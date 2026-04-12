@@ -2,13 +2,27 @@
 
 ## System Overview
 
-Three entry points, shared service core:
+Four entry points, shared service core:
 
 1. **Jupyter notebook** — `notebooks/optimization_campaign.ipynb` uses `promptpotter/ui/campaign/` (display layer wrapping services). No business logic in the notebook layer.
 2. **CLI** — `promptpotter/cli/campaign_runner.py` — terminal-based HITL workflow: `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
 3. **FastAPI API** (`promptpotter/main.py`) — REST at `/api/v1/`. Routers: `backends`, `campaigns`.
+4. **Next.js webapp** *(planned, M9 → M11)* — browser surface consuming the FastAPI API, reading the M9 file-directory view model.
 
-All core logic lives in `promptpotter/services/`.
+All core logic lives in `promptpotter/services/` (post-M9: `promptpotter/application/`).
+
+## Entry Points: One Core, Four Adapters
+
+The four entry points all consume the same `application/` core (post-M9 hexagonal layout). They do **not** share render code:
+
+- **CLI** prints to stdout via rich/plain text.
+- **FastAPI** returns JSON.
+- **Notebook** renders inline HTML + ipywidgets.
+- **Webapp** renders React on top of FastAPI's JSON.
+
+Each render layer is ~50 lines per verb. The *logic* lives in exactly one place (`application/<domain>/<verb>.py`); each surface adapts it to its native ergonomics. This is why maintaining four surfaces is cheap: what gets duplicated is ~20 lines of adapter boilerplate per verb, not business logic. The "duplication" people sometimes see between CLI and API today is an artifact of pre-M9 `services/` mixing orchestration with display and I/O — not a real architectural cost.
+
+**Maturity order** (features land left → right): Notebook > CLI > FastAPI > webapp. Notebook is the daily driver; the webapp is a polish layer on top of what the other surfaces already expose. Do not invert this order.
 
 ## Two-Loop Architecture
 

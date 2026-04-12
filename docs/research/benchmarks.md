@@ -1,8 +1,32 @@
 # Benchmark Methodology
 
+## Priority (2026-04-12)
+
+1. **BBEH (primary)** — the M10 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).
+2. **HotPotQA (secondary, pending saturation probe)** — multi-hop QA data point. Probe first; run fully only if non-saturated.
+3. **GSM8K, AIME 2025 (deprioritized)** — effectively saturated at `gpt-oss-120b`. Cite published numbers for context; run only if a future probe reveals headroom (e.g., under a smaller or constrained model setup).
+
+The legacy "HotPotQA + GSM8K + AIME" framing below pre-dates the saturation finding. Dataset sections are kept as reference and for future model setups where headroom may exist.
+
 ## Datasets
 
-### HotPotQA
+### BBEH (Big-Bench Extra Hard) -- Primary
+
+Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a harder variant probing similar reasoning capabilities. Best general-purpose models score ~24%, reasoning-specialized ~54%. Ample headroom for prompt optimization to matter.
+
+| Property | Value |
+|----------|-------|
+| Task | 23 diverse reasoning tasks |
+| Split | Single (evaluation-only); we create train/test with seed=42 |
+| Size | 4,520 full / 460 mini (20 per task) |
+| Source | [BBEH/bbeh](https://huggingface.co/datasets/BBEH/bbeh) |
+| Metrics | Exact Match (case-insensitive), macro-average across tasks |
+| Format | `{"task": str, "input": str, "target": str, "mini": int}` |
+| Paper | [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025) |
+
+**Head-to-head infrastructure:** [`bbeh-comparison/`](bbeh-comparison/) contains Colab notebooks (`bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) running CAPO, GEPA, MIPROv2, and BootstrapFewShot against the identical `gpt-oss-120b` model and identical 10/task train + 10/task test split (seed=42). PromptPotter runs via its own CLI producing the same JSON output schema. This is the M10 primary benchmark.
+
+### HotPotQA -- Secondary (saturation probe pending)
 
 Multi-hop question answering over Wikipedia paragraphs. Requires reasoning across multiple documents to produce a short answer.
 
@@ -15,9 +39,11 @@ Multi-hop question answering over Wikipedia paragraphs. Requires reasoning acros
 | Metrics | Token F1, Exact Match (EM) |
 | Format | `{"question": str, "answer": str, "context": list[list]}` |
 
-Used in: MIPROv2, GEPA, adv-CoT.
+Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M10 Wave 1.**
 
-### GSM8K
+### GSM8K -- Deprioritized (saturated)
+
+> **Saturation note (2026-04-12):** Effectively saturated at `gpt-oss-120b`. Deprioritized as a primary publication target. Literature numbers cited in results tables; no new runs unless probe reveals headroom.
 
 Grade school math word problems requiring multi-step arithmetic reasoning. Clean structured output with exact-match scoring.
 
@@ -32,7 +58,9 @@ Grade school math word problems requiring multi-step arithmetic reasoning. Clean
 
 Used in: MIPROv2, Promptomatix, adv-CoT.
 
-### AIME 2025
+### AIME 2025 -- Deprioritized (saturated)
+
+> **Saturation note (2026-04-12):** Effectively saturated at `gpt-oss-120b`. Deprioritized as a primary publication target. Literature numbers cited in results tables; no new runs unless probe reveals headroom.
 
 Competition-level math from the American Invitational Mathematics Examination. Frontier models still struggle here — GEPA reported +12% over MIPROv2. All answers are integers in [0, 999].
 
@@ -46,22 +74,6 @@ Competition-level math from the American Invitational Mathematics Examination. F
 | Format | `{"problem": str, "answer": int}` |
 
 Used in: GEPA.
-
-### BBEH (Big-Bench Extra Hard)
-
-Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a harder variant probing similar reasoning capabilities. Best general-purpose models score ~24%, reasoning-specialized ~54%.
-
-| Property | Value |
-|----------|-------|
-| Task | 23 diverse reasoning tasks |
-| Split | Single (evaluation-only); we create train/test with seed=42 |
-| Size | 4,520 full / 460 mini (20 per task) |
-| Source | [BBEH/bbeh](https://huggingface.co/datasets/BBEH/bbeh) |
-| Metrics | Exact Match (case-insensitive), macro-average across tasks |
-| Format | `{"task": str, "input": str, "target": str, "mini": int}` |
-| Paper | [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025) |
-
-Used in: PromptPotter vs CAPO vs DSPy head-to-head. See [`bbeh-comparison/`](bbeh-comparison/).
 
 ### Phase 2 (planned)
 
@@ -90,9 +102,10 @@ All methods evaluated under identical conditions:
 
 | Dataset | Primary Metric | Secondary | Scorer |
 |---------|---------------|-----------|--------|
+| BBEH | Exact Match (case-insensitive), macro-avg across 23 tasks | Per-task accuracy | `bbeh_match` |
 | HotPotQA | Token F1 | Exact Match | Token-level precision/recall (planned: `F1Evaluator`) |
-| GSM8K | Exact Match | — | Extract `#### N`, compare numeric value (`gsm8k_match`) |
-| AIME 2025 | Exact Match | — | Extract `\boxed{N}` (primary) or last integer (fallback), compare to ground truth (`aime_match`) |
+| GSM8K (deprioritized) | Exact Match | — | `gsm8k_match` |
+| AIME 2025 (deprioritized) | Exact Match | — | `aime_match` |
 
 ## Baselines
 
@@ -113,41 +126,45 @@ All methods evaluated under identical conditions:
 
 ## Results
 
-### Main Results
-
-<!-- Filled after benchmark campaigns complete -->
-
-| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | AIME 2025 EM | Source |
-|--------|-------------|-------------|----------|--------------|--------|
-| Zero-shot | — | — | — | — | Ours |
-| MIPROv2 | — | — | — | — | Cited |
-| GEPA | — | — | — | — | Cited |
-| **PromptPotter (full)** | **—** | **—** | **—** | **—** | **Ours** |
-
-### BBEH (Big-Bench Extra Hard) — Mini Split
+### Main Results -- BBEH Mini (Primary)
 
 **Model:** gpt-oss-120b via Groq | **Split:** 10/task train, 10/task test, seed=42 | **Scoring:** Exact match, macro-average across 23 tasks
 
-<!-- Filled from results_*.json after Colab runs complete -->
+<!-- Filled from results_*.json after M10 runs complete -->
 
 | Method | Overall | Source |
 |--------|---------|--------|
 | **PromptPotter (full)** | **—** | Ours (CLI) |
+| PromptPotter (L1+L2) | — | Ours (CLI) |
+| PromptPotter (L1 only) | — | Ours (CLI) |
 | GEPA | — | `bbeh_dspy.ipynb` |
 | MIPROv2 | — | `bbeh_dspy.ipynb` |
 | BootstrapFewShot | — | `bbeh_dspy.ipynb` |
 | CAPO | — | `bbeh_capo.ipynb` |
+| Zero-shot | — | Ours |
 
-Per-task breakdown will be added once experiments complete. Reproducible notebooks: [`bbeh-comparison/`](bbeh-comparison/).
+Per-task breakdown (23 tasks × methods) will be added once experiments complete. Reproducible notebooks: [`bbeh-comparison/`](bbeh-comparison/).
 
-### Convergence, Ablation, Parameter Impact, Significance
+### HotPotQA (Secondary, pending saturation probe)
 
-| Method | HotPotQA F1 | HotPotQA EM | GSM8K EM | AIME 2025 EM | Source |
-|--------|-------------|-------------|----------|--------------|--------|
-| Zero-shot | — | — | — | — | Ours |
-| MIPROv2 | — | — | — | — | Cited |
-| GEPA | — | — | — | — | Cited |
-| **PromptPotter (full)** | **—** | **—** | **—** | **—** | **Ours** |
+<!-- Filled only if saturation probe shows headroom at gpt-oss-120b -->
+
+| Method | HotPotQA F1 | HotPotQA EM | Source |
+|--------|-------------|-------------|--------|
+| Zero-shot | — | — | Ours |
+| MIPROv2 | — | — | Cited |
+| GEPA | — | — | Cited |
+| **PromptPotter (full)** | **—** | **—** | **Ours** |
+
+### Saturated Datasets (cited literature only)
+
+GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numbers included for context only; no new runs planned under current model setup.
+
+| Dataset | Method | Reported | Source |
+|---------|--------|----------|--------|
+| GSM8K EM | MIPROv2 | — | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
+| GSM8K EM | PromptWizard | — | [Agarwal et al., 2024](https://arxiv.org/abs/2405.18369) |
+| AIME 2025 EM | GEPA | — | [GEPA, 2025](https://arxiv.org/abs/2507.19457) |
 
 ## Reference Papers
 

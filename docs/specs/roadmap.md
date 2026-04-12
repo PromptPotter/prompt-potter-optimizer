@@ -1,7 +1,7 @@
 # Roadmap: PromptPotter Optimizer
 
-**Version:** 0.13.0
-**Date:** 2026-04-08
+**Version:** 0.14.0
+**Date:** 2026-04-12
 **Status:** Active
 
 ---
@@ -15,9 +15,10 @@
 | M7 | Optimizer-as-Pipeline | Complete |
 | Parity | Entry-Point Parity (Unified Persistence) | Complete |
 | M8 | Campaign Intelligence | Complete |
-| M9 | Publication, Stable Config & Webapp | **Next** |
-| M10 | OptSearchPoint Refinement & Ablation Studies | Future |
-| M11 | Multi-Connector Architecture | Future |
+| M9 | Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 | **Next** |
+| M10 | Publication Benchmarks, Ablation Studies, Webapp Read-Only | Future |
+| M11 | Multi-Connector, Competitor Comparison, Webapp Phase 2 | Future |
+| M11+ | Backlog | Future |
 
 Archived specs (M0-M7, governance docs, old M9) are in `archive/` or git history.
 
@@ -49,53 +50,110 @@ Full spec: [`m8-campaign-intelligence.md`](m8-campaign-intelligence.md)
 
 ---
 
-## M9: Publication, Stable Config & Webapp -- Next
+## M9: Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 -- Next
 
-Four tracks delivering publication readiness, optimizer tuning, a web application, and publication figure design. The optimization loop (L1/L2/L3) is functionally complete but unvalidated against academic benchmarks, running on proof-of-concept meta-prompts, and accessible only via notebook/CLI.
+M9 is foundation work. Four parallel tracks build the scaffolding that M10 and M11 then populate with benchmark results and a full webapp. The optimization loop is functionally complete but runs on proof-of-concept meta-prompts, lives in a flat service layout unsuited to multi-tenant / webapp expansion, assumes a single dataset/pipeline per campaign, and has no shared view model between notebook, CLI, and future webapp.
 
-### Track 1: Publication Readiness (Benchmarks + Competitor Comparison)
+### Track 1: Stable Optimizer Configuration
 
-Build dataset loaders (HotPotQA, GSM8K), evaluation scorers (Token F1, numeric exact match), and run benchmark campaigns via the backend's `llm_only` step. Compare against published results from DSPy/MIPROv2, GEPA, Promptomatix, adv-CoT, and PromptWizard (cited numbers). Fill `docs/research/benchmarks.md` result tables. Generate paper-quality convergence plots and comparison figures.
+Systematically evaluate and tune the optimizer's own meta-prompts (L1 generate, critique, L2 refine, L3 replan). Define second-order success metrics (rounds to convergence, final accuracy, escalation frequency, candidate diversity, optimizer cost). Run meta-prompt variants on small-sample campaigns and document final configs with rationale. Generic prompts — adapt via `task_context` injection, not task-specific sets.
 
-### Track 2: Stable Optimizer Configuration
+Spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md)
 
-Systematically evaluate and tune the optimizer's own meta-prompts (L1 generate, critique, L2 refine, L3 replan). Define success metrics (rounds to convergence, final accuracy, escalation frequency, candidate diversity). Run benchmark campaigns with different meta-prompt variants. Document final configs with rationale for paper's "method" section. Generic prompts — adapt via `task_context` injection, not task-specific sets.
+### Track 2: Hierarchy Refactor (Hexagonal Layout)
 
-### Track 3: Web Application
+Reshape `promptpotter/` into a top-down hexagonal layout so that (a) the three-layer I/O invariant is structurally obvious, (b) a `TenantContext` seam exists for whitelabel distribution, (c) the eventual webapp lands as one more thin presentation adapter, and (d) the largest offender files (37KB, 34KB, …) become splittable in follow-up specs. Move-only in M9 — splits deferred.
 
-Next.js + React + Tailwind CSS webapp in `webapp/` directory, consuming the existing FastAPI REST API. MVP: campaign list, campaign detail (convergence chart, trial timeline), trial inspector (prompt diff, per-query results), benchmark results display. Phase 2: campaign launcher, live monitoring (WebSocket/SSE), API extensions.
+```
+promptpotter/
+├── domain/                 # pure models, no I/O, no logging
+│   ├── search_point.py     # JobSearchPoint, PromptTemplate, OptSearchPoint
+│   ├── pipeline.py         # PipelineSchema, PipelineNode, NodeOutputSchema
+│   ├── scoring.py          # ScoringEnv, RoundResult, composite formulas
+│   ├── campaign.py         # LoopState, RunConfig, RunCallbacks
+│   └── tenant.py           # TenantContext (new — the multi-tenant seam)
+│
+├── application/            # use cases / orchestration — no direct disk or network
+│   ├── campaign/           # lifecycle, runner, round_execution, setup
+│   ├── optimization/       # L1/L2/L3 pipeline, critique, escalation, layer_transitions
+│   ├── search/             # scan_advisor, smart_search, sensitivity_scanner, search_memory
+│   └── scoring/            # search_point_scorer, sample_measurement, metrics
+│
+├── infrastructure/         # adapters — all I/O lives here
+│   ├── store/              # ProjectStore facade + focused stores
+│   ├── backend/            # BackendClient, pipeline parsing
+│   ├── llm/                # _OpenAICompatibleClient, providers
+│   ├── tracing/            # obs_logger, langfuse_client, langfuse_push
+│   └── persistence/        # session_emitter, round_recorder, control surfaces
+│
+├── presentation/           # entry points — thin, one per surface
+│   ├── cli/                # click/typer commands → application
+│   ├── api/                # FastAPI routers → application
+│   └── ui/                 # notebook + webapp display adapters → application
+│       ├── campaign/       # (replaces current ui/campaign/)
+│       └── formatters/     # display, phase_display, reporting helpers
+│
+├── shared/                 # leaf utilities — no domain or application deps
+│   ├── errors.py           # graceful(), PauseForReviewError
+│   ├── constants.py        # PROMPT_STRING_FIELDS
+│   └── scoring.py          # compile_scorer
+│
+└── config/                 # settings, APP_VERSION, logging setup
+```
 
-### Track 4: Results Design (Publication Figures & Tables)
+How and when this lands inside M9 is open. The target shape is the contract; execution order and commit granularity are decided during the track.
 
-Define WHAT to show before collecting data. Design main results table, convergence figures, ablation tables, analysis visualizations, cost/efficiency comparisons. Document in `docs/publication-figures.md` as the data collection checklist.
+Spec: [`m9-hierarchy-refactor.md`](m9-hierarchy-refactor.md)
+
+### Track 3: Multi-Dataset / Multi-Pipeline Support
+
+Same connector, multiple datasets and pipelines per project. Dataset/pipeline become first-class identifiers in campaign state and store paths. Prerequisite for benchmark campaigns (HotPotQA + GSM8K + TermNorm coexisting) in M10.
+
+### Track 4: File-Directory UI v0 (Webapp Preparation)
+
+Draft the first non-notebook UI as a plain file-directory "view model" under the session store. The CLI and eventual webapp both read from the same files; nothing renders UI from in-memory state. Content mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. This is the seed the M10/M11 webapp slices will consume. Exact structure (temp vs permanent views, what belongs where) is intentionally left open and decided during the track.
 
 **Entry criteria:** M8 exit gate passed.
 
-**Exit gate:** HotPotQA + GSM8K results with statistical rigor (3 seeds, CIs, significance tests). Meta-prompts evaluated on ≥2 benchmarks with documented rationale. Webapp showing campaign browser and benchmark results. Publication figures designed and documented.
+**Exit gate:** Stable meta-prompts documented. Hexagonal layout in place and tests green. Multi-dataset/pipeline working on at least two datasets. File-directory UI v0 readable by a human browsing the session folder.
 
-Full spec: [`m9-publication-config-webapp.md`](m9-publication-config-webapp.md)
-
----
-
-## M10: OptSearchPoint Refinement & Ablation Studies -- Future
-
-Slim milestone focused on optimization loop refinement and ablation studies that feed the publication. Multi-pipeline/project/dataset support (same connector, already half-built). OptSearchPoint bells and whistles — advanced L1/L2/L3 strategies, detailed analysis tooling, ablation experiments (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, critique on/off). Can contribute to paper if completed quickly enough.
-
-**Entry criteria:** M9 stable config validated.
-
-**Exit gate:** Ablation results complete. Multi-pipeline/dataset support working.
+Full spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md)
 
 ---
 
-## M11: Multi-Connector Architecture -- Future
+## M10: Publication Benchmarks, Ablation Studies, Webapp Read-Only -- Future
 
-Generalize beyond the current single-backend setup to support arbitrary LLM application backends. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13). Workflow nodes (from M6 Wave 4).
+First publication slice. **Primary benchmark: BBEH** (Big-Bench Extra Hard, 23 diverse reasoning tasks). GSM8K and AIME are effectively saturated at `gpt-oss-120b` and are deprioritized; they may still appear as secondary numbers if headroom is found. HotPotQA runs second as a multi-hop QA data point — pending a saturation check, it may also be deprioritized. Head-to-head infrastructure for BBEH already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) with CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks against the same model and split.
+
+Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
+
+**Entry criteria:** M9 exit gate passed.
+
+**Exit gate:** BBEH results with statistical rigor (3 seeds, CIs) including head-to-head vs CAPO/GEPA/MIPROv2/BootstrapFewShot at identical model + split. HotPotQA saturation assessed (benchmarked if non-saturated). Ablation results complete. Webapp read-only views live. First publication figures generated.
+
+Full spec: [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)
+
+---
+
+## M11: Multi-Connector, Competitor Comparison, Webapp Phase 2 -- Future
+
+Generalize beyond the current single-backend setup. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13) and workflow nodes (from M6 Wave 4). Second backend connector demonstrates the abstraction. Publication gets competitor head-to-head (MIPROv2 reproduction if reviewers demand it, cited numbers otherwise). Webapp Phase 2: campaign launcher, live monitoring (WebSocket/SSE), API extensions for control.
 
 **Entry criteria:** M10 exit gate passed.
 
-**Exit gate:** A second backend connector exists and runs through the same optimization workflow.
+**Exit gate:** Second backend connector runs through the same optimization workflow. Competitor comparison published. Webapp can launch and monitor a campaign end-to-end.
 
-Preserved spec: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md)
+Full spec: [`m11-multi-connector.md`](m11-multi-connector.md)
+
+Preserved context: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md)
+
+---
+
+## M11+: Backlog -- Future
+
+Polish, cost tracking, MCP server mode, multimodal, self-optimization, and everything in the Backlog table below. Ships opportunistically after M11.
+
+Full spec: [`m11-plus-backlog.md`](m11-plus-backlog.md)
 
 ---
 

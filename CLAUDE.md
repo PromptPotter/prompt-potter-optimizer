@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop (L1 generate → L2 refine → L3 replan). Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm and AIME 2025.
+PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer optimization loop (L1 generate + evaluate → L2 refine → L3 replan), with a critique node between rounds. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH (see [`docs/research/benchmarks.md`](docs/research/benchmarks.md)).
 
 ## Commands
 
@@ -61,7 +61,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All mus
 
 ### Mental Model
 
-Three entry points (notebook, CLI, web API), one service core in `promptpotter/services/`. All entry points produce identical persistent artifacts via the three-layer I/O architecture.
+Four entry points — see § Four Entry Points (Maturity Order). One service core in `promptpotter/services/`. All entry points produce identical persistent artifacts via the three-layer I/O architecture.
 
 **Three-layer I/O architecture (INVARIANT):**
 - **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS` in `campaign/state.py`; `tests/test_artifact_parity.py` enforces.
@@ -93,17 +93,22 @@ Every state traced at **both** layers independently:
 
 ### Pipeline Params — Two Namespaces
 
-Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`). No flat format. `PROMPT_STRING_FIELDS` is the canonical split (import from `shared/constants.py`, never define locally). L1 candidates use `pipeline_params_override`: keys matching `PROMPT_STRING_FIELDS` auto-route to `derive_candidate()` (prompt fields); all others nest under their node name. `l1_generate()` has a safety net that auto-nests flat params the LLM emits.
+Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`). `PROMPT_STRING_FIELDS` (in `shared/constants.py`) is the canonical split. See [`docs/architecture/information-flow.md`](docs/architecture/information-flow.md) for L1 override routing and the `l1_generate()` auto-nest safety net.
 
 ### Self-Describing Pipeline
 
 `PipelineSchema` built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
 
-### Three Entry Points
+### Four Entry Points (Maturity Order)
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/ui/campaign/` is pure UI, delegates to services
-2. **CLI**: `python -m promptpotter` (unified entry point) — `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
-3. **FastAPI API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`
+Features land left → right. Notebook is the daily driver and the testing ground; the webapp is a polish layer on top of whatever the first three surfaces expose. When adding a feature, prove it in the notebook first, then the CLI, then the API, then the webapp. Do not invert this order.
+
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/ui/campaign/` is pure UI, delegates to services. Most features land here first.
+2. **CLI**: `python -m promptpotter` — scripted and local workflows. `init → [set-task] → [scan] → [show-scan] → optimize → show-results`
+3. **FastAPI REST API**: `promptpotter/main.py` — `/api/v1/backends`, `/api/v1/campaigns`. Programmatic access for automation and the webapp.
+4. **Next.js webapp** (planned, M9 → M11): browser surface, consumes the FastAPI API. Reads the M9 file-directory view model. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+
+> ⚠️ **TEMPORARY (delete after M9 Track 2 lands):** Today's `services/` mixes orchestration, display, and I/O. This makes CLI and API handlers *look* like they duplicate each other — they don't, they both reach into the same tangled `services/` tree and untangle it locally. The fix is the hexagonal hierarchy refactor in M9 Track 2 (see [`docs/specs/m9-hierarchy-refactor.md`](docs/specs/m9-hierarchy-refactor.md)), after which every entry point is a thin adapter over `application/`. See [`docs/architecture/overview.md`](docs/architecture/overview.md) § "Entry Points: One Core, Four Adapters" for the post-refactor shape. Delete this warning once M9 Track 2 ships.
 
 **Active session pointer** (`.promptpotter/active_session.json`): Stores `{backend_id, session_id}` of the current campaign. Written by `init`, read by every other command. Works like a browser's active tab — `optimize`, `show-status`, `show-results` etc. all operate on the active session automatically. `--session <id>` overrides it. `init` always creates a new session and overwrites the pointer. When `--backend-id` is not passed, `init` derives it from `dataset_name` in the config.
 
@@ -122,13 +127,15 @@ Always **nested dicts** keyed by node name (`{"web_search": {"max_sites": 5}}`).
 
 - **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/architecture/prompt-scheme.md`.
 - **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
-- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/`. Three pillars: parameter impact (+ axis exhaustion, value trends), query patterns (+ CI-gated intractable detection), failure modes (+ failure group × axis correlation). Atomic accessors only. Three-tier intelligence architecture: deterministic code triage (per-query exclusion, no LLM), critique (every-round intelligence hub — frames analysis with SearchMemory), L2 (escalation-only strategic meta-intelligence). L3 receives aggregate SearchMemory picture. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
+- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/` with three pillars (parameter impact, query patterns, failure modes) and three-tier intelligence (deterministic triage, critique, L2). See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md) for architecture detail.
 
 ## Known Issues
 
 ### Notebook ↔ CLI Session Parity
 
 The notebook has no `session_id` — scan/campaign results don't persist. Root cause: UI layer wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
+
+**M9 resolves:** Both entry points render from the shared file-directory view model (M9 Track 4), closing the parity gap.
 
 ### TermNorm Backend
 
@@ -137,7 +144,7 @@ The notebook has no `session_id` — scan/campaign results don't persist. Root c
 
 ## Roadmap
 
-M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 next** — Publication, Stable Config & Webapp (4 tracks: benchmarks + competitor comparison, meta-prompt stabilization, Next.js webapp, publication figures design). **M10 future** — OptSearchPoint Refinement & Ablation Studies (bells & whistles, multi-pipeline/dataset). **M11 future** — Multi-Backend Architecture.
+M0–M7 complete (archived). **M8 complete** — Campaign Intelligence (SearchMemory, all 17 waves). **M9 next** — Stable config, hierarchy refactor, multi-dataset/pipeline, file-directory UI v0. **M10** — BBEH benchmarks, ablation studies, webapp read-only views. **M11** — Multi-connector, competitor comparison, webapp Phase 2 (launcher + live monitoring). **M11+** — Backlog (cost tracking, multimodal, MCP, self-optimization). See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Testing
 
@@ -157,6 +164,6 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 7. [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/observability.md`](docs/observability.md)
 
 **Research** (methodology & analysis):
-9. [`docs/research/benchmarks.md`](docs/research/benchmarks.md), [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md), [`docs/research/candidate-comparison.md`](docs/research/candidate-comparison.md)
+8. [`docs/research/benchmarks.md`](docs/research/benchmarks.md), [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md), [`docs/research/candidate-comparison.md`](docs/research/candidate-comparison.md)
 
-**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9), archived (M8, old M9)
+**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9, M10, M11, M11+), archived (M8, old M9)
