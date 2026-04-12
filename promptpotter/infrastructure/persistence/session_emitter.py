@@ -19,7 +19,6 @@ from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.store.base import write_json
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
@@ -176,17 +175,6 @@ class CampaignPersistenceEmitter:
                 resume_from = None
 
         return cls(session_dir, config, resume_from=resume_from, cycle_id=cycle_id)
-
-    def as_callbacks(self) -> RunCallbacks:
-        """Return a ``RunCallbacks`` with this emitter's 4 dispatch methods wired."""
-        from promptpotter.application.campaign.callbacks import RunCallbacks
-
-        return RunCallbacks(
-            on_phase=self.on_phase,
-            on_sample_scored=self.on_sample_scored,
-            on_candidate_scored=self.on_candidate_scored,
-            on_round_complete=self.on_round_complete,
-        )
 
     # -- Callbacks -------------------------------------------------------------
 

@@ -1,9 +1,10 @@
 """Multicast progress callbacks for the optimization loop.
 
-Each channel is a list of listeners; ``merge()`` concatenates two callback
-bundles.  Dispatch methods are always safe to call — no ``None`` guards
-needed at call sites.  ``on_checkpoint`` short-circuits on the first
-non-``None`` result.
+Each channel is a list of listeners; ``attach()`` appends additional
+listeners to an existing bundle (used to bolt persistence hooks onto
+user-supplied display callbacks). Dispatch methods are always safe to
+call — no ``None`` guards needed at call sites.  ``on_checkpoint``
+short-circuits on the first non-``None`` result.
 """
 
 from __future__ import annotations
@@ -39,15 +40,26 @@ class RunCallbacks:
         self._phase = _wrap(on_phase)
         self._checkpoint = _wrap(on_checkpoint)
 
-    def merge(self, other: RunCallbacks) -> RunCallbacks:
-        """Return a new RunCallbacks with self's listeners first, then other's."""
-        merged = RunCallbacks()
-        merged._round = self._round + other._round
-        merged._candidate = self._candidate + other._candidate
-        merged._sample = self._sample + other._sample
-        merged._phase = self._phase + other._phase
-        merged._checkpoint = self._checkpoint + other._checkpoint
-        return merged
+    def attach(
+        self,
+        *,
+        on_round_complete: Callable[[RoundResult, int], None] | None = None,
+        on_candidate_scored: Callable[[int, int, dict], None] | None = None,
+        on_sample_scored: Callable[[int, int, int, int, dict], None] | None = None,
+        on_phase: Callable[[PhaseEvent], None] | None = None,
+        on_checkpoint: Callable[[str], str | None] | None = None,
+    ) -> None:
+        """Append additional listeners to this bundle in place."""
+        if on_round_complete:
+            self._round.append(on_round_complete)
+        if on_candidate_scored:
+            self._candidate.append(on_candidate_scored)
+        if on_sample_scored:
+            self._sample.append(on_sample_scored)
+        if on_phase:
+            self._phase.append(on_phase)
+        if on_checkpoint:
+            self._checkpoint.append(on_checkpoint)
 
     def on_round_complete(self, rr: RoundResult, stall_count: int) -> None:
         for fn in self._round:

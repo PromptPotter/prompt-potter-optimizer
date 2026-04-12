@@ -37,7 +37,6 @@ from .display import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.recon.recon_report import ReconBrief
@@ -324,7 +323,6 @@ async def run_optimization_notebook(
     session: SessionEnv | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
-    display_callbacks: RunCallbacks | None = None,
 ) -> tuple[list, RunResult | None]:
     """Run optimization via feedback cycle with notebook display.
 
@@ -383,10 +381,7 @@ async def run_optimization_notebook(
         run_optimization as _orch_run_optimization,
     )
 
-    notebook_display_cb = display.as_callbacks()
-    callbacks = (
-        notebook_display_cb.merge(display_callbacks) if display_callbacks else notebook_display_cb
-    )
+    callbacks = display.as_callbacks()
 
     result = await _orch_run_optimization(
         dataset,

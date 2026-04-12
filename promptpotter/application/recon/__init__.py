@@ -19,10 +19,6 @@ from promptpotter.application.recon.adaptive_recon import (
     load_filtered_variant_library,
     run_adaptive_recon,
 )
-from promptpotter.application.recon.coverage import (
-    CoverageEstimate,
-    estimate_recon_coverage,
-)
 from promptpotter.application.recon.recon_advisor import (
     advise_recon,
     build_llm_context,
@@ -40,7 +36,6 @@ from promptpotter.application.recon.recon_report import (
 from promptpotter.application.recon.recon_runner import run_recon
 
 __all__ = [
-    "CoverageEstimate",
     "advise_recon",
     "build_diagnostic_set",
     "build_llm_context",
@@ -48,7 +43,6 @@ __all__ = [
     "build_tunable_params",
     "convert_advisory_to_recon_variants",
     "decompose_recon_baseline",
-    "estimate_recon_coverage",
     "finalize_scan",
     "load_filtered_variant_library",
     "prepare_recon_brief",
