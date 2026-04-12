@@ -12,22 +12,29 @@ Stopping conditions:
 """
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig
 from promptpotter.application.campaign.data import extract_campaign_baseline
-from promptpotter.application.campaign.lifecycle import finalize_campaign, init_cycle_state
+from promptpotter.application.datasets.builder import sample_dataset
+from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
 from promptpotter.application.optimization.nodes.escalation import escalate_l2
 from promptpotter.application.optimization.nodes.round_execution import (
     PauseForReviewError,
     execute_round,
     update_round_state,
 )
+from promptpotter.application.scoring.metrics import compute_composite_score
+from promptpotter.application.search.search_memory import SearchMemory
+from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 from promptpotter.infrastructure.persistence.state import (
@@ -47,6 +54,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.search.scan_results import ScanBrief
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
 
 logger = logging.getLogger(__name__)
 
@@ -506,6 +514,180 @@ async def _run_round_loop(
     return stop_reason
 
 
+async def _init_optimization(
+    instruction: str,
+    dataset: list[dict[str, Any]],
+    config: LoopConfig,
+    *,
+    baseline_prompt_fields: dict | None,
+    baseline_accuracy: float,
+    baseline_results: list | None,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    langfuse_session_id: str | None,
+    cycle_id: str | None,
+    experiment_id: str,
+    session: SessionEnv,
+    started_at: str,
+) -> LoopState:
+    """Build LoopState: baseline, cycle resume, obs, scoring env, search memory.
+
+    All mutation lives here; the loop body can then run against a fully
+    wired ``LoopState``.  See ``docs/architecture/overview.md § Persistence
+    Architecture`` for the two-tier resume flow this function sets up.
+    """
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
+    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+
+    emit_phase(on_phase, CampaignPhase.INIT, "enter", config=config, dataset=dataset)
+
+    if session.index_terms:
+        await session.backend_client.init_session(session.index_terms)
+
+    scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest, config.seed)
+
+    # --- 1. Baseline LoopState --------------------------------------------
+    if baseline_prompt_fields is None:
+        raise ValueError(
+            "baseline_prompt_fields is required. Run baseline evaluation in the "
+            "notebook before starting the feedback cycle.",
+        )
+    baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
+    logger.debug("Using provided baseline (acc=%.3f)", baseline_accuracy)
+    if baseline_results:
+        assert config.pipeline_schema is not None, "pipeline_schema required for composite score"
+        baseline_composite = compute_composite_score(baseline_results, config.pipeline_schema)[
+            "composite"
+        ]
+    else:
+        baseline_composite = baseline_accuracy
+    state = LoopState.from_baseline(
+        baseline_osp,
+        baseline_accuracy,
+        baseline_composite,
+        task_context=config.task_context or TaskDecomposition(),
+        schema=config.pipeline_schema,
+        baseline_results=baseline_results,
+    )
+
+    # --- 2. Cycle resume / create + observability -------------------------
+    campaign_store: CampaignStore | None = None
+    resolved_cycle_id: str | None = None
+    resumed_from_round = 0
+    if config.project_root and config.backend_id:
+        try:
+            campaign_store = CampaignStore(Path(config.project_root))
+            resolved_cycle_id = cycle_id or cycle_config_identity(
+                config, baseline_osp.render(), dataset, strict=config.strict_cycle_identity
+            )
+            logger.debug("Cycle identity: %s", resolved_cycle_id)
+            resumed_from_round = campaign_store.resume_or_create(
+                config.backend_id,
+                resolved_cycle_id,
+                config_snapshot=config.model_dump(mode="json"),
+                baseline_accuracy=baseline_accuracy,
+                hot_update_keys=TUNING_KEYS if cycle_id else frozenset(),
+            )
+        except (OSError, json.JSONDecodeError, KeyError):
+            logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+            campaign_store, resolved_cycle_id, resumed_from_round = None, None, 0
+
+    if not langfuse_session_id and resolved_cycle_id:
+        langfuse_session_id = resolved_cycle_id
+    obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+
+    obs = ObsLogger.start_campaign(
+        config.project_root,
+        config.backend_id,
+        config_snapshot=config.model_dump(mode="json"),
+        baseline_accuracy=baseline_accuracy,
+        dataset=dataset,
+        obs_campaign_id=obs_campaign_id,
+        langfuse_session_id=langfuse_session_id,
+    )
+
+    if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
+        trial = campaign_store.load_trial(
+            config.backend_id, resolved_cycle_id, resumed_from_round - 1
+        )
+        if trial:
+            state.restore_from_trial(trial)
+    else:
+        # thinking_styles is part of OptSearchPoint.MEMORY_FIELDS — only
+        # sample on fresh init so restore_from_trial's value wins on resume.
+        state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+
+    # --- 3. Scoring env, baseline alias, degradation checks --------------
+    state.scoring_ctx = ScoringEnv.for_loop(
+        session.backend_client,
+        session.store,
+        config.backend_id,
+        config.pipeline_schema,
+        obs,
+        experiment_id,
+        resolved_cycle_id,
+        max_consecutive_errors=config.max_consecutive_errors,
+        stale_data_load_protocol=config.stale_data_load_protocol,
+        stale_data_observations=state.opt_sp.stale_data_observations,
+        scoring_formula=config.scoring_formula,
+    )
+    if session.store:
+        session.store.dataset_runs.register_prompt_alias(
+            config.backend_id, instruction, baseline_osp.render()
+        )
+
+    from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
+
+    degradation_checks = build_degradation_checks(config)
+
+    # --- 4. SearchMemory --------------------------------------------------
+    search_memory = SearchMemory.ensure_for(session.store, config.backend_id)
+    state.search_memory = search_memory
+    if state.scoring_ctx and search_memory:
+        state.scoring_ctx.search_memory = search_memory
+
+    # --- 5. Wire infrastructure fields on state before INIT:exit ---------
+    state.campaign_store = campaign_store
+    state.cycle_id = resolved_cycle_id
+    state.obs_campaign_id = obs_campaign_id
+    state.scoring_dataset = scoring_dataset
+    state.degradation_checks = degradation_checks
+    state.resumed_from_round = resumed_from_round
+
+    emit_phase(on_phase, CampaignPhase.INIT, "exit", state=state, config=config, dataset=dataset)
+    return state
+
+
+def _finalize_optimization(
+    state: LoopState,
+    config: LoopConfig,
+    *,
+    stop_reason: str,
+    finished_at: str,
+    campaign_status: str,
+) -> None:
+    """Mark the campaign on disk and finalize observability."""
+    if state.campaign_store and state.cycle_id:
+        state.campaign_store.mark_finished(
+            config.backend_id,
+            state.cycle_id,
+            status=campaign_status,
+            stop_reason=stop_reason,
+            best_accuracy=state.best_accuracy,
+            best_round=state.best_round,
+            n_rounds=len(state.rounds),
+            finished_at=finished_at,
+        )
+    obs: ObsLogger | None = state.scoring_ctx.obs if state.scoring_ctx else None
+    if obs:
+        obs.end_campaign(
+            state.obs_campaign_id,
+            best_accuracy=state.best_accuracy,
+            n_rounds=len(state.rounds),
+            stop_reason=stop_reason,
+            best_round=state.best_round,
+        )
+
+
 async def _run_optimization_core(
     instruction: str,
     dataset: list[dict[str, Any]],
@@ -521,24 +703,26 @@ async def _run_optimization_core(
     session: SessionEnv | None = None,
 ) -> RunResult:
     """Core optimization loop: init → round loop → finalize."""
+    if session is None:
+        raise ValueError("session (SessionEnv) is required for _run_optimization_core")
     started_at = datetime.now(UTC).isoformat()
 
     cb = callbacks or RunCallbacks()
 
     # -- Init --
-    state = await init_cycle_state(
+    state = await _init_optimization(
         instruction,
         dataset,
         config,
-        baseline_prompt_fields,
-        baseline_accuracy,
-        baseline_results,
-        cb.on_phase,
-        langfuse_session_id,
-        cycle_id,
-        experiment_id,
-        session,
-        started_at,
+        baseline_prompt_fields=baseline_prompt_fields,
+        baseline_accuracy=baseline_accuracy,
+        baseline_results=baseline_results,
+        on_phase=cb.on_phase,
+        langfuse_session_id=langfuse_session_id,
+        cycle_id=cycle_id,
+        experiment_id=experiment_id,
+        session=session,
+        started_at=started_at,
     )
     _emitter = CampaignPersistenceEmitter.for_session(config, baseline_accuracy, state.cycle_id)
 
@@ -570,16 +754,12 @@ async def _run_optimization_core(
         if stop_reason == StopReason.INTERRUPTED
         else "completed"
     )
-    finalize_campaign(
-        state.campaign_store,
-        state.cycle_id,
-        config,
+    _finalize_optimization(
         state,
-        stop_reason,
-        finished_at,
-        obs,
-        state.obs_campaign_id,
-        status=campaign_status,
+        config,
+        stop_reason=stop_reason,
+        finished_at=finished_at,
+        campaign_status=campaign_status,
     )
 
     # Persistence emitter: finalize artifacts

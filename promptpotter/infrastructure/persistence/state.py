@@ -285,7 +285,7 @@ class LoopState:
     # L2/L3 escalation counters
     escalation: EscalationCounters = field(default_factory=EscalationCounters)
 
-    # -- Infrastructure (populated by init_cycle_state, threaded through loop) --
+    # -- Infrastructure (populated by _init_optimization, threaded through loop) --
     campaign_store: CampaignStore | None = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
