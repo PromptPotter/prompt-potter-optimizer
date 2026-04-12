@@ -485,16 +485,7 @@ def _load_campaigns(
     campaign_ids: list[str] | None = None,
 ) -> list[dict]:
     """Load campaigns from store, filtering by IDs if provided."""
-    if campaign_ids:
-        return [
-            c for cid in campaign_ids if (c := store.campaigns.load(backend_id, cid)) is not None
-        ]
-    summaries = store.campaigns.list_all(backend_id)
-    return [
-        c
-        for s in summaries
-        if (c := store.campaigns.load(backend_id, s["campaign_id"])) is not None
-    ]
+    return store.campaigns.load_many(backend_id, campaign_ids)
 
 
 def generate_supplemental(

@@ -288,77 +288,66 @@ async def resume_or_build_diagnostic(
     )
 
 
-def select_recon_winner(
+def _improving_axes(axis_profiles: list[dict]) -> list[dict]:
+    """Axes with positive delta that weren't skipped — the single filter used
+    by winner selection, brief formatting, and campaign seeding."""
+    return [p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"]
+
+
+def _compose_winner(
     recon_df: pd.DataFrame,
-    axis_profiles: list[dict],
+    improving: list[dict],
     baseline: JobSearchPoint,
     recon_variants: dict[str, list],
-    *,
-    baseline_opt: OptSearchPoint | None = None,
-    pipeline_schema: PipelineSchema | None = None,
+    baseline_opt: OptSearchPoint | None,
+    pipeline_schema: PipelineSchema | None,
 ) -> JobSearchPoint:
-    """Pick best variant per sensitive axis from OAT scan results.
-
-    Composes the best-performing value for each axis that showed positive
-    improvement (best_delta > 0) into a single JobSearchPoint.
-
-    Args:
-        baseline_opt: Required when recon_variants contains prompt_field axes.
-            Used to derive prompt-field perturbations via OptSearchPoint.
-    """
+    """Compose best-per-axis values into a single JobSearchPoint."""
     prompt_changes: dict[str, Any] = {}
     param_changes: dict[str, Any] = {}
-
-    improving = [
-        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
 
     for profile in improving:
         axis_name = profile["axis"]
         axis_rows = recon_df[recon_df["axis"] == axis_name]
         if axis_rows.empty:
             continue
-        best_row = axis_rows.loc[axis_rows["accuracy"].idxmax()]
-        value_idx = int(best_row["value_idx"])
+        best_row_axis = axis_rows.loc[axis_rows["accuracy"].idxmax()]
+        value_idx = int(best_row_axis["value_idx"])
         values = recon_variants.get(axis_name, [])
         if value_idx >= len(values):
             logger.warning(
-                "select_recon_winner: value_idx %d out of range for %s (len=%d)",
+                "finalize_scan: value_idx %d out of range for %s (len=%d)",
                 value_idx,
                 axis_name,
                 len(values),
             )
             continue
-        value = values[value_idx]
-        if axis_name in PROMPT_STRING_FIELDS:
-            prompt_changes[axis_name] = value
-        else:
-            param_changes[axis_name] = value
+        target = prompt_changes if axis_name in PROMPT_STRING_FIELDS else param_changes
+        target[axis_name] = values[value_idx]
 
-    best = baseline
+    best_sp = baseline
     if prompt_changes:
         assert baseline_opt is not None, (
-            "baseline_opt required for prompt_field perturbation in select_recon_winner"
+            "baseline_opt required for prompt_field perturbation in finalize_scan"
         )
-        best_opt = baseline_opt.derive_candidate(
+        best_sp = baseline_opt.derive_candidate(
             **prompt_changes,
             changes_description="recon_winner",
-        )
-        best = best_opt.to_job_search_point(
+        ).to_job_search_point(
             base_pipeline_params=baseline.pipeline_params,
             schema=pipeline_schema,
         )
     if param_changes:
-        best = best.derive(
-            pipeline_params={**(best.pipeline_params or {}), **param_changes},
+        best_sp = best_sp.derive(
+            pipeline_params={**(best_sp.pipeline_params or {}), **param_changes},
         )
     logger.debug(
-        "select_recon_winner: %d prompt changes, %d param changes from %d improving axes",
+        "finalize_scan: %d prompt changes, %d param changes from %d improving axes",
         len(prompt_changes),
         len(param_changes),
         len(improving),
     )
-    return best
+    return best_sp
 
 
 def compute_difficulty_summary(difficulty_df: Any) -> dict[str, int] | None:
@@ -424,11 +413,9 @@ def prepare_recon_brief(
     else:
         difficulty_text = "  (not available)"
 
-    _improving = [
-        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
-    improving_axes = [p["axis"] for p in _improving]
-    has_prompt_axes = any(p["axis_type"] == "prompt_field" for p in _improving)
+    improving = _improving_axes(axis_profiles)
+    improving_axes = [p["axis"] for p in improving]
+    has_prompt_axes = any(p["axis_type"] == "prompt_field" for p in improving)
 
     tested_lines = []
     for axis_name in improving_axes:
@@ -458,42 +445,44 @@ def prepare_recon_brief(
 
 
 @dataclass
-class SeedResult:
-    """Result from ``seed_campaign_from_recon()``."""
+class FinalizedScan:
+    """Result from ``finalize_scan()``.
+
+    ``merged_pipeline_params`` and ``round_entry`` are ``None`` when called
+    in read-only mode (no ``campaign_config`` / ``campaign_rounds``).
+    """
 
     best_sp: JobSearchPoint
-    merged_pipeline_params: dict | None
-    round_entry: dict
     improving_axes: list[dict]
+    merged_pipeline_params: dict | None = None
+    round_entry: dict | None = None
 
 
-def seed_campaign_from_recon(
+def finalize_scan(
     recon_df: pd.DataFrame,
     axis_profiles: list[dict],
     baseline: JobSearchPoint,
     recon_variants: dict[str, list],
-    campaign_rounds: list[dict],
-    campaign_config: CampaignConfig,
-) -> SeedResult:
-    """Select scan winner, update pipeline_params, seed campaign_rounds.
+    *,
+    campaign_rounds: list[dict] | None = None,
+    campaign_config: CampaignConfig | None = None,
+    baseline_opt: OptSearchPoint | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+) -> FinalizedScan:
+    """Pick scan winner and, if campaign state is supplied, seed the campaign.
 
-    Mutates ``campaign_config["pipeline_params"]`` and appends to
-    ``campaign_rounds``.
-
-    Returns:
-        SeedResult with best_sp, merged params, new round entry, and
-        improving axes for display.
+    Composes the best per-axis value from positively-improving axes into a
+    single ``JobSearchPoint``. When both ``campaign_config`` and
+    ``campaign_rounds`` are provided, also mutates
+    ``campaign_config["pipeline_params"]`` and appends a search round entry.
     """
-    best_sp = select_recon_winner(
-        recon_df,
-        axis_profiles,
-        baseline,
-        recon_variants,
+    improving = _improving_axes(axis_profiles)
+    best_sp = _compose_winner(
+        recon_df, improving, baseline, recon_variants, baseline_opt, pipeline_schema
     )
 
-    improving = [
-        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
+    if campaign_config is None or campaign_rounds is None:
+        return FinalizedScan(best_sp=best_sp, improving_axes=improving)
 
     merged_pp = None
     if best_sp.pipeline_params:
@@ -501,16 +490,12 @@ def seed_campaign_from_recon(
         merged = {**existing_pp, **best_sp.pipeline_params}
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
-            excluded = set(campaign_config.get("exclude_nodes") or [])
-            for node_name in excluded:
+            for node_name in set(campaign_config.get("exclude_nodes") or []):
                 merged.pop(node_name, None)
         campaign_config["pipeline_params"] = merged
         merged_pp = merged
 
-    # Compute scan winner accuracy from recon_df (best single-variant result)
     best_row = recon_df.loc[recon_df["accuracy"].idxmax()] if not recon_df.empty else None
-    scan_winner_acc = float(best_row["accuracy"]) if best_row is not None else 0.0
-
     search_opt = OptSearchPoint(
         instruction=best_sp.render(),
         changes_description=f"recon_winner (sp_hash={best_sp.sp_hash()[:12]})",
@@ -519,16 +504,16 @@ def seed_campaign_from_recon(
         "round": "search",
         "label": f"adaptive_recon ({search_opt.changes_description or search_opt.id[:12]})",
         "prompt_fields": search_opt,
-        "accuracy": scan_winner_acc,
+        "accuracy": float(best_row["accuracy"]) if best_row is not None else 0.0,
         "hits": int(best_row["hits"]) if best_row is not None else 0,
         "total": int(best_row["total"]) if best_row is not None else 0,
         "results": [],
     }
     campaign_rounds.append(round_entry)
 
-    return SeedResult(
+    return FinalizedScan(
         best_sp=best_sp,
+        improving_axes=improving,
         merged_pipeline_params=merged_pp,
         round_entry=round_entry,
-        improving_axes=improving,
     )

@@ -21,9 +21,6 @@ from promptpotter.application.recon import (
 from promptpotter.application.recon import (
     resume_or_build_diagnostic as _resume_or_build_diagnostic,
 )
-from promptpotter.application.recon import (
-    select_recon_winner as _select_scan_winner,
-)
 from promptpotter.application.recon.recon_advisor import (
     convert_advisory_to_recon_variants,
     resolve_schema_axes,
@@ -32,7 +29,7 @@ from promptpotter.application.recon.recon_report import (
     decompose_recon_baseline as _decompose_scan_baseline,
 )
 from promptpotter.application.recon.recon_report import (
-    seed_campaign_from_recon as _seed_campaign_from_scan,
+    finalize_scan as _finalize_scan,
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
@@ -567,23 +564,13 @@ def select_recon_winner_notebook(
         print("No scan data available. Run sensitivity scan first.")
         return baseline
 
-    best_sp = _select_scan_winner(
-        recon_df,
-        axis_profiles,
-        baseline,
-        recon_variants,
-    )
+    result = _finalize_scan(recon_df, axis_profiles, baseline, recon_variants)
+    _display_improving_axes(recon_df, result.improving_axes)
 
-    # Print summary
-    improving = [
-        p for p in axis_profiles if p["best_delta"] > 0 and p["exploration_budget"] != "skip"
-    ]
-    _display_improving_axes(recon_df, improving)
+    if result.best_sp.sp_hash() != baseline.sp_hash():
+        print(f"\nComposed winner: sp_hash={result.best_sp.sp_hash()[:12]}")
 
-    if best_sp.sp_hash() != baseline.sp_hash():
-        print(f"\nComposed winner: sp_hash={best_sp.sp_hash()[:12]}")
-
-    return best_sp
+    return result.best_sp
 
 
 def seed_campaign_from_recon(
@@ -604,13 +591,13 @@ def seed_campaign_from_recon(
         print("No scan data available. Run sensitivity scan first.")
         return baseline
 
-    result = _seed_campaign_from_scan(
+    result = _finalize_scan(
         recon_df,
         axis_profiles,
         baseline,
         recon_variants,
-        campaign_rounds,
-        campaign_config,
+        campaign_rounds=campaign_rounds,
+        campaign_config=campaign_config,
     )
 
     # Print improving axes summary

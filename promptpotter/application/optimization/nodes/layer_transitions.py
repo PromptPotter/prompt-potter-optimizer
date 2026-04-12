@@ -15,6 +15,9 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
+from promptpotter.application.optimization.nodes.escalation_report import (
+    format_escalation_report,
+)
 from promptpotter.application.optimization.nodes.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
@@ -23,6 +26,8 @@ from promptpotter.application.optimization.nodes.formatting import (
     build_strategic_search_memory_digest,
     classify_trajectory,
     format_l2_intelligence,
+    format_l3_intelligence,
+    format_pipeline_section,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -30,7 +35,6 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.domain.opt_search_point import PromptTemplate
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
@@ -63,80 +67,33 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-def _build_l2_prompt(
-    opt_sp: OptSearchPoint,
-    pipeline_params: dict | None,
-    pipeline_schema: PipelineSchema | None,
-    escalation_check_result: dict | None,
-    search_memory: object | None = None,
-    rounds: list | None = None,
-    candidate_scores: list[dict] | None = None,
-) -> tuple[str, PromptTemplate, dict]:
-    """Assemble the L2 refine_strategy prompt from all context sources.
+async def _run_llm_transition(
+    *,
+    template_name: str,
+    compile_vars: dict,
+    llm_client: LLMClientBase,
+    model: str | None,
+    temperature: float,
+) -> tuple[dict, str]:
+    """Shared L2/L3 plumbing: load template → compile → llm_call → parse JSON.
 
-    Returns (compiled_prompt, template, compile_variables).
+    Returns ``(parsed_response, compiled_prompt)``.
     """
-    escalation_section = _build_escalation_prompt_section(
-        escalation_check_result,
-        opt_sp.escalation_journal or None,
-        pipeline_params,
-        pipeline_schema=pipeline_schema,
+    template = load_optimizer_prompt(template_name)
+    prompt = template.compile_prompt(**compile_vars)
+    response = await llm_call(
+        llm_client,
+        messages=[{"role": "user", "content": prompt}],
+        node=template_name,
+        model=model,
+        temperature=temperature,
+        trace_meta={
+            "template_name": template_name,
+            "template_fields": template.prompt_field_dict(),
+            "variables": compile_vars,
+        },
     )
-
-    task_context_section = ""
-    if opt_sp.task_context:
-        # Filter raw_description — already digested into structured fields
-        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
-        task_context_section = (
-            "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
-            + json.dumps(tc_display, indent=2)
-        )
-
-    intelligence_sections = format_l2_intelligence(
-        L2IntelligenceData(
-            escalation_section=escalation_section,
-            warning_inventory=opt_sp.warning_inventory or None,
-            critique_text=opt_sp.critique_text,
-            l2_directive=opt_sp.l2_directive,
-            search_memory_digest=build_strategic_search_memory_digest(
-                search_memory,
-                include_correlations=True,
-            ),
-            round_trajectory=build_round_trajectory(rounds) if rounds else None,
-            trajectory_classification=classify_trajectory(rounds) if rounds else None,
-            candidate_comparison=(
-                build_candidate_comparison(candidate_scores) if candidate_scores else None
-            ),
-            diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
-        )
-    )
-
-    response_schema_suffix = (
-        "\nReturn a JSON object with:\n"
-        '  "optimizer_params": dict of meta-setting changes '
-        "(creativity, n_variants, sp_budget_ttest — or {} to keep current)\n"
-        '  "task_context": dict of refined domain fields (or {} to keep current)\n'
-        '  "action": "continue" (normal L1 cycle) or "probe" '
-        "(test warned queries with new settings first)\n"
-        '  "directive": 2-3 sentence strategic guidance for the next candidate '
-        "generator — what problem to solve and why, not specific parameter "
-        "values (L1 decides those)\n"
-        '  "rationale": 1-2 sentence explanation\n'
-        "\nNote: L1 Generate makes the final decision on pipeline_params. "
-        "Your job is to refine the "
-        "situation context and meta-settings so L1 makes better choices.\n"
-        'Use your judgment on when to set action to "probe" vs "continue" '
-        "based on the data above."
-    )
-
-    _compile_vars = {
-        "current_params": json.dumps(opt_sp.optimizer_params),
-        "task_context_section": task_context_section,
-        "intelligence_sections": ("\n\n" + intelligence_sections) if intelligence_sections else "",
-        "response_schema_suffix": response_schema_suffix,
-    }
-    _template = load_optimizer_prompt("l2_refine_strategy")
-    return _template.compile_prompt(**_compile_vars), _template, _compile_vars
+    return extract_parsed_json(response), prompt
 
 
 def _parse_l2_response(
@@ -144,7 +101,7 @@ def _parse_l2_response(
     opt_sp: OptSearchPoint,
     prompt: str,
 ) -> TransitionResult:
-    """Parse LLM response into a TransitionResult with derived OptSearchPoint."""
+    """Parse L2 LLM response into a TransitionResult with derived OptSearchPoint."""
     changes: dict = {}
     if result.get("optimizer_params"):
         new_params = {**opt_sp.optimizer_params, **result["optimizer_params"]}
@@ -186,6 +143,48 @@ def _parse_l2_response(
     )
 
 
+def _parse_l3_response(
+    result: dict,
+    opt_sp: OptSearchPoint,
+    prompt: str,
+    current_pipeline_params: dict | None,
+) -> TransitionResult:
+    """Parse L3 LLM response into a TransitionResult.
+
+    Merges any nested ``pipeline_params`` deltas into the current params.
+    """
+    new_plan = result.get("plan", opt_sp.plan)
+    rationale = result.get("rationale", "L3 modify_plan transition")
+
+    pp_changes = result.get("pipeline_params")
+    new_pipeline_params: dict | None = None
+    if isinstance(pp_changes, dict) and pp_changes:
+        merged = dict(current_pipeline_params or {})
+        for key, value in pp_changes.items():
+            if isinstance(value, dict) and isinstance(merged.get(key), dict):
+                merged[key] = {**merged[key], **value}
+            else:
+                merged[key] = value
+        new_pipeline_params = merged
+
+    logger.debug(
+        "L3 modify_plan: %s, pipeline_params %s",
+        rationale[:100],
+        "updated" if new_pipeline_params else "unchanged",
+    )
+
+    new_opt_sp = opt_sp.derive_candidate(
+        plan=new_plan,
+        changes_description=f"L3: {rationale[:80]}",
+    )
+    return TransitionResult(
+        opt_search_point=new_opt_sp,
+        pipeline_params=new_pipeline_params,
+        debug_prompt=prompt,
+        debug_response=result,
+    )
+
+
 async def refine_strategy(
     opt_sp: OptSearchPoint,
     llm_client: LLMClientBase,
@@ -205,30 +204,55 @@ async def refine_strategy(
     text), and optionally ``pipeline_params`` when a pipeline schema is
     available.
     """
-    prompt, _template, _compile_vars = _build_l2_prompt(
-        opt_sp,
-        pipeline_params,
-        pipeline_schema,
+    escalation_section = format_escalation_report(
         escalation_check_result,
-        search_memory=search_memory,
-        rounds=rounds,
-        candidate_scores=candidate_scores,
+        opt_sp.escalation_journal or None,
+        pipeline_params,
+        pipeline_schema=pipeline_schema,
     )
 
-    response = await llm_call(
-        llm_client,
-        messages=[{"role": "user", "content": prompt}],
-        node="l2_refine_strategy",
+    task_context_section = ""
+    if opt_sp.task_context:
+        # Filter raw_description — already digested into structured fields
+        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
+        task_context_section = (
+            "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
+            + json.dumps(tc_display, indent=2)
+        )
+
+    intelligence_sections = format_l2_intelligence(
+        L2IntelligenceData(
+            escalation_section=escalation_section,
+            warning_inventory=opt_sp.warning_inventory or None,
+            critique_text=opt_sp.critique_text,
+            l2_directive=opt_sp.l2_directive,
+            search_memory_digest=build_strategic_search_memory_digest(
+                search_memory,
+                include_correlations=True,
+            ),
+            round_trajectory=build_round_trajectory(rounds) if rounds else None,
+            trajectory_classification=classify_trajectory(rounds) if rounds else None,
+            candidate_comparison=(
+                build_candidate_comparison(candidate_scores) if candidate_scores else None
+            ),
+            diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
+        )
+    )
+
+    compile_vars = {
+        "current_params": json.dumps(opt_sp.optimizer_params),
+        "task_context_section": task_context_section,
+        "intelligence_sections": ("\n\n" + intelligence_sections) if intelligence_sections else "",
+    }
+
+    result, prompt = await _run_llm_transition(
+        template_name="l2_refine_strategy",
+        compile_vars=compile_vars,
+        llm_client=llm_client,
         model=model,
         temperature=temperature,
-        trace_meta={
-            "template_name": "l2_refine_strategy",
-            "template_fields": _template.prompt_field_dict(),
-            "variables": _compile_vars,
-        },
     )
-
-    return _parse_l2_response(extract_parsed_json(response), opt_sp, prompt)
+    return _parse_l2_response(result, opt_sp, prompt)
 
 
 async def modify_plan(
@@ -246,9 +270,6 @@ async def modify_plan(
     Analyzes why L2 context/parameter adjustments didn't help and proposes
     a fundamentally different optimization strategy via ``OptSearchPoint.plan``,
     and optionally new pipeline_params when a pipeline schema is available.
-
-    Returns:
-        TransitionResult with derived OptSearchPoint and optional pipeline_params.
     """
     l2_summary = "\n".join(
         f"  L2 round {rd.get('l2_round', '?')}: "
@@ -257,189 +278,21 @@ async def modify_plan(
         for rd in l2_history[-3:]
     )
 
-    pipeline_section = _build_pipeline_prompt_section(pipeline_params, pipeline_schema)
-
-    response_schema_suffix = (
-        "\nReturn a JSON object with:\n"
-        '  "plan": new strategy text for guiding future optimization\n'
-        '  "pipeline_params": {"step_name": {"param": value}} '
-        "(or {} for no changes)\n"
-        '  "rationale": 1-2 sentence explanation of the strategic shift'
-    )
-
-    # SearchMemory intelligence — aggregate strategic picture for L3
-    sm_section = ""
-    sm_ctx = build_strategic_search_memory_digest(search_memory, include_clusters=True)
-    if sm_ctx:
-        sm_lines = ["HISTORICAL INTELLIGENCE:"]
-        if sm_ctx.get("axis_rankings"):
-            sm_lines.append(f"  Axis impact rankings: {sm_ctx['axis_rankings']}")
-        if sm_ctx.get("bottleneck_distribution"):
-            sm_lines.append(f"  Bottleneck distribution: {sm_ctx['bottleneck_distribution']}")
-        if sm_ctx.get("failure_clusters"):
-            sm_lines.append(f"  Failure clusters: {sm_ctx['failure_clusters']}")
-        if sm_ctx.get("persistent_failures"):
-            sm_lines.append(f"  Persistent failures: {sm_ctx['persistent_failures']}")
-        sm_section = "\n".join(sm_lines)
-
-    _compile_vars = {
+    compile_vars = {
         "current_plan": opt_sp.plan or "(none — default strategy)",
         "l2_summary": l2_summary,
         "rendered_prompt": opt_sp.render(),
-        "pipeline_section": pipeline_section,
-        "intelligence_section": sm_section,
-        "response_schema_suffix": response_schema_suffix,
+        "pipeline_section": format_pipeline_section(pipeline_params, pipeline_schema),
+        "intelligence_section": format_l3_intelligence(
+            build_strategic_search_memory_digest(search_memory, include_clusters=True)
+        ),
     }
-    _template = load_optimizer_prompt("l3_modify_plan")
-    prompt = _template.compile_prompt(**_compile_vars)
 
-    response = await llm_call(
-        llm_client,
-        messages=[{"role": "user", "content": prompt}],
-        node="l3_modify_plan",
+    result, prompt = await _run_llm_transition(
+        template_name="l3_modify_plan",
+        compile_vars=compile_vars,
+        llm_client=llm_client,
         model=model,
         temperature=temperature,
-        trace_meta={
-            "template_name": "l3_modify_plan",
-            "template_fields": _template.prompt_field_dict(),
-            "variables": _compile_vars,
-        },
     )
-    result = extract_parsed_json(response)
-
-    new_plan = result.get("plan", opt_sp.plan)
-    rationale = result.get("rationale", "L3 modify_plan transition")
-
-    new_pipeline_params = _parse_pipeline_params(result, pipeline_params)
-
-    logger.debug(
-        "L3 modify_plan: %s, pipeline_params %s",
-        rationale[:100],
-        "updated" if new_pipeline_params else "unchanged",
-    )
-
-    new_opt_sp = opt_sp.derive_candidate(
-        plan=new_plan,
-        changes_description=f"L3: {rationale[:80]}",
-    )
-    return TransitionResult(
-        opt_search_point=new_opt_sp,
-        pipeline_params=new_pipeline_params,
-    )
-
-
-def _build_pipeline_prompt_section(
-    pipeline_params: dict | None,
-    pipeline_schema: PipelineSchema | None,
-) -> str:
-    """Build the pipeline parameters section for L2/L3 LLM prompts.
-
-    Returns an empty string when no schema is available, which causes the
-    pipeline_params instructions to be omitted from the prompt.
-    """
-    if not pipeline_schema:
-        return ""
-    param_keys = pipeline_schema.node_param_keys()
-    if not param_keys:
-        return ""
-    lines = ["AVAILABLE PIPELINE PARAMETERS (in pipeline execution order):\n"]
-    for step_name, keys in param_keys.items():
-        current_vals = {}
-        if pipeline_params:
-            step_cfg = pipeline_params.get(step_name, {})
-            if isinstance(step_cfg, dict):
-                current_vals = {k: step_cfg.get(k, "?") for k in keys}
-        lines.append(f"  {step_name}: {', '.join(sorted(keys))}")
-        if current_vals:
-            lines.append(f"    current: {json.dumps(current_vals)}")
-        lines.append("")
-    return "\n".join(lines) + "\n"
-
-
-def _build_escalation_prompt_section(
-    escalation_check_result: dict | None,
-    escalation_journal: list[dict] | None,
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-) -> str:
-    """Build the escalation diagnostics section for L2 prompts.
-
-    Returns an empty string when no escalation context is available,
-    keeping the normal L2 prompt unchanged.  When present, the section
-    shows a data-driven stability map of tried configs so the LLM can
-    figure out what to change.
-    """
-    if not escalation_check_result:
-        return ""
-
-    dominant = escalation_check_result.get("dominant_warning", "unknown")
-    step_name = dominant.split(":")[0] if ":" in dominant else "unknown"
-    rate = escalation_check_result.get("degraded_rate", 0)
-
-    wt = escalation_check_result.get("warning_types", {})
-    wt_str = ", ".join(f"{k} ({v})" for k, v in sorted(wt.items(), key=lambda x: -x[1]))
-
-    lines = [
-        f"PIPELINE STABILITY REPORT ({step_name}):\n",
-        f"  Current degradation: {rate:.0%} of queries ({wt_str})",
-    ]
-
-    # Show current web_search config
-    step_cfg = (pipeline_params or {}).get(step_name, {})
-    if isinstance(step_cfg, dict) and step_cfg:
-        lines.append(f"  Current {step_name} config: {json.dumps(step_cfg)}")
-
-    lines.append("")
-
-    if escalation_journal:
-        lines.append("  Tried configs and stability:")
-        for entry in escalation_journal:
-            step = entry.get("problem_step", "unknown")
-            step_cfg = entry.get("step_config", {})
-            prev_rate = entry.get("degraded_rate", 0)
-            outcome = entry.get("outcome_degraded_rate")
-            outcome_str = f" -> {outcome:.0%}" if outcome is not None else ""
-            cfg_parts = [f"{k}={v!r}" for k, v in sorted(step_cfg.items())]
-            lines.append(
-                f"    Round {entry.get('round', '?')}: "
-                f"{step} [{', '.join(cfg_parts) or 'defaults'}]"
-                f" | {prev_rate:.0%} degraded{outcome_str}"
-            )
-        lines.append("")
-
-    # Surface the problem step's configurable axes
-    if pipeline_schema:
-        all_keys = pipeline_schema.node_param_keys()
-        step_keys = all_keys.get(step_name, set())
-        if step_keys:
-            lines.append(f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}")
-
-    lines.append(
-        "  The configurations above are all unstable. Suggest different "
-        "parameter values to stabilize the pipeline."
-    )
-    lines.append("")
-    return "\n".join(lines) + "\n"
-
-
-def _parse_pipeline_params(
-    llm_result: dict,
-    current_pipeline_params: dict | None,
-) -> dict | None:
-    """Extract and merge pipeline_params from LLM response.
-
-    Expects nested format: ``{"node_name": {"param": value}}``.
-    Returns merged pipeline_params dict if the LLM suggested changes,
-    or None if no changes were suggested.
-    """
-    pp_changes = llm_result.get("pipeline_params")
-    if not pp_changes or not isinstance(pp_changes, dict):
-        return None
-    merged = dict(current_pipeline_params or {})
-    for key, value in pp_changes.items():
-        if isinstance(value, dict) and isinstance(merged.get(key), dict):
-            merged[key] = {**merged[key], **value}
-        else:
-            # Defensive: non-dict values shouldn't appear in nested format
-            merged[key] = value
-    return merged
+    return _parse_l3_response(result, opt_sp, prompt, pipeline_params)

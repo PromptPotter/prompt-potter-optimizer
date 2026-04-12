@@ -44,6 +44,8 @@ def _load_prompt(name: str) -> str:
     return (_PROMPT_DIR / f"{name}.md").read_text(encoding="utf-8").rstrip("\n")
 
 
+# _TYPE_MAP / schema dicts below mirror external JSON Schema wire format —
+# intentionally untyped (a TypedDict would duplicate the shape without adding safety).
 _TYPE_MAP: dict[str, dict] = {
     "string": {"type": "string"},
     "array": {"type": "array", "items": {"type": "string"}},

@@ -195,6 +195,20 @@ class CampaignStore(EntityStore):
                 },
             )
 
+    def load_many(
+        self,
+        backend_id: str,
+        campaign_ids: list[str] | None = None,
+    ) -> list[dict[str, Any]]:
+        """Load full campaign records for *campaign_ids*, or all campaigns when None.
+
+        Skips campaigns whose detail file is missing. Replaces the list-all +
+        per-id load fan-out that lived in application/campaign/reporting.py.
+        """
+        if campaign_ids is None:
+            campaign_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
+        return [c for cid in campaign_ids if (c := self.load(backend_id, cid)) is not None]
+
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign under *backend_id*."""
         campaigns_dir = self._entity_dir(backend_id)

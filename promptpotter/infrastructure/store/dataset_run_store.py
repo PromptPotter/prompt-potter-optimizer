@@ -16,6 +16,7 @@ Prompt alias groups are used by ``recon_baseline.py`` and
 
 import hashlib
 import logging
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
 
@@ -155,6 +156,25 @@ class DatasetRunStore:
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
         return self._load_index(backend_id).get("dataset_runs", [])
+
+    def load_since(
+        self,
+        backend_id: str,
+        seen_ids: set[str],
+    ) -> Iterator[tuple[str, dict[str, Any]]]:
+        """Yield ``(run_id, detail)`` for runs whose ``run_id`` is not in ``seen_ids``.
+
+        Skips runs whose detail file is missing. Encapsulates the index-scan +
+        per-run load that SearchMemory.refresh used to do by hand.
+        """
+        for entry in self.list_all(backend_id):
+            run_id = entry["run_id"]
+            if run_id in seen_ids:
+                continue
+            detail = self.load_by_id(backend_id, run_id)
+            if detail is None:
+                continue
+            yield run_id, detail
 
     def find_by_prefix_chain(
         self,

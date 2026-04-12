@@ -33,10 +33,9 @@ from promptpotter.application.recon.recon_advisor import (
 )
 from promptpotter.application.recon.recon_report import (
     decompose_recon_baseline,
+    finalize_scan,
     prepare_recon_brief,
     resume_or_build_diagnostic,
-    seed_campaign_from_recon,
-    select_recon_winner,
 )
 from promptpotter.application.recon.recon_runner import run_recon
 
@@ -50,12 +49,11 @@ __all__ = [
     "convert_advisory_to_recon_variants",
     "decompose_recon_baseline",
     "estimate_recon_coverage",
+    "finalize_scan",
     "load_filtered_variant_library",
     "prepare_recon_brief",
     "preview_advisor_prompt",
     "resume_or_build_diagnostic",
     "run_adaptive_recon",
     "run_recon",
-    "seed_campaign_from_recon",
-    "select_recon_winner",
 ]

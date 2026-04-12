@@ -208,9 +208,7 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
     """Show recon analytics and seed campaign from recon winner."""
     import pandas as pd
 
-    from promptpotter.application.recon.recon_report import (
-        seed_campaign_from_recon,
-    )
+    from promptpotter.application.recon.recon_report import finalize_scan
 
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params)
@@ -235,13 +233,13 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
 
     recon_baseline_sp = load_cli_baseline(session)
     campaign_rounds: list = []
-    seed_campaign_from_recon(
+    finalize_scan(
         recon_df,
         axis_profiles,
         recon_baseline_sp.to_job_search_point(),
         ctx.recon_variants,
-        campaign_rounds,
-        ctx.campaign_config,
+        campaign_rounds=campaign_rounds,
+        campaign_config=ctx.campaign_config,
     )
 
     if campaign_rounds:

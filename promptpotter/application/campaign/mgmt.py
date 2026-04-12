@@ -9,6 +9,7 @@ campaigns rather than creating them.
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.campaign.config import CampaignConfig
@@ -21,12 +22,21 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ConfigDiff",
     "apply_stored_overrides",
     "diff_campaign_config",
     "load_stored_campaign_config",
     "resolve_active_campaign_id",
     "save_campaign_winner",
 ]
+
+
+@dataclass(frozen=True)
+class ConfigDiff:
+    """One field's difference between a stored campaign config and the current config."""
+
+    stored: Any
+    current: Any
 
 
 def apply_stored_overrides(
@@ -122,7 +132,7 @@ def diff_campaign_config(
     stored_config: dict,
     campaign_config: CampaignConfig,
     pipeline_schema: PipelineSchema | None = None,
-) -> dict[str, dict]:
+) -> dict[str, ConfigDiff]:
     """Compute parameter differences between stored and current campaign config."""
     from promptpotter.application.campaign.config import LoopConfig
 
@@ -142,12 +152,12 @@ def diff_campaign_config(
         "seed",
     ]
 
-    diffs: dict[str, dict] = {}
+    diffs: dict[str, ConfigDiff] = {}
     for k in keys:
         sv = stored_config.get(k)
         cv = current.get(k)
         if sv != cv:
-            diffs[k] = {"stored": sv, "current": cv}
+            diffs[k] = ConfigDiff(stored=sv, current=cv)
 
     # Compare pipeline params (derived from schema)
     sp = stored_config.get("pipeline_params")
@@ -157,7 +167,7 @@ def diff_campaign_config(
             sv = (sp or {}).get(pk)
             cv = (cp or {}).get(pk)
             if sv != cv:
-                diffs[f"pp.{pk}"] = {"stored": sv, "current": cv}
+                diffs[f"pp.{pk}"] = ConfigDiff(stored=sv, current=cv)
 
     return diffs
 

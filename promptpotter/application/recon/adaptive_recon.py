@@ -310,7 +310,7 @@ def _stratify_misses(
     from promptpotter.application.scoring.metrics import extract_sample_diagnostics
 
     # Map miss queries to their baseline results for diagnostic extraction
-    result_by_query: dict[str, dict] = {}
+    result_by_query: dict[str, dict[str, Any]] = {}
     for r in baseline_results:
         if not r.get("hit") and not is_error_result(r):
             result_by_query[r.get("query", "")] = r

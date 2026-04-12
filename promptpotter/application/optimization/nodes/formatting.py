@@ -6,6 +6,7 @@ l1_optimizer (L1 generate) for prompt assembly.
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -14,6 +15,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 __all__ = [
     "L1PromptData",
@@ -28,9 +30,61 @@ __all__ = [
     "classify_trajectory",
     "format_context_sections",
     "format_l2_intelligence",
+    "format_l3_intelligence",
+    "format_pipeline_section",
     "summarize_warning_inventory",
     "warning_summary",
 ]
+
+
+def format_pipeline_section(
+    pipeline_params: dict | None,
+    pipeline_schema: PipelineSchema | None,
+) -> str:
+    """Build the pipeline parameters section for L2/L3 LLM prompts.
+
+    Returns an empty string when no schema is available, which causes the
+    pipeline_params instructions to be omitted from the prompt.
+    """
+    if not pipeline_schema:
+        return ""
+    param_keys = pipeline_schema.node_param_keys()
+    if not param_keys:
+        return ""
+    lines = ["AVAILABLE PIPELINE PARAMETERS (in pipeline execution order):\n"]
+    for step_name, keys in param_keys.items():
+        current_vals = {}
+        if pipeline_params:
+            step_cfg = pipeline_params.get(step_name, {})
+            if isinstance(step_cfg, dict):
+                current_vals = {k: step_cfg.get(k, "?") for k in keys}
+        lines.append(f"  {step_name}: {', '.join(sorted(keys))}")
+        if current_vals:
+            lines.append(f"    current: {json.dumps(current_vals)}")
+        lines.append("")
+    return "\n".join(lines) + "\n"
+
+
+def format_l3_intelligence(sm_digest: dict | None) -> str:
+    """Build the HISTORICAL INTELLIGENCE section for L3 modify_plan prompts.
+
+    Symmetric with ``format_l2_intelligence`` but pulls the strategic
+    picture variant (axis rankings, bottlenecks, failure clusters,
+    persistent failures). Returns empty string when no data is available.
+    """
+    if not sm_digest:
+        return ""
+    lines = ["HISTORICAL INTELLIGENCE:"]
+    for key, label in (
+        ("axis_rankings", "Axis impact rankings"),
+        ("bottleneck_distribution", "Bottleneck distribution"),
+        ("failure_clusters", "Failure clusters"),
+        ("persistent_failures", "Persistent failures"),
+    ):
+        val = sm_digest.get(key)
+        if val:
+            lines.append(f"  {label}: {val}")
+    return "\n".join(lines) if len(lines) > 1 else ""
 
 
 @dataclass

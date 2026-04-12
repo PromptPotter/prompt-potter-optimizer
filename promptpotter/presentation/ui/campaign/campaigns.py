@@ -185,8 +185,8 @@ def diff_campaign_config(
     print(f"\nDiff: current config vs {campaign_id}")
     print("=" * 60)
     for k, v in diffs.items():
-        sv_str = str(v["stored"])[:40] if v["stored"] is not None else "(none)"
-        cv_str = str(v["current"])[:40] if v["current"] is not None else "(none)"
+        sv_str = str(v.stored)[:40] if v.stored is not None else "(none)"
+        cv_str = str(v.current)[:40] if v.current is not None else "(none)"
         print(f"  {k}: {sv_str} → {cv_str}")
     if not diffs:
         print("  (identical — will resume this campaign)")

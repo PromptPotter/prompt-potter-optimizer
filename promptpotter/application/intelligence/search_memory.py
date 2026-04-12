@@ -474,21 +474,16 @@ class SearchMemory:
 
         Returns True if new data was incorporated.
         """
-        index_entries = store.dataset_runs.list_all(backend_id)
-        new_ids = [e["run_id"] for e in index_entries if e["run_id"] not in self._watermark]
-        if not new_ids:
-            return False
-
-        for run_id in new_ids:
-            detail = store.dataset_runs.load_by_id(backend_id, run_id)
-            if not detail:
-                continue
+        added = 0
+        for run_id, detail in store.dataset_runs.load_since(backend_id, self._watermark):
             self._ingest_run(detail)
             self._watermark.add(run_id)
-
+            added += 1
+        if not added:
+            return False
         logger.debug(
             "SearchMemory refreshed: %d new runs (total watermark: %d)",
-            len(new_ids),
+            added,
             len(self._watermark),
         )
         return True

@@ -5,5 +5,5 @@
   "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy.",
   "thinking_style": "Consider:\n- What patterns in the L2 history suggest about why the current approach is failing\n- What fundamentally different strategies the data supports\n- Which pipeline dimensions have been under-explored",
   "plan": "{{current_plan}}",
-  "answer_format": "{{response_schema_suffix}}"
+  "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization\n  \"pipeline_params\": {\"step_name\": {\"param\": value}} (or {} for no changes)\n  \"rationale\": 1-2 sentence explanation of the strategic shift"
 }
