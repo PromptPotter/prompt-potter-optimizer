@@ -16,6 +16,7 @@ Scoring functions (add new ones here):
     rr(k)                              — reciprocal rank: 1/k if k else 0
     gsm8k_match(predicted, ground_truth) — numeric extraction + comparison
     aime_match(predicted, ground_truth)  — \\boxed{} extraction + integer comparison (AIME 0-999)
+    exact_match(predicted, ground_truth) — case-insensitive whitespace-stripped equality
 
 No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 """
@@ -105,10 +106,18 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if pred == gt else 0.0
 
 
+def _exact_match(predicted: str, ground_truth: str) -> float:
+    """Return 1.0 iff predicted == ground_truth after strip + lowercase."""
+    p = (predicted or "").strip().lower()
+    g = (ground_truth or "").strip().lower()
+    return 1.0 if p == g else 0.0
+
+
 SCORING_FUNCTIONS: dict[str, Callable] = {
     "rr": _rr,
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,
+    "exact_match": _exact_match,
 }
 """All scoring helpers available in formulas. Add new ones here."""
 
