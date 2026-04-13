@@ -313,7 +313,7 @@ def build_dataset_run_data(
     }
     data["sp_hash"] = sp_h
     if pipeline_schema and search_point.pipeline_params:
-        data["prefix_chain"] = pipeline_schema.prefix_keys(search_point.pipeline_params)
+        data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)
     if search_point.pipeline_params:
         data["pipeline_params"] = search_point.pipeline_params
     if experiment_id:

@@ -1,9 +1,9 @@
 """Sample measurement — single-query pipeline execution and scoring.
 
 Measures one sample at a time via the backend query endpoint.
-Uses the unified node chain (``PipelineSchema.prefix_keys``) for
-per-node cache walk and populate.  Dataset-level scoring and
-prior-result matching live in ``scoring_searchpoint``.
+Uses the suffix-hash cache (``SuffixCache``) for per-node output
+reuse.  Dataset-level scoring and prior-result matching live in
+``search_point_scorer``.
 
 Prompt interpolation
 --------------------

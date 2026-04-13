@@ -18,27 +18,6 @@ from typing import Any
 from pydantic import BaseModel, Field
 
 
-def node_cache_key(
-    node_name: str,
-    node_config: dict[str, Any],
-    upstream_hash: str = "",
-) -> str:
-    """Deterministic 16-char hex key for one node's output.
-
-    Chains upstream: *upstream_hash* is the previous node's cache key.
-    Changing any upstream node's config cascades invalidation downstream.
-
-    Used only by ``prefix_keys`` / ``sp_hash`` for SearchPoint identity
-    and dataset-run archival. The per-query cache uses ``suffix_key``.
-    """
-    blob = json.dumps(
-        {"node": node_name, "config": node_config, "upstream": upstream_hash},
-        sort_keys=True,
-        default=str,
-    ).encode()
-    return hashlib.sha256(blob).hexdigest()[:16]
-
-
 def stable_hash(value: Any) -> str:
     """Deterministic 16-char hex digest of an arbitrary JSON-able value."""
     blob = json.dumps(value, sort_keys=True, default=str).encode()
@@ -247,37 +226,25 @@ class PipelineSchema(BaseModel):
         """Return the node name that owns *param_name* (O(1)), or None."""
         return self._param_map.get(param_name)  # type: ignore[attr-defined]
 
-    def prefix_keys(self, pipeline_params: dict[str, Any]) -> list[tuple[str, str]]:
-        """Chained cache keys for each node in pipeline order.
+    def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict]]:
+        """Ordered ``[(node_name, node_config), ...]`` for this schema.
 
-        Returns ``[(node_name, cache_key), ...]``.  Each key is a 16-char
-        hex digest of ``(node_name, node_config, upstream_key)``, so changing
-        any upstream node's config cascades invalidation downstream.
-
-        This is the single addressing scheme for all caching: the
-        intermediate cache uses individual entries for per-node output
-        lookup; the terminal element serves as ``sp_hash`` for dataset-run
-        lookup.
+        The canonical representation of a SearchPoint's identity at the
+        archive layer: fed to ``suffix_key`` for ``sp_hash`` and compared
+        element-wise by ``DatasetRunStore.find_by_node_configs``.
         """
-        result: list[tuple[str, str]] = []
-        upstream = ""
+        result: list[tuple[str, dict]] = []
         for node in self.nodes:
-            config = pipeline_params.get(node.name, {})
-            if not isinstance(config, dict):
-                config = {}
-            key = node_cache_key(node.name, config, upstream)
-            result.append((node.name, key))
-            upstream = key
+            cfg = pipeline_params.get(node.name, {})
+            if not isinstance(cfg, dict):
+                cfg = {}
+            result.append((node.name, cfg))
         return result
 
     def sp_hash(self, pipeline_params: dict[str, Any]) -> str:
-        """SearchPoint identity hash — terminal element of the node chain.
-
-        Equivalent to ``self.prefix_keys(pipeline_params)[-1][1]``.
-        Returns ``""`` for empty schemas (no nodes).
-        """
-        chain = self.prefix_keys(pipeline_params)
-        return chain[-1][1] if chain else ""
+        """SearchPoint identity hash.  Empty string for empty schemas."""
+        configs = self.node_configs(pipeline_params)
+        return suffix_key("", configs) if configs else ""
 
     # -------------------------------------------------------------------
     # Derivation methods

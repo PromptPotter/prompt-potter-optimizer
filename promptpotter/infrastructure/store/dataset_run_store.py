@@ -2,14 +2,15 @@
 Dataset run storage — archive layer for eval history.
 
 Stores completed evaluation runs for SearchMemory, observability,
-campaign lineage, and full-run cache lookup (``find_by_prefix_chain``).
+campaign lineage, and full-run cache lookup (``find_by_node_configs``).
 Per-query per-node reuse is handled separately by ``SuffixCache``
 (see ``docs/architecture/suffix-cache.md``).
 
-Both layers use the same chained node hashes from
-``PipelineSchema.prefix_keys()``.  The terminal element of the chain
-serves as ``sp_hash``; prefix matching enables reuse of prior results
-when only downstream nodes changed.
+Archive identity uses ``PipelineSchema.node_configs`` — the ordered
+list of ``(node_name, node_config)`` tuples.  Prefix matching over
+that list enables reuse of prior results when only downstream nodes
+changed; ``sp_hash = suffix_key("", node_configs)`` is the terminal
+identity.
 
 Prompt alias groups are used by ``recon_baseline.py`` and
 ``optimization_loop.py`` for SearchMemory historical linking.
@@ -112,7 +113,7 @@ class DatasetRunStore:
             "content_hash": data["content_hash"],
             "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
             "sp_hash": data.get("sp_hash", ""),
-            "prefix_chain": data.get("prefix_chain"),
+            "node_configs": data.get("node_configs"),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
             "connector_type": data.get("connector_type", DEFAULT_CONNECTOR_TYPE),
@@ -177,42 +178,36 @@ class DatasetRunStore:
                 continue
             yield run_id, detail
 
-    def find_by_prefix_chain(
+    def find_by_node_configs(
         self,
         backend_id: str,
-        prefix_chain: list[tuple[str, str]],
+        node_configs: list[tuple[str, dict]],
     ) -> list[tuple[dict[str, Any], int]]:
-        """Return index entries sharing a chain prefix, best match first.
+        """Return index entries sharing a node-config prefix, best match first.
 
-        Compares each stored entry's ``prefix_chain`` element-by-element
-        against *prefix_chain*.  Returns ``(entry, match_length)`` tuples
+        Compares each stored entry's ``node_configs`` element-by-element
+        against *node_configs*.  Returns ``(entry, match_length)`` tuples
         sorted by match_length desc, then item_count desc.
-
-        Entries without a stored ``prefix_chain`` fall back to ``sp_hash``
-        exact match (match_length = full chain length when terminal hash
-        matches, 0 otherwise).
         """
-        if not prefix_chain:
+        if not node_configs:
             return []
-        terminal_hash = prefix_chain[-1][1]
-        chain_len = len(prefix_chain)
 
         scored: list[tuple[dict[str, Any], int]] = []
         for entry in self.list_all(backend_id):
-            stored_chain = entry.get("prefix_chain")
-            if stored_chain:
-                # Element-by-element comparison
-                match_len = 0
-                for (_, h_want), (_, h_have) in zip(prefix_chain, stored_chain, strict=False):
-                    if h_want != h_have:
-                        break
-                    match_len += 1
-                if match_len > 0:
-                    scored.append((entry, match_len))
-            else:
-                # Legacy entry: fall back to sp_hash exact match
-                if entry.get("sp_hash") == terminal_hash:
-                    scored.append((entry, chain_len))
+            stored = entry.get("node_configs")
+            if not stored:
+                continue
+            match_len = 0
+            for (n_want, c_want), stored_pair in zip(node_configs, stored, strict=False):
+                # stored_pair may be [name, config] after JSON round-trip
+                if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+                    break
+                n_have, c_have = stored_pair
+                if n_have != n_want or c_have != c_want:
+                    break
+                match_len += 1
+            if match_len > 0:
+                scored.append((entry, match_len))
 
         scored.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
         return scored
@@ -220,29 +215,29 @@ class DatasetRunStore:
     def load_reusable_results(
         self,
         backend_id: str,
-        prefix_chain: list[tuple[str, str]],
+        node_configs: list[tuple[str, dict]],
     ) -> dict[str, dict[str, Any]]:
-        """Build per-query cache from prior dataset_runs sharing *prefix_chain*.
+        """Build per-query cache from prior dataset_runs sharing *node_configs*.
 
-        Exact matches (``match_length == len(prefix_chain)``) reuse every
+        Exact matches (``match_length == len(node_configs)``) reuse every
         non-error item.  Partial matches reuse only items whose
         ``pipeline_data.terminated_at`` falls within the shared prefix —
         the query short-circuited before the diverging node.
 
         Later runs overwrite earlier ones for the same query.
         """
-        if not prefix_chain:
+        if not node_configs:
             return {}
-        chain_len = len(prefix_chain)
+        chain_len = len(node_configs)
         cache: dict[str, dict[str, Any]] = {}
 
-        for entry, match_length in self.find_by_prefix_chain(backend_id, prefix_chain):
+        for entry, match_length in self.find_by_node_configs(backend_id, node_configs):
             detail = self.load_by_id(backend_id, entry["run_id"])
             if not detail:
                 continue
             is_full_match = match_length >= chain_len
             trusted_nodes: set[str] = (
-                set() if is_full_match else {prefix_chain[i][0] for i in range(match_length)}
+                set() if is_full_match else {node_configs[i][0] for i in range(match_length)}
             )
             for item in detail.get("dataset_run_items", []):
                 q = item.get("query", "")

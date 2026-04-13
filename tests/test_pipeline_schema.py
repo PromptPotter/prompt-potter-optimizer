@@ -127,39 +127,20 @@ class TestCoordinateLookups:
         assert schema.exclude(None) is schema
         assert schema.exclude(set()) is schema
 
-    def test_prefix_keys_stable_and_chained(self):
+    def test_node_configs_preserves_order_and_fills_empty(self):
         schema = _three_node_schema()
         pp = {"a": {"max_results": 5}, "b": {"temperature": 0.7}}
-        keys = schema.prefix_keys(pp)
-        assert len(keys) == 3
-        assert all(len(k) == 16 for _, k in keys)
-        names = [name for name, _ in keys]
-        assert names == ["a", "b", "c"]
-        # Changing upstream config changes downstream keys
-        pp2 = {"a": {"max_results": 10}, "b": {"temperature": 0.7}}
-        keys2 = schema.prefix_keys(pp2)
-        assert keys2[0][1] != keys[0][1]  # a changed
-        assert keys2[1][1] != keys[1][1]  # b cascaded
-        assert keys2[2][1] != keys[2][1]  # c cascaded
+        configs = schema.node_configs(pp)
+        assert [name for name, _ in configs] == ["a", "b", "c"]
+        assert configs[0][1] == {"max_results": 5}
+        assert configs[2][1] == {}  # missing node → empty dict
 
-    def test_prefix_keys_matches_node_cache_key(self):
-        """prefix_keys produces the same hashes as node_cache_key."""
-        from promptpotter.domain.pipeline_schema import node_cache_key
+    def test_sp_hash_matches_suffix_key_of_node_configs(self):
+        from promptpotter.domain.pipeline_schema import suffix_key
 
         schema = _three_node_schema()
         pp = {"a": {"max_results": 5}}
-        keys = schema.prefix_keys(pp)
-        # First node: upstream=""
-        assert keys[0][1] == node_cache_key("a", {"max_results": 5}, "")
-        # Second node: upstream=first key
-        assert keys[1][1] == node_cache_key("b", {}, keys[0][1])
-
-    def test_sp_hash_is_terminal_of_prefix_keys(self):
-        """sp_hash returns the terminal element of prefix_keys."""
-        schema = _three_node_schema()
-        pp = {"a": {"max_results": 5}, "b": {"temperature": 0.7}}
-        chain = schema.prefix_keys(pp)
-        assert schema.sp_hash(pp) == chain[-1][1]
+        assert schema.sp_hash(pp) == suffix_key("", schema.node_configs(pp))
 
     def test_sp_hash_empty_schema(self):
         schema = PipelineSchema(nodes=[])

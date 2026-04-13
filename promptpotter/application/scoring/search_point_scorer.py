@@ -1,8 +1,9 @@
 """Dataset scoring — query loop orchestration, archival, and observability.
 
 Two cache tiers: prior-result reuse via ``DatasetRunStore.load_reusable_results``
-(addressed by ``PipelineSchema.prefix_keys`` for archive lineage) and per-node
+(addressed by ``PipelineSchema.node_configs`` for archive lineage) and per-node
 output reuse via the suffix-hash cache (see ``docs/architecture/suffix-cache.md``).
+Both tiers share the same ``suffix_key`` primitive for identity.
 Single-sample measurement lives in ``sample_measurement``; the stale-data
 ladder in ``stale_data``.
 
@@ -212,10 +213,10 @@ async def score_search_point(
 
     prior_results: dict[str, QueryResult] = {}
     if store and backend_id:
-        prefix_chain = pipeline_schema.prefix_keys(search_point.pipeline_params or {})
+        node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         prior_results = cast(
             "dict[str, QueryResult]",
-            store.dataset_runs.load_reusable_results(backend_id, prefix_chain),
+            store.dataset_runs.load_reusable_results(backend_id, node_configs),
         )
 
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
