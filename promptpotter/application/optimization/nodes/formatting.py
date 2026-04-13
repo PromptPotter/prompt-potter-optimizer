@@ -94,13 +94,7 @@ def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str
 
 
 def format_context_sections(ctx: L1PromptData) -> str:
-    """Build all optional context sections as a single string.
-
-    Each non-empty section is a titled block. Returned string is empty
-    when no context is available. This is the single intelligence bundle
-    for L1 — scan data, escalation, critique, directives, and plan all
-    live here.
-    """
+    """Build the L1 intelligence bundle — scan, escalation, critique, directives, plan."""
     sections: list[str] = []
 
     # Pipeline schema — valid nodes and parameters
@@ -258,12 +252,7 @@ class L2IntelligenceData:
 
 
 def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
-    """Build the intelligence bundle for L2 refine_strategy.
-
-    Mirrors L1's ``format_context_sections()`` pattern — a single string
-    with titled blocks for escalation/warnings, critique, and previous
-    directive. Returns empty string when no intelligence is available.
-    """
+    """Build the L2 refine_strategy intelligence bundle (mirrors ``format_context_sections``)."""
     sections: list[str] = []
 
     # Escalation OR per-query warnings — never both. The escalation
@@ -351,12 +340,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
 
 @dataclass
 class TrajectoryReport:
-    """Unified campaign-trajectory view derived from round accuracies.
-
-    ``text`` is the compact L2 trend summary. The remaining fields classify
-    the trajectory and suggest an action. ``classification`` is one of
-    ``healthy``, ``plateau``, ``oscillating``, ``ceiling``.
-    """
+    """Unified campaign-trajectory view. ``classification`` ∈ healthy/plateau/oscillating/ceiling."""
 
     text: str
     classification: str
@@ -365,12 +349,7 @@ class TrajectoryReport:
 
 
 def build_trajectory_report(rounds: list[Any]) -> TrajectoryReport | None:
-    """Compute the unified trajectory report for L2 / critique.
-
-    Single pass over the accuracy history derives: trend direction, stall
-    streak, last 5 deltas, classification, and recommended action. Returns
-    ``None`` when fewer than 2 rounds are available.
-    """
+    """Compute trend direction, stall streak, and classification from round accuracies."""
     if not rounds or len(rounds) < 2:
         return None
 
@@ -458,12 +437,7 @@ def build_trajectory_report(rounds: list[Any]) -> TrajectoryReport | None:
 
 
 def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None:
-    """Detect when L1 is generating near-duplicate candidates across rounds.
-
-    Analyzes ``pipeline_params_override`` axes across recent rounds. When the
-    same axes dominate candidate generation repeatedly, returns an alert string
-    for L2 to act on. Returns None when diversity is healthy.
-    """
+    """Detect mode collapse — same axes dominating across recent rounds. Returns None when healthy."""
     if not rounds or len(rounds) < 3:
         return None
 
@@ -519,11 +493,7 @@ def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None
 
 
 def build_candidate_comparison(candidate_scores: list[dict]) -> str | None:
-    """Build compact summary of how all candidates performed in the last round.
-
-    Shows each candidate's accuracy, changes_description, and delta from winner.
-    Helps L2 avoid directing toward already-tested approaches.
-    """
+    """Compact per-candidate summary (accuracy, description, delta from winner) for L2."""
     if not candidate_scores or len(candidate_scores) < 2:
         return None
 
@@ -547,14 +517,7 @@ def build_cross_candidate_diff(
     all_candidate_results: dict[str, list[dict]],
     candidate_scores: list[dict],
 ) -> str | None:
-    """Compare winner's per-query results vs other candidates.
-
-    Surfaces "missed opportunities" — queries where non-winners hit but
-    winner misses. Helps critique identify config dimensions that could
-    unlock more queries.
-
-    Returns formatted string for injection into critique context, or None.
-    """
+    """Surface missed opportunities — queries other candidates hit but winner missed."""
     if not winner_results or not all_candidate_results or len(all_candidate_results) < 2:
         return None
 
@@ -624,11 +587,7 @@ def candidate_summaries(candidates: list[dict]) -> list[dict]:
 
 
 def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
-    """Build a text summary of recurring warnings across rounds.
-
-    Groups queries by warning type and shows per-query hit/miss stats.
-    Returns empty string when no warnings are tracked.
-    """
+    """Group queries by warning type with per-query hit/miss stats."""
     # Collect queries that have any warnings
     by_warning: dict[str, list[tuple[str, dict]]] = {}
     for query, entry in tracker.items():
@@ -661,11 +620,7 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
 
 
 def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
-    """Return ``(warned_count, top_warning_type)`` from the warning inventory.
-
-    ``warned_count`` is the number of queries with at least one warning.
-    ``top_warning_type`` is the most frequent warning type, or ``""`` if none.
-    """
+    """Return ``(warned_count, top_warning_type)`` from the warning inventory."""
     if not tracker:
         return 0, ""
     warned_count = sum(1 for e in tracker.values() if e.get("warnings"))
