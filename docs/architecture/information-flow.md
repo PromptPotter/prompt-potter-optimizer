@@ -29,6 +29,7 @@ What gets injected into each LLM node's prompt, where it originates, and how it 
 | **Thinking styles** | `sample_thinking_styles()` → `opt_sp.thinking_styles` | 3 sampled | — | — | — |
 | **Plan** | L3 output → `opt_sp.plan` | read-only | — | — | prev (editable) |
 | **Optimizer params** | campaign init / L2 override → `opt_sp.optimizer_params` | via overrides | — | editable | — |
+| **Validation failures** | L1 parse-time `validate_overrides()` → `opt_sp.memory.validation_failures` | — | — | "L1 VALIDATION FAILURES" section when non-empty **(e)** | — |
 
 ### Per-round / transient
 
@@ -103,6 +104,8 @@ See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the ful
 
 **(d) L2 sees pipeline schema only via escalation.** L2 does not receive the full pipeline parameter listing — that's L1's domain. When escalation fires, the stability report surfaces the problem step's available parameters and tried configs.
 
+**(e) Validation failures as L2 self-healing input.** When a candidate's `OptSearchPoint.memory.validation_failures` is non-empty, the candidate skips the backend (synthetic 0) and the failure is fed to L2 `refine_strategy` as an explicit section alongside critique and escalation context. L2 produces a directive that names the disallowed value by name. L1 never sees the raw failure — it sees the resulting directive on the next round via the normal directive/critique mutual exclusion (rule **(a)**). The signal lives on the outer-layer optimizer trace, not the target-layer `JobSearchPoint`. See [`optimization.md`](optimization.md) "Self-healing optimization".
+
 ---
 
 ## Compression Chain
@@ -113,6 +116,8 @@ eval results ──► Critique (LLM) ──► critique_text ──► L2 (LLM)
 ```
 
 When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy compression. The directive/critique mutual exclusion ensures L1 gets the most processed form available. Round trajectory and failure group insights will feed L2 directly (bypassing this chain), so L2 can produce better-informed directives for L1.
+
+Validation failures bypass critique entirely and feed L2 directly (1 hop instead of 2) — the signal is already structured, no eval-result digestion needed.
 
 L3 sees only `l2_summary` (last 3 L2 outcomes: what changed, whether accuracy moved) — never L2's directive or reasoning. Strategy from outcomes, not tactics.
 

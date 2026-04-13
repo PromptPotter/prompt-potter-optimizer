@@ -11,10 +11,12 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.phases import CampaignPhase
+from promptpotter.application.scoring.metrics import is_degraded
 from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.store.base import write_json
 
@@ -75,6 +77,10 @@ def _make_initial_state(
         "error_count": 0,
         "best_round": r.get("best_round", 0),
         "improvement_streak": 0,
+        # Most recent scoring/escalation event — populated when an
+        # escalation check fires, or when a candidate is scored invalid
+        # by parse-time validation (Workstream A). Resets on each round.
+        "last_scoring_metadata": None,
         # Historical (carried across resumes for display continuity)
         "rounds_completed": r.get("rounds_completed", 0),
         "total_queries_scored": r.get("total_queries_scored", 0),
@@ -199,6 +205,17 @@ class CampaignPersistenceEmitter:
             self._rc.reset()
             s["degraded_count"] = 0
             s["round_elapsed_s"] = 0.0
+            s["last_scoring_metadata"] = None
+        elif phase == CampaignPhase.ESCALATION and event.event == "enter":
+            s["last_scoring_metadata"] = {
+                "kind": "escalation",
+                "round": data.get("round"),
+                "check_name": data.get("check_name"),
+                "target": str(data.get("target")) if data.get("target") is not None else None,
+                "degraded_rate": data.get("degraded_rate"),
+                "warning_types": data.get("warning_types"),
+                "ts": datetime.now(UTC).isoformat(),
+            }
         elif phase == CampaignPhase.REFINE_STRATEGY:
             s["layer"] = "L2"
         elif phase == CampaignPhase.MODIFY_PLAN:
@@ -253,7 +270,7 @@ class CampaignPersistenceEmitter:
         s["hit_rate"] = round(rc.candidate_hits / (qi + 1), 3)
         if result.get("error") or pd.get("error"):
             s["error_count"] += 1
-        if pd.get("diagnostics"):
+        if is_degraded(result):
             rc.degraded += 1
             s["degraded_count"] = rc.degraded
 
@@ -283,8 +300,29 @@ class CampaignPersistenceEmitter:
         s["hit_rate"] = 0.0
         self._rc.candidate_hits = 0
 
+        # Surface parse-time validation failures to the diagnostic file.
+        # Workstream A flags these on the candidate report; users read them
+        # from campaign_state.last_scoring_metadata without grepping logs.
+        if scores.get("invalid") and scores.get("validation_failures"):
+            failures = scores["validation_failures"]
+            first = failures[0] if failures else {}
+            s["last_scoring_metadata"] = {
+                "kind": "validation_failure",
+                "round": s.get("round"),
+                "candidate": f"C{idx + 1}/{total}",
+                "axis": first.get("axis"),
+                "value": first.get("value"),
+                "allowed": first.get("allowed"),
+                "reason": first.get("reason"),
+                "n_failures": len(failures),
+                "ts": datetime.now(UTC).isoformat(),
+            }
+
         comp_str = f"  composite={comp:.3f}" if comp is not None else ""
-        self._log_fh.write(f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str} ===\n")
+        invalid_mark = "  INVALID" if scores.get("invalid") else ""
+        self._log_fh.write(
+            f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str}{invalid_mark} ===\n"
+        )
         write_json(self.state_path, self._state, default=str)
 
     def on_round_complete(self, round_result: RoundResult, stall_count: int) -> None:

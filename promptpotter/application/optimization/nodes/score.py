@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
-from promptpotter.domain.analysis import EscalationTarget
+from promptpotter.domain.analysis import EscalationTarget, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
@@ -135,14 +135,23 @@ def _parse_candidates(
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
+    _meta_keys = {"__pipeline_params_override__", "__validation_failures__"}
     for c in candidates:
         override = c.get("__pipeline_params_override__")
         overrides.append(override)
-        osp_list.append(
-            OptSearchPoint.from_prompt_fields(
-                {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
-            )
+        osp = OptSearchPoint.from_prompt_fields(
+            {k: v for k, v in c.items() if k not in _meta_keys},
         )
+        # Re-attach parse-time validation failures so the scorer can short-
+        # circuit invalid candidates. Failures are produced by validate_overrides()
+        # in nodes/generate.py and ride through the candidate dict so they survive
+        # the prompt_field round trip.
+        raw_failures = c.get("__validation_failures__") or []
+        if raw_failures:
+            osp.memory.validation_failures = [
+                ValidationFailure(**f) if isinstance(f, dict) else f for f in raw_failures
+            ]
+        osp_list.append(osp)
         merged.append(_merge_pipeline_params(pipeline_params, override, schema))
     return osp_list, merged, overrides
 
@@ -157,6 +166,8 @@ def _build_score_report(
     aborted: bool = False,
     elimination_stopped: bool = False,
     resumed_from_cache: bool = False,
+    invalid: bool = False,
+    validation_failures: list[dict] | None = None,
 ) -> dict:
     """Build unified candidate score report dict."""
     return {
@@ -171,6 +182,8 @@ def _build_score_report(
         "elimination_stopped": elimination_stopped,
         "scored_queries": len(results),
         "expected_queries": len(dataset),
+        "invalid": invalid,
+        **({"validation_failures": validation_failures} if validation_failures else {}),
         **({"resumed_from_cache": True} if resumed_from_cache else {}),
     }
 
@@ -196,7 +209,7 @@ async def _score_candidates(
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []
-    escalation_signal = None
+    escalation_signal: dict | None = None
     n_candidates = len(osp_candidates)
 
     elim_check = EliminationCheck(
@@ -209,6 +222,43 @@ async def _score_candidates(
 
         def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
             callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
+
+        # Synthetic-0 early exit: a SearchPoint whose L1 parse-time validation
+        # produced ValidationFailures is structurally invalid. We do not run it
+        # through the backend at all — we synthesize a 0-accuracy report and
+        # let the existing accuracy comparator deprioritize it. See
+        # docs/architecture/optimization.md.
+        if osp_c.memory.validation_failures:
+            failures = osp_c.memory.validation_failures
+            logger.warning(
+                "Candidate %d/%d invalid (%d validation failure(s)) — skipping backend",
+                idx + 1,
+                n_candidates,
+                len(failures),
+            )
+            results: list[QueryResult] = []
+            scores: dict[str, Any] = {
+                "accuracy": 0.0,
+                "composite": 0.0,
+                "hits": 0,
+                "total": 0,
+                "errors": 0,
+                "invalid": True,
+                "validation_failures": [vf.to_dict() for vf in failures],
+            }
+            all_candidate_results[osp_c.id] = results
+            report = _build_score_report(
+                osp_c,
+                candidate_overrides[idx],
+                scores,
+                results,
+                dataset,
+                invalid=True,
+                validation_failures=[vf.to_dict() for vf in failures],
+            )
+            candidate_scores.append(report)
+            callbacks.on_candidate_scored(idx, n_candidates, report)
+            continue
 
         sp = osp_c.to_job_search_point(
             base_pipeline_params=merged_pp[idx],
@@ -255,7 +305,7 @@ async def _score_candidates(
 
         escalation_signal = scores.pop("escalation_signal", None)
         elimination_stopped = (
-            bool(escalation_signal)
+            escalation_signal is not None
             and escalation_signal["target"] == EscalationTarget.ELIMINATE_CANDIDATE
         )
 

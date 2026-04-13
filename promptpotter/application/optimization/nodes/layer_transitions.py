@@ -219,6 +219,14 @@ async def refine_strategy(
             + json.dumps(tc_display, indent=2)
         )
 
+    # Aggregate parse-time validation failures across the prior round's
+    # candidates. Self-healing: L2 sees these and produces a directive that
+    # names the disallowed values so L1 doesn't propose them again.
+    validation_failures: list[dict] = []
+    for cs in candidate_scores or []:
+        for vf in cs.get("validation_failures") or []:
+            validation_failures.append(vf)
+
     intelligence_sections = format_l2_intelligence(
         L2IntelligenceData(
             escalation_section=escalation_section,
@@ -235,6 +243,7 @@ async def refine_strategy(
                 build_candidate_comparison(candidate_scores) if candidate_scores else None
             ),
             diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
+            validation_failures=validation_failures or None,
         )
     )
 

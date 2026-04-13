@@ -239,6 +239,69 @@ Degradation rounds don't count toward `max_rounds` (hard cap: 100).
 
 ---
 
+## OptimizationMemory state
+
+`OptSearchPoint.memory` (an `OptimizationMemory` Pydantic submodel in `domain/opt_search_point.py`) bundles the cross-round optimizer state that travels with each candidate. Every field is persisted with the round trial JSON; lifecycles vary:
+
+| Field | Lifecycle | Purpose |
+|---|---|---|
+| `critique_text` | per-round, cleared on improvement | Critique node's narrative for next L1 |
+| `thinking_styles` | per-round | 2-3 strategy hints sampled into the meta-prompt |
+| `escalation_journal` | cross-round, append-only | History of degradation events with outcomes |
+| `warning_inventory` | cross-round | Per-query warning aggregation |
+| `l2_directive` | one-round window, cleared on improvement | L2's diagnostic + action guidance for L1 |
+| `degradation_reset_count` | cross-round | How many times L2/L3 patience exhausted |
+| `backend_warning_emitted` | one-shot | Backend-warning emission flag |
+| `validation_failures` | per-candidate (set at L1 parse time) | Parse-time invariant violations — see below |
+
+---
+
+## Self-healing optimization
+
+When the optimizer proposes a structurally invalid candidate, the failure is recorded as a property of the outer-layer `OptSearchPoint` (**not** the `JobSearchPoint`), absorbed by L2 on the next round, and never spends a backend call. Structural mistakes are optimizer-layer state; L2 is the layer that already has the context to repair them.
+
+Every self-healing mechanism follows one rail:
+
+```
+detect → trace on OptSearchPoint → score (synthetic 0) → surface → feed L2 → L2 directive → next L1
+```
+
+The rail is the contract. New mechanisms plug in by adding a `detect` step and reusing the rest — **do not invent a sidecar, do not silently drop, do not just log.**
+
+### Validation failures as OptSearchPoint properties (first instance)
+
+Some L1-generated candidates are invalid before evaluation starts — the optimizer LLM hallucinated a value outside the user-declared allowed set. Canonical example: `pipeline_params_override.llm_only.model = "gpt-4o"` when the backend only has `openai/gpt-oss-120b` per `PipelineSchema.available_models`.
+
+`validate_overrides()` in `application/optimization/nodes/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside critique_text, l2_directive, and escalation_journal. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `_score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `_select_round_winner`, and the round checkpoint persists the failure with the rest of the optimizer memory.
+
+**L2 owns the repair.** L2 `refine_strategy` already reads critique, escalation reports, and the previous directive; validation failures slot into that same context as a new "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces critique for next round's L1 via the normal directive/critique mutual exclusion. The outer-layer trace carries the evidence; L2 turns it into explicit forward guidance. Alternatives like silent-drop, deadlist sidecars, or post-hoc prompt injection all either lose the signal or require new machinery parallel to the trace.
+
+For the prompt-injection routing (who reads `validation_failures`, when it overrides critique), see [`information-flow.md`](information-flow.md). For how the failure is rendered to the user, see [`display-conventions.md`](display-conventions.md).
+
+### Relationship to the other per-evaluation checks
+
+| Check | Fires | Action | Target enum |
+|---|---|---|---|
+| **Validation failure** | L1 parse time, before evaluation | Synthetic 0; skip backend | (no signal — handled in `_score_candidates` via `OptSearchPoint.memory.validation_failures`) |
+| `EliminationCheck` | Mid-evaluation, after `n_min` queries | Stop scoring this candidate; continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
+| `EmptyOutputCheck` | Mid-evaluation, after 3 queries | Stop scoring this candidate; continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
+| `DegradationCheck` | Mid-evaluation, after 3 queries | Abort the round; escalate to L2 | `EscalationTarget.L2` |
+
+Validation is the only one that fires *before* evaluation — it needs nothing but the candidate dict and the schema, which is why it can short-circuit the backend entirely.
+
+### Planned future self-healing mechanisms
+
+The same rail generalizes:
+
+- **Empty-output candidates** — verbose prompts that blow `max_tokens` mid-reasoning. Detection shipped via `EmptyOutputCheck`; the L2-feedback half is the gap to close.
+- **Monotonic per-axis degradation with fault attribution** — routes to L2 today, but without per-candidate fault attribution on the OptSearchPoint trace.
+- **Backend errors naming a parameter and reason** — e.g. `temperature out of range`. Needs a structured-error parser at the backend client.
+- **Schema/format violations on structured outputs** — valid JSON, wrong shape.
+
+Each lands by following the rail, not by inventing parallel machinery. Today `validate_overrides()` only checks `model` against `PipelineSchema.available_models`; future enum params plug in by extending the validator — the `ValidationFailure` dataclass is intentionally axis-agnostic.
+
+---
+
 ## Wiring a New Node
 
 Reference: `web_search`. Default chain works for **any** target pipeline node that emits warnings.

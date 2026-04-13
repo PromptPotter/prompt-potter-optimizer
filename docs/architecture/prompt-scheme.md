@@ -173,3 +173,5 @@ Usage: `load_dataset("potter_traces", store=..., backend_id=...)`. Natural scori
 - `promptpotter/shared/constants.py` — `PROMPT_STRING_FIELDS`
 - `promptpotter/domain/opt_search_point.py` — `PromptTemplate` + `OptSearchPoint` (render, derive, project)
 - `promptpotter/application/optimization/prompts/` — meta-prompt JSON templates
+
+For the `OptimizationMemory` submodel inventory (cross-round optimizer state — `critique_text`, `escalation_journal`, `validation_failures`, etc.) and the validation-failure mechanism, see [optimization.md](optimization.md) "OptimizationMemory state" and "Validation failures as SearchPoint properties".

@@ -250,6 +250,11 @@ class L2IntelligenceData:
     trajectory: TrajectoryReport | None = None
     candidate_comparison: str | None = None
     diversity_alert: str | None = None
+    validation_failures: list[dict] | None = None
+    """Aggregated parse-time validation failures from the prior round's
+    candidates. Each entry carries axis/value/allowed/reason. Self-healing
+    signal: tells L2 the L1 prompt produced structurally invalid output and
+    L2 must produce a directive to prevent recurrence."""
 
 
 def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
@@ -298,6 +303,34 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     # Diversity alert — mode collapse detection
     if ctx.diversity_alert:
         sections.append(f"DIVERSITY ALERT:\n  {ctx.diversity_alert}")
+
+    # Validation failures from the prior round — self-healing signal.
+    # L1 hallucinated values outside the user-declared allowed set. L2
+    # must produce a directive that explicitly tells L1 not to do this
+    # again. Without this section, L2 only sees aggregate accuracy and
+    # has no idea why the candidates were structurally invalid.
+    vfs = ctx.validation_failures or []
+    if vfs:
+        lines = [
+            "L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):",
+        ]
+        for vf in vfs:
+            allowed = vf.get("allowed") or []
+            allowed_str = ", ".join(allowed[:5]) + (
+                f" (+{len(allowed) - 5} more)" if len(allowed) > 5 else ""
+            )
+            lines.append(
+                f"  ⚠ axis={vf.get('axis')} proposed={vf.get('value')!r} reason={vf.get('reason')}"
+            )
+            lines.append(f"    allowed: [{allowed_str}]")
+        lines.append(
+            "  ↳ Required L2 action: produce a directive that names the disallowed "
+            "value(s) explicitly and instructs L1 to choose only from the allowed "
+            'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
+            'propose any other value such as gpt-4o." Self-healing depends on the '
+            "directive being explicit."
+        )
+        sections.append("\n".join(lines))
 
     # Historical intelligence from SearchMemory
     hi = format_search_memory_block(

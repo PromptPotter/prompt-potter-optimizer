@@ -10,6 +10,8 @@ PromptPotter finds better prompts automatically.
 
 **Optional — the sensitivity scan.** A separate, human-driven pre-step that measures which prompt/parameter axes matter before optimization starts. One LLM call site (`recon_advisor`) plus a one-at-a-time perturbation runner. Lives in its own `application/recon/` package and is fully optional — `optimize` runs end-to-end without it. When used, the scan produces a `ReconBrief` that is passed into the optimizer as a starting-point hint; that handoff is the **only** sanctioned bridge between the two features.
 
+**🔁 Self-healing optimization.** When L1 proposes a structurally invalid candidate (e.g. `model: gpt-4o` when the backend only exposes `openai/gpt-oss-120b`), the failure is recorded on the **outer-layer `OptSearchPoint.memory.validation_failures`** — not on the `JobSearchPoint` — and L2 turns it into an explicit directive for next round's L1. Zero backend calls on invalid candidates. L2 is the layer with the context to repair structural mistakes; the outer-layer trace carries the evidence. The same `detect → trace → score → surface → feed L2 → directive` rail is the contract for future self-healing mechanisms (empty-output, schema violations, param-range errors) — do not invent a sidecar, do not silently drop, do not just log. See `docs/architecture/optimization.md` "Self-healing optimization" and `docs/architecture/display-conventions.md` for the `⚠ … ↳` rendering convention.
+
 ## Commands
 
 ```bash
@@ -52,6 +54,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All mus
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
 - **No fallbacks** in service code. Sanctioned exceptions (keep this list short):
   1. `init_services()`: local `LLMOnlyAdapter` → `BackendClient` when `LOCAL_SCORING_SECRET` auth fails (security gate, not hidden default).
+  2. `_score_candidates()` validation-failure synthetic-0: when `OptSearchPoint.memory.validation_failures` is non-empty, the candidate loop synthesizes a 0-accuracy report and skips the backend instead of running an invalid candidate. This is *not* a "default value when the real one fails" — it is the result for a structurally invalid SearchPoint, computed from the validation failure itself, with no hidden retry. See "Scoring Pipeline" → "Three early-exit paths" below.
   Any doc or code introducing a new fallback must add it to this list.
 - **Cycle identity**: Two-tier system. Experiment mode (default) hashes only the *problem* (dataset, baseline, pipeline steps) — everything else (optimizer model, seed, n_variants, creativity, patience, thresholds) is tweakable without breaking the cycle. Strict mode (`strict_cycle_identity: true`) hashes everything — for publication reproducibility only. See `TUNING_KEYS` in `lifecycle.py` and `docs/research/benchmarks.md` "Reproducibility: Cycle Identity Modes".
 - **Two-tier sampling**: `sp_budget_ttest` (must be > 0) controls the optimization loop scoring set. `recon_sample_size` controls sensitivity scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test after 20 queries, so actual round cost is well below `n_variants × eval_size`.
@@ -114,6 +117,11 @@ Every state traced at **both** layers independently:
 ### Scoring Pipeline
 
 `score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Two cache layers, different jobs: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior full runs via `PipelineSchema.prefix_keys()` for result-level reuse and archival (SearchMemory, observability, lineage — `sp_hash` = terminal element of the chain), (2) **suffix-hash cache** reuses per-node outputs across novel searchpoints — see [`docs/architecture/suffix-cache.md`](docs/architecture/suffix-cache.md). `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+
+**Three early-exit paths around `score_search_point()`** (the candidate loop in `application/optimization/nodes/score.py::_score_candidates` shortcuts each one before calling the gateway):
+1. **Full-run cache hit** — prior `dataset_runs/` entry covers this exact searchpoint; results are replayed and the candidate scored without any backend calls.
+2. **Validation failure** — the candidate's `OptSearchPoint.memory.validation_failures` is non-empty (an L1-proposed value was outside the user-declared allowed set, e.g. `model: gpt-4o` when `PipelineSchema.available_models = [openai/gpt-oss-120b]`). The candidate is structurally invalid; the loop synthesizes a `{accuracy: 0.0, invalid: True, validation_failures: [...]}` report and skips the gateway entirely. **Zero backend calls are spent on invalid candidates.** The failure is fully traced — persisted on the OptSearchPoint trace, surfaced in `campaign_state.json.last_scoring_metadata`, fed into L2 refine_strategy as a self-healing signal, rendered in the notebook UI with the `⚠ … ↳` convention, and the existing accuracy comparator deprioritizes the candidate in `_select_round_winner`. See `docs/architecture/optimization.md` "Validation failures as SearchPoint properties".
+3. **Mid-evaluation escalation** — the per-query check protocol (`DegradationCheck`, `EliminationCheck`, `EmptyOutputCheck`) returns an `EscalationSignal` mid-loop. Elimination/empty-output signals are absorbed inside `_score_candidates` (see `EscalationTarget.ELIMINATE_CANDIDATE`); only true degradation propagates to the runner.
 
 ### Pipeline Params — Two Namespaces
 

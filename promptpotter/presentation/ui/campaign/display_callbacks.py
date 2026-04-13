@@ -111,6 +111,28 @@ class NotebookDisplay:
         ci_lo, ci_hi = wilson_ci(hits, n)
         delta = acc - self.state.baseline_accuracy
 
+        # Validation-failure branch: candidate never ran the backend because
+        # parse-time validation rejected an L1-proposed value as out-of-set.
+        # Render with the ⚠ … ↳ "addressed by" convention so the user sees
+        # both what happened and how the loop reacted.
+        if scores.get("invalid"):
+            failures = scores.get("validation_failures") or []
+            acc_tag = f"{YELLOW}INVALID{RESET}"
+            print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
+            for vf in failures:
+                axis = vf.get("axis", "?")
+                value = vf.get("value", "?")
+                allowed = vf.get("allowed") or []
+                allowed_str = ", ".join(allowed[:3]) + (
+                    f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
+                )
+                cause = f"{YELLOW}\u26a0{RESET} {axis} = {value!r}  \u2209 [{allowed_str}]"
+                response = "  \u21b3 scored 0 (no backend call); L2 directive will name this value"
+                print(f"  {_box_line(cause, width=w)}")
+                print(f"  {_box_line(response, width=w)}")
+            print(f"  {_box_bottom(width=w)}")
+            return
+
         # Line 1 (top frame): label + accuracy with CI
         acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
         print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")

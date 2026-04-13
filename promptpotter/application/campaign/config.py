@@ -45,6 +45,7 @@ class OptimizationConfig(TypedDict, total=False):
     seed: int
     max_failures: int
     degradation_threshold: float
+    empty_output_threshold: float
     backend_warning_threshold: int
     enable_l2: bool
     enable_l3: bool
@@ -163,6 +164,11 @@ class LoopConfig(BaseModel):
     degradation_threshold: float = Field(
         0.4,
         description="Fraction of degraded queries to trigger escalation (0 = disabled)",
+    )
+    empty_output_threshold: float = Field(
+        0.5,
+        description="Fraction of empty-prediction queries to eliminate a candidate "
+        "(0 = disabled). Catches verbose prompts that blow max_tokens mid-reasoning.",
     )
     backend_warning_threshold: int = Field(
         2,

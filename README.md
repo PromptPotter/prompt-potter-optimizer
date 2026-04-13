@@ -13,6 +13,17 @@ Give it a labeled dataset and an LLM. PromptPotter systematically searches for a
 
 At its core, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
 
+## ⭐ Features
+
+- **🔁 Self-healing optimization** — when the optimizer hallucinates a value your backend doesn't accept (e.g. `model: gpt-4o`), PromptPotter catches it before any API call, scores the candidate 0, and tells the strategy layer what went wrong so the next round stops repeating the mistake.
+- **Prompt + pipeline optimization** — searches the prompt (8-field decomposition) AND your pipeline parameters jointly. Most tools optimize one or the other.
+- **Statistical early-stopping** — sequential elimination via paired Welch's t-test stops inferior candidates after ~6 queries instead of running the full eval set. Real cost is well below `n_variants × eval_size`.
+- **Cross-run learning** — every evaluation flows into a shared `SearchMemory` store: parameter impact, axis exhaustion, query tractability, failure-group correlations. The optimizer carries what it learned across runs.
+- **Auto-injected scoring** — define your scoring formula once in `campaign.json`. It compiles into every eval path automatically. No glue code.
+- **IDE-native operation** — drive a full optimization campaign from the terminal via the `/potter-run` Claude Code skill. No notebook required.
+
+For a head-to-head comparison with other prompt-optimization frameworks, see [`docs/research/README.md`](docs/research/README.md). For the self-healing architecture in detail, see [`docs/architecture/optimization.md`](docs/architecture/optimization.md).
+
 ```
   ┌──────────────────────────────────────────────────────────┐
   │  l1_generate ────► l1_evaluate (+ critique)              │

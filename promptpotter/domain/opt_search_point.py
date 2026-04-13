@@ -37,6 +37,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field, field_validator
 
+from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
@@ -181,6 +182,15 @@ class OptimizationMemory(BaseModel):
     backend_warning_emitted: bool = Field(
         False,
         description="One-shot flag — True after backend warning has been emitted.",
+    )
+    validation_failures: list[ValidationFailure] = Field(
+        default_factory=list,
+        description="Parse-time invariant violations on this candidate "
+        "(e.g. proposed `model: gpt-4o` when the user-declared allowed "
+        "set is `[openai/gpt-oss-120b]`). A non-empty list makes the "
+        "SearchPoint structurally invalid; score_search_point() short-"
+        "circuits to a synthetic 0 instead of running the backend. See "
+        "docs/architecture/optimization.md.",
     )
 
     def clear_volatile(self) -> None:

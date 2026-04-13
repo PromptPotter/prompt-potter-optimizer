@@ -44,6 +44,7 @@ Together, the four metrics separate three concerns: *how good* (Acc), *how much 
 
 | Capability | PP | po | pf | How in PromptPotter |
 |------------|:--:|:--:|:--:|---------------------|
+| **Self-healing optimization** | 🟢 | 🔴 | 🔴 | L1-proposed values outside the declared allowed set (e.g. `model` ∉ `available_models`) are caught at parse time, recorded on `OptSearchPoint.memory.validation_failures`, scored 0 with no backend call, and fed to L2 as a self-healing signal. As far as we know, no other prompt-optimization framework does this. See [`../architecture/optimization.md`](../architecture/optimization.md) "Self-healing optimization". |
 | **Auto-injected scoring** | 🟢 | 🔴 | 🔴 | `compile_scorer()` — per-dataset formula from `campaign.json`, compiled once, injected into all eval paths |
 | **IDE-native operation** | 🟢 | 🔴 | 🔴 | `/potter-run` Claude Code skill — full campaign lifecycle from the terminal |
 | **Prompt + pipeline optimization** | 🟢 | 🔴 | 🔴 | 8-field prompt decomposition + per-node `pipeline_params` — optimizes prompts AND pipeline config jointly |

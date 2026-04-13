@@ -96,3 +96,22 @@ class EscalationSignal:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class ValidationFailure:
+    """A parse-time invariant violation on an L1-generated candidate.
+
+    Recorded as a property of the OptSearchPoint (in
+    ``OptimizationMemory.validation_failures``). Drives the synthetic-0
+    early exit in ``score_search_point()`` — see
+    ``docs/architecture/optimization.md`` for the rationale.
+    """
+
+    axis: str  # e.g. "llm_only.model"
+    value: str  # the offending value the optimizer proposed
+    allowed: list[str]  # the user-declared allowed set (may be empty)
+    reason: str  # short machine-readable reason code
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

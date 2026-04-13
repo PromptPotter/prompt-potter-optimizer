@@ -32,7 +32,12 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["DegradationCheck", "build_degradation_checks", "escalate_l2"]
+__all__ = [
+    "DegradationCheck",
+    "EmptyOutputCheck",
+    "build_degradation_checks",
+    "escalate_l2",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -85,10 +90,61 @@ class DegradationCheck:
         )
 
 
-def build_degradation_checks(config: LoopConfig) -> list[DegradationCheck]:
-    """Return the list of enabled degradation checks (0 or 1 entry)."""
-    threshold = getattr(config, "degradation_threshold", 0.0)
-    return [DegradationCheck(threshold=threshold)] if threshold > 0 else []
+class EmptyOutputCheck:
+    """Eliminates a candidate whose LLM consistently returns empty predictions.
+
+    Catches candidates whose prompt blew the max_tokens budget mid-reasoning
+    and returned 0 chars — visible to the scorer as ``predicted == ""`` and
+    ``score == 0``, but indistinguishable from a legitimate wrong answer
+    without this check. Conforms to the same protocol as ``DegradationCheck``
+    and ``EliminationCheck``; uses ``ELIMINATE_CANDIDATE`` so the per-candidate
+    absorption logic in ``score._score_candidates`` skips it without aborting
+    the round.
+    """
+
+    name = "empty_output"
+
+    def __init__(self, threshold: float = 0.5, min_queries: int = 3) -> None:
+        self.enabled = threshold > 0
+        self.threshold = threshold
+        self.min_queries = min_queries
+
+    def evaluate(
+        self,
+        results_so_far: list[dict],
+        candidate_idx: int,
+        n_total_candidates: int,
+    ) -> EscalationSignal | None:
+        if len(results_so_far) < self.min_queries:
+            return None
+        empty = sum(1 for r in results_so_far if not str(r.get("predicted") or "").strip())
+        rate = empty / len(results_so_far)
+        if rate < self.threshold:
+            return None
+        return EscalationSignal(
+            check_name=self.name,
+            target=EscalationTarget.ELIMINATE_CANDIDATE,
+            check_result={
+                "empty_count": empty,
+                "empty_rate": rate,
+                "total_evaluated": len(results_so_far),
+            },
+            candidate_idx=candidate_idx,
+            candidates_scored=candidate_idx + 1,
+            candidates_skipped=n_total_candidates - candidate_idx - 1,
+        )
+
+
+def build_degradation_checks(config: LoopConfig) -> list[Any]:
+    """Return the list of enabled per-query checks (degradation + empty-output)."""
+    checks: list[Any] = []
+    deg_threshold = getattr(config, "degradation_threshold", 0.0)
+    if deg_threshold > 0:
+        checks.append(DegradationCheck(threshold=deg_threshold))
+    empty_threshold = getattr(config, "empty_output_threshold", 0.0)
+    if empty_threshold > 0:
+        checks.append(EmptyOutputCheck(threshold=empty_threshold))
+    return checks
 
 
 # ---------------------------------------------------------------------------

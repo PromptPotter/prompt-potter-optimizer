@@ -10,6 +10,7 @@ from promptpotter.application.optimization.nodes.formatting import (
     format_context_sections,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
+from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
@@ -22,7 +23,42 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["l1_generate"]
+__all__ = ["l1_generate", "validate_overrides"]
+
+
+def validate_overrides(
+    node_overrides: dict[str, dict],
+    pipeline_schema: PipelineSchema,
+) -> list[ValidationFailure]:
+    """Walk node-scoped pipeline_params overrides against user-declared
+    allowed sets. Today only ``model`` has an allowed set
+    (``PipelineSchema.available_models``); future enum params plug in here.
+
+    Failures are NOT silently dropped. The caller (``l1_generate``)
+    attaches the returned list to the candidate's OptSearchPoint memory,
+    where it acts as a structural property of the SearchPoint and triggers
+    the synthetic-0 early exit in ``score_search_point()``. See
+    ``docs/architecture/optimization.md``.
+    """
+    failures: list[ValidationFailure] = []
+    if not pipeline_schema.available_models:
+        return failures
+    allowed_models = list(pipeline_schema.available_models)
+    allowed_models_set = set(allowed_models)
+    for node_name, node_params in node_overrides.items():
+        if not isinstance(node_params, dict):
+            continue
+        proposed = node_params.get("model")
+        if proposed is not None and proposed not in allowed_models_set:
+            failures.append(
+                ValidationFailure(
+                    axis=f"{node_name}.model",
+                    value=str(proposed),
+                    allowed=allowed_models,
+                    reason="not_in_available_models",
+                )
+            )
+    return failures
 
 
 def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
@@ -184,19 +220,20 @@ async def l1_generate(
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]
 
-            # Filter out invalid model overrides
-            if pipeline_schema.available_models:
-                _valid_models = set(pipeline_schema.available_models)
-                for _nn, _np in node_overrides.items():
-                    if (
-                        isinstance(_np, dict)
-                        and "model" in _np
-                        and _np["model"] not in _valid_models
-                    ):
-                        logger.warning(
-                            "l1_generate: dropping invalid model %r for %s", _np["model"], _nn
-                        )
-                        del _np["model"]
+        # Validate remaining overrides against allowed-value sets. Failures
+        # are recorded as a property of the SearchPoint (NOT silently dropped)
+        # so score_search_point() can short-circuit to a synthetic 0. See
+        # docs/architecture/optimization.md.
+        validation_failures: list[ValidationFailure] = []
+        if pipeline_schema:
+            validation_failures = validate_overrides(node_overrides, pipeline_schema)
+            for vf in validation_failures:
+                logger.warning(
+                    "l1_generate: validation failure on %s — proposed %r not in allowed %r",
+                    vf.axis,
+                    vf.value,
+                    vf.allowed,
+                )
 
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
@@ -204,12 +241,16 @@ async def l1_generate(
         )
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
+        if validation_failures:
+            child.memory.validation_failures = list(validation_failures)
         c_dict = child.prompt_field_dict()
         c_dict["id"] = child.id
         c_dict["parent_id"] = child.parent_id
         c_dict["changes_description"] = child.changes_description
         if node_overrides:
             c_dict["__pipeline_params_override__"] = node_overrides
+        if validation_failures:
+            c_dict["__validation_failures__"] = [vf.to_dict() for vf in validation_failures]
         candidates.append(c_dict)
 
     return candidates

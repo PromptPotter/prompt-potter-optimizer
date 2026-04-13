@@ -123,11 +123,14 @@ def count_failures(results: list[QueryResult]) -> int:
     return sum(1 for r in results if not r.get("hit"))
 
 
+def is_degraded(result: Mapping[str, Any]) -> bool:
+    """A query is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
+    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
+
+
 def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:
     """Count queries that have pipeline degradation warnings."""
-    return sum(
-        1 for r in results if (r.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings")
-    )
+    return sum(1 for r in results if is_degraded(r))
 
 
 def _extract_candidate_label(c) -> str:
