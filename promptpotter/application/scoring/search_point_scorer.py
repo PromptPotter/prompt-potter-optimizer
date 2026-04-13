@@ -79,7 +79,6 @@ async def _run_query_loop(
     save_run: Callable[..., None] | None,
 ) -> QueryLoopResult:
     """Evaluate dataset queries, reusing prior results where available."""
-    suffix_cache = ctx.store.suffix_cache if ctx.store else None
     results: list[QueryResult] = []
     consecutive_errors = 0
 
@@ -102,12 +101,8 @@ async def _run_query_loop(
             # Tier 2 + backend: measure_sample walks the per-node cache then calls out.
             result = await measure_sample(
                 qd,
-                ctx.backend_client,
+                ctx,
                 pipeline_params=search_point.pipeline_params,
-                pipeline_schema=ctx.pipeline_schema,
-                suffix_cache=suffix_cache,
-                backend_id=ctx.backend_id,
-                scorer=ctx.scorer,
             )
             was_cached = bool(result.get("precomputed_through"))
 
@@ -116,14 +111,8 @@ async def _run_query_loop(
                     ctx.stale_data_load_protocol,
                     qd,
                     cast(dict[str, Any], result),
-                    ctx.backend_client,
+                    ctx,
                     pipeline_params=search_point.pipeline_params,
-                    pipeline_schema=ctx.pipeline_schema,
-                    suffix_cache=suffix_cache,
-                    backend_id=ctx.backend_id,
-                    search_memory=ctx.search_memory,
-                    scorer=ctx.scorer,
-                    stop_check=ctx.stop_check,
                 )
                 result = cast(QueryResult, stale_result)
 

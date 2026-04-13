@@ -31,7 +31,7 @@ from promptpotter.shared.scoring import Scorer
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import QueryRunner
+    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.infrastructure.store.suffix_cache import SuffixCache
 
 _comparator = ExactMatchComparator({"strip": True})
@@ -155,38 +155,22 @@ def _parse_backend_response(
     return pd
 
 
-def _local_result(
+def _result_from_cache(
     query: str,
     ground_truth: str,
     node_outputs: dict,
     target_steps: list[str],
-    pipeline_schema: PipelineSchema,
     scorer: Scorer | None = None,
 ) -> QueryResult:
-    """Construct a measurement result locally from intermediate cache (no backend call).
+    """Build a measurement result from a full-coverage suffix-cache hit.
 
-    Used when the intermediate cache covers ALL target steps — the backend
-    would just repackage the same precomputed data, so we skip the HTTP
-    round-trip entirely.
+    Skips the backend round-trip: all target steps are already materialized
+    on disk, so the final ranking is read directly from the terminal node's
+    cached output (which was produced by the backend on an earlier run).
     """
     last_node = target_steps[-1] if target_steps else ""
-    raw_ranked = node_outputs.get(last_node, [])
-
-    # Normalize: intermediate cache stores [{term, score}],
-    # backend returns [{candidate, score}]
-    ranked: list[dict] = []
-    for item in raw_ranked:
-        if isinstance(item, dict):
-            ranked.append(
-                {
-                    "candidate": item.get("candidate") or item.get("term", NO_RESULT),
-                    "score": item.get("score", 0),
-                }
-            )
-        else:
-            ranked.append({"candidate": str(item), "score": 0})
-
-    predicted = ranked[0]["candidate"] if ranked else NO_RESULT
+    ranked: list[dict] = list(node_outputs.get(last_node, []))
+    predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
     comparison = _comparator.compare(ground_truth, predicted)
 
     pd: dict = {
@@ -267,23 +251,21 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
 
 async def measure_sample(
     query_data: dict,
-    backend_client: QueryRunner,
+    env: ScoringEnv,
     pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    suffix_cache: SuffixCache | None = None,
-    backend_id: str = "",
-    scorer: Scorer | None = None,
 ) -> QueryResult:
     """Measure one sample: run query through pipeline, score against ground truth."""
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
 
+    pipeline_schema = env.pipeline_schema
     if pipeline_schema is None:
         from promptpotter.domain.pipeline_schema import PipelineSchema
 
         pipeline_schema = PipelineSchema()
 
     _target_steps = list(pipeline_schema.active_steps)
+    suffix_cache = env.store.suffix_cache if env.store else None
 
     try:
         # Suffix-hash cache: one hash check for full-pipeline hit, then
@@ -297,18 +279,17 @@ async def measure_sample(
 
         if suffix_cache and node_configs:
             full_key = suffix_key(q_hash, node_configs)
-            hit = suffix_cache.lookup(backend_id, full_key)
+            hit = suffix_cache.lookup(env.backend_id, full_key)
             if hit and set(hit["covers"]) >= set(_target_steps):
-                return _local_result(
+                return _result_from_cache(
                     query,
                     ground_truth,
                     hit["node_outputs"],
                     _target_steps,
-                    pipeline_schema,
-                    scorer=scorer,
+                    scorer=env.scorer,
                 )
             node_outputs_hit, _covers = _longest_prefix_hit(
-                suffix_cache, backend_id, q_hash, node_configs
+                suffix_cache, env.backend_id, q_hash, node_configs
             )
             if node_outputs_hit:
                 precomputed = node_outputs_hit
@@ -316,7 +297,7 @@ async def measure_sample(
         # Interpolate {{variable}} placeholders in prompt templates from query_data
         wire_params = interpolate_pipeline_params(pipeline_params or {}, query_data)
 
-        resp = await backend_client.run_query(
+        resp = await env.backend_client.run_query(
             query,
             pipeline_params=wire_params,
             precomputed=precomputed,
@@ -328,7 +309,7 @@ async def measure_sample(
         # contiguous executed prefix.
         node_outputs = data.get("node_outputs")
         if suffix_cache and node_configs and node_outputs:
-            suffix_cache.populate_from_run(backend_id, query, node_configs, node_outputs)
+            suffix_cache.populate_from_run(env.backend_id, query, node_configs, node_outputs)
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
@@ -357,8 +338,8 @@ async def measure_sample(
         }
         if precomputed:
             result["precomputed_through"] = list(precomputed.keys())
-        if scorer:
-            result["score"] = scorer(result)
+        if env.scorer:
+            result["score"] = env.scorer(result)
             result["hit"] = result["score"] >= 1.0
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:

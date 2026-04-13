@@ -8,17 +8,15 @@ from the ``l1_score`` optimizer node config.
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
+from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.application.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import QueryRunner
-    from promptpotter.infrastructure.store.suffix_cache import SuffixCache
+    from promptpotter.domain.scoring import ScoringEnv
 
 logger = logging.getLogger(__name__)
 
@@ -64,15 +62,9 @@ async def execute_stale_data_protocol(
     protocol_steps: list[str],
     query_data: dict,
     cached_result: dict[str, Any],
-    backend_client: QueryRunner,
+    env: ScoringEnv,
     *,
     pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    suffix_cache: SuffixCache | None = None,
-    backend_id: str = "",
-    search_memory: SearchMemory | None = None,
-    stop_check: Callable[[], bool] | None = None,
-    scorer: Callable[[dict], float] | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -96,14 +88,20 @@ async def execute_stale_data_protocol(
     query = query_data["query"]
     result = cached_result
 
+    # Samplescan bypasses the suffix cache — it's a fresh probe whose job
+    # is to detect whether the degraded state is reproducible.
+    bypass_env = replace(env, store=None)
+
     for step in protocol_steps:
-        if stop_check and stop_check():
+        if env.stop_check and env.stop_check():
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
             # Historical count through last SearchMemory refresh (previous round).
             # The current observation bumps the effective count by 1.
-            historical = search_memory.query_degradation_count(query) if search_memory else 0
+            historical = (
+                env.search_memory.query_degradation_count(query) if env.search_memory else 0
+            )
             effective_count = historical + 1
             if effective_count < trigger_count:
                 return {
@@ -114,17 +112,7 @@ async def execute_stale_data_protocol(
                     "degraded_obs_threshold": trigger_count,
                 }, "below_threshold"
 
-            result = dict(
-                await measure_sample(
-                    query_data,
-                    backend_client,
-                    pipeline_params=pipeline_params,
-                    pipeline_schema=pipeline_schema,
-                    suffix_cache=suffix_cache,
-                    backend_id=backend_id,
-                    scorer=scorer,
-                )
-            )
+            result = dict(await measure_sample(query_data, env, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
             result["rerun_comparison"] = compare_rerun(cached_result, result)
             if not is_degraded(result):
@@ -134,17 +122,7 @@ async def execute_stale_data_protocol(
             n_candidates = cfg.get("samplescan_candidates", 3)
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
-            result = dict(
-                await measure_sample(
-                    query_data,
-                    backend_client,
-                    pipeline_params=None,
-                    pipeline_schema=pipeline_schema,
-                    suffix_cache=None,
-                    backend_id=backend_id,
-                    scorer=scorer,
-                )
-            )
+            result = dict(await measure_sample(query_data, bypass_env, pipeline_params=None))
             result["samplescan_probe"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,
@@ -155,8 +133,8 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
-            if search_memory:
-                deg_rate = search_memory.query_degradation_rate(query)
+            if env.search_memory:
+                deg_rate = env.search_memory.query_degradation_rate(query)
                 if deg_rate >= min_deg_rate:
                     result = {**cached_result, "cached": True, "switched_out": True}
                     return result, "sampleswitch"
