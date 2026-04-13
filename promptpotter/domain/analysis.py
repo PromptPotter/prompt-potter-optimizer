@@ -79,7 +79,8 @@ class EscalationTarget(enum.StrEnum):
     RETRY = "retry"
     L2 = "l2"
     L3 = "l3"
-    ABORT = "abort"
+    ELIMINATE_CANDIDATE = "eliminate_candidate"
+    ABORT_CAMPAIGN = "abort_campaign"
 
 
 @dataclass

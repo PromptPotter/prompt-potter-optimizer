@@ -147,7 +147,10 @@ async def _handle_escalation_signal(
             raise
         except Exception:
             logger.warning("L2 escalation failed", exc_info=True)
-    elif signal["target"] == EscalationTarget.ABORT:
+    elif signal["target"] == EscalationTarget.ABORT_CAMPAIGN:
+        # Elimination signals (target=ELIMINATE_CANDIDATE) are absorbed inside
+        # _score_candidates — only true degradation that L2/L3 cannot rescue
+        # should ever reach this branch.
         raise StopLoop(StopReason.ABORT)
 
     # Common escalation exit (L2 continued, retry, or L2 disabled)

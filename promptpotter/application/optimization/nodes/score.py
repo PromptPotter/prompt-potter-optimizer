@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
+from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
@@ -255,7 +256,7 @@ async def _score_candidates(
         escalation_signal = scores.pop("escalation_signal", None)
         elimination_stopped = (
             bool(escalation_signal)
-            and getattr(escalation_signal, "check_name", "") == "elimination"
+            and escalation_signal["target"] == EscalationTarget.ELIMINATE_CANDIDATE
         )
 
         aborted = bool(escalation_signal) and len(results) < len(dataset)
