@@ -24,6 +24,7 @@ from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import most_common_error_category
+from promptpotter.shared.statistics import wilson_ci
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -217,12 +218,7 @@ async def run_recon(
     # Baseline CI for early pruning (Wave 2b)
     _baseline_ci: tuple[float, float] | None = None
     if pruning_enabled:
-        try:
-            from promptpotter.application.recon.failure_groups import wilson_ci
-
-            _baseline_ci = wilson_ci(baseline_scores["hits"], baseline_scores["total"])
-        except ImportError:
-            pass  # scipy not installed
+        _baseline_ci = wilson_ci(baseline_scores["hits"], baseline_scores["total"])
 
     _pruned_axes: set[str] = set()
 
@@ -353,8 +349,6 @@ async def run_recon(
 
             # Per-axis early pruning (Wave 2b)
             if _baseline_ci is not None and not _axis_pruned:
-                from promptpotter.application.recon.failure_groups import wilson_ci
-
                 var_ci = wilson_ci(scores["hits"], scores["total"])
                 _axis_variant_cis.append(var_ci)
                 # Check if ALL variant CIs overlap with baseline

@@ -106,7 +106,7 @@ class NotebookDisplay:
         hits = scores.get("hits", 0)
         n = scores.get("total", 0)
         comp = scores.get("composite")
-        from promptpotter.application.recon.failure_groups import wilson_ci
+        from promptpotter.shared.statistics import wilson_ci
 
         ci_lo, ci_hi = wilson_ci(hits, n)
         delta = acc - self.state.baseline_accuracy

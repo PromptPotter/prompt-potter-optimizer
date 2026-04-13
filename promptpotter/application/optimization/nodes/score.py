@@ -190,7 +190,7 @@ async def _score_candidates(
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
     """
-    from promptpotter.application.recon.failure_groups import EliminationCheck
+    from promptpotter.application.optimization.elimination import EliminationCheck
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
     all_candidate_results: dict[str, list[QueryResult]] = {}

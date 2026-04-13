@@ -26,6 +26,7 @@ from promptpotter.shared.constants import (
     RECON_TARGET_MDE,
 )
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.statistics import min_sample_size
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -205,24 +206,18 @@ def build_diagnostic_set(
         )
 
     # Auto-adjust sample size for statistical power (Wave 2a)
-    try:
-        from promptpotter.application.recon.failure_groups import min_sample_size
-
-        min_n = min_sample_size(RECON_TARGET_MDE)
-        if n_queries < min_n:
-            adjusted = min(min_n, len(dataset))
-            if adjusted > n_queries:
-                logger.warning(
-                    "Scan sample size %d too small to detect %.0f%% effect "
-                    "(need %d); adjusting to %d",
-                    n_queries,
-                    RECON_TARGET_MDE * 100,
-                    min_n,
-                    adjusted,
-                )
-                n_queries = adjusted
-    except ImportError:
-        pass  # scipy not installed — skip auto-adjustment
+    min_n = min_sample_size(RECON_TARGET_MDE)
+    if n_queries < min_n:
+        adjusted = min(min_n, len(dataset))
+        if adjusted > n_queries:
+            logger.warning(
+                "Scan sample size %d too small to detect %.0f%% effect (need %d); adjusting to %d",
+                n_queries,
+                RECON_TARGET_MDE * 100,
+                min_n,
+                adjusted,
+            )
+            n_queries = adjusted
 
     # Map queries to dataset items
     query_to_score = {d["query"]: d for d in dataset}

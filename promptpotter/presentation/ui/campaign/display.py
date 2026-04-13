@@ -4,8 +4,8 @@ from __future__ import annotations
 
 import re
 
-from promptpotter.application.recon.failure_groups import wilson_ci
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.statistics import wilson_ci
 
 
 def fmt_ci(lower: float, upper: float) -> str:

@@ -17,7 +17,7 @@ from promptpotter.application.optimization.phases import PhaseEvent
 if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
 
-from promptpotter.application.recon.failure_groups import (
+from promptpotter.shared.statistics import (
     min_detectable_effect,
     proportion_test,
 )

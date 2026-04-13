@@ -11,14 +11,14 @@ from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.application.optimization.results import RunResult
-from promptpotter.application.recon.failure_groups import (
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.statistics import (
     min_detectable_effect,
     proportion_test,
     wilson_ci,
 )
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.shared.errors import is_error_result
 
 from .display import (
     BOLD,

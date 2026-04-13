@@ -6,8 +6,8 @@ import pytest
 
 scipy = pytest.importorskip("scipy")
 
-from promptpotter.application.recon.failure_groups import (  # noqa: E402
-    EliminationCheck,
+from promptpotter.application.optimization.elimination import EliminationCheck  # noqa: E402
+from promptpotter.shared.statistics import (  # noqa: E402
     _holm_bonferroni,
     _paired_ttest_pvalue,
     should_stop_early,

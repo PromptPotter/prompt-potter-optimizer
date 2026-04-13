@@ -28,7 +28,7 @@ import sys
 from dataclasses import asdict
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.recon.failure_groups import proportion_test, wilson_ci
+from promptpotter.shared.statistics import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
