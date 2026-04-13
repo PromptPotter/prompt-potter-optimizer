@@ -137,6 +137,13 @@ class PipelineSchema(BaseModel):
         object.__setattr__(
             self, "_param_map", {p: n.name for n in self.nodes for p in n.param_keys}
         )
+        obs_keys: frozenset[str] = frozenset(
+            m.pipeline_key
+            for n in self.nodes
+            if n.observation_name and n.observation_mappings
+            for m in n.observation_mappings
+        )
+        object.__setattr__(self, "_observation_keys", obs_keys)
 
     # -------------------------------------------------------------------
     # Pipeline identity — derived from nodes
@@ -146,6 +153,16 @@ class PipelineSchema(BaseModel):
     def active_steps(self) -> tuple[str, ...]:
         """Node names in pipeline order (schema is pre-filtered to active nodes)."""
         return tuple(n.name for n in self.nodes)
+
+    @property
+    def observation_keys(self) -> frozenset[str]:
+        """Pipeline_data keys written by every node's observation mappings.
+
+        Derived once in ``model_post_init`` — schemas are frozen.  Consumed
+        by ``sample_measurement`` when projecting wire-response fields into
+        a ``QueryResult``'s ``pipeline_data`` dict.
+        """
+        return self._observation_keys  # type: ignore[attr-defined]
 
     def to_pipeline_params(self) -> dict:
         """Build initial pipeline_params dict from this schema.

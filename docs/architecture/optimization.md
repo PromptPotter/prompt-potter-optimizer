@@ -208,7 +208,7 @@ Computed inline from the health, rank, and evolution sections:
 
 ### Pipeline Data Flow
 
-Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`). Flow: `_parse_backend_response()` → `_pipeline_health_section()` → anomaly flags in critique meta-prompt.
+Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`). Flow: `measure_sample()` projects `diagnostics` into `pipeline_data` → `_pipeline_health_section()` → anomaly flags in critique meta-prompt.
 
 ---
 

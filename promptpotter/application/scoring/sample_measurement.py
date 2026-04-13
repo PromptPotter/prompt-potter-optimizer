@@ -27,7 +27,6 @@ from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import ScoringEnv
 
 _comparator = ExactMatchComparator({"strip": True})
@@ -115,40 +114,10 @@ def interpolate_pipeline_params(
 
 __all__ = ["measure_sample"]
 
-
-def _parse_backend_response(
-    backend_data: dict,
-    final_ranking: list,
-    pipeline_schema: PipelineSchema,
-) -> dict:
-    """Extract pipeline data fields from a backend /matches response.
-
-    Derives the key set from the ``PipelineSchema``'s observation mappings.
-    """
-    pd: dict = {"final_ranking": final_ranking}
-    keys: set[str] = set()
-    for mappings in pipeline_schema.obs_extraction_map().values():
-        for m in mappings:
-            keys.add(m.pipeline_key)
-    # Always include infrastructure keys
-    keys |= {"step_timings", "llm_provider", "total_time", "pipeline_params", "diagnostics"}
-    for key in keys:
-        val = backend_data.get(key)
-        if val is not None:
-            pd[key] = val
-
-    # Determine terminating step: explicit from backend takes priority;
-    # otherwise the last pipeline-ordered node with a non-None timing.
-    terminated_at = backend_data.get("terminated_at")
-    if terminated_at is None:
-        st = pd.get("step_timings") or {}
-        for node in pipeline_schema.nodes:
-            if st.get(node.name) is not None:
-                terminated_at = node.name
-    if terminated_at is not None:
-        pd["terminated_at"] = terminated_at
-
-    return pd
+# Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
+_INFRA_KEYS: frozenset[str] = frozenset(
+    {"step_timings", "llm_provider", "total_time", "pipeline_params", "diagnostics"}
+)
 
 
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
@@ -206,6 +175,23 @@ async def measure_sample(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
             None,
         )
+
+        # Project wire response → pipeline_data.  Keys: per-schema observation
+        # outputs + infrastructure keys.
+        pd: dict = {"final_ranking": ranked}
+        for key in pipeline_schema.observation_keys | _INFRA_KEYS:
+            val = data.get(key)
+            if val is not None:
+                pd[key] = val
+        terminated_at = data.get("terminated_at")
+        if terminated_at is None:
+            st = pd.get("step_timings") or {}
+            for node in pipeline_schema.nodes:
+                if st.get(node.name) is not None:
+                    terminated_at = node.name
+        if terminated_at is not None:
+            pd["terminated_at"] = terminated_at
+
         result: dict = {
             "query": query,
             "predicted": predicted,
@@ -215,7 +201,7 @@ async def measure_sample(
             "error": None,
             "n_candidates": len(ranked),
             "ground_truth_rank": gt_rank,
-            "pipeline_data": _parse_backend_response(data, ranked, pipeline_schema),
+            "pipeline_data": pd,
         }
         if env.scorer:
             result["score"] = env.scorer(result)

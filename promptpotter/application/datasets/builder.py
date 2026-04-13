@@ -347,7 +347,6 @@ def build_dataset_run_data(
         "created_at": datetime.now(UTC).isoformat(),
         "dataset_run_items": list(results),
     }
-    data["sp_hash"] = sp_h
     if pipeline_schema and search_point.pipeline_params:
         data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)
     if search_point.pipeline_params:

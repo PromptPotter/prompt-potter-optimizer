@@ -110,7 +110,6 @@ class DatasetRunStore:
             "scores": data["scores"],
             "content_hash": data["content_hash"],
             "rendered_prompt_hash": data.get("rendered_prompt_hash", ""),
-            "sp_hash": data.get("sp_hash", ""),
             "node_configs": data.get("node_configs"),
             "pipeline_params": data.get("pipeline_params"),
             "source": data.get("source", ""),
