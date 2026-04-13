@@ -20,7 +20,8 @@ from promptpotter.shared.statistics import (
     wilson_ci,
 )
 
-from .notebook_display import (
+from .notebook_phase import format_pipeline_overrides, show_progress
+from .notebook_primitives import (
     BOLD,
     CYAN,
     GREEN,
@@ -32,8 +33,6 @@ from .notebook_display import (
     _dbox_top,
     _fmt_query_result,
     _print_interrupt_banner,
-    format_pipeline_overrides,
-    show_progress,
 )
 
 if TYPE_CHECKING:
@@ -453,7 +452,7 @@ from promptpotter.application.campaign.data import (  # noqa: E402
     run_baseline_scoring as _run_baseline_scoring,
 )
 
-from .notebook_display import fmt_ci, fmt_pvalue  # noqa: E402
+from .notebook_primitives import fmt_ci, fmt_pvalue  # noqa: E402
 
 
 async def run_baseline_scoring(

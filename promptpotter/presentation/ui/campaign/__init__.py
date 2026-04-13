@@ -29,7 +29,16 @@ from .campaigns import (
 )
 
 # -- Display ------------------------------------------------------------------
-from .notebook_display import (
+from .notebook_phase import (
+    show_axis_profiles,
+    show_campaign_summary,
+    show_flip_tracking,
+    show_lineage_chain,
+    show_progress,
+    show_recon_leaderboard,
+    show_recon_query_difficulty,
+)
+from .notebook_primitives import (
     BLUE,
     BOLD,
     CYAN,
@@ -39,13 +48,6 @@ from .notebook_display import (
     RESET,
     YELLOW,
     set_display_tags,
-    show_axis_profiles,
-    show_campaign_summary,
-    show_flip_tracking,
-    show_lineage_chain,
-    show_progress,
-    show_recon_leaderboard,
-    show_recon_query_difficulty,
 )
 
 # -- Optimization (feedback cycle, stats, scoring) --------------------------------

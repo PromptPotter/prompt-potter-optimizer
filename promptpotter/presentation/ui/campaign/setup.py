@@ -139,6 +139,8 @@ def dev_reload() -> None:
         "promptpotter.application.recon.recon_report",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
+        "promptpotter.presentation.ui.campaign.notebook_primitives",
+        "promptpotter.presentation.ui.campaign.notebook_phase",
         "promptpotter.presentation.ui.campaign.notebook_display",
         "promptpotter.presentation.ui.campaign.optimize",
         "promptpotter.presentation.ui.campaign.setup",
@@ -199,7 +201,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
     """
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
-    from .notebook_display import set_display_tags
+    from .notebook_primitives import set_display_tags
 
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)

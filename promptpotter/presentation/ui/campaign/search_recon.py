@@ -15,13 +15,13 @@ from promptpotter.application.recon.recon_runner import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
-from .notebook_display import (
+from .notebook_phase import show_axis_profiles
+from .notebook_primitives import (
     CYAN,
     DIM,
     RESET,
     _fmt_query_result,
     _print_interrupt_banner,
-    show_axis_profiles,
 )
 
 if TYPE_CHECKING:
