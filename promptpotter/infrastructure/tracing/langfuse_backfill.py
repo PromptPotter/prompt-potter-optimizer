@@ -16,7 +16,7 @@ re-running only pushes new runs.
 
 Usage::
 
-    from promptpotter.infrastructure.tracing.langfuse_push import push_all_runs
+    from promptpotter.infrastructure.tracing.langfuse_backfill import push_all_runs
     stats = push_all_runs(store, backend_id)
 """
 

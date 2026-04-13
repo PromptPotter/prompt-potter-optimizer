@@ -90,7 +90,7 @@ class LoopState:
     best_composite: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
-    stall_count: int = 0
+    l1_stall_count: int = 0
 
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
@@ -150,7 +150,7 @@ class LoopState:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
         self.escalation = EscalationCounters.from_checkpoint_dict(trial)
-        self.stall_count = trial["stall_count"]
+        self.l1_stall_count = trial["l1_stall_count"]
 
     def apply_transition(
         self,

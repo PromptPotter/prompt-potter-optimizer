@@ -20,7 +20,7 @@ from promptpotter.shared.statistics import (
     wilson_ci,
 )
 
-from .display import (
+from .notebook_display import (
     BOLD,
     CYAN,
     GREEN,
@@ -332,7 +332,7 @@ async def run_optimization_notebook(
     Returns:
         Tuple of (campaign_rounds, RunResult or None if interrupted).
     """
-    from .display_callbacks import NotebookDisplay
+    from .notebook_display import NotebookDisplay
 
     assert session is not None, "session (SessionEnv) required for optimization"
     store = session.store
@@ -453,7 +453,7 @@ from promptpotter.application.campaign.data import (  # noqa: E402
     run_baseline_scoring as _run_baseline_scoring,
 )
 
-from .display import fmt_ci, fmt_pvalue  # noqa: E402
+from .notebook_display import fmt_ci, fmt_pvalue  # noqa: E402
 
 
 async def run_baseline_scoring(

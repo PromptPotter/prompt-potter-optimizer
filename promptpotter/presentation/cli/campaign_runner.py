@@ -346,7 +346,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_results(args: argparse.Namespace) -> CommandResult:
     """Show campaign results, optionally save winner."""
-    from promptpotter.application.campaign.mgmt import save_campaign_winner
+    from promptpotter.application.campaign.utils import save_campaign_winner
     from promptpotter.presentation.cli.renderers import (
         render_campaign_summary,
         render_flip_tracking,

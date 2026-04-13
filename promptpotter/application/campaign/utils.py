@@ -1,33 +1,24 @@
-"""Campaign reporting — data export and supplemental materials generation.
+"""Campaign utilities — post-init operations and reporting.
 
 Two layers in one module:
-- Pure data transforms (flatten, compare, export) for paper-ready analysis
-- Markdown formatting for supplemental documents
+- Lifecycle ops: save winner, diff config, apply stored overrides, resolve ID.
+- Data transforms + markdown formatting for paper-ready export and supplemental.
 
-No persistence — takes already-loaded data, returns dicts/strings.
+No persistence beyond what the callers pass in. Operates on already-loaded
+campaigns / configs.
 """
 
 from __future__ import annotations
-
-__all__ = [
-    "build_reproducibility_manifest",
-    "compare_campaigns",
-    "export_failure_analysis",
-    "export_query_difficulty",
-    "export_search_memory_summary",
-    "flatten_campaign_trials",
-    "generate_export_json",
-    "generate_supplemental",
-    "render_table",
-]
 
 import json
 import logging
 import platform
 import sys
-from dataclasses import asdict
-from typing import TYPE_CHECKING, Any
+from dataclasses import asdict, dataclass
+from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.campaign.config import CampaignConfig
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import proportion_test, wilson_ci
 
 if TYPE_CHECKING:
@@ -38,9 +29,221 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+__all__ = [
+    "ConfigDiff",
+    "apply_stored_overrides",
+    "build_reproducibility_manifest",
+    "compare_campaigns",
+    "diff_campaign_config",
+    "export_failure_analysis",
+    "export_query_difficulty",
+    "export_search_memory_summary",
+    "flatten_campaign_trials",
+    "generate_export_json",
+    "generate_supplemental",
+    "load_stored_campaign_config",
+    "render_table",
+    "resolve_active_campaign_id",
+    "save_campaign_winner",
+]
+
 
 # ---------------------------------------------------------------------------
-# Data transforms — pure functions, no I/O
+# Lifecycle ops — operate on an already-created campaign
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class ConfigDiff:
+    """One field's difference between a stored campaign config and the current config."""
+
+    stored: Any
+    current: Any
+
+
+def apply_stored_overrides(
+    campaign_config: CampaignConfig,
+    stored_cfg: dict,
+) -> dict | None:
+    """Merge stored experiment config into campaign_config (in-place).
+
+    Returns updated pipeline_params if stored, else None.
+    """
+    _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
+        "l1_patience": ("optimization",),
+        "max_rounds": ("optimization",),
+        "n_variants": ("optimization",),
+        "creativity": ("optimization",),
+        "model": ("optimizer_llm",),
+        "sp_budget_ttest": (),
+    }
+    for key, path in _OVERRIDE_KEYS.items():
+        val = stored_cfg.get(key)
+        if val is not None:
+            target: dict[str, Any] = cast(dict[str, Any], campaign_config)
+            for p in path:
+                target = target.setdefault(p, {})
+            target[key] = val
+
+    stored_pp = stored_cfg.get("pipeline_params")
+    if stored_pp:
+        campaign_config["pipeline_params"] = stored_pp
+        return stored_pp
+    return None
+
+
+def save_campaign_winner(
+    campaign_rounds: list,
+    campaign_config: CampaignConfig,
+    store: ProjectStore,
+    backend_id: str,
+    *,
+    campaign_id: str | None = None,
+) -> dict:
+    """Find best round, save to store + link to campaign. Returns save_data dict."""
+    from datetime import UTC, datetime
+
+    from promptpotter.application.campaign.campaign_setup import resolve_campaign_id
+
+    winner = campaign_rounds[-1]["prompt_fields"]
+    winner_acc = campaign_rounds[-1]["accuracy"]
+
+    for rd in campaign_rounds:
+        if rd["accuracy"] > winner_acc:
+            winner = rd["prompt_fields"]
+            winner_acc = rd["accuracy"]
+
+    baseline_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else None
+    save_data = {
+        "winner": winner.model_dump(),
+        "accuracy": winner_acc,
+        "campaign_rounds": len(campaign_rounds),
+        "baseline_accuracy": baseline_acc,
+        "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
+        "config": campaign_config,
+        "saved_at": datetime.now(UTC).isoformat(),
+    }
+
+    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
+    store.backends.save_sync(backend_id, filename, save_data)
+
+    if campaign_id:
+        full_id = resolve_campaign_id(store, backend_id, campaign_id)
+        if full_id:
+            with graceful("Campaign metadata update skipped", level=logging.DEBUG):
+                store.campaigns.update(
+                    backend_id,
+                    full_id,
+                    {
+                        "winner_prompt_fields_id": winner.id,
+                        "winner_accuracy": winner_acc,
+                        "winner_filename": filename,
+                    },
+                )
+
+    logger.info("Winner saved: %s (acc=%.1f%%)", filename, winner_acc * 100)
+    return {
+        **save_data,
+        "winner_id": winner.id,
+        "filename": filename,
+        "backend_id": backend_id,
+    }
+
+
+def diff_campaign_config(
+    stored_config: dict,
+    campaign_config: CampaignConfig,
+    pipeline_schema: PipelineSchema | None = None,
+) -> dict[str, ConfigDiff]:
+    """Compute parameter differences between stored and current campaign config."""
+    from promptpotter.application.campaign.config import LoopConfig
+
+    current = LoopConfig.from_campaign_config(
+        campaign_config,
+        pipeline_schema=pipeline_schema,
+    ).model_dump()
+
+    keys = [
+        "max_rounds",
+        "l1_patience",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "model",
+        "sp_budget_ttest",
+        "seed",
+    ]
+
+    diffs: dict[str, ConfigDiff] = {}
+    for k in keys:
+        sv = stored_config.get(k)
+        cv = current.get(k)
+        if sv != cv:
+            diffs[k] = ConfigDiff(stored=sv, current=cv)
+
+    # Compare pipeline params (derived from schema)
+    sp = stored_config.get("pipeline_params")
+    cp = pipeline_schema.to_pipeline_params() if pipeline_schema else None
+    if sp != cp:
+        for pk in sorted(set(sp or {}) | set(cp or {})):
+            sv = (sp or {}).get(pk)
+            cv = (cp or {}).get(pk)
+            if sv != cv:
+                diffs[f"pp.{pk}"] = ConfigDiff(stored=sv, current=cv)
+
+    return diffs
+
+
+def load_stored_campaign_config(
+    store: ProjectStore,
+    backend_id: str,
+    experiment_id: str,
+) -> dict | None:
+    """Load stored experiment config for a campaign. Returns config dict or None."""
+    from promptpotter.application.campaign.campaign_setup import resolve_campaign_id
+
+    full_id = resolve_campaign_id(store, backend_id, experiment_id)
+    if not full_id:
+        return None
+    campaign = store.campaigns.load(backend_id, full_id)
+    if not campaign:
+        return None
+    return campaign.get("config")
+
+
+def resolve_active_campaign_id(
+    campaign_config: CampaignConfig,
+    pipeline_schema: PipelineSchema | None,
+    baseline_prompt_fields: dict | None,
+    dataset: list[dict],
+) -> str | None:
+    """Compute the cycle ID matching the current config, or None on failure.
+
+    Used by display layer to detect which stored campaign matches the active
+    notebook/CLI configuration.
+    """
+    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.domain.cycle_identity import cycle_config_identity
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+
+    try:
+        config = LoopConfig.from_campaign_config(
+            campaign_config,
+            pipeline_schema=pipeline_schema,
+        )
+        bl_rendered = ""
+        if baseline_prompt_fields:
+            bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
+        return cycle_config_identity(
+            config, bl_rendered, dataset, strict=config.strict_cycle_identity
+        )
+    except Exception:
+        logger.debug("Could not compute active campaign ID", exc_info=True)
+        return None
+
+
+# ---------------------------------------------------------------------------
+# Reporting — pure data transforms, no I/O
 # ---------------------------------------------------------------------------
 
 
@@ -159,11 +362,7 @@ def compare_campaigns(campaigns: list[dict[str, Any]]) -> dict[str, Any]:
 
 
 def export_search_memory_summary(memory: SearchMemory) -> dict[str, Any]:
-    """Extract paper-relevant fields from SearchMemory.
-
-    Returns structured dicts for parameter impact, failure modes,
-    and query pattern summaries.
-    """
+    """Extract paper-relevant fields from SearchMemory."""
     axis_impacts = memory.axis_rankings()
     parameter_impact = [
         {
@@ -244,10 +443,7 @@ def build_reproducibility_manifest(
     backend_id: str,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
-    """Build reproducibility metadata for paper supplemental.
-
-    Captures config hashes, pipeline snapshot, runtime environment.
-    """
+    """Build reproducibility metadata for paper supplemental."""
     manifest: dict[str, Any] = {
         "backend_id": backend_id,
         "python_version": sys.version,
@@ -445,16 +641,10 @@ _TABLE_CONFIGS: dict[str, _TableConfig] = {
 def render_table(data: Any, config_name: str) -> str:
     """Generic table renderer driven by ``_TABLE_CONFIGS``.
 
-    Args:
-        data: The structured data to render (dict or list depending on table).
-        config_name: Key into ``_TABLE_CONFIGS``.
-
-    Returns:
-        Markdown table string, or ``""`` if the guard path is empty.
+    Returns the rendered markdown, or ``""`` if the guard path is empty.
     """
     cfg = _TABLE_CONFIGS[config_name]
 
-    # Check guard — either a key path into data, or None (data itself is the guard)
     guard = cfg["guard"]
     if guard is not None:
         guarded = data.get(guard) if isinstance(data, dict) else data
@@ -503,19 +693,6 @@ def generate_supplemental(
 
     Loads campaigns from store, combines with optional pre-computed analysis,
     and renders each section as markdown.
-
-    Args:
-        store: ProjectStore for loading campaign data.
-        backend_id: Backend identifier.
-        campaign_ids: Specific campaigns to include (default: all).
-        search_memory: Pre-loaded SearchMemory (skips memory sections if None).
-        pipeline_schema: Pipeline schema for reproducibility manifest.
-        failure_analysis: Pre-computed FailureAnalysis.
-        query_difficulty: Pre-computed QueryDifficulty.
-        sections: Which sections to include (default: all).
-
-    Returns:
-        Complete markdown string.
     """
     active_sections = sections or _DEFAULT_SECTIONS
     campaigns = _load_campaigns(store, backend_id, campaign_ids)
@@ -593,10 +770,7 @@ def generate_export_json(
     search_memory: SearchMemory | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
-    """Export all campaign data as a single JSON-serializable dict.
-
-    Suitable for inclusion in a paper repository or supplemental data package.
-    """
+    """Export all campaign data as a single JSON-serializable dict."""
     campaigns = _load_campaigns(store, backend_id, campaign_ids)
 
     result: dict[str, Any] = {

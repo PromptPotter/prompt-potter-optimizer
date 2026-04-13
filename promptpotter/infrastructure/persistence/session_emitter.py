@@ -325,7 +325,7 @@ class CampaignPersistenceEmitter:
         )
         write_json(self.state_path, self._state, default=str)
 
-    def on_round_complete(self, round_result: RoundResult, stall_count: int) -> None:
+    def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         s = self._state
         acc = round_result.accuracy
         improved = round_result.improved
@@ -335,7 +335,7 @@ class CampaignPersistenceEmitter:
             s["best_round"] = round_result.round
 
         s["improvement_streak"] = s["improvement_streak"] + 1 if improved else 0
-        s["patience"] = f"{stall_count}/{self._patience_max}"
+        s["patience"] = f"{l1_stall_count}/{self._patience_max}"
         s["layer"] = "L1"
         s["rounds_completed"] = round_result.round
         s["elapsed_s"] = round(time.monotonic() - self._workflow_start, 1)
@@ -344,14 +344,14 @@ class CampaignPersistenceEmitter:
         self._log_fh.write(
             f"\n  >>> Round {round_result.round}: "
             f"{round_result.label} {acc:.1%} — {mark} "
-            f"(patience {stall_count}) <<<\n\n"
+            f"(patience {l1_stall_count}) <<<\n\n"
         )
         write_json(self.state_path, self._state, default=str)
 
         self._append_log_md(
             f"## Round {round_result.round} — Evaluated\n"
             f"- {round_result.label}: {acc:.1%} — {mark}\n"
-            f"- Hits: {round_result.hits}/{round_result.total}, stall: {stall_count}"
+            f"- Hits: {round_result.hits}/{round_result.total}, stall: {l1_stall_count}"
         )
 
     # -- Lifecycle -------------------------------------------------------------

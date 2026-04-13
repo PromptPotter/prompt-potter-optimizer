@@ -61,9 +61,9 @@ class RunCallbacks:
         if on_checkpoint:
             self._checkpoint.append(on_checkpoint)
 
-    def on_round_complete(self, rr: RoundResult, stall_count: int) -> None:
+    def on_round_complete(self, rr: RoundResult, l1_stall_count: int) -> None:
         for fn in self._round:
-            fn(rr, stall_count)
+            fn(rr, l1_stall_count)
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         for fn in self._candidate:

@@ -17,7 +17,7 @@ from promptpotter.application.campaign.config import (
 from promptpotter.application.campaign.data import (
     build_all_index_terms,
 )
-from promptpotter.application.campaign.mgmt import (
+from promptpotter.application.campaign.utils import (
     save_campaign_winner,
 )
 from promptpotter.application.intelligence import load_variant_library
@@ -139,8 +139,7 @@ def dev_reload() -> None:
         "promptpotter.application.recon.recon_report",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
-        "promptpotter.presentation.ui.campaign.display",
-        "promptpotter.presentation.ui.campaign.phase_display",
+        "promptpotter.presentation.ui.campaign.notebook_display",
         "promptpotter.presentation.ui.campaign.optimize",
         "promptpotter.presentation.ui.campaign.setup",
         "promptpotter.presentation.ui.campaign.campaigns",
@@ -200,7 +199,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
     """
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
-    from .display import set_display_tags
+    from .notebook_display import set_display_tags
 
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)
@@ -425,7 +424,7 @@ def sync_langfuse(
     reset: bool = False,
 ) -> dict | None:
     """Configure Langfuse dataset name and optionally push all runs."""
-    from promptpotter.infrastructure.tracing.langfuse_push import sync_langfuse_runs
+    from promptpotter.infrastructure.tracing.langfuse_backfill import sync_langfuse_runs
 
     result = sync_langfuse_runs(
         store,
@@ -445,7 +444,7 @@ def sync_langfuse(
 
 def push_langfuse(store, backend_id: str) -> dict:
     """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from promptpotter.infrastructure.tracing.langfuse_push import push_all_runs
+    from promptpotter.infrastructure.tracing.langfuse_backfill import push_all_runs
 
     summaries = store.dataset_runs.list_all(backend_id)
 

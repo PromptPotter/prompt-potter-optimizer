@@ -8,10 +8,10 @@ from typing import TYPE_CHECKING
 from promptpotter.application.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
 )
-from promptpotter.application.campaign.mgmt import (
+from promptpotter.application.campaign.utils import (
     apply_stored_overrides,
 )
-from promptpotter.application.campaign.mgmt import (
+from promptpotter.application.campaign.utils import (
     diff_campaign_config as _diff_campaign_config,
 )
 
@@ -277,7 +277,7 @@ def show_experiment_dashboard(
     # --- Detect active campaign from current config ---
     active_id = None
     if campaign_config is not None and dataset is not None:
-        from promptpotter.application.campaign.mgmt import resolve_active_campaign_id
+        from promptpotter.application.campaign.utils import resolve_active_campaign_id
 
         active_id = resolve_active_campaign_id(
             campaign_config,

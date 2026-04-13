@@ -62,7 +62,7 @@ CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All mus
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground so stale processes don't leak.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.
-- **Commit messages**: keep under 1000 characters total (subject + body + trailers). Terse bullets, not prose.
+- **Commit messages**: keep under 900 characters total (subject + body + trailers). Terse bullets, not prose.
 
 ## Architecture
 

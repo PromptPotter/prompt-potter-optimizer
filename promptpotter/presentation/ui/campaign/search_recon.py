@@ -15,7 +15,7 @@ from promptpotter.application.recon.recon_runner import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
-from .display import (
+from .notebook_display import (
     CYAN,
     DIM,
     RESET,

@@ -34,7 +34,7 @@ from promptpotter.application.recon.recon_report import (
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.shared.constants import LAYER1_STRING_FIELDS
 
-from .display import (
+from .notebook_display import (
     CYAN,
     DIM,
     RESET,
@@ -156,7 +156,7 @@ def show_variant_library(
     """
     from promptpotter.application.recon.adaptive_recon import filter_variant_library_display
 
-    from .display import BOLD, GREEN, YELLOW
+    from .notebook_display import BOLD, GREEN, YELLOW
 
     rich = load_variant_library_rich()
     lib = filter_variant_library_display(rich, axes=axes, source=source)

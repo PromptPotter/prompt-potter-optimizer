@@ -183,7 +183,7 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
         "results": rr.results,
         "candidates_scored": rr.candidates_scored,
         "candidate_scores": list(rr.candidate_scores),
-        "stall_count": state.stall_count,
+        "l1_stall_count": state.l1_stall_count,
         **state.escalation.to_checkpoint_dict(),
         "opt_search_point": state.opt_sp.model_dump(),
     }
@@ -202,11 +202,11 @@ async def _post_round(
 
     Raises ``StopLoop`` if any stopping condition fires.
     """
-    state.stall_count = 0 if round_result.improved else state.stall_count + 1
+    state.l1_stall_count = 0 if round_result.improved else state.l1_stall_count + 1
     if round_result.improved:
         state.opt_sp.memory.clear_volatile()
 
-    cb.on_round_complete(round_result, state.stall_count)
+    cb.on_round_complete(round_result, state.l1_stall_count)
 
     if env.campaign_store and env.cycle_id:
         with graceful("Round checkpoint failed"):
@@ -233,11 +233,11 @@ async def _post_round(
     # Stopping conditions
     if state.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)
-    if state.stall_count >= config.l1_patience:
+    if state.l1_stall_count >= config.l1_patience:
         if not config.enable_l2:
             raise StopLoop(StopReason.PATIENCE)
         await _try_escalate_l2(state, env, config, round_num, cb)
-        state.stall_count = 0  # L2/L3 changed prompt — fresh window
+        state.l1_stall_count = 0  # L2/L3 changed prompt — fresh window
 
 
 async def _run_round_loop(
@@ -271,7 +271,7 @@ async def _run_round_loop(
                 clean_rounds,
                 max_rounds,
                 state.current_accuracy,
-                state.stall_count,
+                state.l1_stall_count,
                 config.l1_patience,
                 ", PROBE" if is_probe else "",
             )

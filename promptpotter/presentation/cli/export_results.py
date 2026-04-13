@@ -61,7 +61,7 @@ def main(argv: list[str] | None = None) -> None:
     output = Path(args.output)
 
     # Lazy import to avoid loading scipy at CLI parse time
-    from promptpotter.application.campaign.reporting import (
+    from promptpotter.application.campaign.utils import (
         generate_export_json,
         generate_supplemental,
     )

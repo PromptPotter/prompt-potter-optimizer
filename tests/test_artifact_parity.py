@@ -130,7 +130,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
         prompt_fields={"instruction": "test"},
         candidates_scored=1,
     )
-    emitter.on_round_complete(round_result, stall_count=0)
+    emitter.on_round_complete(round_result, l1_stall_count=0)
 
     # Finalize
     emitter.finalize(

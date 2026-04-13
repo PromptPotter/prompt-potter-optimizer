@@ -180,7 +180,7 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 
 ### Stat-Rich Analysis
 
-`assemble_critique_sections()` in `critique_formatting.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
+`_assemble_critique_sections()` in `critique.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
 
 Per-query diagnostics are derived from `PipelineSchema.nodes` via `NODE_TYPE_METRICS` (`pipeline_schema.py`) — a registry mapping node type → metrics → `pipeline_data_key`. Schema-driven, not hardcoded: when the pipeline gains a new node or node type, diagnostics extend automatically without code changes.
 

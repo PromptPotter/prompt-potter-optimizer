@@ -10,7 +10,7 @@ import types as _types
 # -- Setup (init, pipeline, LLM, langfuse, datasets) -------------------------
 # -- Re-exports from promptpotter.application.recon (used directly in notebook) ----------
 # -- Reporting (supplemental materials) — direct from services ----------------
-from promptpotter.application.campaign.reporting import generate_export_json, generate_supplemental
+from promptpotter.application.campaign.utils import generate_export_json, generate_supplemental
 from promptpotter.application.recon import (
     build_diagnostic_set,
     build_llm_context,
@@ -29,7 +29,7 @@ from .campaigns import (
 )
 
 # -- Display ------------------------------------------------------------------
-from .display import (
+from .notebook_display import (
     BLUE,
     BOLD,
     CYAN,
