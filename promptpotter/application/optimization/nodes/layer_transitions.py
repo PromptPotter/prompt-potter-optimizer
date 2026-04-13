@@ -15,14 +15,12 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.nodes.escalation_report import (
-    format_escalation_report,
-)
 from promptpotter.application.optimization.nodes.formatting import (
     L2IntelligenceData,
     assess_candidate_diversity,
     build_candidate_comparison,
     build_trajectory_report,
+    format_escalation_report,
     format_l2_intelligence,
     format_pipeline_section,
     format_search_memory_block,

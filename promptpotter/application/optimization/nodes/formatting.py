@@ -26,6 +26,7 @@ __all__ = [
     "build_trajectory_report",
     "candidate_summaries",
     "format_context_sections",
+    "format_escalation_report",
     "format_l2_intelligence",
     "format_pipeline_section",
     "format_search_memory_block",
@@ -624,3 +625,66 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
             all_wtypes[wt] = all_wtypes.get(wt, 0) + c
     top_warning = max(all_wtypes, key=all_wtypes.get) if all_wtypes else ""  # type: ignore[arg-type]
     return warned_count, top_warning
+
+
+def format_escalation_report(
+    escalation_check_result: dict | None,
+    escalation_journal: list[dict] | None,
+    pipeline_params: dict | None = None,
+    pipeline_schema: PipelineSchema | None = None,
+) -> str:
+    """Build the escalation diagnostics section for L2 prompts.
+
+    Returns an empty string when no escalation context is available.
+    When present, the section shows a data-driven stability map of tried
+    configs so the LLM can figure out what to change.
+    """
+    if not escalation_check_result:
+        return ""
+
+    dominant = escalation_check_result.get("dominant_warning", "unknown")
+    step_name = dominant.split(":")[0] if ":" in dominant else "unknown"
+    rate = escalation_check_result.get("degraded_rate", 0)
+
+    wt = escalation_check_result.get("warning_types", {})
+    wt_str = ", ".join(f"{k} ({v})" for k, v in sorted(wt.items(), key=lambda x: -x[1]))
+
+    lines = [
+        f"PIPELINE STABILITY REPORT ({step_name}):\n",
+        f"  Current degradation: {rate:.0%} of queries ({wt_str})",
+    ]
+
+    step_cfg = (pipeline_params or {}).get(step_name, {})
+    if isinstance(step_cfg, dict) and step_cfg:
+        lines.append(f"  Current {step_name} config: {json.dumps(step_cfg)}")
+
+    lines.append("")
+
+    if escalation_journal:
+        lines.append("  Tried configs and stability:")
+        for entry in escalation_journal:
+            step = entry.get("problem_step", "unknown")
+            ec = entry.get("step_config", {})
+            prev_rate = entry.get("degraded_rate", 0)
+            outcome = entry.get("outcome_degraded_rate")
+            outcome_str = f" -> {outcome:.0%}" if outcome is not None else ""
+            cfg_parts = [f"{k}={v!r}" for k, v in sorted(ec.items())]
+            lines.append(
+                f"    Round {entry.get('round', '?')}: "
+                f"{step} [{', '.join(cfg_parts) or 'defaults'}]"
+                f" | {prev_rate:.0%} degraded{outcome_str}"
+            )
+        lines.append("")
+
+    if pipeline_schema:
+        all_keys = pipeline_schema.node_param_keys()
+        step_keys = all_keys.get(step_name, set())
+        if step_keys:
+            lines.append(f"  Available {step_name} parameters: {', '.join(sorted(step_keys))}")
+
+    lines.append(
+        "  The configurations above are all unstable. Suggest different "
+        "parameter values to stabilize the pipeline."
+    )
+    lines.append("")
+    return "\n".join(lines) + "\n"

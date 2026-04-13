@@ -15,9 +15,11 @@ from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.critique import (
     CritiqueAgent,
-    RoundSnapshot,
     format_critique_for_prompt,
     sample_thinking_styles,
+)
+from promptpotter.application.optimization.nodes.critique_payload import (
+    RoundSnapshot,
     update_query_tracker,
 )
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries

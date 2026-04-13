@@ -19,7 +19,7 @@ from collections import Counter
 from collections.abc import Awaitable, Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.critique import extract_warning_types
+from promptpotter.application.optimization.nodes.critique_payload import extract_warning_types
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget

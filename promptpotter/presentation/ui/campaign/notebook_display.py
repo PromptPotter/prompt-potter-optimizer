@@ -263,7 +263,7 @@ class NotebookDisplay:
         try:
             from collections import Counter
 
-            from promptpotter.application.optimization.nodes.critique import (
+            from promptpotter.application.optimization.nodes.critique_payload import (
                 candidate_keys_from_schema,
                 get_candidates,
             )
