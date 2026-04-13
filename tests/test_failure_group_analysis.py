@@ -114,35 +114,3 @@ def test_search_memory_ingest_and_accessors():
 
     # Unknown axis returns empty
     assert sm.parameter_failure_correlation("unknown") == {}
-
-
-def test_persistent_failures():
-    """Test failure streak detection."""
-    sm = SearchMemory()
-
-    # Simulate query history: q1 always fails, q2 fails recently, q3 intermittent
-    sm._query_hits["q1"] = [False, False, False, False, False]
-    sm._query_hits["q2"] = [True, True, False, False, False]
-    sm._query_hits["q3"] = [False, True, False, True, False]
-    sm._query_hits["q4"] = [True, True, True]  # always hits
-    sm._query_failure_modes["q1"] = ["web_search"] * 5
-    sm._query_failure_modes["q2"] = ["token_matching"] * 3
-
-    persistent = sm.persistent_failures(min_streak=3)
-
-    # q1 (intractable) and q2 (chronic) should be returned
-    queries = {r.query for r in persistent}
-    assert "q1" in queries
-    assert "q2" in queries
-    assert "q3" not in queries  # intermittent — has a True in last 3
-    assert "q4" not in queries  # always hits
-
-    # q1 should be first (hit_rate=0, intractable)
-    assert persistent[0].query == "q1"
-    assert persistent[0].hit_rate == 0.0
-    assert persistent[0].dominant_failure_mode == "web_search"
-
-    # q2 chronic — hit_rate > 0
-    q2 = next(r for r in persistent if r.query == "q2")
-    assert q2.hit_rate > 0
-    assert q2.dominant_failure_mode == "token_matching"

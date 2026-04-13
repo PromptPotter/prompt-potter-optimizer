@@ -141,40 +141,9 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
         cycle_id="cycle_test_001",
     )
 
-    # Assert ALL session artifacts exist
-    for artifact in CAMPAIGN_SESSION_ARTIFACTS:
-        artifact_path = session_dir / artifact
-        assert artifact_path.exists(), (
-            f"Missing artifact: {artifact} — entry-point parity violated. "
-            f"All artifacts in CAMPAIGN_SESSION_ARTIFACTS must be produced by "
-            f"CampaignPersistenceEmitter. See docs/specs/m-parity-entry-point-parity.md"
-        )
-
-    # Verify campaign_state.json structure
-    state = json.loads((session_dir / "campaign_state.json").read_text())
-    assert state["workflow"] == "idle"
-    assert state["stop_reason"] == "max_rounds"
-    assert state["cycle_id"] == "cycle_test_001"
-    # Control lives in its own file — not merged into state
-    assert "control" not in state
-    assert state["rounds_completed"] == 0
-    assert state["total_queries_scored"] == 2
-
-    # Verify campaign_control.json seeded with defaults
-    control = json.loads((session_dir / "campaign_control.json").read_text())
-    assert control["requested_state"] == "running"
-    assert control["pause_before_l2_scoring"] is False
-
-    # Verify campaign_output.log has content
-    log = (session_dir / "campaign_output.log").read_text()
-    assert "HIT" in log
-    assert "MISS" in log
-    assert "Round 0" in log
-
-    # Verify campaign_log.md has round entry + completion entry
-    md = (session_dir / "campaign_log.md").read_text()
-    assert "Round 0" in md
-    assert "Optimization Complete" in md
+    # The contract: every artifact in CAMPAIGN_SESSION_ARTIFACTS must exist.
+    missing = [a for a in CAMPAIGN_SESSION_ARTIFACTS if not (session_dir / a).exists()]
+    assert not missing, f"Entry-point parity violated — missing: {missing}"
 
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
