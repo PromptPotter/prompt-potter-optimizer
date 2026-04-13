@@ -18,7 +18,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryRunner
-    from promptpotter.infrastructure.store.stores import IntermediateCache
+    from promptpotter.infrastructure.store.suffix_cache import SuffixCache
 
 logger = logging.getLogger(__name__)
 
@@ -68,7 +68,7 @@ async def execute_stale_data_protocol(
     *,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    intermediate_cache: IntermediateCache | None = None,
+    suffix_cache: SuffixCache | None = None,
     backend_id: str = "",
     search_memory: SearchMemory | None = None,
     stop_check: Callable[[], bool] | None = None,
@@ -120,7 +120,7 @@ async def execute_stale_data_protocol(
                     backend_client,
                     pipeline_params=pipeline_params,
                     pipeline_schema=pipeline_schema,
-                    intermediate_cache=intermediate_cache,
+                    suffix_cache=suffix_cache,
                     backend_id=backend_id,
                     scorer=scorer,
                 )
@@ -140,7 +140,7 @@ async def execute_stale_data_protocol(
                     backend_client,
                     pipeline_params=None,
                     pipeline_schema=pipeline_schema,
-                    intermediate_cache=None,
+                    suffix_cache=None,
                     backend_id=backend_id,
                     scorer=scorer,
                 )

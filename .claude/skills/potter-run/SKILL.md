@@ -157,7 +157,7 @@ SESSION FILES
 WHERE THINGS LIVE
   Campaign rounds:  .promptpotter/projects/{bid}/campaigns/{cycle_id}/
   Eval results:     .promptpotter/projects/{bid}/dataset_runs/
-  Node cache:       .promptpotter/projects/{bid}/intermediate_cache/
+  Node cache:       .promptpotter/projects/{bid}/suffix_cache/
   Traces & scores:  .promptpotter/projects/{bid}/obs/langfuse/
   Prompt versions:  .promptpotter/projects/{bid}/obs/prompts/
   Ground truth:     .promptpotter/projects/{bid}/datasets/{dataset}.json

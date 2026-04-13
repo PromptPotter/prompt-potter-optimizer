@@ -3,7 +3,8 @@ Dataset run storage — archive layer for eval history.
 
 Stores completed evaluation runs for SearchMemory, observability,
 campaign lineage, and full-run cache lookup (``find_by_prefix_chain``).
-Per-node reuse is handled separately by ``IntermediateCache``.
+Per-query per-node reuse is handled separately by ``SuffixCache``
+(see ``docs/architecture/suffix-cache.md``).
 
 Both layers use the same chained node hashes from
 ``PipelineSchema.prefix_keys()``.  The terminal element of the chain

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from promptpotter.domain.pipeline_schema import stable_hash, suffix_key
 from promptpotter.domain.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
@@ -31,7 +32,7 @@ from promptpotter.shared.scoring import Scorer
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryRunner
-    from promptpotter.infrastructure.store.stores import IntermediateCache
+    from promptpotter.infrastructure.store.suffix_cache import SuffixCache
 
 _comparator = ExactMatchComparator({"strip": True})
 
@@ -222,6 +223,27 @@ def _local_result(
     return result  # type: ignore[return-value]
 
 
+def _longest_prefix_hit(
+    cache: SuffixCache,
+    backend_id: str,
+    q_hash: str,
+    node_configs: list[tuple[str, dict]],
+) -> tuple[dict[str, Any], list[str]]:
+    """Find the longest cached prefix from pipeline start.
+
+    Iterates j from n down to 1, checking ``suffix_key(q_hash, configs[:j])``;
+    first hit wins.  Returns ``(node_outputs, covers)`` or ``({}, [])``.
+    ``covers`` is taken from the stored entry (may be shorter than the
+    probed prefix if the prior run short-circuited).
+    """
+    for j in range(len(node_configs), 0, -1):
+        key = suffix_key(q_hash, node_configs[:j])
+        entry = cache.lookup(backend_id, key)
+        if entry:
+            return entry["node_outputs"], list(entry["covers"])
+    return {}, []
+
+
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
     """Build a standard error result dict."""
     return {
@@ -248,7 +270,7 @@ async def measure_sample(
     backend_client: QueryRunner,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    intermediate_cache: IntermediateCache | None = None,
+    suffix_cache: SuffixCache | None = None,
     backend_id: str = "",
     scorer: Scorer | None = None,
 ) -> QueryResult:
@@ -264,31 +286,32 @@ async def measure_sample(
     _target_steps = list(pipeline_schema.active_steps)
 
     try:
-        # Per-node cache: reuse upstream pipeline nodes (multi-step only).
-        # LLM-only pipelines have no steps → this block is a clean no-op.
-        precomputed = None
-        cached_steps: list[str] = []
-        prefix_keys: list[tuple[str, str]] = []
-        if intermediate_cache and _target_steps:
-            prefix_keys = pipeline_schema.prefix_keys(pipeline_params or {})
-            node_outputs_hit, cached_steps = intermediate_cache.walk_prefix(
-                backend_id,
-                query,
-                prefix_keys,
+        # Suffix-hash cache: one hash check for full-pipeline hit, then
+        # longest-prefix probe for partial reuse via `precomputed`.
+        # LLM-only pipelines have no steps → clean no-op.
+        precomputed: dict[str, Any] | None = None
+        node_configs: list[tuple[str, dict]] = [
+            (n.name, (pipeline_params or {}).get(n.name, {}) or {}) for n in pipeline_schema.nodes
+        ]
+        q_hash = stable_hash(query)
+
+        if suffix_cache and node_configs:
+            full_key = suffix_key(q_hash, node_configs)
+            hit = suffix_cache.lookup(backend_id, full_key)
+            if hit and set(hit["covers"]) >= set(_target_steps):
+                return _local_result(
+                    query,
+                    ground_truth,
+                    hit["node_outputs"],
+                    _target_steps,
+                    pipeline_schema,
+                    scorer=scorer,
+                )
+            node_outputs_hit, _covers = _longest_prefix_hit(
+                suffix_cache, backend_id, q_hash, node_configs
             )
             if node_outputs_hit:
                 precomputed = node_outputs_hit
-
-        # Full coverage: all target steps cached — skip backend entirely
-        if precomputed and cached_steps == _target_steps:
-            return _local_result(
-                query,
-                ground_truth,
-                precomputed,
-                _target_steps,
-                pipeline_schema,
-                scorer=scorer,
-            )
 
         # Interpolate {{variable}} placeholders in prompt templates from query_data
         wire_params = interpolate_pipeline_params(pipeline_params or {}, query_data)
@@ -300,20 +323,12 @@ async def measure_sample(
         )
         data = resp.get("data", {})
 
-        # Cache populate: store per-node outputs (multi-step only;
-        # LLM-only adapters return empty node_outputs so this is a no-op)
+        # Populate the suffix cache from the full run.  Handles
+        # short-circuit runs by only emitting cut-points within the
+        # contiguous executed prefix.
         node_outputs = data.get("node_outputs")
-        if intermediate_cache and _target_steps and node_outputs and prefix_keys:
-            precomputed_set = set(precomputed or {})
-            for node_name, cache_key in prefix_keys:
-                if node_name in node_outputs and node_name not in precomputed_set:
-                    intermediate_cache.put_node(
-                        backend_id,
-                        node_name,
-                        cache_key,
-                        query,
-                        node_outputs[node_name],
-                    )
+        if suffix_cache and node_configs and node_outputs:
+            suffix_cache.populate_from_run(backend_id, query, node_configs, node_outputs)
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT

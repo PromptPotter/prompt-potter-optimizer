@@ -27,9 +27,34 @@ def node_cache_key(
 
     Chains upstream: *upstream_hash* is the previous node's cache key.
     Changing any upstream node's config cascades invalidation downstream.
+
+    Used only by ``prefix_keys`` / ``sp_hash`` for SearchPoint identity
+    and dataset-run archival. The per-query cache uses ``suffix_key``.
     """
     blob = json.dumps(
         {"node": node_name, "config": node_config, "upstream": upstream_hash},
+        sort_keys=True,
+        default=str,
+    ).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def stable_hash(value: Any) -> str:
+    """Deterministic 16-char hex digest of an arbitrary JSON-able value."""
+    blob = json.dumps(value, sort_keys=True, default=str).encode()
+    return hashlib.sha256(blob).hexdigest()[:16]
+
+
+def suffix_key(input_hash: str, node_configs: list[tuple[str, dict[str, Any]]]) -> str:
+    """Key for a pipeline tail, given a starting input and the (node, config) list.
+
+    The suffix-hash cache addresses every cut point of a pipeline run by
+    ``(input_hash, tail)``.  ``input_hash`` is either the query hash (prefix
+    from pipeline start) or an intermediate node output hash (tail from a
+    midpoint).  See ``docs/architecture/suffix-cache.md``.
+    """
+    blob = json.dumps(
+        {"input": input_hash, "tail": node_configs},
         sort_keys=True,
         default=str,
     ).encode()

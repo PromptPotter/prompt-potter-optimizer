@@ -1,10 +1,10 @@
 """Dataset scoring — query loop orchestration, archival, and observability.
 
-One chain (``PipelineSchema.prefix_keys``) addresses two cache tiers:
-prior-result reuse via ``DatasetRunStore.load_reusable_results`` and
-per-node output reuse via ``IntermediateCache.walk_prefix``.  Single-sample
-measurement lives in ``sample_measurement``; the stale-data ladder in
-``stale_data``.
+Two cache tiers: prior-result reuse via ``DatasetRunStore.load_reusable_results``
+(addressed by ``PipelineSchema.prefix_keys`` for archive lineage) and per-node
+output reuse via the suffix-hash cache (see ``docs/architecture/suffix-cache.md``).
+Single-sample measurement lives in ``sample_measurement``; the stale-data
+ladder in ``stale_data``.
 
 Interrupt handling is pulled in from the caller via ``ScoringEnv.stop_check``
 (polled between queries).  A hard cancel (``KeyboardInterrupt`` /
@@ -79,7 +79,7 @@ async def _run_query_loop(
     save_run: Callable[..., None] | None,
 ) -> QueryLoopResult:
     """Evaluate dataset queries, reusing prior results where available."""
-    intermediate_cache = ctx.store.intermediate_cache if ctx.store else None
+    suffix_cache = ctx.store.suffix_cache if ctx.store else None
     results: list[QueryResult] = []
     consecutive_errors = 0
 
@@ -105,7 +105,7 @@ async def _run_query_loop(
                 ctx.backend_client,
                 pipeline_params=search_point.pipeline_params,
                 pipeline_schema=ctx.pipeline_schema,
-                intermediate_cache=intermediate_cache,
+                suffix_cache=suffix_cache,
                 backend_id=ctx.backend_id,
                 scorer=ctx.scorer,
             )
@@ -119,7 +119,7 @@ async def _run_query_loop(
                     ctx.backend_client,
                     pipeline_params=search_point.pipeline_params,
                     pipeline_schema=ctx.pipeline_schema,
-                    intermediate_cache=intermediate_cache,
+                    suffix_cache=suffix_cache,
                     backend_id=ctx.backend_id,
                     search_memory=ctx.search_memory,
                     scorer=ctx.scorer,
