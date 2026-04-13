@@ -1,0 +1,34 @@
+{
+  "campaign_config": {
+    "dataset_name": "bbeh",
+    "dataset_type": "llm-only",
+    "scoring": "exact_match(predicted, ground_truth)",
+    "sp_budget_ttest": 10,
+    "recon_sample_size": 10,
+    "exclude_nodes": [],
+    "pipeline_overrides": {},
+    "optimization": {
+      "l1_patience": 2,
+      "max_rounds": 3,
+      "n_variants": 5,
+      "creativity": 0.7,
+      "improvement_threshold": 0.01,
+      "seed": 42,
+      "max_failures": 10,
+      "degradation_threshold": 0.4,
+      "enable_l2": true,
+      "enable_l3": true,
+      "l2_patience": 2,
+      "l3_patience": 1,
+      "l2_temperature": 0.3,
+      "l3_temperature": 0.5,
+      "enable_critique": true
+    },
+    "optimizer_llm": {
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq",
+      "temperature": 0.4,
+      "max_tokens": 2000
+    }
+  }
+}

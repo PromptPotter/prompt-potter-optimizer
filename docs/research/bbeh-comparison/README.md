@@ -14,10 +14,11 @@ Head-to-head benchmark of **PromptPotter vs CAPO vs DSPy optimizers** on BBEH (B
 
 ## Notebooks
 
-| Notebook | Methods | Framework |
-|----------|---------|-----------|
-| `bbeh_capo.ipynb` | CAPO | [promptolution](https://github.com/automl/promptolution) |
-| `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot | [DSPy](https://github.com/stanfordnlp/dspy) |
+| Notebook | Methods | Framework | Runtime |
+|----------|---------|-----------|---------|
+| `bbeh_capo.ipynb` | CAPO | [promptolution](https://github.com/automl/promptolution) | Colab |
+| `bbeh_dspy.ipynb` | GEPA, MIPROv2, BootstrapFewShot | [DSPy](https://github.com/stanfordnlp/dspy) | Colab |
+| `bbeh_potter.ipynb` | L1/L2/L3 critique-guided loop | PromptPotter (this repo) | **Local** |
 
 `bbeh_dspy.ipynb` has a flags cell at the top to toggle which optimizers run:
 
@@ -27,15 +28,24 @@ RUN_MIPRO = True
 RUN_BOOTSTRAP = True
 ```
 
-PromptPotter runs via its own CLI (not a Colab).
-
 ## How to run
+
+**CAPO / DSPy (Colab):**
 
 1. Open notebook in Google Colab
 2. Add your Groq API key to Colab Secrets (key name: `GROQ_API_KEY`)
 3. Toggle optimizer flags if needed (DSPy notebook only)
 4. Run All
 5. Download the `results_*.json` output file(s)
+
+**PromptPotter (local):** runs against this repo, not Colab (PromptPotter is not on PyPI).
+
+1. `pip install -e ".[dev,jupyter]"` from the repo root, plus `pip install datasets`
+2. `.env` at the repo root with `GROQ_API_KEY` and `LOCAL_SCORING_SECRET`
+3. Open `bbeh_potter.ipynb` in Jupyter / VS Code and Run All
+4. `results_potter.json` is written next to the notebook
+
+The PromptPotter notebook uses the `LLMOnlyAdapter` — no FastAPI backend to stand up. Per-task loop (23 campaigns, one `cycle_id` per task) mirrors the CAPO/DSPy harness. Hyperparameters in the config cell are **unmeasured starting points** (pre-sweep); `results_potter.json` tags this via its `config.note` field so downstream comparison tables don't misread the numbers as tuned.
 
 ## Output format
 
