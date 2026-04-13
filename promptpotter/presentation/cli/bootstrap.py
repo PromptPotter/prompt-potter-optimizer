@@ -72,6 +72,7 @@ async def init_services_cli(
     dataset_name: str | None = None,
     dataset_type: str | None = None,
     local_scoring_token: str | None = None,
+    take_over: bool = False,
 ) -> SessionEnv:
     """Initialize services (logging + service init) for a CLI command."""
     from promptpotter.application.campaign.campaign_setup import init_services
@@ -88,6 +89,7 @@ async def init_services_cli(
         dataset_type=dataset_type,
         local_scoring_token=local_scoring_token,
         on_status=_status_sink,
+        take_over=take_over,
     )
 
 

@@ -220,6 +220,7 @@ async def init_services(
     dataset_name: str | None = None,
     dataset_type: str | None = None,
     local_scoring_token: str | None = None,
+    take_over: bool = False,
 ) -> SessionEnv:
     """Initialize store, client, and load experiment data.
 
@@ -243,6 +244,7 @@ async def init_services(
         dataset_type=dataset_type,
         local_scoring_token=local_scoring_token,
         on_status=print,
+        take_over=take_over,
     )
 
     if dataset_name and session.queries:

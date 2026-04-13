@@ -52,6 +52,7 @@ from promptpotter.presentation.ui.campaign import (  # noqa: E402
     prepare_scoring_context,
     run_optimization_notebook,
 )
+from promptpotter.shared.errors import ActiveSessionMismatchError  # noqa: E402
 
 
 def _build_config(
@@ -60,6 +61,7 @@ def _build_config(
     samples: int,
     variants: int,
     rounds: int,
+    patience: int,
     task_context: str,
 ) -> dict:
     return {
@@ -71,7 +73,7 @@ def _build_config(
         "pipeline_overrides": {},
         "task_context": {"task_description": task_context},
         "optimization": {
-            "l1_patience": 1,
+            "l1_patience": patience,
             "max_rounds": rounds,
             "n_variants": variants,
             "creativity": 0.7,
@@ -132,17 +134,43 @@ async def _run(args: argparse.Namespace) -> int:
         f"variants={args.variants} rounds={args.rounds}",
         flush=True,
     )
+    project_dir = _REPO_ROOT / ".promptpotter" / "projects" / args.dataset
+    print(f"[smoke] project dir:  {project_dir}", flush=True)
+    print(f"[smoke] campaigns:    {project_dir / 'campaigns'}", flush=True)
+    print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
-    session = await init_services(
-        backend_url=args.backend_url,
-        dataset_name=args.dataset,
-    )
+    try:
+        session = await init_services(
+            backend_url=args.backend_url,
+            backend_id=args.dataset,
+            dataset_name=args.dataset,
+            take_over=args.take_over,
+        )
+    except ActiveSessionMismatchError as exc:
+        print(f"[smoke] ERROR: {exc}", file=sys.stderr)
+        print(
+            "[smoke] Rerun with --take-over to clear the pointer and proceed.",
+            file=sys.stderr,
+        )
+        return 5
+
+    schema = session.pipeline_schema
+    if schema is None or not schema.available_models:
+        print(
+            f"[smoke] ERROR: pipeline schema for {args.dataset!r} declares no "
+            f"available_models. Add an `available_models: [...]` list to "
+            f"datasets/{args.dataset}/pipeline.json so the L1 validation rail "
+            f"can reject candidates that propose unsupported models.",
+            file=sys.stderr,
+        )
+        return 4
 
     campaign_config = _build_config(
         args.dataset,
         samples=args.samples,
         variants=args.variants,
         rounds=args.rounds,
+        patience=args.patience,
         task_context=args.task_context,
     )
     pipeline_params = configure_pipeline(session, campaign_config)
@@ -167,14 +195,37 @@ async def _run(args: argparse.Namespace) -> int:
         session=session,
     )
 
-    best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0.0) or 0.0)
     cycle_id = getattr(result, "cycle_id", "") or ""
+    cycle_dir = (
+        _REPO_ROOT / ".promptpotter" / "projects" / args.dataset / "campaigns" / cycle_id
+        if cycle_id
+        else None
+    )
+
+    if not campaign_rounds:
+        print(
+            f"\n[smoke] dataset={args.dataset} "
+            f"rounds=0 "
+            f"cycle={cycle_id or 'unknown'} "
+            f"status=interrupted (no rounds — cache resume found nothing to do)",
+            flush=True,
+        )
+    else:
+        best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0.0) or 0.0)
+        print(
+            f"\n[smoke] dataset={args.dataset} "
+            f"rounds={len(campaign_rounds)} "
+            f"best_acc={best.get('accuracy', 0.0):.3f} "
+            f"cycle={cycle_id or 'unknown'} "
+            f"status=ok",
+            flush=True,
+        )
+
+    if cycle_dir is not None:
+        print(f"[smoke] cycle dir: {cycle_dir}", flush=True)
     print(
-        f"\n[smoke] dataset={args.dataset} "
-        f"rounds={len(campaign_rounds)} "
-        f"best_acc={best.get('accuracy', 0.0):.3f} "
-        f"cycle={cycle_id or 'unknown'} "
-        f"status=ok",
+        "[smoke] note: smoke tool is sessionless (no campaigns/sessions/<id>/"
+        "campaign_state.json exists); inspect cycle dir above for trial JSONs.",
         flush=True,
     )
 
@@ -190,7 +241,13 @@ def _parse_args() -> argparse.Namespace:
     p.add_argument("--samples", type=int, default=5, help="Queries per candidate (sp_budget_ttest)")
     p.add_argument("--variants", type=int, default=3, help="L1 candidates per round")
     p.add_argument("--rounds", type=int, default=1, help="max_rounds")
+    p.add_argument("--patience", type=int, default=1, help="l1_patience (consecutive stalls)")
     p.add_argument("--backend-url", default="http://127.0.0.1:8000")
+    p.add_argument(
+        "--take-over",
+        action="store_true",
+        help="Clear the active-session pointer if it names a different dataset",
+    )
     p.add_argument(
         "--task-context",
         default="Solve the following problem. Provide only the final answer, nothing else.",

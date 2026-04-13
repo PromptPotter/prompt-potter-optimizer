@@ -5,6 +5,7 @@
   "backend_name": "BBEH Benchmark",
   "backend_type": "benchmark",
   "type": "llm-only",
+  "available_models": ["openai/gpt-oss-120b"],
   "nodes": {
     "llm_only": {
       "type": "generation",

@@ -199,6 +199,7 @@ async def init_services(
     dataset_type: str | None = None,
     local_scoring_token: str | None = None,
     on_status: Callable[[str], None] | None = None,
+    take_over: bool = False,
 ) -> SessionEnv:
     """Initialize store, client, pipeline schema, and load eval data.
 
@@ -206,7 +207,13 @@ async def init_services(
     When ``dataset_type="llm-only"``, uses :class:`LLMOnlyAdapter` instead —
     gated behind ``LOCAL_SCORING_SECRET`` + ``local_scoring_token`` for multi-tenant
     safety.
+
+    Refuses to run if the active-session pointer
+    (``.promptpotter/active_session.json``) names a different ``backend_id``
+    unless ``take_over=True`` is passed. CLI ``init`` passes ``take_over=True``;
+    other surfaces (notebook, smoke tool) inherit the guardrail by default.
     """
+    from promptpotter.shared.errors import ActiveSessionMismatchError
 
     def _status(msg: str) -> None:
         if on_status:
@@ -220,6 +227,23 @@ async def init_services(
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
+
+    # Guardrail: refuse to drift to a different project silently.
+    active_bid, active_sid = store.sessions.read_active_pointer()
+    if active_bid and active_bid != backend_id:
+        if not take_over:
+            raise ActiveSessionMismatchError(
+                active_backend_id=active_bid,
+                active_session_id=active_sid,
+                requested_backend_id=backend_id,
+            )
+        # Take-over: clear the pointer. The smoke tool / notebook is sessionless
+        # by design (M9 gap), so writing {backend_id, ""} would be a lie that
+        # downstream `SessionStore.load_active()` turns into an ugly "session not
+        # found" error. Clearing leaves the workspace in "no active session"
+        # state, which is what a CLI `init` then correctly recovers from.
+        store.sessions.clear_active_pointer()
+        _status(f"Took over active session: cleared pointer (was {active_bid!r})")
 
     # Decide eval client: local LLM-only (if authorized) or backend (default)
     use_local = dataset_type == "llm-only" and _validate_local_access(local_scoring_token)

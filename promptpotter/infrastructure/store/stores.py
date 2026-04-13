@@ -366,6 +366,26 @@ class SessionStore:
             encoding="utf-8",
         )
 
+    def clear_active_pointer(self) -> None:
+        """Delete the active-session pointer file, if present. Idempotent."""
+        _ACTIVE_SESSION_PATH.unlink(missing_ok=True)
+
+    def read_active_pointer(self) -> tuple[str, str]:
+        """Return ``(backend_id, session_id)`` from the pointer, or ``("", "")``.
+
+        Unlike :meth:`load_active`, this does NOT raise if the pointer is missing
+        or the referenced session has been deleted — it only inspects the raw
+        pointer file. Used by guardrails that need to compare the pointer to a
+        requested backend without coupling to session lifecycle.
+        """
+        if not _ACTIVE_SESSION_PATH.exists():
+            return "", ""
+        try:
+            ptr = json.loads(_ACTIVE_SESSION_PATH.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return "", ""
+        return ptr.get("backend_id", ""), ptr.get("session_id", "")
+
     def load_active(
         self,
         session_override: str | None = None,

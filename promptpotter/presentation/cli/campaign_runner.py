@@ -74,6 +74,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         dataset_name=dataset_name,
         dataset_type=dataset_type,
         local_scoring_token=local_scoring_token,
+        take_over=True,  # cmd_init always rewrites the pointer
     )
     backend_id = session.backend_id  # may have been derived from dataset_name
 

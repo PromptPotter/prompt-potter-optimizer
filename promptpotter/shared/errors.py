@@ -26,6 +26,37 @@ class ErrorCategory(enum.StrEnum):
     UNKNOWN = "UNKNOWN"
 
 
+class ActiveSessionMismatchError(RuntimeError):
+    """Raised when a caller requests a backend different from the active pointer.
+
+    ``.promptpotter/active_session.json`` is the "currently active tab" of the
+    campaign workspace. Any entry point (CLI, notebook, smoke tool) that asks
+    :func:`init_services` for a different ``backend_id`` without explicitly
+    passing ``take_over=True`` hits this error instead of silently drifting to
+    a different project. Pass ``take_over=True`` to clear the pointer and
+    proceed, or run ``python -m promptpotter init ...`` for the new dataset
+    first (which rewrites the pointer as part of session creation).
+    """
+
+    def __init__(
+        self,
+        *,
+        active_backend_id: str,
+        active_session_id: str,
+        requested_backend_id: str,
+    ) -> None:
+        self.active_backend_id = active_backend_id
+        self.active_session_id = active_session_id
+        self.requested_backend_id = requested_backend_id
+        super().__init__(
+            f"Active session points at backend {active_backend_id!r} "
+            f"(session {active_session_id!r}), but this call requested "
+            f"backend {requested_backend_id!r}. "
+            f"Pass take_over=True to clear the pointer and proceed, or run "
+            f"`python -m promptpotter init ...` for the new dataset first."
+        )
+
+
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """Return True if *result* represents a failed evaluation.
 

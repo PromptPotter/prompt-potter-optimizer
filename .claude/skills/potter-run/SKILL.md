@@ -34,6 +34,7 @@ Export: `python -m promptpotter export <format> --backend-id <id> -o <file>`
 Rules the whole flow obeys:
 
 - **Resume is the default.** `.promptpotter/active_session.json` stores `{backend_id, session_id}` like a browser's active tab. Every command except `init` reads it. If it points to a valid session matching the user's request, **skip `init`** and jump to whichever phase the session needs next. Only `init` (new/fresh / dataset mismatch) overwrites the pointer.
+- **`init_services` enforces the pointer.** The application-layer `init_services()` refuses to run against a backend different from the active pointer unless `take_over=True` is passed. CLI `init` passes it automatically; the smoke tool surfaces it as `--take-over`. Silent drift (working on dataset X while the pointer claims dataset Y) is no longer possible — you get a hard `ActiveSessionMismatchError` instead.
 - **Always `--skip-baseline`.** Baseline is evaluated automatically before the first round. Explicit baseline only when substantial historical data exists *and* the user asks.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking ("this will take ~Xmin, OK?"). Never `run_in_background` CLI commands — stale processes leak credits. If a command auto-backgrounds by hitting timeout, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop on 502s.** If logs show `502 Bad Gateway`, halt and tell the user: "Backend is returning 502s — likely Groq rate-limiting. Please check and restart." Do not retry on your own.
