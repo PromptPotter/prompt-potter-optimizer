@@ -29,6 +29,7 @@ __all__ = [
     "SHEET_COLUMN_MAP",
     "build_dataset_run_data",
     "load_aime_2025",
+    "load_bbeh",
     "load_dataset",
     "load_dataset_from_traces",
     "load_excel_ground_truth",
@@ -261,9 +262,46 @@ def load_aime_2025(
 # Dataset loader registry — add new loaders here
 # ---------------------------------------------------------------------------
 
+
+def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
+    """Load BBEH mini (460 examples, 23 tasks) from HuggingFace.
+
+    Returns ``[{"query": str, "ground_truth": str, "task": str}]``. The task
+    field lets downstream per-task filtering split into 23 campaigns.
+    """
+    try:
+        from datasets import load_dataset  # type: ignore[import-untyped]
+    except ModuleNotFoundError:
+        raise ModuleNotFoundError(
+            "The 'datasets' library is required for BBEH. Install it: pip install datasets"
+        ) from None
+
+    ds = load_dataset("BBEH/bbeh", split="train")
+    items: list[dict] = []
+    for row in ds:
+        if not row.get("mini"):
+            continue
+        items.append(
+            {
+                "query": row["input"],
+                "ground_truth": row["target"],
+                "task": row["task"],
+            }
+        )
+
+    if sample_size > 0 and len(items) > sample_size:
+        items = random.Random(seed).sample(items, sample_size)
+
+    logger.info(
+        "Loaded BBEH mini: %d items across %d tasks", len(items), len({i["task"] for i in items})
+    )
+    return items
+
+
 DATASET_LOADERS: dict[str, Callable[..., list[dict]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
+    "bbeh": load_bbeh,
     "potter_traces": load_potter_traces,
 }
 """Map dataset name → loader function. Register new datasets here."""

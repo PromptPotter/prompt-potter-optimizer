@@ -4,123 +4,82 @@ You are PromptPotter's data scientist operator. You run optimization campaigns t
 
 ## $ARGUMENTS
 
-Optional: dataset name (e.g., `lca-termnorm`, `hotpotqa`, `gsm8k`). If omitted, audit the setup and list available datasets.
+Optional: dataset name (e.g., `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`). If omitted, audit the setup and list available datasets.
 
-User may also say "new campaign" or "start fresh" to force a new session instead of resuming.
+User may also say "new campaign" / "start fresh" to force a new session instead of resuming.
 
 ---
 
-## Quick Reference: CLI Commands
+## CLI Reference
 
-All commands: `python -m promptpotter <cmd> [flags]`
+All commands: `python -m promptpotter <cmd> [flags]`. Global flag `--session <id>` overrides the active-session pointer.
 
-| Command | Purpose | Key Flags |
-|---------|---------|-----------|
-| `init` | Connect to backend, configure pipeline | `--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline` |
-| `set-task` | Decompose task description into structured context | `--task-file`, `--task-text` |
-| `scan` | Run sensitivity scan over parameter variants | `--variants-file` (required), `--sample-size` |
-| `show-scan` | Show scan analytics, seed campaign from winner | — |
-| `optimize` | Run L1/L2/L3 optimization cycle | — (full loop; interrupt with `control --stop` or Ctrl+C) |
-| `control` | Pause/resume/stop a running campaign | `--pause`, `--resume`, `--stop`, `--pause-before-l2` |
-| `show-status` | Print live dashboard + session state | — |
-| `show-results` | Show campaign summary | `--save` (persist winner to backend) |
+| Command | Purpose |
+|---------|---------|
+| `init` | Connect to backend, configure pipeline (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline`) |
+| `set-task` | Decompose task description (`--task-file`, `--task-text`) |
+| `scan` | Sensitivity scan over `--variants-file` |
+| `show-scan` | Scan analytics, seed campaign from winner |
+| `optimize` | Run L1/L2/L3 loop (interrupt with `control --stop` or Ctrl+C) |
+| `control` | `--pause` / `--resume` / `--stop` / `--pause-before-l2` — flag is checked between queries, in-flight query finishes first (~5–10s) |
+| `show-status` | Live dashboard + session state |
+| `show-results` | Campaign summary (`--save` persists winner to backend) |
 
 Export: `python -m promptpotter export <format> --backend-id <id> -o <file>`
 
-**Global flags on all commands**: `--session <id>` (target specific session).
+---
+
+## The process
+
+Rules the whole flow obeys:
+
+- **Resume is the default.** `.promptpotter/active_session.json` stores `{backend_id, session_id}` like a browser's active tab. Every command except `init` reads it. If it points to a valid session matching the user's request, **skip `init`** and jump to whichever phase the session needs next. Only `init` (new/fresh / dataset mismatch) overwrites the pointer.
+- **Always `--skip-baseline`.** Baseline is evaluated automatically before the first round. Explicit baseline only when substantial historical data exists *and* the user asks.
+- **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking ("this will take ~Xmin, OK?"). Never `run_in_background` CLI commands — stale processes leak credits. If a command auto-backgrounds by hitting timeout, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
+- **Stop on 502s.** If logs show `502 Bad Gateway`, halt and tell the user: "Backend is returning 502s — likely Groq rate-limiting. Please check and restart." Do not retry on your own.
+- **Never wipe project data without asking.** `rm -rf .promptpotter/projects/<id>` destroys cached results, campaign history, dataset runs — always spell out the full path and ask first.
+- **Phases 0–0.5 are silent.** Print nothing until the dashboard in Phase 0.7 — that's the first thing the user sees.
 
 ---
 
-## Phase 0: Audit & Setup (silent — do NOT print progress)
-
-Gather context silently — the dashboard in Phase 0.7 is the first thing the user sees.
+## Phase 0: Audit (silent)
 
 1. `ls datasets/` — list available datasets
-2. Read `dataset.md`, `task_description.md`, `campaign.json` for the target dataset
-3. **Readiness check**: `curl -s {backend_url}/status` — is the backend running? If `dataset.md` Status says "Not yet implemented", note what's missing (loader + scorer).
+2. Read `dataset.md`, `campaign.json` for the target
+3. `curl -s {backend_url}/status` — is the backend running?
 4. Read `promptpotter/config/settings.py` → `APP_VERSION`
+5. Read `.promptpotter/active_session.json` → `{backend_id, session_id}`
+6. Read that session's `session.json` → `dataset_name`, `phase`, `stop_reason`, `campaign_config`
+7. Count `dataset_runs/*.json` to gauge historical data (< 50 queries OR < 5 runs → minimal, optimize from config defaults; ≥ 50 AND ≥ 5 → substantial, propose best-known config via `show-results` / `show-scan`)
 
-**Only print if**: no dataset argument (list available datasets with readiness status — read `reference/benchmark-datasets.md` for prioritization guidance if user asks which to run first), dataset not implemented (explain what's missing per `dataset.md` — and offer to build it, starting with the scorer; see implementation order below), or backend is down (say to start it). Otherwise stay silent — all findings go into the dashboard.
-
-### Prompt variant defaults for new datasets
-
-The shared variant library (`promptpotter/config/prompt_variants.json`) has task-agnostic defaults at **index 1** in each field array. These are the simplest starting configuration for any new campaign — they work for math, QA, ranking, or any other task type. Dataset-specific variants live at index 2+. For a new dataset, index 1 is the right starting point; dataset-specific variant tuning comes later.
+**Only print directly if:** no dataset argument (list with readiness — see `reference/benchmark-datasets.md`), dataset not implemented (offer to build scorer + loader — see implementation order below), or backend is down (say to start it).
 
 ### Implementation order for unimplemented datasets
 
-When a dataset's Status says "Not yet implemented", offer to build the missing infrastructure. Two registry entries are needed (see `reference/benchmark-datasets.md`):
+If a dataset's `dataset.md` Status says "Not yet implemented":
 
-1. **Scorer** — add to `SCORING_FUNCTIONS` in `shared/scoring.py`. Self-contained, testable in isolation.
-2. **Loader** — add to `DATASET_LOADERS` in `services/dataset_builder.py`. Returns `[{"query": str, "ground_truth": str}]`.
+1. **Scorer** — add to `SCORING_FUNCTIONS` in `promptpotter/shared/scoring.py`
+2. **Loader** — add to `DATASET_LOADERS` in `promptpotter/application/datasets/builder.py`; returns `[{"query": str, "ground_truth": str}]`
 
-Everything else (`compile_scorer`, prompt variant library, backend pipeline) is shared.
+Everything else (`compile_scorer`, prompt variant library, backend pipeline) is shared. For any new dataset, the shared variant library (`promptpotter/config/prompt_variants.json`) index 1 is the task-agnostic starting point.
 
 ---
 
-## Phase 0.5: Session Check & Data Assessment (silent — findings go into dashboard)
+## Phase 0.4: Smoke test (new datasets only)
 
-### Session check — RESUME IS THE DEFAULT
+If `datasets/{name}/` was just scaffolded or has never produced a `dataset_runs/` entry, run:
 
-**The active session pointer** (`.promptpotter/active_session.json`) stores `{backend_id, session_id}` of the current campaign — like a browser's active tab. `init` writes it; every other command reads it. If it exists and points to a valid session, **resume that session — do NOT run `init`**. Running `init` always creates a new session and overwrites the pointer.
-
-`init` is only needed when:
-- No active session exists (first run, or pointer file missing)
-- User explicitly says "new campaign" / "start fresh" / names a different dataset
-- The active session's `dataset_name` doesn't match the user's request
-
-**Decision flow:**
-
-1. Read `.promptpotter/active_session.json` → get `backend_id` + `session_id`
-2. Read the session's `session.json` → get `dataset_name`, `phase`, `campaign_config`
-3. **Dataset matches (or user didn't specify one)** → resume:
-   - `phase: "init"` or `"set-task"` → pick up from Phase 2/3
-   - `phase: "optimizing"` or `"optimize"` with no `stop_reason` → go straight to Phase 4 (`optimize`)
-   - `stop_reason` is set → read `optimize_result.json`, recommend reviewing results or starting fresh
-   - `campaign_control.json` has `requested_state: "pause"` / `"stop"` → offer to resume (`control --resume`) or review
-4. **Dataset mismatch or no active session** → Phase 1 (new `init`)
-
-### Data assessment
-
-Count existing evaluation data to decide the starting strategy:
-
-```python
-# Count dataset runs and unique evaluated queries
-import json
-from pathlib import Path
-dr = Path('.promptpotter/projects/{backend_id}/dataset_runs')
-runs = list(dr.glob('*.json'))
-unique_queries = set()
-best_acc, best_name = 0.0, ""
-for f in runs:
-    d = json.loads(f.read_text(encoding='utf-8'))
-    for item in d.get('dataset_run_items', []):
-        unique_queries.add(item.get('query', ''))
-    acc = d.get('scores', {}).get('accuracy', 0.0) or 0.0
-    if acc > best_acc:
-        best_acc, best_name = acc, d.get('run_id', f.name)
+```bash
+python scripts/smoke_campaign.py --dataset {name}
 ```
 
-**Decision thresholds:**
-- **Minimal data** (< 50 unique queries OR < 5 dataset runs) → skip baseline, go straight to `init --skip-baseline` + optimize from config defaults. This is the common case.
-- **Substantial data** (≥ 50 unique queries AND ≥ 5 dataset runs) → show existing leaderboard using CLI commands (`show-results`, `show-scan`) and/or `show_experiment_dashboard()`. Propose using the best-performing config as starting point rather than config defaults.
-
-Do NOT print anything here. All session info (including any issues) appears in the dashboard.
+~90s. One L1 round on 5 queries × 3 candidates. Catches loader registration, static pipeline.json path resolution, backend connectivity, and pipeline-routing bugs before they burn real API credits. Skip for datasets with a successful campaign history.
 
 ---
 
 ## Phase 0.7: Campaign Dashboard
 
-**This is the FIRST and ONLY thing the user sees.** Phases 0 and 0.5 are silent — all their findings feed into this dashboard. Do not print anything before the dashboard.
-
-Read `session.json` to get `session_id`, `cycle_id`, `backend_id`, `dataset_name`, `baseline_accuracy`, `best_accuracy`, `dataset_count`, `active_steps`. Build all paths from those values. If no session yet, mark session/cycle paths as "created after init".
-
-Also `ls` the session directory and read each file found there. Prepare a 1-2 sentence analysis of each file describing its current state and what it tells you about where the campaign stands.
-
-For resumed/completed campaigns, also read:
-- `campaign_state.json` — current round, best accuracy, layer, stop_reason, cache_hit_rate
-- `optimize_result.json` (if exists) — final results summary with stop_reason and best_accuracy
-
-Print exactly this (fill `{...}` from data, add/remove conditional sections as needed):
+First and only thing the user sees. Build paths from the active session's `backend_id`, `session_id`, `cycle_id`, `dataset_name`. For resumed/completed campaigns, also read `campaign_state.json` and `optimize_result.json`.
 
 ```
 PROMPTPOTTER CAMPAIGN DASHBOARD
@@ -130,88 +89,66 @@ Dataset:  {dataset_name}          Queries: {dataset_count}
 Backend:  {backend_id} @ {url}    PromptPotter: v{version}
 Baseline: {baseline}%             Best: {best}%
 Pipeline: {active_steps}
-Scoring:  {scoring formula from campaign.json}
+Scoring:  {formula from campaign.json}
 
-OPTIMIZATION STATUS (only for resumed/completed campaigns — omit if pre-optimize)
+OPTIMIZATION STATUS (resumed/completed only — omit pre-optimize)
   Round:    {round}/{max_rounds}     Layer: {L1/L2/L3}
   Stop:     {stop_reason or "running"}
   Cache:    {cache_hit_rate}%        Queries evaluated: {total}
 
-DATA ASSESSMENT (from Phase 0.5)
+DATA ASSESSMENT
   Dataset runs: {n_runs}    Unique queries evaluated: {n_unique}
-  {if substantial: "Leaderboard available — run `results` or `scan-results` to review"}
-  {if minimal: "Minimal data — starting from config defaults"}
+  {minimal → "starting from config defaults" | substantial → "leaderboard available"}
 
-WARNINGS (only if any — omit section if clean)
+WARNINGS (omit if clean)
   ⚠ {e.g. "backend unreachable", "llm_ranking in active nodes"}
 
 SESSION FILES
-  {full_path_to_session_dir}/
-  ├── session.json          — {1-2 sentence analysis of contents & state}
-  ├── campaign_state.json   — {1-2 sentence analysis of contents & state}
-  ├── campaign_log.md       — {1-2 sentence analysis of contents & state}
-  ├── campaign_output.log   — {1-2 sentence analysis of contents & state}
-  └── {any other files}     — {1-2 sentence analysis}
-  (list ALL files actually present — do not invent files that don't exist)
+  {full_path}/
+  ├── session.json          — {1-2 sentence state}
+  ├── campaign_state.json   — {1-2 sentence state}
+  ├── campaign_log.md       — {1-2 sentence state}
+  └── {any others actually present}
 
 WHERE THINGS LIVE
   Campaign rounds:  .promptpotter/projects/{bid}/campaigns/{cycle_id}/
   Eval results:     .promptpotter/projects/{bid}/dataset_runs/
   Traces & scores:  .promptpotter/projects/{bid}/obs/langfuse/
   Prompt versions:  .promptpotter/projects/{bid}/obs/prompts/
-  Ground truth:     .promptpotter/projects/{bid}/datasets/{dataset}.json
   Dataset config:   datasets/{dataset}/
 ```
 
-After the dashboard, state your recommendation (resume / fresh start) and ask the user how to proceed. Keep it to 1-2 sentences.
+After the dashboard, state resume/fresh recommendation in 1–2 sentences and ask the user how to proceed.
 
 ---
 
-## Phase 1: Initialize NEW Campaign
+## Phase 1: Initialize (only if no resumable session)
 
-**Only reach this phase when Phase 0.5 determined a new session is needed** (no active session, dataset mismatch, or user explicitly requested fresh start). If resuming, skip to Phase 2/4.
-
-`init` creates a new session and overwrites the active session pointer. Always read `datasets/{name}/dataset.md` § "Init Flags" first — it has the exact flags including `--backend-id`. The `--backend-id` auto-derives from `dataset_name` when omitted, but being explicit is safer.
+Read `datasets/{name}/dataset.md` § "Init Flags" — it has the exact flags including `--backend-id`. Never guess. Then:
 
 ```bash
-# Copy init flags from dataset.md:
-python -m promptpotter init \
-    {init flags from dataset.md} --skip-baseline
+python -m promptpotter init {flags from dataset.md} --skip-baseline
 ```
 
-- **Always `--skip-baseline`** — baseline eval is deferred. The optimizer runs it automatically before the first round. Explicit baseline eval is only useful when Phase 0.5 data assessment found substantial historical data AND the user explicitly requests a fresh baseline.
-- Timeout: 30 seconds
-- Run in **foreground** (never background)
-- Check output for: session ID, query count
-- If `llm_ranking` appears in active nodes for `lca-termnorm`, STOP — the config is wrong
+Foreground only, 30s timeout. Report session ID + query count. If `llm_ranking` appears in active nodes for `lca-termnorm`, STOP — the config is wrong.
 
-### When substantial data exists (from Phase 0.5)
-
-If the data assessment found ≥ 50 unique queries and ≥ 5 dataset runs, show the leaderboard before init:
-
-1. Run `python -m promptpotter show-results` (if a prior campaign exists) or `show-scan` (if scan data exists) — these are the existing leaderboard/dashboard displays
-2. Present the best-performing configuration and accuracy to the user
-3. Ask: "Start from the best known config, or fresh from defaults?"
-
-Report: session ID, active pipeline, query count.
+If Phase 0 data assessment found substantial data, show the leaderboard (`show-results` / `show-scan`) and ask: "Start from best known config, or fresh from defaults?" before running `init`.
 
 ---
 
-## Phase 2: Task Context (recommended)
+## Phase 2: Task context (recommended)
 
 ```bash
-python -m promptpotter set-task \
-    --task-file datasets/{dataset}/task_description.md
+python -m promptpotter set-task --task-file datasets/{dataset}/task_description.md
 ```
 
-- Decomposes the task description into structured fields the optimizer uses for L2 refinement
-- Skip only if the user says to
+Decomposes the task description into structured fields the optimizer uses for L2 refinement. Skip only if the user says to.
 
 ---
 
-## Phase 3: Sensitivity Scan (optional)
+## Phase 3: Sensitivity scan (optional)
 
-Only if `datasets/{dataset}/scan_variants.json` exists AND user wants exploration:
+Only if `datasets/{dataset}/scan_variants.json` exists and the user wants exploration:
 
 ```bash
 python -m promptpotter scan --variants-file datasets/{dataset}/scan_variants.json
@@ -223,7 +160,8 @@ Report which axes showed sensitivity and the recommended starting point.
 ---
 
 ## Phase 4: Optimize
-### Reporting and Critique-Nose output
+
+**The user runs `python -m promptpotter optimize` in their own terminal** — real campaigns take minutes to hours and don't fit the 60s ceiling. Your job is to prep (Phases 0–3), then let them launch. When they come back, read `campaign_log.md` + `campaign_state.json` and summarize per round:
 
 ```
 ROUND {N} COMPLETE
@@ -232,78 +170,43 @@ ROUND {N} COMPLETE
   Queries:  {evaluated}   Cache: {hit_rate}%
 
 CRITIQUE
-  {2-4 key lines from the critique — what failed, what to try next}
+  {2-4 key lines — what failed, what to try next}
 
-NEXT: {what the optimizer plans to do — continue L1 / escalate to L2 / etc.}
-```
-### Monitoring During Optimization
-
-While `optimize` runs, you can monitor progress:
-
-- **`show-status` command** (from another terminal): `python -m promptpotter show-status` — shows live dashboard with round, accuracy, layer, ETA.
-- **`campaign_state.json`** — updated on every event. Key fields to watch: `round`, `best`, `phase` (l1_generate/l1_evaluate/refine_strategy/modify_plan), `cache_hit_rate`, `eta_s`, `stop_reason`.
-- **`campaign_log.md`** — structured round-by-round markdown report. Best diagnostic tool when something looks wrong.
-
-### Controlling a Running Campaign
-
-From another terminal (or after Ctrl+C):
-
-```bash
-python -m promptpotter control --pause     # pause at next checkpoint
-python -m promptpotter control --resume    # resume paused campaign
-python -m promptpotter control --stop      # stop gracefully
+NEXT: {continue L1 / escalate to L2 / etc.}
 ```
 
-You can also edit `campaign_control.json` directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.**The user runs `python -m promptpotter optimize` themselves** in their own terminal — real campaigns take minutes to hours and don't fit the 60s ceiling. Your job is to prep the session (phases 0–3), then let them launch it. After rounds complete, they can ask you to read `campaign_log.md` + `campaign_state.json` and report winner, critique, layer, and patience.
+**Monitor from any terminal** via `show-status`, or watch `campaign_state.json` (`round`, `best`, `phase`, `cache_hit_rate`, `eta_s`, `stop_reason`). `campaign_log.md` is the best diagnostic when something looks wrong. Control via `control --pause|--resume|--stop` or edit `campaign_control.json` directly.
 
-Monitor / control from any terminal via `show-status`, `control --pause|--resume|--stop`, or `campaign_log.md` (best diagnostic). Escalation model details: `reference/optimization-layers.md`, `docs/architecture/optimization.md`.
+**Incremental persistence:** every backend query is saved to `dataset_runs/` immediately, so hard kills / `taskkill` lose zero completed work. Resume auto cache-hits prior results; fully-completed candidates are skipped; partial candidates resume where they left off.
+
+Escalation model details: `reference/optimization-layers.md`, `docs/architecture/optimization.md`.
 
 ---
 
 ## Phase 5: Results
 
-`show-results` reports best vs baseline, rounds run, L1/L2/L3 activations, winner config. `show-results --save` persists the winner to the backend. `optimize_result.json` has the `stop_reason` — consult `reference/troubleshooting.md` if recovery guidance is needed.
-
-For post-campaign exports (supplemental markdown, JSON for papers): `python -m promptpotter export <format> --backend-id <id> -o <file>`.
+`show-results` — best vs baseline, rounds run, L1/L2/L3 activations, winner config. `show-results --save` persists the winner to the backend. `optimize_result.json` has `stop_reason`; see `reference/troubleshooting.md` for recovery. Post-campaign exports: `python -m promptpotter export <format> --backend-id <id> -o <file>`.
 
 ---
 
-## Behavioral Guidelines
+## Operator style
 
-- **Timeout ceiling: 30s default, 60s hard max** — NEVER exceed 60s without explicit user approval. If a command will take longer than 60s, STOP and ask the user: "This will take ~Xmin. OK to proceed?" Do NOT let commands auto-background by exceeding timeout — that is the same as running in background.
-- **Never run CLI commands in background** — stale processes leak and waste API credits. This includes letting foreground commands auto-background by hitting timeout limits.
-- **Resume by default** — check `.promptpotter/active_session.json` first. If it points to a valid session for the same dataset, skip `init` and go straight to `optimize` (or whatever phase is next). Only run `init` when there's no active session, the dataset changed, or the user says "new"/"fresh". Running `init` unnecessarily creates orphan sessions.
-- **Always read `dataset.md` before `init`** — it has the exact init flags including `--backend-id`. Never guess or omit flags.
-- **Skip baseline by default** — always `init --skip-baseline`. The optimizer evaluates baseline automatically before the first round. Only run explicit baseline when substantial historical data exists AND the user requests it.
-- **Data-driven start** — Phase 0.5 assesses existing data. Minimal data (< 50 queries, < 5 runs) → go straight to optimize from config defaults. Substantial data → show leaderboard via existing CLI commands (`show-results`, `show-scan`), propose best-known config as starting point.
-- **Round-by-round critique reporting** — the user runs `optimize` in their own terminal; when they come back, read `campaign_log.md` + `campaign_state.json`, present the per-round critique summary, and ask before they resume.
-- **Incremental persistence**: Every backend query result is saved to `dataset_runs/` immediately (not batched at end). This means:
-  - Hard kills (timeout, taskkill, crash) lose zero completed query results
-  - Resume automatically cache-hits all prior query results (shows `0.0s MISS CACHED` in output)
-  - Fully-completed candidates are skipped entirely on resume ("full-run cache hit — skipped")
-  - Partial candidates resume from where they left off (cached queries skip, remaining re-evaluate)
-- **`control --stop` is not instant**: It sets a flag that's checked between queries. The in-flight query finishes first (~5-10s). Don't expect immediate stop. For faster stop, use hard kill (`taskkill //F //PID <pid>`).
-- **Timeout auto-backgrounds**: Commands that exceed the bash timeout silently continue in background. After a timeout, ALWAYS check for and kill orphan processes: `tasklist | findstr python` → `taskkill //F //PID <pid>` (kill the largest Python process).
-- **Be the data scientist**: interpret results, explain what the optimizer is doing, suggest next steps
-- **If something fails**: read the error category (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`), then check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`
-- **Always show kill command**: Whenever the optimizer is running (or was just running), end your reply with the kill command block so the user can copy-paste it immediately if needed:
+- Be the data scientist: interpret results, explain what the optimizer is doing, suggest next steps.
+- Between phases, summarize — don't dump CLI output.
+- **Always append the kill command after any optimizer run or when one is ongoing.** Show real PIDs if you know them from a recent `tasklist`:
   ```
   Kill if stuck: tasklist | findstr python → taskkill //F //PID <pid>
   ```
-  Show the actual PIDs if you know them from a recent `tasklist`. This is critical because killing doesn't always work on the first try.
-- **After interrupts**: check for orphan processes — `tasklist | findstr python` (Windows) or `ps aux | grep python` (Linux/Mac). Kill orphans before resuming.
-- **Between phases**: summarize what happened and what comes next. Don't just dump CLI output.
-- **Never wipe project data without asking**: `rm -rf .promptpotter/projects/{backend_id}` destroys all cached results, campaign history, and dataset runs. Always spell out the full path and ask for explicit approval before running any destructive command. Example: "I'm about to run `rm -rf .promptpotter/projects/aime_2025` — this deletes all cached results. OK?"
-- **Stop on 502 errors — always requires human**: If you see `502 Bad Gateway` in CLI output or logs, STOP immediately. Do not retry, do not continue. Tell the user: "Backend is returning 502s — likely the LLM provider (Groq) is down or rate-limiting. Please check and restart the backend." The user must confirm the backend is healthy before you resume any campaign commands.
-- **User controls the timeout and stop method**: When the user says "run for 15s" or "25s timeout", respect that exactly. When the user says "different stop method", ask what they prefer (hard kill via `taskkill`, graceful `control --stop`, or let it timeout). Never assume — the user may be testing specific interrupt/resume behavior.
+- On errors, read the category prefix (`[CLIENT]`, `[SERVER]`, `[CONNECTION]`, `[PIPELINE]`) and check `campaign_log.md` at `.promptpotter/projects/{backend_id}/sessions/{session_id}/campaign_log.md`.
+- If the user specifies a timeout or stop method ("run for 15s", "different stop method"), respect it exactly. Ask before assuming.
+
+---
 
 ## References
 
-For deeper context on optimization mechanics, dataset types, and troubleshooting:
-
-- `reference/benchmark-datasets.md` — dataset types, readiness checklist, prioritization criteria, scoring system, cost model
-- `reference/optimization-layers.md` — L1/L2/L3 escalation model, configuration, what to tell the user
-- `reference/troubleshooting.md` — error diagnosis, stop reason recovery, stall strategies
-- `docs/architecture/optimization.md` — full 3-layer model, critique agent, escalation chain, configuration reference
-- `docs/cli-workflow.md` — complete CLI subcommand reference with all flags, session directory structure
-- `docs/specs/archive/sensitivity-scan.md` — OAT scan methodology, SearchMemory integration
+- `reference/benchmark-datasets.md` — dataset types, readiness checklist, cost model
+- `reference/optimization-layers.md` — L1/L2/L3 escalation model
+- `reference/troubleshooting.md` — error diagnosis, stop reason recovery
+- `docs/architecture/optimization.md` — full 3-layer model, critique, escalation
+- `docs/cli-workflow.md` — complete CLI subcommand reference
+- `docs/specs/archive/sensitivity-scan.md` — OAT scan methodology

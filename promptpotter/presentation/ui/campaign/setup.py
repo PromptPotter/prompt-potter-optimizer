@@ -231,8 +231,8 @@ async def init_services(
 
     setup_logging()
 
-    # campaign/setup.py → display → promptpotter → repo_root
-    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    # campaign/setup.py → ui → presentation → promptpotter → repo_root
+    project_root = Path(__file__).resolve().parent.parent.parent.parent.parent
 
     session = await _init_services(
         backend_url=backend_url,
