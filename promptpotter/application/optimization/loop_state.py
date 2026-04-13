@@ -160,7 +160,7 @@ class LoopState:
     ) -> None:
         """Adopt a TransitionResult's new opt_sp and rebuild current_sp."""
         new_opt = transition.opt_search_point
-        new_opt.inherit_memory(self.opt_sp)
+        new_opt.memory = self.opt_sp.memory.model_copy(deep=True)
         self.opt_sp = new_opt
         assert self.current_sp is not None
         base_params = transition.pipeline_params or self.current_sp.pipeline_params

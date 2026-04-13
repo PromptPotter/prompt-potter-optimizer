@@ -205,7 +205,7 @@ async def refine_strategy(
     """
     escalation_section = format_escalation_report(
         escalation_check_result,
-        opt_sp.escalation_journal or None,
+        opt_sp.memory.escalation_journal or None,
         pipeline_params,
         pipeline_schema=pipeline_schema,
     )
@@ -222,9 +222,9 @@ async def refine_strategy(
     intelligence_sections = format_l2_intelligence(
         L2IntelligenceData(
             escalation_section=escalation_section,
-            warning_inventory=opt_sp.warning_inventory or None,
-            critique_text=opt_sp.critique_text,
-            l2_directive=opt_sp.l2_directive,
+            warning_inventory=opt_sp.memory.warning_inventory or None,
+            critique_text=opt_sp.memory.critique_text,
+            l2_directive=opt_sp.memory.l2_directive,
             search_memory_digest=(
                 search_memory.to_strategic_digest(include_correlations=True)
                 if search_memory is not None

@@ -126,7 +126,7 @@ async def _handle_escalation_signal(
     esc_check_result = signal["check_result"]
 
     if signal["target"] in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
-        state.opt_sp.record_escalation_event(
+        state.opt_sp.memory.record_escalation_event(
             round_num,
             esc_check_result,
             state.current_sp.pipeline_params if state.current_sp else None,
@@ -201,7 +201,7 @@ async def _post_round(
     """
     state.stall_count = 0 if round_result.improved else state.stall_count + 1
     if round_result.improved:
-        state.opt_sp.l2_directive = ""  # L2 directive is one-round only
+        state.opt_sp.memory.clear_volatile()
 
     cb.on_round_complete(round_result, state.stall_count)
 
@@ -254,7 +254,9 @@ async def _run_round_loop(
         while clean_rounds < max_rounds and round_num < hard_cap:
             is_probe = state.probe_next_round
             if is_probe:
-                warned = {q for q, e in state.opt_sp.warning_inventory.items() if e.get("warnings")}
+                warned = {
+                    q for q, e in state.opt_sp.memory.warning_inventory.items() if e.get("warnings")
+                }
                 round_eval_data = [d for d in dataset if d.get("query") in warned]
                 round_checks = None
             else:
@@ -379,9 +381,9 @@ async def _init_optimization(
         if trial:
             state.restore_from_trial(trial)
     else:
-        # thinking_styles is part of OptSearchPoint.MEMORY_FIELDS — only
-        # sample on fresh init so restore_from_trial's value wins on resume.
-        state.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
+        # Only seed thinking_styles on fresh init — restore_from_trial's
+        # value must win on resume, so don't overwrite it there.
+        state.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=config.seed)
 
     scoring_ctx = ScoringEnv.for_loop(
         session.backend_client,

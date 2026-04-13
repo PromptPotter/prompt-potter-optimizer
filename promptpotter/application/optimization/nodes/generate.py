@@ -119,12 +119,12 @@ async def l1_generate(
         "context_sections": format_context_sections(
             L1PromptData(
                 task_context=opt_sp.task_context or None,
-                critique_text=opt_sp.critique_text,
-                l2_directive=opt_sp.l2_directive,
-                thinking_styles=opt_sp.thinking_styles or None,
+                critique_text=opt_sp.memory.critique_text,
+                l2_directive=opt_sp.memory.l2_directive,
+                thinking_styles=opt_sp.memory.thinking_styles or None,
                 plan=opt_sp.plan or "",
-                warning_inventory=opt_sp.warning_inventory or None,
-                escalation_journal=opt_sp.escalation_journal or None,
+                warning_inventory=opt_sp.memory.warning_inventory or None,
+                escalation_journal=opt_sp.memory.escalation_journal or None,
                 is_probe_round=is_probe_round,
                 recon_brief=recon_brief,
                 scan_compact=scan_compact,

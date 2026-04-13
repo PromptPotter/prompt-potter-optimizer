@@ -103,17 +103,17 @@ def _maybe_emit_backend_warning(
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
     """Emit a one-shot backend advisory once degradation resets pile up."""
-    opt = state.opt_sp
-    if opt.backend_warning_emitted or config.backend_warning_threshold <= 0:
+    mem = state.opt_sp.memory
+    if mem.backend_warning_emitted or config.backend_warning_threshold <= 0:
         return
-    if opt.degradation_reset_count < config.backend_warning_threshold:
+    if mem.degradation_reset_count < config.backend_warning_threshold:
         return
 
-    opt.backend_warning_emitted = True
-    count = opt.degradation_reset_count
-    steps = sorted({e["problem_step"] for e in opt.escalation_journal if e.get("problem_step")})
+    mem.backend_warning_emitted = True
+    count = mem.degradation_reset_count
+    steps = sorted({e["problem_step"] for e in mem.escalation_journal if e.get("problem_step")})
     wtypes: Counter[str] = Counter()
-    for e in opt.escalation_journal:
+    for e in mem.escalation_journal:
         wtypes.update(e.get("warning_types") or {})
 
     emit_phase(
@@ -206,7 +206,7 @@ async def _do_l2_transition(
         )
 
     def _exit(transition: Any) -> dict[str, Any]:
-        warned_count, top_warning = warning_summary(state.opt_sp.warning_inventory)
+        warned_count, top_warning = warning_summary(state.opt_sp.memory.warning_inventory)
         return {
             "l2_round": state.escalation.l2.round,
             "param_changes_count": len(transition.opt_search_point.optimizer_params),
@@ -237,7 +237,7 @@ async def _do_l2_transition(
 
     if transition.task_context:
         state.opt_sp.task_context = transition.task_context
-    state.opt_sp.l2_directive = transition.l2_directive
+    state.opt_sp.memory.l2_directive = transition.l2_directive
     state.escalation.l2.record_entry(state.best_accuracy, state.best_composite)
     if transition.action == TransitionAction.PROBE:
         state.probe_next_round = True
@@ -351,7 +351,7 @@ async def _exhaust_or_reset(
     if reset_l3:
         state.escalation.l3.stall_count = 0
         state.escalation.l3.round = 0
-    state.opt_sp.degradation_reset_count += 1
+    state.opt_sp.memory.degradation_reset_count += 1
     _maybe_emit_backend_warning(state, config, round_num, on_phase)
     await _do_l2_transition(
         state,

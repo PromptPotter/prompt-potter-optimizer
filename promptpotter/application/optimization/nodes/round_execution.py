@@ -91,7 +91,7 @@ async def _generate_or_load_candidates(
         creativity=_creativity,
         model=config.model or "(default)",
         has_recon_brief=config.recon_brief is not None,
-        has_critique=bool(state.opt_sp.critique_text),
+        has_critique=bool(state.opt_sp.memory.critique_text),
         pipeline_params=state.current_sp.pipeline_params,
     )
 
@@ -311,8 +311,8 @@ async def execute_round(
     )
 
     # Update state with critique + thinking styles from eval output
-    state.opt_sp.critique_text = scoring_result.critique_text
-    state.opt_sp.thinking_styles = scoring_result.thinking_styles
+    state.opt_sp.memory.critique_text = scoring_result.critique_text
+    state.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
 
     # Compute failure analysis for next round's L1 context (Wave 1c)
     if scoring_result.winner_results and config.pipeline_schema:
@@ -346,7 +346,7 @@ async def execute_round(
     # (not just winner — aborted candidates carry the pipeline warnings)
     _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
-        update_query_tracker(state.opt_sp.warning_inventory, _all_results)
+        update_query_tracker(state.opt_sp.memory.warning_inventory, _all_results)
 
     if obs:
         with graceful("ObsLogger.log_round_end failed"):

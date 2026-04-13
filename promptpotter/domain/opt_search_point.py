@@ -33,7 +33,7 @@ import copy
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, ClassVar, Self
+from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -149,6 +149,77 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
+class OptimizationMemory(BaseModel):
+    """Cross-round optimizer memory — the working set L1/L2/L3 build on.
+
+    Bundled together because every field shares the same lifecycle:
+    preserved across L2/L3 transitions (``OptSearchPoint`` adopts the
+    parent's memory after derive_candidate dropped it), checkpointed as
+    one nested object, and reset only by ``clear_volatile()`` on round
+    improvement.
+    """
+
+    critique_text: str = ""
+    thinking_styles: list[str] = Field(default_factory=list)
+    escalation_journal: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Cross-round degradation investigation memory.",
+    )
+    warning_inventory: dict[str, dict[str, Any]] = Field(
+        default_factory=dict,
+        description="Per-query warning inventory across rounds.",
+    )
+    l2_directive: str = Field(
+        default="",
+        description="L2's diagnostic reasoning + action guidance for L1. "
+        "One-round window — cleared by clear_volatile() on improvement.",
+    )
+    degradation_reset_count: int = Field(
+        0,
+        description="How many times L2/L3 patience exhausted during degradation.",
+    )
+    backend_warning_emitted: bool = Field(
+        False,
+        description="One-shot flag — True after backend warning has been emitted.",
+    )
+
+    def clear_volatile(self) -> None:
+        """Drop one-round windows after an improving round.
+
+        Currently only ``l2_directive`` (L2's guidance is meant to steer
+        the next round only — once L1 succeeded, the directive is stale).
+        """
+        self.l2_directive = ""
+
+    def record_escalation_event(
+        self,
+        round_num: int,
+        check_result: dict[str, Any],
+        current_pipeline_params: dict | None,
+    ) -> None:
+        """Append a degradation escalation entry to the journal.
+
+        Also fills the outcome of the previous entry if pending.
+        """
+        journal = self.escalation_journal
+        if journal and journal[-1].get("outcome_degraded_rate") is None:
+            journal[-1]["outcome_degraded_rate"] = check_result.get("degraded_rate", 0)
+
+        dominant = check_result.get("dominant_warning", "unknown:unknown")
+        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+        step_cfg = (current_pipeline_params or {}).get(problem_step, {})
+        journal.append(
+            {
+                "round": round_num,
+                "degraded_rate": check_result.get("degraded_rate", 0),
+                "problem_step": problem_step,
+                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+                "warning_types": check_result.get("warning_types", {}),
+                "outcome_degraded_rate": None,
+            }
+        )
+
+
 class OptSearchPoint(PromptTemplate):
     """Optimizer-level search point — the optimizer's full working state.
 
@@ -184,78 +255,7 @@ class OptSearchPoint(PromptTemplate):
         return TaskDecomposition()
 
     # -- Optimization memory -----------------------------------------------
-    critique_text: str = ""
-    thinking_styles: list[str] = Field(default_factory=list)
-    escalation_journal: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Cross-round degradation investigation memory.",
-    )
-    warning_inventory: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Per-query warning inventory across rounds.",
-    )
-    l2_directive: str = Field(
-        default="",
-        description="L2's diagnostic reasoning + action guidance for L1.",
-    )
-    degradation_reset_count: int = Field(
-        0,
-        description="How many times L2/L3 patience exhausted during degradation.",
-    )
-    backend_warning_emitted: bool = Field(
-        False,
-        description="One-shot flag — True after backend warning has been emitted.",
-    )
-
-    # Canonical list of optimization memory fields.
-    # derive_candidate() intentionally omits these (L1 candidates start fresh).
-    # inherit_memory() copies them (L2/L3 transitions preserve session state).
-    MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "critique_text",
-        "thinking_styles",
-        "escalation_journal",
-        "warning_inventory",
-        "l2_directive",
-        "degradation_reset_count",
-        "backend_warning_emitted",
-    )
-
-    def record_escalation_event(
-        self,
-        round_num: int,
-        check_result: dict[str, Any],
-        current_pipeline_params: dict | None,
-    ) -> None:
-        """Append a degradation escalation entry to the journal.
-
-        Also fills the outcome of the previous entry if pending.
-        """
-        journal = self.escalation_journal
-        if journal and journal[-1].get("outcome_degraded_rate") is None:
-            journal[-1]["outcome_degraded_rate"] = check_result.get("degraded_rate", 0)
-
-        dominant = check_result.get("dominant_warning", "unknown:unknown")
-        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-        step_cfg = (current_pipeline_params or {}).get(problem_step, {})
-        journal.append(
-            {
-                "round": round_num,
-                "degraded_rate": check_result.get("degraded_rate", 0),
-                "problem_step": problem_step,
-                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                "warning_types": check_result.get("warning_types", {}),
-                "outcome_degraded_rate": None,
-            }
-        )
-
-    def inherit_memory(self, source: OptSearchPoint) -> None:
-        """Copy optimization memory from *source* into this instance.
-
-        Used after L2/L3 transitions where derive_candidate() created a
-        fresh OptSearchPoint but dropped accumulated memory fields.
-        """
-        for field in self.MEMORY_FIELDS:
-            setattr(self, field, getattr(source, field))
+    memory: OptimizationMemory = Field(default_factory=lambda: OptimizationMemory())
 
     # -- Render with pipeline context --------------------------------------
 
@@ -335,8 +335,9 @@ class OptSearchPoint(PromptTemplate):
         """Create a child OptSearchPoint with prompt field modifications.
 
         Sets parent_id to this instance's id. Generates a new id/timestamp.
-        Only copies prompt decomposition + L2/L3 state fields — does NOT
-        copy optimization memory (critique, escalation_journal, etc.).
+        Copies prompt decomposition + L2/L3 state. ``memory`` is *not*
+        copied — children start fresh and only inherit accumulated memory
+        when L2/L3 transitions adopt them via ``LoopState.apply_transition``.
         """
         data: dict[str, Any] = {}
         # Copy prompt decomposition fields

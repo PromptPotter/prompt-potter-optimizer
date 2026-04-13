@@ -374,7 +374,7 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         f"  {GREEN}\u2713{RESET} Initialized  baseline={loop_state.current_accuracy:.1%}  "
         f"cycle={cycle_id}  samples={samples}  obs={obs}"
     )
-    crit = loop_state.opt_sp.critique_text
+    crit = loop_state.opt_sp.memory.critique_text
     if crit:
         preview = crit.replace("\n", " ").strip()
         if len(preview) > 80:
@@ -383,7 +383,7 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     resumed = loop_env.resumed_from_round
     if resumed > 0:
         state_parts = []
-        critique_chars = len(loop_state.opt_sp.critique_text)
+        critique_chars = len(loop_state.opt_sp.memory.critique_text)
         task_context_keys = len(loop_state.opt_sp.task_context)
         l2_round = loop_state.escalation.l2.round
         if critique_chars:
