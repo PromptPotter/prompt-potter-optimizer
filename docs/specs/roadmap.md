@@ -46,7 +46,7 @@ Three-layer I/O architecture (persistence / display / control). `CampaignPersist
 
 Made campaigns smarter and faster through accumulated data. Four pillars: (1) per-node intermediate caching — prompt variants skip redundant upstream computation (~60% speedup), (2) adaptive sensitivity scan with statistical pruning (Wilson CI overlap, minimum detectable effect), (3) SearchMemory — cross-campaign materialized view over dataset_runs (parameter impact, query patterns, failure modes), (4) three-tier intelligence architecture feeding L1/L2/L3/critique/scan advisor with accumulated analysis. All 17 waves complete.
 
-Architecture: [`../architecture/search-memory-intelligence.md`](../architecture/search-memory-intelligence.md), [`../architecture/optimization.md`](../architecture/optimization.md), [`../architecture/suffix-cache.md`](../architecture/suffix-cache.md). Original spec preserved in git history.
+Architecture: [`../architecture/search-memory-intelligence.md`](../architecture/search-memory-intelligence.md), [`../architecture/optimization.md`](../architecture/optimization.md). Original spec preserved in git history.
 
 ---
 

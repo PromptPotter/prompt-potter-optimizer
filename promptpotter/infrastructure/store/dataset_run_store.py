@@ -3,13 +3,11 @@ Dataset run storage — archive layer for eval history.
 
 Stores completed evaluation runs for SearchMemory, observability,
 campaign lineage, and full-run cache lookup (``find_by_node_configs``).
-Per-query per-node reuse is handled separately by ``SuffixCache``
-(see ``docs/architecture/suffix-cache.md``).
 
 Archive identity uses ``PipelineSchema.node_configs`` — the ordered
 list of ``(node_name, node_config)`` tuples.  Prefix matching over
 that list enables reuse of prior results when only downstream nodes
-changed; ``sp_hash = suffix_key("", node_configs)`` is the terminal
+changed; ``sp_hash = stable_hash(node_configs)`` is the terminal
 identity.
 
 Prompt alias groups are used by ``recon_baseline.py`` and

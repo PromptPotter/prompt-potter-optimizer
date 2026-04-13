@@ -92,7 +92,7 @@ SearchPoint (abstract — render())
 
 **Prompt alias groups** link the original monolithic prompt to its decomposed form (and any future variants) so all historical evaluations are discoverable across both. Core to the data model and actively evolving.
 
-Intermediate node outputs are cached per query — see [suffix-hash cache](docs/architecture/suffix-cache.md). This enables mid-task cache pooling if the backend streams intermediate inputs back (outputs must already be converted to inputs).
+Per-query results from prior `dataset_runs/` are reused when the new searchpoint's `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
 
 ```
   OPTIONAL                             CORE — always runs
@@ -173,7 +173,6 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 - [Prompt Scheme](docs/architecture/prompt-scheme.md) — 8-field decomposition, variant library, rendering
 - [Information Flow](docs/architecture/information-flow.md) — Prompt injection map
 - [Node Standard](docs/architecture/node-standard.md) — Node types, `llm_call()` primitive
-- [Suffix-Hash Cache](docs/architecture/suffix-cache.md) — Per-query intermediate cache (M9, replaces prefix-chain scheme)
 
 **Operations** (how to use it):
 - [Setup Guide](docs/setup-guide.md) — Prerequisites, installation, configuration

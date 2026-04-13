@@ -135,12 +135,12 @@ class TestCoordinateLookups:
         assert configs[0][1] == {"max_results": 5}
         assert configs[2][1] == {}  # missing node → empty dict
 
-    def test_sp_hash_matches_suffix_key_of_node_configs(self):
-        from promptpotter.domain.pipeline_schema import suffix_key
+    def test_sp_hash_matches_stable_hash_of_node_configs(self):
+        from promptpotter.domain.pipeline_schema import stable_hash
 
         schema = _three_node_schema()
         pp = {"a": {"max_results": 5}}
-        assert schema.sp_hash(pp) == suffix_key("", schema.node_configs(pp))
+        assert schema.sp_hash(pp) == stable_hash(schema.node_configs(pp))
 
     def test_sp_hash_empty_schema(self):
         schema = PipelineSchema(nodes=[])

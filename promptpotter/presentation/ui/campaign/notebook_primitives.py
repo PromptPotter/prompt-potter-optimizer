@@ -353,12 +353,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
             tag = "MISS"
 
     cache_marker = " \U0001f4d6" if cached else ""
-    precomp = r.get("precomputed_through")
-    if precomp and not cached:
-        last_cached = _DISPLAY_TAGS.get(precomp[-1], precomp[-1][:4])
-        step = f"{DIM}[{last_cached}\U0001f4d6]{RESET}->{step}{cache_marker}"
-    else:
-        step = f"{step}{cache_marker}"
+    step = f"{step}{cache_marker}"
 
     indent = prefix if prefix else ""
 

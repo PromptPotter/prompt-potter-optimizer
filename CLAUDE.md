@@ -116,7 +116,7 @@ Every state traced at **both** layers independently:
 
 ### Scoring Pipeline
 
-`score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Two cache layers, different jobs: (1) `find_by_node_configs()` in `dataset_run_store` matches prior full runs via `PipelineSchema.node_configs()` for result-level reuse and archival (SearchMemory, observability, lineage — `sp_hash = suffix_key("", node_configs)`), (2) **suffix-hash cache** reuses per-node outputs across novel searchpoints — see [`docs/architecture/suffix-cache.md`](docs/architecture/suffix-cache.md). Both layers share one identity primitive (`suffix_key`). `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Reuse is per-query: `find_by_node_configs()` in `dataset_run_store` matches prior dataset runs via `PipelineSchema.node_configs()` (ordered `[(name, config)]` list). Exact matches reuse every non-error item; partial matches reuse items whose `terminated_at` falls within the shared prefix. `sp_hash = stable_hash(node_configs)` serves as the archive identity. `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 **Three early-exit paths around `score_search_point()`** (the candidate loop in `application/optimization/nodes/score.py::_score_candidates` shortcuts each one before calling the gateway):
 1. **Full-run cache hit** — prior `dataset_runs/` entry covers this exact searchpoint; results are replayed and the candidate scored without any backend calls.

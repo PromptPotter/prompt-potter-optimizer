@@ -24,22 +24,6 @@ def stable_hash(value: Any) -> str:
     return hashlib.sha256(blob).hexdigest()[:16]
 
 
-def suffix_key(input_hash: str, node_configs: list[tuple[str, dict[str, Any]]]) -> str:
-    """Key for a pipeline tail, given a starting input and the (node, config) list.
-
-    The suffix-hash cache addresses every cut point of a pipeline run by
-    ``(input_hash, tail)``.  ``input_hash`` is either the query hash (prefix
-    from pipeline start) or an intermediate node output hash (tail from a
-    midpoint).  See ``docs/architecture/suffix-cache.md``.
-    """
-    blob = json.dumps(
-        {"input": input_hash, "tail": node_configs},
-        sort_keys=True,
-        default=str,
-    ).encode()
-    return hashlib.sha256(blob).hexdigest()[:16]
-
-
 class NodeType(enum.StrEnum):
     """Pipeline node type classification (empty string = untyped)."""
 
@@ -229,9 +213,9 @@ class PipelineSchema(BaseModel):
     def node_configs(self, pipeline_params: dict[str, Any]) -> list[tuple[str, dict]]:
         """Ordered ``[(node_name, node_config), ...]`` for this schema.
 
-        The canonical representation of a SearchPoint's identity at the
-        archive layer: fed to ``suffix_key`` for ``sp_hash`` and compared
-        element-wise by ``DatasetRunStore.find_by_node_configs``.
+        The canonical SearchPoint identity at the archive layer: hashed
+        by ``sp_hash`` and compared element-wise by
+        ``DatasetRunStore.find_by_node_configs``.
         """
         result: list[tuple[str, dict]] = []
         for node in self.nodes:
@@ -244,7 +228,7 @@ class PipelineSchema(BaseModel):
     def sp_hash(self, pipeline_params: dict[str, Any]) -> str:
         """SearchPoint identity hash.  Empty string for empty schemas."""
         configs = self.node_configs(pipeline_params)
-        return suffix_key("", configs) if configs else ""
+        return stable_hash(configs) if configs else ""
 
     # -------------------------------------------------------------------
     # Derivation methods

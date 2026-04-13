@@ -51,7 +51,6 @@ class QueryResultFull(QueryResult, total=False):
     # Eval pipeline
     n_candidates: int
     ground_truth_rank: int | None
-    precomputed_through: list[str]
     cached: bool
 
     # Stale-data protocol fields (set by stale_data.py)
@@ -83,7 +82,6 @@ class QueryRunner(Protocol):
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = ...,
-        precomputed: dict[str, Any] | None = ...,
     ) -> dict[str, Any]: ...
 
     async def check_status(self) -> dict[str, Any]: ...

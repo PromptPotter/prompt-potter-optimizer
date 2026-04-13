@@ -449,7 +449,6 @@ class LLMOnlyAdapter:
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
-        precomputed: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Send query to LLM and return a backend-compatible response.
 

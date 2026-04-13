@@ -156,7 +156,7 @@ Every node declares a `node_role` that describes its function in the pipeline:
 PromptPotter auto-detects exit points from this metadata. When a pipeline terminates early (e.g., `llm_ranking` excluded), the system reads candidates from the last active exit point's declared output key. This enables:
 
 - **Step-sequence cache reuse**: A cached run with more nodes serves a request for fewer nodes by re-scoring from the appropriate exit point.
-- **Partial pipeline execution**: Cached node outputs from a shorter run feed into a longer run via `precomputed`, skipping already-computed nodes.
+- **Partial prior-run reuse**: Queries that short-circuited before the divergence between two searchpoints can be replayed from the earlier run's stored results (`DatasetRunStore.load_reusable_results`).
 
 **Example** — a multi-node pipeline's two exit points:
 

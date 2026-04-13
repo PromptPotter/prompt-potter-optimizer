@@ -1,8 +1,7 @@
 """Sample measurement — single-query pipeline execution and scoring.
 
 Measures one sample at a time via the backend query endpoint.
-Uses the suffix-hash cache (``SuffixCache``) for per-node output
-reuse.  Dataset-level scoring and prior-result matching live in
+Dataset-level scoring and prior-result matching live in
 ``search_point_scorer``.
 
 Prompt interpolation
@@ -23,16 +22,13 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.domain.pipeline_schema import stable_hash, suffix_key
 from promptpotter.domain.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
-from promptpotter.shared.scoring import Scorer
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import ScoringEnv
-    from promptpotter.infrastructure.store.suffix_cache import SuffixCache
 
 _comparator = ExactMatchComparator({"strip": True})
 
@@ -155,79 +151,6 @@ def _parse_backend_response(
     return pd
 
 
-def _result_from_cache(
-    query: str,
-    ground_truth: str,
-    node_outputs: dict,
-    target_steps: list[str],
-    scorer: Scorer | None = None,
-) -> QueryResult:
-    """Build a measurement result from a full-coverage suffix-cache hit.
-
-    Skips the backend round-trip: all target steps are already materialized
-    on disk, so the final ranking is read directly from the terminal node's
-    cached output (which was produced by the backend on an earlier run).
-    """
-    last_node = target_steps[-1] if target_steps else ""
-    ranked: list[dict] = list(node_outputs.get(last_node, []))
-    predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
-    comparison = _comparator.compare(ground_truth, predicted)
-
-    pd: dict = {
-        "final_ranking": ranked,
-        "total_time": 0.0,
-        "terminated_at": last_node,
-    }
-    # Include node-specific outputs that obs mappings expect
-    for step in target_steps:
-        node_data = node_outputs.get(step)
-        if node_data is not None and step != last_node:
-            pd[step] = node_data
-
-    gt_rank = next(
-        (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth), None
-    )
-    n_candidates = len(ranked)
-    result: dict = {
-        "query": query,
-        "predicted": predicted,
-        "ground_truth": ground_truth,
-        "hit": comparison.result == GroundTruthResult.PASS,
-        "score": comparison.score,
-        "error": None,
-        "n_candidates": n_candidates,
-        "ground_truth_rank": gt_rank,
-        "pipeline_data": pd,
-        "precomputed_through": list(target_steps),
-        "cached": True,
-    }
-    if scorer:
-        result["score"] = scorer(result)
-        result["hit"] = result["score"] >= 1.0
-    return result  # type: ignore[return-value]
-
-
-def _longest_prefix_hit(
-    cache: SuffixCache,
-    backend_id: str,
-    q_hash: str,
-    node_configs: list[tuple[str, dict]],
-) -> tuple[dict[str, Any], list[str]]:
-    """Find the longest cached prefix from pipeline start.
-
-    Iterates j from n down to 1, checking ``suffix_key(q_hash, configs[:j])``;
-    first hit wins.  Returns ``(node_outputs, covers)`` or ``({}, [])``.
-    ``covers`` is taken from the stored entry (may be shorter than the
-    probed prefix if the prior run short-circuited).
-    """
-    for j in range(len(node_configs), 0, -1):
-        key = suffix_key(q_hash, node_configs[:j])
-        entry = cache.lookup(backend_id, key)
-        if entry:
-            return entry["node_outputs"], list(entry["covers"])
-    return {}, []
-
-
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
     """Build a standard error result dict."""
     return {
@@ -264,52 +187,10 @@ async def measure_sample(
 
         pipeline_schema = PipelineSchema()
 
-    _target_steps = list(pipeline_schema.active_steps)
-    suffix_cache = env.store.suffix_cache if env.store else None
-
     try:
-        # Suffix-hash cache: one hash check for full-pipeline hit, then
-        # longest-prefix probe for partial reuse via `precomputed`.
-        # LLM-only pipelines have no steps → clean no-op.
-        precomputed: dict[str, Any] | None = None
-        node_configs: list[tuple[str, dict]] = [
-            (n.name, (pipeline_params or {}).get(n.name, {}) or {}) for n in pipeline_schema.nodes
-        ]
-        q_hash = stable_hash(query)
-
-        if suffix_cache and node_configs:
-            full_key = suffix_key(q_hash, node_configs)
-            hit = suffix_cache.lookup(env.backend_id, full_key)
-            if hit and set(hit["covers"]) >= set(_target_steps):
-                return _result_from_cache(
-                    query,
-                    ground_truth,
-                    hit["node_outputs"],
-                    _target_steps,
-                    scorer=env.scorer,
-                )
-            node_outputs_hit, _covers = _longest_prefix_hit(
-                suffix_cache, env.backend_id, q_hash, node_configs
-            )
-            if node_outputs_hit:
-                precomputed = node_outputs_hit
-
-        # Interpolate {{variable}} placeholders in prompt templates from query_data
         wire_params = interpolate_pipeline_params(pipeline_params or {}, query_data)
-
-        resp = await env.backend_client.run_query(
-            query,
-            pipeline_params=wire_params,
-            precomputed=precomputed,
-        )
+        resp = await env.backend_client.run_query(query, pipeline_params=wire_params)
         data = resp.get("data", {})
-
-        # Populate the suffix cache from the full run.  Handles
-        # short-circuit runs by only emitting cut-points within the
-        # contiguous executed prefix.
-        node_outputs = data.get("node_outputs")
-        if suffix_cache and node_configs and node_outputs:
-            suffix_cache.populate_from_run(env.backend_id, query, node_configs, node_outputs)
 
         ranked = data.get("final_ranking", [])
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
@@ -336,8 +217,6 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": _parse_backend_response(data, ranked, pipeline_schema),
         }
-        if precomputed:
-            result["precomputed_through"] = list(precomputed.keys())
         if env.scorer:
             result["score"] = env.scorer(result)
             result["hit"] = result["score"] >= 1.0

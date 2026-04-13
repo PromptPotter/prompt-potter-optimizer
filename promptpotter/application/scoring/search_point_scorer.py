@@ -1,11 +1,9 @@
 """Dataset scoring — query loop orchestration, archival, and observability.
 
-Two cache tiers: prior-result reuse via ``DatasetRunStore.load_reusable_results``
-(addressed by ``PipelineSchema.node_configs`` for archive lineage) and per-node
-output reuse via the suffix-hash cache (see ``docs/architecture/suffix-cache.md``).
-Both tiers share the same ``suffix_key`` primitive for identity.
-Single-sample measurement lives in ``sample_measurement``; the stale-data
-ladder in ``stale_data``.
+Reuses per-query results from prior dataset_runs via
+``DatasetRunStore.load_reusable_results`` (addressed by
+``PipelineSchema.node_configs``).  Single-sample measurement lives in
+``sample_measurement``; the stale-data ladder in ``stale_data``.
 
 Interrupt handling is pulled in from the caller via ``ScoringEnv.stop_check``
 (polled between queries).  A hard cancel (``KeyboardInterrupt`` /
@@ -91,7 +89,7 @@ async def _run_query_loop(
 
             query = qd["query"]
 
-            # Tier 1: prior-result cache from previous dataset_runs.
+            # Reuse: prior-result cache from previous dataset_runs.
             if query in prior_results:
                 cached_r = _materialize_cached(prior_results[query])
                 results.append(cached_r)
@@ -99,13 +97,12 @@ async def _run_query_loop(
                     on_result(cached_r, i, len(dataset))
                 continue
 
-            # Tier 2 + backend: measure_sample walks the per-node cache then calls out.
+            # Miss → backend call.
             result = await measure_sample(
                 qd,
                 ctx,
                 pipeline_params=search_point.pipeline_params,
             )
-            was_cached = bool(result.get("precomputed_through"))
 
             if _is_degraded(result) and ctx.stale_data_load_protocol:
                 stale_result, _step = await _execute_stale_data_protocol(
@@ -119,33 +116,32 @@ async def _run_query_loop(
 
             results.append(result)
 
-            # Consecutive-error abort policy (cached results pass through unchanged).
-            if not was_cached:
-                if is_error_result(result):
-                    cat = error_category(result.get("error"))
-                    if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
-                        abort_reason = f"skipped_after_{cat or 'pipeline'}_error"
-                    else:
-                        consecutive_errors += 1
-                        abort_reason = (
-                            "skipped_after_consecutive_errors"
-                            if consecutive_errors >= ctx.max_consecutive_errors
-                            else ""
-                        )
-                    if abort_reason:
-                        logger.warning(
-                            "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
-                            abort_reason,
-                            i + 1,
-                            len(dataset) - i - 1,
-                        )
-                        results.extend(
-                            _error_result(rq["query"], rq.get("ground_truth", ""), abort_reason)
-                            for rq in dataset[i + 1 :]
-                        )
-                        return QueryLoopResult(results, stop_reason=abort_reason)
+            # Consecutive-error abort policy.
+            if is_error_result(result):
+                cat = error_category(result.get("error"))
+                if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
+                    abort_reason = f"skipped_after_{cat or 'pipeline'}_error"
                 else:
-                    consecutive_errors = 0
+                    consecutive_errors += 1
+                    abort_reason = (
+                        "skipped_after_consecutive_errors"
+                        if consecutive_errors >= ctx.max_consecutive_errors
+                        else ""
+                    )
+                if abort_reason:
+                    logger.warning(
+                        "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
+                        abort_reason,
+                        i + 1,
+                        len(dataset) - i - 1,
+                    )
+                    results.extend(
+                        _error_result(rq["query"], rq.get("ground_truth", ""), abort_reason)
+                        for rq in dataset[i + 1 :]
+                    )
+                    return QueryLoopResult(results, stop_reason=abort_reason)
+            else:
+                consecutive_errors = 0
 
             if on_result is not None:
                 on_result(result, i, len(dataset))

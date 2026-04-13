@@ -307,9 +307,7 @@ def build_dataset_run_data(
         "scores": scores,
         "source": source,
         "created_at": datetime.now(UTC).isoformat(),
-        "dataset_run_items": [
-            {k: v for k, v in r.items() if k != "precomputed_through"} for r in results
-        ],
+        "dataset_run_items": list(results),
     }
     data["sp_hash"] = sp_h
     if pipeline_schema and search_point.pipeline_params:

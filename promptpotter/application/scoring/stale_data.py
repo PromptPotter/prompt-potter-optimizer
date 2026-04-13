@@ -9,7 +9,6 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Mapping
-from dataclasses import replace
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import find_rank
@@ -88,10 +87,6 @@ async def execute_stale_data_protocol(
     query = query_data["query"]
     result = cached_result
 
-    # Samplescan bypasses the suffix cache — it's a fresh probe whose job
-    # is to detect whether the degraded state is reproducible.
-    bypass_env = replace(env, store=None)
-
     for step in protocol_steps:
         if env.stop_check and env.stop_check():
             return {**result, "cached": result.get("cached", False)}, "interrupted"
@@ -122,7 +117,7 @@ async def execute_stale_data_protocol(
             n_candidates = cfg.get("samplescan_candidates", 3)
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
-            result = dict(await measure_sample(query_data, bypass_env, pipeline_params=None))
+            result = dict(await measure_sample(query_data, env, pipeline_params=None))
             result["samplescan_probe"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,

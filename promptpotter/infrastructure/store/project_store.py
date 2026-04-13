@@ -35,7 +35,6 @@ from promptpotter.infrastructure.store.stores import (
     PlanStore,
     SessionStore,
 )
-from promptpotter.infrastructure.store.suffix_cache import SuffixCache
 
 __all__ = ["ProjectStore"]
 
@@ -51,5 +50,4 @@ class ProjectStore:
         self.campaigns = CampaignStore(self.base_dir)
         self.dataset_runs = DatasetRunStore(self.base_dir)
         self.adaptive_recon = PlanStore(self.base_dir)
-        self.suffix_cache = SuffixCache(self.base_dir)
         self.sessions = SessionStore(self.base_dir)

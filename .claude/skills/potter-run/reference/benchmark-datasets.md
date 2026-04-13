@@ -71,5 +71,5 @@ Pick by: scorer simplicity (fewer edge cases first) > competitor overlap (DSPy/M
 | Factor | Details |
 |--------|---------|
 | Per-round cost | First candidate evaluates full eval set; others use sequential elimination (t-test early-stop after 20 queries). Typical: `eval_size + ~20-30 per eliminated candidate` |
-| Caching | SuffixCache available for multi-step pipelines; single-step `llm_only` has no upstream to cache |
-| Round-over-round speedup | Only for multi-step pipelines (e.g. lca-termnorm). Benchmark datasets: none |
+| Caching | Prior dataset_runs reused across candidates sharing node_configs prefix. No per-node cache. |
+| Round-over-round speedup | Only when consecutive candidates share the upstream prefix (tier-1 prior-result reuse). |

@@ -79,12 +79,11 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`. Fie
     {cycle_id}/trial_NNNN.json
   dataset_runs/{run_id}.json    # content-addressed eval archive (shared)
   search_memory.json            # materialized intelligence view
-  suffix_cache/{key}.json       # per-query node cache
 ```
 
 Sessions are ephemeral display state; campaigns are the resume source of truth. The canonical session file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `campaign_state.json`.
 
-Per-query cache design: [suffix-cache.md](suffix-cache.md).
+Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
 ## Where to Read Next
 
@@ -93,4 +92,3 @@ Per-query cache design: [suffix-cache.md](suffix-cache.md).
 - [information-flow.md](information-flow.md) — prompt injection map
 - [node-standard.md](node-standard.md) — node types, `llm_call()` primitive
 - [search-memory-intelligence.md](search-memory-intelligence.md) — three-pillar materialized view
-- [suffix-cache.md](suffix-cache.md) — per-query cache + complexity

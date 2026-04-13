@@ -142,7 +142,7 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 ## Infrastructure Notes
 
-Wall-clock numbers in this document are produced against the M9 suffix-hash cache. Design: [`docs/architecture/suffix-cache.md`](../architecture/suffix-cache.md).
+Wall-clock numbers in this document rely on prior-result reuse from `dataset_runs/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
 ## Reference Papers
 
