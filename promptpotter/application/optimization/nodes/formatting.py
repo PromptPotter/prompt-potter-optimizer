@@ -464,7 +464,6 @@ def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None
     if total_candidates < 6 or not axis_counts:
         return None
 
-    # Check concentration — if top axis appears in > 60% of candidates, flag it
     sorted_axes = sorted(axis_counts.items(), key=lambda x: -x[1])
     top_axis, top_count = sorted_axes[0]
     concentration = top_count / total_candidates
@@ -478,7 +477,6 @@ def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None
             "Consider directing L1 toward different axes."
         )
 
-    # Check if same 2 axes dominate
     if len(sorted_axes) >= 2:
         top2_count = sorted_axes[0][1] + sorted_axes[1][1]
         top2_concentration = top2_count / total_candidates
@@ -497,7 +495,6 @@ def build_candidate_comparison(candidate_scores: list[dict]) -> str | None:
     if not candidate_scores or len(candidate_scores) < 2:
         return None
 
-    # Sort by accuracy descending
     sorted_candidates = sorted(candidate_scores, key=lambda c: -c.get("accuracy", 0))
     winner_acc = sorted_candidates[0].get("accuracy", 0)
 
@@ -521,7 +518,6 @@ def build_cross_candidate_diff(
     if not winner_results or not all_candidate_results or len(all_candidate_results) < 2:
         return None
 
-    # Build winner hit set
     winner_hits: set[str] = set()
     winner_misses: set[str] = set()
     for r in winner_results:
@@ -536,10 +532,8 @@ def build_cross_candidate_diff(
     if not winner_misses:
         return None
 
-    # Find missed opportunities — queries other candidates solved
     missed_by: dict[str, list[str]] = {}  # {query: [candidate descriptions]}
     for cand_id, results in all_candidate_results.items():
-        # Find this candidate's description
         desc = cand_id
         for cs in candidate_scores:
             if cs.get("label") == cand_id or str(cs.get("idx")) == cand_id:

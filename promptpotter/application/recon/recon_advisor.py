@@ -365,16 +365,10 @@ def build_llm_context(
 
 def _advisor_task_context_section(task_description: str | dict | TaskDecomposition) -> str:
     """Optional task context from user description or structured TaskDecomposition."""
-    if isinstance(task_description, TaskDecomposition):
+    if isinstance(task_description, TaskDecomposition | dict):
         tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
-        if tc_lines:
-            return f"\n## Task Context\n{tc_lines}\n"
-        return ""
-    if isinstance(task_description, dict) and task_description:
-        tc_lines = "\n".join(f"- **{k}**: {v}" for k, v in task_description.items() if v)
-        if tc_lines:
-            return f"\n## Task Context\n{tc_lines}\n"
-    elif task_description:
+        return f"\n## Task Context\n{tc_lines}\n" if tc_lines else ""
+    if task_description:
         return f"\n## Task Context\n{task_description}\n"
     return ""
 

@@ -212,7 +212,7 @@ class OptimizationMemory(BaseModel):
         Also fills the outcome of the previous entry if pending.
         """
         journal = self.escalation_journal
-        if journal and journal[-1].get("outcome_degraded_rate") is None:
+        if journal and journal[-1]["outcome_degraded_rate"] is None:
             journal[-1]["outcome_degraded_rate"] = check_result.get("degraded_rate", 0)
 
         dominant = check_result.get("dominant_warning", "unknown:unknown")
