@@ -8,6 +8,13 @@ intelligence to L1 generate, L2 refine, and the critique agent.[^impl]
 This document describes what data is collected, how it flows into LLM
 prompts, and where the gaps are.
 
+**The key insight: every evaluation is saved.** When an optimization
+thread stops improving, its data isn't wasted — on a later run, the
+optimizer (or the optional scan) discovers all stored evaluations,
+knows the landscape better, and a fresh optimization starts from
+higher ground. This shared memory lives in the `intelligence/` package
+and is independent of both the optimization loop and the scan.
+
 [^impl]: `services/search/search_memory.py`.
 
 ## 1. Data Model
@@ -128,7 +135,31 @@ the aggregate SearchMemory picture (axis rankings, bottleneck
 distribution, failure clusters, persistent failures) for strategic
 plan pivots.
 
-## 4. Foundation: Two-Tier Sample Intelligence
+## 4. Materialized View Mechanics
+
+### Watermark + Incremental Update
+
+Each pillar tracks a watermark — the set of `dataset_run` IDs already
+folded into its statistics. On refresh, SearchMemory compares current
+run IDs against the watermark, loads only the **new** runs' per-query
+data, and updates the rolling statistics in place. Persisted view +
+new watermark are written back atomically. No full recomputation, no
+re-reading the entire `dataset_runs/` archive — the cost of one
+refresh is proportional to new evaluations since the last refresh,
+not to total history.
+
+### Atomic API (Design Constraint)
+
+SearchMemory exposes **granular data accessors** returning structured
+data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`).
+It never produces LLM-ready text. Each consumer (scan_advisor, L1,
+L2, critique) composes and formats its own digest from the accessors
+it needs. This is a deliberate constraint: it keeps SearchMemory from
+growing into a god object that knows about every prompt template, and
+lets new consumers add tailored context without changing the shared
+state.
+
+## 5. Foundation: Two-Tier Sample Intelligence
 
 ### Tier 1 — Deterministic Sample Triage (Code)
 
@@ -148,7 +179,7 @@ Meta-reasoning injected into L2 Refine only:
 - **Failure group × axis** — `parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
 - **Candidate comparison** — `build_candidate_comparison()`: how all candidates performed, preventing L2 from repeating tested approaches.
 
-## 5. Status
+## 6. Status
 
 All core items implemented: failure streak triage + CI gating, round trajectory, failure group × axis, candidate comparison, critique tractability/exhaustion/trends, L3 intelligence.
 

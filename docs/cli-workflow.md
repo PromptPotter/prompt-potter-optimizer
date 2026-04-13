@@ -169,14 +169,7 @@ python -m promptpotter export supplemental \
 
 ## Pipeline Params Threading
 
-`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides`, returning `pipeline_params`. Node ordering comes from `PipelineSchema` (pre-filtered to active nodes); `pipeline_params["steps"]` is only read at wire-format boundaries.
-
-This `pipeline_params` dict flows to every eval call:
-- `init` — baseline eval uses the configured pipeline (skipped by default, runs automatically before first optimize round)
-- `optimize` — each candidate is evaluated with the configured pipeline
-- `recon` — builds per-variant pipeline_params (one axis changed at a time)
-
-If `pipeline_params` is `None`, the backend runs the full pipeline including excluded nodes.
+`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which then flows unchanged through `init`, `optimize`, and `recon`. If `pipeline_params` is `None`, the backend runs the full pipeline including excluded nodes.
 
 ---
 

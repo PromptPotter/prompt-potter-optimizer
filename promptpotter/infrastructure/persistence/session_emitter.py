@@ -1,9 +1,9 @@
 """Campaign session emitter — writes the live dashboard + audit log.
 
-Owns the per-session artifacts in ``CAMPAIGN_SESSION_ARTIFACTS`` (see
-``docs/architecture/overview.md § Persistence Architecture`` for the
-canonical file-role table).  Instantiated by ``run_optimization()`` so
-every entry point produces identical artifacts.
+Owns the per-session artifacts in ``CAMPAIGN_SESSION_ARTIFACTS`` — this
+module is the canonical source for the file set; ``tests/test_artifact_parity.py``
+enforces parity across entry points.  Instantiated by ``run_optimization()``
+so every entry point produces identical artifacts.
 """
 
 from __future__ import annotations

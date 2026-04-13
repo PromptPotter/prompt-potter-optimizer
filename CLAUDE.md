@@ -92,7 +92,7 @@ promptpotter/
 - **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
-**Core loop + optional scan:** The **optimization loop** (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is the product and always runs. The **sensitivity scan** is an optional, human-driven pre-step that explores which axes matter and hands a `ReconBrief` to the optimizer as a starting-point hint. They are independent features in independent packages; skipping the scan leaves the optimization loop fully functional. All evaluation data from both (and from any earlier run) is archived to `dataset_runs/` store. SearchMemory (lives in `intelligence/`, M8) aggregates historical data into a materialized view that feeds both features without either importing the other. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md).
+**Core loop + optional scan:** The **optimization loop** (L1 generate → L1 evaluate → critique → L2 refine → L3 replan) is the product and always runs. The **sensitivity scan** is an optional, human-driven pre-step that explores which axes matter and hands a `ReconBrief` to the optimizer as a starting-point hint. They are independent features in independent packages; skipping the scan leaves the optimization loop fully functional. All evaluation data from both (and from any earlier run) is archived to `dataset_runs/` store. SearchMemory (lives in `intelligence/`, M8) aggregates historical data into a materialized view that feeds both features without either importing the other. Three-tier intelligence: deterministic code triage (CI-gated query exclusion, no LLM), critique (every-round intelligence hub — enriched with SearchMemory tractability, axis exhaustion, value trends), L2 (escalation-only — round trajectory, candidate comparison, failure group × axis). L3 receives SearchMemory aggregate picture. L1 stays clean. See [`docs/architecture/search-memory-intelligence.md`](docs/architecture/search-memory-intelligence.md).
 
 ### SearchPoint Hierarchy
 
@@ -113,7 +113,7 @@ Every state traced at **both** layers independently:
 
 ### Scoring Pipeline
 
-`score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Two cache layers, different jobs: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior full runs via `PipelineSchema.prefix_keys()` for result-level reuse and archival (SearchMemory, observability, lineage — `sp_hash` = terminal element of the chain), (2) **suffix-hash cache** (`SuffixCache`, replaces the deprecated `IntermediateCache` as of M9) reuses per-node outputs for novel searchpoints via a flat KV store keyed at every pipeline cut point — O(1) lookup for the common case, symmetric reuse across upstream *and* downstream config changes. See [`docs/architecture/suffix-cache.md`](docs/architecture/suffix-cache.md). `BackendClient` translates `pipeline_params` to wire-format `node_config`.
+`score_search_point()` (in `application/scoring/search_point_scorer.py`) is the single gateway for scoring, archival, and observability. Two cache layers, different jobs: (1) `find_by_prefix_chain()` in `dataset_run_store` matches prior full runs via `PipelineSchema.prefix_keys()` for result-level reuse and archival (SearchMemory, observability, lineage — `sp_hash` = terminal element of the chain), (2) **suffix-hash cache** reuses per-node outputs across novel searchpoints — see [`docs/architecture/suffix-cache.md`](docs/architecture/suffix-cache.md). `BackendClient` translates `pipeline_params` to wire-format `node_config`.
 
 ### Pipeline Params — Two Namespaces
 
@@ -134,7 +134,7 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 **Active session pointer** (`.promptpotter/active_session.json`): Stores `{backend_id, session_id}` of the current campaign. Written by `init`, read by every other command. Works like a browser's active tab — `optimize`, `show-status`, `show-results` etc. all operate on the active session automatically. `--session <id>` overrides it. `init` always creates a new session and overwrites the pointer. When `--backend-id` is not passed, `init` derives it from `dataset_name` in the config.
 
-**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-scoring candidates). See `docs/architecture/overview.md § Persistence Architecture` for the full layout, `campaign_state.json` schema, and resume flow.
+**Persistence: two tiers.** Session state (`sessions/{session_id}/`) is the live UI dashboard + HITL control surface. Campaign store (`campaigns/{cycle_id}/`) is the source of truth for optimizer resume (trial checkpoints, pre-scoring candidates). See `docs/architecture/overview.md § Persistence: Two Tiers` for the layout; `campaign_state.json` schema and resume flow live in `promptpotter/infrastructure/persistence/session_emitter.py` and `application/campaign/lifecycle.py`.
 
 ### Key Patterns
 
@@ -150,7 +150,7 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 - **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/architecture/prompt-scheme.md`.
 - **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
-- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/` with three pillars (parameter impact, query patterns, failure modes) and three-tier intelligence (deterministic triage, critique, L2). See [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md) for architecture detail.
+- **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/` with three pillars (parameter impact, query patterns, failure modes) and three-tier intelligence (deterministic triage, critique, L2). See [`docs/architecture/search-memory-intelligence.md`](docs/architecture/search-memory-intelligence.md) for architecture detail.
 
 ## Known Issues
 
@@ -187,6 +187,6 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 7. [`docs/setup-guide.md`](docs/setup-guide.md), [`docs/observability.md`](docs/observability.md)
 
 **Research** (methodology & analysis):
-8. [`docs/research/benchmarks.md`](docs/research/benchmarks.md), [`docs/research/search-memory-intelligence.md`](docs/research/search-memory-intelligence.md), [`docs/research/candidate-comparison.md`](docs/research/candidate-comparison.md)
+8. [`docs/research/benchmarks.md`](docs/research/benchmarks.md), [`docs/architecture/search-memory-intelligence.md`](docs/architecture/search-memory-intelligence.md)
 
 **Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9, M10, M11, M11+), archived (M8, old M9)

@@ -41,39 +41,9 @@ Multi-hop question answering over Wikipedia paragraphs. Requires reasoning acros
 
 Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M10 Wave 1.**
 
-### GSM8K -- Deprioritized (saturated)
+### GSM8K, AIME 2025 -- Saturated, cited only
 
-> **Saturation note (2026-04-12):** Effectively saturated at `gpt-oss-120b`. Deprioritized as a primary publication target. Literature numbers cited in results tables; no new runs unless probe reveals headroom.
-
-Grade school math word problems requiring multi-step arithmetic reasoning. Clean structured output with exact-match scoring.
-
-| Property | Value |
-|----------|-------|
-| Task | Math word problems |
-| Split | Test |
-| Size | 1,319 questions |
-| Source | [Cobbe et al., 2021](https://github.com/openai/grade-school-math) |
-| Metrics | Exact Match (numeric answer) |
-| Format | `{"question": str, "answer": str}` with `#### N` answer format |
-
-Used in: MIPROv2, Promptomatix, adv-CoT.
-
-### AIME 2025 -- Deprioritized (saturated)
-
-> **Saturation note (2026-04-12):** Effectively saturated at `gpt-oss-120b`. Deprioritized as a primary publication target. Literature numbers cited in results tables; no new runs unless probe reveals headroom.
-
-Competition-level math from the American Invitational Mathematics Examination. Frontier models still struggle here — GEPA reported +12% over MIPROv2. All answers are integers in [0, 999].
-
-| Property | Value |
-|----------|-------|
-| Task | Competition math |
-| Split | Full (single split) |
-| Size | 30 problems |
-| Source | [MathArena/aime_2025](https://huggingface.co/datasets/MathArena/aime_2025) |
-| Metrics | Exact Match (integer) |
-| Format | `{"problem": str, "answer": int}` |
-
-Used in: GEPA.
+Both effectively saturated at `gpt-oss-120b` (2026-04-12). Cited in literature tables for context; no new runs planned. **GSM8K** — 1,319 grade-school math problems, [Cobbe et al., 2021](https://github.com/openai/grade-school-math), used by MIPROv2 / Promptomatix / adv-CoT. **AIME 2025** — 30 competition math problems, [MathArena/aime_2025](https://huggingface.co/datasets/MathArena/aime_2025), used by GEPA.
 
 ### Phase 2 (planned)
 
@@ -84,6 +54,10 @@ Used in: GEPA.
 ---
 
 ## Evaluation Protocol
+
+### Sample Sizing for Tuning vs. Final Numbers
+
+Meta-prompt evaluation and ablation tuning use **50–100 sample** runs to keep the bootstrap cost bounded — a single 100-sample × 5-variant × 10-round campaign is already ~5,000 backend evaluations, and tuning sweeps multiply that by the number of meta-prompt variants under test. Final headline numbers in published tables use **200+ sample** runs for tighter CIs. The split is intentional: tuning is high-iteration, low-fidelity; final reporting is low-iteration, high-fidelity. Don't mix the two — small-sample tuning numbers should never appear in the main results table.
 
 ### Controlled Variables
 
@@ -168,7 +142,7 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 ## Infrastructure Notes
 
-**Suffix-hash cache (M9).** Per-query intermediate caching was rebuilt for this publication. The prior `IntermediateCache` used a chained-prefix scheme that walked O(n) per lookup and could only reuse upstream nodes across config changes — changing any node cascaded invalidation downstream. We replaced it with a **suffix-hash cache** keyed at every pipeline cut point, giving O(1) lookup for the common case, symmetric reuse across both upstream and downstream config changes, and mid-call short-circuiting when the backend streams intermediates. This is a deliberate pre-publication simplification, not an incidental rewrite — benchmark wall-clock numbers reported in this document are produced against the suffix-hash cache. Design: [`docs/architecture/suffix-cache.md`](../architecture/suffix-cache.md).
+Wall-clock numbers in this document are produced against the M9 suffix-hash cache. Design: [`docs/architecture/suffix-cache.md`](../architecture/suffix-cache.md).
 
 ## Reference Papers
 

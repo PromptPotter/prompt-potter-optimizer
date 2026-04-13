@@ -81,9 +81,7 @@ SearchPoint (abstract — render())
 
 **Prompt alias groups** link the original monolithic prompt to its decomposed form (and any future variants) so all historical evaluations are discoverable across both. Core to the data model and actively evolving.
 
-Intermediate node outputs are cached in a [suffix-hash store](docs/architecture/suffix-cache.md) keyed at every pipeline cut point — O(1) lookup for the common case, symmetric reuse across both upstream and downstream config changes. The cache replaced an earlier prefix-chain scheme during M9 and is a deliberate pre-publication architectural improvement.
-
-**The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — on a later run, the optimizer (or the optional scan) discovers all stored evaluations, knows the landscape better, and a fresh optimization starts from higher ground. This shared memory lives in the `intelligence/` package and is independent of both the optimization loop and the scan.
+Intermediate node outputs are cached per query — see [suffix-hash cache](docs/architecture/suffix-cache.md). This enables mid-task cache pooling if the backend streams intermediate inputs back (outputs must already be converted to inputs).
 
 ```
   OPTIONAL                             CORE — always runs
@@ -174,7 +172,6 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 
 **Research** (methodology & analysis):
 - [Benchmarks](docs/research/benchmarks.md) — HotPotQA/GSM8K methodology, head-to-head protocol
-- [SearchMemory Intelligence](docs/research/search-memory-intelligence.md) — Cross-campaign intelligence design
-- [Candidate Comparison](docs/research/candidate-comparison.md) — Sequential elimination methodology
+- [SearchMemory Intelligence](docs/architecture/search-memory-intelligence.md) — Cross-campaign intelligence design
 
 **Specs**: [docs/specs/](docs/specs/) — Roadmap, active milestone (M9), archived specs

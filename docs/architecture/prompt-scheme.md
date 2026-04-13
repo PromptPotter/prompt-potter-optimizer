@@ -68,9 +68,11 @@ Think step by step.
 
 ## Field Usage by Prompt Type
 
-See [architecture.md § Data Models](overview.md#data-models) for the full `SearchPoint` → `PromptTemplate` → `OptSearchPoint` class hierarchy.
+See [overview.md § SearchPoint Hierarchy](overview.md#searchpoint-hierarchy) for the full `SearchPoint` → `PromptTemplate` → `OptSearchPoint` class hierarchy.
 
 In optimizer prompts, `problem_description` carries analytical evidence (eval stats, scan data, critique, escalation). `instruction` carries task directives. `plan` carries L3's strategic framework.
+
+**Generic meta-prompts, task-specific via injection.** Meta-prompt files in `application/optimization/prompts/` are dataset-agnostic. Task-specific details flow through `task_context` injection into `problem_description` and `instruction` template variables — there are no per-task or per-dataset prompt sets, and base prompts must not contain pipeline-specific language. This is a deliberate constraint that keeps the meta-prompt count from multiplying with each new benchmark; adding a dataset is a config change, not a prompt-fork.
 
 ```
 ┌────────────────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┬──────┐
@@ -168,11 +170,6 @@ Usage: `load_dataset("potter_traces", store=..., backend_id=...)`. Natural scori
 
 ## Key Files
 
-| Concern | File |
-|---------|------|
-| Field constants | `promptpotter/shared/constants.py` |
-| OptSearchPoint (render, derive, project) | `promptpotter/domain/opt_search_point.py` |
-| Meta-prompt templates | `promptpotter/application/optimization/prompts/` |
-| Trace dataset loader | `promptpotter/application/datasets/trace_dataset.py` |
-| Variant library | `promptpotter/config/prompt_variants.json` |
-| Variant filtering | `promptpotter/application/recon/adaptive_recon.py` |
+- `promptpotter/shared/constants.py` — `PROMPT_STRING_FIELDS`
+- `promptpotter/domain/opt_search_point.py` — `PromptTemplate` + `OptSearchPoint` (render, derive, project)
+- `promptpotter/application/optimization/prompts/` — meta-prompt JSON templates

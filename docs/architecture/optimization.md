@@ -149,6 +149,8 @@ Each round:
 2. **Eval + Critique** -- Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
 3. **Loop control** -- Stall counter on no improvement. Patience exhausted: escalate L2 (`task_context`) then L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on target pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
+**Breadth over depth.** Failure analysis surfaces 2-3 distinct improvement directions ranked by failure count, not a single dominant fix. L1 receives all directions and generates candidates across them rather than N variations on one theme — this is the primary guard against mode collapse. The single `priority_fix` in critique output is one signal among several; `failure_highlights` and `suggested_axes` carry the breadth.
+
 **Init** configures the pipeline; baseline evaluation is deferred and runs automatically when `optimize` starts. The first critique is bootstrapped from baseline results at that point. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_recon_brief()`.
 
 ---
@@ -179,6 +181,8 @@ Formatted by `format_critique_for_prompt()` (emits only actionable fields: summa
 ### Stat-Rich Analysis
 
 `assemble_critique_sections()` in `critique.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
+
+Per-query diagnostics are derived from `PipelineSchema.nodes` via `NODE_TYPE_METRICS` (`pipeline_schema.py`) — a registry mapping node type → metrics → `pipeline_data_key`. Schema-driven, not hardcoded: when the pipeline gains a new node or node type, diagnostics extend automatically without code changes.
 
 | Section | Source |
 |---------|--------|
@@ -264,9 +268,13 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 When scan data is available, `prepare_recon_brief()` enriches the meta-prompt with `recon_brief` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](../specs/archive/sensitivity-scan.md) for scan workflow details.
 
+**Per-axis pruning rule.** After each scan variant evaluates, Wilson CIs are computed against baseline. If CIs **fully overlap** for every variant tested on an axis, the axis is marked noise and remaining values are skipped — early *pruning*, not early stopping. Always test ≥2 values per axis before any axis can be pruned, otherwise a single anomalous reading would silence a real effect.
+
+**Diagnostic-stratified sample selection.** `build_diagnostic_set()` stratifies misses by diagnostic pattern (`extract_sample_diagnostics()` output) so each distinct failure pattern is represented in the scan sample. Patterns are discovered from data, not hardcoded categories, so the stratification adapts to whatever pipeline is in front of it.
+
 ### SearchMemory Intelligence Feed
 
-Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`docs/research/search-memory-intelligence.md`](../research/search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
+Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
 ### Stale Data Load Protocol
 
