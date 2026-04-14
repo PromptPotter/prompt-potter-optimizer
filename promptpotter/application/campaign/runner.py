@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.callbacks import RunCallbacks
 from promptpotter.application.campaign.campaign_setup import SessionEnv
-from promptpotter.application.campaign.config import LoopConfig
+from promptpotter.application.campaign.config import LoopConfig, run_preflight_checks
 from promptpotter.application.campaign.data import CampaignBaseline
 from promptpotter.application.datasets.builder import sample_dataset
 from promptpotter.application.intelligence.search_memory import SearchMemory
@@ -401,7 +401,17 @@ async def _init_optimization(
     started_at: str,
 ) -> tuple[LoopState, LoopEnv]:
     """Build LoopState + LoopEnv: baseline, cycle resume, obs, scoring env, search memory."""
-    emit_phase(cb.on_phase, CampaignPhase.INIT, "enter", config=config, dataset=dataset)
+    preflight_warnings = run_preflight_checks(config, dataset)
+    for w in preflight_warnings:
+        logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
+    emit_phase(
+        cb.on_phase,
+        CampaignPhase.INIT,
+        "enter",
+        config=config,
+        dataset=dataset,
+        warnings=preflight_warnings,
+    )
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)

@@ -11,45 +11,45 @@ API_BASE = "https://api.groq.com/openai/v1"
 # ── Dataset ────────────────────────────────────────────────────────
 HF_DATASET = "BBEH/bbeh"
 SPLIT_SEED = 42
-TRAIN_PER_TASK = 10  # optimization set
-TEST_PER_TASK = 10   # held-out evaluation
-
-# ── Scoring ────────────────────────────────────────────────────────
-def exact_match(expected: str, predicted: str) -> bool:
-    """Case-insensitive, whitespace-stripped exact match."""
-    return expected.strip().lower() == predicted.strip().lower()
 
 
 # ── Dataset loading & splitting ────────────────────────────────────
 def load_and_split():
-    """Load BBEH mini and return (train_by_task, test_by_task) dicts.
+    """Load full BBEH and split by HF `mini` flag.
 
-    Each dict maps task_name -> list[dict] with keys "input" and "target".
-    The split is deterministic (SPLIT_SEED) and identical across notebooks.
+    Train pool = all mini examples (460 total), pooled across tasks — used as
+    a single flat list for global prompt optimization.
+    Test set = all non-mini examples (~4,060 total), grouped by task for the
+    per-task accuracy breakdown in results.json.
+
+    The mini/non-mini partition is disjoint by construction (HF flags each
+    example), so there is zero leakage between train and test.
+
+    Returns (train_pool, test_by_task):
+      train_pool: list[dict] with keys "input", "target", "task"
+      test_by_task: dict[str, list[dict]] mapping task -> list of same shape
     """
-    import random
     from datasets import load_dataset
 
     ds = load_dataset(HF_DATASET)["train"]
-    mini = ds.filter(lambda x: x["mini"] == 1)
 
-    # Group by task
-    by_task: dict[str, list[dict]] = {}
-    for ex in mini:
-        task = ex["task"]
-        by_task.setdefault(task, []).append({"input": ex["input"], "target": ex["target"]})
-
-    train_by_task: dict[str, list[dict]] = {}
+    train_pool: list[dict] = []
     test_by_task: dict[str, list[dict]] = {}
 
-    for task, examples in sorted(by_task.items()):
-        rng = random.Random(SPLIT_SEED)
-        shuffled = examples.copy()
-        rng.shuffle(shuffled)
-        train_by_task[task] = shuffled[:TRAIN_PER_TASK]
-        test_by_task[task] = shuffled[TRAIN_PER_TASK : TRAIN_PER_TASK + TEST_PER_TASK]
+    for ex in ds:
+        record = {"input": ex["input"], "target": ex["target"], "task": ex["task"]}
+        if ex["mini"] == 1:
+            train_pool.append(record)
+        else:
+            test_by_task.setdefault(ex["task"], []).append(record)
 
-    return train_by_task, test_by_task
+    # Deterministic ordering
+    import random
+    rng = random.Random(SPLIT_SEED)
+    rng.shuffle(train_pool)
+    test_by_task = {k: test_by_task[k] for k in sorted(test_by_task.keys())}
+
+    return train_pool, test_by_task
 
 
 # ── Result export ──────────────────────────────────────────────────
@@ -70,7 +70,7 @@ def export_results(
     result = {
         "method": method,
         "model": MODEL_ID,
-        "dataset": "bbeh-mini",
+        "dataset": "bbeh-full (train=mini 460, test=non-mini ~4060)",
         "split_seed": SPLIT_SEED,
         "timestamp": datetime.now(timezone.utc).isoformat(),
         "config": config,

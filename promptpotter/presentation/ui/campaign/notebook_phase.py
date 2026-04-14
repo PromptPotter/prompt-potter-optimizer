@@ -625,6 +625,13 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     dataset = d["dataset"]
     schema = config.pipeline_schema
 
+    warnings = d.get("warnings") or []
+    if warnings:
+        print()
+        for w in warnings:
+            print(f"{YELLOW}\u26a0 {BOLD}{w.title}{RESET}")
+            print(f"    {YELLOW}{w.detail}{RESET}")
+
     state.max_rounds = config.max_rounds or 0
     state.patience = config.l1_patience
     state.original_sp_flat = _flatten_sp_summary(

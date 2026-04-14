@@ -29,8 +29,10 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "CampaignConfig",
     "LoopConfig",
+    "PreflightWarning",
     "configure_and_apply_pipeline",
     "create_llm_client",
+    "run_preflight_checks",
 ]
 
 
@@ -299,25 +301,69 @@ class PreflightMetrics:
     strategy: str
 
 
+@dataclass(frozen=True)
+class PreflightWarning:
+    """Structured pre-run warning surfaced before a campaign kicks off.
+
+    Rendered in yellow at the top of the init display and mirrored to the
+    logger. Pure data — no I/O, no check-specific rendering logic.
+    """
+
+    code: str
+    title: str
+    detail: str
+
+
+def _check_sp_budget_vs_dataset(config: LoopConfig, dataset: list) -> PreflightWarning | None:
+    n = config.sp_budget_ttest
+    m = len(dataset)
+    if m > 0 and n > m:
+        return PreflightWarning(
+            code="sp_budget_exceeds_dataset",
+            title=f"sp_budget_ttest ({n}) exceeds dataset size ({m})",
+            detail=(
+                f"Scoring will run on {m} samples (the full dataset). "
+                f"Lower sp_budget_ttest to {m} or grow the dataset to silence "
+                f"this warning."
+            ),
+        )
+    return None
+
+
+_PREFLIGHT_CHECKS: list[Callable[[LoopConfig, list], PreflightWarning | None]] = [
+    _check_sp_budget_vs_dataset,
+]
+
+
+def run_preflight_checks(config: LoopConfig, dataset: list) -> list[PreflightWarning]:
+    """Run all registered preflight checks. Pure — no mutation, no I/O.
+
+    Adding a new check is a one-line append to ``_PREFLIGHT_CHECKS``.
+    """
+    warnings: list[PreflightWarning] = []
+    for check in _PREFLIGHT_CHECKS:
+        w = check(config, dataset)
+        if w is not None:
+            warnings.append(w)
+    return warnings
+
+
 def compute_preflight_metrics(
     config: LoopConfig,
     dataset_size: int,
     exclude_nodes: list[str] | None = None,
     has_recon_brief: bool = False,
 ) -> PreflightMetrics:
-    """Derive display-ready metrics from LoopConfig and dataset size."""
-    # Clamp budget to dataset size — a budget larger than the dataset is a
-    # configuration error (Welch elimination gets no margin, dashboard prints
-    # "Sample size 15 of 10"). Clamp silently at compute time; log once.
-    if config.sp_budget_ttest > dataset_size and dataset_size > 0:
-        logger.warning(
-            "sp_budget_ttest (%d) exceeds dataset size (%d) — clamping to dataset size",
-            config.sp_budget_ttest,
-            dataset_size,
-        )
-        config.sp_budget_ttest = dataset_size
-    eff_queries = config.sp_budget_ttest
-    queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
+    """Derive display-ready metrics from LoopConfig and dataset size.
+
+    Does not mutate ``config``. If ``sp_budget_ttest`` exceeds ``dataset_size``
+    the effective query count is clamped for display only; ``sample_dataset``
+    handles runtime truncation. Surface the mismatch via ``run_preflight_checks``.
+    """
+    eff_queries = (
+        min(config.sp_budget_ttest, dataset_size) if dataset_size > 0 else config.sp_budget_ttest
+    )
+    queries_label = f"{eff_queries} of {dataset_size}"
 
     schema = config.pipeline_schema
     active_nodes = list(schema.active_steps) if schema else []
