@@ -266,7 +266,7 @@ class BackendStore:
 
 
 # Thin pointer to the active session — survives across CLI invocations
-_ACTIVE_SESSION_PATH = Path(".promptpotter") / "active_session.json"
+_ACTIVE_SESSION_PATH = Path(__file__).resolve().parents[3] / ".promptpotter" / "active_session.json"
 
 
 def generate_session_id() -> str:

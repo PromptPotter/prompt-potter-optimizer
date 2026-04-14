@@ -38,7 +38,8 @@ from promptpotter.infrastructure.store.stores import (
 
 __all__ = ["ProjectStore"]
 
-BASE_DIR = Path(".promptpotter") / "projects"
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+BASE_DIR = _REPO_ROOT / ".promptpotter" / "projects"
 
 
 class ProjectStore:
