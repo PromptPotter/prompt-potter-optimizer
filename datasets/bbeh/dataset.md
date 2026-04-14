@@ -2,24 +2,27 @@
 
 ## Status
 
-**Scaffolded for the `docs/research/bbeh-comparison/bbeh_potter.ipynb` comparison run.** Data is loaded
-in-memory from HuggingFace `BBEH/bbeh` via
-`docs/research/bbeh-comparison/shared_config.py::load_and_split` — there is no on-disk ground-truth file
-in this folder. The notebook feeds the per-task train split directly into
-`prepare_scoring_context(session, train_data, ...)`.
+**Routed through TermNorm `/matches` with the `llm_only` pipeline** (M9 LLM-Only
+Unification, 2026-04-14). Data is loaded in-memory from HuggingFace `BBEH/bbeh`
+via `docs/research/bbeh-comparison/shared_config.py::load_and_split`. The
+comparison notebook `docs/research/bbeh-comparison/bbeh_potter.ipynb` feeds the
+per-task train split directly into `prepare_scoring_context`.
 
 ## Type
 
-`llm-only` — single `llm_only` node, no retrieval.
+Single `llm_only` generation node. No retrieval, no enrichment. Evaluates
+against a running TermNorm backend that exposes the `llm_only` pipeline.
 
-## Init Flags (CLI — not used by the comparison notebook)
+## Init Flags (CLI)
 
 ```
+--backend-url http://127.0.0.1:8000
 --dataset-name bbeh
---dataset-type llm-only
 --config datasets/bbeh/campaign.json
 --skip-baseline
 ```
+
+Requires a TermNorm instance with the `llm_only` node enabled.
 
 ## Data
 
@@ -29,12 +32,16 @@ in this folder. The notebook feeds the per-task train split directly into
 
 ## Scoring
 
-`exact_match(predicted, ground_truth)` — case-insensitive, whitespace-stripped string equality.
-The scorer is **not** in `SCORING_FUNCTIONS` by default; `bbeh_potter.ipynb` registers it in-process before
-running campaigns.
+`exact_match(predicted, ground_truth)` — case-insensitive, whitespace-stripped
+string equality. Registered in
+`promptpotter/shared/scoring.py::SCORING_FUNCTIONS`.
 
 ## Pipeline Notes
 
-- Single `llm_only` node — prompt flows through `pipeline_params` via `PromptTemplate`
-- Optimization target: prompt template (task framing, reasoning style, answer formatting)
+- Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`
+- `max_tokens: 16000`, `reasoning_effort: "medium"` — both are necessary for
+  `gpt-oss-120b` on long BBEH prompts; reducing either risks empty-output
+  failures when hidden reasoning tokens consume the output budget
+- Optimization target: prompt template, `reasoning_effort`, `temperature`,
+  `max_tokens`
 - Per-task loop: 23 separate campaigns, one `cycle_id` per task

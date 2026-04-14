@@ -64,16 +64,12 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 
     file_config = load_campaign_config(args.config)
     dataset_name = args.dataset_name or file_config.get("dataset_name")
-    dataset_type = file_config.get("dataset_type")
-    local_scoring_token = file_config.get("local_scoring_token")
 
     session = await init_services_cli(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
-        dataset_type=dataset_type,
-        local_scoring_token=local_scoring_token,
         take_over=True,  # cmd_init always rewrites the pointer
     )
     backend_id = session.backend_id  # may have been derived from dataset_name
@@ -91,8 +87,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "backend_id": backend_id,
             "experiment_id": args.experiment_id,
             "dataset_name": dataset_name,
-            "dataset_type": dataset_type,
-            "local_scoring_token": local_scoring_token,
         },
         campaign_config=campaign_config,
         pipeline_params=pipeline_params,

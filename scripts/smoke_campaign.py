@@ -6,7 +6,7 @@ contact verification of a newly scaffolded `datasets/{name}/` bring-up:
 
 - dataset loader present in the registry
 - static `pipeline.json` schema parses and resolves
-- backend (or LLMOnlyAdapter) is reachable
+- backend is reachable
 - L1 generate / score / critique loop runs end-to-end
 - per-node pipeline routing works when only one node is active
 

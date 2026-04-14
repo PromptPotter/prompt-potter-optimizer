@@ -70,8 +70,6 @@ async def init_services_cli(
     backend_id: str = DEFAULT_BACKEND_ID,
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
-    dataset_type: str | None = None,
-    local_scoring_token: str | None = None,
     take_over: bool = False,
 ) -> SessionEnv:
     """Initialize services (logging + service init) for a CLI command."""
@@ -86,8 +84,6 @@ async def init_services_cli(
         experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
-        dataset_type=dataset_type,
-        local_scoring_token=local_scoring_token,
         on_status=_status_sink,
         take_over=take_over,
     )

@@ -74,8 +74,7 @@ class QueryResultFull(QueryResult, total=False):
 class QueryRunner(Protocol):
     """Async backend connector interface.
 
-    Satisfied by both ``BackendClient`` (multi-node pipelines) and
-    ``LLMOnlyAdapter`` (single-call LLM datasets).
+    Satisfied by :class:`BackendClient`.
     """
 
     async def run_query(

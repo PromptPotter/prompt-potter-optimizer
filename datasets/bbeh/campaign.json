@@ -1,7 +1,6 @@
 {
   "campaign_config": {
     "dataset_name": "bbeh",
-    "dataset_type": "llm-only",
     "scoring": "exact_match(predicted, ground_truth)",
     "sp_budget_ttest": 10,
     "recon_sample_size": 10,

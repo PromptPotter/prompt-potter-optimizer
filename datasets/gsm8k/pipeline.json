@@ -1,28 +1,37 @@
 {
   "name": "GSM8K",
   "version": "v0.1",
-  "description": "LLM-only grade school math reasoning — prompt optimization only",
-  "backend_name": "GSM8K Benchmark",
-  "backend_type": "benchmark",
-  "type": "llm-only",
+  "description": "Grade school math reasoning — prompt optimization via TermNorm /matches with the llm_only pipeline.",
+  "backend_name": "TermNorm",
+  "backend_type": "termnorm",
+  "available_models": ["openai/gpt-oss-120b"],
   "nodes": {
     "llm_only": {
       "type": "generation",
-      "runtime": "frontend",
+      "runtime": "backend",
       "node_role": "ranker",
-      "description": "Direct LLM call: prompt + question -> chain-of-thought -> numeric answer. No retrieval or enrichment nodes.",
+      "description": "Direct LLM generation on the TermNorm backend. Dataset-side override bumps max_tokens for reasoning models.",
       "config": {
         "model": "openai/gpt-oss-120b",
         "temperature": 0.0,
-        "max_tokens": 2000
+        "max_tokens": 16000,
+        "reasoning_effort": "medium"
       },
       "prompt_meta": {
         "family": "llm_only",
         "template_variables": ["query"],
-        "description": "System prompt for LLM-only evaluation"
+        "description": "System prompt for GSM8K chain-of-thought evaluation"
       },
       "optimizer": {
-        "param_keys": ["temperature", "max_tokens", "model", "prompt"],
+        "param_keys": ["temperature", "max_tokens", "model", "prompt", "reasoning_effort"],
+        "observation_name": "llm_only",
+        "observation_mappings": [
+          {
+            "pipeline_key": "final_ranking",
+            "output_field": "generated_text",
+            "is_llm": true
+          }
+        ],
         "langfuse_type": "generation"
       }
     }

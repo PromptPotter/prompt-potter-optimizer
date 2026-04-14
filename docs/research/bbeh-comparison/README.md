@@ -41,11 +41,12 @@ RUN_BOOTSTRAP = True
 **PromptPotter (local):** runs against this repo, not Colab (PromptPotter is not on PyPI).
 
 1. `pip install -e ".[dev,jupyter]"` from the repo root, plus `pip install datasets`
-2. `.env` at the repo root with `GROQ_API_KEY` and `LOCAL_SCORING_SECRET`
-3. Open `bbeh_potter.ipynb` in Jupyter / VS Code and Run All
-4. `results_potter.json` is written next to the notebook
+2. `.env` at the repo root with `GROQ_API_KEY`
+3. Boot a TermNorm backend exposing the `llm_only` pipeline at `http://127.0.0.1:8000`
+4. Open `bbeh_potter.ipynb` in Jupyter / VS Code and Run All
+5. `results_potter.json` is written next to the notebook
 
-The PromptPotter notebook uses the `LLMOnlyAdapter` — no FastAPI backend to stand up. Per-task loop (23 campaigns, one `cycle_id` per task) mirrors the CAPO/DSPy harness. Hyperparameters in the config cell are **unmeasured starting points** (pre-sweep); `results_potter.json` tags this via its `config.note` field so downstream comparison tables don't misread the numbers as tuned.
+The PromptPotter notebook routes every BBEH task through TermNorm `/matches` with `steps: ["llm_only"]` — the same evaluation path used by `lca-termnorm` and every other dataset. Per-task loop (23 campaigns, one `cycle_id` per task) mirrors the CAPO/DSPy harness. Hyperparameters in the config cell are **unmeasured starting points** (pre-sweep); `results_potter.json` tags this via its `config.note` field so downstream comparison tables don't misread the numbers as tuned.
 
 ## Output format
 

@@ -183,7 +183,7 @@ Full spec: [`m11-plus-backlog.md`](m11-plus-backlog.md)
 | Project store per campaign | < 10 MB |
 | LLM providers | Groq and OpenAI (any OpenAI-compatible) |
 | Python | 3.13 |
-| Evaluation mode | Backend via `/matches` (default, `llm_only` step). Optional local eval via `LLMOnlyAdapter` (opt-in). |
+| Evaluation mode | All datasets route through TermNorm `/matches`. Retrieval pipelines (e.g. `lca-termnorm`) use the default step list; generation-only benchmarks (BBEH/GSM8K/AIME/HotPotQA) use `steps: ["llm_only"]`. No local evaluation path. |
 | Crash recovery | Incremental `.partial.jsonl` with partial-run resume |
 
 ---
