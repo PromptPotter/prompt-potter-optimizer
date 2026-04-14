@@ -251,6 +251,103 @@ class BackendStore:
             self._datasets_dir(backend_id) / f"{name}.json",
         )
 
+    def exclude_dataset_items(
+        self,
+        backend_id: str,
+        name: str,
+        exclusions: list[dict[str, Any]],
+    ) -> int:
+        """Atomically move items from ``items`` into the ``excluded`` sidelist.
+
+        Each entry in ``exclusions`` must have a ``query`` key matching the
+        ``query`` field of an active item, plus arbitrary metadata
+        (``reason``, ``hit_rate``, ``observations``, ``campaign_id``, …) that
+        will be persisted alongside the original item.
+
+        Returns the number of items actually moved. Items whose query is not
+        in the active list are silently skipped (idempotent).
+        """
+        validate_path_component(name)
+        data = self.load_dataset(backend_id, name)
+        if data is None:
+            return 0
+
+        items: list[dict[str, Any]] = list(data.get("items", []))
+        excluded: list[dict[str, Any]] = list(data.get("excluded", []))
+
+        targets: dict[str, dict[str, Any]] = {e["query"]: e for e in exclusions}
+        remaining: list[dict[str, Any]] = []
+        moved = 0
+        now = datetime.now(UTC).isoformat()
+        for item in items:
+            q = item.get("query", "")
+            if q in targets:
+                meta = targets[q]
+                excluded.append(
+                    {
+                        "item": item,
+                        "reason": meta.get("reason", "zero_signal"),
+                        "hit_rate": meta.get("hit_rate"),
+                        "observations": meta.get("observations"),
+                        "campaign_id": meta.get("campaign_id", ""),
+                        "excluded_at": now,
+                    }
+                )
+                moved += 1
+            else:
+                remaining.append(item)
+
+        if moved == 0:
+            return 0
+
+        data["items"] = remaining
+        data["excluded"] = excluded
+        data["row_count"] = len(remaining)
+        path = self._datasets_dir(backend_id) / f"{name}.json"
+        write_json(path, data)
+        return moved
+
+    def restore_dataset_items(
+        self,
+        backend_id: str,
+        name: str,
+        queries: list[str] | None = None,
+    ) -> int:
+        """Move items from ``excluded`` back into ``items``.
+
+        If ``queries`` is None, restores everything. Returns the number of
+        items actually restored.
+        """
+        validate_path_component(name)
+        data = self.load_dataset(backend_id, name)
+        if data is None:
+            return 0
+
+        items: list[dict[str, Any]] = list(data.get("items", []))
+        excluded: list[dict[str, Any]] = list(data.get("excluded", []))
+        if not excluded:
+            return 0
+
+        keep: list[dict[str, Any]] = []
+        restored = 0
+        for entry in excluded:
+            item = entry["item"]
+            if queries is None or item.get("query", "") in queries:
+                items.append(item)
+                restored += 1
+            else:
+                keep.append(entry)
+
+        if restored == 0:
+            return 0
+
+        data["items"] = items
+        data["excluded"] = keep
+        data["row_count"] = len(items)
+        path = self._datasets_dir(backend_id) / f"{name}.json"
+        write_json(path, data)
+        return restored
+
     # -- connector profile (persistent per-backend defaults) -------------------
 
     def save_connector_profile(self, backend_id: str, profile: dict[str, Any]) -> None:

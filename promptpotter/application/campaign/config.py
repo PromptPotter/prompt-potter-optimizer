@@ -115,6 +115,25 @@ class LoopConfig(BaseModel):
     backend_id: str = Field("", description="Backend identifier for caching")
     project_root: str = Field("", description="Project root for store")
     session_id: str = Field("", description="Session ID for persistence emitter")
+    dataset_name: str = Field(
+        "",
+        description="Name of the active dataset (resolves to "
+        "``{backend_id}/datasets/{dataset_name}.json``). Required for "
+        "zero-signal filtering.",
+    )
+
+    # Zero-signal sample filtering (deterministic, no LLM)
+    zero_signal_filter_enabled: bool = Field(
+        True,
+        description="Prune always-hit and always-miss queries from the active "
+        "dataset at round boundaries. Uses SearchMemory.dead_queries(). "
+        "On by default — the min_observations gate prevents premature exclusion.",
+    )
+    zero_signal_filter_min_observations: int = Field(
+        5,
+        description="Minimum Bernoulli samples required before a query is "
+        "eligible for zero-signal exclusion.",
+    )
     sp_budget_ttest: int = Field(20, description="Eval subsample size (must be > 0)")
     seed: int = Field(42, description="Random seed for subsampling")
 
@@ -242,6 +261,7 @@ class LoopConfig(BaseModel):
         pipeline_schema: PipelineSchema | None = None,
         recon_brief: ReconBrief | None = None,
         task_context: TaskDecomposition | dict | None = None,
+        dataset_name: str = "",
     ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
@@ -258,6 +278,7 @@ class LoopConfig(BaseModel):
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
+            dataset_name=dataset_name or campaign_config.get("dataset_name", ""),
             pipeline_schema=pipeline_schema,
             recon_brief=recon_brief,
             task_context=task_context,

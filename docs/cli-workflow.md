@@ -167,6 +167,22 @@ python -m promptpotter export supplemental \
 
 ---
 
+## Zero-Signal Sample Filtering
+
+On by default (the `min_observations=5` gate prevents premature exclusion on a fresh campaign). Queries with variance 0 (always-hit or always-miss) across at least `zero_signal_filter_min_observations` samples are physically moved from `datasets/{name}.json::items` into a `datasets/{name}.json::excluded` sidelist after each round. A fresh campaign will see the shrunken dataset.
+
+Disable via `optimization.zero_signal_filter_enabled: false` in `campaign.json`. Tune `optimization.zero_signal_filter_min_observations` (default 5).
+
+```bash
+# Inspect what's been excluded
+cat .promptpotter/projects/{backend_id}/datasets/{name}.json \
+  | jq '.excluded | map({query: .item.query, hit_rate, observations, reason})'
+```
+
+Restoration is manual — either use `BackendStore.restore_dataset_items()` in a Python shell, or move entries from `excluded` back into `items` and delete the `excluded` array. When the filter fires during a run, a `zero_signal_filter` phase event is emitted with count + examples.
+
+---
+
 ## Pipeline Params Threading
 
 `configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which then flows unchanged through `init`, `optimize`, and `recon`. If `pipeline_params` is `None`, the backend runs the full pipeline including excluded nodes.

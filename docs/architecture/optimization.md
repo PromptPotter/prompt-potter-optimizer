@@ -369,6 +369,8 @@ When scan data is available, `prepare_recon_brief()` enriches the meta-prompt wi
 
 Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
+**Round-boundary dataset mutation — zero-signal filter.** Immediately after `SearchMemory.on_round_complete()`, `campaign/runner.py::_maybe_apply_zero_signal_filter` runs. When enabled (`LoopConfig.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are physically moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. This is the **only** sanctioned round-boundary mutation of the active dataset; all other intelligence tiers are read-only signals into LLM prompts. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
+
 ### Stale Data Load Protocol
 
 When a cached eval result is degraded (non-empty `diagnostics.warnings`), the protocol walks a 3-step ladder:
@@ -395,6 +397,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 | `refine_strategy` | L2 escalation |
 | `modify_plan` | L3 escalation |
 | `escalation` | `EscalationCheck` fires mid-eval |
+| `zero_signal_filter` | Dataset sweep removed always-hit/always-miss queries |
 
 Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `RunCallbacks` for the callback interface.
 

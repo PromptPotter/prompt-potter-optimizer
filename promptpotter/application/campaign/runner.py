@@ -40,6 +40,7 @@ from promptpotter.application.optimization.phases import (
 )
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
+from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
@@ -188,6 +189,60 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
     }
 
 
+def _maybe_apply_zero_signal_filter(
+    state: LoopState,
+    env: LoopEnv,
+    config: LoopConfig,
+    round_num: int,
+    dataset: list[dict[str, Any]],
+    cb: RunCallbacks,
+) -> None:
+    """Prune always-hit/always-miss queries from the active dataset.
+
+    Off by default — gated on ``config.zero_signal_filter_enabled``. When
+    the filter fires, excluded queries are physically moved to the
+    dataset's ``excluded`` sidelist on disk AND removed from the
+    in-memory ``dataset`` list so the next round sees the smaller set.
+    """
+    if not config.zero_signal_filter_enabled:
+        return
+    if not config.dataset_name:
+        return
+    memory = state.search_memory
+    if memory is None or env.scoring_ctx is None or env.scoring_ctx.store is None:
+        return
+
+    with graceful("Zero-signal filter failed"):
+        excluded = apply_zero_signal_exclusions(
+            store=env.scoring_ctx.store,
+            backend_id=config.backend_id,
+            dataset_name=config.dataset_name,
+            memory=memory,
+            active_dataset=dataset,
+            min_observations=config.zero_signal_filter_min_observations,
+            campaign_id=env.cycle_id or "",
+        )
+        if excluded:
+            # Also prune any sampled scoring dataset the next round will read.
+            excluded_queries = {e["query"] for e in excluded}
+            env.scoring_dataset[:] = [
+                d for d in env.scoring_dataset if d.get("query", "") not in excluded_queries
+            ]
+            always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
+            always_hit = len(excluded) - always_miss
+            emit_phase(
+                cb.on_phase,
+                "zero_signal_filter",
+                "applied",
+                round=round_num,
+                count=len(excluded),
+                always_miss=always_miss,
+                always_hit=always_hit,
+                examples=[e["query"] for e in excluded[:3]],
+                dataset_name=config.dataset_name,
+            )
+
+
 async def _post_round(
     state: LoopState,
     env: LoopEnv,
@@ -228,6 +283,7 @@ async def _post_round(
 
     if state.search_memory:
         state.search_memory.on_round_complete(state, env, config, round_num, dataset)
+        _maybe_apply_zero_signal_filter(state, env, config, round_num, dataset, cb)
 
     # Stopping conditions
     if state.current_accuracy >= 1.0:
@@ -508,6 +564,7 @@ async def run_optimization(
         recon_brief=recon_brief,
         pipeline_schema=session.pipeline_schema,
         task_context=task_context,
+        dataset_name=session.dataset_name or "",
     )
 
     cb = callbacks or RunCallbacks()

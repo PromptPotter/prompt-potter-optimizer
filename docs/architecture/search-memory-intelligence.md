@@ -49,7 +49,7 @@ accumulates a Bernoulli sequence of hits across configs.
 **Accessors:**
 - `discriminating_queries(min_variance)` → queries whose outcome varies
   across configurations (high variance = informative for comparison)
-- `dead_queries()` → queries that never hit (or always hit)
+- `dead_queries(min_observations=N, include_always_hit=..., include_always_miss=...)` → zero-signal queries (always-hit and/or always-miss) with a minimum-observations confidence gate. Powers the zero-signal sample filter (§ Zero-Signal Sample Filtering)
 - `query_tractability()` → all queries with hit rate and variance
 - `query_degradation_rate(query)` → fraction of evaluations with pipeline
   warnings
@@ -124,7 +124,7 @@ L1 focuses on generating diverse candidates. Critique is the every-round hub (ra
 
 | Tier | Handled by | Fires when | What | Example |
 |------|-----------|------------|------|---------|
-| **Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | CI-gated intractable exclusion, eval set adaptation |
+| **Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | Zero-signal sample filtering (§ below) |
 | **Every-round** | Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
 | **Strategic** | L2 Refine (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
 
@@ -165,11 +165,48 @@ state.
 
 Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three severity levels:
 
-- **Intractable** (never hit) → `intractable_queries_ci()` excludes via Wilson CI. No optimizer signal.
+- **Zero-signal** (always-hit or always-miss with ≥ `min_observations` samples) → `dead_queries(min_observations=N)` drives the zero-signal sample filter (see next section). Physically removed from the active dataset.
 - **Chronically failing** (recent streak) → `persistent_failures(min_streak)` deprioritizes. Flagged to L2.
 - **Intermittent** (variable) → kept in eval set. High discrimination value.
 
-`adapt_eval_set()` swaps dead queries for discriminating ones. Intractable queries excluded before evaluation begins.
+### Zero-Signal Sample Filtering
+
+`application/scoring/zero_signal_filter.py::apply_zero_signal_exclusions()` sweeps the active dataset at round boundaries. Called from `campaign/runner.py::_post_round` right after `SearchMemory.on_round_complete()`, gated on `LoopConfig.zero_signal_filter_enabled` (**on by default** — the `min_observations=5` gate prevents premature exclusion on a fresh campaign).
+
+**Criteria.** A query is zero-signal when its Bernoulli hit sequence satisfies *both*:
+1. `len(hits) >= min_observations` (default 5) — confidence gate so a single observation doesn't exclude the world on a fresh campaign.
+2. `hit_rate ∈ {0.0, 1.0}` — variance exactly 0. Treated symmetrically; always-hit and always-miss are both excluded.
+
+**Persistence — "exchange from the default set".** Excluded queries are **physically moved** inside `{backend_id}/datasets/{name}.json` from `items` into a new `excluded` sidelist via `BackendStore.exclude_dataset_items()`. The sidelist entry captures the full original item plus `{reason, hit_rate, observations, campaign_id, excluded_at}`. A fresh campaign launched tomorrow sees the shrunken `items` list — not transient state, actually pruned. Recovery is `BackendStore.restore_dataset_items(queries=None)` which moves entries back.
+
+```json
+{
+  "name": "train",
+  "items": [...],
+  "excluded": [
+    {
+      "item": {"query": "...", "ground_truth": "..."},
+      "reason": "zero_signal",
+      "hit_rate": 0.0,
+      "observations": 7,
+      "campaign_id": "cyc_...",
+      "excluded_at": "2026-04-14T..."
+    }
+  ]
+}
+```
+
+**In-round effect.** `apply_zero_signal_exclusions()` also mutates the in-memory `dataset` list passed into `_run_round_loop`, and prunes `env.scoring_dataset` — so the *current* run's next round immediately sees the smaller set, not just future runs.
+
+**User surfacing.** When the filter fires, `emit_phase("zero_signal_filter", "applied", count=N, always_miss=..., always_hit=..., examples=[...])` is dispatched via `RunCallbacks.on_phase`. Notebook/CLI presenters render the message.
+
+**Config.** Two `LoopConfig` fields:
+- `zero_signal_filter_enabled: bool = True` — master switch (on by default).
+- `zero_signal_filter_min_observations: int = 5` — confidence gate.
+
+**Known limitations (to be refined in M10).** This first implementation is deliberately rudimentary: excluded queries are dropped outright rather than tiered (no "probation" / "rotate back in" / "cold storage queryable by future critique"), and there is no guard preventing the active dataset from shrinking below `sp_budget_ttest`. See M10 spec.
+
+**Why it's not a fallback.** The filter is *not* a "default value when the real one fails" — it's deterministic dataset shrinking driven entirely by observed data. Zero backend calls. No retry. No hidden recovery.
 
 ### Tier 2 — L2 Strategic Intelligence (LLM)
 

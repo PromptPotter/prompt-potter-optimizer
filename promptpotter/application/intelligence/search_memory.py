@@ -152,10 +152,28 @@ class SearchMemory:
         """Return queries whose outcome varies across configurations."""
         return [q for q in self._build_query_records() if q.variance >= min_variance]
 
-    def dead_queries(self, max_hit_rate: float = 0.0) -> list[QueryRecord]:
-        """Return queries that never hit (or always hit if max_hit_rate=1.0)."""
-        records = self._build_query_records()
-        return [q for q in records if q.hit_rate <= max_hit_rate or q.hit_rate >= 1.0]
+    def dead_queries(
+        self,
+        *,
+        min_observations: int = 1,
+        include_always_hit: bool = True,
+        include_always_miss: bool = True,
+    ) -> list[QueryRecord]:
+        """Return zero-signal queries — always-hit and/or always-miss.
+
+        Requires at least ``min_observations`` Bernoulli samples for a query
+        to be eligible; without this floor a single observation would mark
+        every query as "dead" on a fresh campaign.
+        """
+        out: list[QueryRecord] = []
+        for q in self._build_query_records():
+            if len(self._query_hits.get(q.query, [])) < min_observations:
+                continue
+            if (include_always_miss and q.hit_rate == 0.0) or (
+                include_always_hit and q.hit_rate == 1.0
+            ):
+                out.append(q)
+        return out
 
     def query_sensitive_axes(self, query: str) -> list[str]:
         """Return axes that most affect this query's outcome.
@@ -465,7 +483,7 @@ class SearchMemory:
         if clusters:
             ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
 
-        dead = self.dead_queries()
+        dead = self.dead_queries(include_always_hit=False)
         if dead:
             ctx["dead_queries"] = f"{len(dead)} queries never hit"
 
