@@ -352,6 +352,7 @@ async def run_optimization_notebook(
         l1_patience=l1_patience,
         pipeline_schema=session.pipeline_schema,
         recon_brief=recon_brief,
+        scoring_formula=campaign_config.get("scoring"),
     )
 
     # Resolve explicit experiment_id to full cycle_id
@@ -473,10 +474,12 @@ async def run_baseline_scoring(
 
     pbar = tqdm(total=len(dataset) or 1, desc="Baseline eval", unit="query")
 
+    scoring_formula = campaign_config.get("scoring")
+
     def _on_result(result, index, total):
         pbar.total = total
         is_cached = result.get("cached", False)
-        tqdm.write(_fmt_query_result(result, cached=is_cached))
+        tqdm.write(_fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula))
         pbar.update(1)
 
     from promptpotter.infrastructure.tracing import ObservabilityBridge
@@ -508,11 +511,13 @@ async def run_baseline_scoring(
 
     show_progress(campaign_rounds)
 
+    from promptpotter.shared.scoring import extract_display_answer
+
     failures = [r for r in baseline_results if not r["hit"] and not is_error_result(r)]
     for r in failures[:5]:
-        print(
-            f"  MISS: {r['query'][:55]}  |  "
-            f"Pred: {r['predicted'][:35]}  |  GT: {r['ground_truth'][:35]}"
-        )
+        pred = extract_display_answer(r["predicted"], scoring_formula)[:30]
+        gt = (r["ground_truth"] or "").strip()[:30]
+        q = (r["query"] or "").replace("\n", " ")[:50]
+        print(f"  MISS: -> {pred:<30s}  gt: {gt:<30s}  q: {q}")
 
     return campaign_rounds, baseline_results

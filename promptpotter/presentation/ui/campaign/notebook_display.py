@@ -53,6 +53,7 @@ class NotebookDisplay:
         l1_patience: int,
         pipeline_schema: PipelineSchema | None,
         recon_brief: ReconBrief | None = None,
+        scoring_formula: str | None = None,
     ) -> None:
         self.campaign_rounds = campaign_rounds
         self.baseline_acc = baseline_acc
@@ -62,6 +63,7 @@ class NotebookDisplay:
         self.state = _CycleDisplayState(baseline_accuracy=baseline_acc)
         self.state.recon_brief = recon_brief
         self.query_counter = 0
+        self.scoring_formula = scoring_formula
 
     def as_callbacks(self) -> RunCallbacks:
         from promptpotter.application.campaign.callbacks import RunCallbacks
@@ -90,7 +92,15 @@ class NotebookDisplay:
         self.query_counter += 1
         is_cached = result.get("cached", False)
         prefix = f"  [{self.query_counter:>3d}] "
-        print(_fmt_query_result(result, cached=is_cached, prefix=prefix), flush=True)
+        print(
+            _fmt_query_result(
+                result,
+                cached=is_cached,
+                prefix=prefix,
+                scoring_formula=self.scoring_formula,
+            ),
+            flush=True,
+        )
 
     def on_candidate(self, idx: int, total: int, scores: dict) -> None:
         label = f"C{idx + 1}"

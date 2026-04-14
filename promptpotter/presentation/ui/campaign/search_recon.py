@@ -89,7 +89,7 @@ async def run_recon(
     )
     print(f"  Estimated calls: ~{n_configs * n_samples}")
 
-    cb, on_result_cb = _make_scan_progress_cb()
+    cb, on_result_cb = _make_scan_progress_cb(scoring_formula=scoring_formula)
 
     _httpx_log = logging.getLogger("httpx")
     _httpcore_log = logging.getLogger("httpcore")
@@ -145,16 +145,19 @@ async def run_recon(
     return df, profiles
 
 
-def _make_scan_progress_cb() -> tuple[
-    Callable[[ReconEvent], None], Callable[[dict, int, int], None]
-]:
+def _make_scan_progress_cb(
+    *, scoring_formula: str | None = None
+) -> tuple[Callable[[ReconEvent], None], Callable[[dict, int, int], None]]:
     """Build a progress callback for run_recon with flip tracking."""
     baseline_results: list[dict] = []
 
     def _on_result(result: dict, index: int, total: int) -> None:
         """Print each query result as it arrives from the backend."""
         is_cached = result.get("cached", False)
-        print(_fmt_query_result(result, cached=is_cached), flush=True)
+        print(
+            _fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula),
+            flush=True,
+        )
 
     def _cb(event: ReconEvent) -> None:
         t = event["type"]
@@ -244,6 +247,7 @@ async def run_adaptive_recon(
     pipeline_params: dict | None = None,
     plan_id: str = "",
     experiment_id: str = "",
+    scoring_formula: str | None = None,
 ) -> tuple:
     """Run adaptive coordinate descent search with progress output.
 
@@ -258,7 +262,7 @@ async def run_adaptive_recon(
             f"card={p['cardinality']}, budget={p['exploration_budget']}"
         )
 
-    cb = _make_search_progress_cb()
+    cb = _make_search_progress_cb(scoring_formula=scoring_formula)
 
     _httpx_log = logging.getLogger("httpx")
     _httpcore_log = logging.getLogger("httpcore")
@@ -306,7 +310,7 @@ async def run_adaptive_recon(
     return best_ps, best_params, log_df
 
 
-def _make_search_progress_cb():
+def _make_search_progress_cb(*, scoring_formula: str | None = None):
     """Build a progress callback for run_adaptive_recon."""
 
     def _cb(event: ReconEvent) -> None:
@@ -351,7 +355,7 @@ def _make_search_progress_cb():
 
             results = event.get("results", [])
             for r in results:
-                print(_fmt_query_result(r, cached=cached))
+                print(_fmt_query_result(r, cached=cached, scoring_formula=scoring_formula))
 
         elif t == "axis_resolved":
             action = event["action"]

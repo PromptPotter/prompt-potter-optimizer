@@ -11,6 +11,7 @@ from __future__ import annotations
 import re
 
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.scoring import extract_display_answer
 from promptpotter.shared.statistics import wilson_ci
 
 
@@ -320,14 +321,26 @@ def _find_gt_rank(r: dict) -> int | None:
     return None
 
 
-def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str:
+def _fmt_query_result(
+    r: dict,
+    cached: bool = False,
+    *,
+    prefix: str = "",
+    scoring_formula: str | None = None,
+) -> str:
     """Format a single query result as a HIT/MISS line with timing.
 
     When *prefix* is given it replaces the default 8-space indent so the
-    caller can merge a counter into the same line.
+    caller can merge a counter into the same line. *scoring_formula* is
+    the dataset's scoring formula (from ``campaign_config["scoring"]``);
+    when provided, ``predicted`` is parsed via ``extract_display_answer``
+    so markers like ``**bold**`` or ``\\boxed{…}`` collapse to the
+    single-token answer.
     """
-    q = (r.get("query") or "")[:45]
-    pred = (r.get("predicted") or "")[:35]
+    raw_pred = r.get("predicted") or ""
+    pred = extract_display_answer(raw_pred, scoring_formula)[:30]
+    gt = (r.get("ground_truth") or "").strip()[:30]
+    q = ((r.get("query") or "").replace("\n", " ").strip())[:40]
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")
@@ -340,7 +353,7 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
     tt = pd.get("total_time")
 
     if r.get("hit"):
-        tag = "HIT "
+        tag = "HIT"
     else:
         ranked = pd.get("ranked_candidates", [])
         n_cand = len(ranked)
@@ -352,17 +365,16 @@ def _fmt_query_result(r: dict, cached: bool = False, *, prefix: str = "") -> str
         else:
             tag = "MISS"
 
-    cache_marker = " \U0001f4d6" if cached else ""
+    cache_marker = "\U0001f4d6" if cached else ""
     step = f"{step}{cache_marker}"
 
     indent = prefix if prefix else ""
 
-    sw = 10 if cached else 8
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
     if err:
-        return f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  ERR: {str(err)[:40]}"
+        return f"{indent}{time_col} {tag} {step} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
-    line = f"{indent}{time_col} {tag} {step:>{sw}s}  {q:<45s}  -> {pred}"
+    line = f"{indent}{time_col} {tag} {step} -> {pred!r} gt:{gt!r} q:{q!r}"
 
     _ann_indent = ""
 

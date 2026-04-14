@@ -41,6 +41,20 @@ Scorer = Callable[[dict], float]
 _GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")
 _NUMBER_RE = re.compile(r"-?\d[\d,]*\.?\d*")
 _BOXED_RE = re.compile(r"\\boxed\{([^{}]+)\}")
+_BOLD_RE = re.compile(r"\*\*([^*]+?)\*\*")
+
+
+def _extract_bold(text: str) -> str:
+    """Return the last ``**…**`` run, else *text* unchanged.
+
+    BBEH final answers are wrapped in bold markers. No markers → no-op.
+    """
+    if not text:
+        return ""
+    matches = _BOLD_RE.findall(text)
+    if matches:
+        return matches[-1].strip()
+    return text
 
 
 def _extract_gsm8k_number(text: str) -> float | None:
@@ -107,10 +121,35 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 
 
 def _exact_match(predicted: str, ground_truth: str) -> float:
-    """Return 1.0 iff predicted == ground_truth after strip + lowercase."""
-    p = (predicted or "").strip().lower()
-    g = (ground_truth or "").strip().lower()
+    """Return 1.0 iff predicted == ground_truth after bold-strip + lowercase.
+
+    Strips ``**…**`` markers from both sides (BBEH convention); no-op
+    when markers are absent, so plain exact-match datasets are unaffected.
+    """
+    p = _extract_bold(predicted or "").strip().lower()
+    g = _extract_bold(ground_truth or "").strip().lower()
     return 1.0 if p == g else 0.0
+
+
+def _extract_gsm8k_display(text: str) -> str:
+    """Return the extracted GSM8K answer as a short string."""
+    n = _extract_gsm8k_number(text or "")
+    if n is None:
+        return (text or "").strip()
+    return str(int(n)) if n.is_integer() else str(n)
+
+
+def _extract_boxed_display(text: str) -> str:
+    """Return the last ``\\boxed{…}`` content, else last number, else stripped."""
+    if not text:
+        return ""
+    boxed = _BOXED_RE.findall(text)
+    if boxed:
+        return boxed[-1].strip()
+    nums = _NUMBER_RE.findall(text)
+    if nums:
+        return nums[-1]
+    return text.strip()
 
 
 SCORING_FUNCTIONS: dict[str, Callable] = {
@@ -120,6 +159,31 @@ SCORING_FUNCTIONS: dict[str, Callable] = {
     "exact_match": _exact_match,
 }
 """All scoring helpers available in formulas. Add new ones here."""
+
+
+DISPLAY_EXTRACTORS: dict[str, Callable[[str], str]] = {
+    "exact_match": _extract_bold,
+    "gsm8k_match": _extract_gsm8k_display,
+    "aime_match": _extract_boxed_display,
+}
+"""Per-scoring-function display extractors — reused by the eval UI."""
+
+
+def extract_display_answer(predicted: str, formula: str | None) -> str:
+    """Return the parsed answer for *predicted* under *formula*.
+
+    Dispatches on the first scoring-function name found in *formula*.
+    Falls back to a whitespace-stripped copy of *predicted* when no
+    formula or no match is given.
+    """
+    text = (predicted or "").strip()
+    if not formula:
+        return text
+    for name, extractor in DISPLAY_EXTRACTORS.items():
+        if name in formula:
+            return extractor(predicted or "").strip()
+    return text
+
 
 # ---------------------------------------------------------------------------
 
