@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
-from promptpotter.domain.analysis import EscalationTarget, ValidationFailure
+from promptpotter.domain.analysis import EscalationTarget, RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
@@ -168,6 +168,7 @@ def _build_score_report(
     resumed_from_cache: bool = False,
     invalid: bool = False,
     validation_failures: list[dict] | None = None,
+    runtime_failures: list[dict] | None = None,
 ) -> dict:
     """Build unified candidate score report dict."""
     return {
@@ -184,6 +185,7 @@ def _build_score_report(
         "expected_queries": len(dataset),
         "invalid": invalid,
         **({"validation_failures": validation_failures} if validation_failures else {}),
+        **({"runtime_failures": runtime_failures} if runtime_failures else {}),
         **({"resumed_from_cache": True} if resumed_from_cache else {}),
     }
 
@@ -316,6 +318,42 @@ async def _score_candidates(
         if len(results) == len(dataset) and not aborted:
             elim_check.register_completed([r["score"] for r in results])
 
+        # Self-healing: convert a degradation elimination signal into a
+        # RuntimeFailure attached to THIS candidate's memory. Mirrors the
+        # ValidationFailure rail — the failure is a property of the
+        # candidate that produced it, not a round-level event. L2 reads it
+        # from candidate_scores next round and produces a directive that
+        # names the disallowed value range.
+        runtime_failures_dicts: list[dict] | None = None
+        if (
+            elimination_stopped
+            and escalation_signal is not None
+            and escalation_signal["check_name"] == "degradation"
+        ):
+            cr = escalation_signal["check_result"]
+            dominant = cr.get("dominant_warning", "unknown:unknown")
+            problem_node = dominant.split(":")[0] if ":" in dominant else ""
+            observed_node_cfg = (merged_pp[idx] or {}).get(problem_node, {}) or {}
+            rf = RuntimeFailure(
+                source="degradation_check",
+                dominant_warning=dominant,
+                warning_types=dict(cr.get("warning_types") or {}),
+                degraded_rate=float(cr.get("degraded_rate", 0.0)),
+                degraded_count=int(cr.get("degraded_count", 0)),
+                total_evaluated=int(cr.get("total_evaluated", len(results))),
+                observed_config=dict(observed_node_cfg),
+            )
+            osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, rf]
+            runtime_failures_dicts = [rf.to_dict()]
+            logger.info(
+                "Candidate %d/%d eliminated — RuntimeFailure attached (%s, rate=%.0f%%, config=%s)",
+                idx + 1,
+                n_candidates,
+                dominant,
+                rf.degraded_rate * 100,
+                observed_node_cfg,
+            )
+
         report = _build_score_report(
             osp_c,
             candidate_overrides[idx],
@@ -324,6 +362,7 @@ async def _score_candidates(
             dataset,
             aborted=aborted,
             elimination_stopped=elimination_stopped,
+            runtime_failures=runtime_failures_dicts,
         )
         candidate_scores.append(report)
         callbacks.on_candidate_scored(idx, n_candidates, report)

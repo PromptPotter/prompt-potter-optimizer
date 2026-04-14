@@ -115,3 +115,34 @@ class ValidationFailure:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass
+class RuntimeFailure:
+    """A runtime-observed health failure on a candidate's evaluation.
+
+    Sibling of ``ValidationFailure`` on the self-healing rail, but
+    populated AFTER the candidate ran — from per-query degradation
+    evidence (e.g. a candidate with ``max_tokens=150`` that produces
+    ``empty_content_reasoning_fallback`` on 7/7 queries). Attributes
+    the failure to the specific candidate that caused it, not the
+    round, so winners are never penalised for losers' runtime issues.
+
+    Stored on ``OptimizationMemory.runtime_failures``, surfaced in the
+    candidate's score report, and ingested by L2 next round as a
+    self-healing directive signal — mirroring the ValidationFailure
+    pipeline. Does **not** drive synthetic-0: the candidate's real
+    score stands (usually low anyway), the failure is a forensic
+    attachment explaining *why*.
+    """
+
+    source: str  # e.g. "degradation_check" | "empty_output_check"
+    dominant_warning: str  # e.g. "llm_only:empty_content_reasoning_fallback"
+    warning_types: dict[str, int]  # full histogram of warning types seen
+    degraded_rate: float  # fraction of scored queries that degraded
+    degraded_count: int
+    total_evaluated: int
+    observed_config: dict[str, Any]  # snapshot of the offending node's config
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)

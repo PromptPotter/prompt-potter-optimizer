@@ -23,6 +23,7 @@ from promptpotter.application.optimization.nodes.formatting import (
     format_escalation_report,
     format_l2_intelligence,
     format_pipeline_section,
+    format_runtime_failures_for_l3,
     format_search_memory_block,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
@@ -217,13 +218,28 @@ async def refine_strategy(
             + json.dumps(tc_display, indent=2)
         )
 
-    # Aggregate parse-time validation failures across the prior round's
-    # candidates. Self-healing: L2 sees these and produces a directive that
-    # names the disallowed values so L1 doesn't propose them again.
+    # Aggregate parse-time validation failures AND runtime failures across
+    # the prior round's candidates. Self-healing: L2 sees these and produces
+    # a directive that names the disallowed values/ranges so L1 doesn't
+    # propose them again. validation_failures are the parse-time rail
+    # (synthetic-0, never ran the backend); runtime_failures are the
+    # mid-eval rail (ran, degraded, eliminated).
     validation_failures: list[dict] = []
+    runtime_failures: list[dict] = []
     for cs in candidate_scores or []:
         for vf in cs.get("validation_failures") or []:
             validation_failures.append(vf)
+        for rf in cs.get("runtime_failures") or []:
+            rf_with_label = dict(rf)
+            rf_with_label["candidate_changes"] = cs.get("changes_description", "")
+            runtime_failures.append(rf_with_label)
+
+    # Accumulated runtime_failures from outer memory — patterns that survived
+    # across earlier rounds despite L2's prior strategy adjustments. This is
+    # the signal that tells L2 "your last angle didn't work; try a different
+    # one," and when the list keeps growing across L2 rounds it's also the
+    # justification for L3 escalation (which reads the same list).
+    runtime_failures_accumulated = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
 
     intelligence_sections = format_l2_intelligence(
         L2IntelligenceData(
@@ -242,6 +258,8 @@ async def refine_strategy(
             ),
             diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
             validation_failures=validation_failures or None,
+            runtime_failures=runtime_failures or None,
+            runtime_failures_accumulated=runtime_failures_accumulated,
         )
     )
 
@@ -284,11 +302,21 @@ async def modify_plan(
         for rd in l2_history[-3:]
     )
 
+    # Runtime failure trail — everything L2 has seen but couldn't reduce.
+    # Empty string when the list is empty, so the template placeholder
+    # collapses cleanly.
+    runtime_failures_section = format_runtime_failures_for_l3(
+        [rf.to_dict() for rf in opt_sp.memory.runtime_failures]
+    )
+
     compile_vars = {
         "current_plan": opt_sp.plan or "(none — default strategy)",
         "l2_summary": l2_summary,
         "rendered_prompt": opt_sp.render(),
         "pipeline_section": format_pipeline_section(pipeline_params, pipeline_schema),
+        "runtime_failures_section": (
+            "\n\n" + runtime_failures_section if runtime_failures_section else ""
+        ),
         "intelligence_section": format_search_memory_block(
             search_memory.to_strategic_digest(include_clusters=True)
             if search_memory is not None

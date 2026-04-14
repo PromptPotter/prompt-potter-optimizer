@@ -212,30 +212,38 @@ Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"deg
 
 ---
 
-## Escalation Chain
+## Escalation Chain — degradation via the RuntimeFailure rail
 
-When degradation persists across rounds:
+When a candidate's evaluation degrades mid-round, the failure is attributed **to that candidate**, not the round, and flows through the rail-2 self-healing pipeline (see "Self-healing optimization — two rails" below for the full two-rail discipline):
 
 ```
-degraded_rate >= threshold
+degraded_rate >= threshold on candidate C_k mid-eval
     ↓
-DegradationCheck fires mid-eval → ABORT remaining queries + candidates
+DegradationCheck fires → EscalationSignal(target=ELIMINATE_CANDIDATE)
     ↓
-EscalationSignal(target="l2")    ← DEFAULT_STRATEGIES routes by {step}:{code}
+_score_candidates absorbs the signal, synthesises a RuntimeFailure from
+check_result + C_k's observed pipeline_params, attaches to
+C_k.memory.runtime_failures, includes in C_k's score report, CONTINUES
+with the next candidate (round winner is unaffected)
     ↓
-Escalation journal entry recorded BEFORE L2 (tried config, degradation rate)
+End of round: execute_round mirrors every new RuntimeFailure onto
+state.opt_sp.memory.runtime_failures (deduped across rounds)
     ↓
-L2 Refine receives: critique + journal + escalation report
-    → updates task_context + meta-settings + produces l2_directive
+L2 Refine next round receives: NEW (this round's candidate_scores) +
+ACCUMULATED (outer-memory trail)
+    → L2 updates its OWN outputs — directive / task_context /
+      optimizer_params — to re-shape L1's search around the safe region
     ↓
-L1 Generate receives: l2_directive (replaces critique)
-    → candidates naturally target unstable node's parameters
-    (probe rounds also receive warning_inventory for per-query targeting)
+Round N+1: pattern reduced? L2 self-healing worked.
+           pattern persists? ACCUMULATED list keeps growing.
     ↓
-Retry → degradation rate drops? → continue or escalate again
+L3 modify_plan (triggered by l2_stall or l3_patience) reads the
+cumulative runtime_failures_section from opt_sp.memory and replans —
+changes pipeline_params / swaps nodes / rewrites plan text — to escape
+the failing region entirely.
 ```
 
-Degradation rounds don't count toward `max_rounds` (hard cap: 100).
+Degradation is no longer a round-level escalation — the round never aborts for a single candidate's runtime issues, and `max_rounds` is never skipped for it. The only round-level escalation paths left are `ABORT_CAMPAIGN` (true catastrophic degradation that L2/L3 cannot rescue) and the normal patience-exhaustion path when successive rounds don't improve.
 
 ---
 
@@ -252,53 +260,75 @@ Degradation rounds don't count toward `max_rounds` (hard cap: 100).
 | `l2_directive` | one-round window, cleared on improvement | L2's diagnostic + action guidance for L1 |
 | `degradation_reset_count` | cross-round | How many times L2/L3 patience exhausted |
 | `backend_warning_emitted` | one-shot | Backend-warning emission flag |
-| `validation_failures` | per-candidate (set at L1 parse time) | Parse-time invariant violations — see below |
+| `validation_failures` | per-candidate (set at L1 parse time) | Parse-time invariant violations — rail 1 (L1 self-healing via L2 directive). See below |
+| `runtime_failures` | per-candidate + cumulative outer-memory mirror | Runtime-observed health failures — rail 2 (L2 self-healing, L3 escalation). Candidate-level copies set in `_score_candidates`; outer-level accumulated in `execute_round` after the round; cleared never (they represent discovered runtime constraints, not one-round guidance). |
 
 ---
 
-## Self-healing optimization
+## Self-healing optimization — two rails
 
-When the optimizer proposes a structurally invalid candidate, the failure is recorded as a property of the outer-layer `OptSearchPoint` (**not** the `JobSearchPoint`), absorbed by L2 on the next round, and never spends a backend call. Structural mistakes are optimizer-layer state; L2 is the layer that already has the context to repair them.
+Failures attach to the **candidate that produced them** (per-candidate `OptSearchPoint.memory`), never to the round, so a losing candidate's problem never disrupts the round winner. Two rails exist; new mechanisms must pick one — **do not invent a sidecar, do not silently drop, do not just log.**
 
-Every self-healing mechanism follows one rail:
+|  | **Rail 1 — `ValidationFailure`** | **Rail 2 — `RuntimeFailure`** |
+|---|---|---|
+| Detected | L1 parse time (before backend) | Mid-evaluation (after backend) |
+| Example | `model: gpt-4o` when allowed = `[gpt-oss-120b]` | `max_tokens=150` → 100% `empty_content_reasoning_fallback` on reasoning model |
+| Who made the mistake | L1 (tactical — picked a disallowed value) | Nobody tactically (L1's value was in range; the *strategic shape* of the search didn't account for the runtime constraint) |
+| Score effect | Synthetic 0 (zero backend calls) | Real score stands (candidate is eliminated mid-eval) |
+| Per-candidate memory | `memory.validation_failures` | `memory.runtime_failures` |
+| Outer-memory mirror | None — L2 reads from `candidate_scores` only | Cumulative `state.opt_sp.memory.runtime_failures` (every round's new failures deduped and appended) |
+| Healer | **L2 teaches L1** via a directive (`"use ONLY one of: …"`) | **L2 heals itself** — updates its own directive / `task_context` / `optimizer_params` to re-shape what L1 is allowed to search over |
+| Escalation | None (L2 can always articulate the constraint) | **L3** `modify_plan` — when the `ACCUMULATED` list keeps growing despite L2's adjustments, L3 reads the trail and replans (change `pipeline_params`, swap nodes, rewrite `plan` text) |
 
-```
-detect → trace on OptSearchPoint → score (synthetic 0) → surface → feed L2 → L2 directive → next L1
-```
+Both rails share the rule *"detect → trace on the candidate → surface on `candidate_scores` → feed the right teacher"* but diverge on **who the teacher is** and **what the healing action looks like**.
 
-The rail is the contract. New mechanisms plug in by adding a `detect` step and reusing the rest — **do not invent a sidecar, do not silently drop, do not just log.**
-
-### Validation failures as OptSearchPoint properties (first instance)
+### Rail 1 — `ValidationFailure` (L1 self-healing via L2 directive)
 
 Some L1-generated candidates are invalid before evaluation starts — the optimizer LLM hallucinated a value outside the user-declared allowed set. Canonical example: `pipeline_params_override.llm_only.model = "gpt-4o"` when the backend only has `openai/gpt-oss-120b` per `PipelineSchema.available_models`.
 
-`validate_overrides()` in `application/optimization/nodes/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside critique_text, l2_directive, and escalation_journal. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `_score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `_select_round_winner`, and the round checkpoint persists the failure with the rest of the optimizer memory.
+`validate_overrides()` in `application/optimization/nodes/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `_score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `_select_round_winner`, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
-**L2 owns the repair.** L2 `refine_strategy` already reads critique, escalation reports, and the previous directive; validation failures slot into that same context as a new "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces critique for next round's L1 via the normal directive/critique mutual exclusion. The outer-layer trace carries the evidence; L2 turns it into explicit forward guidance. Alternatives like silent-drop, deadlist sidecars, or post-hoc prompt injection all either lose the signal or require new machinery parallel to the trace.
+**L2 teaches L1.** L2 `refine_strategy` already reads critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces critique for next round's L1 via the normal directive/critique mutual exclusion. L1 next round follows the directive and heals itself.
 
-For the prompt-injection routing (who reads `validation_failures`, when it overrides critique), see [`information-flow.md`](information-flow.md). For how the failure is rendered to the user, see [`display-conventions.md`](display-conventions.md).
+Flow: `detect → attach to candidate memory → synthetic-0 → surface on candidate_scores → L2 directive → L1 next round heals`.
+
+### Rail 2 — `RuntimeFailure` (L2 self-healing with L3 escalation)
+
+Some candidates are valid at parse time — every parameter is in the allowed range — but degrade at runtime. Canonical example: `llm_only.max_tokens=150` with `reasoning_effort=medium` on a Groq reasoning model. The model exhausts its reasoning budget before emitting visible content; the backend returns the raw reasoning trace as the answer; 7/7 evaluated queries produce an `llm_only:empty_content_reasoning_fallback` warning. No L1 rule was broken — the *strategic shape* of the search didn't account for the runtime constraint.
+
+`DegradationCheck` in `application/optimization/nodes/escalation.py` fires mid-evaluation when `degraded_rate >= threshold`. Its target is `EscalationTarget.ELIMINATE_CANDIDATE` — the failure is attributed to the **single candidate that produced it**, not the round. `_score_candidates` in `application/optimization/nodes/score.py` synthesises a `RuntimeFailure` (source, dominant_warning, warning_types histogram, degraded_rate/count, observed_config snapshot of the offending node) from the check result and attaches it to that candidate's `OptSearchPoint.memory.runtime_failures`, includes it in the candidate's score report, and continues with the next candidate. The round winner is unaffected by a losing candidate's runtime issues.
+
+**Outer-memory mirror.** After the round completes, `round_execution.execute_round` walks `candidate_scores` and appends every new `RuntimeFailure` to `state.opt_sp.memory.runtime_failures` on the **outer** OptSearchPoint — deduped by `(source, dominant_warning, observed_config)` so recurring patterns don't bloat the list. `LoopState.apply_transition` deep-copies `memory` across L2/L3 transitions, so the cumulative trail follows the optimizer forward automatically. `clear_volatile()` does **not** clear this list — it represents discovered runtime constraints, not one-round guidance.
+
+**L2 heals itself.** L2 `refine_strategy` receives two partitions of the runtime failures for next round's L2 prompt: `NEW (this round)` pulled from `candidate_scores[*].runtime_failures`, and `ACCUMULATED (surviving from earlier rounds despite L2 adjustment)` pulled from `opt_sp.memory.runtime_failures`. The `ACCUMULATED` section is the real signal — if items there survived L2's prior strategy adjustments, L2's last angle didn't work and it must try a different one. L2's job is **not** to parrot "don't use X" to L1 (that's rail 1's pattern) — it must update its own outputs: tighten the directive to name the failing config range, refine `task_context` with the discovered constraint, or adjust `optimizer_params` (`creativity`, `n_variants`) to narrow L1's search around the safe region.
+
+**L3 replans on escalation.** When the `ACCUMULATED` list keeps growing across L2 rounds — i.e. L2's self-healing is running out of runway — `modify_plan` receives the cumulative `runtime_failures_section` and treats those patterns as discovered constraints on the search space. L3's replan must either change `pipeline_params` to escape the failing region (switch model, raise a param floor, swap a node) or change the `plan` text to steer L1/L2 around it. The instruction in `l3_modify_plan.json` is explicit: *"Do not propose a plan that re-enters the same failure mode."*
+
+Flow: `detect → attach per-candidate → real score stands → mirror to outer memory → L2 adjusts own strategy (directive, task_context, optimizer_params) → (if pattern persists across L2 rounds) L3 replans pipeline / plan`.
+
+For the prompt-injection routing (who reads each failure list), see [`information-flow.md`](information-flow.md). For the `⚠ … ↳` rendering convention, see [`display-conventions.md`](display-conventions.md).
 
 ### Relationship to the other per-evaluation checks
 
 | Check | Fires | Action | Target enum |
 |---|---|---|---|
-| **Validation failure** | L1 parse time, before evaluation | Synthetic 0; skip backend | (no signal — handled in `_score_candidates` via `OptSearchPoint.memory.validation_failures`) |
-| `EliminationCheck` | Mid-evaluation, after `n_min` queries | Stop scoring this candidate; continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
+| **Validation failure** | L1 parse time, before evaluation | Synthetic 0; skip backend. Surface on `OptSearchPoint.memory.validation_failures`; L2 reads via `candidate_scores` next round and teaches L1 via directive. | (no signal — handled in `_score_candidates`) |
+| `EliminationCheck` | Mid-evaluation, after `n_min` queries | Stop scoring this candidate (Welch t-test says it can't beat the leader); continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
 | `EmptyOutputCheck` | Mid-evaluation, after 3 queries | Stop scoring this candidate; continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
-| `DegradationCheck` | Mid-evaluation, after 3 queries | Abort the round; escalate to L2 | `EscalationTarget.L2` |
+| `DegradationCheck` | Mid-evaluation, after 3 queries | Stop scoring this candidate; synthesise a `RuntimeFailure` and attach to its `OptSearchPoint.memory.runtime_failures`; mirror to outer memory after the round. L2 reads *NEW + ACCUMULATED* next round and adjusts its own strategy; L3 replans when the pattern persists. | `EscalationTarget.ELIMINATE_CANDIDATE` |
 
 Validation is the only one that fires *before* evaluation — it needs nothing but the candidate dict and the schema, which is why it can short-circuit the backend entirely.
 
 ### Planned future self-healing mechanisms
 
-The same rail generalizes:
+New mechanisms land by following one of the two rails, not by inventing parallel machinery:
 
-- **Empty-output candidates** — verbose prompts that blow `max_tokens` mid-reasoning. Detection shipped via `EmptyOutputCheck`; the L2-feedback half is the gap to close.
-- **Monotonic per-axis degradation with fault attribution** — routes to L2 today, but without per-candidate fault attribution on the OptSearchPoint trace.
-- **Backend errors naming a parameter and reason** — e.g. `temperature out of range`. Needs a structured-error parser at the backend client.
-- **Schema/format violations on structured outputs** — valid JSON, wrong shape.
+- **Backend errors naming a parameter and reason** (e.g. `temperature out of range` returned by the backend as a structured error) — rail 1 (`ValidationFailure`): L1 proposed a bad value, L2 teaches L1 via directive. Needs a structured-error parser at the backend client that emits the axis + allowed range.
+- **Schema/format violations on structured outputs** — valid JSON, wrong shape. Usually rail 1 (L1 picked a bad format hint) or rail 2 (the schema itself is over-constrained for the current model — L3 replans).
+- **Monotonic per-axis degradation with fault attribution** — rail 2 (`RuntimeFailure`): surfaced per-candidate, L2 adjusts `optimizer_params` / `task_context`, L3 eventually changes pipeline composition.
+- **Quota / rate-limit exhaustion on a specific node** — rail 2: L2 can't fix quota via directive, but L3 can swap nodes.
 
-Each lands by following the rail, not by inventing parallel machinery. Today `validate_overrides()` only checks `model` against `PipelineSchema.available_models`; future enum params plug in by extending the validator — the `ValidationFailure` dataclass is intentionally axis-agnostic.
+`validate_overrides()` today only checks `model` against `PipelineSchema.available_models`; future enum params plug in by extending the validator — `ValidationFailure` is intentionally axis-agnostic. `DegradationCheck` today only looks at warning rate; future health signals plug in by extending `RuntimeFailure` fields or adding sibling checks that emit the same dataclass.
 
 ---
 
@@ -319,7 +349,7 @@ Example -- adding `entity_profiling` error detection:
 {"step": "entity_profiling", "code": "schema_error", "message": "Failed to parse JSON"}
 ```
 
-That's it. `DegradationCheck` counts it, critique shows `ANOMALY FLAGS`, escalation routes to L2, L1 focuses candidates on the failing node.
+That's it. `DegradationCheck` counts the warning, synthesises a `RuntimeFailure` on the offending candidate, and the round completes normally. L2 reads the failure next round and adjusts its own strategy (directive, task_context, optimizer_params) to steer L1 away from the failing config region. If the pattern persists across L2 rounds, L3 replans. Critique still shows `ANOMALY FLAGS` for the winner's warnings — but the round-level escalation path is gone for per-candidate runtime issues.
 
 ---
 

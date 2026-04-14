@@ -37,7 +37,7 @@ from typing import TYPE_CHECKING, Any, Self
 
 from pydantic import BaseModel, Field, field_validator
 
-from promptpotter.domain.analysis import ValidationFailure
+from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
@@ -191,6 +191,17 @@ class OptimizationMemory(BaseModel):
         "SearchPoint structurally invalid; score_search_point() short-"
         "circuits to a synthetic 0 instead of running the backend. See "
         "docs/architecture/optimization.md.",
+    )
+    runtime_failures: list[RuntimeFailure] = Field(
+        default_factory=list,
+        description="Runtime-observed health failures on this candidate "
+        "(e.g. max_tokens=150 producing 100%% empty_content_reasoning_fallback "
+        "on reasoning models). Sibling of validation_failures on the self-"
+        "healing rail but populated AFTER the backend ran, not at parse time. "
+        "Does not synthetic-0 — the real score stands — but flows to L2 as "
+        "self-healing evidence so the next round's directive names the "
+        "disallowed value range. Attached per candidate, so a losing "
+        "candidate's runtime issues never disrupt the round winner.",
     )
 
     def clear_volatile(self) -> None:

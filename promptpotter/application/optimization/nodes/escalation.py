@@ -46,7 +46,16 @@ __all__ = [
 
 
 class DegradationCheck:
-    """Triggers when degraded query fraction exceeds threshold."""
+    """Triggers when degraded query fraction exceeds threshold.
+
+    Target is ``ELIMINATE_CANDIDATE`` — the check attributes the failure
+    to the specific candidate that produced it, and the per-candidate
+    absorption path in ``score._score_candidates`` synthesises a
+    ``RuntimeFailure`` from ``check_result`` and attaches it to that
+    candidate's ``OptSearchPoint.memory.runtime_failures``. The winner
+    is never penalised for a losing candidate's runtime issues; L2 sees
+    the evidence via the candidate_scores self-healing rail next round.
+    """
 
     name = "degradation"
 
@@ -76,7 +85,7 @@ class DegradationCheck:
 
         return EscalationSignal(
             check_name=self.name,
-            target=EscalationTarget.L2,
+            target=EscalationTarget.ELIMINATE_CANDIDATE,
             check_result={
                 "degraded_rate": rate,
                 "degraded_count": degraded,

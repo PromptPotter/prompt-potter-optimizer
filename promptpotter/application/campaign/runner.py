@@ -303,20 +303,9 @@ async def _run_round_loop(
                 continue
 
             if round_result.escalation_signal:
-                # If the round improved, the warning-rate signal is noise from
-                # a losing candidate — the winner is fine, don't disrupt L1
-                # with a premature L2 call. Still record the event so
-                # warning_inventory / search_memory see it via _post_round.
-                if round_result.improved:
-                    logger.debug(
-                        "Round %d escalation signal suppressed — round improved "
-                        "(signal came from losing candidates, not the winner)",
-                        round_num,
-                    )
-                else:
-                    await _handle_escalation_signal(state, env, config, round_result, round_num, cb)
-                    round_num += 1  # degradation rounds don't count toward max_rounds
-                    continue
+                await _handle_escalation_signal(state, env, config, round_result, round_num, cb)
+                round_num += 1  # degradation rounds don't count toward max_rounds
+                continue
 
             await _post_round(state, env, round_result, round_num, config, dataset, cb)
             round_num += 1

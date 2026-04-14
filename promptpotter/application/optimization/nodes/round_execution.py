@@ -361,6 +361,33 @@ async def execute_round(
     if _all_results:
         update_query_tracker(state.opt_sp.memory.warning_inventory, _all_results)
 
+    # Mirror per-candidate RuntimeFailures onto the outer OptSearchPoint memory.
+    # This is the L2-heals/L3-escalates self-healing rail: individual losing
+    # candidates attach their runtime failures to their own memory in
+    # _score_candidates, and here we accumulate them on the outer opt_sp so
+    # L2 sees both this-round and accumulated evidence, and L3 gets the full
+    # trail when L2's strategy adjustments can't reduce the pattern. Deduped
+    # by (source, dominant_warning, observed_config) so recurring patterns
+    # don't bloat the list.
+    from promptpotter.domain.analysis import RuntimeFailure
+
+    def _rf_key(rf_dict: dict) -> tuple:
+        cfg = rf_dict.get("observed_config") or {}
+        return (
+            rf_dict.get("source", ""),
+            rf_dict.get("dominant_warning", ""),
+            tuple(sorted(cfg.items())),
+        )
+
+    existing_keys = {_rf_key(rf.to_dict()) for rf in state.opt_sp.memory.runtime_failures}
+    for cs in scoring_result.candidate_scores:
+        for rf_dict in cs.get("runtime_failures") or []:
+            k = _rf_key(rf_dict)
+            if k in existing_keys:
+                continue
+            existing_keys.add(k)
+            state.opt_sp.memory.runtime_failures.append(RuntimeFailure(**rf_dict))
+
     if obs:
         with graceful("RoundEnd emit failed"):
             obs.emit(

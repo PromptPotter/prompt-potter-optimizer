@@ -94,6 +94,46 @@ def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
+    """Render the accumulated RuntimeFailure trail for L3 ``modify_plan``.
+
+    This is the L2→L3 escalation signal on the runtime-failures rail:
+    every entry in ``runtime_failures`` is a pattern that L2 has already
+    seen (and tried to self-heal around) across prior rounds, yet the
+    pattern survived. L3's job is to replan — change pipeline_params,
+    node composition, or strategy plan — so L1/L2 stop re-entering the
+    same failure region.
+    """
+    if not runtime_failures:
+        return ""
+
+    lines = [
+        "L3 RUNTIME FAILURE TRAIL — L2 SELF-HEALING EXHAUSTED",
+        "  (these patterns survived L2's prior strategy adjustments; replan required)",
+        "",
+    ]
+    for rf in runtime_failures:
+        rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
+        dominant = rf.get("dominant_warning", "unknown")
+        cfg = rf.get("observed_config") or {}
+        cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k not in ("prompt",)]
+        cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
+        lines.append(
+            f"  ⚠ {dominant} — {rate_pct}% degradation on {rf.get('total_evaluated', 0)} queries"
+        )
+        lines.append(f"    observed_config: {cfg_str}")
+
+    lines.append("")
+    lines.append(
+        "  ↳ Required L3 action: treat these as discovered constraints on the "
+        "search space. Your replan must either change pipeline_params to "
+        "escape the failing region (switch model, raise max_tokens floor, "
+        "swap a node) OR change the plan text to steer L1/L2 around it. "
+        "Do NOT propose a plan that re-enters the same failure mode."
+    )
+    return "\n".join(lines)
+
+
 def format_context_sections(ctx: L1PromptData) -> str:
     """Build the L1 intelligence bundle — scan, escalation, critique, directives, plan."""
     sections: list[str] = []
@@ -250,6 +290,18 @@ class L2IntelligenceData:
     candidates. Each entry carries axis/value/allowed/reason. Self-healing
     signal: tells L2 the L1 prompt produced structurally invalid output and
     L2 must produce a directive to prevent recurrence."""
+    runtime_failures: list[dict] | None = None
+    """NEW runtime-observed health failures from the prior round's candidates
+    (e.g. max_tokens=150 producing 100%% empty_content_reasoning_fallback on
+    reasoning models). L2-heals-itself rail: L2 must adjust its OWN strategy
+    (directive, task_context, optimizer_params) to steer L1 away from the
+    failing config region. Sibling of validation_failures but detected
+    mid-evaluation, not at parse time."""
+    runtime_failures_accumulated: list[dict] | None = None
+    """Runtime failures surviving from earlier rounds despite L2's prior
+    strategy adjustments. If this list is non-empty, L2's previous angle
+    didn't work and it must try something different. When the list keeps
+    growing across L2 rounds, L3 escalation uses the same trail to replan."""
 
 
 def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
@@ -319,6 +371,68 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
             'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
             'propose any other value such as gpt-4o." Self-healing depends on the '
             "directive being explicit."
+        )
+        sections.append("\n".join(lines))
+
+    # Runtime failures — candidates that ran but produced high degradation
+    # rates from runtime issues (e.g. max_tokens too low for a reasoning
+    # model, prompt exceeds context window). Rendered in two partitions
+    # so L2 sees *new this round* separately from *accumulated across rounds*.
+    # The accumulated list is the real self-healing signal: if items there
+    # survived L2's prior strategy adjustments, L2's last angle didn't work
+    # and it must try a different one. (Runtime failures heal L2 itself,
+    # not L1 — unlike validation_failures which L2 teaches L1 to avoid.)
+    rfs_new = ctx.runtime_failures or []
+    rfs_acc = ctx.runtime_failures_accumulated or []
+    if rfs_new or rfs_acc:
+        lines = [
+            "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
+            "  (candidates ran but produced high warning rates; L2 must adjust "
+            "its own strategy — directive, task_context, optimizer_params — to "
+            "steer L1 away from the failing config region)",
+        ]
+
+        def _render_rf(rf: dict) -> list[str]:
+            rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
+            dominant = rf.get("dominant_warning", "unknown")
+            cfg = rf.get("observed_config") or {}
+            cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k not in ("prompt",)]
+            cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
+            changes = rf.get("candidate_changes") or ""
+            head = (f"  ⚠ {changes[:60]}" if changes else "  ⚠") + (
+                f" — {rate_pct}% degraded on "
+                f"{rf.get('total_evaluated', 0)} queries, "
+                f"dominant={dominant}"
+            )
+            return [head, f"    observed_config: {cfg_str}"]
+
+        if rfs_new:
+            lines.append("")
+            lines.append("NEW (this round):")
+            for rf in rfs_new:
+                lines.extend(_render_rf(rf))
+
+        if rfs_acc:
+            lines.append("")
+            lines.append(
+                f"ACCUMULATED (surviving from earlier rounds, {len(rfs_acc)} patterns — "
+                "L2's prior strategy adjustments did NOT reduce these):"
+            )
+            for rf in rfs_acc:
+                lines.extend(_render_rf(rf))
+
+        lines.append("")
+        lines.append(
+            "  ↳ Required L2 action: this is L2 self-healing, not L1 correction. "
+            "Update your OWN outputs — tighten the directive to name the failing "
+            "config range, refine task_context with the discovered constraint, or "
+            "adjust optimizer_params (creativity, n_variants) to narrow L1's search "
+            "around the safe region. Do NOT just parrot 'don't use X' to L1 — "
+            'restructure the search. Example directive: "Reasoning models on this '
+            "task need max_tokens ≥ 2000 to emit a final answer; propose variants "
+            'only within that range." '
+            "If ACCUMULATED entries persist across multiple L2 attempts, L3 will "
+            "replan the pipeline itself next."
         )
         sections.append("\n".join(lines))
 
