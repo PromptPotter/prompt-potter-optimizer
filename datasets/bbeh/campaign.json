@@ -2,7 +2,7 @@
   "campaign_config": {
     "dataset_name": "bbeh",
     "scoring": "exact_match(predicted, ground_truth)",
-    "sp_budget_ttest": 10,
+    "sp_budget_ttest": 20,
     "recon_sample_size": 10,
     "exclude_nodes": [],
     "pipeline_overrides": {},

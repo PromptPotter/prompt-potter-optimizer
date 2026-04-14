@@ -12,7 +12,6 @@
       "n_variants": 6,
       "creativity": 0.7,
       "improvement_threshold": 0.01,
-      "elimination_n_min": 6,
       "seed": 42,
       "max_failures": 15,
       "degradation_threshold": 0.4,

@@ -15,7 +15,7 @@ Prompt-optimization papers position themselves against Bayesian optimization, ev
 
 ## Where PromptPotter sits
 
-PromptPotter's sequential elimination (paired Welch's t-test + Holm-Bonferroni, α=0.05, minimum 20 queries before any candidate can be dropped) **is** a racing procedure. The mapping to the algorithm-configuration framing is direct:
+PromptPotter's sequential elimination (paired Welch's t-test + Holm-Bonferroni, α=0.05, minimum 6 queries before any candidate can be dropped — single threshold, no separate enable gate) **is** a racing procedure. The mapping to the algorithm-configuration framing is direct:
 
 | Algorithm configuration | PromptPotter |
 |-------------------------|--------------|

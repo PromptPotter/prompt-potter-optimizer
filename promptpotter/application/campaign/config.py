@@ -178,9 +178,7 @@ class LoopConfig(BaseModel):
     )
 
     # Sequential candidate elimination
-    elimination_n_min: int = Field(
-        20, description="Min queries before elimination t-test activates"
-    )
+    elimination_n_min: int = Field(6, description="Min queries before elimination t-test activates")
     elimination_alpha: float = Field(
         0.05, description="Significance level for candidate elimination"
     )

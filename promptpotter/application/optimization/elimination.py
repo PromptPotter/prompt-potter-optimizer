@@ -27,11 +27,11 @@ class EliminationCheck:
 
     name: str = "elimination"
 
-    def __init__(self, *, n_min: int = 20, alpha: float = 0.05, n_queries: int) -> None:
+    def __init__(self, *, n_min: int = 6, alpha: float = 0.05, n_queries: int) -> None:
         self.n_min = n_min
         self.alpha = alpha
         self.n_queries = n_queries
-        self.enabled = n_queries >= 2 * n_min
+        self.enabled = True
         self._prior_scores: list[list[float]] = []
 
     def register_completed(self, scores: list[float]) -> None:

@@ -112,12 +112,8 @@ class TestShouldStopEarly:
 
 
 class TestEliminationCheck:
-    def test_disabled_when_k_too_small(self):
-        check = EliminationCheck(n_min=20, alpha=0.05, n_queries=30)
-        assert check.enabled is False
-
-    def test_enabled_when_k_sufficient(self):
-        check = EliminationCheck(n_min=20, alpha=0.05, n_queries=40)
+    def test_always_enabled(self):
+        check = EliminationCheck(n_min=6, alpha=0.05, n_queries=20)
         assert check.enabled is True
 
     def test_returns_none_before_n_min(self):
