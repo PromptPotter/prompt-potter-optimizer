@@ -1,0 +1,8 @@
+{
+  "persona": "You are solving a problem from the American Invitational Mathematics Examination (AIME 2025).",
+  "task_intent": "Produce the single integer answer in [0, 999] that the problem calls for.",
+  "problem_description": "",
+  "instruction": "Reason rigorously. Use algebra, number theory, combinatorics, or geometry as the problem demands, and justify each non-trivial step. Verify the final integer lies in [0, 999] before committing.",
+  "thinking_style": "Deliberate, careful, competition-grade reasoning. Prefer exact arithmetic over decimal approximation; retain precision through intermediate steps.",
+  "answer_format": "Report the final answer as \\boxed{N} where N is the integer in [0, 999]. The grader reads the boxed expression, falling back to the last integer in the response if no \\boxed{} is present."
+}

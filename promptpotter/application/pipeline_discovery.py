@@ -95,6 +95,48 @@ def _extract_resolved_metadata(
     return metadata
 
 
+def _warn_legacy_prompt_authoring(nodes: dict[str, Any]) -> None:
+    """Emit deprecation warnings for nodes that still author prompts the old way.
+
+    The canonical starting-point store is ``datasets/{name}/prompts/{node}.json``
+    (or a dataset-wide ``default.json``) — a 6-field ``PromptTemplate`` loaded at
+    campaign init and injected into the prompt-bearing node.  Two patterns are
+    deprecated:
+
+    1. ``nodes.{name}.config.prompt`` — a monolithic prompt string baked into
+       the pipeline config.  Always overridden by the canonical store when
+       present; dead weight otherwise.
+    2. ``nodes.{name}.optimizer.param_keys`` containing ``"prompt"`` — an
+       atomic L1 mutation surface that prevents per-field perturbation.  It
+       must be replaced with the 6 canonical fields (``persona``,
+       ``task_intent``, ``problem_description``, ``instruction``,
+       ``thinking_style``, ``answer_format``).
+    """
+    from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+
+    for node_name, node in nodes.items():
+        if not isinstance(node, dict):
+            continue
+        if "prompt" in (node.get("config") or {}):
+            logger.warning(
+                "Deprecated prompt authoring: node %r has a monolithic 'prompt' in "
+                "config. Move it to datasets/{dataset}/prompts/%s.json (or default.json) "
+                "as a 6-field PromptTemplate. The blob is ignored when a canonical "
+                "template exists. See docs/architecture/prompt-scheme.md.",
+                node_name,
+                node_name,
+            )
+        opt = node.get("optimizer") or {}
+        if "prompt" in (opt.get("param_keys") or []):
+            logger.warning(
+                "Deprecated param_keys axis: node %r lists 'prompt' as an atomic key. "
+                "Replace with the 6 canonical fields %s so L1 can mutate axes "
+                "independently.",
+                node_name,
+                PROMPT_STRING_FIELDS,
+            )
+
+
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     """Parse a ``GET /pipeline`` JSON response into a PipelineSchema.
 
@@ -112,6 +154,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
 
     nodes = config.get("nodes", {})
     resolved_metadata = _extract_resolved_metadata(config)
+    _warn_legacy_prompt_authoring(nodes)
 
     # Step order from pipelines.default, fallback to nodes dict order
     step_order = config.get("pipelines", {}).get("default", list(nodes.keys()))

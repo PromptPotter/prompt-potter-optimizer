@@ -156,6 +156,7 @@ Features land left → right. Notebook is the daily driver and the testing groun
 ## Design Principles
 
 - **Prompt decomposition & variant library** — Backends have monolithic prompts. PromptPotter decomposes into 8 independent fields via LLM restructure, perturbs each independently. See `docs/architecture/prompt-scheme.md`.
+- **Canonical prompt authoring** — Dataset starting prompts live in `datasets/{name}/prompts/{node}.json` (or `default.json` for single-node datasets) as 6-field `PromptTemplate` JSON. Authoring a monolithic `prompt` string inside `pipeline.json` `nodes.{node}.config` is deprecated and warned about at pipeline load. Listing `"prompt"` as a single atomic axis in `optimizer.param_keys` is deprecated — use the 6 canonical field names instead so L1 can perturb each axis independently.
 - **Prompt alias groups** — `register_alias`/`resolve_aliases` link equivalent prompt hashes so historical data is discoverable across forms. Transitive resolution.
 - **Cross-campaign learning via SearchMemory** (M8) — Materialized view over `dataset_runs/` with three pillars (parameter impact, query patterns, failure modes) and three-tier intelligence (deterministic triage, critique, L2). See [`docs/architecture/search-memory-intelligence.md`](docs/architecture/search-memory-intelligence.md) for architecture detail.
 

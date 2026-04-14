@@ -121,16 +121,36 @@ Three transformations bridge optimizer state to the wire:
 
 ---
 
-## Variant Library
+## Two prompt stores
 
-`promptpotter/config/prompt_variants.json` provides pre-built alternatives per field. It is a **shared resource** — loaded from `application/intelligence/variant_library.py` and consumed by both the optional sensitivity scan (`application/recon/`, OAT perturbation) and the core optimization loop's L1 generator.
+PromptPotter keeps two independent prompt stores, each answering a different question.
+
+### 1. Per-dataset starting points — `datasets/{name}/prompts/*.json` (canonical)
+
+**The one true source for the initial `JobSearchPoint`.** Each file is a full `PromptTemplate` JSON — the 6 canonical fields (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`) plus optional `few_shot_examples` and `plan`. Loaded via `application/datasets/prompt_store.py::load_node_prompt(dataset, node, variant)`. The campaign's `campaign.json` picks a variant name via `starting_prompt` (defaults to `"default"`); `configure_and_apply_pipeline` projects each prompt-bearing node's canonical template into `pipeline_params.<node>.prompt` as an override before the first round.
+
+**Layout:**
+
+```
+datasets/{name}/prompts/
+  default.json              # single-node datasets (BBEH, GSM8K, AIME, HotPotQA)
+  {node_name}.json          # multi-node datasets (TermNorm: entity_profiling.json, llm_ranking.json)
+```
+
+**Resolution per node:** `{node_name}.json` wins when present; otherwise `{starting_prompt}.json` (typically `default.json`) is used. Missing both is a hard error at init time — author the canonical template first.
+
+Add alt starting points by dropping more files in the same directory (`zero_shot.json`, `cot_explicit.json`, etc.) and pointing `starting_prompt` at them.
+
+**Deprecated — do not author new instances:** a monolithic `"prompt"` string inside `datasets/{name}/pipeline.json` → `nodes.{node}.config.prompt`, or `"prompt"` as a single atomic axis in `optimizer.param_keys`. Both are emitted as deprecation warnings by `parse_pipeline_response()` at load time. The blob-in-config is ignored whenever a canonical file exists, and the atomic `"prompt"` axis prevents per-field L1 perturbation, variant-library filtering, and critique/L2 field-level diagnostics. Replace with the 6 canonical fields in `param_keys` and move the prompt text into `datasets/{name}/prompts/{node_or_default}.json`.
+
+### 2. L1 crossover / recombination pool — `promptpotter/config/prompt_variants.json`
+
+**Not a starting-point store.** Task-agnostic material that L1 recombines from during optimization, and the seed corpus for recon axis variants. Loaded from `application/intelligence/variant_library.py` and consumed by both the optional sensitivity scan (`application/recon/`, OAT perturbation) and the core optimization loop's L1 generator. Never read at init time as the source of the baseline prompt.
 
 **Index convention (provisional):**
 - **Index 0** — empty string (always present; lets the optimizer start from scratch)
-- **Index 1** — task-agnostic defaults that work for any dataset out of the box
+- **Index 1** — task-agnostic defaults
 - **Index 2+** — dataset-specific and PromptWizard variants from the original library
-
-Index 1 variants are a provisional starting point for new campaigns. For production, per-dataset variant libraries (`datasets/{name}/prompt_variants.json`) are the long-term plan.
 
 | Field | Variant count | Source |
 |-------|--------------|--------|

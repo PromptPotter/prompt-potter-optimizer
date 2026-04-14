@@ -24,6 +24,7 @@ Preliminary probing showed GSM8K and AIME 2025 are effectively **saturated** at 
 1. **BBEH (Big-Bench Extra Hard)** — 23 diverse reasoning tasks, state-of-the-art reasoners still score ~54%, general-purpose ~24%. Ample headroom. Head-to-head infrastructure already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) — CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks run against the same `gpt-oss-120b` model and same 10/10 mini split, seed=42.
 2. **HotPotQA** — multi-hop QA data point, pending saturation check. If it looks saturated on probe runs, demote to secondary-if-time-permits.
 3. **GSM8K, AIME 2025** — secondary at best. Include in tables only if there is demonstrable headroom; otherwise cite existing literature numbers and move on.
+4. **IFBench** — unreviewed candidate, instruction-following benchmark. Needs a scoping pass before committing: what it measures, whether it fits our loop (scorable ground truth), and whether it has headroom at `gpt-oss-120b`.
 
 ## Tracks
 

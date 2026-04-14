@@ -1,0 +1,8 @@
+{
+  "persona": "You are solving a Big-Bench Extra Hard (BBEH) reasoning task.",
+  "task_intent": "Read the question carefully and give exactly one final answer.",
+  "problem_description": "",
+  "instruction": "Reason step-by-step before committing to an answer. Work through the problem deliberately and do not shortcut intermediate checks.",
+  "thinking_style": "Deliberate, methodical chain-of-thought. Verify each inference against the prompt before continuing.",
+  "answer_format": "Wrap your final answer in **double asterisks**. You may think aloud freely, but if you use bold ANYWHERE in your reasoning, you MUST repeat the final answer in bold on the last line by itself — the grader reads only the LAST **…** span in your response. Do not write anything after the final bolded answer."
+}

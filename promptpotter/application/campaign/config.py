@@ -89,6 +89,7 @@ class CampaignConfig(TypedDict, total=False):
     """
 
     dataset_name: str
+    starting_prompt: str
     sp_budget_ttest: int
     recon_sample_size: int
     exclude_nodes: list[str]
@@ -329,6 +330,10 @@ def configure_and_apply_pipeline(
 
     Returns ``pipeline_params`` dict ready for evaluation.
     """
+    from promptpotter.application.datasets.prompt_store import (
+        has_dataset_prompts,
+        load_node_prompt,
+    )
     from promptpotter.infrastructure.backend.client import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
@@ -366,6 +371,25 @@ def configure_and_apply_pipeline(
                     key,
                     value,
                 )
+    # Starting-point prompt templates → inject per prompt-bearing node from the
+    # canonical store ``datasets/{name}/prompts/``.  Resolution is per-node: if
+    # ``{node_name}.json`` exists it wins; otherwise ``{starting_prompt}.json``
+    # (typically ``default.json``) is used — which is the common single-node
+    # case.  Authoring a monolithic ``prompt`` string in ``pipeline.json``
+    # ``config`` is deprecated (warning emitted by parse_pipeline_response).
+    dataset_name = campaign_config.get("dataset_name")
+    starting_name = campaign_config.get("starting_prompt", "default")
+    if dataset_name and filtered and has_dataset_prompts(dataset_name):
+        prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
+        for pnode in prompt_nodes:
+            template = load_node_prompt(dataset_name, pnode, starting_name)
+            # Use render() — not compile_prompt() — so backend-side ``{{var}}``
+            # placeholders (e.g. TermNorm's ``{{query}}``, ``{{entity_profile_json}}``)
+            # pass through unchanged. compile_prompt is for optimizer meta-prompts
+            # whose variables are substituted in-process before the LLM call.
+            valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
+            log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|{starting_name}].json → {pnode}")
+
     if filtered and valid_overrides:
         filtered = filtered.with_overrides(valid_overrides)
 

@@ -192,9 +192,14 @@
           "raw_content_limit",
           "temperature",
           "max_tokens",
-          "prompt",
           "output_schema",
-          "model"
+          "model",
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
         ],
         "param_descriptions": {
           "raw_content_limit": "Maximum characters of web-sourced raw content passed as context to the profiling LLM \u00c3\u00a2\u00e2\u201a\u00ac\u00e2\u20ac\udc9d bounds how much of web_search output is visible to the model",
@@ -267,10 +272,15 @@
           "temperature",
           "max_tokens",
           "sample_size",
-          "prompt",
           "output_schema",
           "model",
-          "relevance_weight_core"
+          "relevance_weight_core",
+          "persona",
+          "task_intent",
+          "problem_description",
+          "instruction",
+          "thinking_style",
+          "answer_format"
         ],
         "param_descriptions": {
           "temperature": "LLM sampling temperature for ranking",

@@ -23,7 +23,7 @@
         "description": "System prompt for HotPotQA multi-hop QA evaluation"
       },
       "optimizer": {
-        "param_keys": ["prompt", "model", "temperature", "max_tokens", "reasoning_effort"],
+        "param_keys": ["model", "temperature", "max_tokens", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
         "langfuse_type": "generation"
       }
     }

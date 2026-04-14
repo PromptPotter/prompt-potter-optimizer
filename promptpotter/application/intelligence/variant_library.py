@@ -1,8 +1,17 @@
-"""Prompt variant library loaders.
+"""L1 crossover / recombination pool loader.
 
-Reads the curated axis variants from ``promptpotter/config/prompt_variants.json``
-in two shapes: flat (``{field: [str]}``) for consumers that just need the text,
-and rich (with provenance metadata) for UI surfaces.
+Reads the curated, task-agnostic axis pool from
+``promptpotter/config/prompt_variants.json``.  Two shapes: flat
+(``{field: [str]}``) for consumers that just need text, rich (with
+provenance metadata) for UI surfaces.
+
+**This is the crossover pool, not the starting-point store.**  Baseline
+prompts for a campaign live in ``datasets/{name}/prompts/*.json`` and
+load via ``promptpotter.application.datasets.prompt_store.load_dataset_prompt``
+— that is the principal flow at init time.  This file is the material
+L1 recombines from during optimization (and the seed corpus for recon
+axis variants).  Never read at init as a source of the starting
+``JobSearchPoint``.
 """
 
 from __future__ import annotations
