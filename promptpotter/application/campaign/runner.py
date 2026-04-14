@@ -45,7 +45,7 @@ from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
-from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -85,7 +85,6 @@ async def _try_escalate_l2(
     Raises ``StopLoop`` if L2/L3 says to stop.
     """
     obs = env.scoring_ctx.obs if env.scoring_ctx else None
-    trace_id = obs.get_file_trace_id(env.obs_campaign_id) if obs else None
     stop = await escalate_l2(
         state,
         config,
@@ -93,7 +92,7 @@ async def _try_escalate_l2(
         cb.on_phase,
         on_checkpoint=cb.on_checkpoint,
         obs=obs,
-        trace_id=trace_id,
+        obs_campaign_id=env.obs_campaign_id,
         from_degradation=from_degradation,
         escalation_check_result=esc_check_result,
     )
@@ -367,7 +366,7 @@ async def _init_optimization(
     )
 
     obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
-    obs = ObsLogger.start_campaign(
+    obs = ObservabilityBridge.start_campaign(
         config.project_root,
         config.backend_id,
         config_snapshot=config.model_dump(mode="json"),
@@ -452,7 +451,7 @@ def _finalize_run(
             n_rounds=len(state.rounds),
             finished_at=finished_at,
         )
-    obs: ObsLogger | None = env.scoring_ctx.obs if env.scoring_ctx else None
+    obs: ObservabilityBridge | None = env.scoring_ctx.obs if env.scoring_ctx else None
     if obs:
         obs.end_campaign(
             env.obs_campaign_id,
@@ -471,7 +470,7 @@ def _finalize_run(
         )
     if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW) or obs is None:
         return None
-    return obs.get_cloud_trace_id(env.obs_campaign_id)
+    return obs.get_langfuse_trace_id(env.obs_campaign_id)
 
 
 # ---------------------------------------------------------------------------
@@ -537,7 +536,7 @@ async def run_optimization(
     stop_reason = await _run_round_loop(state, env, dataset, config, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    cloud_trace_id = _finalize_run(state, env, config, emitter, stop_reason, finished_at)
+    langfuse_trace_id = _finalize_run(state, env, config, emitter, stop_reason, finished_at)
 
     return RunResult(
         rounds=state.rounds,
@@ -550,7 +549,7 @@ async def run_optimization(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
-        langfuse_trace_id=cloud_trace_id,
+        langfuse_trace_id=langfuse_trace_id,
         cycle_id=env.cycle_id,
         resumed_from_round=env.resumed_from_round,
     )

@@ -29,7 +29,12 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.infrastructure.llm import client as _llm_client
-from promptpotter.infrastructure.tracing.observability_logger import observed_node
+from promptpotter.infrastructure.tracing import observed_node
+from promptpotter.infrastructure.tracing.events import (
+    PromptVersion,
+    RoundEnd,
+    RoundStart,
+)
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
@@ -37,7 +42,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +74,7 @@ async def _generate_or_load_candidates(
     on_phase=None,
     n_eval_queries: int = 0,
     *,
-    obs: ObsLogger | None = None,
-    trace_id: str | None = None,
+    obs: ObservabilityBridge | None = None,
     search_memory: Any = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
@@ -128,7 +132,13 @@ async def _generate_or_load_candidates(
     sm_ctx = search_memory.to_l1_digest() if search_memory else None
 
     client = _llm_client.get_llm_client()
-    async with observed_node(f"l1_generate_r{round_num}", "llm/meta", obs=obs, trace_id=trace_id):
+    async with observed_node(
+        f"l1_generate_r{round_num}",
+        "llm/meta",
+        obs=obs,
+        campaign_id=env.obs_campaign_id,
+        round_num=round_num,
+    ):
         candidates = await l1_generate(
             state.opt_sp,
             state.current_accuracy,
@@ -201,8 +211,7 @@ async def _score_and_select(
     scoring_dataset: list[dict],
     config: LoopConfig,
     callbacks: RunCallbacks,
-    obs: ObsLogger | None = None,
-    trace_id: str | None = None,
+    obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1ScoringResult:
     """Evaluate candidates, run critique, select winner."""
@@ -229,7 +238,12 @@ async def _score_and_select(
     }
 
     async with observed_node(
-        f"l1_score_r{round_num}", "scoring", obs=obs, trace_id=trace_id, obs_type="span"
+        f"l1_score_r{round_num}",
+        "scoring",
+        obs=obs,
+        obs_type="span",
+        campaign_id=env.obs_campaign_id,
+        round_num=round_num,
     ):
         assert env.scoring_ctx is not None
         assert state.current_sp is not None
@@ -279,10 +293,9 @@ async def execute_round(
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
     obs = env.scoring_ctx.obs if env.scoring_ctx else None
-    trace_id = obs.get_file_trace_id(env.obs_campaign_id) if obs else None
     if obs:
-        with graceful("ObsLogger.log_round_start failed"):
-            obs.log_round_start(env.obs_campaign_id, round_num)
+        with graceful("RoundStart emit failed"):
+            obs.emit(RoundStart(campaign_id=env.obs_campaign_id, round_num=round_num))
 
     candidates = await _generate_or_load_candidates(
         round_num,
@@ -292,7 +305,6 @@ async def execute_round(
         callbacks.on_phase,
         n_eval_queries=len(scoring_dataset),
         obs=obs,
-        trace_id=trace_id,
         search_memory=search_memory,
     )
 
@@ -308,7 +320,6 @@ async def execute_round(
         config,
         callbacks,
         obs=obs,
-        trace_id=trace_id,
         degradation_checks=degradation_checks,
     )
 
@@ -351,28 +362,33 @@ async def execute_round(
         update_query_tracker(state.opt_sp.memory.warning_inventory, _all_results)
 
     if obs:
-        with graceful("ObsLogger.log_round_end failed"):
-            obs.log_round_end(
-                campaign_id=env.obs_campaign_id,
-                round_num=round_num,
-                accuracy=scoring_result.winner_accuracy,
-                hits=scoring_result.hits,
-                total=scoring_result.total,
-                improved=scoring_result.improved,
-                winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
-                candidate_scores=scoring_result.candidate_scores,
-                model=config.model or "",
-                n_variants=config.n_variants,
-                optimizer_templates=["meta_scan_aware", "critique"],
+        with graceful("RoundEnd emit failed"):
+            obs.emit(
+                RoundEnd(
+                    campaign_id=env.obs_campaign_id,
+                    round_num=round_num,
+                    accuracy=scoring_result.winner_accuracy,
+                    hits=scoring_result.hits,
+                    total=scoring_result.total,
+                    improved=scoring_result.improved,
+                    winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
+                    candidate_scores=scoring_result.candidate_scores,
+                    model=config.model or "",
+                    n_variants=config.n_variants,
+                    optimizer_templates=["meta_scan_aware", "critique"],
+                )
             )
-        with graceful("ObsLogger.log_prompt_version failed"):
-            winner_fields = scoring_result.winner_prompt_fields
-            winner_osp = OptSearchPoint.from_prompt_fields(winner_fields)
-            obs.log_prompt_version(
-                prompt_fields_id=winner_osp.id,
-                rendered_prompt=winner_osp.render(),
-                layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
-                parent_id=winner_osp.parent_id,
+        with graceful("PromptVersion emit failed"):
+            winner_osp = OptSearchPoint.from_prompt_fields(scoring_result.winner_prompt_fields)
+            obs.emit(
+                PromptVersion(
+                    campaign_id=env.obs_campaign_id,
+                    round_num=round_num,
+                    prompt_fields_id=winner_osp.id,
+                    rendered_prompt=winner_osp.render(),
+                    layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
+                    parent_id=winner_osp.parent_id,
+                )
             )
 
     return round_result

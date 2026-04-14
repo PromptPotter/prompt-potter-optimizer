@@ -261,16 +261,23 @@ async def score_search_point(
 
     _save_run(results, scores)
     if store and backend_id:
-        from promptpotter.infrastructure.tracing.observability_logger import log_scoring_to_obs
+        from promptpotter.infrastructure.tracing import ObservabilityBridge
+        from promptpotter.infrastructure.tracing.events import DatasetRun
+        from promptpotter.shared.errors import graceful
 
-        log_scoring_to_obs(
-            store.base_dir,
-            backend_id,
-            run_id,
-            content_hash,
-            scores,
-            search_point.sp_hash(pipeline_schema),
-            ctx.obs,
-        )
+        with graceful("DatasetRun emit failed"):
+            obs = ctx.obs or ObservabilityBridge.file_only(store.base_dir, backend_id)
+            obs.emit(
+                DatasetRun(
+                    campaign_id="",
+                    round_num=-1,
+                    run_id=run_id,
+                    content_hash=content_hash,
+                    prompt_fields_id=search_point.sp_hash(pipeline_schema),
+                    accuracy=scores["accuracy"],
+                    hits=scores["hits"],
+                    total=scores["total"],
+                )
+            )
 
     return results, scores, False

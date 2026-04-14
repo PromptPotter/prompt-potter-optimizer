@@ -97,7 +97,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store.project_store import ProjectStore
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
 @dataclass
@@ -114,7 +114,7 @@ class ScoringEnv:
     store: ProjectStore | None = None
     backend_id: str = ""
     pipeline_schema: PipelineSchema | None = None
-    obs: ObsLogger | None = None
+    obs: ObservabilityBridge | None = None
     source: str = ""
     experiment_id: str = ""
     max_consecutive_errors: int = 3
@@ -133,7 +133,7 @@ class ScoringEnv:
         store: ProjectStore | None,
         backend_id: str,
         pipeline_schema: PipelineSchema | None,
-        obs: ObsLogger | None,
+        obs: ObservabilityBridge | None,
         experiment_id: str,
         cycle_id: str | None,
         *,

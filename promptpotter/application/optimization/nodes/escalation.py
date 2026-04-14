@@ -28,7 +28,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.phases import StopReason
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 
@@ -201,18 +201,24 @@ async def _run_layer_transition(
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
-    obs: ObsLogger | None,
-    trace_id: str | None,
+    obs: ObservabilityBridge | None,
+    obs_campaign_id: str,
     observed_name: str,
     enter_payload: dict[str, Any],
     call: Callable[[], Awaitable[Any]],
     exit_payload: Callable[[Any], dict[str, Any]],
 ) -> Any:
     """Run an L2/L3 transition: emit enter → observed call → apply → emit exit."""
-    from promptpotter.infrastructure.tracing.observability_logger import observed_node
+    from promptpotter.infrastructure.tracing import observed_node
 
     emit_phase(on_phase, phase, "enter", round=round_num, **enter_payload)
-    async with observed_node(observed_name, "llm/meta", obs=obs, trace_id=trace_id):
+    async with observed_node(
+        observed_name,
+        "llm/meta",
+        obs=obs,
+        campaign_id=obs_campaign_id,
+        round_num=round_num,
+    ):
         transition = await call()
     state.apply_transition(transition, schema=config.pipeline_schema)
     emit_phase(on_phase, phase, "exit", round=round_num, **exit_payload(transition))
@@ -224,8 +230,8 @@ async def _do_l2_transition(
     config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: ObsLogger | None = None,
-    trace_id: str | None = None,
+    obs: ObservabilityBridge | None = None,
+    obs_campaign_id: str = "",
     escalation_check_result: dict | None = None,
 ) -> Any:
     """Perform L2 refine_strategy transition. Updates state in-place."""
@@ -284,7 +290,7 @@ async def _do_l2_transition(
         round_num,
         on_phase,
         obs=obs,
-        trace_id=trace_id,
+        obs_campaign_id=obs_campaign_id,
         observed_name=f"l2_refine_r{round_num}",
         enter_payload=enter,
         call=_call,
@@ -309,8 +315,8 @@ async def _do_l3_transition(
     config: LoopConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: ObsLogger | None = None,
-    trace_id: str | None = None,
+    obs: ObservabilityBridge | None = None,
+    obs_campaign_id: str = "",
 ) -> Any:
     """Perform L3 modify_plan transition. Updates state in-place."""
     from promptpotter.application.optimization.nodes import layer_transitions
@@ -361,7 +367,7 @@ async def _do_l3_transition(
         round_num,
         on_phase,
         obs=obs,
-        trace_id=trace_id,
+        obs_campaign_id=obs_campaign_id,
         observed_name=f"l3_modify_plan_r{round_num}",
         enter_payload=enter,
         call=_call,
@@ -390,8 +396,8 @@ async def _exhaust_or_reset(
     from_degradation: bool,
     stop_reason: StopReason,
     reset_l3: bool,
-    obs: ObsLogger | None,
-    trace_id: str | None,
+    obs: ObservabilityBridge | None,
+    obs_campaign_id: str,
     escalation_check_result: dict | None,
 ) -> StopReason | None:
     """Either exhaust patience (return stop) or reset counters + run L2."""
@@ -415,7 +421,7 @@ async def _exhaust_or_reset(
         round_num,
         on_phase,
         obs=obs,
-        trace_id=trace_id,
+        obs_campaign_id=obs_campaign_id,
         escalation_check_result=escalation_check_result,
     )
     return None
@@ -427,8 +433,8 @@ async def escalate_l2(
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     on_checkpoint: Callable[[str], str | None] | None = None,
-    obs: ObsLogger | None = None,
-    trace_id: str | None = None,
+    obs: ObservabilityBridge | None = None,
+    obs_campaign_id: str = "",
     from_degradation: bool = False,
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
@@ -453,7 +459,7 @@ async def escalate_l2(
             round_num,
             on_phase,
             obs=obs,
-            trace_id=trace_id,
+            obs_campaign_id=obs_campaign_id,
             escalation_check_result=escalation_check_result,
         )
         if on_checkpoint:
@@ -477,7 +483,7 @@ async def escalate_l2(
             stop_reason=StopReason.L2_PATIENCE,
             reset_l3=False,
             obs=obs,
-            trace_id=trace_id,
+            obs_campaign_id=obs_campaign_id,
             escalation_check_result=escalation_check_result,
         )
 
@@ -485,7 +491,9 @@ async def escalate_l2(
     esc.l3.record_outcome(state.best_composite)
     l3_exhausted = config.l3_patience is not None and esc.l3.stall_count >= config.l3_patience
     if not l3_exhausted:
-        await _do_l3_transition(state, config, round_num, on_phase, obs=obs, trace_id=trace_id)
+        await _do_l3_transition(
+            state, config, round_num, on_phase, obs=obs, obs_campaign_id=obs_campaign_id
+        )
         return None
 
     # L3 exhausted → exhaust or reset
@@ -500,6 +508,6 @@ async def escalate_l2(
         stop_reason=StopReason.L3_PATIENCE,
         reset_l3=True,
         obs=obs,
-        trace_id=trace_id,
+        obs_campaign_id=obs_campaign_id,
         escalation_check_result=escalation_check_result,
     )

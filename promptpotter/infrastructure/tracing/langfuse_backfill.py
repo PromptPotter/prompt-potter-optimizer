@@ -1,24 +1,16 @@
+"""Replay historical ``dataset_runs/`` entries into the Langfuse sink.
+
+Reads JSON from disk and emits :class:`QueryEvalStart` / :class:`QueryNodeSpan`
+/ :class:`QueryEvalEnd` events into an :class:`ObservabilityBridge`. The sink
+owns every Langfuse SDK call — this file is just a disk walker.
+
+Idempotency tracking (``backfilled_run_ids`` and legacy ``dataset_items``
+seed) lives in ``obs/langfuse/backfill_state.json``; the sink's own
+persisted id maps in ``sessions/{session_id}/langfuse_state.json`` are
+the source of truth after the first replay.
 """
-Push dataset runs to cloud Langfuse.
 
-Dataset-first structure: registers dataset items with ground truth, then
-creates one trace per *query* linked to the dataset via Dataset Runs.
-Each trace shows the backend pipeline graph as child spans — standard
-Langfuse pattern: 1 trace = 1 pipeline invocation. Node discovery is
-schema-driven via ``PipelineNode.output_keys``.
-
-Single entry point: ``push_all_runs()`` — batch push all historical runs
-(called from the notebook's ``push_langfuse()`` cell). Internally delegates
-to ``push_run()`` per run, always with dataset-item linking.
-
-State is tracked in ``{backend_id}/obs/langfuse/backfill_state.json`` so
-re-running only pushes new runs.
-
-Usage::
-
-    from promptpotter.infrastructure.tracing.langfuse_backfill import push_all_runs
-    stats = push_all_runs(store, backend_id)
-"""
+from __future__ import annotations
 
 import logging
 from collections.abc import Callable
@@ -29,15 +21,40 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
+from promptpotter.infrastructure.tracing.events import (
+    QueryEvalEnd,
+    QueryEvalStart,
+    QueryNodeSpan,
+)
 from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
+logger = logging.getLogger(__name__)
+
+ORIGIN_ORDER = [
+    "baseline",
+    "run_recon",
+    "feedback_cycle",
+    "optimization_loop",
+    "adaptive_recon_winner",
+    "other",
+]
+
+
+def classify_run_origin(source: str = "") -> str:
+    """Classify a dataset run's origin from its ``source`` field."""
+    if source in ORIGIN_ORDER:
+        return source
+    return "other"
+
+
 @dataclass(frozen=True)
 class LangfuseObservation:
-    """A single pipeline node ready to be pushed as a Langfuse observation."""
+    """A pipeline node extracted from ``dataset_runs/`` ready to emit."""
 
     name: str
     as_type: str
@@ -52,9 +69,8 @@ def _node_meta(
     timings: dict,
     node_params: dict,
     node_name: str,
-    schema: "PipelineSchema",
+    schema: PipelineSchema,
 ) -> dict[str, Any]:
-    """Build metadata dict for a pipeline node: timing + per-node params."""
     meta: dict[str, Any] = {}
     if node_name in timings:
         meta["duration_s"] = timings[node_name]
@@ -68,14 +84,9 @@ def _node_meta(
 def extract_pipeline_nodes(
     pipeline_data: dict,
     query: str,
-    schema: "PipelineSchema",
+    schema: PipelineSchema,
 ) -> list[LangfuseObservation]:
-    """Parse pipeline_data into an ordered list of typed nodes.
-
-    Schema-driven: walks ``schema.nodes`` in pipeline order and checks each
-    node's ``output_keys`` (derived from ``observation_mappings``) against
-    ``pipeline_data``.  Nodes without matching keys are omitted.
-    """
+    """Parse pipeline_data into an ordered list of typed nodes."""
     nodes: list[LangfuseObservation] = []
     timings = pipeline_data.get("step_timings") or {}
     llm_provider = pipeline_data.get("llm_provider", "")
@@ -95,48 +106,24 @@ def extract_pipeline_nodes(
                 model=llm_provider or None if node.is_llm else None,
             )
         )
-
     return nodes
-
-
-logger = logging.getLogger(__name__)
-
-# Fixed ordering for origin groups
-ORIGIN_ORDER = [
-    "baseline",
-    "run_recon",
-    "feedback_cycle",
-    "optimization_loop",
-    "adaptive_recon_winner",
-    "other",
-]
-
-
-def classify_run_origin(source: str = "") -> str:
-    """Classify a dataset run's origin from its ``source`` field.
-
-    Returns one of the ORIGIN_ORDER values, defaulting to ``"other"``.
-    """
-    if source in ORIGIN_ORDER:
-        return source
-    return "other"
 
 
 def _state_path(store: ProjectStore, backend_id: str) -> Path:
     return store.base_dir / backend_id / "obs" / "langfuse" / "backfill_state.json"
 
 
-def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
-    return read_json_optional(_state_path(store, backend_id)) or _fresh_state()
-
-
 def _fresh_state() -> dict[str, Any]:
     return {
         "backfilled_run_ids": [],
         "last_backfill_at": None,
-        "langfuse_trace_ids": {},  # {run_id: [trace_id, ...]}
+        "langfuse_trace_ids": {},
         "dataset_items": {},
     }
+
+
+def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
+    return read_json_optional(_state_path(store, backend_id)) or _fresh_state()
 
 
 def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> None:
@@ -148,7 +135,6 @@ def _collect_ground_truth(
     backend_id: str,
     summaries: list[dict],
 ) -> dict[str, str]:
-    """Extract unique (query -> ground_truth) pairs from all dataset_runs."""
     gt_map: dict[str, str] = {}
     for s in summaries:
         rid = s.get("run_id", "")
@@ -163,220 +149,85 @@ def _collect_ground_truth(
     return gt_map
 
 
-def _register_dataset_items(
-    lf: Any,
-    gt_map: dict[str, str],
-    state: dict[str, Any],
-    on_progress: Callable[[str], None] | None = None,
-    dataset_name: str = _DEFAULT_DATASET_NAME,
-) -> dict[str, str]:
-    """Register/update dataset items in Langfuse. Returns {query: item_id}.
-
-    Creates the dataset if needed, then creates or updates each item
-    with the ground truth as expected_output.
-    """
-    query_to_item_id: dict[str, str] = dict(state.get("dataset_items", {}))
-
-    # Create dataset (idempotent) — fail fast on auth errors
-    ok = lf.create_dataset(
-        name=dataset_name,
-        description="Production ground truth queries for prompt evaluation",
-        metadata={"n_queries": len(gt_map)},
-    )
-    if not ok:
-        raise RuntimeError(
-            f"Langfuse: failed to create/access dataset '{dataset_name}'. "
-            "Check LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY in .env."
-        )
-
-    # Fetch existing items to find those needing updates
-    existing_items: dict[str, Any] = {}  # query_str -> SDK item
-    ds = lf.get_dataset(dataset_name)
-    if ds and hasattr(ds, "items"):
-        for it in ds.items:
-            input_data = getattr(it, "input", None) or {}
-            q = input_data.get("query", "") if isinstance(input_data, dict) else ""
-            if q:
-                existing_items[q] = it
-
-    created = 0
-    updated = 0
-    for query, ground_truth in gt_map.items():
-        if query in query_to_item_id:
-            # Already registered — check if expected_output needs update
-            existing = existing_items.get(query)
-            if existing and getattr(existing, "expected_output", None) is None:
-                lf.update_dataset_item(
-                    item_id=existing.id,
-                    expected_output=ground_truth,
-                )
-                updated += 1
-            continue
-
-        # Check if item exists in Langfuse but not in our state
-        existing = existing_items.get(query)
-        if existing:
-            item_id = existing.id
-            if getattr(existing, "expected_output", None) is None:
-                lf.update_dataset_item(
-                    item_id=item_id,
-                    expected_output=ground_truth,
-                )
-                updated += 1
-        else:
-            item_id = lf.create_dataset_item(
-                dataset_name=dataset_name,
-                input={"query": query},
-                expected_output=ground_truth,
-                metadata={"source": "dataset"},
-            )
-            created += 1
-
-        if item_id:
-            query_to_item_id[query] = item_id
-
-    if on_progress:
-        on_progress(
-            f"  Dataset '{dataset_name}': {len(query_to_item_id)} items "
-            f"({created} created, {updated} updated)",
-        )
-
-    return query_to_item_id
-
-
-def push_run(
-    lf: Any,
+def _replay_run(
+    bridge: ObservabilityBridge,
     store: ProjectStore,
     backend_id: str,
     run_id: str,
-    *,
-    schema: Any | None = None,
-    query_to_item_id: dict[str, str] | None = None,
-    session_id: str | None = None,
-    _state: dict[str, Any] | None = None,
-    _save: bool = True,
-) -> list[str] | None:
-    """Push one dataset_run to Langfuse cloud as per-query pipeline traces.
-
-    Creates one rooted trace per query item (via ``create_trace()``), then
-    adds pipeline steps as child spans (via ``create_span()``). This produces
-    a proper Langfuse graph: ``__start__ → target_pipeline → {steps} → __end__``.
-
-    Args:
-        lf: LangfuseLogger instance.
-        store: ProjectStore instance.
-        backend_id: Backend identifier.
-        run_id: Dataset run ID to push.
-        query_to_item_id: Optional ``{query: item_id}`` for dataset linking.
-        session_id: Optional Langfuse session ID.
-        _state: Pre-loaded state dict (for batch efficiency). When None,
-            state is loaded from disk on each call.
-        _save: Whether to persist state after this call. Set False in
-            batch contexts where the caller manages saves.
-
-    Returns:
-        List of per-query Langfuse trace IDs, or None if already pushed
-        or push failed.
-    """
-    state = _state if _state is not None else _load_state(store, backend_id)
-    already_done = set(state["backfilled_run_ids"])
-
-    if run_id in already_done:
-        return None
-
-    # Load full run detail
+    schema: PipelineSchema | None,
+    session_id: str,
+    dataset_name: str,
+) -> bool:
+    """Replay one dataset_run's items as events. Returns ``True`` on success."""
     detail = store.dataset_runs.load_by_id(backend_id, run_id)
     if not detail:
-        logger.warning("push_run: could not load detail for run %s", run_id)
-        return None
+        logger.warning("replay: could not load detail for run %s", run_id)
+        return False
 
     items = detail.get("dataset_run_items", [])
     origin = classify_run_origin(detail.get("source", ""))
-    sid = session_id or f"dataset_{backend_id}"
-    trace_ids: list[str] = []
+    any_pushed = False
 
     for it in items:
         query = it.get("query", "")
-        pipeline = it.get("pipeline_data") or {}
-        hit = it.get("hit", False)
-
-        # Root chain anchor — visible in Langfuse graph as the trace root.
-        # Child spans nest underneath, producing a proper pipeline graph.
-        trace_metadata: dict[str, Any] = {
-            "run_id": run_id,
-            "llm_provider": pipeline.get("llm_provider", detail.get("model", "")),
-            "prompt_fields_id": detail.get("prompt_fields_id", ""),
-        }
-        pp = pipeline.get("pipeline_params")
-        if pp:
-            trace_metadata["pipeline_params"] = pp
-
-        trace_name = f"{schema.name}_pipeline" if schema and schema.name else "pipeline"
-        trace_id = lf.create_trace(
-            name=trace_name,
-            input={"query": query, "ground_truth": it.get("ground_truth", "")},
-            session_id=sid,
-            tags=["eval", origin, "pipeline"],
-            metadata=trace_metadata,
-        )
-        if not trace_id:
+        if not query:
             continue
+        pipeline = it.get("pipeline_data") or {}
+        hit = bool(it.get("hit", False))
+
+        bridge.emit(
+            QueryEvalStart(
+                run_id=run_id,
+                query=query,
+                ground_truth=it.get("ground_truth", ""),
+                origin=origin,
+                llm_provider=pipeline.get("llm_provider", detail.get("model", "")),
+                prompt_fields_id=detail.get("prompt_fields_id", ""),
+                pipeline_params=pipeline.get("pipeline_params") or None,
+                schema_name=schema.name if schema and schema.name else "",
+                session_id=session_id,
+                dataset_name=dataset_name,
+            )
+        )
 
         if pipeline and schema:
-            nodes = extract_pipeline_nodes(pipeline, query, schema=schema)
-            for node in nodes:
-                lf.create_span(
-                    trace_id,
-                    node.name,
-                    node.input,
-                    node.output,
-                    node.metadata,
-                    as_type=node.as_type,
-                    model=node.model,
-                    usage_details=node.usage_details,
+            for node in extract_pipeline_nodes(pipeline, query, schema=schema):
+                bridge.emit(
+                    QueryNodeSpan(
+                        run_id=run_id,
+                        query=query,
+                        node_name=node.name,
+                        as_type=node.as_type,
+                        input_data=node.input,
+                        output_data=node.output,
+                        metadata=node.metadata,
+                        model=node.model,
+                        usage_details=node.usage_details,
+                    )
                 )
 
-        lf.create_score(trace_id, "hit", 1.0 if hit else 0.0)
-        trace_output: dict[str, Any] = {
-            "predicted": it.get("predicted", ""),
-            "ground_truth": it.get("ground_truth", ""),
-            "hit": hit,
-            "total_time": pipeline.get("total_time"),
-        }
+        node_outputs: dict[str, Any] = {}
         if schema:
-            for node in schema.nodes:
-                for k in node.output_keys:
+            for schema_node in schema.nodes:
+                for k in schema_node.output_keys:
                     val = pipeline.get(k)
                     if val is not None:
-                        trace_output[k] = val
-        lf.update_trace(trace_id, output=trace_output)
-        lf.end_trace(trace_id)
+                        node_outputs[k] = val
 
-        # Link trace to dataset item
-        if query_to_item_id:
-            item_id = query_to_item_id.get(query)
-            if item_id and not lf.rate_limited:
-                lf.link_item_to_run(
-                    dataset_item_id=item_id,
-                    trace_id=trace_id,
-                    run_name=run_id,
-                    run_metadata={"origin": origin},
-                )
+        bridge.emit(
+            QueryEvalEnd(
+                run_id=run_id,
+                query=query,
+                predicted=it.get("predicted", ""),
+                ground_truth=it.get("ground_truth", ""),
+                hit=hit,
+                total_time=pipeline.get("total_time"),
+                node_outputs=node_outputs,
+            )
+        )
+        any_pushed = True
 
-        trace_ids.append(trace_id)
-
-    if not trace_ids:
-        return None
-
-    # Update registry
-    state["backfilled_run_ids"].append(run_id)
-    state["langfuse_trace_ids"][run_id] = trace_ids
-
-    if _save:
-        state["last_backfill_at"] = datetime.now(UTC).isoformat()
-        _save_state(store, backend_id, state)
-
-    return trace_ids
+    return any_pushed
 
 
 def sync_langfuse_runs(
@@ -387,11 +238,7 @@ def sync_langfuse_runs(
     backfill: bool = True,
     reset: bool = False,
 ) -> dict | None:
-    """Configure Langfuse dataset name and optionally push all runs.
-
-    Returns:
-        Push stats dict, or None if backfill was skipped.
-    """
+    """Configure Langfuse dataset name and optionally replay all runs."""
     if not backfill:
         logger.info("Langfuse dataset: %s (backfill disabled)", dataset_name)
         return None
@@ -416,38 +263,15 @@ def push_all_runs(
     flush_every: int = 20,
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Push all historical dataset_runs to cloud Langfuse.
-
-    Dataset-first structure:
-    1. Collect ground truth from all runs
-    2. Register/update dataset items with expected_output
-    3. Create one trace per query per run, link to dataset items
-    4. Score each trace with hit (1/0)
-
-    Idempotent — tracks which run_ids have been pushed in a state file
-    and skips them on subsequent calls.
-
-    Args:
-        store: ProjectStore instance.
-        backend_id: Backend identifier.
-        flush_every: Flush Langfuse client every N runs.
-        on_progress: Optional callback for progress messages.
-
-    Returns:
-        Stats dict with keys: total_on_disk, new_runs, already_done,
-        origins (per-origin breakdown), error (if Langfuse disabled).
-    """
-    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-
-    lf = LangfuseLogger.get_instance()
-    if not lf.enabled:
+    """Replay all historical dataset_runs through a Langfuse bridge."""
+    bridge = ObservabilityBridge.from_settings(store.base_dir, backend_id)
+    lf_sink = bridge.langfuse_sink
+    if lf_sink is None:
         return {"error": "Langfuse is disabled (missing credentials or LANGFUSE_ENABLED=false)"}
 
-    # Load state
     state = _load_state(store, backend_id)
     already_done = set(state["backfilled_run_ids"])
 
-    # List all completed runs
     summaries = store.dataset_runs.list_all(backend_id)
     total_on_disk = len(summaries)
 
@@ -455,19 +279,19 @@ def push_all_runs(
         if on_progress:
             on_progress(msg)
 
-    # Step 1: Collect ground truth and register dataset items
     _emit("Collecting ground truth from dataset runs...")
     gt_map = _collect_ground_truth(store, backend_id, summaries)
     try:
-        query_to_item_id = _register_dataset_items(
-            lf, gt_map, state, on_progress, dataset_name=dataset_name
+        query_to_item_id = lf_sink.reconcile_dataset(
+            dataset_name,
+            gt_map,
+            seed_items=state.get("dataset_items") or None,
         )
     except RuntimeError as exc:
         _emit(f"  SKIP: {exc}")
         return {"skipped": True, "reason": str(exc)}
     state["dataset_items"] = query_to_item_id
 
-    # Step 2: Group new runs by origin for stats
     groups: dict[str, list[dict]] = {origin: [] for origin in ORIGIN_ORDER}
     for s in summaries:
         rid = s.get("run_id", "")
@@ -479,9 +303,6 @@ def push_all_runs(
     new_runs = sum(len(v) for v in groups.values())
     run_counter = 0
     origin_stats: dict[str, dict[str, Any]] = {}
-    rate_limit_warned = False
-
-    # Step 3: Push each run via push_run() with shared state
     session_id = f"dataset_{backend_id}"
 
     for origin in ORIGIN_ORDER:
@@ -496,50 +317,33 @@ def push_all_runs(
 
         for run_summary in runs:
             rid = run_summary["run_id"]
-
-            trace_ids = push_run(
-                lf,
+            ok = _replay_run(
+                bridge,
                 store,
                 backend_id,
                 rid,
-                query_to_item_id=query_to_item_id,
+                schema=None,
                 session_id=session_id,
-                _state=state,
-                _save=False,
+                dataset_name=dataset_name,
             )
-
-            if trace_ids:
-                # Collect stats from detail
+            if ok:
                 detail = store.dataset_runs.load_by_id(backend_id, rid)
                 if detail:
                     scores = detail.get("scores", {})
                     accuracies.append(scores.get("accuracy", 0.0))
                     total_items += len(detail.get("dataset_run_items", []))
-
-            if lf.rate_limited and not rate_limit_warned:
-                rate_limit_warned = True
-                _emit(
-                    "  ** Rate limit hit — traces/scores continue but "
-                    "dataset linking paused until quota resets. "
-                    "Re-run push later to complete linking."
-                )
+                state["backfilled_run_ids"].append(rid)
 
             run_counter += 1
             if run_counter % flush_every == 0:
-                lf.flush()
+                bridge.flush()
                 _emit(f"    [{run_counter}/{new_runs}] flushed")
 
-        # Save state after each origin group (crash recovery)
         state["last_backfill_at"] = datetime.now(UTC).isoformat()
         _save_state(store, backend_id, state)
 
-        if accuracies:
-            best_acc = max(accuracies)
-            avg_acc = sum(accuracies) / len(accuracies)
-        else:
-            best_acc = 0.0
-            avg_acc = 0.0
-
+        best_acc = max(accuracies) if accuracies else 0.0
+        avg_acc = sum(accuracies) / len(accuracies) if accuracies else 0.0
         origin_stats[origin] = {
             "n_runs": len(runs),
             "total_items": total_items,
@@ -547,8 +351,7 @@ def push_all_runs(
             "avg_accuracy": avg_acc,
         }
 
-    # Final flush
-    lf.flush()
+    bridge.flush()
     state["last_backfill_at"] = datetime.now(UTC).isoformat()
     _save_state(store, backend_id, state)
 
@@ -560,5 +363,5 @@ def push_all_runs(
         "session_id": session_id,
         "dataset_name": dataset_name,
         "dataset_items": len(query_to_item_id),
-        "rate_limit_hit": rate_limit_warned,
+        "rate_limit_hit": False,
     }

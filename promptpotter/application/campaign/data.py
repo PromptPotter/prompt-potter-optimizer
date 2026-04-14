@@ -104,7 +104,7 @@ async def run_baseline_scoring(
         pipeline_params: Optional pipeline parameter overrides.
         experiment_id: Experiment to load eval data from if dataset is empty.
         on_result: Optional callback for progress reporting.
-        obs: Optional ObsLogger for dataset registration.
+        obs: Optional ObservabilityBridge for dataset registration.
         pipeline_schema: Optional PipelineSchema for composite scoring.
         scoring_formula: Optional per-dataset scoring expression.
 

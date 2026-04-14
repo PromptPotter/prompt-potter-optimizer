@@ -479,9 +479,9 @@ async def run_baseline_scoring(
         tqdm.write(_fmt_query_result(result, cached=is_cached))
         pbar.update(1)
 
-    from promptpotter.infrastructure.tracing.observability_logger import ObsLogger
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
-    _obs = ObsLogger(session.store.base_dir, session.backend_id, langfuse=None)
+    _obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
 
     try:
         campaign_rounds, baseline_results = await _run_baseline_scoring(
