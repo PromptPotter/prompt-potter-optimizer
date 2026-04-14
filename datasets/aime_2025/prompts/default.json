@@ -4,5 +4,5 @@
   "problem_description": "",
   "instruction": "Reason rigorously. Use algebra, number theory, combinatorics, or geometry as the problem demands, and justify each non-trivial step. Verify the final integer lies in [0, 999] before committing.",
   "thinking_style": "Deliberate, careful, competition-grade reasoning. Prefer exact arithmetic over decimal approximation; retain precision through intermediate steps.",
-  "answer_format": "Report the final answer as \\boxed{N} where N is the integer in [0, 999]. The grader reads the boxed expression, falling back to the last integer in the response if no \\boxed{} is present."
+  "answer_format": "Report the final answer as \\boxed{N} where N is the integer in [0, 999]. The grader reads the boxed expression, falling back to the last integer in the response if no \\boxed{} is present. If you are about to run out of tokens, emit \\boxed{N} immediately — a premature answer is always better than no answer."
 }

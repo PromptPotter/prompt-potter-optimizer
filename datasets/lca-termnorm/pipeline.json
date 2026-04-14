@@ -182,10 +182,13 @@
         "max_tokens": null,
         "raw_content_limit": 5000,
         "per_site_content_limit": 500,
-        "prompt_family": "entity_profiling",
-        "prompt_version": 1,
         "schema_family": "entity_profile",
         "schema_version": 1
+      },
+      "prompt_meta": {
+        "family": "entity_profiling",
+        "template_variables": ["query", "format_string", "combined_text"],
+        "description": "System prompt for entity-profile extraction from web research data"
       },
       "optimizer": {
         "param_keys": [
@@ -262,10 +265,13 @@
         "sample_size": 20,
         "debug_output_limit": 20,
         "relevance_weight_core": 0.7,
-        "prompt_family": "llm_ranking",
-        "prompt_version": 1,
         "schema_family": "llm_ranking_output",
         "schema_version": 1
+      },
+      "prompt_meta": {
+        "family": "llm_ranking",
+        "template_variables": ["core_concept", "entity_profile_json", "matches"],
+        "description": "System prompt for LLM-driven candidate re-ranking"
       },
       "optimizer": {
         "param_keys": [
@@ -520,30 +526,6 @@
           "ranked_candidates"
         ]
       }
-    }
-  },
-  "resolved_prompts": {
-    "entity_profiling/1": {
-      "family": "entity_profiling",
-      "version": 1,
-      "description": "Extract comprehensive entity profile from web research data with US/GB spelling variants",
-      "template_variables": [
-        "query",
-        "format_string",
-        "combined_text"
-      ],
-      "template": "You are a comprehensive technical database API specialized in exhaustive entity profiling. Extract ALL possible information about '{{query}}' from the research data and return it in this exact JSON format:\n{{format_string}}\n\nCRITICAL SPELLING REQUIREMENT: In ALL arrays, after each term, immediately add its US/GB spelling variant if different. Example: [\"colour\", \"color\", \"analyse\", \"analyze\"]. This is MANDATORY for every array field.\n\nCORE CONCEPT IDENTIFICATION: Within '{{query}}', certain words carry more semantic weight than others. Material names, product codes, and specifications describe WHAT is involved, but other terms describe the fundamental NATURE of what is being expressed. Identify the single word that defines the conceptual essence - typically the term that indicates an activity, action, method, or process rather than an object or material. Output only this one defining word.\n\nPROFESSIONAL CLASSIFICATION ALIASES: Generate the full spectrum of expert-level references for this entity, spanning precise technical descriptors to broader categorical terms. These terms stem from domain-specific terminology and industry-standard nomenclature that professionals recognize. Include approximations and near-equivalent terms that experts use when exact terminology doesn't exist, accepting that some terms may not be perfect equivalents but represent the best available expert terminology for referencing similar concepts.\n\nGENERIC TECHNICAL INFERENCE INSTRUCTION: Given the product or technical description '{{query}}', perform comprehensive analysis to extract and infer:\n\n1. **Explicit Information**: Directly stated specifications, dimensions, materials, codes, and properties\n2. **Implicit Information**: Commonly associated materials, manufacturing processes, applications, and technical characteristics that are standard for this type of product/component, even if not explicitly mentioned\n3. **Manufacturing Processes**: Both stated and inferred processes based on product type, materials, and specifications\n4. **Material Composition**: Complete material breakdown including standard/typical materials used in such products\n5. **Applications & Use Cases**: Direct and derived applications based on product characteristics\n\n**Include domain knowledge**: Draw from technical standards, industry practices, and material science to infer missing but relevant information.\n\nCRITICAL INSTRUCTIONS FOR RICH ATTRIBUTE COLLECTION:\n- MAXIMIZE diversity: Include ALL synonyms, trade names, scientific names, abbreviations, acronyms, regional terms, industry terminology\n- COMPREHENSIVE extraction: Capture every property, specification, feature, attribute, including numerical values and compositional data\n- PRIORITIZE completeness over brevity: Aim for 5-10+ items per array field - be thorough, not minimal\n---\nRESEARCH DATA:\n{{combined_text}}\n---\nREMEMBER: Every term must be followed by its US/GB variant if different. Return only the JSON object with ALL fields maximally populated."
-    },
-    "llm_ranking/1": {
-      "family": "llm_ranking",
-      "version": 1,
-      "description": "Rank candidate matches based on entity profile relevance with core concept weighting",
-      "template_variables": [
-        "core_concept",
-        "entity_profile_json",
-        "matches"
-      ],
-      "template": "You are a candidate evaluation expert.\n\nTASK 1: Analyze profile and core concept (PRIMARY FACTOR - 70% WEIGHT)\n- Summarize the profile in 1-2 sentences capturing key details\n- Identify the entity_category from the profile\n- Think step-by-step: What are the most important distinguishing features of this entity?\n- CRITICAL: Prioritize candidates that match the core_concept: '{{core_concept}}'\n- Higher match = more of the distinguishing features present in the candidate name\n\nTASK 2: Evaluate candidate matches (20 candidates provided)\n- Each candidate will receive a relevance_score from 0.0 to 1.0\n- 0.95+ : Exact or near-perfect semantic match (contains most/all distinguishing features + matches core_concept)\n- 0.80-0.94 : Strong match (contains several key features + aligns with core_concept)\n- 0.50-0.79 : Moderate match (contains some features OR loosely relates to core_concept)\n- 0.00-0.49 : Weak/poor match (missing most features, doesn't match core_concept)\n\nENTITY PROFILE (JSON):\n{{entity_profile_json}}\n\nCANDIDATE MATCHES TO EVALUATE:\n{{matches}}\n\nIMPORTANT: Return a valid JSON response matching this exact structure:\n{\n    \"reasoning\": \"[1-2 sentences explaining profile, entity_category, and key features]\",\n    \"ranked_candidates\": [\n        {\n            \"rank\": 1,\n            \"candidate\": \"...\",\n            \"relevance_score\": 0.95,\n            \"rationale\": \"[Brief explanation - 1 sentence]\"\n        }\n    ]\n}\n\nRules:\n- Include ALL 20 candidates in ranked_candidates array\n- Rank 1 = highest relevance_score\n- relevance_score must decrease or stay equal as rank increases\n- Return ONLY valid JSON, no other text"
     }
   }
 }
