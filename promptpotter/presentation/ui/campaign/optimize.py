@@ -404,7 +404,7 @@ async def run_optimization_notebook(
             f"stopped before any rounds completed."
         )
         print("  Resume: re-run this cell to restart.")
-        return campaign_rounds, result
+        raise KeyboardInterrupt("optimization interrupted before any rounds completed")
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     if result is None:
@@ -437,6 +437,9 @@ async def run_optimization_notebook(
     print(_dbox_bottom())
 
     format_pipeline_overrides(result.winner_pipeline_params, session.pipeline_schema)
+
+    if interrupted:
+        raise KeyboardInterrupt(f"optimization interrupted after {result.n_rounds} rounds")
 
     return campaign_rounds, result
 
