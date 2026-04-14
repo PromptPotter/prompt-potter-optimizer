@@ -60,6 +60,7 @@ class SessionEnv:
     experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
+    dataset_name: str | None = None
 
 
 def load_baseline_prompt(
@@ -269,6 +270,7 @@ async def init_services(
         backend_client=client,
         pipeline_schema=pipeline_schema,
         synced=False,
+        dataset_name=dataset_name,
     )
 
     # --- Dataset store path (preferred when available) ---

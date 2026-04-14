@@ -25,6 +25,7 @@ from promptpotter.application.optimization.nodes.critique_payload import (
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
+from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
@@ -229,11 +230,38 @@ async def _score_and_select(
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
     )
 
+    # For probe rounds, subset the baseline's prior results to the same
+    # query set the probe is evaluating — otherwise we'd compare subset
+    # accuracy against full-set baseline and every probe round would look
+    # like a regression. Apples-to-apples.
+    if state.probe_next_round and state.current_results:
+        from typing import cast
+
+        from promptpotter.domain.scoring import QueryResult
+
+        _probe_queries = {d.get("query") for d in scoring_dataset}
+        _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
+        if _subset and config.pipeline_schema:
+            _subset_scores = compute_composite_score(
+                cast(list[QueryResult], _subset), config.pipeline_schema
+            )
+            _baseline_acc = _subset_scores["accuracy"]
+            _baseline_comp = _subset_scores.get("composite", _baseline_acc)
+            _baseline_results = _subset
+        else:
+            _baseline_acc = state.current_accuracy
+            _baseline_comp = state.current_composite
+            _baseline_results = state.current_results
+    else:
+        _baseline_acc = state.current_accuracy
+        _baseline_comp = state.current_composite
+        _baseline_results = state.current_results
+
     current_best = {
-        "accuracy": state.current_accuracy,
-        "composite": state.current_composite,
+        "accuracy": _baseline_acc,
+        "composite": _baseline_comp,
         "prompt_fields": state.opt_sp.prompt_field_dict(),
-        "results": state.current_results,
+        "results": _baseline_results,
         "label": f"round_{round_num}" if round_num > 0 else "baseline",
     }
 

@@ -285,6 +285,16 @@ def compute_preflight_metrics(
     has_recon_brief: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from LoopConfig and dataset size."""
+    # Clamp budget to dataset size — a budget larger than the dataset is a
+    # configuration error (Welch elimination gets no margin, dashboard prints
+    # "Sample size 15 of 10"). Clamp silently at compute time; log once.
+    if config.sp_budget_ttest > dataset_size and dataset_size > 0:
+        logger.warning(
+            "sp_budget_ttest (%d) exceeds dataset size (%d) — clamping to dataset size",
+            config.sp_budget_ttest,
+            dataset_size,
+        )
+        config.sp_budget_ttest = dataset_size
     eff_queries = config.sp_budget_ttest
     queries_label = f"{config.sp_budget_ttest} of {dataset_size}"
 

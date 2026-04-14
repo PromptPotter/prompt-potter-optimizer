@@ -127,4 +127,8 @@ def load_cli_baseline(session: SessionEnv):
     from promptpotter.application.campaign.campaign_setup import load_baseline_prompt
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    return load_baseline_prompt(session.experiment_extract, prompt_node_names=prompt_nodes)
+    return load_baseline_prompt(
+        session.experiment_extract,
+        prompt_node_names=prompt_nodes,
+        dataset_name=session.dataset_name,
+    )
