@@ -65,8 +65,24 @@ class SessionEnv:
 def load_baseline_prompt(
     experiment_extract: dict,
     prompt_node_names: list[str] | None = None,
+    dataset_name: str | None = None,
 ) -> OptSearchPoint:
-    """Extract baseline prompt from experiment data's prompt registry."""
+    """Load the baseline OptSearchPoint for the optimizer.
+
+    Resolution order:
+      1. ``experiment_extract.dependencies.prompts`` — legacy registry path
+         used when synced from a live backend's experiment extract.
+      2. ``datasets/{dataset_name}/prompts/{node}.json`` (or ``default.json``)
+         — canonical per-dataset prompt store. This is the path all
+         dataset-first campaigns (bbeh/gsm8k/aime_2025/lca-termnorm) take.
+      3. Empty OptSearchPoint — param-only optimization.
+
+    Without the canonical fallback, the pipeline_params would get the
+    right starting prompt (via ``configure_pipeline``) while the optimizer
+    itself would start from an empty ``OptSearchPoint`` — causing L1 to
+    generate variants from nothing and silently overwrite the pipeline's
+    prompt with hallucinated replacements.
+    """
     dependencies = experiment_extract.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
@@ -82,24 +98,49 @@ def load_baseline_prompt(
         if matched_prompt:
             break
 
-    # Fallback: no node names provided but prompts exist — use the first one
+    # Fallback 1: no node names provided but prompts exist — use the first one
     if matched_prompt is None and not names and prompts:
         matched_key, matched_prompt = next(iter(prompts.items()))
 
-    if matched_prompt is None:
-        logger.info(
-            "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
-            names,
-        )
+    if matched_prompt is not None:
+        label = names[0] if names else matched_key
         return OptSearchPoint(
-            instruction="",
-            changes_description="Baseline (no prompt node active — param-only optimization)",
+            instruction=matched_prompt["template"],
+            changes_description=f"Baseline prompt from {label} registry",
         )
 
-    label = names[0] if names else matched_key
+    # Fallback 2: canonical per-dataset prompt store
+    if dataset_name and names:
+        from promptpotter.application.datasets.prompt_store import (
+            has_dataset_prompts,
+            load_node_prompt,
+        )
+
+        if has_dataset_prompts(dataset_name):
+            for node_name in names:
+                try:
+                    template = load_node_prompt(dataset_name, node_name, "default")
+                except FileNotFoundError:
+                    continue
+                logger.info(
+                    "Baseline loaded from canonical store: datasets/%s/prompts/ → %s",
+                    dataset_name,
+                    node_name,
+                )
+                return OptSearchPoint.from_prompt_fields(
+                    template.prompt_field_dict(),
+                    changes_description=(
+                        f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
+                    ),
+                )
+
+    logger.info(
+        "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
+        names,
+    )
     return OptSearchPoint(
-        instruction=matched_prompt["template"],
-        changes_description=f"Baseline prompt from {label} registry",
+        instruction="",
+        changes_description="Baseline (no prompt node active — param-only optimization)",
     )
 
 
