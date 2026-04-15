@@ -445,6 +445,76 @@ campaign_config = {
 
 ---
 
+## Forking a campaign
+
+A fork branches a new campaign from **any durable write point** in an existing cycle's timeline — e.g. "apply this fix after round 1's L1 candidates are generated, then reuse every query already scored earlier". The primitive is dead simple: `events.jsonl` becomes a write-ahead log, and `optimize --from` is a pointer into it.
+
+### events.jsonl as the write-ahead log
+
+The append-only stream at `.promptpotter/projects/{backend_id}/obs/langfuse/events.jsonl` already mirrors every Langfuse trace event produced by the optimizer. For forking, a handful of mid-round events carry a self-contained `state_snapshot` — a dump of `OptSearchPoint.model_dump(mode="json")` captured at the write point. A fork resolves the spec → reads the snapshot → rehydrates the OptSearchPoint → uses it as the baseline for a fresh cycle. No new data model.
+
+**Invariant**: every durable state change lands on disk via an appended event. `round_NNNN_candidates.json` / `trial_NNNN.json` stay for in-cycle resume speed but are never the fork source.
+
+### Fork-addressable write points
+
+| Write point | Event name | Sub-indexes |
+|---|---|---|
+| Each L1 candidate registered | `candidate_created` | `candidate_idx` |
+| Each query finishes for a candidate | `query_scored` | `candidate_idx`, `query_idx` |
+| Each candidate's full scoring loop completes | `candidate_scored` | `candidate_idx` |
+| Round winner picked | `round_winner_chosen` | — |
+| Critique text produced (inline in `_score_and_select`) | `critique_written` | — |
+| L2 `refine_strategy` transition applied | `l2_applied` | — |
+| L3 `modify_plan` transition applied | `l3_applied` | — |
+| (future) node boundary w/ state_snapshot | `node_end` | — |
+
+All emit through `ObservabilityBridge.emit_write_point(event_cls, opt_sp=…)` so the snapshot shape is uniform. Langfuse sees these events too but the cloud sink doesn't need to know about them — they pass through as unhandled types.
+
+### Addressing grammar
+
+`optimize --from <cycle_id>:<event_ref>` where `event_ref` is one of:
+
+- **Human form**: `round:write_point[:i[:j]]` — e.g. `1:l1_generate:2` (third candidate of round 1), `1:query_scored:0:7` (candidate 0, query 7 of round 1). Aliases: `l1_generate`→`candidate_created`, `candidate`→`candidate_scored`, `winner`→`round_winner_chosen`, `critique`→`critique_written`, `l2`→`l2_applied`, `l3`→`l3_applied`.
+- **Absolute form**: `@<event_index>` — direct 0-indexed offset into the target cycle's slice of `events.jsonl`.
+
+Human specs land on the **last** matching event in the round (deterministic: events are append-only).
+
+### What the fork actually does
+
+1. CLI `optimize --from <cycle_id>:<event_ref>` parses the spec. (`init` handles registration/setup only; forking is an alternate starting condition for the same optimization loop `optimize` already runs.)
+2. `application/campaign/fork_loader.py::load_fork_seed` streams `events.jsonl`, filters by `campaign_id == <cycle_id>`, finds the target event, returns a `ForkSeed` with `state_snapshot`.
+3. `prepare_scoring_context(fork_seed=…)` in `application/campaign/data.py` rehydrates `OptSearchPoint(**state_snapshot)` and uses it as the baseline, skipping the normal `load_baseline_prompt()` path.
+4. `LoopConfig.fork_from` / `parent_cycle_id` / `parent_event_ref` flow into `config.model_dump()` and land on the new cycle's `CampaignStart` event — no event schema change, the `config` field is arbitrary.
+5. A fresh `cycle_id` is derived from the new config hash (fork_from participates in the hash, so the fork never collides with its parent).
+6. `dataset_runs/` content-addressed cache automatically replays every per-query result that matches the forked pipeline config — mid-scoring forks resume at the next unrun query.
+
+### What's reset vs. preserved
+
+- **L1-stage forks** (`candidate_created`) — `OptSearchPoint.memory` is whatever the parent had at the start of that round. The new cycle proceeds with the same memory (validation failures, runtime failures, escalation journal) as the parent had when L1 fired.
+- **Mid-scoring forks** (`query_scored`, `candidate_scored`) — dataset_runs cache absorbs the work already done; the new cycle's score loop cache-hits earlier queries and continues.
+- **Downstream forks** (`round_winner_chosen`, `critique_written`, `l2_applied`, `l3_applied`) — critique text, L2 directive, transition effects are all on the snapshot, so the new cycle picks up exactly where the parent was.
+
+### Examples
+
+```bash
+# Precondition: a session exists (from a prior `init`) — optimize inherits
+# its dataset, pipeline config, and task context. --from only overrides the
+# baseline OptSearchPoint.
+
+# Default: fork after L1 generated candidates for round 1, before scoring.
+python -m promptpotter optimize --from cycle_89d1c661916f:1:l1_generate
+
+# Fork mid-scoring: after query 7 of candidate 0 in round 1. Remaining
+# queries of candidate 0 + all later candidates are re-run (cache hits
+# for earlier queries, fresh work for new ones).
+python -m promptpotter optimize --from cycle_89d1c661916f:1:query_scored:0:7
+
+# Absolute fork by event index in the source cycle's slice of events.jsonl
+python -m promptpotter optimize --from cycle_89d1c661916f:@42
+```
+
+Lineage is queryable downstream by walking `CampaignStart.config.parent_cycle_id` from child to root — a zero-schema-cost way to reconstruct fork trees.
+
 ## Key Files
 
 | File | Role |

@@ -27,14 +27,21 @@ from promptpotter.infrastructure.store.base import (
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,
+    CandidateCreated,
+    CandidateScored,
+    CritiqueWritten,
     DatasetRegistered,
     DatasetRun,
     Event,
+    L2Applied,
+    L3Applied,
     NodeEnd,
     NodeStart,
     PromptVersion,
+    QueryScored,
     RoundEnd,
     RoundStart,
+    RoundWinnerChosen,
 )
 
 logger = logging.getLogger(__name__)
@@ -221,8 +228,85 @@ class FileSink:
             self._on_prompt_version(event)
         elif isinstance(event, CampaignEnd):
             self._on_campaign_end(event)
+        elif isinstance(event, CandidateCreated):
+            self._on_write_point(
+                "candidate_created",
+                event,
+                extra={
+                    "candidate_idx": event.candidate_idx,
+                    "candidate_id": event.candidate_id,
+                    "candidate_snapshot": event.candidate_snapshot,
+                },
+            )
+        elif isinstance(event, QueryScored):
+            self._on_write_point(
+                "query_scored",
+                event,
+                extra={
+                    "candidate_idx": event.candidate_idx,
+                    "query_idx": event.query_idx,
+                    "hit": event.hit,
+                    "score": event.score,
+                },
+            )
+        elif isinstance(event, CandidateScored):
+            self._on_write_point(
+                "candidate_scored",
+                event,
+                extra={
+                    "candidate_idx": event.candidate_idx,
+                    "report": event.report,
+                },
+            )
+        elif isinstance(event, RoundWinnerChosen):
+            self._on_write_point(
+                "round_winner_chosen",
+                event,
+                extra={
+                    "winner_candidate_id": event.winner_candidate_id,
+                    "winner_accuracy": event.winner_accuracy,
+                    "improved": event.improved,
+                },
+            )
+        elif isinstance(event, CritiqueWritten):
+            self._on_write_point(
+                "critique_written",
+                event,
+                extra={"critique_text": event.critique_text},
+            )
+        elif isinstance(event, L2Applied):
+            self._on_write_point(
+                "l2_applied",
+                event,
+                extra={"changes_description": event.changes_description},
+            )
+        elif isinstance(event, L3Applied):
+            self._on_write_point(
+                "l3_applied",
+                event,
+                extra={"changes_description": event.changes_description},
+            )
         # Topology B (QueryEvalStart / QueryNodeSpan / QueryEvalEnd) is
         # Langfuse-only — the file sink has no analogue for backfill replay.
+
+    # --- Fork-addressable write-point handler (shared) ---
+
+    def _on_write_point(self, event_name: str, event: Any, extra: dict[str, Any]) -> None:
+        """Append a fork-addressable event to events.jsonl.
+
+        The snapshot is the fork substrate — a new cycle can be seeded from
+        any write point using ``--fork-from <cycle_id>:<event_ref>``.
+        """
+        trace_id = self._campaign_traces.get(event.campaign_id, "")
+        payload = {
+            "event": event_name,
+            "trace_id": trace_id,
+            "campaign_id": event.campaign_id,
+            "round": event.round_num,
+            "state_snapshot": event.state_snapshot,
+            **extra,
+        }
+        self._log_event(payload)
 
     # --- Optimization topology (A) handlers ---
 
@@ -370,15 +454,16 @@ class FileSink:
             if event.error:
                 obs_data.setdefault("metadata", {})["error"] = event.error
             write_json(obs_path, obs_data)
-        self._log_event(
-            {
-                "event": "node_end",
-                "trace_id": trace_id,
-                "obs_id": obs_id,
-                "node_id": event.node_id,
-                "error": event.error,
-            }
-        )
+        node_end_payload: dict[str, Any] = {
+            "event": "node_end",
+            "trace_id": trace_id,
+            "obs_id": obs_id,
+            "node_id": event.node_id,
+            "error": event.error,
+        }
+        if event.state_snapshot is not None:
+            node_end_payload["state_snapshot"] = event.state_snapshot
+        self._log_event(node_end_payload)
 
     def _on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")

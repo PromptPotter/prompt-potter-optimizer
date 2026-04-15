@@ -101,6 +101,9 @@ class CampaignConfig(TypedDict, total=False):
     optimizer_llm: OptimizerLLMConfig
     adaptive_recon: SmartSearchConfig
     scoring: str
+    fork_from: str
+    parent_cycle_id: str
+    parent_event_ref: str
 
 
 class LoopConfig(BaseModel):
@@ -259,6 +262,23 @@ class LoopConfig(BaseModel):
         "publication experiments requiring exact reproducibility.",
     )
 
+    # Fork lineage (see docs/architecture/optimization.md "Forking a campaign")
+    fork_from: str | None = Field(
+        None,
+        description="Raw --fork-from spec, e.g. 'cycle_abc:1:l1_generate:2'. "
+        "Present only when this cycle was forked from another; flows into the "
+        "CampaignStart config dict so lineage can be walked downstream.",
+    )
+    parent_cycle_id: str | None = Field(
+        None,
+        description="Source cycle id when forked. Paired with fork_from.",
+    )
+    parent_event_ref: str | None = Field(
+        None,
+        description="Event reference inside the source cycle — either 'round:"
+        "write_point[:i[:j]]' or '@<idx>'. Paired with fork_from.",
+    )
+
     @classmethod
     def from_campaign_config(
         cls,
@@ -291,6 +311,9 @@ class LoopConfig(BaseModel):
             pipeline_schema=pipeline_schema,
             recon_brief=recon_brief,
             task_context=task_context,
+            fork_from=campaign_config.get("fork_from"),
+            parent_cycle_id=campaign_config.get("parent_cycle_id"),
+            parent_event_ref=campaign_config.get("parent_event_ref"),
         )
 
 

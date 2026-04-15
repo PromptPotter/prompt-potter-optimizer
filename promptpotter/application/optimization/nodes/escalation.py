@@ -23,6 +23,8 @@ from promptpotter.application.optimization.nodes.critique_payload import extract
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
+from promptpotter.infrastructure.tracing.events import L2Applied, L3Applied
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
@@ -230,6 +232,16 @@ async def _run_layer_transition(
     ):
         transition = await call()
     state.apply_transition(transition, schema=config.pipeline_schema)
+    if obs is not None:
+        event_cls: type = L2Applied if phase == CampaignPhase.REFINE_STRATEGY else L3Applied
+        with graceful(f"{event_cls.__name__} emit failed"):
+            obs.emit_write_point(
+                event_cls,
+                campaign_id=obs_campaign_id,
+                round_num=round_num,
+                opt_sp=state.opt_sp,
+                changes_description=transition.opt_search_point.changes_description or "",
+            )
     emit_phase(on_phase, phase, "exit", round=round_num, **exit_payload(transition))
     return transition
 

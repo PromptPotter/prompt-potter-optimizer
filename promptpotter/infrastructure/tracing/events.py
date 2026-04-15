@@ -84,6 +84,101 @@ class NodeEnd:
     output_data: dict[str, Any] | None = None
     metrics: dict[str, float] | None = None
     error: str | None = None
+    state_snapshot: dict[str, Any] | None = None
+    """Optional OptSearchPoint snapshot captured at node boundary for fork support.
+
+    When present, this event becomes a fork-addressable write point — a new
+    cycle can be seeded from this exact OptSearchPoint via ``--fork-from``.
+    See ``docs/architecture/optimization.md`` "Forking a campaign".
+    """
+
+
+# --- Fork-addressable mid-round write points ---
+#
+# These events carry a self-contained ``state_snapshot`` (dumped
+# ``OptSearchPoint``) so any new cycle can be seeded from the exact optimizer
+# state at that point in the timeline. See ``docs/architecture/optimization.md``
+# "Forking a campaign" and ``application/campaign/fork_loader.py``.
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateCreated:
+    """An L1-proposed candidate was registered for this round."""
+
+    campaign_id: str
+    round_num: int
+    candidate_idx: int
+    candidate_id: str
+    state_snapshot: dict[str, Any]
+    candidate_snapshot: dict[str, Any] | None = None
+    """Dump of the candidate's ``OptSearchPoint`` (distinct from ``state_snapshot``
+    which is the parent state) so forks can reconstruct the precise candidate."""
+
+
+@dataclass(frozen=True, slots=True)
+class QueryScored:
+    """One backend query finished for a specific candidate."""
+
+    campaign_id: str
+    round_num: int
+    candidate_idx: int
+    query_idx: int
+    hit: bool
+    score: float
+    state_snapshot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class CandidateScored:
+    """A candidate finished its full scoring loop (report built)."""
+
+    campaign_id: str
+    round_num: int
+    candidate_idx: int
+    report: dict[str, Any]
+    state_snapshot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class RoundWinnerChosen:
+    """Round winner picked from evaluated candidates."""
+
+    campaign_id: str
+    round_num: int
+    winner_candidate_id: str
+    winner_accuracy: float
+    improved: bool
+    state_snapshot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class CritiqueWritten:
+    """Critique text produced after scoring (inline in ``_score_and_select``)."""
+
+    campaign_id: str
+    round_num: int
+    critique_text: str
+    state_snapshot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class L2Applied:
+    """L2 ``refine_strategy`` transition applied to the loop state."""
+
+    campaign_id: str
+    round_num: int
+    changes_description: str
+    state_snapshot: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class L3Applied:
+    """L3 ``modify_plan`` transition applied to the loop state."""
+
+    campaign_id: str
+    round_num: int
+    changes_description: str
+    state_snapshot: dict[str, Any]
 
 
 @dataclass(frozen=True, slots=True)
@@ -153,6 +248,13 @@ OptimizationEvent = Union[
     DatasetRun,
     RoundEnd,
     CampaignEnd,
+    CandidateCreated,
+    QueryScored,
+    CandidateScored,
+    RoundWinnerChosen,
+    CritiqueWritten,
+    L2Applied,
+    L3Applied,
 ]
 
 

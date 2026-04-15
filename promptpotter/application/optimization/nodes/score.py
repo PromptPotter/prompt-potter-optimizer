@@ -13,6 +13,8 @@ from promptpotter.domain.analysis import EscalationTarget, RuntimeFailure, Valid
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
+from promptpotter.infrastructure.tracing.events import CandidateScored, QueryScored
+from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunCallbacks
@@ -212,6 +214,8 @@ async def _score_candidates(
     callbacks: RunCallbacks,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
+    obs_campaign_id: str = "",
+    round_num: int = 0,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], dict | None]:
     """Evaluate each candidate against the dataset.
 
@@ -231,10 +235,36 @@ async def _score_candidates(
         n_queries=len(dataset),
     )
 
+    obs = ctx.obs
+
+    def _emit_candidate_scored(c_idx: int, c_osp: OptSearchPoint, c_report: dict) -> None:
+        if obs:
+            with graceful("CandidateScored emit failed"):
+                obs.emit_write_point(
+                    CandidateScored,
+                    campaign_id=obs_campaign_id,
+                    round_num=round_num,
+                    opt_sp=c_osp,
+                    candidate_idx=c_idx,
+                    report=c_report,
+                )
+
     for idx, osp_c in enumerate(osp_candidates):
 
-        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
+        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates, _osp=osp_c):
             callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
+            if obs:
+                with graceful("QueryScored emit failed"):
+                    obs.emit_write_point(
+                        QueryScored,
+                        campaign_id=obs_campaign_id,
+                        round_num=round_num,
+                        opt_sp=_osp,
+                        candidate_idx=_ci,
+                        query_idx=qi,
+                        hit=bool(result.get("hit", False)),
+                        score=float(result.get("score", 0.0)),
+                    )
 
         # Synthetic-0 early exit: a SearchPoint whose L1 parse-time validation
         # produced ValidationFailures is structurally invalid. We do not run it
@@ -271,6 +301,7 @@ async def _score_candidates(
             )
             candidate_scores.append(report)
             callbacks.on_candidate_scored(idx, n_candidates, report)
+            _emit_candidate_scored(idx, osp_c, report)
             continue
 
         sp = osp_c.to_job_search_point(
@@ -314,6 +345,7 @@ async def _score_candidates(
             )
             candidate_scores.append(report)
             callbacks.on_candidate_scored(idx, n_candidates, report)
+            _emit_candidate_scored(idx, osp_c, report)
             continue
 
         escalation_signal = scores.pop("escalation_signal", None)
@@ -377,6 +409,7 @@ async def _score_candidates(
         )
         candidate_scores.append(report)
         callbacks.on_candidate_scored(idx, n_candidates, report)
+        _emit_candidate_scored(idx, osp_c, report)
 
         if escalation_signal:
             if elimination_stopped:
@@ -399,6 +432,8 @@ async def l1_score(
     degradation_checks: list | None = None,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
+    obs_campaign_id: str = "",
+    round_num: int = 0,
 ) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
     # Normalize current_best prompt_fields to OptSearchPoint once at entry
@@ -422,6 +457,8 @@ async def l1_score(
         callbacks=callbacks,
         elimination_n_min=elimination_n_min,
         elimination_alpha=elimination_alpha,
+        obs_campaign_id=obs_campaign_id,
+        round_num=round_num,
     )
 
     evaluated_candidates = [

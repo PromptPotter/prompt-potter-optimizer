@@ -32,9 +32,11 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.infrastructure.llm import client as _llm_client
 from promptpotter.infrastructure.tracing import observed_node
 from promptpotter.infrastructure.tracing.events import (
+    CritiqueWritten,
     PromptVersion,
     RoundEnd,
     RoundStart,
+    RoundWinnerChosen,
 )
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
@@ -154,6 +156,9 @@ async def _generate_or_load_candidates(
             failure_analysis=state.failure_analysis,
             search_memory_digest=sm_ctx,
             pipeline_schema=config.pipeline_schema,
+            obs=obs,
+            obs_campaign_id=env.obs_campaign_id,
+            round_num=round_num,
         )
 
     if env.campaign_store and env.cycle_id:
@@ -286,12 +291,36 @@ async def _score_and_select(
             degradation_checks=degradation_checks,
             elimination_n_min=config.elimination_n_min,
             elimination_alpha=config.elimination_alpha,
+            obs_campaign_id=env.obs_campaign_id,
+            round_num=round_num,
         )
+
+        if obs and scoring_result.candidate_scores:
+            winner_id = str(scoring_result.winner_prompt_fields.get("id", ""))
+            with graceful("RoundWinnerChosen emit failed"):
+                obs.emit_write_point(
+                    RoundWinnerChosen,
+                    campaign_id=env.obs_campaign_id,
+                    round_num=round_num,
+                    opt_sp=state.opt_sp,
+                    winner_candidate_id=winner_id,
+                    winner_accuracy=scoring_result.winner_accuracy,
+                    improved=scoring_result.improved,
+                )
 
         scoring_result.critique_text = await _run_critique(scoring_result, round_num, state, config)
         scoring_result.thinking_styles = sample_thinking_styles(
             n=3, seed=config.seed + round_num + 1
         )
+        if obs and scoring_result.critique_text:
+            with graceful("CritiqueWritten emit failed"):
+                obs.emit_write_point(
+                    CritiqueWritten,
+                    campaign_id=env.obs_campaign_id,
+                    round_num=round_num,
+                    opt_sp=state.opt_sp,
+                    critique_text=scoring_result.critique_text,
+                )
 
     emit_phase(
         callbacks.on_phase,

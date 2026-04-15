@@ -120,6 +120,35 @@ class ObservabilityBridge:
             with graceful(f"Tracing sink {type(sink).__name__} failed on {type(event).__name__}"):
                 sink.handle(event)
 
+    def emit_write_point(
+        self,
+        event_cls: type,
+        *,
+        campaign_id: str,
+        round_num: int,
+        opt_sp: Any,
+        **extra: Any,
+    ) -> None:
+        """Emit a fork-addressable write-point event with a full state snapshot.
+
+        The snapshot is ``opt_sp.model_dump(mode="json")`` — this is the
+        substrate ``fork_loader.load_fork_seed`` reads to seed a child
+        cycle. Every call site for a new write point should route through
+        here rather than building events by hand, so every snapshot is
+        shaped identically.
+        """
+        if not self._enabled:
+            return
+        with graceful(f"{event_cls.__name__} snapshot build failed"):
+            snapshot = opt_sp.model_dump(mode="json") if opt_sp is not None else {}
+            event = event_cls(
+                campaign_id=campaign_id,
+                round_num=round_num,
+                state_snapshot=snapshot,
+                **extra,
+            )
+            self.emit(event)
+
     def flush(self) -> None:
         for sink in self._sinks:
             with graceful(f"Tracing sink {type(sink).__name__} flush failed"):

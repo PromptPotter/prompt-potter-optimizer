@@ -14,12 +14,15 @@ from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
+from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared.constants import classify_axis
+from promptpotter.shared.errors import graceful
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 
@@ -131,6 +134,9 @@ async def l1_generate(
     failure_analysis: FailureAnalysis | None = None,
     search_memory_digest: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
+    obs: ObservabilityBridge | None = None,
+    obs_campaign_id: str = "",
+    round_num: int = 0,
 ) -> list[dict]:
     """Generate candidate pipeline-param variants via LLM meta-prompt.
 
@@ -252,5 +258,17 @@ async def l1_generate(
         if validation_failures:
             c_dict["__validation_failures__"] = [vf.to_dict() for vf in validation_failures]
         candidates.append(c_dict)
+
+        if obs:
+            with graceful("CandidateCreated emit failed"):
+                obs.emit_write_point(
+                    CandidateCreated,
+                    campaign_id=obs_campaign_id,
+                    round_num=round_num,
+                    opt_sp=opt_sp,
+                    candidate_idx=len(candidates) - 1,
+                    candidate_id=child.id,
+                    candidate_snapshot=child.model_dump(mode="json"),
+                )
 
     return candidates

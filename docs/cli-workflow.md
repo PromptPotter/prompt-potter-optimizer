@@ -51,6 +51,18 @@ Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `e
 
 Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
+**Init flags**:
+
+| Flag | Purpose |
+|---|---|
+| `--backend-url` | Backend service URL (default from settings) |
+| `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
+| `--dataset-name` | Override dataset name from config |
+| `--config` | Campaign config JSON file |
+| `--skip-baseline` | Skip explicit baseline eval (default — auto-baseline runs before round 1) |
+
+Forking a campaign is not done here — see `optimize --from` below. `init` handles registration/setup only.
+
 ### set-task
 
 ```bash
@@ -80,10 +92,32 @@ Displays recon results leaderboard and seeds the optimization campaign with the 
 ### optimize
 
 ```bash
+# Resume: run the loop from the active session's current state.
 python -m promptpotter optimize
+
+# Fork: run the loop with the baseline OptSearchPoint rehydrated from a
+# prior cycle's events.jsonl write-point. Mints a new cycle_id branched
+# off the parent. Inherits the active session's dataset/pipeline/task.
+python -m promptpotter optimize --from <cycle_id>:<event_ref>
 ```
 
 Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). Use `control --stop` or Ctrl+C to pause gracefully — state is checkpointed between rounds and resumes from the last completed round.
+
+#### `--from <cycle_id>:<event_ref>` (forking)
+
+Forks a new cycle from any durable write point in a prior cycle's timeline. The baseline is seeded from the `state_snapshot` on that event; the new cycle's `CampaignStart` config carries `parent_cycle_id` + `fork_spec` so lineage is queryable. `dataset_runs/` content-addressed cache replays any already-evaluated queries, so mid-scoring forks resume at the next unrun query.
+
+Addressing grammar: `<cycle_id>:<event_ref>`. Event ref is either `round:write_point[:i[:j]]` (human form, last match wins) or `@<event_index>` (absolute offset into the cycle's slice of `events.jsonl`). Write points: `l1_generate` / `query_scored` / `candidate` / `winner` / `critique` / `l2` / `l3`. See [architecture/optimization.md § Forking a campaign](architecture/optimization.md#forking-a-campaign) for the full write-point table.
+
+Examples:
+
+```bash
+# Fork after L1 generated candidates for round 1, before scoring.
+python -m promptpotter optimize --from cycle_89d1c661916f:1:l1_generate
+
+# Fork mid-scoring: after query 7 of candidate 0 in round 1.
+python -m promptpotter optimize --from cycle_89d1c661916f:1:query_scored:0:7
+```
 
 ### show-results
 

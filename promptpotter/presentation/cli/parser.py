@@ -63,7 +63,17 @@ def build_parser() -> argparse.ArgumentParser:
     p_recon.add_argument("--sample-size", type=int, default=None)
 
     sub.add_parser("show-recon", help="Show recon analytics and seed campaign")
-    sub.add_parser("optimize", help="Run optimization loop")
+    p_opt = sub.add_parser("optimize", help="Run optimization loop")
+    p_opt.add_argument(
+        "--from",
+        dest="fork_from",
+        default=None,
+        help="Fork from a prior cycle's write-point: "
+        "<cycle_id>:<round>:<write_point>[:i[:j]] or <cycle_id>:@<idx>. "
+        "Seeds the baseline OptSearchPoint from events.jsonl at that point, "
+        "then runs the loop as a new cycle branched off the parent. "
+        "See docs/architecture/optimization.md 'Forking a campaign'.",
+    )
 
     p_ctl = sub.add_parser("control", help="Write control signal to dashboard")
     p_ctl.add_argument(
