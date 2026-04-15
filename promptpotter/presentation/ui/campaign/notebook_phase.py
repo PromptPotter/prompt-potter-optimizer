@@ -672,6 +672,16 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     loop_state = d["state"]
     loop_env = d["env"]
     state.baseline_accuracy = loop_state.current_accuracy
+
+    # Mix prompt fields from the loaded baseline into the Start column so
+    # the SP diff shows what the loop is actually starting from (not just
+    # schema pipeline params). Otherwise any candidate that overrides a
+    # prompt field would render as a diff against "-".
+    prompt_fields = loop_state.opt_sp.prompt_field_dict()
+    for field_name, value in prompt_fields.items():
+        if value:
+            state.original_sp_flat[field_name] = str(value)
+
     cycle_id = (loop_env.cycle_id or "?")[:12]
     samples = len(loop_env.scoring_dataset)
     obs = "ON" if (loop_env.scoring_ctx and loop_env.scoring_ctx.obs) else "OFF"
@@ -709,7 +719,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     if len(preview) > 50:
         preview = preview[:47] + "..."
     if not preview:
-        preview = "(no baseline -- seed from scan or provide instruction)"
+        preview = "(empty starting prompt — param-only optimization)"
     n = d.get("n_variants", 0)
     model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)

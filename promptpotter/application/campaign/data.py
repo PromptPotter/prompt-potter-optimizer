@@ -196,7 +196,21 @@ async def prepare_scoring_context(
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set dataset, optionally run baseline eval."""
+    """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
+
+    Baseline semantics:
+      * ``run_baseline=True`` (explicit) — score the loaded prompt on the
+        **full dataset** (legacy path, populates the per-query cache broadly).
+      * ``run_baseline=False`` **auto-baseline** — score the loaded prompt on
+        the first ``sp_budget_ttest`` queries of the dataset so L1 has a real
+        reference anchor. This honors the CLAUDE.md contract that the
+        optimizer evaluates baseline automatically before round 1 and is
+        shared by every entry point (notebook, CLI, API, webapp).
+
+    The auto-baseline is skipped only when the loaded prompt is genuinely
+    empty (param-only optimization) or when ``svc`` / ``campaign_config`` is
+    missing (caller pre-dates the sharing refactor).
+    """
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     dataset_name = campaign_config.get("dataset_name") if campaign_config else None
     baseline = load_baseline_prompt(
@@ -208,15 +222,31 @@ async def prepare_scoring_context(
 
     campaign_rounds: list = []
     baseline_results: list = []
-    if run_baseline and campaign_config is not None and svc is not None:
-        campaign_rounds, baseline_results = await run_baseline_scoring(
-            baseline,
-            dataset,
-            svc,
-            pipeline_params=pipeline_params,
-            pipeline_schema=pipeline_schema,
-            scoring_formula=campaign_config.get("scoring"),
-        )
+    if campaign_config is not None and svc is not None and dataset:
+        if run_baseline:
+            eval_dataset = dataset
+            label = f"Baseline eval on full dataset ({len(eval_dataset)} queries)"
+        elif baseline.render().strip():
+            sp_budget = int(campaign_config.get("sp_budget_ttest") or 15)
+            eval_dataset = dataset[:sp_budget] if len(dataset) > sp_budget else dataset
+            label = (
+                f"Auto-baseline on t-test slice ({len(eval_dataset)}/{len(dataset)} "
+                f"queries) — L1 reference anchor"
+            )
+        else:
+            eval_dataset = []
+            label = ""
+
+        if eval_dataset:
+            logger.info(label)
+            campaign_rounds, baseline_results = await run_baseline_scoring(
+                baseline,
+                eval_dataset,
+                svc,
+                pipeline_params=pipeline_params,
+                pipeline_schema=pipeline_schema,
+                scoring_formula=campaign_config.get("scoring"),
+            )
 
     return baseline, dataset, campaign_rounds, baseline_results
 

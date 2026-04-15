@@ -126,10 +126,12 @@ class LoopConfig(BaseModel):
 
     # Zero-signal sample filtering (deterministic, no LLM)
     zero_signal_filter_enabled: bool = Field(
-        True,
+        False,
         description="Prune always-hit and always-miss queries from the active "
         "dataset at round boundaries. Uses SearchMemory.dead_queries(). "
-        "On by default — the min_observations gate prevents premature exclusion.",
+        "Off by default — at small t-test budgets the filter rarely accumulates "
+        "enough observations to fire and can shrink the active dataset in ways "
+        "that confuse publication-grade benchmark runs. Opt in explicitly.",
     )
     zero_signal_filter_min_observations: int = Field(
         5,
@@ -200,9 +202,14 @@ class LoopConfig(BaseModel):
     )
 
     # Sequential candidate elimination
-    elimination_n_min: int = Field(6, description="Min queries before elimination t-test activates")
+    elimination_n_min: int = Field(4, description="Min queries before elimination t-test activates")
     elimination_alpha: float = Field(
-        0.05, description="Significance level for candidate elimination"
+        0.2,
+        description="Significance level for candidate elimination. Tuned for "
+        "online ranking (0.2) rather than publication-strict inference (0.05) "
+        "— at small t-test budgets (n<20) the 0.05 threshold almost never "
+        "fires for realistic gaps. Holm-Bonferroni correction across priors "
+        "still applies on top of this.",
     )
 
     # Eval robustness

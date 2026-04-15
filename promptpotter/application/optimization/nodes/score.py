@@ -199,8 +199,8 @@ async def _score_candidates(
     *,
     degradation_checks: list | None = None,
     callbacks: RunCallbacks,
-    elimination_n_min: int = 20,
-    elimination_alpha: float = 0.05,
+    elimination_n_min: int = 4,
+    elimination_alpha: float = 0.2,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], dict | None]:
     """Evaluate each candidate against the dataset.
 
@@ -386,8 +386,8 @@ async def l1_score(
     improvement_threshold: float = 0.01,
     callbacks: RunCallbacks,
     degradation_checks: list | None = None,
-    elimination_n_min: int = 20,
-    elimination_alpha: float = 0.05,
+    elimination_n_min: int = 4,
+    elimination_alpha: float = 0.2,
 ) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
     # Normalize current_best prompt_fields to OptSearchPoint once at entry

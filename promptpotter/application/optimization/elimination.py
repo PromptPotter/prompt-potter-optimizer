@@ -27,7 +27,7 @@ class EliminationCheck:
 
     name: str = "elimination"
 
-    def __init__(self, *, n_min: int = 6, alpha: float = 0.05, n_queries: int) -> None:
+    def __init__(self, *, n_min: int = 4, alpha: float = 0.2, n_queries: int) -> None:
         self.n_min = n_min
         self.alpha = alpha
         self.n_queries = n_queries
