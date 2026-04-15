@@ -2,6 +2,17 @@
 
 PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization.
 
+## SearchPoint Hierarchy
+
+```
+SearchPoint (abstract — render())
+    ├── JobSearchPoint      — target evaluation space (pipeline_params, frozen)
+    └── PromptTemplate      — 8-field prompt scheme (render/compile)
+            └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
+```
+
+**Prompt alias groups** link the original monolithic prompt to its decomposed form so historical evaluations stay discoverable across both. Per-query results from prior `dataset_runs/` are reused when a new searchpoint's `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
+
 ## Key Concept: Two Parameter Namespaces
 
 **Prompt scheme fields** live on `OptSearchPoint` / `PromptTemplate` and render into a single prompt string via `render()`. **Pipeline node params** (`pipeline_params`) are a separate namespace — nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both).
