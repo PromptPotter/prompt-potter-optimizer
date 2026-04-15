@@ -60,6 +60,8 @@ class RoundSnapshot:
 
     search_memory_digest: dict | None = None
 
+    runtime_failures: list[dict] = field(default_factory=list)
+
     @classmethod
     def from_round_state(
         cls,
@@ -126,6 +128,16 @@ class RoundSnapshot:
             degradation_threshold=config.critique_degradation_threshold,
             near_miss_ratio=config.critique_near_miss_ratio,
             search_memory_digest=sm_ctx,
+            runtime_failures=[
+                {
+                    "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[
+                        :60
+                    ],
+                    **rf,
+                }
+                for cs in scoring_result.candidate_scores
+                for rf in (cs.get("runtime_failures") or [])
+            ],
         )
 
 
@@ -457,6 +469,36 @@ def _success_details_section(results: list[QueryResult]) -> str:
     return "\n".join(lines)
 
 
+def _runtime_failures_section(entries: list[dict]) -> str:
+    """Render per-candidate RuntimeFailures as a hard-constraint section.
+
+    Groups by dominant_warning, names the offending config axes, and
+    instructs the critique LLM to steer suggested_axes away from them.
+    """
+    if not entries:
+        return ""
+    by_warning: dict[str, list[dict]] = {}
+    for e in entries:
+        by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
+    lines = ["## RUNTIME FAILURES THIS ROUND (Rail 2 — treat as hard constraints)"]
+    _cfg_axes = ("model", "temperature", "max_tokens", "reasoning_effort")
+    for dom in sorted(by_warning):
+        lines.append(f"  {dom}:")
+        for e in by_warning[dom]:
+            rate = float(e.get("degraded_rate", 0.0)) * 100
+            dc = e.get("degraded_count", 0)
+            tot = e.get("total_evaluated", 0)
+            cfg = e.get("observed_config") or {}
+            cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _cfg_axes if k in cfg)
+            lines.append(
+                f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
+            )
+    lines.append(
+        "  These configurations are broken — do NOT propose the same or similar values next round."
+    )
+    return "\n".join(lines)
+
+
 def assemble_critique_sections(ctx: RoundSnapshot) -> str:
     """Build stat-rich sections for the critique template."""
     results = ctx.results
@@ -469,6 +511,8 @@ def assemble_critique_sections(ctx: RoundSnapshot) -> str:
         near_miss_ratio=ctx.near_miss_ratio,
     )
 
+    rt_failures_text = _runtime_failures_section(ctx.runtime_failures)
+
     sections = [
         _summary_section(ctx),
         _pipeline_health_section(
@@ -476,6 +520,10 @@ def assemble_critique_sections(ctx: RoundSnapshot) -> str:
             anomalies,
             degradation_threshold=ctx.degradation_threshold,
         ),
+    ]
+    if rt_failures_text:
+        sections.append(rt_failures_text)
+    sections += [
         rank_text,
         _round_evolution_section(ctx.round_history, anomalies),
         _query_category_section(results),

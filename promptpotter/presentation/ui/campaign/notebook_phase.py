@@ -592,6 +592,19 @@ def _print_sp_diff(
         return _get_code(val)
 
     col_w = max(8, max(len(label) for label, _ in columns) + 2)
+    # Bump col_w to fit any inline value (<= _VAL_INLINE_MAX) so short-but-
+    # wider-than-label values like "**{answer}**" don't overflow into the
+    # next cell.
+    widest_inline = max(
+        (
+            len(d[k])
+            for k in diff_keys
+            for _, d in columns
+            if k in d and len(d[k]) <= _VAL_INLINE_MAX
+        ),
+        default=0,
+    )
+    col_w = max(col_w, widest_inline + 2)
     max_key = max(len(k) for k in diff_keys)
 
     r_label = f"Round {round_num}" if round_num is not None else "SPs"
