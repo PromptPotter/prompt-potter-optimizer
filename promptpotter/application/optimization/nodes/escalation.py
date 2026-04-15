@@ -35,11 +35,24 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "FATAL_WARNINGS",
     "DegradationCheck",
     "EmptyOutputCheck",
     "build_degradation_checks",
     "escalate_l2",
 ]
+
+
+# Warnings whose first occurrence is already conclusive evidence that the
+# candidate's config is deterministically broken for this dataset — no point
+# spending more queries to confirm. Currently: reasoning models (e.g.
+# gpt-oss-120b) whose hidden reasoning trace eats the entire max_tokens budget
+# and leaves empty visible content. Hardcoded invariant, not a tunable.
+FATAL_WARNINGS: frozenset[str] = frozenset(
+    {
+        "llm_only:empty_content_reasoning_fallback",
+    }
+)
 
 
 # ---------------------------------------------------------------------------
@@ -48,7 +61,17 @@ __all__ = [
 
 
 class DegradationCheck:
-    """Triggers when degraded query fraction exceeds threshold.
+    """Eliminates a candidate when its warnings look terminal.
+
+    Two paths, in order:
+
+    1. **Fatal fast-path.** If the newest query carries any warning in
+       ``FATAL_WARNINGS`` (e.g. ``llm_only:empty_content_reasoning_fallback``),
+       fire immediately — bypass ``min_queries`` and ``threshold``. These
+       codes are deterministic for the whole config, so one occurrence is
+       conclusive and the remaining queries would just waste backend calls.
+    2. **Rate-based.** Otherwise, once at least ``min_queries`` results
+       are in, fire when the degraded fraction meets ``threshold``.
 
     Target is ``ELIMINATE_CANDIDATE`` — the check attributes the failure
     to the specific candidate that produced it, and the per-candidate
@@ -72,6 +95,31 @@ class DegradationCheck:
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
+        # Fast-path: a single fatal warning on the newest query ends the
+        # candidate immediately. Scanning only results_so_far[-1] is enough
+        # because this method runs after every query — an earlier fatal
+        # would already have fired.
+        if results_so_far:
+            latest_warnings = extract_warning_types(results_so_far[-1])
+            fatal_hit = next((w for w in latest_warnings if w in FATAL_WARNINGS), None)
+            if fatal_hit is not None:
+                n = len(results_so_far)
+                return EscalationSignal(
+                    check_name=self.name,
+                    target=EscalationTarget.ELIMINATE_CANDIDATE,
+                    check_result={
+                        "degraded_rate": 1.0,
+                        "degraded_count": n,
+                        "total_evaluated": n,
+                        "warning_types": {fatal_hit: 1},
+                        "dominant_warning": fatal_hit,
+                        "fatal": True,
+                    },
+                    candidate_idx=candidate_idx,
+                    candidates_scored=candidate_idx + 1,
+                    candidates_skipped=n_total_candidates - candidate_idx - 1,
+                )
+
         if len(results_so_far) < self.min_queries:
             return None
 
