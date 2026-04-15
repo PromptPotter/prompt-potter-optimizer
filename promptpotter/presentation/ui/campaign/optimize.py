@@ -11,9 +11,7 @@ from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
 )
 from promptpotter.application.optimization.results import RunResult
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     proportion_test,
@@ -31,8 +29,6 @@ from .notebook_primitives import (
     _dbox_line,
     _dbox_sep,
     _dbox_top,
-    _fmt_query_result,
-    _print_interrupt_banner,
 )
 
 if TYPE_CHECKING:
@@ -49,7 +45,6 @@ __all__ = [
     "load_baseline_prompt",
     "min_detectable_effect",
     "proportion_test",
-    "run_baseline_scoring",
     "run_optimization_notebook",
     "show_feedback_preflight",
     "show_progress",
@@ -444,83 +439,8 @@ async def run_optimization_notebook(
     return campaign_rounds, result
 
 
-# ---------------------------------------------------------------------------
-# Statistical helpers — imported from display.py
-# ---------------------------------------------------------------------------
-# Baseline eval wrapper (from eval.py)
-# ---------------------------------------------------------------------------
 from promptpotter.application.campaign.campaign_setup import (  # noqa: E402
     load_baseline_prompt,
 )
-from promptpotter.application.campaign.data import (  # noqa: E402
-    run_baseline_scoring as _run_baseline_scoring,
-)
 
 from .notebook_primitives import fmt_ci, fmt_pvalue  # noqa: E402
-
-
-async def run_baseline_scoring(
-    baseline: OptSearchPoint,
-    dataset: list,
-    campaign_config: CampaignConfig,
-    session: SessionEnv,
-    pipeline_params: dict | None = None,
-) -> tuple:
-    """Evaluate baseline prompt and initialize campaign_rounds.
-
-    Returns:
-        (campaign_rounds, baseline_results).
-    """
-    import asyncio
-
-    from tqdm.auto import tqdm
-
-    pbar = tqdm(total=len(dataset) or 1, desc="Baseline eval", unit="query")
-
-    scoring_formula = campaign_config.get("scoring")
-
-    def _on_result(result, index, total):
-        pbar.total = total
-        is_cached = result.get("cached", False)
-        tqdm.write(_fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula))
-        pbar.update(1)
-
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
-
-    _obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
-
-    try:
-        campaign_rounds, baseline_results = await _run_baseline_scoring(
-            baseline,
-            dataset,
-            session,
-            pipeline_params=pipeline_params,
-            pipeline_schema=session.pipeline_schema,
-            experiment_id=session.experiment_id,
-            on_result=_on_result,
-            obs=_obs,
-            scoring_formula=campaign_config.get("scoring"),
-        )
-    except (KeyboardInterrupt, asyncio.CancelledError):
-        _print_interrupt_banner(
-            "Baseline eval",
-            completed=f"{pbar.n}/{pbar.total} queries",
-            saved="completed results are cached (re-run to restart)",
-            resume_hint="re-run this cell to continue from checkpoint",
-        )
-        return [], []
-    finally:
-        pbar.close()
-
-    show_progress(campaign_rounds)
-
-    from promptpotter.shared.scoring import extract_display_answer
-
-    failures = [r for r in baseline_results if not r["hit"] and not is_error_result(r)]
-    for r in failures[:5]:
-        pred = extract_display_answer(r["predicted"], scoring_formula)[:30]
-        gt = (r["ground_truth"] or "").strip()[:30]
-        q = (r["query"] or "").replace("\n", " ")[:50]
-        print(f"  MISS: -> {pred:<30s}  gt: {gt:<30s}  q: {q}")
-
-    return campaign_rounds, baseline_results

@@ -561,7 +561,7 @@ async def run_optimization(
     """Run the full optimization loop from a prepared baseline.
 
     Callers must provide an already-scored ``baseline`` (see
-    ``run_baseline_scoring``).  Returns ``RunResult`` — never None; any
+    ``prepare_scoring_context``). Returns ``RunResult`` — never None; any
     interrupt is reflected in ``stop_reason``.
     """
     started_at = datetime.now(UTC).isoformat()

@@ -32,7 +32,6 @@ __all__ = [
     "extract_campaign_baseline",
     "prepare_datasets",
     "prepare_scoring_context",
-    "run_baseline_scoring",
     "summarize_dataset_runs",
 ]
 
@@ -83,52 +82,26 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     )
 
 
-async def run_baseline_scoring(
+async def _run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
     session: SessionEnv,
     pipeline_params: dict | None = None,
-    experiment_id: str = "",
     on_result: Callable | None = None,
     obs: Any | None = None,
     pipeline_schema: Any | None = None,
     scoring_formula: str | None = None,
 ) -> tuple[list, list]:
-    """Evaluate baseline prompt and build initial campaign_rounds list.
-
-    Args:
-        baseline: Baseline OptSearchPoint.
-        dataset: Evaluation data. If empty and store+experiment_id are
-            provided, attempts to load from store.
-        session: SessionEnv bundling backend_client, store, backend_id, index_terms.
-        pipeline_params: Optional pipeline parameter overrides.
-        experiment_id: Experiment to load eval data from if dataset is empty.
-        on_result: Optional callback for progress reporting.
-        obs: Optional ObservabilityBridge for dataset registration.
-        pipeline_schema: Optional PipelineSchema for composite scoring.
-        scoring_formula: Optional per-dataset scoring expression.
-
-    Returns:
-        Tuple of (campaign_rounds, baseline_results).
-
-    Raises:
-        RuntimeError: If no evaluation data is available.
-    """
+    """Score the baseline prompt and build initial campaign_rounds list."""
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.shared.errors import graceful
     from promptpotter.shared.scoring import compile_scorer
 
-    # Unpack session
     backend_client = session.backend_client
     store = session.store
     backend_id = session.backend_id
     index_terms = session.index_terms
-
-    if not dataset and store and experiment_id:
-        from promptpotter.application.datasets.builder import load_dataset_from_traces
-
-        dataset = load_dataset_from_traces(store, backend_id, experiment_id)
 
     if not dataset:
         raise RuntimeError(
@@ -196,6 +169,8 @@ async def prepare_scoring_context(
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
     fork_seed: Any = None,
+    on_result: Callable | None = None,
+    obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
 
@@ -252,13 +227,15 @@ async def prepare_scoring_context(
 
         if eval_dataset:
             logger.info(label)
-            campaign_rounds, baseline_results = await run_baseline_scoring(
+            campaign_rounds, baseline_results = await _run_baseline_scoring(
                 baseline,
                 eval_dataset,
                 svc,
                 pipeline_params=pipeline_params,
                 pipeline_schema=pipeline_schema,
                 scoring_formula=campaign_config.get("scoring"),
+                on_result=on_result,
+                obs=obs,
             )
 
     return baseline, dataset, campaign_rounds, baseline_results

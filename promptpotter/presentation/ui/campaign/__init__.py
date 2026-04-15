@@ -57,7 +57,6 @@ from .optimize import (
     load_baseline_prompt,
     min_detectable_effect,
     proportion_test,
-    run_baseline_scoring,
     run_optimization_notebook,
     show_feedback_preflight,
     wilson_ci,

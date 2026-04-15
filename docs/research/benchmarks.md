@@ -1,5 +1,7 @@
 # Benchmark Methodology
 
+> Deep background & AI knowledge base: [`benchmarks-ii.md`](benchmarks-ii.md).
+
 ## Priority (2026-04-12)
 
 1. **BBEH (primary)** — the M10 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).

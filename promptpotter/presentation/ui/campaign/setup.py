@@ -332,20 +332,47 @@ async def prepare_scoring_context(
     vocabulary — callers parse ``"cycle:<id>:<ref>"`` via
     ``application.campaign.fork_loader``.
     """
+    from tqdm.auto import tqdm
+
     from promptpotter.application.campaign.data import (
         prepare_scoring_context as _svc_prepare,
     )
-
-    baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
-        session.experiment_extract,
-        train_data,
-        campaign_config,
-        run_baseline=run_baseline,
-        pipeline_params=pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
-        fork_seed=fork_seed,
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.presentation.ui.campaign.notebook_primitives import (
+        _fmt_query_result,
     )
+
+    scoring_formula = campaign_config.get("scoring") if campaign_config else None
+    pbar: Any = None
+
+    def _on_result(result: dict, index: int, total: int) -> None:
+        nonlocal pbar
+        if pbar is None:
+            pbar = tqdm(total=total or 1, desc="Baseline eval", unit="query")
+        else:
+            pbar.total = total
+        is_cached = result.get("cached", False)
+        tqdm.write(_fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula))
+        pbar.update(1)
+
+    _obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
+
+    try:
+        baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
+            session.experiment_extract,
+            train_data,
+            campaign_config,
+            run_baseline=run_baseline,
+            pipeline_params=pipeline_params,
+            pipeline_schema=session.pipeline_schema,
+            svc=session,
+            fork_seed=fork_seed,
+            on_result=_on_result,
+            obs=_obs,
+        )
+    finally:
+        if pbar is not None:
+            pbar.close()
 
     print(f"\nEvaluation data: {len(dataset)} queries")
     return baseline, dataset, campaign_rounds, baseline_results
