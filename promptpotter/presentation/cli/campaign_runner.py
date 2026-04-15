@@ -256,10 +256,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.campaign_setup import load_recon_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
-    from promptpotter.application.campaign.fork_loader import (
-        load_fork_seed,
-        parse_fork_spec,
-    )
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -274,27 +270,16 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     pipeline_params = configure_pipeline(session, campaign_config)
     train_data = session.queries or []
 
-    fork_seed = None
-    if args.fork_from:
-        parent_cycle_id, _, parent_event_ref = args.fork_from.partition(":")
-        if not parent_cycle_id or not parent_event_ref:
-            raise ValueError(f"--from must be <cycle_id>:<event_ref>, got {args.fork_from!r}")
-        addr = parse_fork_spec(parent_event_ref)
-        fork_seed = load_fork_seed(
-            session.store.base_dir,
-            ctx.backend_id,
-            parent_cycle_id,
-            addr,
-        )
-        campaign_config["fork_from"] = args.fork_from
-        campaign_config["parent_cycle_id"] = parent_cycle_id
-        campaign_config["parent_event_ref"] = parent_event_ref
-        logger.info(
-            "Forking from %s @ %s (event idx %d) → new cycle",
-            parent_cycle_id,
-            fork_seed.event_name,
-            fork_seed.event_index,
-        )
+    resume_from_round: int | None = getattr(args, "resume_from_round", None)
+    if resume_from_round is not None:
+        prior_cycle = ctx.state.get("cycle_id")
+        if not prior_cycle:
+            raise ValueError(
+                "--from requires an active cycle on this session; run `optimize` first"
+            )
+        if resume_from_round < 0:
+            raise ValueError(f"--from must be >= 0, got {resume_from_round}")
+        logger.info("Resuming cycle %s from after round %d", prior_cycle, resume_from_round)
     else:
         prior_cycle = ctx.state.get("cycle_id")
         if prior_cycle:
@@ -318,7 +303,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         campaign_config,
         pipeline_params=pipeline_params,
         run_baseline=has_baseline,
-        fork_seed=fork_seed,
     )
 
     baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
@@ -343,6 +327,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             task_context=ctx.task_context,
             session_id=ctx.session_id,
             callbacks=control_cb,
+            cycle_id=ctx.state.get("cycle_id"),
+            resume_from_round_override=resume_from_round,
         )
     finally:
         set_round_recorder(None)

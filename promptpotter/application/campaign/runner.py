@@ -396,6 +396,7 @@ async def _init_optimization(
     cb: RunCallbacks,
     langfuse_session_id: str | None,
     cycle_id: str | None,
+    resume_from_round_override: int | None,
     experiment_id: str,
     session: SessionEnv,
     started_at: str,
@@ -428,7 +429,12 @@ async def _init_optimization(
     )
 
     campaign_store, resolved_cycle_id, resumed_from_round = CampaignStore.bootstrap_cycle(
-        config, baseline_osp.render(), baseline.baseline_acc, dataset, cycle_id
+        config,
+        baseline_osp.render(),
+        baseline.baseline_acc,
+        dataset,
+        cycle_id,
+        resume_from_round_override=resume_from_round_override,
     )
 
     obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
@@ -557,6 +563,7 @@ async def run_optimization(
     callbacks: RunCallbacks | None = None,
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
+    resume_from_round_override: int | None = None,
 ) -> RunResult:
     """Run the full optimization loop from a prepared baseline.
 
@@ -586,12 +593,18 @@ async def run_optimization(
         cb=cb,
         langfuse_session_id=langfuse_session_id,
         cycle_id=cycle_id,
+        resume_from_round_override=resume_from_round_override,
         experiment_id=experiment_id or "",
         session=session,
         started_at=started_at,
     )
 
-    emitter = CampaignPersistenceEmitter.for_session(config, baseline.baseline_acc, env.cycle_id)
+    emitter = CampaignPersistenceEmitter.for_session(
+        config,
+        baseline.baseline_acc,
+        env.cycle_id,
+        resumed_from_round=env.resumed_from_round,
+    )
     if emitter:
         cb.attach(
             on_phase=emitter.on_phase,

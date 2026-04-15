@@ -66,13 +66,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
     p_opt.add_argument(
         "--from",
-        dest="fork_from",
+        dest="resume_from_round",
+        type=int,
         default=None,
-        help="Fork from a prior cycle's write-point: "
-        "<cycle_id>:<round>:<write_point>[:i[:j]] or <cycle_id>:@<idx>. "
-        "Seeds the baseline OptSearchPoint from events.jsonl at that point, "
-        "then runs the loop as a new cycle branched off the parent. "
-        "See docs/architecture/optimization.md 'Forking a campaign'.",
+        metavar="ROUND",
+        help="Resume the active cycle from after round N. Archives trial "
+        "files for rounds > N into archived/resumed_at_<ts>/, rebuilds the "
+        "trial index, and loads trial_N as the restart baseline. Omit to "
+        "resume from the latest completed round (default).",
     )
 
     p_ctl = sub.add_parser("control", help="Write control signal to dashboard")

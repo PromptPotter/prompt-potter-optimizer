@@ -445,75 +445,38 @@ campaign_config = {
 
 ---
 
-## Forking a campaign
+## Resuming mid-cycle
 
-A fork branches a new campaign from **any durable write point** in an existing cycle's timeline — e.g. "apply this fix after round 1's L1 candidates are generated, then reuse every query already scored earlier". The primitive is dead simple: `events.jsonl` becomes a write-ahead log, and `optimize --from` is a pointer into it.
+`optimize --from <round>` rewinds the active cycle to a specific round boundary and continues from there. It is **not** a new campaign: the same `cycle_id`, the same `campaigns/{cycle_id}/` directory, trial files appended past the rewind point after the next run. Use it when you want to edit the optimizer state by hand (edit `trial_NNNN.json` between runs), discard a bad trajectory, or re-enter HITL review.
 
-### events.jsonl as the write-ahead log
+### The only snapshot source is `trial_NNNN.json`
 
-The append-only stream at `.promptpotter/projects/{backend_id}/obs/langfuse/events.jsonl` already mirrors every Langfuse trace event produced by the optimizer. For forking, a handful of mid-round events carry a self-contained `state_snapshot` — a dump of `OptSearchPoint.model_dump(mode="json")` captured at the write point. A fork resolves the spec → reads the snapshot → rehydrates the OptSearchPoint → uses it as the baseline for a fresh cycle. No new data model.
+Each completed round writes `campaigns/{cycle_id}/trial_{round:04d}.json` via `CampaignStore.add_trial`. That file already carries the full serialized `OptSearchPoint` (`opt_search_point` key), so resume rehydrates the exact optimizer state via `LoopState.restore_from_trial` — no separate write-ahead log. `events.jsonl` is a pure observability mirror parallel to Langfuse; nothing reads it for state reconstruction.
 
-**Invariant**: every durable state change lands on disk via an appended event. `round_NNNN_candidates.json` / `trial_NNNN.json` stay for in-cycle resume speed but are never the fork source.
+### What `--from N` does
 
-### Fork-addressable write points
+1. `optimize --from N` requires an active cycle on the session (run `optimize` at least once first).
+2. `CampaignStore.rewind_to_round(backend_id, cycle_id, N)` moves `trial_{M:04d}.json` and `round_{M:04d}_candidates.json` for every `M > N` into `campaigns/{cycle_id}/archived/resumed_at_<ts>/`, then rebuilds the in-memory trial index (`trials`, `n_trials`, `best_accuracy`, `best_trial_id`) from the surviving files.
+3. `resume_or_create` opens the same cycle and returns `resumed_from_round = N + 1`. The runner loads `trial_N` via `LoopState.restore_from_trial` and begins round `N + 1` with that state as the baseline.
+4. The dashboard's `rounds_completed` / `best_round` are clamped so the UI does not show phantom rounds from the archived trajectory.
+5. `dataset_runs/` is unchanged — content-addressed per-query results replay automatically for any unchanged `(prompt_hash, query)` pair.
 
-| Write point | Event name | Sub-indexes |
-|---|---|---|
-| Each L1 candidate registered | `candidate_created` | `candidate_idx` |
-| Each query finishes for a candidate | `query_scored` | `candidate_idx`, `query_idx` |
-| Each candidate's full scoring loop completes | `candidate_scored` | `candidate_idx` |
-| Round winner picked | `round_winner_chosen` | — |
-| Critique text produced (inline in `_score_and_select`) | `critique_written` | — |
-| L2 `refine_strategy` transition applied | `l2_applied` | — |
-| L3 `modify_plan` transition applied | `l3_applied` | — |
-| (future) node boundary w/ state_snapshot | `node_end` | — |
+### Editing the snapshot by hand
 
-All emit through `ObservabilityBridge.emit_write_point(event_cls, opt_sp=…)` so the snapshot shape is uniform. Langfuse sees these events too but the cloud sink doesn't need to know about them — they pass through as unhandled types.
-
-### Addressing grammar
-
-`optimize --from <cycle_id>:<event_ref>` where `event_ref` is one of:
-
-- **Human form**: `round:write_point[:i[:j]]` — e.g. `1:l1_generate:2` (third candidate of round 1), `1:query_scored:0:7` (candidate 0, query 7 of round 1). Aliases: `l1_generate`→`candidate_created`, `candidate`→`candidate_scored`, `winner`→`round_winner_chosen`, `critique`→`critique_written`, `l2`→`l2_applied`, `l3`→`l3_applied`.
-- **Absolute form**: `@<event_index>` — direct 0-indexed offset into the target cycle's slice of `events.jsonl`.
-
-Human specs land on the **last** matching event in the round (deterministic: events are append-only).
-
-### What the fork actually does
-
-1. CLI `optimize --from <cycle_id>:<event_ref>` parses the spec. (`init` handles registration/setup only; forking is an alternate starting condition for the same optimization loop `optimize` already runs.)
-2. `application/campaign/fork_loader.py::load_fork_seed` streams `events.jsonl`, filters by `campaign_id == <cycle_id>`, finds the target event, returns a `ForkSeed` with `state_snapshot`.
-3. `prepare_scoring_context(fork_seed=…)` in `application/campaign/data.py` rehydrates `OptSearchPoint(**state_snapshot)` and uses it as the baseline, skipping the normal `load_baseline_prompt()` path.
-4. `LoopConfig.fork_from` / `parent_cycle_id` / `parent_event_ref` flow into `config.model_dump()` and land on the new cycle's `CampaignStart` event — no event schema change, the `config` field is arbitrary.
-5. A fresh `cycle_id` is derived from the new config hash (fork_from participates in the hash, so the fork never collides with its parent).
-6. `dataset_runs/` content-addressed cache automatically replays every per-query result that matches the forked pipeline config — mid-scoring forks resume at the next unrun query.
-
-### What's reset vs. preserved
-
-- **L1-stage forks** (`candidate_created`) — `OptSearchPoint.memory` is whatever the parent had at the start of that round. The new cycle proceeds with the same memory (validation failures, runtime failures, escalation journal) as the parent had when L1 fired.
-- **Mid-scoring forks** (`query_scored`, `candidate_scored`) — dataset_runs cache absorbs the work already done; the new cycle's score loop cache-hits earlier queries and continues.
-- **Downstream forks** (`round_winner_chosen`, `critique_written`, `l2_applied`, `l3_applied`) — critique text, L2 directive, transition effects are all on the snapshot, so the new cycle picks up exactly where the parent was.
+To alter optimizer state before resuming, edit `campaigns/{cycle_id}/trial_{N:04d}.json` between runs. Keep the file valid JSON and leave the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On the next `optimize --from N`, the edited trial is what `restore_from_trial` sees.
 
 ### Examples
 
 ```bash
-# Precondition: a session exists (from a prior `init`) — optimize inherits
-# its dataset, pipeline config, and task context. --from only overrides the
-# baseline OptSearchPoint.
+# Resume from the latest completed round (default behavior — no --from).
+python -m promptpotter optimize
 
-# Default: fork after L1 generated candidates for round 1, before scoring.
-python -m promptpotter optimize --from cycle_89d1c661916f:1:l1_generate
-
-# Fork mid-scoring: after query 7 of candidate 0 in round 1. Remaining
-# queries of candidate 0 + all later candidates are re-run (cache hits
-# for earlier queries, fresh work for new ones).
-python -m promptpotter optimize --from cycle_89d1c661916f:1:query_scored:0:7
-
-# Absolute fork by event index in the source cycle's slice of events.jsonl
-python -m promptpotter optimize --from cycle_89d1c661916f:@42
+# Rewind the active cycle to "after round 2 completed" and continue from
+# round 3. Trials 3..M are moved to archived/resumed_at_<ts>/.
+python -m promptpotter optimize --from 2
 ```
 
-Lineage is queryable downstream by walking `CampaignStart.config.parent_cycle_id` from child to root — a zero-schema-cost way to reconstruct fork trees.
+Forking across cycles (new `cycle_id`, parent pointer, independent trajectory) is not a supported primitive — if you need that, copy the campaign directory to a new name before running. The complexity was not worth the WAL it required.
 
 ## Key Files
 

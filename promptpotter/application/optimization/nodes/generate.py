@@ -265,10 +265,8 @@ async def l1_generate(
                     CandidateCreated,
                     campaign_id=obs_campaign_id,
                     round_num=round_num,
-                    opt_sp=opt_sp,
                     candidate_idx=len(candidates) - 1,
                     candidate_id=child.id,
-                    candidate_snapshot=child.model_dump(mode="json"),
                 )
 
     return candidates

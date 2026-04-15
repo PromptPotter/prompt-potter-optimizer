@@ -159,12 +159,19 @@ class CampaignPersistenceEmitter:
         config: LoopConfig,
         baseline_accuracy: float,
         cycle_id: str | None,
+        *,
+        resumed_from_round: int | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if session_dir is unknown.
 
         Reads the prior ``campaign_state.json`` (if present) to carry UI
         counters across resumes — optimizer resume is a separate concern
         via ``LoopState.restore_from_trial``.
+
+        On a mid-cycle rewind (``--from N``), ``resumed_from_round`` is the
+        round the runner will execute next; dashboard counters that outran
+        the surviving trials are clamped so the UI doesn't show phantom
+        rounds.
         """
         if not (config.project_root and config.backend_id and config.session_id):
             return None
@@ -179,6 +186,17 @@ class CampaignPersistenceEmitter:
                 resume_from["baseline"] = baseline_accuracy
             except (json.JSONDecodeError, OSError):
                 resume_from = None
+
+        if resume_from is not None and resumed_from_round is not None:
+            # resumed_from_round is the next round to execute; the last
+            # completed round on disk is resumed_from_round - 1. Clamp
+            # display counters that overshoot that horizon.
+            completed = max(resumed_from_round - 1, 0)
+            if resume_from.get("rounds_completed", 0) > completed:
+                resume_from["rounds_completed"] = completed
+            if resume_from.get("best_round", 0) > completed:
+                resume_from["best_round"] = 0
+                resume_from["best"] = 0.0
 
         return cls(session_dir, config, resume_from=resume_from, cycle_id=cycle_id)
 

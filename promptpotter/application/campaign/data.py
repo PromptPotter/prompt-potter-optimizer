@@ -168,7 +168,6 @@ async def prepare_scoring_context(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
-    fork_seed: Any = None,
     on_result: Callable | None = None,
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
@@ -189,23 +188,11 @@ async def prepare_scoring_context(
     """
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     dataset_name = campaign_config.get("dataset_name") if campaign_config else None
-    if fork_seed is not None:
-        baseline = OptSearchPoint(**fork_seed.state_snapshot)
-        baseline.changes_description = (
-            f"Forked from {fork_seed.source_cycle_id} @ {fork_seed.event_name}"
-        )
-        logger.info(
-            "Baseline seeded from fork: cycle=%s event=%s (idx %d)",
-            fork_seed.source_cycle_id,
-            fork_seed.event_name,
-            fork_seed.event_index,
-        )
-    else:
-        baseline = load_baseline_prompt(
-            experiment_extract or {},
-            prompt_node_names=prompt_nodes,
-            dataset_name=dataset_name,
-        )
+    baseline = load_baseline_prompt(
+        experiment_extract or {},
+        prompt_node_names=prompt_nodes,
+        dataset_name=dataset_name,
+    )
     dataset = train_data or []
 
     campaign_rounds: list = []

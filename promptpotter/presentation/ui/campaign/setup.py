@@ -321,16 +321,10 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,
     pipeline_params: dict | None = None,
-    fork_seed: Any = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline.
 
-    Delegates to shared orchestration with notebook display. When
-    ``fork_seed`` is a :class:`ForkSeed`, the application layer rehydrates
-    the baseline ``OptSearchPoint`` from its ``state_snapshot`` instead of
-    loading a fresh prompt. Pre-figures M9 Track 5's unified ``--from``
-    vocabulary — callers parse ``"cycle:<id>:<ref>"`` via
-    ``application.campaign.fork_loader``.
+    Delegates to shared orchestration with notebook display.
     """
     from tqdm.auto import tqdm
 
@@ -366,7 +360,6 @@ async def prepare_scoring_context(
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
             svc=session,
-            fork_seed=fork_seed,
             on_result=_on_result,
             obs=_obs,
         )

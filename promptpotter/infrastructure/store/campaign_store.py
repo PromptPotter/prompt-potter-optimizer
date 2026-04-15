@@ -84,11 +84,17 @@ class CampaignStore(EntityStore):
         baseline_accuracy: float,
         dataset: list[dict[str, Any]],
         cycle_id_override: str | None,
+        *,
+        resume_from_round_override: int | None = None,
     ) -> tuple["CampaignStore | None", str | None, int]:
         """Open the store and resume/create the cycle in one shot.
 
         Returns ``(store, cycle_id, resumed_from_round)``.  All-None on
         missing project_root/backend_id or any resume failure.
+
+        When ``resume_from_round_override`` is set, trials for rounds > N
+        are archived into ``archived/resumed_at_<ts>/`` and the trial
+        index is rebuilt before resume.
         """
         import json as _json
 
@@ -101,6 +107,12 @@ class CampaignStore(EntityStore):
             resolved = cycle_id_override or cycle_config_identity(
                 config, baseline_render, dataset, strict=config.strict_cycle_identity
             )
+            if resume_from_round_override is not None:
+                store.rewind_to_round(
+                    config.backend_id,
+                    resolved,
+                    resume_from_round_override,
+                )
             resumed_from = store.resume_or_create(
                 config.backend_id,
                 resolved,
@@ -112,6 +124,103 @@ class CampaignStore(EntityStore):
         except (OSError, _json.JSONDecodeError, KeyError):
             logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
             return None, None, 0
+
+    def rewind_to_round(
+        self,
+        backend_id: str,
+        cycle_id: str,
+        after_round: int,
+    ) -> None:
+        """Archive trial/candidate files for rounds > ``after_round``.
+
+        Moves ``trial_{M:04d}.json`` and ``round_{M:04d}_candidates.json``
+        for M > after_round into ``archived/resumed_at_<ts>/``, then
+        rebuilds the cycle's trial index to reflect only surviving trials
+        (rounds 0..after_round). No-op on a cycle with no such trial.
+        """
+        trial_dir = self._trial_dir(backend_id, cycle_id)
+        if not trial_dir.exists():
+            raise LookupError(f"cycle {cycle_id!r} has no trials on disk")
+
+        target = trial_dir / f"trial_{after_round:04d}.json"
+        if not target.exists():
+            raise LookupError(
+                f"--from {after_round}: trial_{after_round:04d}.json not found in {trial_dir}"
+            )
+
+        survivors: list[Path] = []
+        to_archive: list[Path] = []
+        for p in sorted(trial_dir.glob("trial_*.json")):
+            try:
+                n = int(p.stem.removeprefix("trial_"))
+            except ValueError:
+                continue
+            (to_archive if n > after_round else survivors).append(p)
+        for p in sorted(trial_dir.glob("round_*_candidates.json")):
+            try:
+                n = int(p.stem.removeprefix("round_").removesuffix("_candidates"))
+            except ValueError:
+                continue
+            if n > after_round:
+                to_archive.append(p)
+
+        if to_archive:
+            ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+            archive_dir = trial_dir / "archived" / f"resumed_at_{ts}"
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            for p in to_archive:
+                p.rename(archive_dir / p.name)
+            logger.info(
+                "Rewind cycle %s to round %d: archived %d file(s) → %s",
+                cycle_id,
+                after_round,
+                len(to_archive),
+                archive_dir,
+            )
+
+        self._rebuild_trial_index(backend_id, cycle_id, survivors)
+
+    def _rebuild_trial_index(
+        self,
+        backend_id: str,
+        cycle_id: str,
+        survivors: list[Path],
+    ) -> None:
+        """Recompute ``trials`` / ``n_trials`` / ``best_accuracy`` / ``best_trial_id``
+        from the trial detail files that remain after a rewind."""
+        campaign_path = self._entity_path(backend_id, cycle_id)
+        data = read_json(campaign_path)
+
+        rebuilt: list[dict[str, Any]] = []
+        best_acc = 0.0
+        best_trial_id: str | None = None
+        for p in sorted(survivors):
+            trial = read_json(p)
+            round_num = trial.get("round", 0)
+            trial_id = trial.get("trial_id", f"round_{round_num}")
+            rebuilt.append(
+                {
+                    "trial_id": trial_id,
+                    "round": round_num,
+                    "label": trial.get("label", ""),
+                    "prompt_fields_id": trial.get("prompt_fields_id", ""),
+                    "accuracy": trial.get("accuracy", 0.0),
+                    "hits": trial.get("hits", 0),
+                    "total": trial.get("total", 0),
+                    "improved": trial.get("improved", False),
+                    "created_at": trial.get("created_at", ""),
+                }
+            )
+            if trial.get("accuracy", 0.0) > best_acc:
+                best_acc = trial["accuracy"]
+                best_trial_id = trial_id
+
+        data["trials"] = rebuilt
+        data["n_trials"] = len(rebuilt)
+        data["best_accuracy"] = best_acc
+        data["best_trial_id"] = best_trial_id
+        data["updated_at"] = datetime.now(UTC).isoformat()
+        write_json(campaign_path, data)
 
     def resume_or_create(
         self,

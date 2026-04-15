@@ -303,7 +303,6 @@ async def _score_and_select(
                     RoundWinnerChosen,
                     campaign_id=env.obs_campaign_id,
                     round_num=round_num,
-                    opt_sp=state.opt_sp,
                     winner_candidate_id=winner_id,
                     winner_accuracy=scoring_result.winner_accuracy,
                     improved=scoring_result.improved,
@@ -319,7 +318,6 @@ async def _score_and_select(
                     CritiqueWritten,
                     campaign_id=env.obs_campaign_id,
                     round_num=round_num,
-                    opt_sp=state.opt_sp,
                     critique_text=scoring_result.critique_text,
                 )
 

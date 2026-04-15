@@ -126,25 +126,20 @@ class ObservabilityBridge:
         *,
         campaign_id: str,
         round_num: int,
-        opt_sp: Any,
         **extra: Any,
     ) -> None:
-        """Emit a fork-addressable write-point event with a full state snapshot.
+        """Emit a mid-round write-point observability event.
 
-        The snapshot is ``opt_sp.model_dump(mode="json")`` — this is the
-        substrate ``fork_loader.load_fork_seed`` reads to seed a child
-        cycle. Every call site for a new write point should route through
-        here rather than building events by hand, so every snapshot is
-        shaped identically.
+        events.jsonl is a pure observability mirror — nothing reads these
+        events back for state reconstruction. Resume uses
+        ``campaigns/{cycle_id}/trial_NNNN.json`` via ``CampaignStore``.
         """
         if not self._enabled:
             return
-        with graceful(f"{event_cls.__name__} snapshot build failed"):
-            snapshot = opt_sp.model_dump(mode="json") if opt_sp is not None else {}
+        with graceful(f"{event_cls.__name__} emit failed"):
             event = event_cls(
                 campaign_id=campaign_id,
                 round_num=round_num,
-                state_snapshot=snapshot,
                 **extra,
             )
             self.emit(event)

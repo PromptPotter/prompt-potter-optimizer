@@ -85,7 +85,7 @@ Sessions are ephemeral display state; campaigns are the resume source of truth. 
 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
-`obs/langfuse/events.jsonl` is both a replay log and the **fork substrate**: every durable mid-round state change is an appended event carrying a self-contained `state_snapshot`, and `optimize --from <cycle_id>:<event_ref>` is a pointer into it. See [optimization.md § Forking a campaign](optimization.md#forking-a-campaign).
+`obs/langfuse/events.jsonl` is a **pure observability mirror** parallel to Langfuse — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trial_NNNN.json`, which already carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
 
 ## Where to Read Next
 

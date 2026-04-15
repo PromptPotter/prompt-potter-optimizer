@@ -287,7 +287,6 @@ async def _run_layer_transition(
                 event_cls,
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
-                opt_sp=state.opt_sp,
                 changes_description=transition.opt_search_point.changes_description or "",
             )
     emit_phase(on_phase, phase, "exit", round=round_num, **exit_payload(transition))

@@ -237,21 +237,20 @@ async def _score_candidates(
 
     obs = ctx.obs
 
-    def _emit_candidate_scored(c_idx: int, c_osp: OptSearchPoint, c_report: dict) -> None:
+    def _emit_candidate_scored(c_idx: int, c_report: dict) -> None:
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
                     CandidateScored,
                     campaign_id=obs_campaign_id,
                     round_num=round_num,
-                    opt_sp=c_osp,
                     candidate_idx=c_idx,
                     report=c_report,
                 )
 
     for idx, osp_c in enumerate(osp_candidates):
 
-        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates, _osp=osp_c):
+        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
             callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
             if obs:
                 with graceful("QueryScored emit failed"):
@@ -259,7 +258,6 @@ async def _score_candidates(
                         QueryScored,
                         campaign_id=obs_campaign_id,
                         round_num=round_num,
-                        opt_sp=_osp,
                         candidate_idx=_ci,
                         query_idx=qi,
                         hit=bool(result.get("hit", False)),
@@ -301,7 +299,7 @@ async def _score_candidates(
             )
             candidate_scores.append(report)
             callbacks.on_candidate_scored(idx, n_candidates, report)
-            _emit_candidate_scored(idx, osp_c, report)
+            _emit_candidate_scored(idx, report)
             continue
 
         sp = osp_c.to_job_search_point(
@@ -345,7 +343,7 @@ async def _score_candidates(
             )
             candidate_scores.append(report)
             callbacks.on_candidate_scored(idx, n_candidates, report)
-            _emit_candidate_scored(idx, osp_c, report)
+            _emit_candidate_scored(idx, report)
             continue
 
         escalation_signal = scores.pop("escalation_signal", None)
@@ -409,7 +407,7 @@ async def _score_candidates(
         )
         candidate_scores.append(report)
         callbacks.on_candidate_scored(idx, n_candidates, report)
-        _emit_candidate_scored(idx, osp_c, report)
+        _emit_candidate_scored(idx, report)
 
         if escalation_signal:
             if elimination_stopped:

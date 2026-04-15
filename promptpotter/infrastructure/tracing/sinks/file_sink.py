@@ -235,7 +235,6 @@ class FileSink:
                 extra={
                     "candidate_idx": event.candidate_idx,
                     "candidate_id": event.candidate_id,
-                    "candidate_snapshot": event.candidate_snapshot,
                 },
             )
         elif isinstance(event, QueryScored):
@@ -292,10 +291,11 @@ class FileSink:
     # --- Fork-addressable write-point handler (shared) ---
 
     def _on_write_point(self, event_name: str, event: Any, extra: dict[str, Any]) -> None:
-        """Append a fork-addressable event to events.jsonl.
+        """Append a mid-round observability event to events.jsonl.
 
-        The snapshot is the fork substrate — a new cycle can be seeded from
-        any write point using ``--fork-from <cycle_id>:<event_ref>``.
+        events.jsonl is a pure observability mirror — metadata only, no
+        OptSearchPoint snapshots. Resume reads
+        ``campaigns/{cycle_id}/trial_NNNN.json``.
         """
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         payload = {
@@ -303,7 +303,6 @@ class FileSink:
             "trace_id": trace_id,
             "campaign_id": event.campaign_id,
             "round": event.round_num,
-            "state_snapshot": event.state_snapshot,
             **extra,
         }
         self._log_event(payload)
@@ -461,8 +460,6 @@ class FileSink:
             "node_id": event.node_id,
             "error": event.error,
         }
-        if event.state_snapshot is not None:
-            node_end_payload["state_snapshot"] = event.state_snapshot
         self._log_event(node_end_payload)
 
     def _on_round_end(self, event: RoundEnd) -> None:

@@ -103,7 +103,6 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,
     pipeline_params: dict | None = None,
-    fork_seed=None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
     from promptpotter.application.campaign.data import prepare_scoring_context as _svc_prepare
@@ -116,7 +115,6 @@ async def prepare_scoring_context(
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
         svc=session,
-        fork_seed=fork_seed,
     )
 
     if _VERBOSE:

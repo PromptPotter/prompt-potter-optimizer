@@ -95,28 +95,25 @@ Displays recon results leaderboard and seeds the optimization campaign with the 
 # Resume: run the loop from the active session's current state.
 python -m promptpotter optimize
 
-# Fork: run the loop with the baseline OptSearchPoint rehydrated from a
-# prior cycle's events.jsonl write-point. Mints a new cycle_id branched
-# off the parent. Inherits the active session's dataset/pipeline/task.
-python -m promptpotter optimize --from <cycle_id>:<event_ref>
+# Rewind: resume the active cycle from after a specific round N.
+# Later trial files are moved to archived/resumed_at_<ts>/ and the loop
+# continues at round N+1 from the restored OptSearchPoint.
+python -m promptpotter optimize --from <round>
 ```
 
 Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). Use `control --stop` or Ctrl+C to pause gracefully — state is checkpointed between rounds and resumes from the last completed round.
 
-#### `--from <cycle_id>:<event_ref>` (forking)
+#### `--from <round>` (mid-cycle rewind)
 
-Forks a new cycle from any durable write point in a prior cycle's timeline. The baseline is seeded from the `state_snapshot` on that event; the new cycle's `CampaignStart` config carries `parent_cycle_id` + `fork_spec` so lineage is queryable. `dataset_runs/` content-addressed cache replays any already-evaluated queries, so mid-scoring forks resume at the next unrun query.
+Rewinds the active cycle to after round N and resumes in-place. Same `cycle_id`, same campaign directory — **not** a new campaign. Trial files for rounds > N are moved into `campaigns/{cycle_id}/archived/resumed_at_<ts>/` and the cycle's trial index is rebuilt to reflect only the surviving 0..N entries. `dataset_runs/` content-addressed cache replays any unchanged per-query results automatically.
 
-Addressing grammar: `<cycle_id>:<event_ref>`. Event ref is either `round:write_point[:i[:j]]` (human form, last match wins) or `@<event_index>` (absolute offset into the cycle's slice of `events.jsonl`). Write points: `l1_generate` / `query_scored` / `candidate` / `winner` / `critique` / `l2` / `l3`. See [architecture/optimization.md § Forking a campaign](architecture/optimization.md#forking-a-campaign) for the full write-point table.
+To edit optimizer state by hand, modify `campaigns/{cycle_id}/trial_{N:04d}.json` between runs — keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. See [architecture/optimization.md § Resuming mid-cycle](architecture/optimization.md#resuming-mid-cycle).
 
 Examples:
 
 ```bash
-# Fork after L1 generated candidates for round 1, before scoring.
-python -m promptpotter optimize --from cycle_89d1c661916f:1:l1_generate
-
-# Fork mid-scoring: after query 7 of candidate 0 in round 1.
-python -m promptpotter optimize --from cycle_89d1c661916f:1:query_scored:0:7
+# Resume from after round 2 — archives trial_0003+ and continues at round 3.
+python -m promptpotter optimize --from 2
 ```
 
 ### show-results
