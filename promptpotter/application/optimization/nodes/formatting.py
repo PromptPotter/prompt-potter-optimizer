@@ -11,6 +11,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
@@ -680,12 +681,15 @@ def candidate_summaries(candidates: list[dict]) -> list[dict]:
     summaries = []
     for i, c in enumerate(candidates):
         pp_override = c.get("__pipeline_params_override__")
+        prompt_fields = {k: c[k] for k in PROMPT_STRING_FIELDS if c.get(k)}
         summary: dict = {
             "idx": i,
             "changes_description": c.get("changes_description", ""),
         }
         if pp_override:
             summary["pipeline_params_override"] = pp_override
+        if prompt_fields:
+            summary["prompt_fields"] = prompt_fields
         summaries.append(summary)
     return summaries
 

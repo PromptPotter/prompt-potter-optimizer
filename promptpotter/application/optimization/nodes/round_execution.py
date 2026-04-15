@@ -102,6 +102,7 @@ async def _generate_or_load_candidates(
         has_recon_brief=config.recon_brief is not None,
         has_critique=bool(state.opt_sp.memory.critique_text),
         pipeline_params=state.current_sp.pipeline_params,
+        parent_prompt_fields={k: v for k, v in state.opt_sp.prompt_field_dict().items() if v},
     )
 
     if env.campaign_store and env.cycle_id:

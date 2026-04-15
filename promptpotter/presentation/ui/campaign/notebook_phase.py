@@ -494,7 +494,9 @@ def _build_candidate_flat(
 
     When a candidate overrides a schema key, parent's dot-notation
     children for that key are removed first, then the candidate's
-    expanded fields are added.
+    expanded fields are added. Prompt-field rewrites (persona,
+    task_intent, …) ride on ``candidate_meta["prompt_fields"]`` and are
+    overlaid as top-level keys.
     """
     flat = parent.copy()
     pp = candidate_meta.get("pipeline_params_override")
@@ -506,6 +508,10 @@ def _build_candidate_flat(
                 del flat[pk]
         override_flat = _flatten_sp_summary(pp)
         flat.update(override_flat)
+    prompt_fields = candidate_meta.get("prompt_fields") or {}
+    for field_name, value in prompt_fields.items():
+        if value:
+            flat[field_name] = str(value)
     return flat
 
 
@@ -729,6 +735,10 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     new_flat = _flatten_sp_summary(
         d.get("pipeline_params"),
     )
+    parent_prompt_fields = d.get("parent_prompt_fields") or {}
+    for field_name, value in parent_prompt_fields.items():
+        if value:
+            new_flat[field_name] = str(value)
     if state.round_num == 0:
         state.previous_sp_flat = state.original_sp_flat.copy()
     else:
