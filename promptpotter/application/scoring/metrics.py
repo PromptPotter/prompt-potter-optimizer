@@ -331,12 +331,82 @@ def _diag_cache(
     return {"cache_hit": timings.get(node.name) is not None}
 
 
+# Composite-score default weights. Sum = 1.0. Accuracy stays dominant;
+# the rest is split across health/cost/recall bundles so single-node
+# pipelines (e.g. BBEH llm_only) still get a meaningful composite beyond
+# raw accuracy, and multi-node pipelines (e.g. TermNorm) pick up the
+# recall signals on top.
+COMPOSITE_WEIGHT_ACCURACY = 0.7
+COMPOSITE_WEIGHT_HEALTH = 0.15  # errors + degradation + runtime failures
+COMPOSITE_WEIGHT_COST = 0.10  # latency + (future) token cost
+COMPOSITE_WEIGHT_RECALL = 0.05  # node-type recall metrics (enriches multi-node)
+
+# Latency budget for the cost bundle. Results with mean latency ≥ this
+# contribute 0 to the cost bundle; ≤ 0.2× contribute 1.0. Prototype value.
+COMPOSITE_LATENCY_BUDGET_MS = 10_000.0
+
+
+def _compute_health_bundle(
+    results: list[QueryResult],
+    *,
+    runtime_failure_count: int,
+) -> dict[str, float]:
+    """JobSP + OptSP health signals rolled into a single [0, 1] score.
+
+    - error_rate, degraded_rate: derived from results.
+    - runtime_failure_rate: count on opt_sp.memory divided by total queries
+      (bounded to [0, 1]).
+
+    Each sub-signal contributes as (1 - rate); the bundle is the mean so
+    one catastrophic dimension doesn't wipe the other two.
+    """
+    total = len(results) or 1
+    errors = sum(1 for r in results if is_error_result(r))
+    degraded = count_degraded_queries(results)
+    error_rate = errors / total
+    degraded_rate = degraded / total
+    rf_rate = min(runtime_failure_count / total, 1.0)
+    components = [
+        1.0 - error_rate,
+        1.0 - degraded_rate,
+        1.0 - rf_rate,
+    ]
+    return {
+        "health": sum(components) / len(components),
+        "error_rate": error_rate,
+        "degraded_rate": degraded_rate,
+        "runtime_failure_rate": rf_rate,
+    }
+
+
+def _compute_cost_bundle(results: list[QueryResult]) -> dict[str, float]:
+    """Cost / latency signals rolled into a single [0, 1] score.
+
+    Only latency for now. Token cost is a natural future extension —
+    slot it into this bundle when the backend starts reporting it.
+    """
+    latencies = []
+    for r in results:
+        pd = r.get("pipeline_data") or {}
+        t = pd.get("total_time")
+        if t is not None:
+            try:
+                latencies.append(float(t))
+            except (TypeError, ValueError):
+                continue
+    if not latencies:
+        return {"cost": 1.0, "mean_latency_ms": 0.0}
+    mean_latency = sum(latencies) / len(latencies)
+    latency_score = max(0.0, 1.0 - mean_latency / COMPOSITE_LATENCY_BUDGET_MS)
+    return {"cost": latency_score, "mean_latency_ms": mean_latency}
+
+
 def compute_pipeline_metrics(
     pipeline_schema: PipelineSchema,
     results: list[QueryResult],
     *,
     metric_weights: dict[str, float] | None = None,
-    accuracy_weight: float = 0.9,
+    opt_sp: Any = None,
 ) -> dict[str, float]:
     """Compute intermediate metrics from pipeline node types.
 
@@ -344,21 +414,36 @@ def compute_pipeline_metrics(
     registry, computes the corresponding metric scoped to queries where
     the step ran.
 
-    Returns dict with per-metric values and a weighted ``composite`` score.
+    The composite is **recorded, not gating**: ``_select_round_winner``
+    compares candidates on ``accuracy`` (the user's performance scoring
+    function). Composite is displayed and persisted so operators can see
+    whether a win came with hidden costs (latency, error bursts,
+    runtime failures), but it does not drive the optimization loop.
+
+    Signals folded into composite:
+      - accuracy (JobSP, dominant)
+      - health bundle: errors + degradation + OptSP runtime_failures
+      - cost bundle: mean latency (future: token cost)
+      - recall bundle: node-type recall metrics when the pipeline has them
+
+    ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
+    ``memory.validation_failures`` forces composite to 0.0 (a structurally
+    invalid candidate has no meaningful composite) and
+    ``memory.runtime_failures`` feeds the health bundle.
     """
     base = _compute_accuracy(results)
     accuracy = base["accuracy"]
     weights = dict(metric_weights or {})
     metric_values: dict[str, float] = {}
 
-    # Collect steps by type (namespace when >1 step shares a type)
+    # Node-type metrics (display + recall bundle)
     type_steps: dict[str, list] = {}
     for step in pipeline_schema.nodes:
         if step.node_type and step.node_type in NODE_TYPE_METRICS:
             type_steps.setdefault(step.node_type, []).append(step)
 
-    for ntype, steps in type_steps.items():
-        metrics = NODE_TYPE_METRICS.get(ntype, [])
+    for _ntype, steps in type_steps.items():
+        metrics = NODE_TYPE_METRICS.get(_ntype, [])
         needs_namespace = len(steps) > 1
         for step in steps:
             for metric_def in metrics:
@@ -371,22 +456,55 @@ def compute_pipeline_metrics(
                     results,
                 )
 
-    # Composite: accuracy_weight * accuracy + distributed remaining weight
-    remaining_weight = 1.0 - accuracy_weight
-    weighted_sum = accuracy_weight * accuracy
-    if metric_values:
-        n_metrics = len(metric_values)
-        for m_name, m_val in metric_values.items():
-            w = weights.get(m_name, remaining_weight / n_metrics)
-            weighted_sum += w * m_val
+    # OptSP signals
+    runtime_failure_count = 0
+    validation_failure_count = 0
+    if opt_sp is not None and hasattr(opt_sp, "memory"):
+        runtime_failure_count = len(getattr(opt_sp.memory, "runtime_failures", []) or [])
+        validation_failure_count = len(getattr(opt_sp.memory, "validation_failures", []) or [])
+
+    health = _compute_health_bundle(results, runtime_failure_count=runtime_failure_count)
+    cost = _compute_cost_bundle(results)
+
+    # Recall bundle: mean of available node-type metrics, or fall back to
+    # accuracy so single-node pipelines don't silently discount the weight.
+    recall_score = sum(metric_values.values()) / len(metric_values) if metric_values else accuracy
+
+    # Weighted composite — weights can be overridden per-metric via
+    # metric_weights for tuning experiments.
+    w_acc = weights.get("accuracy", COMPOSITE_WEIGHT_ACCURACY)
+    w_health = weights.get("health", COMPOSITE_WEIGHT_HEALTH)
+    w_cost = weights.get("cost", COMPOSITE_WEIGHT_COST)
+    w_recall = weights.get("recall", COMPOSITE_WEIGHT_RECALL)
+    composite = (
+        w_acc * accuracy
+        + w_health * health["health"]
+        + w_cost * cost["cost"]
+        + w_recall * recall_score
+    )
+
+    # Hard zero for structurally invalid candidates — keeps the composite
+    # honest even though the synthetic-0 path already sets accuracy=0.
+    if validation_failure_count > 0:
+        composite = 0.0
 
     degraded = count_degraded_queries(results)
 
     return {
         **base,
         **metric_values,
-        "composite": round(weighted_sum, 6),
+        "composite": round(composite, 6),
         "degraded_queries": degraded,
+        # Display-only breakdown so operators can see what moved the composite.
+        "health_bundle": round(health["health"], 6),
+        "error_rate": round(health["error_rate"], 6),
+        "degraded_rate": round(health["degraded_rate"], 6),
+        "runtime_failure_rate": round(health["runtime_failure_rate"], 6),
+        "cost_bundle": round(cost["cost"], 6),
+        "mean_latency_ms": round(cost["mean_latency_ms"], 2),
+        "recall_bundle": round(recall_score, 6),
+        "validation_failure_count": validation_failure_count,
+        "runtime_failure_count": runtime_failure_count,
     }
 
 
@@ -394,17 +512,25 @@ def compute_composite_score(
     results: list[QueryResult],
     pipeline_schema: PipelineSchema,
     *,
-    accuracy_weight: float = 0.9,
+    opt_sp: Any = None,
+    metric_weights: dict[str, float] | None = None,
 ) -> dict:
     """Compute composite score — delegates to ``compute_pipeline_metrics()``.
 
+    The composite is a **recorded** multi-signal diagnostic, not the
+    winner-selection key. ``_select_round_winner`` compares candidates on
+    ``accuracy`` (the user's performance scoring function). See
+    ``compute_pipeline_metrics`` for the signal breakdown.
+
     Returns dict with at least: hits, total, accuracy, errors, composite,
-    and type-derived metrics from the schema's node types.
+    plus the health/cost/recall bundle breakdown and any type-derived
+    metrics from the schema's node types.
     """
     return compute_pipeline_metrics(
         pipeline_schema,
         results,
-        accuracy_weight=accuracy_weight,
+        opt_sp=opt_sp,
+        metric_weights=metric_weights,
     )
 
 

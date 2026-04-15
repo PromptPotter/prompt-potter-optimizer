@@ -53,19 +53,30 @@ def _select_round_winner(
     improvement_threshold: float,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, Any]:
-    """Compare candidates and select the round winner."""
+    """Compare candidates and select the round winner.
+
+    Winner selection is driven by ``accuracy`` (the user's performance
+    scoring function). ``composite`` is a recorded multi-signal diagnostic
+    — see ``compute_pipeline_metrics`` — but it does not gate the loop.
+    """
     current_acc = current_best["accuracy"]
     current_composite = current_best.get("composite", current_acc)
 
     assert pipeline_schema is not None, "_select_round_winner requires pipeline_schema"
 
-    # Score each candidate once, reuse for selection and display
+    # Score each candidate once, reuse for selection and display. Thread
+    # the candidate's OptSearchPoint so the composite can fold in its
+    # OptSP-layer signals (runtime/validation failures).
     candidate_scores = {
-        c.id: compute_composite_score(all_candidate_results[c.id], pipeline_schema)
+        c.id: compute_composite_score(
+            all_candidate_results[c.id],
+            pipeline_schema,
+            opt_sp=c,
+        )
         for c in candidates
     }
 
-    # Find best candidate
+    # Find best candidate — compare on accuracy, keep composite for display.
     best_composite = current_composite
     best_acc = current_acc
     best_ps: OptSearchPoint = current_best["prompt_fields"]
@@ -74,10 +85,10 @@ def _select_round_winner(
     winner_idx: int | None = None
 
     for idx, candidate in enumerate(candidates):
-        c_composite = candidate_scores[candidate.id]["composite"]
-        if c_composite > best_composite:
-            best_composite = c_composite
-            best_acc = candidate_scores[candidate.id]["accuracy"]
+        c_acc = candidate_scores[candidate.id]["accuracy"]
+        if c_acc > best_acc:
+            best_acc = c_acc
+            best_composite = candidate_scores[candidate.id]["composite"]
             best_ps = candidate
             best_results = all_candidate_results[candidate.id]
             best_label = candidate.changes_description or candidate.id[:12]
@@ -92,7 +103,7 @@ def _select_round_winner(
         "total": len(best_results),
         "results": best_results,
         "candidates_scored": len(candidates),
-        "improved": best_composite > current_composite + improvement_threshold,
+        "improved": best_acc > current_acc + improvement_threshold,
         "winner_idx": winner_idx,
     }
 
