@@ -5,11 +5,7 @@ Each dataset ships a ``datasets/{name}/prompts/`` directory of named
 campaign init flow loads one per prompt-bearing node and projects it
 into the starting ``JobSearchPoint`` as the node's ``prompt`` config.
 
-**This is the one true source for baseline prompts.**  Authoring a
-monolithic ``prompt`` string inside ``datasets/{name}/pipeline.json``
-``nodes.{node}.config`` is deprecated — the load path
-(``parse_pipeline_response``) emits a deprecation warning when it
-encounters one.
+**This is the one true source for baseline prompts.**
 
 Layout::
 
@@ -69,9 +65,6 @@ def load_node_prompt(
       1. ``datasets/{dataset}/prompts/{node_name}.json`` (per-node canonical)
       2. ``datasets/{dataset}/prompts/{variant}.json`` (dataset-wide fallback)
       3. ``FileNotFoundError`` citing both expected paths.
-
-    No silent fallback to a monolithic ``config.prompt`` in
-    ``pipeline.json`` — that path is deprecated and must be migrated.
     """
     d = dataset_prompt_dir(dataset)
     node_path = d / f"{node_name}.json"

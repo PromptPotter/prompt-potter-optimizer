@@ -1,6 +1,6 @@
 <p align="center">
   <img src="docs/assets/wizard.jpg" alt="PromptPotter wizard" width="100">
-  <img src="docs/assets/promptpotter-wordmark.svg" alt="PromptPotter" width="420">
+  <img src="docs/assets/promptpotter-wordmark.png" alt="PromptPotter" width="420">
 
 </p>
 

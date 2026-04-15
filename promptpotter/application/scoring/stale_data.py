@@ -117,7 +117,12 @@ async def execute_stale_data_protocol(
             n_candidates = cfg.get("samplescan_candidates", 3)
             resolved_threshold = cfg.get("samplescan_threshold", 0.5)
 
-            result = dict(await measure_sample(query_data, env, pipeline_params=None))
+            # pipeline_params=None would erase `steps` and make the backend
+            # run its full default pipeline — probe must stay inside the schema.
+            probe_params = (
+                env.pipeline_schema.to_pipeline_params() if env.pipeline_schema is not None else {}
+            )
+            result = dict(await measure_sample(query_data, env, pipeline_params=probe_params))
             result["samplescan_probe"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,
