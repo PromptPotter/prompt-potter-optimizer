@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.campaign_setup import (
     SessionEnv,
@@ -321,10 +321,16 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,
     pipeline_params: dict | None = None,
+    fork_seed: Any = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline.
 
-    Delegates to shared orchestration with notebook display.
+    Delegates to shared orchestration with notebook display. When
+    ``fork_seed`` is a :class:`ForkSeed`, the application layer rehydrates
+    the baseline ``OptSearchPoint`` from its ``state_snapshot`` instead of
+    loading a fresh prompt. Pre-figures M9 Track 5's unified ``--from``
+    vocabulary — callers parse ``"cycle:<id>:<ref>"`` via
+    ``application.campaign.fork_loader``.
     """
     from promptpotter.application.campaign.data import (
         prepare_scoring_context as _svc_prepare,
@@ -338,6 +344,7 @@ async def prepare_scoring_context(
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
         svc=session,
+        fork_seed=fork_seed,
     )
 
     print(f"\nEvaluation data: {len(dataset)} queries")
