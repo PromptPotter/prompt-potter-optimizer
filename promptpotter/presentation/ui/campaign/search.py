@@ -32,7 +32,7 @@ from promptpotter.application.recon.recon_report import (
     finalize_scan as _finalize_scan,
 )
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.shared.constants import LAYER1_STRING_FIELDS
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 from .notebook_phase import (
     format_pipeline_overrides,
@@ -116,7 +116,7 @@ async def decompose_recon_baseline(
     # Print decomposed fields
     cache_tag = " (cached)" if result.was_cached else ""
     print(f"{CYAN}Restructured baseline fields{cache_tag}:{RESET}")
-    for field in LAYER1_STRING_FIELDS:
+    for field in PROMPT_STRING_FIELDS:
         val = result.restructured_fields.get(field, "")
         if val:
             print(f"  {DIM}{field}:{RESET} {val[:80]}{'...' if len(val) > 80 else ''}")

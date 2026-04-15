@@ -28,9 +28,6 @@ PROMPT_STRING_FIELDS: list[str] = [
     "answer_format",
 ]
 
-# Layer 1 string fields (prompt decomposition fields, excluding few_shot_examples).
-LAYER1_STRING_FIELDS = list(PROMPT_STRING_FIELDS)
-
 # task_context sub-fields that L1 may emit alongside prompt/node overrides.
 TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
 

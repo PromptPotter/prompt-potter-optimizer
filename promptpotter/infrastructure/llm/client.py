@@ -85,10 +85,6 @@ class LLMClientBase(ABC):
         ...
 
 
-# JSON repair and parsing moved to promptpotter.shared.llm_parsing.
-_try_parse_json = try_parse_json
-
-
 class OpenAICompatibleClient(LLMClientBase):
     """Client for any OpenAI-compatible API (OpenAI, Groq, etc.)."""
 
@@ -182,7 +178,7 @@ class OpenAICompatibleClient(LLMClientBase):
                             fg_text = fg_text[:fg_end]
                             # Unescape Python string repr artifacts
                             fg_text = fg_text.replace("\\n", "\n").replace("\\'", "'")
-                            parsed = _try_parse_json(fg_text, self._provider_name)
+                            parsed = try_parse_json(fg_text, self._provider_name)
                             if parsed is not None:
                                 logger.info(
                                     "%s: salvaged failed_generation via JSON repair",
@@ -233,7 +229,7 @@ class OpenAICompatibleClient(LLMClientBase):
             raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].message.content or ""
         parsed = (
-            _try_parse_json(content, self._provider_name)
+            try_parse_json(content, self._provider_name)
             if output_format == "json" and content
             else None
         )
@@ -306,7 +302,7 @@ class AnthropicClient(LLMClientBase):
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = (
-            _try_parse_json(content, "Anthropic") if output_format == "json" and content else None
+            try_parse_json(content, "Anthropic") if output_format == "json" and content else None
         )
 
         return LLMResponse(

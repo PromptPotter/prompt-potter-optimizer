@@ -33,10 +33,6 @@ def set_verbose(value: bool) -> None:
     _VERBOSE = value
 
 
-def is_verbose() -> bool:
-    return _VERBOSE
-
-
 def _noop(*_: object, **__: object) -> None:
     pass
 

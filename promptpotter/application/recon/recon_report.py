@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.shared.constants import LAYER1_STRING_FIELDS, PROMPT_STRING_FIELDS
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     import pandas as pd
@@ -100,7 +100,7 @@ async def decompose_recon_baseline(
 
     # Build restructured fields dict for display
     restructured_fields = {}
-    for f in LAYER1_STRING_FIELDS:
+    for f in PROMPT_STRING_FIELDS:
         restructured_fields[f] = getattr(search_baseline, f, "") or ""
 
     # Build JobSearchPoint for evaluation

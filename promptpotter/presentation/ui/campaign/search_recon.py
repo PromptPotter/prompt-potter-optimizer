@@ -13,7 +13,7 @@ from promptpotter.application.recon.recon_runner import (
     run_recon as _run_recon,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.shared.constants import LAYER1_STRING_FIELDS
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 from .notebook_phase import show_axis_profiles
 from .notebook_primitives import (
@@ -67,7 +67,7 @@ async def run_recon(
     print("Running sensitivity scan...")
     if baseline_opt is not None:
         print(f"{CYAN}Baseline field values:{RESET}")
-        for field in LAYER1_STRING_FIELDS:
+        for field in PROMPT_STRING_FIELDS:
             val = getattr(baseline_opt, field, "")
             if val:
                 print(f"  {DIM}{field}:{RESET} {val[:80]}{'...' if len(val) > 80 else ''}")

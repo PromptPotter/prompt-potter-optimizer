@@ -17,12 +17,6 @@ HASH_TRUNCATE = 24
 __all__ = ["HASH_TRUNCATE", "content_hash"]
 
 
-def _hash_dict(blob_dict: dict) -> str:
-    """SHA256-truncate a JSON-serialized dict."""
-    blob = json.dumps(blob_dict, sort_keys=True)
-    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
-
-
 def content_hash(
     rendered_prompt: str,
     dataset: list,
@@ -44,4 +38,5 @@ def content_hash(
     }
     if pipeline_params:
         blob_dict["pipeline_params"] = pipeline_params
-    return _hash_dict(blob_dict)
+    blob = json.dumps(blob_dict, sort_keys=True)
+    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
