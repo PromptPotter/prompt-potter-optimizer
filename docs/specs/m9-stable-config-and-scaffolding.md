@@ -14,7 +14,7 @@ M9 is foundation work. The optimization loop (L1/L2/L3) is functionally complete
 1. **Meta-prompts are proof-of-concept.** `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against a multi-node retrieval pipeline and need systematic evaluation before any benchmark number is meaningful.
 2. **Flat service layout.** `promptpotter/services/` mixes orchestration with I/O and has files up to 37KB. A multi-tenant webapp lands on top of this as duplication or leakage.
 3. **Single dataset/pipeline assumption.** Nothing in store paths or campaign state cleanly distinguishes HotPotQA from GSM8K from TermNorm running in the same project.
-4. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Notebook ↔ CLI parity is a known gap.
+4. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Artifact-write parity is closed (`run_optimization` auto-mints a session when the caller passes `session_id=""`, so notebook/smoke/future-API produce the same five `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`); **view-model unification remains** — Track 4 below.
 
 M9 delivers the foundation. M10 populates it with benchmark results. M11 generalizes the connector.
 
@@ -77,7 +77,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation)
 
-**Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model.
+**Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model. (Artifact-write parity is closed — `run_optimization` auto-mints a session when `session_id=""`, and the recon-path auto-mint is the next follow-up. Track 4 is about renderer unification only.)
 
 **Approach:** Instead of each entry point building its own render pipeline, the session writes a flat file-directory "view model" to disk. The CLI, the notebook, and the eventual webapp all read from the same files. The first cut mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. Think: what a human sees when they `cd` into the session folder and `cat` a few files.
 
@@ -86,7 +86,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 1. A file-directory view model under `sessions/{session_id}/views/` (exact path open). Content is a superset of what the notebook currently displays: round summary, candidate leaderboard, current trajectory, critique text, active SearchPoint.
 2. Format TBD during the track — likely a mix of small JSON files for structured data and pre-rendered Markdown snippets for human-readable dashboards. Open: temp vs permanent files, rolling vs append-only.
 3. CLI `show-status` becomes a thin renderer that reads the view directory and pretty-prints. No live-state polling.
-4. Notebook output becomes a thin renderer that reads the view directory. This closes the notebook ↔ CLI parity gap.
+4. Notebook output becomes a thin renderer that reads the view directory. This closes the remaining notebook ↔ CLI parity gap (renderer divergence); artifact-write parity is already closed via the `run_optimization` auto-mint.
 5. Documented "this is what the future webapp reads" contract. M10 Track 3 picks up from here.
 
 **Intentionally open:** exact file layout, whether intermediate/temp views exist alongside permanent ones, how to version the view schema. Decided during the track via agile iteration — write the files, look at them, adjust.

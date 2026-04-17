@@ -41,4 +41,5 @@ class RunResult(BaseModel):
     finished_at: str
     langfuse_trace_id: str | None = None
     cycle_id: str | None = None
+    session_id: str | None = None
     resumed_from_round: int = 0

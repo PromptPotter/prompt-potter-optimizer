@@ -146,6 +146,54 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
     assert not missing, f"Entry-point parity violated — missing: {missing}"
 
 
+def test_auto_mint_session_claims_active_pointer() -> None:
+    """Non-CLI entry points (notebook/smoke) get a session auto-minted when
+    ``session_id=''`` — and the active pointer is claimed, so CLI commands
+    like ``show-status`` find the session without ``--session``."""
+    from types import SimpleNamespace
+
+    from promptpotter.application.campaign.data import CampaignBaseline
+    from promptpotter.application.campaign.runner import _auto_mint_session
+
+    created: dict = {}
+
+    def fake_create(backend_id: str, state: dict) -> str:
+        created["backend_id"] = backend_id
+        created["state"] = state
+        return "sess_test_abc"
+
+    def fake_save_active_pointer(backend_id: str, session_id: str) -> None:
+        created["active_pointer"] = (backend_id, session_id)
+
+    sessions_store = SimpleNamespace(
+        create=fake_create,
+        save_active_pointer=fake_save_active_pointer,
+    )
+    store = SimpleNamespace(sessions=sessions_store)
+    backend_client = SimpleNamespace(base_url="http://localhost:8000")
+    session = SimpleNamespace(
+        store=store,
+        backend_id="bk_test",
+        backend_client=backend_client,
+        dataset_name="ds_test",
+    )
+    baseline = CampaignBaseline(
+        baseline_ps={"instruction": "seed"},
+        baseline_acc=0.42,
+        baseline_results=None,
+        instruction="seed",
+    )
+
+    minted = _auto_mint_session(session, {}, baseline, dataset_size=7, experiment_id=None)
+
+    assert minted == "sess_test_abc"
+    assert created["backend_id"] == "bk_test"
+    assert created["state"]["dataset_count"] == 7
+    assert created["state"]["baseline_accuracy"] == 0.42
+    assert created["state"]["baseline_prompt_fields"] == {"instruction": "seed"}
+    assert created["active_pointer"] == ("bk_test", "sess_test_abc")
+
+
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
     """CampaignControlReader reads control signals from campaign_control.json."""
     from promptpotter.infrastructure.persistence.control import CampaignControlReader

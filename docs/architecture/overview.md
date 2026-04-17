@@ -81,7 +81,7 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`. Fie
   search_memory.json            # materialized intelligence view
 ```
 
-Sessions are ephemeral display state; campaigns are the resume source of truth. The canonical session file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `campaign_state.json`.
+Sessions are ephemeral display state; campaigns are the resume source of truth. The canonical session file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `campaign_state.json`. Non-CLI entry points (notebook, smoke tool, future API/webapp) auto-mint a session via `run_optimization()` when the caller passes `session_id=""` — CLI `init` still mints eagerly and passes the id through, so there is no double-mint.
 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 

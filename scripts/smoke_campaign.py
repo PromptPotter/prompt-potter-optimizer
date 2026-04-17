@@ -223,11 +223,14 @@ async def _run(args: argparse.Namespace) -> int:
 
     if cycle_dir is not None:
         print(f"[smoke] cycle dir: {cycle_dir}", flush=True)
-    print(
-        "[smoke] note: smoke tool is sessionless (no campaigns/sessions/<id>/"
-        "campaign_state.json exists); inspect cycle dir above for trial JSONs.",
-        flush=True,
-    )
+
+    session_id = getattr(result, "session_id", "") or ""
+    if session_id:
+        session_dir = (
+            _REPO_ROOT / ".promptpotter" / "projects" / args.dataset / "sessions" / session_id
+        )
+        print(f"[smoke] session:     {session_id}", flush=True)
+        print(f"[smoke] session dir: {session_dir}", flush=True)
 
     await session.backend_client.aclose()
     return 0

@@ -172,9 +172,11 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 ### Notebook ↔ CLI Session Parity
 
-The notebook has no `session_id` — scan/campaign results don't persist. Root cause: UI layer wrappers accept `session_id` but notebook never passes one. Both entry points must eventually produce identical artifacts (whitelabel prerequisite).
+**Campaign path closed:** `run_optimization` auto-mints a session when the caller passes `session_id=""` and claims the active pointer, so notebook/smoke/future-API runs produce the same five `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`. CLI path unchanged — it still mints at `init` and passes the id through (no double-mint).
 
-**M9 resolves:** Both entry points render from the shared file-directory view model (M9 Track 4), closing the parity gap.
+**Still open — scan path:** `run_sensitivity_scan` does not yet auto-mint; recon results don't persist from the notebook. Follow-up applies the same pattern.
+
+**M9 Track 4:** Shared file-directory view model — renderer unification is still that track's work.
 
 ### TermNorm Backend
 

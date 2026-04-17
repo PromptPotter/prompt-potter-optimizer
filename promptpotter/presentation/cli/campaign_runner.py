@@ -5,7 +5,7 @@ scan, show-scan, optimize, show-results), the ``COMMANDS`` registry, and
 ``main()``. Everything else lives in sibling modules:
 
 - ``result.py`` — ``CommandResult``
-- ``session.py`` — ``SessionCtx``, ``load_session``, ``new_session_state``, ``load_campaign_config``
+- ``session.py`` — ``SessionCtx``, ``load_session``, ``load_campaign_config``
 - ``bootstrap.py`` — service init, pipeline config, scoring setup, verbose toggle
 - ``parser.py`` — argparse schema
 - ``commands/`` — non-lifecycle commands (profile, control, status, set-task)
@@ -30,6 +30,7 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from promptpotter.application.campaign.session_state import new_session_state
 from promptpotter.presentation.cli.bootstrap import (
     configure_pipeline,
     init_services_cli,
@@ -47,7 +48,6 @@ from promptpotter.presentation.cli.result import CommandResult
 from promptpotter.presentation.cli.session import (
     load_campaign_config,
     load_session,
-    new_session_state,
 )
 
 logger = logging.getLogger("promptpotter.presentation.cli")

@@ -1,9 +1,8 @@
-"""CLI session state plumbing — load, create, persist, and type-access session state.
+"""CLI session state plumbing — load and type-access session state.
 
 ``SessionCtx`` wraps the raw state dict that ``ProjectStore.sessions`` reads
 from disk, exposing typed accessors so command bodies don't have to
-string-index every field. ``new_session_state()`` is the canonical factory
-for a fresh session (phase='init', empty baseline slots).
+string-index every field.
 """
 
 from __future__ import annotations
@@ -11,7 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.infrastructure.store.project_store import ProjectStore
 
@@ -61,30 +60,6 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     store = ProjectStore()
     state, backend_id, session_id = store.sessions.load_active(args.session)
     return SessionCtx(store, state, backend_id, session_id)
-
-
-def new_session_state(
-    *,
-    init_params: dict,
-    campaign_config: dict,
-    pipeline_params: dict,
-    active_steps: list[str],
-) -> dict[str, Any]:
-    """Fresh session state — phase='init', empty baseline/results slots."""
-    return {
-        "phase": "init",
-        "init_params": init_params,
-        "campaign_config": campaign_config,
-        "pipeline_params": pipeline_params,
-        "active_steps": active_steps,
-        "baseline_prompt_fields": {},
-        "dataset_count": 0,
-        "baseline_accuracy": 0.0,
-        "task_context": None,
-        "recon_variants": None,
-        "cycle_id": None,
-        "experiment_id": None,
-    }
 
 
 def load_campaign_config(config_path: str | None) -> dict:

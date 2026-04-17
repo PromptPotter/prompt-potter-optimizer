@@ -427,6 +427,8 @@ async def run_optimization_notebook(
         print(_dbox_line("Resume: re-run this cell -- rounds auto-restore"))
     if result.cycle_id:
         print(_dbox_line(f"Cycle ID     {result.cycle_id}"))
+    if result.session_id:
+        print(_dbox_line(f"Session      {result.session_id}"))
     if result.langfuse_trace_id:
         print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
     print(_dbox_bottom())
