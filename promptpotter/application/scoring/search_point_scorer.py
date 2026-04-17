@@ -92,6 +92,15 @@ async def _run_query_loop(
             # Reuse: prior-result cache from previous dataset_runs.
             if query in prior_results:
                 cached_r = _materialize_cached(prior_results[query])
+                if _is_degraded(cached_r) and ctx.stale_data_load_protocol:
+                    recovered, _step = await _execute_stale_data_protocol(
+                        ctx.stale_data_load_protocol,
+                        qd,
+                        cast(dict[str, Any], cached_r),
+                        ctx,
+                        pipeline_params=search_point.pipeline_params,
+                    )
+                    cached_r = cast(QueryResult, recovered)
                 results.append(cached_r)
                 if on_result is not None:
                     on_result(cached_r, i, len(dataset))
