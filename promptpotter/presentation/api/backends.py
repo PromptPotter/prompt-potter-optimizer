@@ -17,7 +17,7 @@ from promptpotter.application.pipeline_discovery import compute_pipeline_view
 from promptpotter.dependencies import StoreDep
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.backend.client import BackendClient
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -63,7 +63,7 @@ def _slugify(name: str) -> str:
     return slug.strip("-")
 
 
-def _get_backend_or_404(backend_id: str, store: ProjectStore) -> BackendConnection:
+def _get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
     backend = store.backends.get(backend_id)
     if not backend:
         raise HTTPException(status_code=404, detail=f"Backend '{backend_id}' not found")

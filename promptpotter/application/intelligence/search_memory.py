@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -600,7 +600,7 @@ class SearchMemory:
 
     # --- Lifecycle ---
 
-    def refresh(self, store: ProjectStore, backend_id: str) -> bool:
+    def refresh(self, store: Stores, backend_id: str) -> bool:
         """Incrementally update from new dataset runs.
 
         Returns True if new data was incorporated.
@@ -700,7 +700,7 @@ class SearchMemory:
     @classmethod
     def ensure_for(
         cls,
-        store: ProjectStore | None,
+        store: Stores | None,
         backend_id: str,
     ) -> SearchMemory | None:
         """Load, refresh from historical data, and persist if changed.

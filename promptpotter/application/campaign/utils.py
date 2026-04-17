@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.analysis import FailureAnalysis, QueryDifficulty
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -95,7 +95,7 @@ def apply_stored_overrides(
 def save_campaign_winner(
     campaign_rounds: list,
     campaign_config: CampaignConfig,
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     campaign_id: str | None = None,
@@ -195,7 +195,7 @@ def diff_campaign_config(
 
 
 def load_stored_campaign_config(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     experiment_id: str,
 ) -> dict | None:
@@ -670,7 +670,7 @@ _DEFAULT_SECTIONS = [
 
 
 def _load_campaigns(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     campaign_ids: list[str] | None = None,
 ) -> list[dict]:
@@ -679,7 +679,7 @@ def _load_campaigns(
 
 
 def generate_supplemental(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     campaign_ids: list[str] | None = None,
@@ -763,7 +763,7 @@ def generate_supplemental(
 
 
 def generate_export_json(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     campaign_ids: list[str] | None = None,

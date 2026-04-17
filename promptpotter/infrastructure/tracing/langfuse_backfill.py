@@ -19,8 +19,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
-from promptpotter.infrastructure.store.project_store import ProjectStore
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import (
     QueryEvalEnd,
@@ -109,7 +109,7 @@ def extract_pipeline_nodes(
     return nodes
 
 
-def _state_path(store: ProjectStore, backend_id: str) -> Path:
+def _state_path(store: Stores, backend_id: str) -> Path:
     return store.base_dir / backend_id / "obs" / "langfuse" / "backfill_state.json"
 
 
@@ -122,16 +122,16 @@ def _fresh_state() -> dict[str, Any]:
     }
 
 
-def _load_state(store: ProjectStore, backend_id: str) -> dict[str, Any]:
+def _load_state(store: Stores, backend_id: str) -> dict[str, Any]:
     return read_json_optional(_state_path(store, backend_id)) or _fresh_state()
 
 
-def _save_state(store: ProjectStore, backend_id: str, state: dict[str, Any]) -> None:
+def _save_state(store: Stores, backend_id: str, state: dict[str, Any]) -> None:
     write_json(_state_path(store, backend_id), state)
 
 
 def _collect_ground_truth(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     summaries: list[dict],
 ) -> dict[str, str]:
@@ -151,7 +151,7 @@ def _collect_ground_truth(
 
 def _replay_run(
     bridge: ObservabilityBridge,
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     run_id: str,
     schema: PipelineSchema | None,
@@ -231,7 +231,7 @@ def _replay_run(
 
 
 def sync_langfuse_runs(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     dataset_name: str = "ground_truth",
@@ -256,7 +256,7 @@ def sync_langfuse_runs(
 
 
 def push_all_runs(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     dataset_name: str = _DEFAULT_DATASET_NAME,

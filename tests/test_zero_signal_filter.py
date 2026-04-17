@@ -14,7 +14,7 @@ from promptpotter.application.intelligence.search_memory import SearchMemory
 from promptpotter.application.scoring.zero_signal_filter import (
     apply_zero_signal_exclusions,
 )
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import build_stores
 
 
 def _seed_memory(hits: dict[str, list[bool]]) -> SearchMemory:
@@ -43,7 +43,7 @@ def test_dead_queries_respects_min_observations() -> None:
 
 
 def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
-    store = ProjectStore(base_dir=tmp_path)
+    store = build_stores(tmp_path)
     backend = "bx"
     items = [
         {"query": "a", "ground_truth": "A"},
@@ -75,7 +75,7 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
 
 
 def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) -> None:
-    store = ProjectStore(base_dir=tmp_path)
+    store = build_stores(tmp_path)
     backend = "bx"
     items = [
         {"query": "always_miss", "ground_truth": "X"},

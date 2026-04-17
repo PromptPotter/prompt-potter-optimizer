@@ -2,7 +2,27 @@
 
 Consolidated from individual modules. These are simple file-based stores
 that follow identical patterns (EntityStore base or standalone CRUD).
-Larger stores (CampaignStore, DatasetRunStore) remain in their own modules.
+Larger stores (CampaignStore, DatasetRunStore) live in their own modules
+and are composed here via ``Stores`` / :func:`build_stores`.
+
+Disk layout::
+
+    .promptpotter/projects/
+      {backend_id}/
+        backend.json
+        sync/
+          experiments.json
+          experiments/{experiment_id}.json
+        executions/{execution_id}.json
+        datasets/{name}.json
+        dataset_runs/{run_id}.json
+        dataset_runs.json
+        adaptive_recon_plans/{plan_id}.json
+        campaigns/{campaign_id}.json
+        campaigns/{campaign_id}/trial_NNNN.json
+        sessions/{session_id}/session.json
+        sessions/{session_id}/recon_results.json
+        sessions/{session_id}/campaign_log.md
 """
 
 from __future__ import annotations
@@ -23,8 +43,13 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
 
 logger = logging.getLogger(__name__)
+
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+DEFAULT_BASE_DIR = _REPO_ROOT / ".promptpotter" / "projects"
 
 
 @dataclass
@@ -503,3 +528,41 @@ class SessionStore:
         if not state:
             raise SystemExit(f"ERROR: Session '{sid}' not found for backend '{bid}'.")
         return state, bid, sid
+
+
+# ---------------------------------------------------------------------------
+# Composite store — frozen bundle of the five focused stores.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class Stores:
+    """Composite bundle of focused stores sharing a single ``base_dir``.
+
+    Construct via :func:`build_stores`. Callers access the leaf stores as
+    public attributes (``stores.backends``, ``stores.campaigns``, …); the
+    bundle itself carries no logic.
+    """
+
+    base_dir: Path
+    backends: BackendStore
+    campaigns: CampaignStore
+    dataset_runs: DatasetRunStore
+    adaptive_recon: PlanStore
+    sessions: SessionStore
+
+
+def build_stores(base_dir: Path | str | None = None) -> Stores:
+    """Assemble a :class:`Stores` bundle rooted at ``base_dir``.
+
+    ``base_dir`` defaults to ``<repo_root>/.promptpotter/projects``.
+    """
+    root = Path(base_dir) if base_dir else DEFAULT_BASE_DIR
+    return Stores(
+        base_dir=root,
+        backends=BackendStore(root),
+        campaigns=CampaignStore(root),
+        dataset_runs=DatasetRunStore(root),
+        adaptive_recon=PlanStore(root),
+        sessions=SessionStore(root),
+    )

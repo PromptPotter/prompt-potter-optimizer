@@ -95,7 +95,7 @@ class QueryRunner(Protocol):
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
@@ -110,7 +110,7 @@ class ScoringEnv:
     """
 
     backend_client: QueryRunner
-    store: ProjectStore | None = None
+    store: Stores | None = None
     backend_id: str = ""
     pipeline_schema: PipelineSchema | None = None
     obs: ObservabilityBridge | None = None
@@ -129,7 +129,7 @@ class ScoringEnv:
     def for_loop(
         cls,
         backend_client: QueryRunner,
-        store: ProjectStore | None,
+        store: Stores | None,
         backend_id: str,
         pipeline_schema: PipelineSchema | None,
         obs: ObservabilityBridge | None,

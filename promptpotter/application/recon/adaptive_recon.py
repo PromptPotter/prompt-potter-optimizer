@@ -540,7 +540,7 @@ async def run_adaptive_recon(
         axis_profiles: From ``run_recon()``.
         max_rounds: Maximum coordinate descent rounds.
         stop_threshold: Minimum per-round improvement to continue an axis.
-        store: Optional ProjectStore for caching.
+        store: Optional ``Stores`` bundle for caching.
         backend_id: Backend identifier.
         pipeline_params: Base pipeline parameters.
         index_terms: Optional session terms.

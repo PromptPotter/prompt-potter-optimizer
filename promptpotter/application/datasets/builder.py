@@ -20,7 +20,7 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -334,7 +334,7 @@ def build_dataset_run_data(
     experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
-    """Build a DatasetRun dict ready for ProjectStore.save_dataset_run()."""
+    """Build a DatasetRun dict ready for ``Stores.dataset_runs.save()``."""
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
     data: dict = {
@@ -469,7 +469,7 @@ def _extract_dataset_from_traces(
 
 
 def load_dataset_from_traces(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     experiment_id: str,
     sample_size: int = 0,

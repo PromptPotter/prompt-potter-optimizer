@@ -1,6 +1,6 @@
 """CLI session state plumbing — load and type-access session state.
 
-``SessionCtx`` wraps the raw state dict that ``ProjectStore.sessions`` reads
+``SessionCtx`` wraps the raw state dict that ``Stores.sessions`` reads
 from disk, exposing typed accessors so command bodies don't have to
 string-index every field.
 """
@@ -12,7 +12,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -22,7 +22,7 @@ if TYPE_CHECKING:
 class SessionCtx:
     """Loaded session state with typed accessors over the raw state dict."""
 
-    store: ProjectStore
+    store: Stores
     state: dict
     backend_id: str
     session_id: str
@@ -57,7 +57,7 @@ class SessionCtx:
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
-    store = ProjectStore()
+    store = build_stores()
     state, backend_id, session_id = store.sessions.load_active(args.session)
     return SessionCtx(store, state, backend_id, session_id)
 

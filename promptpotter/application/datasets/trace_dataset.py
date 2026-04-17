@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 
 def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
@@ -81,14 +81,14 @@ def _build_row(
 
 
 def load_potter_traces(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     cycle_ids: list[str] | None = None,
 ) -> list[dict]:
     """Emit one row per round-to-round transition across archived campaigns.
 
     Args:
-        store: ProjectStore facade (reads ``campaigns/{cycle_id}/`` only).
+        store: Stores facade (reads ``campaigns/{cycle_id}/`` only).
         backend_id: Which backend's campaigns to scan.
         cycle_ids: Restrict to specific cycle IDs, or None for every campaign
             under the backend.

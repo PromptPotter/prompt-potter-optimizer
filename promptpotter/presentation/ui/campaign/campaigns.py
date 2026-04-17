@@ -21,7 +21,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 
 __all__ = [
@@ -54,7 +54,7 @@ def _print_resume_hint(
 
 
 def _format_campaign_summary(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     campaign: dict,
     *,
@@ -92,7 +92,7 @@ def _format_campaign_summary(
 
 
 def list_campaigns(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     *,
     campaign_id: str | None = None,
@@ -164,7 +164,7 @@ def list_campaigns(
 
 
 def diff_campaign_config(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     campaign_id: str,
     campaign_config: CampaignConfig,
@@ -195,7 +195,7 @@ def diff_campaign_config(
 
 
 def load_stored_campaign_config(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     experiment_id: str,
 ) -> dict | None:
@@ -237,7 +237,7 @@ def load_and_apply_experiment(
 
 
 def show_experiment_dashboard(
-    store: ProjectStore | None = None,
+    store: Stores | None = None,
     backend_id: str = "",
     *,
     experiment_id: str | None = None,

@@ -4,7 +4,7 @@ from promptpotter.application.datasets.trace_dataset import (
     _infer_escalation_layer,
     load_potter_traces,
 )
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import build_stores
 
 
 def _make_trial(
@@ -67,7 +67,7 @@ class TestEscalationInference:
 
 class TestLoadPotterTraces:
     def test_two_trial_transition(self, tmp_path):
-        store = ProjectStore(tmp_path)
+        store = build_stores(tmp_path)
         backend_id = "bt"
         cycle_id = "cyc1"
 
@@ -100,7 +100,7 @@ class TestLoadPotterTraces:
         assert row["next_prompt"]
 
     def test_empty_when_single_trial(self, tmp_path):
-        store = ProjectStore(tmp_path)
+        store = build_stores(tmp_path)
         store.campaigns.create("bt", "cyc1", {"type": "optimization_loop"})
         store.campaigns.add_trial(
             "bt",

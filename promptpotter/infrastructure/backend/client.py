@@ -16,7 +16,7 @@ import httpx
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -227,7 +227,7 @@ class BackendClient:
 
     async def sync_experiments(
         self,
-        store: ProjectStore,
+        store: Stores,
         backend_id: str,
         include_traces: bool = True,
     ) -> int:
@@ -252,7 +252,7 @@ class BackendClient:
 
     async def sync_experiment(
         self,
-        store: ProjectStore,
+        store: Stores,
         backend_id: str,
         experiment_id: str,
         include_traces: bool = True,

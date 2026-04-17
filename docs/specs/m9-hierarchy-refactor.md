@@ -37,7 +37,7 @@ promptpotter/
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │
 ├── infrastructure/         # adapters — all I/O lives here
-│   ├── store/              # ProjectStore facade + focused stores
+│   ├── store/              # Stores composite + build_stores() + focused leaf stores
 │   ├── backend/            # BackendClient, pipeline parsing
 │   ├── llm/                # _OpenAICompatibleClient, providers
 │   ├── tracing/            # obs_logger, langfuse_client, langfuse_push

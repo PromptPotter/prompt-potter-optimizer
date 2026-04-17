@@ -19,7 +19,7 @@ from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -239,7 +239,7 @@ class DatasetSummary:
 
 
 def prepare_datasets(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     excel_path: str | Path | None = None,
     *,
@@ -295,7 +295,7 @@ def prepare_datasets(
 
 
 def build_all_index_terms(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
 ) -> list[str]:
     """Unique ground_truth identifiers across all stored datasets (train + test).

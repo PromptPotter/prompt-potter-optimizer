@@ -151,7 +151,7 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 ### Key Patterns
 
-- **Store**: `ProjectStore` facade over focused stores in `infrastructure/store/`.
+- **Store**: `Stores` bundle + `build_stores(base_dir)` in `infrastructure/store/` — frozen composite over the focused leaf stores (BackendStore, CampaignStore, DatasetRunStore, PlanStore, SessionStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation signals flow via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. No completed work discarded.
 - **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score. Candidates persisted to `round_NNNN_candidates.json` before pause.

@@ -5,13 +5,13 @@ from __future__ import annotations
 import argparse
 import json
 
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import build_stores
 from promptpotter.presentation.cli.result import CommandResult
 
 
 async def cmd_profile(args: argparse.Namespace) -> CommandResult:
     """Manage connector profile — persistent per-backend defaults."""
-    store = ProjectStore()
+    store = build_stores()
     backend_id = args.backend_id
 
     if args.save:

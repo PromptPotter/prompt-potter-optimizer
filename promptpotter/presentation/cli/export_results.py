@@ -22,7 +22,7 @@ import argparse
 import json
 from pathlib import Path
 
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import build_stores
 
 
 def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -56,7 +56,7 @@ def _parse_args(argv: list[str] | None = None) -> argparse.Namespace:
 
 def main(argv: list[str] | None = None) -> None:
     args = _parse_args(argv)
-    store = ProjectStore(args.store_dir)
+    store = build_stores(args.store_dir)
     campaign_ids = args.campaigns.split(",") if args.campaigns else None
     output = Path(args.output)
 

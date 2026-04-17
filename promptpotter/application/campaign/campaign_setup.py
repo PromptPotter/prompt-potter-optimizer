@@ -26,7 +26,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -50,7 +50,7 @@ __all__ = [
 class SessionEnv:
     """Return value from ``init_services()``."""
 
-    store: ProjectStore
+    store: Stores
     backend_id: str
     experiment_id: str
     backend_client: BackendClient
@@ -204,7 +204,7 @@ async def init_services(
         # campaign/campaign_setup.py → services → promptpotter → repo_root
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
-    store = ProjectStore(base_dir=project_root / ".promptpotter" / "projects")
+    store = build_stores(project_root / ".promptpotter" / "projects")
 
     # Guardrail: refuse to drift to a different project silently.
     active_bid, active_sid = store.sessions.read_active_pointer()
@@ -394,7 +394,7 @@ def _dataset_items_to_queries(items: list[dict]) -> list[dict]:
 
 
 def resolve_campaign_id(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     short_id: str,
 ) -> str | None:

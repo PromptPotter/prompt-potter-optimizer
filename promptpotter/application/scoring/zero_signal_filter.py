@@ -19,7 +19,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.infrastructure.store.project_store import ProjectStore
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +28,7 @@ __all__ = ["apply_zero_signal_exclusions"]
 
 def apply_zero_signal_exclusions(
     *,
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     dataset_name: str,
     memory: SearchMemory,

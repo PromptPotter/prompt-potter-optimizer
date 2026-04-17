@@ -23,7 +23,7 @@ from promptpotter.application.campaign.utils import (
 from promptpotter.application.intelligence import load_variant_library
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.store.project_store import ProjectStore
+from promptpotter.infrastructure.store import Stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -372,7 +372,7 @@ async def prepare_scoring_context(
 
 
 def prepare_datasets(
-    store: ProjectStore,
+    store: Stores,
     backend_id: str,
     excel_path: str | Path | None = None,
     *,
