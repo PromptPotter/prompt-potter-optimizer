@@ -137,14 +137,27 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 
 PromptPotter requires a backend that exposes a `/matches` evaluation endpoint and a `GET /pipeline` endpoint that declares every node, its parameters, and their allowed values. The optimizer searches **only** parameters declared in `pipeline.json` — nothing else is touched. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [Backend Requirements](docs/setup-guide.md#backend-requirements) for the full contract.
 
+```
+┌──────────────────────┐                       ┌──────────────────────┐
+│  Your Backend        │  GET  /pipeline   ──► │  PromptPotter        │
+│  (any pipeline)      │                       │  Optimizer           │
+│                      │  POST /matches    ◄── │                      │
+│  runs the task       │   {prompt, params}    │  generates candidates│
+│                      │                       │  scores + critiques  │
+│                      │  → predictions    ──► │  iterates            │
+└──────────────────────┘                       └──────────────────────┘
+```
+
 ## Getting Started
 
 ### Local install
 
 ```bash
-pip install -e ".[dev,jupyter,stats]"
+pip install -e ".[all,dev]"
 cp .env.example .env   # add your LLM API keys (Groq, OpenAI, or Anthropic)
 ```
+
+The `[all]` extras bundle enables every optional feature (Excel datasets, HuggingFace benchmarks, Langfuse tracing, Anthropic client, JupyterLab). For a minimal install pick only the extras you need — see [Setup Guide](docs/setup-guide.md).
 
 ### Docker (one command)
 

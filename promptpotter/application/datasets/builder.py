@@ -63,7 +63,8 @@ def load_excel_ground_truth(
         import openpyxl
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
-            "openpyxl is required to load Excel files. Install it: pip install openpyxl"
+            "openpyxl is required to load Excel files. "
+            'Install the Excel extras: pip install -e ".[excel]"'
         ) from None
 
     wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
@@ -203,13 +204,14 @@ def load_gsm8k(
         List of ``{"query": str, "ground_truth": str}`` dicts.
         ``ground_truth`` is the ``#### N`` answer line only.
 
-    Requires the ``datasets`` library: ``pip install datasets``.
+    Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-untyped]
+        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
-            "The 'datasets' library is required for GSM8K. Install it: pip install datasets"
+            "The 'datasets' library is required for GSM8K. "
+            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
         ) from None
 
     ds = load_dataset("openai/gsm8k", "main", split=split)
@@ -237,13 +239,14 @@ def load_aime_2025(
         List of ``{"query": str, "ground_truth": str}`` dicts.
         ``ground_truth`` is the integer answer as a string.
 
-    Requires the ``datasets`` library: ``pip install datasets``.
+    Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-untyped]
+        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
-            "The 'datasets' library is required for AIME 2025. Install it: pip install datasets"
+            "The 'datasets' library is required for AIME 2025. "
+            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
         ) from None
 
     ds = load_dataset("MathArena/aime_2025", split="train")
@@ -270,10 +273,11 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
     field lets downstream per-task filtering split into 23 campaigns.
     """
     try:
-        from datasets import load_dataset  # type: ignore[import-untyped]
+        from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
     except ModuleNotFoundError:
         raise ModuleNotFoundError(
-            "The 'datasets' library is required for BBEH. Install it: pip install datasets"
+            "The 'datasets' library is required for BBEH. "
+            'Install the benchmarks extras: pip install -e ".[benchmarks]"'
         ) from None
 
     ds = load_dataset("BBEH/bbeh", split="train")

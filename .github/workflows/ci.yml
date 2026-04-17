@@ -27,6 +27,9 @@ jobs:
       - name: Format check
         run: ruff format --check promptpotter/ tests/
 
+      - name: Dependency check
+        run: deptry .
+
       - name: Type check
         run: mypy promptpotter/
 

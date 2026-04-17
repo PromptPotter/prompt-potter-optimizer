@@ -262,7 +262,8 @@ class AnthropicClient(LLMClientBase):
                 from anthropic import AsyncAnthropic
             except ImportError as err:
                 raise ImportError(
-                    "anthropic package not installed. Run: pip install anthropic"
+                    "anthropic package not installed. "
+                    'Install the anthropic extras: pip install -e ".[anthropic]"'
                 ) from err
             self._client = AsyncAnthropic(api_key=self._api_key)
         return self._client

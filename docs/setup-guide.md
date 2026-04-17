@@ -23,11 +23,18 @@ pip install -e .
 Install extras based on your use case:
 
 ```bash
-pip install -e ".[stats]"        # Statistical analysis: Wilson CI, significance tests (scipy)
-pip install -e ".[jupyter]"      # JupyterLab notebook interface
-pip install -e ".[dev]"          # Development: pytest, ruff, mypy, pre-commit
-pip install -e ".[dev,jupyter,stats]"  # All of the above
+pip install -e ".[stats]"          # Statistical analysis: Wilson CI, significance tests (scipy)
+pip install -e ".[jupyter]"        # JupyterLab notebook interface + IPython display helpers
+pip install -e ".[excel]"          # Excel dataset loading (pandas, openpyxl)
+pip install -e ".[benchmarks]"     # HuggingFace benchmarks — GSM8K, AIME 2025, BBEH (datasets)
+pip install -e ".[observability]"  # Langfuse cloud tracing
+pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
+pip install -e ".[dev]"            # Development: pytest, ruff, mypy, deptry, pre-commit
+pip install -e ".[all]"            # Every optional feature bundled (excluding [dev])
+pip install -e ".[all,dev]"        # Everything — recommended for contributors
 ```
+
+The core install (`pip install -e .`) is intentionally minimal. Every optional feature is lazy-imported with a clear error message telling you which extras to install, so a missing dep never silently disables a feature.
 
 ### Environment variables
 

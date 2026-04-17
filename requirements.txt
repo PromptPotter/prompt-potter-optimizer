@@ -1,6 +1,6 @@
 #
-# Mirrors pyproject.toml [project.dependencies].
-# For development: pip install -e ".[dev,jupyter,stats]"
+# Mirrors pyproject.toml [project.dependencies] (core only — no extras).
+# For development: pip install -e ".[all,dev]"
 # For Docker/deployment: pip install -r requirements.txt
 #
 
@@ -11,27 +11,15 @@ uvicorn[standard]>=0.27.0
 pydantic>=2.5.3
 pydantic-settings>=2.1.0
 
-# LLM Providers
+# LLM Providers (core). Anthropic is optional — see [anthropic] extras.
 openai>=1.10.0
-anthropic>=0.18.0
 groq>=0.4.0
 
 # Utilities
 python-dotenv>=1.0.0
-python-multipart>=0.0.6
-aiofiles>=23.2.1
-pyyaml>=6.0
-
-# Data processing
-pandas>=2.2.0
-numpy>=1.26.3
-openpyxl>=3.1.0
 
 # HTTP client
 httpx>=0.26.0
 
 # Locking
 filelock>=3.12.0
-
-# Observability
-langfuse>=2.0.0

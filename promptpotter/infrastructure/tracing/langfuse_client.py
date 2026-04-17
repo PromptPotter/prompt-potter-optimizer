@@ -22,7 +22,7 @@ import time
 import uuid
 from typing import Any
 
-import requests
+import httpx
 
 from promptpotter.shared.errors import graceful
 
@@ -68,7 +68,10 @@ class LangfuseLogger:
 
                 self.client = Langfuse()
             except ImportError:
-                logger.warning("langfuse package not installed — observability disabled")
+                logger.warning(
+                    "langfuse package not installed — observability disabled. "
+                    'Install: pip install -e ".[observability]"'
+                )
                 self.enabled = False
             except Exception:
                 logger.warning("Failed to initialize Langfuse", exc_info=True)
@@ -460,7 +463,7 @@ class LangfuseLogger:
             auth = (settings.LANGFUSE_PUBLIC_KEY, settings.LANGFUSE_SECRET_KEY)
 
             for attempt in range(max_retries):
-                resp = requests.post(url, auth=auth, json=body, timeout=30)
+                resp = httpx.post(url, auth=auth, json=body, timeout=30)
 
                 if resp.status_code in (200, 201):
                     return True

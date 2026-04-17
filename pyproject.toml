@@ -23,26 +23,44 @@ dependencies = [
     "pydantic>=2.5.3",
     "pydantic-settings>=2.1.0",
     "openai>=1.10.0",
-    "anthropic>=0.18.0",
     "groq>=0.4.0",
     "python-dotenv>=1.0.0",
-    "python-multipart>=0.0.6",
-    "aiofiles>=23.2.1",
-    "pandas>=2.2.0",
-    "openpyxl>=3.1.0",
     "httpx>=0.26.0",
-    "langfuse>=2.0.0",
-    "pyyaml>=6.0",
     "filelock>=3.12.0",
 ]
 
 [project.optional-dependencies]
 jupyter = [
     "jupyterlab>=4.0",
+    "ipython>=8.0",
     "tqdm>=4.66",
 ]
 stats = [
     "scipy>=1.12.0",
+]
+excel = [
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
+]
+benchmarks = [
+    "datasets>=2.14.0",
+]
+observability = [
+    "langfuse>=2.0.0",
+]
+anthropic = [
+    "anthropic>=0.18.0",
+]
+all = [
+    "jupyterlab>=4.0",
+    "ipython>=8.0",
+    "tqdm>=4.66",
+    "scipy>=1.12.0",
+    "pandas>=2.2.0",
+    "openpyxl>=3.1.0",
+    "datasets>=2.14.0",
+    "langfuse>=2.0.0",
+    "anthropic>=0.18.0",
 ]
 dev = [
     "pytest>=8.0.0",
@@ -51,6 +69,7 @@ dev = [
     "ruff>=0.3.0",
     "mypy>=1.10.0",
     "pre-commit>=4.0",
+    "deptry>=0.20.0",
 ]
 
 [project.urls]
@@ -85,11 +104,10 @@ disallow_untyped_defs = false
 [[tool.mypy.overrides]]
 module = [
     "langfuse.*",
-    "groq.*",
     "scalar_fastapi.*",
     "openpyxl.*",
     "pandas.*",
-    "requests.*",
+    "datasets.*",
     "scipy.*",
     "tqdm.*",
     "IPython.*",
@@ -148,3 +166,29 @@ show_missing = true
 skip_covered = true
 skip_empty = true
 fail_under = 0
+
+[tool.deptry]
+extend_exclude = [
+    "docs/research/bbeh-comparison/.*",
+    "notebooks/bbeh_potter.ipynb",
+]
+
+[tool.deptry.per_rule_ignores]
+# CLI/tool deps — invoked by command, not imported.
+# groq is retained for provider-registration symmetry even though calls
+# route through the OpenAI-compatible client.
+DEP002 = [
+    "uvicorn",
+    "jupyterlab",
+    "groq",
+    "pytest",
+    "pytest-asyncio",
+    "pytest-cov",
+    "ruff",
+    "mypy",
+    "pre-commit",
+    "deptry",
+]
+# Optional features — imported lazily with install-message guards.
+# Declared in extras ([excel], [benchmarks], [observability], [anthropic], [jupyter]).
+DEP001 = ["pandas", "openpyxl", "datasets", "langfuse", "anthropic", "IPython"]

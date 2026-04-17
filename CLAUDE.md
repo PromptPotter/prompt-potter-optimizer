@@ -21,11 +21,11 @@ Both rails share the rule *"detect → trace on the candidate → surface on `ca
 ## Commands
 
 ```bash
-# Install (dev)
-pip install -e ".[dev,jupyter,stats]"
+# Install (dev — everything bundled)
+pip install -e ".[all,dev]"
 
 # Verify everything (~5s, minimal output)
-python -m ruff check promptpotter/ tests/ -q && python -m ruff format --check promptpotter/ tests/ -q && python -m mypy promptpotter/ --no-error-summary && python -m pytest tests/ --tb=no -q -p no:warnings
+python -m ruff check promptpotter/ tests/ -q && python -m ruff format --check promptpotter/ tests/ -q && python -m deptry . -q && python -m mypy promptpotter/ --no-error-summary && python -m pytest tests/ --tb=no -q -p no:warnings
 
 # Individual checks
 python -m ruff check promptpotter/ tests/     # lint
@@ -47,7 +47,7 @@ python -m promptpotter show-results
 python -m promptpotter show-status          # live dashboard
 ```
 
-CI runs: `ruff check` → `ruff format --check` → `mypy` → `pytest`. All must pass.
+CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pytest`. All must pass.
 
 ## Code Conventions
 
