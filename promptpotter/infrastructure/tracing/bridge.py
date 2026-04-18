@@ -66,7 +66,6 @@ class ObservabilityBridge:
     ) -> None:
         from promptpotter.config.settings import settings
 
-        self.obs_root = Path(store_base_dir) / backend_id / "obs"
         self._enabled: bool = settings.OBS_ENABLED
         self._file = file_sink
         self._langfuse = langfuse_sink

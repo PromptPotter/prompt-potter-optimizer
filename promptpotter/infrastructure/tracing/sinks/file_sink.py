@@ -1,17 +1,17 @@
-"""File sink — writes Langfuse-compatible JSON + MLflow run dirs + events.jsonl.
+"""File sink — per-cycle Langfuse shadow, events.jsonl, prompts, MLflow (SDK).
 
-Writes Langfuse-compatible JSON traces, MLflow run dirs, and the
-``events.jsonl`` navigation log. The bridge dispatches events to
-:meth:`handle`, which fans out to typed private
-handlers. All file writes are local and synchronous; there is no cloud
-state here.
+Writes a Langfuse-compatible JSON shadow plus the ``events.jsonl`` navigation
+log under ``campaigns/{cycle_id}/`` for the active campaign. MLflow is
+opt-in: when ``settings.MLFLOW_ENABLED`` is true the sink logs each round as
+an MLflow run via the Python SDK, rooted at ``library/mlruns/``. Writes
+arriving without a bound cycle (out-of-campaign ``file_only()`` callers)
+fall back to a shared ``library/obs/`` pool.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import time
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -19,10 +19,8 @@ from typing import Any
 
 from promptpotter.infrastructure.store.base import (
     append_jsonl,
-    append_text,
     write_json,
     write_text,
-    write_yaml_kv,
 )
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
@@ -58,19 +56,30 @@ def _utcnow_iso() -> str:
 
 
 class FileSink:
-    """Append-only Langfuse-style file log + per-campaign MLflow dirs."""
+    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in)."""
 
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
         from promptpotter.config.settings import settings
 
-        # v3: tenant root is the outer axis; obs lives under obs/{backend_id}/
-        # until Wave C relocates it into campaigns/{cycle_id}/ + library/mlruns/.
-        self.obs_root = Path(store_base_dir) / "obs" / backend_id
+        self._tenant_root = Path(store_base_dir)
+        self._tenant_id = self._tenant_root.name
+        self._library_dir = self._tenant_root / "library"
+        self._backend_id = backend_id
         self._enabled: bool = settings.OBS_ENABLED
+        self._cycle_id: str | None = None
+        self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
         # Per-NodeStart obs_id so NodeEnd can update the same JSON file.
         # Keyed by (campaign_id, round_num, node_id).
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
+
+    # --- Scope resolution ---
+
+    def _scope_dir(self) -> Path:
+        if self._cycle_id:
+            return self._tenant_root / "campaigns" / self._cycle_id
+        # Orphan fallback: out-of-campaign file_only() emits share this pool.
+        return self._library_dir / "obs"
 
     # --- Accessors ---
 
@@ -81,7 +90,7 @@ class FileSink:
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = _utcnow_iso()
-        append_jsonl(self.obs_root / "langfuse" / "events.jsonl", event)
+        append_jsonl(self._scope_dir() / "events.jsonl", event)
 
     def _write_trace(
         self,
@@ -101,7 +110,7 @@ class FileSink:
             "metadata": metadata or {},
             "tags": tags or [],
         }
-        write_json(self.obs_root / "langfuse" / "traces" / f"{trace_id}.json", trace)
+        write_json(self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json", trace)
         return trace_id
 
     def _write_observation(
@@ -126,7 +135,7 @@ class FileSink:
             "output": output_data,
             "metadata": metadata or {},
         }
-        obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
+        obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
         write_json(obs_dir / f"{obs_id}.json", observation)
         return obs_id
 
@@ -141,71 +150,47 @@ class FileSink:
             "data_type": data_type,
             "timestamp": _utcnow_iso(),
         }
-        append_jsonl(self.obs_root / "langfuse" / "scores" / f"{trace_id}.jsonl", score)
+        append_jsonl(self._scope_dir() / "langfuse" / "scores" / f"{trace_id}.jsonl", score)
 
-    def _ensure_experiment(self, campaign_id: str) -> Path:
-        exp_dir = self.obs_root / "experiments" / campaign_id
-        meta_path = exp_dir / "meta.yaml"
-        if not meta_path.exists():
-            now_ms = int(time.time() * 1000)
-            write_yaml_kv(
-                meta_path,
-                {
-                    "experiment_id": campaign_id,
-                    "name": campaign_id,
-                    "artifact_location": str(exp_dir),
-                    "lifecycle_stage": "active",
-                    "creation_time": now_ms,
-                    "last_update_time": now_ms,
-                },
-            )
-        return exp_dir
+    # --- MLflow (opt-in via MLFLOW_ENABLED) ---
 
-    def _write_mlflow_run(
-        self,
-        experiment_dir: Path,
-        run_name: str,
-        params: dict[str, str],
-        metrics: dict[str, float],
-        tags: dict[str, str] | None = None,
-    ) -> str:
-        run_id = _generate_obs_id()
-        run_dir = experiment_dir / run_id
-        now_ms = int(time.time() * 1000)
+    def _log_mlflow_run(self, event: RoundEnd) -> None:
+        from promptpotter.config.settings import settings
 
-        write_yaml_kv(
-            run_dir / "meta.yaml",
-            {
-                "run_id": run_id,
-                "run_uuid": run_id,
-                "run_name": run_name,
-                "experiment_id": experiment_dir.name,
-                "status": 3,
-                "start_time": now_ms,
-                "end_time": now_ms,
-                "lifecycle_stage": "active",
-                "source_type": 4,
-                "source_name": "",
-                "source_version": "",
-                "entry_point_name": "",
-                "user_id": "promptpotter",
-                "artifact_uri": f"file:///{(run_dir / 'artifacts').as_posix()}",
-                "tags": [],
-            },
-        )
+        if not settings.MLFLOW_ENABLED or not self._cycle_id:
+            return
+        import mlflow
 
-        for key, value in params.items():
-            write_text(run_dir / "params" / key, str(value))
+        if not self._mlflow_initialized:
+            tracking_uri = (self._library_dir / "mlruns").resolve().as_uri()
+            mlflow.set_tracking_uri(tracking_uri)
+            mlflow.set_experiment(name=f"{self._tenant_id}/{self._cycle_id}")
+            self._mlflow_initialized = True
 
-        timestamp_ms = now_ms
-        for metric_key, metric_value in metrics.items():
-            append_text(run_dir / "metrics" / metric_key, f"{timestamp_ms} {metric_value} 0\n")
+        params: dict[str, str] = {
+            "round": str(event.round_num),
+            "temperature": str(event.temperature),
+        }
+        if event.model:
+            params["model"] = event.model
+        if event.n_variants:
+            params["n_variants"] = str(event.n_variants)
 
-        if tags:
-            for key, value in tags.items():
-                write_text(run_dir / "tags" / key, str(value))
+        metrics = {
+            "accuracy": event.accuracy,
+            "hits": float(event.hits),
+            "total": float(event.total),
+        }
+        tags = {
+            "improved": str(event.improved).lower(),
+            "next_action": event.next_action,
+            "winner_prompt_fields_id": event.winner_prompt_fields_id,
+        }
 
-        return run_id
+        with mlflow.start_run(run_name=f"round_{event.round_num}"):
+            mlflow.log_params(params)
+            mlflow.log_metrics(metrics)
+            mlflow.set_tags(tags)
 
     # --- Event dispatch ---
 
@@ -314,7 +299,7 @@ class FileSink:
     def _on_dataset_registered(self, event: DatasetRegistered) -> None:
         import hashlib
 
-        ds_dir = self.obs_root / "langfuse" / "datasets" / event.dataset_name
+        ds_dir = self._scope_dir() / "langfuse" / "datasets" / event.dataset_name
         ds_dir.mkdir(parents=True, exist_ok=True)
         n_registered = 0
         seen: set[str] = set()
@@ -356,7 +341,10 @@ class FileSink:
         )
 
     def _on_campaign_start(self, event: CampaignStart) -> None:
-        self._ensure_experiment(event.campaign_id)
+        # Bind cycle_id so subsequent writes target campaigns/{cycle_id}/.
+        # session_id carries the resolved cycle_id (see runner:start_campaign).
+        if event.session_id:
+            self._cycle_id = event.session_id
         trace_id = self._write_trace(
             name="optimization_loop",
             input_data={
@@ -444,7 +432,7 @@ class FileSink:
         if ids is None:
             return
         trace_id, obs_id = ids
-        obs_dir = self.obs_root / "langfuse" / "observations" / trace_id
+        obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
         obs_path = obs_dir / f"{obs_id}.json"
         if obs_path.exists():
             obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
@@ -490,29 +478,7 @@ class FileSink:
             )
             self._write_score(trace_id, "accuracy", event.accuracy)
 
-        exp_dir = self._ensure_experiment(event.campaign_id)
-        params: dict[str, str] = {}
-        if event.model:
-            params["model"] = event.model
-        params["temperature"] = str(event.temperature)
-        if event.n_variants:
-            params["n_variants"] = str(event.n_variants)
-        params["round"] = str(event.round_num)
-        self._write_mlflow_run(
-            experiment_dir=exp_dir,
-            run_name=f"round_{event.round_num}",
-            params=params,
-            metrics={
-                "accuracy": event.accuracy,
-                "hits": float(event.hits),
-                "total": float(event.total),
-            },
-            tags={
-                "improved": str(event.improved).lower(),
-                "next_action": event.next_action,
-                "winner_prompt_fields_id": event.winner_prompt_fields_id,
-            },
-        )
+        self._log_mlflow_run(event)
 
         log_entry: dict[str, Any] = {
             "event": "round_complete",
@@ -533,7 +499,7 @@ class FileSink:
     def _on_prompt_version(self, event: PromptVersion) -> None:
         family = "optimizer_prompt"
         version = event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown"
-        prompt_dir = self.obs_root / "prompts" / family / version
+        prompt_dir = self._scope_dir() / "prompts" / family / version
         write_text(prompt_dir / "prompt.txt", event.rendered_prompt)
         metadata = {
             "family": family,
@@ -557,7 +523,7 @@ class FileSink:
     def _on_campaign_end(self, event: CampaignEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
-            trace_path = self.obs_root / "langfuse" / "traces" / f"{trace_id}.json"
+            trace_path = self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json"
             if trace_path.exists():
                 trace_data = json.loads(trace_path.read_text(encoding="utf-8"))
                 trace_data["output"] = {

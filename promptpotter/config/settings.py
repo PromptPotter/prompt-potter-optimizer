@@ -40,8 +40,13 @@ class Settings(BaseSettings):
     LANGFUSE_ENABLED: bool = True
     LANGFUSE_PROMPTS_ENABLED: bool = False
 
-    # File-based observability (traces, experiments, events.jsonl)
+    # File-based observability (traces, events.jsonl)
     OBS_ENABLED: bool = True
+
+    # MLflow experiment tracking (opt-in; off by default). When enabled,
+    # FileSink writes per-round MLflow runs to ``library/mlruns/`` via the
+    # MLflow Python SDK.
+    MLFLOW_ENABLED: bool = False
 
     model_config = {"env_file": ".env", "case_sensitive": True, "extra": "ignore"}
 
