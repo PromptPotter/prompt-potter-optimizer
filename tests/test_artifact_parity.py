@@ -17,14 +17,15 @@ from promptpotter.infrastructure.persistence.session_emitter import CAMPAIGN_SES
 
 @pytest.fixture
 def session_dir(tmp_path: Path) -> Path:
-    """Create a campaign/session directory with a minimal session.json.
+    """Create a per-cycle directory with a minimal ``index.json``.
 
     v3 layout: ``.promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/``
-    (session ≡ campaign). ``tmp_path`` stands in for the tenant root.
+    (session ≡ campaign; ``index.json`` carries session state + campaign
+    metadata in one blob). ``tmp_path`` stands in for the tenant root.
     """
     sdir = tmp_path / "campaigns" / "test_cycle"
     sdir.mkdir(parents=True)
-    (sdir / "session.json").write_text(
+    (sdir / "index.json").write_text(
         json.dumps(
             {
                 "phase": "optimizing",
@@ -203,10 +204,10 @@ def test_auto_mint_session_claims_active_pointer() -> None:
 
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:
-    """CampaignControlReader reads control signals from campaign_control.json."""
+    """CampaignControlReader reads control signals from control.json."""
     from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
-    control_path = session_dir / "campaign_control.json"
+    control_path = session_dir / "control.json"
     control_path.write_text(
         json.dumps({"requested_state": "pause", "pause_before_l2_scoring": False})
     )
@@ -219,7 +220,7 @@ def test_control_surface_resumes(session_dir: Path) -> None:
     """CampaignControlReader acknowledges resume by clearing to running."""
     from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
-    control_path = session_dir / "campaign_control.json"
+    control_path = session_dir / "control.json"
     control_path.write_text(
         json.dumps({"requested_state": "resume", "pause_before_l2_scoring": False})
     )
@@ -236,7 +237,7 @@ def test_control_surface_l2_pause(session_dir: Path) -> None:
     """CampaignControlReader honors pause_before_l2_scoring at before_l2_scoring checkpoint."""
     from promptpotter.infrastructure.persistence.control import CampaignControlReader
 
-    control_path = session_dir / "campaign_control.json"
+    control_path = session_dir / "control.json"
     control_path.write_text(
         json.dumps({"requested_state": "running", "pause_before_l2_scoring": True})
     )

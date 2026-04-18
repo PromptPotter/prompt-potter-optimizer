@@ -252,7 +252,7 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
-    """Run optimization loop. Dashboard is campaign_state.json in session dir."""
+    """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.campaign_setup import load_recon_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
@@ -313,7 +313,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     set_round_recorder(RoundRecorder(session_dir / "rounds"))
 
     baseline = extract_campaign_baseline(campaign_rounds)
-    state_path = session_dir / "campaign_state.json"
+    state_path = session_dir / "dashboard.json"
     try:
         cycle_result = await _orch_run_optimization(
             dataset,

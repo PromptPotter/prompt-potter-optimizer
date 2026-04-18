@@ -1,10 +1,10 @@
 """Campaign control surface — bidirectional HITL signals.
 
-``campaign_control.json`` carries ``requested_state`` (pause / resume / stop)
+``control.json`` carries ``requested_state`` (pause / resume / stop)
 and ``pause_before_l2_scoring``.  Writers: CLI ``control`` command, webapp,
 and hand-edits.  Reader: the optimization loop at natural checkpoints.
 
-Kept in its own file (separate from ``campaign_state.json``) so the emitter
+Kept in its own file (separate from ``dashboard.json``) so the emitter
 never races user intent edits on a hot code path — see
 ``session_emitter.py``.
 """
@@ -19,13 +19,13 @@ from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 
-CONTROL_FILENAME = "campaign_control.json"
+CONTROL_FILENAME = "control.json"
 
 __all__ = ["CONTROL_FILENAME", "CampaignControlReader", "ensure_control_file"]
 
 
 def ensure_control_file(session_dir: Path, *, pause_before_scoring: bool) -> None:
-    """Seed ``campaign_control.json`` with defaults if it doesn't exist.
+    """Seed ``control.json`` with defaults if it doesn't exist.
 
     A lingering pause from a previous session survives ``init`` — the file
     is only written when missing, never overwritten.
@@ -43,7 +43,7 @@ def ensure_control_file(session_dir: Path, *, pause_before_scoring: bool) -> Non
 
 
 class CampaignControlReader:
-    """Reads control signals from ``campaign_control.json`` at checkpoints.
+    """Reads control signals from ``control.json`` at checkpoints.
 
     Accepts either the session directory or the control-file path directly.
     The emitter seeds the file with defaults on init; the CLI ``control``

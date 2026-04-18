@@ -13,8 +13,9 @@ Disk layout (v3)::
     .promptpotter/projects/{tenant_id}/
       campaigns/{cycle_id}.json                     # campaign metadata
       campaigns/{cycle_id}/                         # per-cycle state dir
-        session.json                                # (renamed in Wave B)
-        campaign_state.json / control / log.md / ... etc.
+        index.json                                  # session state + campaign metadata
+        dashboard.json / control.json / output.log / log.md / journal.md / notes.md
+        recon.json                                  # (optional, recon path)
         trial_NNNN.json
         round_NNNN_candidates.json
       library/

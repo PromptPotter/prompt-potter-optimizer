@@ -1,4 +1,4 @@
-"""``control`` subcommand — write HITL control signals to campaign_control.json."""
+"""``control`` subcommand — write HITL control signals to control.json."""
 
 from __future__ import annotations
 
@@ -13,7 +13,7 @@ from promptpotter.presentation.cli.session import load_session
 
 
 async def cmd_control(args: argparse.Namespace) -> CommandResult:
-    """Write a control signal to campaign_control.json."""
+    """Write a control signal to control.json."""
     from promptpotter.infrastructure.store.base import write_json
 
     ctx = load_session(args)

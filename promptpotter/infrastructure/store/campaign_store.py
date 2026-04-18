@@ -1,23 +1,22 @@
 """Campaign registry persistence.
 
 ``CampaignStore`` is the single mint point for the session≡campaign invariant
-(v3). It owns both the campaign metadata file and the per-cycle artifact
-directory (trials + session state + logs + journal + notes + recon results).
-The legacy ``SessionStore`` is absorbed here; there is no separate
-``sessions`` store.
+(v3). It owns the per-cycle artifact directory — campaign metadata, session
+state, trials, dashboard, logs, journal, notes, recon results — all
+co-located. The legacy ``SessionStore`` is absorbed here; there is no
+separate ``sessions`` store, and no separate ``session.json``.
 
-Disk layout (v3; per-cycle artifact names get renamed in Wave B)::
+Disk layout (v3)::
 
-    {tenant_root}/campaigns/{cycle_id}.json                  # metadata + trial index
     {tenant_root}/campaigns/{cycle_id}/                      # per-cycle dir
-      session.json                                            # session state (Wave B: deleted)
-      campaign_state.json                                     # live dashboard (Wave B: dashboard.json)
-      campaign_control.json                                   # HITL signals (Wave B: control.json)
-      campaign_output.log                                     # per-query audit (Wave B: output.log)
-      campaign_log.md                                         # round summary (Wave B: log.md)
-      notebook_journal.md                                     # user narrative (Wave B: journal.md)
-      claude_notes.md                                         # Claude notes (Wave B: notes.md)
-      recon_results.json                                      # this cycle's scan (Wave B: recon.json)
+      index.json                                              # merged session state + campaign metadata + trial index
+      dashboard.json                                          # live scalar counters
+      control.json                                            # HITL signals
+      output.log                                              # per-query audit
+      log.md                                                  # round-by-round summary
+      journal.md                                              # user narrative
+      notes.md                                                # Claude notes
+      recon.json                                              # this cycle's scan result
       trial_NNNN.json                                         # optimizer resume WAL
       round_NNNN_candidates.json                              # pre-scoring checkpoint
 
@@ -56,7 +55,7 @@ class CampaignStore(EntityStore):
     # -- path helpers ---------------------------------------------------------
 
     def _entity_dir(self, _backend_id: str) -> Path:
-        """Parent dir for campaign metadata files. Tenant-global."""
+        """Parent dir for campaign trees. Tenant-global."""
         return self._base_dir / "campaigns"
 
     def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
@@ -67,6 +66,10 @@ class CampaignStore(EntityStore):
     # Retained alias for existing resume/rewind call sites.
     _trial_dir = _campaign_dir
 
+    def _entity_path(self, backend_id: str, entity_id: str) -> Path:
+        """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""
+        return self._campaign_dir(backend_id, entity_id) / "index.json"
+
     # -- Campaign CRUD --------------------------------------------------------
 
     def create(
@@ -75,14 +78,21 @@ class CampaignStore(EntityStore):
         campaign_id: str,
         metadata: dict[str, Any],
     ) -> Path:
-        """Create a new campaign file with initial metadata."""
+        """Create/augment a campaign's ``index.json`` with metadata.
+
+        When the file doesn't exist yet, writes a fresh blob with defaults.
+        When it does (session state was seeded via ``create_session``),
+        merges the campaign-metadata keys alongside the session state
+        already on disk — ``index.json`` carries both concerns (session ≡
+        campaign). The optimizer-added keys never clobber existing session
+        state keys from ``create_session``.
+        """
         path = self._entity_path(backend_id, campaign_id)
-        if path.exists():
-            raise FileExistsError(f"Campaign already exists: {campaign_id}")
+        existing = read_json_optional(path) or {}
         now = datetime.now(UTC).isoformat()
-        data = {
+        defaults: dict[str, Any] = {
             "campaign_id": campaign_id,
-            "created_at": now,
+            "created_at": existing.get("created_at", now),
             "updated_at": now,
             "status": "active",
             "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
@@ -92,8 +102,14 @@ class CampaignStore(EntityStore):
             "best_trial_id": None,
             "baseline_accuracy": 0.0,
             "trials": [],
-            **metadata,
         }
+        # Merge order: existing session state → defaults for missing keys →
+        # explicit metadata overrides. "trials" / "n_trials" / "best_*" are
+        # preserved on replay via ``existing`` since defaults only fill gaps.
+        data = {**defaults, **existing, **metadata}
+        # ``updated_at`` is always now; ``created_at`` sticks.
+        data["updated_at"] = now
+        data["backend_id"] = backend_id
         write_json(path, data)
         return path
 
@@ -272,9 +288,10 @@ class CampaignStore(EntityStore):
         ``config_snapshot`` into the stored config before returning.
         """
         existing = self.load(backend_id, cycle_id)
-        if existing is not None:
+        has_campaign_meta = bool(existing and "trials" in existing)
+        if has_campaign_meta:
             if hot_update_keys:
-                stored_cfg = existing.get("config", {})
+                stored_cfg = existing.get("config", {}) if existing else {}
                 if stored_cfg:
                     cfg_updated = False
                     for k in hot_update_keys:
@@ -284,7 +301,7 @@ class CampaignStore(EntityStore):
                     if cfg_updated:
                         self.update(backend_id, cycle_id, {"config": stored_cfg})
                         logger.info("Updated loop-control config for %s", cycle_id)
-            resumed_from_round = len(existing.get("trials", []))
+            resumed_from_round = len((existing or {}).get("trials", []))
             if resumed_from_round:
                 logger.debug(
                     "Resuming cycle %s — %d prior round(s) on disk",
@@ -293,6 +310,7 @@ class CampaignStore(EntityStore):
                 )
             return resumed_from_round
 
+        # Fresh or session-only index.json — merge campaign metadata in.
         self.create(
             backend_id,
             cycle_id,
@@ -350,16 +368,24 @@ class CampaignStore(EntityStore):
         """Return summary for every campaign stored under this tenant.
 
         Optionally filters by ``backend_id`` (matched against the
-        ``backend_id`` field inside each metadata blob). Campaigns are
+        ``backend_id`` field inside each ``index.json``). Campaigns are
         tenant-global; the filter is a post-read pass, not a path scope.
         Pass ``""`` to list all campaigns regardless of backend.
+        Skips cycle dirs that have only session state (no campaign
+        metadata yet) — those show up once ``optimize`` runs and
+        ``resume_or_create`` merges campaign keys into ``index.json``.
         """
         campaigns_dir = self._entity_dir(backend_id)
         if not campaigns_dir.exists():
             return []
         results = []
-        for path in sorted(campaigns_dir.glob("*.json")):
-            data = read_json(path)
+        for cycle_dir in sorted(campaigns_dir.iterdir()):
+            index_path = cycle_dir / "index.json"
+            if not index_path.is_file():
+                continue
+            data = read_json(index_path)
+            if "campaign_id" not in data or "trials" not in data:
+                continue
             if backend_id and data.get("backend_id") and data["backend_id"] != backend_id:
                 continue
             results.append(
@@ -487,7 +513,8 @@ class CampaignStore(EntityStore):
 
     # ----------------------------------------------------------------------
     # Session artifacts — absorbed from the deleted ``SessionStore`` class.
-    # Session ≡ campaign (v3): session_id IS the cycle_id.
+    # Session ≡ campaign (v3): session_id IS the cycle_id; session state and
+    # campaign metadata are merged into one ``index.json`` per cycle.
     # ----------------------------------------------------------------------
 
     def _session_dir(self, backend_id: str, session_id: str) -> Path:
@@ -495,13 +522,12 @@ class CampaignStore(EntityStore):
         return self._campaign_dir(backend_id, session_id)
 
     def create_session(self, backend_id: str, state: dict[str, Any]) -> str:
-        """Create a new session (= campaign cycle). Returns the cycle_id.
+        """Mint a new cycle and persist the initial session state.
 
-        Mints a timestamp-based cycle_id, seeds the state blob with it, and
-        writes ``campaigns/{cycle_id}/session.json``. The campaign metadata
-        file is minted separately later (in ``bootstrap_cycle`` /
-        ``resume_or_create`` from the optimization runner) using the same
-        cycle_id — that is the session ≡ campaign invariant.
+        Generates a timestamp-based cycle_id and writes
+        ``campaigns/{cycle_id}/index.json`` seeded with the session state
+        blob. Campaign metadata (trials, config, baseline_accuracy, etc.)
+        is merged into the same index.json later by ``resume_or_create``.
         """
         from promptpotter.infrastructure.store.stores import generate_session_id
 
@@ -512,14 +538,20 @@ class CampaignStore(EntityStore):
         return cycle_id
 
     def save_session(self, backend_id: str, session_id: str, state: dict[str, Any]) -> None:
-        """Persist session state to ``campaigns/{cycle_id}/session.json``."""
-        path = self._session_dir(backend_id, session_id) / "session.json"
-        write_json(path, state)
+        """Merge session-state keys into the cycle's ``index.json``.
+
+        Preserves any campaign-metadata keys (trials, n_trials,
+        best_accuracy, …) that were written by ``create`` /
+        ``resume_or_create`` / ``add_trial``.
+        """
+        path = self._entity_path(backend_id, session_id)
+        existing = read_json_optional(path) or {}
+        existing.update(state)
+        write_json(path, existing)
 
     def load_session(self, backend_id: str, session_id: str) -> dict[str, Any] | None:
-        """Load session state. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "session.json"
-        return read_json_optional(path)
+        """Load merged session state + metadata. Returns None if not found."""
+        return read_json_optional(self._entity_path(backend_id, session_id))
 
     # -- Scan results ---------------------------------------------------------
 
@@ -531,7 +563,7 @@ class CampaignStore(EntityStore):
         axis_profiles: list[dict],
     ) -> None:
         """Persist sensitivity scan results for this cycle."""
-        path = self._session_dir(backend_id, session_id) / "recon_results.json"
+        path = self._session_dir(backend_id, session_id) / "recon.json"
         write_json(
             path,
             {
@@ -547,7 +579,7 @@ class CampaignStore(EntityStore):
         session_id: str,
     ) -> dict[str, Any] | None:
         """Load scan results. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "recon_results.json"
+        path = self._session_dir(backend_id, session_id) / "recon.json"
         return read_json_optional(path)
 
     # -- Campaign log ---------------------------------------------------------
@@ -558,15 +590,15 @@ class CampaignStore(EntityStore):
         session_id: str,
         section: str,
     ) -> None:
-        """Append a markdown section to the campaign log."""
-        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
+        """Append a markdown section to the campaign log (``log.md``)."""
+        path = self._session_dir(backend_id, session_id) / "log.md"
         path.parent.mkdir(parents=True, exist_ok=True)
         with open(path, "a", encoding="utf-8") as f:
             f.write(section + "\n\n")
 
     def load_log(self, backend_id: str, session_id: str) -> str:
         """Load the full campaign log. Returns empty string if not found."""
-        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
+        path = self._session_dir(backend_id, session_id) / "log.md"
         if not path.exists():
             return ""
         return path.read_text(encoding="utf-8")

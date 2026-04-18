@@ -89,7 +89,7 @@ class NotebookDisplay:
         return Path(self._store.base_dir) / "campaigns" / cid
 
     def note(self, action: str, body: str = "") -> None:
-        """Append a narrative note to ``notebook_journal.md`` for Claude.
+        """Append a narrative note to ``journal.md`` for Claude.
 
         Call from any notebook cell to record intent or observations that
         don't surface in the scalar dashboard — e.g. ``display.note(
@@ -102,7 +102,7 @@ class NotebookDisplay:
         append_journal(sdir, action, body)
 
     def render_claude_notes(self) -> None:
-        """Render ``claude_notes.md`` inline so Claude's notes appear in a cell."""
+        """Render ``notes.md`` inline so Claude's notes appear in a cell."""
         sdir = self._resolve_session_dir()
         if sdir is None:
             print(f"  {YELLOW}\u26a0 claude_notes: no active session{RESET}")

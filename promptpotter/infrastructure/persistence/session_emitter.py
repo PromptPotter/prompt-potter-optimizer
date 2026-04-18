@@ -35,18 +35,21 @@ __all__ = [
 
 
 CAMPAIGN_SESSION_ARTIFACTS = {
-    "campaign_state.json",
-    "campaign_control.json",
-    "campaign_output.log",
-    "campaign_log.md",
-    "session.json",
-    "notebook_journal.md",
-    "claude_notes.md",
+    # Emitter + create_session produce these on every campaign. ``recon.json``
+    # also lands in this dir but is a recon-path artifact, not an emitter
+    # output — so it's excluded from the parity contract.
+    "index.json",  # session state + campaign metadata (session ≡ campaign)
+    "dashboard.json",  # live scalar counters (was campaign_state.json)
+    "control.json",  # HITL control signals (was campaign_control.json)
+    "output.log",  # per-query audit log (was campaign_output.log)
+    "log.md",  # round-by-round markdown summary (was campaign_log.md)
+    "journal.md",  # user narrative (was notebook_journal.md)
+    "notes.md",  # Claude notes (was claude_notes.md)
 }
 
 
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
-    """Append a timestamped user note to ``notebook_journal.md``.
+    """Append a timestamped user note to ``journal.md``.
 
     Narrative exchange channel: the notebook user calls this to record
     what a cell just did or why. Claude reads the file to pick up intent
@@ -56,28 +59,28 @@ def append_journal(session_dir: Path, action: str, body: str = "") -> None:
     entry = f"## {ts} \u2014 {action}\n"
     if body:
         entry += f"\n{body}\n"
-    path = session_dir / "notebook_journal.md"
+    path = session_dir / "journal.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(entry + "\n")
 
 
 def append_claude_note(session_dir: Path, tag: str, body: str) -> None:
-    """Append a tagged note from Claude to ``claude_notes.md``.
+    """Append a tagged note from Claude to ``notes.md``.
 
     Tag is free-form (e.g. ``FYI``, ``RECOMMEND``, ``BLOCKER``). The
     notebook renders this file via ``NotebookDisplay.render_claude_notes()``.
     """
     ts = datetime.now(UTC).isoformat(timespec="seconds")
-    path = session_dir / "claude_notes.md"
+    path = session_dir / "notes.md"
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("a", encoding="utf-8") as f:
         f.write(f"## {ts} [{tag}]\n\n{body}\n\n")
 
 
 def read_claude_notes(session_dir: Path) -> str:
-    """Read ``claude_notes.md`` or return ``''`` if missing/empty."""
-    path = session_dir / "claude_notes.md"
+    """Read ``notes.md`` or return ``''`` if missing/empty."""
+    path = session_dir / "notes.md"
     if not path.exists():
         return ""
     return path.read_text(encoding="utf-8")
@@ -172,9 +175,9 @@ class CampaignPersistenceEmitter:
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
     ) -> None:
-        self.state_path = session_dir / "campaign_state.json"
-        self.log_path = session_dir / "campaign_output.log"
-        self.log_md_path = session_dir / "campaign_log.md"
+        self.state_path = session_dir / "dashboard.json"
+        self.log_path = session_dir / "output.log"
+        self.log_md_path = session_dir / "log.md"
 
         self._patience_max: int = config.l1_patience
         self._state: dict[str, Any] = _make_initial_state(
@@ -189,8 +192,8 @@ class CampaignPersistenceEmitter:
 
         # Bidirectional exchange channel — user narrative + Claude notes.
         # Created empty so parity holds from session mint; helpers append.
-        (session_dir / "notebook_journal.md").touch()
-        (session_dir / "claude_notes.md").touch()
+        (session_dir / "journal.md").touch()
+        (session_dir / "notes.md").touch()
 
         # Append-only log — hold one handle for the emitter's lifetime so
         # 100+ writes/round don't each open() the file.  Closed in ``finalize``.
@@ -218,7 +221,7 @@ class CampaignPersistenceEmitter:
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if session_dir is unknown.
 
-        Reads the prior ``campaign_state.json`` (if present) to carry UI
+        Reads the prior ``dashboard.json`` (if present) to carry UI
         counters across resumes — optimizer resume is a separate concern
         via ``LoopState.restore_from_trial``.
 
@@ -236,7 +239,7 @@ class CampaignPersistenceEmitter:
         session_dir = Path(config.project_root) / "campaigns" / config.session_id
 
         resume_from: dict[str, Any] | None = None
-        prior_state = session_dir / "campaign_state.json"
+        prior_state = session_dir / "dashboard.json"
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
@@ -377,7 +380,7 @@ class CampaignPersistenceEmitter:
 
         # Surface parse-time validation failures to the diagnostic file.
         # Workstream A flags these on the candidate report; users read them
-        # from campaign_state.last_scoring_metadata without grepping logs.
+        # from dashboard.last_scoring_metadata without grepping logs.
         if scores.get("invalid") and scores.get("validation_failures"):
             failures = scores["validation_failures"]
             first = failures[0] if failures else {}

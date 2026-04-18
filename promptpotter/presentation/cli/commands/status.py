@@ -15,9 +15,9 @@ from promptpotter.presentation.cli.session import load_session
 async def cmd_status(args: argparse.Namespace) -> CommandResult:
     """Emit raw JSON from the canonical session artifacts.
 
-    ``campaign_state.json`` is the single source of truth for the live
-    dashboard (see ``infrastructure/persistence/session_emitter.py``). The
-    webapp reads it directly; this command just cats it alongside the control
+    ``dashboard.json`` is the single source of truth for the live dashboard
+    (see ``infrastructure/persistence/session_emitter.py``). The webapp
+    reads it directly; this command just cats it alongside the control
     file and optimize_result so a human can ``jq`` the same shape.
     """
     ctx = load_session(args)
@@ -29,7 +29,7 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
         "phase": ctx.state["phase"],
     }
     for key, filename in (
-        ("campaign_state", "campaign_state.json"),
+        ("dashboard", "dashboard.json"),
         ("control", CONTROL_FILENAME),
         ("optimize_result", "optimize_result.json"),
     ):
