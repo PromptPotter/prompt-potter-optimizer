@@ -11,7 +11,7 @@ import json
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import CampaignConfig
 
 __all__ = ["TUNING_KEYS", "cycle_config_identity", "cycle_hash_suffix"]
 
@@ -24,8 +24,6 @@ __all__ = ["TUNING_KEYS", "cycle_config_identity", "cycle_hash_suffix"]
 #
 # In strict mode (for publication), all params are included in the hash so
 # any deviation creates a distinct experiment for reproducibility.
-#
-# Also used by resume logic to hot-update stored configs on existing cycles.
 TUNING_KEYS = frozenset(
     {
         # Loop control — how long/aggressively the loop runs
@@ -46,9 +44,10 @@ TUNING_KEYS = frozenset(
 
 
 def cycle_config_identity(
-    config: LoopConfig,
+    config: CampaignConfig,
     baseline_rendered: str,
     dataset: list[dict],
+    active_steps: list[str],
     *,
     strict: bool = False,
 ) -> str:
@@ -60,22 +59,23 @@ def cycle_config_identity(
     or changing model between runs does not create a new cycle.  Strict
     mode hashes every parameter for publication reproducibility.
 
-    Infrastructure fields (``backend_url``, ``project_root``, …) are
-    always excluded.
+    ``active_steps`` is passed explicitly — keeps ``domain/`` free of
+    imports from ``application/`` (``SessionEnv`` owns the pipeline schema).
     """
+    opt = config.optimization
     payload_dict: dict[str, Any] = {
-        "max_rounds": config.max_rounds,
-        "l1_patience": config.l1_patience,
-        "n_variants": config.n_variants,
-        "creativity": config.creativity,
-        "improvement_threshold": config.improvement_threshold,
-        "model": config.model,
+        "max_rounds": opt.max_rounds,
+        "l1_patience": opt.l1_patience,
+        "n_variants": opt.n_variants,
+        "creativity": opt.creativity,
+        "improvement_threshold": opt.improvement_threshold,
+        "model": config.optimizer_llm.model,
         "sp_budget_ttest": config.sp_budget_ttest,
-        "seed": config.seed,
-        "l2_patience": config.l2_patience,
-        "l3_patience": config.l3_patience,
-        "degradation_threshold": config.degradation_threshold,
-        "active_steps": list(config.pipeline_schema.active_steps) if config.pipeline_schema else [],
+        "seed": opt.seed,
+        "l2_patience": opt.l2_patience,
+        "l3_patience": opt.l3_patience,
+        "degradation_threshold": opt.degradation_threshold,
+        "active_steps": list(active_steps),
         "baseline_rendered": baseline_rendered,
         "dataset_pairs": sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset),
     }
@@ -88,18 +88,14 @@ def cycle_config_identity(
 
 
 def cycle_hash_suffix(
-    config: LoopConfig,
+    config: CampaignConfig,
     baseline_rendered: str,
     dataset: list[dict],
+    active_steps: list[str],
     *,
     strict: bool = False,
 ) -> str:
-    """Return the 12-hex content hash without the ``cycle_`` prefix.
-
-    Shared by ``generate_session_id`` so the session dir
-    (``{timestamp}_{suffix}``) and the cycle dir (``cycle_{suffix}``) pair
-    via a common signature.
-    """
-    return cycle_config_identity(config, baseline_rendered, dataset, strict=strict).removeprefix(
-        "cycle_"
-    )
+    """Return the 12-hex content hash without the ``cycle_`` prefix."""
+    return cycle_config_identity(
+        config, baseline_rendered, dataset, active_steps, strict=strict
+    ).removeprefix("cycle_")

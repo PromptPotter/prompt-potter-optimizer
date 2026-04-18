@@ -72,7 +72,7 @@ def auto_mint_session(
             "experiment_id": experiment_id,
             "dataset_name": session.dataset_name,
         },
-        campaign_config=dict(campaign_config),
+        campaign_config=campaign_config.model_dump(),
         pipeline_params={},
         active_steps=[],
     )

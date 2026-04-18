@@ -22,7 +22,6 @@ from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
 
@@ -85,10 +84,15 @@ def read_claude_notes(session_dir: Path) -> str:
 
 
 def _make_initial_state(
-    config: LoopConfig,
     resume_from: dict[str, Any] | None,
     cycle_id: str | None,
+    *,
+    max_rounds: int,
     patience_max: int,
+    active_nodes: list[str],
+    model: str,
+    n_variants: int,
+    sp_budget_ttest: int,
 ) -> dict[str, Any]:
     """Build the scalar-only dashboard dict. Resume keys carry across cycles."""
     r = resume_from or {}
@@ -97,7 +101,7 @@ def _make_initial_state(
         "workflow": "optimize",
         "phase": "init",
         "round": 0,
-        "max_rounds": config.max_rounds or 999,
+        "max_rounds": max_rounds,
         "candidate": "",
         "query": "",
         "patience": f"0/{patience_max}",
@@ -114,7 +118,7 @@ def _make_initial_state(
         "avg_query_time_s": 0.0,
         "eta_s": 0.0,
         # Pipeline
-        "active_nodes": list(config.pipeline_schema.active_steps) if config.pipeline_schema else [],
+        "active_nodes": list(active_nodes),
         "excluded_nodes": [],
         "terminated_at": None,
         "cache_hit_rate": 0.0,
@@ -145,9 +149,9 @@ def _make_initial_state(
         "last_query_elapsed_s": 0.0,
         "wallclock_serialized_at": None,
         # Config
-        "model": config.model or "",
-        "n_variants": config.n_variants,
-        "sp_budget_ttest": config.sp_budget_ttest,
+        "model": model,
+        "n_variants": n_variants,
+        "sp_budget_ttest": sp_budget_ttest,
     }
 
 
@@ -177,8 +181,14 @@ class CampaignPersistenceEmitter:
     def __init__(
         self,
         session_dir: Path,
-        config: LoopConfig,
         *,
+        max_rounds: int,
+        l1_patience: int,
+        active_nodes: list[str],
+        model: str,
+        n_variants: int,
+        sp_budget_ttest: int,
+        pause_before_scoring: bool,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
     ) -> None:
@@ -186,9 +196,16 @@ class CampaignPersistenceEmitter:
         self.log_path = session_dir / "output.log"
         self.log_md_path = session_dir / "log.md"
 
-        self._patience_max: int = config.l1_patience
+        self._patience_max: int = l1_patience
         self._state: dict[str, Any] = _make_initial_state(
-            config, resume_from, cycle_id, self._patience_max
+            resume_from,
+            cycle_id,
+            max_rounds=max_rounds,
+            patience_max=self._patience_max,
+            active_nodes=active_nodes,
+            model=model,
+            n_variants=n_variants,
+            sp_budget_ttest=sp_budget_ttest,
         )
         self._workflow_start = time.monotonic()
         self._round_start = time.monotonic()
@@ -196,7 +213,7 @@ class CampaignPersistenceEmitter:
         self._rc = _RoundCounters()
 
         self._persist()
-        ensure_control_file(session_dir, pause_before_scoring=config.pause_before_scoring)
+        ensure_control_file(session_dir, pause_before_scoring=pause_before_scoring)
 
         # Bidirectional exchange channel — user narrative + Claude notes.
         # Created empty so parity holds from session mint; helpers append.
@@ -221,10 +238,18 @@ class CampaignPersistenceEmitter:
     @classmethod
     def for_session(
         cls,
-        config: LoopConfig,
         baseline_accuracy: float,
         cycle_id: str | None,
         *,
+        project_root: str,
+        session_id: str,
+        max_rounds: int,
+        l1_patience: int,
+        active_nodes: list[str],
+        model: str,
+        n_variants: int,
+        sp_budget_ttest: int,
+        pause_before_scoring: bool,
         resumed_from_round: int | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if session_dir is unknown.
@@ -238,13 +263,13 @@ class CampaignPersistenceEmitter:
         the surviving trials are clamped so the UI doesn't show phantom
         rounds.
         """
-        if not (config.project_root and config.session_id):
+        if not (project_root and session_id):
             return None
 
         # v3 layout: session ≡ campaign; ``project_root`` is already scoped
         # to the tenant by ``build_stores``. Path construction delegated to
         # ``CampaignStore.campaign_dir_for`` so the layout lives in one place.
-        session_dir = campaign_dir_for(Path(config.project_root), config.session_id)
+        session_dir = campaign_dir_for(Path(project_root), session_id)
 
         resume_from: dict[str, Any] | None = None
         prior_state = session_dir / "dashboard.json"
@@ -266,7 +291,18 @@ class CampaignPersistenceEmitter:
                 resume_from["best_round"] = 0
                 resume_from["best"] = 0.0
 
-        return cls(session_dir, config, resume_from=resume_from, cycle_id=cycle_id)
+        return cls(
+            session_dir,
+            max_rounds=max_rounds,
+            l1_patience=l1_patience,
+            active_nodes=active_nodes,
+            model=model,
+            n_variants=n_variants,
+            sp_budget_ttest=sp_budget_ttest,
+            pause_before_scoring=pause_before_scoring,
+            resume_from=resume_from,
+            cycle_id=cycle_id,
+        )
 
     # -- Callbacks -------------------------------------------------------------
 
@@ -283,7 +319,7 @@ class CampaignPersistenceEmitter:
             config = data["config"]
             s["cycle_id"] = loop_env.cycle_id
             s["baseline"] = loop_state.current_accuracy
-            self._patience_max = config.l1_patience
+            self._patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self._patience_max}"
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s["round"] = data.get("round", s["round"])

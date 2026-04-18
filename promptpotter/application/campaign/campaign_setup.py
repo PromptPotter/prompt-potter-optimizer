@@ -17,6 +17,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.recon.recon_report import ReconBrief
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -30,7 +31,6 @@ from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
@@ -48,7 +48,16 @@ __all__ = [
 
 @dataclass
 class SessionEnv:
-    """Return value from ``init_services()``."""
+    """Return value from ``init_services()``.
+
+    Carries session-scoped identity + infrastructure + runtime-derived
+    state.  Fields ``session_id``, ``project_root``, ``recon_brief``, and
+    ``pipeline_params`` are populated as the session progresses —
+    ``configure_and_apply_pipeline`` sets ``pipeline_params``; ``auto_mint_session``
+    / CLI ``init`` set ``session_id`` and ``project_root``; the recon path
+    sets ``recon_brief``.  No user-authored knob lives here — those live
+    on ``CampaignConfig``.
+    """
 
     store: Stores
     backend_id: str
@@ -61,6 +70,10 @@ class SessionEnv:
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
     dataset_name: str | None = None
+    session_id: str = ""
+    project_root: str = ""
+    recon_brief: ReconBrief | None = None
+    pipeline_params: dict = field(default_factory=dict)
 
 
 def load_baseline_prompt(
@@ -273,6 +286,7 @@ async def init_services(
         synced=False,
         dataset_name=dataset_name,
         tenant=TenantContext(tenant_id=tenant_id),
+        project_root=str(project_root),
     )
 
     # --- Dataset store path (preferred when available) ---
@@ -484,24 +498,23 @@ async def run_recon_and_persist(
     )
 
     if not session_id:
-        from promptpotter.application.campaign.config import LoopConfig
         from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
-        tmp_cfg = LoopConfig.from_campaign_config(
-            campaign_config,
-            backend_id=session.backend_id,
-            pipeline_schema=session.pipeline_schema,
-            dataset_name=session.dataset_name or "",
-        )
+        active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
         session_id = auto_mint_session(
             session,
             campaign_config,
             cycle_hash=cycle_hash_suffix(
-                tmp_cfg, baseline.render(), dataset, strict=tmp_cfg.strict_cycle_identity
+                campaign_config,
+                baseline.render(),
+                dataset,
+                active_steps,
+                strict=campaign_config.optimization.strict_cycle_identity,
             ),
             dataset_size=len(dataset),
             experiment_id=experiment_id or None,
         )
+    session.session_id = session_id
 
     # Configure pipeline (ensures filtered schema is applied with overrides baked in)
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log)
@@ -533,7 +546,7 @@ async def run_recon_and_persist(
         "sample_size": recon_sample_size,
         "pipeline_schema": ps,
         "experiment_id": experiment_id,
-        "scoring_formula": campaign_config.get("scoring"),
+        "scoring_formula": campaign_config.scoring,
     }
     if progress_cb is not None:
         scan_kwargs["progress_cb"] = progress_cb

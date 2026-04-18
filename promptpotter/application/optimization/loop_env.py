@@ -31,6 +31,9 @@ class LoopEnv:
     bootstraps without a persistent campaign directory (tests, notebook
     one-shots).  Everything else is populated by ``run_optimization``
     before the round loop begins.
+
+    Zero-signal filter settings live on ``CampaignConfig.optimization``
+    now — reached via the ``config`` parameter at call sites.
     """
 
     scoring_ctx: ScoringEnv | None = None
@@ -40,5 +43,3 @@ class LoopEnv:
     scoring_dataset: list[dict[str, Any]] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
-    zero_signal_filter_enabled: bool = False
-    zero_signal_filter_min_observations: int = 5

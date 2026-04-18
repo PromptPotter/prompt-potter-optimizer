@@ -11,7 +11,7 @@ import argparse
 import json
 from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.infrastructure.store import Stores, build_stores
 
@@ -38,7 +38,9 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        return cast("CampaignConfig", self.state["campaign_config"])
+        from promptpotter.application.campaign.config import load_campaign_config
+
+        return load_campaign_config(self.state["campaign_config"])
 
     @property
     def task_context(self) -> dict | None:
