@@ -201,7 +201,7 @@ async def resume_or_build_diagnostic(
         serialize_adaptive_recon_plan,
     )
 
-    ss = campaign_config.get("adaptive_recon", {})
+    ss = campaign_config.adaptive_recon.model_dump()
     if variant_library is None:
         variant_library = load_variant_library()
 
@@ -209,7 +209,7 @@ async def resume_or_build_diagnostic(
         baseline.instruction,
         variant_library,
         ss,
-        seed=ss.get("seed", 42),
+        seed=campaign_config.adaptive_recon.seed,
     )
 
     match = store.recon_plans.find_reusable_plan(backend_id, plan_id)
@@ -466,15 +466,18 @@ def finalize_scan(
     *,
     campaign_rounds: list[dict] | None = None,
     campaign_config: CampaignConfig | None = None,
+    existing_pipeline_params: dict | None = None,
     baseline_opt: OptSearchPoint | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> FinalizedScan:
     """Pick scan winner and, if campaign state is supplied, seed the campaign.
 
     Composes the best per-axis value from positively-improving axes into a
-    single ``JobSearchPoint``. When both ``campaign_config`` and
-    ``campaign_rounds`` are provided, also mutates
-    ``campaign_config["pipeline_params"]`` and appends a search round entry.
+    single ``JobSearchPoint``. Returns the merged pipeline_params on
+    ``FinalizedScan.merged_pipeline_params`` — caller writes it to
+    ``session.pipeline_params`` (we do NOT mutate user config).  Pass the
+    current ``session.pipeline_params`` as ``existing_pipeline_params`` so
+    the merge keeps already-filtered ``steps``.
     """
     improving = _improving_axes(axis_profiles)
     best_sp = _compose_winner(
@@ -486,13 +489,12 @@ def finalize_scan(
 
     merged_pp = None
     if best_sp.pipeline_params:
-        existing_pp: dict = campaign_config.get("pipeline_params") or {}
+        existing_pp: dict = existing_pipeline_params or {}
         merged = {**existing_pp, **best_sp.pipeline_params}
         if "steps" in existing_pp:
             merged["steps"] = existing_pp["steps"]
-            for node_name in set(campaign_config.get("exclude_nodes") or []):
+            for node_name in set(campaign_config.exclude_nodes or []):
                 merged.pop(node_name, None)
-        campaign_config["pipeline_params"] = merged
         merged_pp = merged
 
     best_row = recon_df.loc[recon_df["accuracy"].idxmax()] if not recon_df.empty else None

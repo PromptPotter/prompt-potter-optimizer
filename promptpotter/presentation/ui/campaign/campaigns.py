@@ -217,11 +217,13 @@ def load_and_apply_experiment(
     campaign_config: CampaignConfig,
     experiment_id: str,
     pipeline_params: dict | None = None,
-) -> dict | None:
-    """Load stored experiment config, apply overrides, return pipeline_params.
+) -> tuple[CampaignConfig, dict | None]:
+    """Load stored experiment config, apply overrides, return (updated_config, pipeline_params).
 
     Convenience wrapper used by the notebook's experiment dashboard cell.
-    Returns updated *pipeline_params* (or the original if nothing changed).
+    Returns a fresh ``CampaignConfig`` with stored scalars merged in, plus
+    updated *pipeline_params* (or the original if nothing changed). Caller
+    should write ``session.pipeline_params = pipeline_params`` themselves.
     """
     stored_cfg = load_stored_campaign_config(
         session.store,
@@ -229,11 +231,11 @@ def load_and_apply_experiment(
         experiment_id,
     )
     if stored_cfg:
-        pp_override = apply_stored_overrides(campaign_config, stored_cfg)
+        campaign_config, pp_override = apply_stored_overrides(campaign_config, stored_cfg)
         if pp_override:
             pipeline_params = pp_override
         print(f"  Loaded config from experiment {experiment_id}")
-    return pipeline_params
+    return campaign_config, pipeline_params
 
 
 def show_experiment_dashboard(
@@ -259,12 +261,14 @@ def show_experiment_dashboard(
 
     # Apply experiment overrides when resuming
     if experiment_id and session is not None and campaign_config is not None:
-        pipeline_params = load_and_apply_experiment(
+        campaign_config, pipeline_params = load_and_apply_experiment(
             session,
             campaign_config,
             experiment_id,
             pipeline_params,
         )
+        if pipeline_params:
+            session.pipeline_params = pipeline_params
 
     # --- Resolve short ID ---
     full_id = None

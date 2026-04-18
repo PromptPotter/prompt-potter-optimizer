@@ -10,7 +10,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.callbacks import RunListener
-from promptpotter.application.campaign.config import LoopConfig
+from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.critique import (
@@ -41,6 +41,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -72,7 +73,8 @@ async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
     env: LoopEnv,
-    config: LoopConfig,
+    config: CampaignConfig,
+    session: SessionEnv,
     on_phase=None,
     n_eval_queries: int = 0,
     *,
@@ -82,9 +84,11 @@ async def _generate_or_load_candidates(
     """Load persisted candidates or generate fresh ones via LLM."""
     # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
     # Cap n_variants to 3× config to prevent L2 from blowing up eval budget
+    opt = config.optimization
+    model = config.optimizer_llm.model
     opt_params = state.opt_sp.optimizer_params
-    _n_variants = min(opt_params.get("n_variants", config.n_variants), config.n_variants * 3)
-    _creativity = opt_params.get("creativity", config.creativity)
+    _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
+    _creativity = opt_params.get("creativity", opt.creativity)
     prompt_preview = state.opt_sp.render()[:120]
 
     assert state.current_sp is not None
@@ -97,8 +101,8 @@ async def _generate_or_load_candidates(
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
         creativity=_creativity,
-        model=config.model or "(default)",
-        has_recon_brief=config.recon_brief is not None,
+        model=model or "(default)",
+        has_recon_brief=session.recon_brief is not None,
         has_critique=bool(state.opt_sp.memory.critique_text),
         pipeline_params=state.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in state.opt_sp.prompt_field_dict().items() if v},
@@ -106,7 +110,7 @@ async def _generate_or_load_candidates(
 
     if env.campaign_store and env.cycle_id:
         persisted = env.campaign_store.load_round_candidates(
-            config.backend_id,
+            session.backend_id,
             env.cycle_id,
             round_num,
         )
@@ -149,13 +153,13 @@ async def _generate_or_load_candidates(
             _n_variants,
             _creativity,
             client,
-            model=config.model,
-            recon_brief=config.recon_brief,
+            model=model,
+            recon_brief=session.recon_brief,
             is_probe_round=state.probe_next_round,
             scan_compact=(round_num > 0),
             failure_analysis=state.failure_analysis,
             search_memory_digest=sm_ctx,
-            pipeline_schema=config.pipeline_schema,
+            pipeline_schema=session.pipeline_schema,
             obs=obs,
             obs_campaign_id=env.obs_campaign_id,
             round_num=round_num,
@@ -163,7 +167,7 @@ async def _generate_or_load_candidates(
 
     if env.campaign_store and env.cycle_id:
         env.campaign_store.save_round_candidates(
-            config.backend_id,
+            session.backend_id,
             env.cycle_id,
             round_num,
             candidates,
@@ -187,19 +191,21 @@ async def _run_critique(
     scoring_result: L1ScoringResult,
     round_num: int,
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
+    schema: PipelineSchema | None,
 ) -> str:
     """Run critique analysis on evaluation results. Returns formatted critique text."""
-    if not config.enable_critique or not scoring_result.winner_results:
+    if not config.optimization.enable_critique or not scoring_result.winner_results:
         return ""
 
     crit_llm = _llm_client.get_llm_client()
-    agent = CritiqueAgent(crit_llm, model=config.model)
+    agent = CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
 
     cctx = RoundSnapshot.from_round_state(
         state,
         scoring_result,
         config,
+        schema,
         round_num=round_num,
         search_memory_digest=(
             state.search_memory.to_critique_digest() if state.search_memory else None
@@ -215,7 +221,8 @@ async def _score_and_select(
     state: LoopState,
     env: LoopEnv,
     scoring_dataset: list[dict],
-    config: LoopConfig,
+    config: CampaignConfig,
+    session: SessionEnv,
     callbacks: RunListener,
     obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
@@ -223,6 +230,7 @@ async def _score_and_select(
     """Evaluate candidates, run critique, select winner."""
     from promptpotter.application.optimization.nodes.score import l1_score
 
+    opt = config.optimization
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -231,7 +239,7 @@ async def _score_and_select(
         n_candidates=len(candidates),
         n_queries=len(scoring_dataset),
         current_best_accuracy=state.current_accuracy,
-        improvement_threshold=config.improvement_threshold,
+        improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
     )
 
@@ -246,10 +254,10 @@ async def _score_and_select(
 
         _probe_queries = {d.get("query") for d in scoring_dataset}
         _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
-        if _subset and config.pipeline_schema:
+        if _subset and session.pipeline_schema:
             _subset_scores = compute_composite_score(
                 cast(list[QueryResult], _subset),
-                config.pipeline_schema,
+                session.pipeline_schema,
                 round_scorer=env.scoring_ctx.round_scorer if env.scoring_ctx else None,
             )
             _baseline_acc = _subset_scores["accuracy"]
@@ -288,11 +296,11 @@ async def _score_and_select(
             current_best,
             env.scoring_ctx,
             pipeline_params=state.current_sp.pipeline_params,
-            improvement_threshold=config.improvement_threshold,
+            improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
-            elimination_n_min=config.elimination_n_min,
-            elimination_alpha=config.elimination_alpha,
+            elimination_n_min=opt.elimination_n_min,
+            elimination_alpha=opt.elimination_alpha,
             obs_campaign_id=env.obs_campaign_id,
             round_num=round_num,
         )
@@ -309,10 +317,10 @@ async def _score_and_select(
                     improved=scoring_result.improved,
                 )
 
-        scoring_result.critique_text = await _run_critique(scoring_result, round_num, state, config)
-        scoring_result.thinking_styles = sample_thinking_styles(
-            n=3, seed=config.seed + round_num + 1
+        scoring_result.critique_text = await _run_critique(
+            scoring_result, round_num, state, config, session.pipeline_schema
         )
+        scoring_result.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed + round_num + 1)
         if obs and scoring_result.critique_text:
             with graceful("CritiqueWritten emit failed"):
                 obs.emit_write_point(
@@ -343,7 +351,8 @@ async def execute_round(
     state: LoopState,
     env: LoopEnv,
     scoring_dataset: list[dict],
-    config: LoopConfig,
+    config: CampaignConfig,
+    session: SessionEnv,
     callbacks: RunListener,
     degradation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
@@ -359,13 +368,14 @@ async def execute_round(
         state,
         env,
         config,
+        session,
         callbacks.on_phase,
         n_eval_queries=len(scoring_dataset),
         obs=obs,
         search_memory=search_memory,
     )
 
-    if config.pause_before_scoring:
+    if config.optimization.pause_before_scoring:
         raise PauseForReviewError(candidates, round_num, pause_point="before_scoring")
 
     scoring_result = await _score_and_select(
@@ -375,6 +385,7 @@ async def execute_round(
         env,
         scoring_dataset,
         config,
+        session,
         callbacks,
         obs=obs,
         degradation_checks=degradation_checks,
@@ -385,12 +396,12 @@ async def execute_round(
     state.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
 
     # Compute failure analysis for next round's L1 context (Wave 1c)
-    if scoring_result.winner_results and config.pipeline_schema:
+    if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
         state.failure_analysis = compile_failure_analysis(
             scoring_result.winner_results,
-            config.pipeline_schema,
+            session.pipeline_schema,
         )
     else:
         state.failure_analysis = None
@@ -458,8 +469,8 @@ async def execute_round(
                     improved=scoring_result.improved,
                     winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
                     candidate_scores=scoring_result.candidate_scores,
-                    model=config.model or "",
-                    n_variants=config.n_variants,
+                    model=config.optimizer_llm.model or "",
+                    n_variants=config.optimization.n_variants,
                     optimizer_templates=["meta_scan_aware", "critique"],
                     evaluators=dict(scoring_result.winner_evaluators),
                 )

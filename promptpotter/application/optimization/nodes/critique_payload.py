@@ -17,7 +17,7 @@ from promptpotter.application.scoring.metrics import extract_sample_diagnostics,
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
@@ -67,7 +67,8 @@ class RoundSnapshot:
         cls,
         state: LoopState,
         scoring_result: L1ScoringResult,
-        config: LoopConfig,
+        config: CampaignConfig,
+        schema: PipelineSchema | None,
         *,
         round_num: int,
         search_memory_digest: dict | None = None,
@@ -123,10 +124,10 @@ class RoundSnapshot:
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
             pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
-            candidate_keys=candidate_keys_from_schema(config.pipeline_schema),
-            pipeline_schema=config.pipeline_schema,
-            degradation_threshold=config.critique_degradation_threshold,
-            near_miss_ratio=config.critique_near_miss_ratio,
+            candidate_keys=candidate_keys_from_schema(schema),
+            pipeline_schema=schema,
+            degradation_threshold=config.optimization.critique_degradation_threshold,
+            near_miss_ratio=config.optimization.critique_near_miss_ratio,
             search_memory_digest=sm_ctx,
             runtime_failures=[
                 {

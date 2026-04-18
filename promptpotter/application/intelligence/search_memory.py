@@ -637,15 +637,17 @@ class SearchMemory:
         )
         from promptpotter.application.scoring.metrics import compile_query_difficulty
 
-        # Refresh + correlations + save
+        # Refresh + correlations + save. `backend_id` comes from the scoring
+        # context (same source as the loop); `config` carries only user knobs.
+        backend_id = env.scoring_ctx.backend_id if env.scoring_ctx else ""
         store = env.scoring_ctx.store if env.scoring_ctx else None
-        if store and self.refresh(store, config.backend_id):
+        if store and backend_id and self.refresh(store, backend_id):
             if round_num > 0 and round_num % 5 == 0 and self.recompute_failure_group_correlations():
                 logger.info(
                     "SearchMemory: recomputed failure group correlations at round %d",
                     round_num,
                 )
-            self.save(Path(store.base_dir) / config.backend_id / "search_memory.json")
+            self.save(Path(store.base_dir) / backend_id / "search_memory.json")
 
         # Adaptive scoring-set swap (needs 3+ rounds of history)
         if round_num < 2:
@@ -658,7 +660,7 @@ class SearchMemory:
             env.scoring_dataset,
             qd,
             full_dataset,
-            seed=config.seed + round_num,
+            seed=config.optimization.seed + round_num,
         )
         if not adapt_info.get("unchanged"):
             logger.info("Adaptive scoring-set: %s", adapt_info)

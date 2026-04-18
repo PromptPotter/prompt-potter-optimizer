@@ -19,10 +19,6 @@ import asyncio
 import json
 import logging
 import sys
-from typing import TYPE_CHECKING, cast
-
-if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -86,12 +82,15 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
     backend_id = session.backend_id  # may have been derived from dataset_name
 
-    profile = session.store.backends.load_connector_profile(backend_id) or {}
-    campaign_config = {**profile, **file_config}
+    from promptpotter.application.campaign.config import load_campaign_config as _load_cfg
 
-    pipeline_params = configure_pipeline(session, cast("CampaignConfig", campaign_config))
+    profile = session.store.backends.load_connector_profile(backend_id) or {}
+    raw_config = {**profile, **file_config}
+    campaign_config = _load_cfg(raw_config)
+
+    pipeline_params = configure_pipeline(session, campaign_config)
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
-    excluded = campaign_config.get("exclude_nodes", [])
+    excluded = list(campaign_config.exclude_nodes)
 
     train_data: list[dict] = []
     if args.excel_path:
@@ -103,20 +102,17 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     baseline = load_cli_baseline(session)
     dataset = train_data
 
-    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
-    _tmp_cfg = LoopConfig.from_campaign_config(
-        cast("CampaignConfig", campaign_config),
-        backend_id=backend_id,
-        pipeline_schema=session.pipeline_schema,
-        dataset_name=dataset_name or "",
+    active_steps_for_hash = (
+        list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
     )
     cycle_hash = cycle_hash_suffix(
-        _tmp_cfg,
+        campaign_config,
         baseline.render(),
         dataset,
-        strict=_tmp_cfg.strict_cycle_identity,
+        active_steps_for_hash,
+        strict=campaign_config.optimization.strict_cycle_identity,
     )
 
     state = new_session_state(
@@ -126,7 +122,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "experiment_id": args.experiment_id,
             "dataset_name": dataset_name,
         },
-        campaign_config=campaign_config,
+        campaign_config=campaign_config.model_dump(),
         pipeline_params=pipeline_params,
         active_steps=active,
     )
@@ -136,6 +132,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 
     session_id = session.store.campaigns.create_session(backend_id, state, cycle_hash)
     session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
+    session.session_id = session_id
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
     session.store.campaigns.append_log(
@@ -191,9 +188,7 @@ async def cmd_recon(args: argparse.Namespace) -> CommandResult:
 
     baseline = load_cli_baseline(session)
     sample_size = (
-        args.sample_size
-        if args.sample_size is not None
-        else ctx.campaign_config.get("recon_sample_size", 0)
+        args.sample_size if args.sample_size is not None else ctx.campaign_config.recon_sample_size
     )
     _recon_bl, _baseline_opt, recon_df, _axis_profiles = await run_recon_and_persist(
         baseline,
@@ -248,14 +243,17 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
 
     recon_baseline_sp = load_cli_baseline(session)
     campaign_rounds: list = []
-    finalize_scan(
+    finalized = finalize_scan(
         recon_df,
         axis_profiles,
         recon_baseline_sp.to_job_search_point(),
         ctx.recon_variants,
         campaign_rounds=campaign_rounds,
         campaign_config=ctx.campaign_config,
+        existing_pipeline_params=session.pipeline_params,
     )
+    if finalized.merged_pipeline_params:
+        session.pipeline_params = finalized.merged_pipeline_params
 
     if campaign_rounds:
         ctx.state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
@@ -275,7 +273,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.campaign_setup import load_recon_brief
-    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
@@ -291,6 +288,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     campaign_config = ctx.campaign_config
 
     session = await init_services_cli(**ctx.init_params)
+    session.session_id = ctx.session_id
     pipeline_params = configure_pipeline(session, campaign_config)
     train_data = session.queries or []
 
@@ -324,18 +322,20 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     # prior dashboard.json for resume continuity; baseline accuracy is
     # stamped later during the INIT exit phase.
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0) or 0.0
-    prelim_config = LoopConfig.from_campaign_config(
-        campaign_config,
-        backend_id=ctx.backend_id,
-        project_root=str(session.store.base_dir),
-        session_id=ctx.session_id,
-        pipeline_schema=session.pipeline_schema,
-        dataset_name=session.dataset_name or "",
-    )
+    opt = campaign_config.optimization
+    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
     emitter = CampaignPersistenceEmitter.for_session(
-        prelim_config,
         pre_baseline_acc,
         ctx.state.get("cycle_id"),
+        project_root=str(session.store.base_dir),
+        session_id=ctx.session_id,
+        max_rounds=opt.max_rounds or 999,
+        l1_patience=opt.l1_patience,
+        active_nodes=active_steps,
+        model=campaign_config.optimizer_llm.model or "",
+        n_variants=opt.n_variants,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        pause_before_scoring=opt.pause_before_scoring,
         resumed_from_round=resume_from_round,
     )
     control_reader = CampaignControlReader(session_dir).check
@@ -355,7 +355,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
     recon_brief = load_recon_brief(session, ctx.session_id, ctx.recon_variants, baseline_acc)
 
-    campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
+    # Clear HITL pause flag after baseline completes so resume doesn't re-pause.
+    campaign_config.optimization.pause_before_scoring = False
     ctx.save_phase("optimizing")
 
     set_round_recorder(RoundRecorder(session_dir / "rounds"))

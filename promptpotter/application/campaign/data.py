@@ -211,7 +211,7 @@ async def prepare_scoring_context(
     missing (caller pre-dates the sharing refactor).
     """
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
-    dataset_name = campaign_config.get("dataset_name") if campaign_config else None
+    dataset_name = campaign_config.dataset_name if campaign_config else None
     baseline = load_baseline_prompt(
         experiment_extract or {},
         prompt_node_names=prompt_nodes,
@@ -226,7 +226,7 @@ async def prepare_scoring_context(
             eval_dataset = dataset
             label = f"Baseline eval on full dataset ({len(eval_dataset)} queries)"
         elif baseline.render().strip():
-            sp_budget = int(campaign_config.get("sp_budget_ttest") or 15)
+            sp_budget = campaign_config.sp_budget_ttest or 15
             eval_dataset = dataset[:sp_budget] if len(dataset) > sp_budget else dataset
             label = (
                 f"Auto-baseline on t-test slice ({len(eval_dataset)}/{len(dataset)} "
@@ -238,7 +238,7 @@ async def prepare_scoring_context(
 
         if eval_dataset:
             logger.info(label)
-            scoring_block = campaign_config.get("scoring")
+            scoring_block = campaign_config.scoring
             if isinstance(scoring_block, dict):
                 query_formula = scoring_block.get("per_query")
             else:

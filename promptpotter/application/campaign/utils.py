@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.shared.errors import graceful
@@ -38,35 +38,41 @@ class ConfigDiff:
     current: Any
 
 
+_OVERRIDE_LOCATIONS: dict[str, tuple[str, ...]] = {
+    # flat key -> path on CampaignConfig
+    "l1_patience": ("optimization", "l1_patience"),
+    "max_rounds": ("optimization", "max_rounds"),
+    "n_variants": ("optimization", "n_variants"),
+    "creativity": ("optimization", "creativity"),
+    "model": ("optimizer_llm", "model"),
+    "sp_budget_ttest": ("sp_budget_ttest",),
+}
+
+
 def apply_stored_overrides(
     campaign_config: CampaignConfig,
     stored_cfg: dict,
-) -> dict | None:
-    """Merge stored experiment config into campaign_config (in-place).
+) -> tuple[CampaignConfig, dict | None]:
+    """Merge stored experiment config into a new ``CampaignConfig`` copy.
 
-    Returns updated pipeline_params if stored, else None.
+    Returns ``(updated_config, stored_pipeline_params)``.  Does NOT mutate
+    the input — user config stays user config.  Callers apply
+    ``stored_pipeline_params`` (when non-None) by writing
+    ``session.pipeline_params = pp``.
     """
-    _OVERRIDE_KEYS: dict[str, tuple[str, ...]] = {
-        "l1_patience": ("optimization",),
-        "max_rounds": ("optimization",),
-        "n_variants": ("optimization",),
-        "creativity": ("optimization",),
-        "model": ("optimizer_llm",),
-        "sp_budget_ttest": (),
-    }
-    for key, path in _OVERRIDE_KEYS.items():
+    patch = campaign_config.model_dump()
+    for key, path in _OVERRIDE_LOCATIONS.items():
         val = stored_cfg.get(key)
-        if val is not None:
-            target: dict[str, Any] = cast(dict[str, Any], campaign_config)
-            for p in path:
-                target = target.setdefault(p, {})
-            target[key] = val
+        if val is None:
+            continue
+        target = patch
+        for p in path[:-1]:
+            target = target.setdefault(p, {})
+        target[path[-1]] = val
+    updated = CampaignConfig.model_validate(patch)
 
     stored_pp = stored_cfg.get("pipeline_params")
-    if stored_pp:
-        campaign_config["pipeline_params"] = stored_pp
-        return stored_pp
-    return None
+    return updated, (stored_pp if stored_pp else None)
 
 
 def save_campaign_winner(
@@ -97,7 +103,7 @@ def save_campaign_winner(
         "campaign_rounds": len(campaign_rounds),
         "baseline_accuracy": baseline_acc,
         "improvement": (winner_acc - baseline_acc) if baseline_acc is not None else None,
-        "config": campaign_config,
+        "config": campaign_config.model_dump(),
         "saved_at": datetime.now(UTC).isoformat(),
     }
 
@@ -127,38 +133,42 @@ def save_campaign_winner(
     }
 
 
+# Surface fields used in ``diff_campaign_config``. Tracks the same scalars
+# that ``_OVERRIDE_LOCATIONS`` covers + a couple of tuning-facing ones.
+_DIFF_KEYS: dict[str, tuple[str, ...]] = {
+    "max_rounds": ("optimization", "max_rounds"),
+    "l1_patience": ("optimization", "l1_patience"),
+    "n_variants": ("optimization", "n_variants"),
+    "creativity": ("optimization", "creativity"),
+    "improvement_threshold": ("optimization", "improvement_threshold"),
+    "model": ("optimizer_llm", "model"),
+    "sp_budget_ttest": ("sp_budget_ttest",),
+    "seed": ("optimization", "seed"),
+}
+
+
+def _read_current(config: CampaignConfig, path: tuple[str, ...]) -> Any:
+    value: Any = config
+    for p in path:
+        value = getattr(value, p, None)
+        if value is None:
+            return None
+    return value
+
+
 def diff_campaign_config(
     stored_config: dict,
     campaign_config: CampaignConfig,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, ConfigDiff]:
     """Compute parameter differences between stored and current campaign config."""
-    from promptpotter.application.campaign.config import LoopConfig
-
-    current = LoopConfig.from_campaign_config(
-        campaign_config,
-        pipeline_schema=pipeline_schema,
-    ).model_dump()
-
-    keys = [
-        "max_rounds",
-        "l1_patience",
-        "n_variants",
-        "creativity",
-        "improvement_threshold",
-        "model",
-        "sp_budget_ttest",
-        "seed",
-    ]
-
     diffs: dict[str, ConfigDiff] = {}
-    for k in keys:
-        sv = stored_config.get(k)
-        cv = current.get(k)
+    for flat_key, path in _DIFF_KEYS.items():
+        sv = stored_config.get(flat_key)
+        cv = _read_current(campaign_config, path)
         if sv != cv:
-            diffs[k] = ConfigDiff(stored=sv, current=cv)
+            diffs[flat_key] = ConfigDiff(stored=sv, current=cv)
 
-    # Compare pipeline params (derived from schema)
     sp = stored_config.get("pipeline_params")
     cp = pipeline_schema.to_pipeline_params() if pipeline_schema else None
     if sp != cp:
@@ -199,20 +209,20 @@ def resolve_active_campaign_id(
     Used by display layer to detect which stored campaign matches the active
     notebook/CLI configuration.
     """
-    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.domain.cycle_identity import cycle_config_identity
     from promptpotter.domain.opt_search_point import OptSearchPoint
 
     try:
-        config = LoopConfig.from_campaign_config(
-            campaign_config,
-            pipeline_schema=pipeline_schema,
-        )
         bl_rendered = ""
         if baseline_prompt_fields:
             bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
+        active_steps = list(pipeline_schema.active_steps) if pipeline_schema else []
         return cycle_config_identity(
-            config, bl_rendered, dataset, strict=config.strict_cycle_identity
+            campaign_config,
+            bl_rendered,
+            dataset,
+            active_steps,
+            strict=campaign_config.optimization.strict_cycle_identity,
         )
     except Exception:
         logger.debug("Could not compute active campaign ID", exc_info=True)

@@ -149,9 +149,11 @@ class CampaignStore(EntityStore):
     def bootstrap_cycle(
         cls,
         config: Any,
+        session: Any,
         baseline_render: str,
         baseline_accuracy: float,
         dataset: list[dict[str, Any]],
+        active_steps: list[str],
         cycle_id_override: str | None,
         *,
         resume_from_round_override: int | None = None,
@@ -167,22 +169,26 @@ class CampaignStore(EntityStore):
         """
         from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
 
-        if not (config.project_root and config.backend_id):
+        if not (session.project_root and session.backend_id):
             return None, None, 0
         try:
             # project_root points at the tenant root when built via build_stores.
-            store = cls(Path(config.project_root))
+            store = cls(Path(session.project_root))
             resolved = cycle_id_override or cycle_config_identity(
-                config, baseline_render, dataset, strict=config.strict_cycle_identity
+                config,
+                baseline_render,
+                dataset,
+                active_steps,
+                strict=config.optimization.strict_cycle_identity,
             )
             if resume_from_round_override is not None:
                 store.rewind_to_round(
-                    config.backend_id,
+                    session.backend_id,
                     resolved,
                     resume_from_round_override,
                 )
             resumed_from = store.resume_or_create(
-                config.backend_id,
+                session.backend_id,
                 resolved,
                 config_snapshot=config.model_dump(mode="json"),
                 baseline_accuracy=baseline_accuracy,

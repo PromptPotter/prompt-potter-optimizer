@@ -43,7 +43,7 @@ def _per_query_formula(campaign_config: CampaignConfig | None) -> str | None:
 
     Accepts the legacy string shorthand or the twin-form dict.
     """
-    raw = campaign_config.get("scoring") if campaign_config else None
+    raw = campaign_config.scoring if campaign_config else None
     if isinstance(raw, dict):
         val = raw.get("per_query")
         return val if isinstance(val, str) else None
@@ -75,6 +75,7 @@ def show_feedback_preflight(
     dataset: list,
     campaign_config: CampaignConfig,
     *,
+    session: SessionEnv | None = None,
     pipeline_schema: PipelineSchema | None = None,
     recon_df=None,
     axis_profiles=None,
@@ -87,14 +88,9 @@ def show_feedback_preflight(
     three sections: configuration summary, round pipeline walkthrough,
     and scan context preview.
 
-    Call this in a separate notebook cell before ``run_optimization_notebook()``
-    so the user can review config before committing to a run.
-
     Returns:
         ReconBrief (or None) for passing to the run cell.
     """
-    from promptpotter.application.campaign.config import LoopConfig
-
     # Build scan context from scan data when available
     recon_brief = None
     if recon_df is not None and axis_profiles is not None and recon_variants is not None:
@@ -115,12 +111,6 @@ def show_feedback_preflight(
             difficulty_summary=difficulty_summary,
         )
 
-    config = LoopConfig.from_campaign_config(
-        campaign_config,
-        recon_brief=recon_brief,
-        pipeline_schema=pipeline_schema,
-    )
-
     _bl = _extract_campaign_baseline(campaign_rounds)
     bl = {
         "baseline_ps": _bl.baseline_ps,
@@ -130,17 +120,28 @@ def show_feedback_preflight(
     }
 
     _print_preflight_sections(
-        config,
+        campaign_config,
+        session,
         bl,
         dataset,
-        exclude_nodes=(campaign_config or {}).get("exclude_nodes", []),
+        exclude_nodes=list(campaign_config.exclude_nodes),
         recon_brief=recon_brief,
+        pipeline_schema=pipeline_schema or (session.pipeline_schema if session else None),
     )
 
     return recon_brief
 
 
-def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], recon_brief=None):
+def _print_preflight_sections(
+    config: CampaignConfig,
+    session: SessionEnv | None,
+    bl: dict,
+    dataset: list,
+    *,
+    exclude_nodes: list[str],
+    recon_brief=None,
+    pipeline_schema: PipelineSchema | None = None,
+) -> None:
     """Print three-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
@@ -152,10 +153,14 @@ def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], 
     _instr_preview = _instr_preview or "(empty)"
     m = compute_preflight_metrics(
         config,
+        session,
         len(dataset),
         exclude_nodes=exclude_nodes,
         has_recon_brief=recon_brief is not None,
     )
+
+    opt = config.optimization
+    model_name = config.optimizer_llm.model or "(default)"
 
     # ── Section 1: Configuration Summary ──
     print()
@@ -165,16 +170,16 @@ def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], 
     print(f"  Baseline accuracy      : {baseline_acc:.1%}")
     print(f"  Baseline prompt        : {_instr_preview}")
     print("  " + "-" * 66)
-    print(f"  Max rounds             : {config.max_rounds or 'unlimited'}")
-    print(f"  Candidates per round   : {config.n_variants}")
+    print(f"  Max rounds             : {opt.max_rounds or 'unlimited'}")
+    print(f"  Candidates per round   : {opt.n_variants}")
     print(f"  Queries per eval       : {m.queries_label}")
-    print(f"  Improvement threshold  : {config.improvement_threshold:.1%}")
-    print(f"  Patience (L1)          : {config.l1_patience} rounds")
+    print(f"  Improvement threshold  : {opt.improvement_threshold:.1%}")
+    print(f"  Patience (L1)          : {opt.l1_patience} rounds")
     print(f"  L2 (refine context)    : {m.l2_label}")
     print(f"  L3 (modify plan)       : {m.l3_label}")
     print("  " + "-" * 66)
-    print(f"  Candidate model        : {config.model or '(default)'}")
-    print(f"  Creativity             : {config.creativity}")
+    print(f"  Candidate model        : {model_name}")
+    print(f"  Creativity             : {opt.creativity}")
     print(f"  Pipeline               : {m.pipeline_label}")
     if m.nodes_detail:
         print(f"    Nodes                : {m.nodes_detail}")
@@ -198,7 +203,7 @@ def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], 
 
     n_failures = count_failures(baseline_results) if baseline_results else 0
     print(f"  {CYAN}2. FAILURE ANALYSIS{RESET}")
-    print(f"     Up to {config.max_failures} failures extracted (currently {n_failures} available)")
+    print(f"     Up to {opt.max_failures} failures extracted (currently {n_failures} available)")
 
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
@@ -231,8 +236,8 @@ def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], 
 
     # Step 4: LLM candidate generation
     print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")
-    print(f"     Model: {config.model or '(default)'}  |  Temperature: {config.creativity}")
-    print(f"     Candidates: {config.n_variants}")
+    print(f"     Model: {model_name}  |  Temperature: {opt.creativity}")
+    print(f"     Candidates: {opt.n_variants}")
     if recon_brief:
         print("     Output: prompt + pipeline_params_override per candidate")
     else:
@@ -241,31 +246,31 @@ def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], 
     # Step 5: Backend evaluation
     print(f"  {CYAN}5. BACKEND EVALUATION{RESET}")
     print(f"     Queries per candidate: {m.queries_label}")
-    scoring = "composite (pipeline-aware)" if config.pipeline_schema else "accuracy"
+    scoring = "composite (pipeline-aware)" if pipeline_schema else "accuracy"
     print(f"     Scoring: {scoring}")
 
     # Step 6: Winner selection
     print(f"  {CYAN}6. WINNER SELECTION{RESET}")
-    print(f"     Criterion: best accuracy >= baseline + {config.improvement_threshold:.1%}")
+    print(f"     Criterion: best accuracy >= baseline + {opt.improvement_threshold:.1%}")
 
     # Step 7: Loop control
     print(f"  {CYAN}7. LOOP CONTROL{RESET}")
     print(
-        f"     Patience: {config.l1_patience} stalls → stop  |  L2: {m.l2_label}  |  L3: {m.l3_label}"
+        f"     Patience: {opt.l1_patience} stalls → stop  |  L2: {m.l2_label}  |  L3: {m.l3_label}"
     )
 
     print("  " + "-" * 66)
     if m.est_calls is not None:
         print(
             f"  Est. backend calls     : ~{m.est_calls}"
-            f"  ({config.max_rounds}r, {config.n_variants} candidates,"
+            f"  ({opt.max_rounds}r, {opt.n_variants} candidates,"
             f" {m.eff_queries}q, sequential elimination)"
         )
     else:
-        per_round = m.eff_queries + (config.n_variants - 1) * int(m.eff_queries * 0.6)
+        per_round = m.eff_queries + (opt.n_variants - 1) * int(m.eff_queries * 0.6)
         print(
             f"  Est. backend calls/round: ~{per_round}"
-            f"  ({config.n_variants} candidates,"
+            f"  ({opt.n_variants} candidates,"
             f" {m.eff_queries}q, sequential elimination)"
         )
 
@@ -355,7 +360,7 @@ async def run_optimization_notebook(
         print(f"  {YELLOW}⚠ Scan context not available — running without scan data.{RESET}")
         print("    Run the preflight cell to rebuild recon_brief from scan variables.")
 
-    l1_patience = campaign_config.get("optimization", {}).get("l1_patience", 3)
+    l1_patience = campaign_config.optimization.l1_patience
     display = NotebookDisplay(
         campaign_rounds=campaign_rounds,
         baseline_acc=baseline_acc,

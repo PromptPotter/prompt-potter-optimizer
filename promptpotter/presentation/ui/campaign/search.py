@@ -262,8 +262,8 @@ def preview_advisor_prompt(
 
     if session is not None:
         pipeline_schema = session.pipeline_schema
-        pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
-        exclude_nodes = campaign_config.get("exclude_nodes") if campaign_config else None
+        pipeline_params = session.pipeline_params or None
+        exclude_nodes = list(campaign_config.exclude_nodes) if campaign_config else None
 
         variant_library = load_variant_library()
         if pipeline_params and pipeline_schema:
@@ -369,8 +369,8 @@ async def recon_advisor(
     """
     # --- Internalized prep (matches resume_or_build_diagnostic pattern) ---
     pipeline_schema = session.pipeline_schema
-    pipeline_params = campaign_config.get("pipeline_params")
-    user_excluded = campaign_config.get("exclude_nodes", [])
+    pipeline_params = session.pipeline_params or None
+    user_excluded = list(campaign_config.exclude_nodes)
 
     print("SCAN ADVISOR -- pipeline-aware sensitivity setup")
     print("-" * 50)
@@ -399,8 +399,7 @@ async def recon_advisor(
             print(f"  Task: {task_description[:80].strip()}")
     print(f"  Calling {model or '?'} ...")
 
-    optimizer_llm = campaign_config.get("optimizer_llm", {})
-    max_tokens = optimizer_llm.get("max_tokens", 2000)
+    max_tokens = campaign_config.optimizer_llm.max_tokens
 
     advisory = await _advise_recon(
         pipeline_schema=pipeline_schema,
@@ -503,7 +502,7 @@ async def resume_or_build_diagnostic(
         (plan_id, search_baseline, diagnostic, cached_profiles, variant_library)
     """
     # Prepare variant library: base + recon_variants merge
-    pipeline_params = campaign_config.get("pipeline_params")
+    pipeline_params = session.pipeline_params or None
     variant_library = load_variant_library()
     if pipeline_params and session.pipeline_schema:
         variant_library = filter_variant_library(

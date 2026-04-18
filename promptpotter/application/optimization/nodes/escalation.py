@@ -27,7 +27,7 @@ from promptpotter.infrastructure.tracing.events import L2Applied, L3Applied
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.phases import StopReason
     from promptpotter.infrastructure.tracing import ObservabilityBridge
@@ -194,15 +194,14 @@ class EmptyOutputCheck:
         )
 
 
-def build_degradation_checks(config: LoopConfig) -> list[Any]:
+def build_degradation_checks(config: CampaignConfig) -> list[Any]:
     """Return the list of enabled per-query checks (degradation + empty-output)."""
     checks: list[Any] = []
-    deg_threshold = getattr(config, "degradation_threshold", 0.0)
-    if deg_threshold > 0:
-        checks.append(DegradationCheck(threshold=deg_threshold))
-    empty_threshold = getattr(config, "empty_output_threshold", 0.0)
-    if empty_threshold > 0:
-        checks.append(EmptyOutputCheck(threshold=empty_threshold))
+    opt = config.optimization
+    if opt.degradation_threshold > 0:
+        checks.append(DegradationCheck(threshold=opt.degradation_threshold))
+    if opt.empty_output_threshold > 0:
+        checks.append(EmptyOutputCheck(threshold=opt.empty_output_threshold))
     return checks
 
 
@@ -213,15 +212,16 @@ def build_degradation_checks(config: LoopConfig) -> list[Any]:
 
 def _maybe_emit_backend_warning(
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
     """Emit a one-shot backend advisory once degradation resets pile up."""
     mem = state.opt_sp.memory
-    if mem.backend_warning_emitted or config.backend_warning_threshold <= 0:
+    threshold = config.optimization.backend_warning_threshold
+    if mem.backend_warning_emitted or threshold <= 0:
         return
-    if mem.degradation_reset_count < config.backend_warning_threshold:
+    if mem.degradation_reset_count < threshold:
         return
 
     mem.backend_warning_emitted = True
@@ -256,7 +256,7 @@ def _maybe_emit_backend_warning(
 async def _run_layer_transition(
     phase: CampaignPhase,
     state: LoopState,
-    config: LoopConfig,
+    schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -282,7 +282,7 @@ async def _run_layer_transition(
     state.adopt_transition(
         transition.opt_search_point,
         transition.pipeline_params,
-        schema=config.pipeline_schema,
+        schema=schema,
     )
     if obs is not None:
         event_cls: type = L2Applied if phase == CampaignPhase.REFINE_STRATEGY else L3Applied
@@ -299,7 +299,8 @@ async def _run_layer_transition(
 
 async def _do_l2_transition(
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
+    pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
@@ -329,10 +330,10 @@ async def _do_l2_transition(
         return await layer_transitions.refine_strategy(
             state.opt_sp,
             client,
-            model=config.model,
-            temperature=config.l2_temperature,
+            model=config.optimizer_llm.model,
+            temperature=config.optimization.l2_temperature,
             pipeline_params=current_pp,
-            pipeline_schema=config.pipeline_schema,
+            pipeline_schema=pipeline_schema,
             escalation_check_result=escalation_check_result,
             search_memory=state.search_memory,
             rounds=state.rounds,
@@ -358,7 +359,7 @@ async def _do_l2_transition(
     transition = await _run_layer_transition(
         CampaignPhase.REFINE_STRATEGY,
         state,
-        config,
+        pipeline_schema,
         round_num,
         on_phase,
         obs=obs,
@@ -384,7 +385,8 @@ async def _do_l2_transition(
 
 async def _do_l3_transition(
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
+    pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
@@ -417,10 +419,10 @@ async def _do_l3_transition(
             state.opt_sp,
             l2_history,
             client,
-            model=config.model,
-            temperature=config.l3_temperature,
+            model=config.optimizer_llm.model,
+            temperature=config.optimization.l3_temperature,
             pipeline_params=current_pp,
-            pipeline_schema=config.pipeline_schema,
+            pipeline_schema=pipeline_schema,
             search_memory=state.search_memory,
         )
 
@@ -435,7 +437,7 @@ async def _do_l3_transition(
     transition = await _run_layer_transition(
         CampaignPhase.MODIFY_PLAN,
         state,
-        config,
+        pipeline_schema,
         round_num,
         on_phase,
         obs=obs,
@@ -459,7 +461,8 @@ async def _do_l3_transition(
 
 async def _exhaust_or_reset(
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
+    pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
@@ -490,6 +493,7 @@ async def _exhaust_or_reset(
     await _do_l2_transition(
         state,
         config,
+        pipeline_schema,
         round_num,
         on_phase,
         obs=obs,
@@ -501,7 +505,8 @@ async def _exhaust_or_reset(
 
 async def escalate_l2(
     state: LoopState,
-    config: LoopConfig,
+    config: CampaignConfig,
+    pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     on_checkpoint: Callable[[str], str | None] | None = None,
@@ -520,14 +525,16 @@ async def escalate_l2(
     from promptpotter.application.optimization.nodes.round_execution import PauseForReviewError
     from promptpotter.application.optimization.phases import StopReason
 
+    opt = config.optimization
     esc = state.escalation
     esc.l2.record_outcome(state.best_composite)
 
-    l2_stalled = config.l2_patience is not None and esc.l2.stall_count >= config.l2_patience
+    l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
     if not l2_stalled:
         await _do_l2_transition(
             state,
             config,
+            pipeline_schema,
             round_num,
             on_phase,
             obs=obs,
@@ -543,10 +550,11 @@ async def escalate_l2(
         return None
 
     # L2 stalled, L3 disabled → exhaust or reset
-    if not config.enable_l3:
+    if not opt.enable_l3:
         return await _exhaust_or_reset(
             state,
             config,
+            pipeline_schema,
             round_num,
             on_phase,
             layer="L2",
@@ -561,10 +569,16 @@ async def escalate_l2(
 
     # L2 stalled, L3 enabled — track L3 stall
     esc.l3.record_outcome(state.best_composite)
-    l3_exhausted = config.l3_patience is not None and esc.l3.stall_count >= config.l3_patience
+    l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
     if not l3_exhausted:
         await _do_l3_transition(
-            state, config, round_num, on_phase, obs=obs, obs_campaign_id=obs_campaign_id
+            state,
+            config,
+            pipeline_schema,
+            round_num,
+            on_phase,
+            obs=obs,
+            obs_campaign_id=obs_campaign_id,
         )
         return None
 
@@ -572,6 +586,7 @@ async def escalate_l2(
     return await _exhaust_or_reset(
         state,
         config,
+        pipeline_schema,
         round_num,
         on_phase,
         layer="L3",

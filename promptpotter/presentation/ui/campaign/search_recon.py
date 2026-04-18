@@ -401,7 +401,6 @@ async def run_sensitivity_recon(
         (recon_baseline_sp, recon_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
-    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.campaign.session_state import auto_mint_session
     from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
@@ -409,21 +408,21 @@ async def run_sensitivity_recon(
 
     assert session is not None
     if not session_id:
-        tmp_cfg = LoopConfig.from_campaign_config(
-            campaign_config,
-            backend_id=session.backend_id,
-            pipeline_schema=session.pipeline_schema,
-            dataset_name=session.dataset_name or "",
-        )
+        active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
         session_id = auto_mint_session(
             session,
             campaign_config,
             cycle_hash=cycle_hash_suffix(
-                tmp_cfg, baseline.render(), dataset, strict=tmp_cfg.strict_cycle_identity
+                campaign_config,
+                baseline.render(),
+                dataset,
+                active_steps,
+                strict=campaign_config.optimization.strict_cycle_identity,
             ),
             dataset_size=len(dataset),
             experiment_id=experiment_id or None,
         )
+        session.session_id = session_id
 
     recon_baseline_sp, search_baseline = await decompose_recon_baseline(
         baseline,
@@ -451,7 +450,7 @@ def _extract_per_query_formula(campaign_config: Any) -> str | None:
     Accepts either a string (legacy shorthand) or a twin-form dict
     ``{"per_query": ..., "per_round": ...}``.
     """
-    raw = campaign_config.get("scoring") if campaign_config else None
+    raw = campaign_config.scoring if campaign_config else None
     if isinstance(raw, dict):
         val = raw.get("per_query")
         return val if isinstance(val, str) else None
