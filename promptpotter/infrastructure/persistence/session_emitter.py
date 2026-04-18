@@ -25,7 +25,13 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
 
-__all__ = ["CAMPAIGN_SESSION_ARTIFACTS", "CampaignPersistenceEmitter"]
+__all__ = [
+    "CAMPAIGN_SESSION_ARTIFACTS",
+    "CampaignPersistenceEmitter",
+    "append_claude_note",
+    "append_journal",
+    "read_claude_notes",
+]
 
 
 CAMPAIGN_SESSION_ARTIFACTS = {
@@ -34,7 +40,47 @@ CAMPAIGN_SESSION_ARTIFACTS = {
     "campaign_output.log",
     "campaign_log.md",
     "session.json",
+    "notebook_journal.md",
+    "claude_notes.md",
 }
+
+
+def append_journal(session_dir: Path, action: str, body: str = "") -> None:
+    """Append a timestamped user note to ``notebook_journal.md``.
+
+    Narrative exchange channel: the notebook user calls this to record
+    what a cell just did or why. Claude reads the file to pick up intent
+    that doesn't show up in the scalar dashboard.
+    """
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
+    entry = f"## {ts} \u2014 {action}\n"
+    if body:
+        entry += f"\n{body}\n"
+    path = session_dir / "notebook_journal.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(entry + "\n")
+
+
+def append_claude_note(session_dir: Path, tag: str, body: str) -> None:
+    """Append a tagged note from Claude to ``claude_notes.md``.
+
+    Tag is free-form (e.g. ``FYI``, ``RECOMMEND``, ``BLOCKER``). The
+    notebook renders this file via ``NotebookDisplay.render_claude_notes()``.
+    """
+    ts = datetime.now(UTC).isoformat(timespec="seconds")
+    path = session_dir / "claude_notes.md"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("a", encoding="utf-8") as f:
+        f.write(f"## {ts} [{tag}]\n\n{body}\n\n")
+
+
+def read_claude_notes(session_dir: Path) -> str:
+    """Read ``claude_notes.md`` or return ``''`` if missing/empty."""
+    path = session_dir / "claude_notes.md"
+    if not path.exists():
+        return ""
+    return path.read_text(encoding="utf-8")
 
 
 def _make_initial_state(
@@ -140,6 +186,11 @@ class CampaignPersistenceEmitter:
 
         self._persist()
         ensure_control_file(session_dir, pause_before_scoring=config.pause_before_scoring)
+
+        # Bidirectional exchange channel — user narrative + Claude notes.
+        # Created empty so parity holds from session mint; helpers append.
+        (session_dir / "notebook_journal.md").touch()
+        (session_dir / "claude_notes.md").touch()
 
         # Append-only log — hold one handle for the emitter's lifetime so
         # 100+ writes/round don't each open() the file.  Closed in ``finalize``.

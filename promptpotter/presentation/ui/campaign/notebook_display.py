@@ -8,16 +8,22 @@ directly — no adapter needed. Pass an instance as ``display=`` to
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.infrastructure.persistence.session_emitter import (
+    append_journal,
+    read_claude_notes,
+)
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import wilson_ci
 
 from .notebook_phase import _CycleDisplayState, _dispatch_phase
 from .notebook_primitives import (
     CYAN,
+    DIM,
     GREEN,
     RED,
     RESET,
@@ -39,6 +45,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.store import Stores
 
 
 class NotebookDisplay:
@@ -53,6 +60,8 @@ class NotebookDisplay:
         pipeline_schema: PipelineSchema | None,
         recon_brief: ReconBrief | None = None,
         scoring_formula: str | None = None,
+        store: Stores | None = None,
+        backend_id: str = "",
     ) -> None:
         self.campaign_rounds = campaign_rounds
         self.baseline_acc = baseline_acc
@@ -63,6 +72,48 @@ class NotebookDisplay:
         self.state.recon_brief = recon_brief
         self.query_counter = 0
         self.scoring_formula = scoring_formula
+        # Bidirectional exchange with Claude via session-tier artifacts.
+        # Resolved lazily each call so auto-mint during the run is picked up.
+        self._store = store
+        self._backend_id = backend_id
+
+    def _resolve_session_dir(self) -> Path | None:
+        """Return the active session directory, or None if not yet minted."""
+        if not self._store or not self._backend_id:
+            return None
+        _, sid = self._store.sessions.read_active_pointer()
+        if not sid:
+            return None
+        return Path(self._store.base_dir) / self._backend_id / "sessions" / sid
+
+    def note(self, action: str, body: str = "") -> None:
+        """Append a narrative note to ``notebook_journal.md`` for Claude.
+
+        Call from any notebook cell to record intent or observations that
+        don't surface in the scalar dashboard — e.g. ``display.note(
+        "skipping recon", "axes already known")``.
+        """
+        sdir = self._resolve_session_dir()
+        if sdir is None:
+            print(f"  {YELLOW}\u26a0 note: no active session \u2014 skipping journal write{RESET}")
+            return
+        append_journal(sdir, action, body)
+
+    def render_claude_notes(self) -> None:
+        """Render ``claude_notes.md`` inline so Claude's notes appear in a cell."""
+        sdir = self._resolve_session_dir()
+        if sdir is None:
+            print(f"  {YELLOW}\u26a0 claude_notes: no active session{RESET}")
+            return
+        content = read_claude_notes(sdir).rstrip()
+        w = 74
+        if not content:
+            print(f"  {DIM}(no claude notes yet){RESET}")
+            return
+        print(f"  {_box_top('CLAUDE NOTES', width=w)}")
+        for line in content.split("\n"):
+            print(f"  {_box_line(line, width=w)}")
+        print(f"  {_box_bottom(width=w)}")
 
     def on_phase(self, event: PhaseEvent) -> None:
         _dispatch_phase(event, self.state)

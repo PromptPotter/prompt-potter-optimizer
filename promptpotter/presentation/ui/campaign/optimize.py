@@ -363,6 +363,8 @@ async def run_optimization_notebook(
         pipeline_schema=session.pipeline_schema,
         recon_brief=recon_brief,
         scoring_formula=_per_query_formula(campaign_config),
+        store=store,
+        backend_id=backend_id,
     )
 
     # Resolve explicit experiment_id to full cycle_id
