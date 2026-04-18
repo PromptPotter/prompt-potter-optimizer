@@ -218,7 +218,6 @@ def _maybe_apply_zero_signal_filter(
     with graceful("Zero-signal filter failed"):
         excluded = apply_zero_signal_exclusions(
             store=env.scoring_ctx.store,
-            backend_id=config.backend_id,
             dataset_name=config.dataset_name,
             memory=memory,
             active_dataset=dataset,

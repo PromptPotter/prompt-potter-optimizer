@@ -159,11 +159,14 @@ class BackendStore:
     """File I/O for backend registration and synced API responses.
 
     Backends live under ``library/backends/{backend_id}/`` — peer entities
-    within the tenant, not outer axes themselves.
+    within the tenant, not outer axes themselves. Named datasets live
+    outside the tenant tree at ``{datasets_root}/{name}/cache.json`` so
+    they survive ``.promptpotter/`` resets.
     """
 
-    def __init__(self, base_dir: Path):
+    def __init__(self, base_dir: Path, datasets_root: Path):
         self._base_dir = base_dir
+        self._datasets_root = datasets_root
 
     def _backends_root(self) -> Path:
         return self._base_dir / "library" / "backends"
@@ -262,21 +265,23 @@ class BackendStore:
             )
         return items
 
-    # -- datasets (absorbed from DatasetStore) --------------------------------
+    # -- datasets (repo-adjacent, gitignored) ----------------------------------
+    # Datasets are identified by name alone, not by backend. Caches live at
+    # ``{datasets_root}/{name}/cache.json`` next to each dataset's
+    # pipeline.json / campaign.json, and survive ``.promptpotter/`` resets.
 
-    def _datasets_dir(self, backend_id: str) -> Path:
-        return self._backend_dir(backend_id) / "datasets"
+    def _dataset_cache_path(self, name: str) -> Path:
+        validate_path_component(name)
+        return self._datasets_root / name / "cache.json"
 
     def save_dataset(
         self,
-        backend_id: str,
         name: str,
         items: list[dict],
         *,
         source_file: str = "",
     ) -> Path:
         """Write a named dataset to disk."""
-        validate_path_component(name)
         data: dict[str, Any] = {
             "name": name,
             "created_at": datetime.now(UTC).isoformat(),
@@ -284,20 +289,16 @@ class BackendStore:
             "row_count": len(items),
             "items": items,
         }
-        path = self._datasets_dir(backend_id) / f"{name}.json"
+        path = self._dataset_cache_path(name)
         write_json(path, data)
         return path
 
-    def load_dataset(self, backend_id: str, name: str) -> dict[str, Any] | None:
+    def load_dataset(self, name: str) -> dict[str, Any] | None:
         """Load a named dataset. Returns ``None`` if not found."""
-        validate_path_component(name)
-        return read_json_optional(
-            self._datasets_dir(backend_id) / f"{name}.json",
-        )
+        return read_json_optional(self._dataset_cache_path(name))
 
     def exclude_dataset_items(
         self,
-        backend_id: str,
         name: str,
         exclusions: list[dict[str, Any]],
     ) -> int:
@@ -311,8 +312,7 @@ class BackendStore:
         Returns the number of items actually moved. Items whose query is not
         in the active list are silently skipped (idempotent).
         """
-        validate_path_component(name)
-        data = self.load_dataset(backend_id, name)
+        data = self.load_dataset(name)
         if data is None:
             return 0
 
@@ -347,13 +347,11 @@ class BackendStore:
         data["items"] = remaining
         data["excluded"] = excluded
         data["row_count"] = len(remaining)
-        path = self._datasets_dir(backend_id) / f"{name}.json"
-        write_json(path, data)
+        write_json(self._dataset_cache_path(name), data)
         return moved
 
     def restore_dataset_items(
         self,
-        backend_id: str,
         name: str,
         queries: list[str] | None = None,
     ) -> int:
@@ -362,8 +360,7 @@ class BackendStore:
         If ``queries`` is None, restores everything. Returns the number of
         items actually restored.
         """
-        validate_path_component(name)
-        data = self.load_dataset(backend_id, name)
+        data = self.load_dataset(name)
         if data is None:
             return 0
 
@@ -388,8 +385,7 @@ class BackendStore:
         data["items"] = items
         data["excluded"] = keep
         data["row_count"] = len(items)
-        path = self._datasets_dir(backend_id) / f"{name}.json"
-        write_json(path, data)
+        write_json(self._dataset_cache_path(name), data)
         return restored
 
     # -- connector profile (persistent per-backend defaults) -------------------
@@ -489,20 +485,24 @@ class Stores:
 def build_stores(
     projects_root: Path | str | None = None,
     tenant_id: str = DEFAULT_TENANT_ID,
+    datasets_root: Path | str | None = None,
 ) -> Stores:
     """Assemble a :class:`Stores` bundle rooted under a tenant.
 
     ``projects_root`` defaults to ``<repo_root>/.promptpotter/projects``.
     ``tenant_id`` defaults to ``"default"`` — the single-user CLI tenant.
-    Multi-tenant webapp picks a tenant at auth time.
+    ``datasets_root`` defaults to ``<repo_root>/datasets`` — named dataset
+    caches live there to survive ``.promptpotter/`` resets. Tests pass
+    ``tmp_path`` to isolate from the real repo tree.
     """
     validate_path_component(tenant_id)
     root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
     tenant_dir = root / tenant_id
+    ds_root = Path(datasets_root) if datasets_root else _REPO_ROOT / "datasets"
     return Stores(
         base_dir=tenant_dir,
         tenant_id=tenant_id,
-        backends=BackendStore(tenant_dir),
+        backends=BackendStore(tenant_dir, ds_root),
         campaigns=CampaignStore(tenant_dir),
         dataset_runs=DatasetRunStore(tenant_dir),
         recon_plans=PlanStore(tenant_dir),

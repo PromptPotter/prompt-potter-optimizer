@@ -405,7 +405,6 @@ async def prepare_scoring_context(
 
 def prepare_datasets(
     store: Stores,
-    backend_id: str,
     excel_path: str | Path | None = None,
     *,
     force: bool = False,
@@ -422,7 +421,7 @@ def prepare_datasets(
     if excel_path:
         print(f"Loading ground truth from {Path(excel_path).name} ...")
 
-    result = _prepare_datasets(store, backend_id, excel_path, force=force)
+    result = _prepare_datasets(store, excel_path, force=force)
 
     print(f"\n{'=' * 50}")
     print(f"  Train              : {len(result.splits.get('train', []))} queries")

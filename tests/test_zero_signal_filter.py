@@ -43,46 +43,43 @@ def test_dead_queries_respects_min_observations() -> None:
 
 
 def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
-    store = build_stores(tmp_path)
-    backend = "bx"
+    store = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
     items = [
         {"query": "a", "ground_truth": "A"},
         {"query": "b", "ground_truth": "B"},
         {"query": "c", "ground_truth": "C"},
     ]
-    store.backends.save_dataset(backend, "train", items)
+    store.backends.save_dataset("train", items)
 
     moved = store.backends.exclude_dataset_items(
-        backend,
         "train",
         [{"query": "b", "reason": "zero_signal", "hit_rate": 0.0, "observations": 7}],
     )
     assert moved == 1
 
-    data = store.backends.load_dataset(backend, "train")
+    data = store.backends.load_dataset("train")
     assert data is not None
     assert [d["query"] for d in data["items"]] == ["a", "c"]
     assert len(data["excluded"]) == 1
     assert data["excluded"][0]["item"]["query"] == "b"
     assert data["excluded"][0]["reason"] == "zero_signal"
 
-    restored = store.backends.restore_dataset_items(backend, "train")
+    restored = store.backends.restore_dataset_items("train")
     assert restored == 1
-    data = store.backends.load_dataset(backend, "train")
+    data = store.backends.load_dataset("train")
     assert data is not None
     assert {d["query"] for d in data["items"]} == {"a", "b", "c"}
     assert data["excluded"] == []
 
 
 def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) -> None:
-    store = build_stores(tmp_path)
-    backend = "bx"
+    store = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
     items = [
         {"query": "always_miss", "ground_truth": "X"},
         {"query": "always_hit", "ground_truth": "Y"},
         {"query": "varies", "ground_truth": "Z"},
     ]
-    store.backends.save_dataset(backend, "train", items)
+    store.backends.save_dataset("train", items)
 
     memory = _seed_memory(
         {
@@ -95,7 +92,6 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
 
     excluded = apply_zero_signal_exclusions(
         store=store,
-        backend_id=backend,
         dataset_name="train",
         memory=memory,
         active_dataset=active,
@@ -107,7 +103,7 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
     # In-memory list was mutated in place.
     assert [d["query"] for d in active] == ["varies"]
     # Disk mirrors the same decision.
-    data = store.backends.load_dataset(backend, "train")
+    data = store.backends.load_dataset("train")
     assert data is not None
     assert [d["query"] for d in data["items"]] == ["varies"]
     assert {e["item"]["query"] for e in data["excluded"]} == {"always_miss", "always_hit"}

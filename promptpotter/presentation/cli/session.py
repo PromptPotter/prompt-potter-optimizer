@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 from dataclasses import dataclass
+from pathlib import Path
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.infrastructure.store import Stores, build_stores
@@ -55,8 +56,23 @@ class SessionCtx:
             self.store.campaigns.append_log(self.backend_id, self.session_id, log)
 
 
+def no_dataset_hint() -> str:
+    """Formatted list of discovered datasets + exact init commands."""
+    datasets = sorted(p.parent.name for p in Path("datasets").glob("*/campaign.json"))
+    lines = [f"  python -m promptpotter init --dataset-name {name}" for name in datasets]
+    body = "\n".join(lines) if lines else "  (no datasets found under ./datasets/)"
+    return "Available datasets:\n\n" + body
+
+
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
+    from promptpotter.infrastructure.store.stores import _ACTIVE_SESSION_PATH
+
+    if not _ACTIVE_SESSION_PATH.exists():
+        raise SystemExit(
+            "ERROR: No active session.\n\n"
+            "To start a campaign, init one of the available datasets:\n\n" + no_dataset_hint()
+        )
     store = build_stores(tenant_id=getattr(args, "tenant", "default"))
     state, backend_id, session_id = store.campaigns.load_active(args.session)
     return SessionCtx(store, state, backend_id, session_id)

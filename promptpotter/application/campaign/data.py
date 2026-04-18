@@ -269,7 +269,6 @@ class DatasetSummary:
 
 def prepare_datasets(
     store: Stores,
-    backend_id: str,
     excel_path: str | Path | None = None,
     *,
     force: bool = False,
@@ -290,23 +289,23 @@ def prepare_datasets(
 
     if excel_path:
         excel_path = Path(excel_path)
-        existing = store.backends.load_dataset(backend_id, "train")
+        existing = store.backends.load_dataset("train")
         needs_create = force or not (existing and existing.get("items"))
 
         if needs_create:
             all_rows = load_excel_ground_truth(excel_path, SHEET_COLUMN_MAP)
             train, test_sets = split_train_test(all_rows)
-            store.backends.save_dataset(backend_id, "train", train, source_file=excel_path.name)
+            store.backends.save_dataset("train", train, source_file=excel_path.name)
             for name, items in test_sets.items():
-                store.backends.save_dataset(backend_id, name, items, source_file=excel_path.name)
+                store.backends.save_dataset(name, items, source_file=excel_path.name)
 
     splits: dict[str, list[dict]] = {}
     for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(backend_id, name)
+        ds = store.backends.load_dataset(name)
         splits[name] = ds["items"] if ds and ds.get("items") else []
 
     train_data = splits["train"] or None
-    index_terms = build_all_index_terms(store, backend_id)
+    index_terms = build_all_index_terms(store)
 
     all_queries: set[str] = set()
     for items in splits.values():
@@ -323,10 +322,7 @@ def prepare_datasets(
     )
 
 
-def build_all_index_terms(
-    store: Stores,
-    backend_id: str,
-) -> list[str]:
+def build_all_index_terms(store: Stores) -> list[str]:
     """Unique ground_truth identifiers across all stored datasets (train + test).
 
     For /match to work correctly, the session must contain ALL identifiers:
@@ -335,7 +331,7 @@ def build_all_index_terms(
     """
     gt_set: set[str] = set()
     for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(backend_id, name)
+        ds = store.backends.load_dataset(name)
         if ds and ds.get("items"):
             for item in ds["items"]:
                 gt = item.get("ground_truth", "").strip()

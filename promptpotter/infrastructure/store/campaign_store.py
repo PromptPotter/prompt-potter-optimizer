@@ -665,7 +665,7 @@ class CampaignStore(EntityStore):
         )
 
         if not _ACTIVE_SESSION_PATH.exists():
-            raise SystemExit("ERROR: No active session. Run 'init' first.")
+            raise SystemExit("ERROR: No active session pointer found.")
         _tid, cid = read_active_pointer()
         cid = session_override or cid
         if not cid:

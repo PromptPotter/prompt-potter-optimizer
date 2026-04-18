@@ -277,7 +277,7 @@ async def init_services(
 
     # --- Dataset store path (preferred when available) ---
     if dataset_name:
-        ds = store.backends.load_dataset(backend_id, dataset_name)
+        ds = store.backends.load_dataset(dataset_name)
 
         # Auto-load from DATASET_LOADERS registry when store is empty
         if not (ds and ds.get("items")):
@@ -286,7 +286,7 @@ async def init_services(
             if dataset_name in DATASET_LOADERS:
                 _status(f"Loading dataset '{dataset_name}' from registry ...")
                 loader_items = DATASET_LOADERS[dataset_name]()
-                store.backends.save_dataset(backend_id, dataset_name, loader_items)
+                store.backends.save_dataset(dataset_name, loader_items)
                 ds = {"items": loader_items}
                 logger.info("Auto-loaded dataset %r: %d items", dataset_name, len(loader_items))
 

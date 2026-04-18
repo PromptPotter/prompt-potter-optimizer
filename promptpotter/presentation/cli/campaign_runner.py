@@ -64,6 +64,14 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     file_config = load_campaign_config(args.config)
     dataset_name = args.dataset_name or file_config.get("dataset_name")
 
+    if not dataset_name:
+        from promptpotter.presentation.cli.session import no_dataset_hint
+
+        raise SystemExit(
+            "ERROR: init requires a dataset name. Silent defaults to the "
+            "TermNorm production experiment are no longer allowed.\n\n" + no_dataset_hint()
+        )
+
     session = await init_services_cli(
         backend_url=args.backend_url,
         backend_id=args.backend_id,
@@ -83,7 +91,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 
     train_data: list[dict] | None = None
     if args.excel_path:
-        ds_result = prepare_datasets(session.store, backend_id, args.excel_path)
+        ds_result = prepare_datasets(session.store, args.excel_path)
         train_data = ds_result.train_data
     elif session.queries:
         train_data = session.queries

@@ -29,7 +29,6 @@ __all__ = ["apply_zero_signal_exclusions"]
 def apply_zero_signal_exclusions(
     *,
     store: Stores,
-    backend_id: str,
     dataset_name: str,
     memory: SearchMemory,
     active_dataset: list[dict[str, Any]],
@@ -66,7 +65,6 @@ def apply_zero_signal_exclusions(
     ]
 
     moved = store.backends.exclude_dataset_items(
-        backend_id,
         dataset_name,
         exclusion_payload,
     )
