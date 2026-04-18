@@ -1,7 +1,7 @@
 # Methods: SearchMemory as Intelligence Feed
 
 SearchMemory is a materialized view over all historical evaluation data,
-persisted at `{backend_id}/search_memory.json`. It is refreshed
+persisted at `{tenant_id}/library/search_memory.json`. It is refreshed
 incrementally before each optimization round and provides read-only
 intelligence to L1 generate, L2 refine, and the critique agent.[^impl]
 
@@ -177,7 +177,7 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 1. `len(hits) >= min_observations` (default 5) — confidence gate so a single observation doesn't exclude the world on a fresh campaign.
 2. `hit_rate ∈ {0.0, 1.0}` — variance exactly 0. Treated symmetrically; always-hit and always-miss are both excluded.
 
-**Persistence — "exchange from the default set".** Excluded queries are **physically moved** inside `{backend_id}/datasets/{name}.json` from `items` into a new `excluded` sidelist via `BackendStore.exclude_dataset_items()`. The sidelist entry captures the full original item plus `{reason, hit_rate, observations, campaign_id, excluded_at}`. A fresh campaign launched tomorrow sees the shrunken `items` list — not transient state, actually pruned. Recovery is `BackendStore.restore_dataset_items(queries=None)` which moves entries back.
+**Persistence — "exchange from the default set".** Excluded queries are **physically moved** inside `{tenant_id}/library/backends/{backend_id}/datasets/{name}.json` from `items` into a new `excluded` sidelist via `BackendStore.exclude_dataset_items()`. The sidelist entry captures the full original item plus `{reason, hit_rate, observations, campaign_id, excluded_at}`. A fresh campaign launched tomorrow sees the shrunken `items` list — not transient state, actually pruned. Recovery is `BackendStore.restore_dataset_items(queries=None)` which moves entries back.
 
 ```json
 {

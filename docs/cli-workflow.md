@@ -1,19 +1,21 @@
 # CLI Campaign Workflow
 
-The CLI provides a terminal-based interface for HITL (human-in-the-loop) prompt optimization. Each subcommand persists its output to `SessionStore`, so progress survives interrupts and the workflow can be resumed at any step.
+The CLI provides a terminal-based interface for HITL (human-in-the-loop) prompt optimization. Each subcommand persists its output under `{tenant_id}/campaigns/{cycle_id}/`, so progress survives interrupts and the workflow can be resumed at any step.
 
 ```bash
-python -m promptpotter <subcommand> [options]
+python -m promptpotter [--tenant <id>] <subcommand> [options]
 ```
+
+`--tenant` is a root flag (default `"default"`) that selects the partition under `.promptpotter/projects/`. Single-user CLI workflows can ignore it; multi-tenant setups set it once per session.
 
 ## Active Session
 
-PromptPotter remembers which campaign you're working on via an **active session pointer** at `.promptpotter/active_session.json`. This stores `{backend_id, session_id}` — like a browser's active tab.
+PromptPotter remembers which campaign you're working on via an **active session pointer** at `.promptpotter/active_session.json`. This stores `{tenant_id, cycle_id}` — like a browser's active tab.
 
-- **`init`** creates a new session and sets it as active (overwrites the pointer).
-- **Every other command** (`optimize`, `show-status`, `show-results`, `set-task`, `recon`, `control`) operates on the active session automatically — no flags needed.
+- **`init`** creates a new cycle and sets it as active (overwrites the pointer).
+- **Every other command** (`optimize`, `show-status`, `show-results`, `set-task`, `recon`, `control`) operates on the active cycle automatically — no flags needed.
 - **`--session <id>`** overrides the active pointer for a single command.
-- **`--backend-id`** is auto-derived from `dataset_name` in the config when not explicitly passed (so `init --config datasets/aime_2025/campaign.json` correctly uses `backend_id=aime_2025`, not the default `local`).
+- **`--backend-id`** is auto-derived from `dataset_name` in the config when not explicitly passed (so `init --config datasets/aime_2025/campaign.json` correctly uses `backend_id=aime_2025`, not the default `local`). Under v3, the backend lives under `{tenant_id}/library/backends/{backend_id}/` — it is no longer the outer axis.
 
 To resume a campaign: just run `python -m promptpotter optimize`. No need to `init` again — `init` is only for starting a **new** campaign.
 
@@ -49,7 +51,7 @@ python -m promptpotter init \
 
 Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Baseline is skipped by default (`--skip-baseline`) — the optimizer evaluates it automatically before the first round. Omit `--skip-baseline` only when you have substantial historical data and want an explicit baseline comparison before starting.
 
-Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
+Produces: `campaigns/{cycle_id}/index.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 
 **Init flags**:
 
@@ -136,7 +138,7 @@ python -m promptpotter control --resume
 python -m promptpotter control --stop
 ```
 
-Bidirectional control lives in `campaign_control.json` (a sibling of `campaign_state.json`). You can also edit it directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
+Bidirectional control lives in `control.json` (a sibling of `dashboard.json`). You can also edit it directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
 
 ---
 
@@ -220,23 +222,42 @@ Restoration is manual — either use `BackendStore.restore_dataset_items()` in a
 
 ---
 
-## Session Directory
+## Cycle Directory (v3)
 
-The active session pointer lives at `.promptpotter/active_session.json` (see [Active Session](#active-session) above). Per-session state lives under `.promptpotter/projects/{backend_id}/sessions/{session_id}/`:
+The active pointer lives at `.promptpotter/active_session.json` (see [Active Session](#active-session) above). Per-cycle state lives under `.promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/`:
 
 | File | Updated | Content |
 |------|---------|---------|
-| `session.json` | Each phase transition | Config, phase, pipeline_params, cycle_id, best_accuracy |
-| `campaign_state.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
-| `campaign_output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
-| `campaign_log.md` | End of each round | Structured markdown report |
-| `recon_results.json` | After recon completes | recon_df + axis_profiles |
+| `index.json` | Each phase transition | Config, phase, pipeline_params, cycle_id, best_accuracy |
+| `dashboard.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
+| `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
+| `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
+| `log.md` | End of each round | Structured markdown report |
+| `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
+| `recon.json` | After recon completes | recon_df + axis_profiles |
+| `trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
+| `events.jsonl` | Every observability event | Flat navigation log |
+| `langfuse/` | During optimization | Trace/observation/score shadow + id-map `state.json` |
+| `prompts/` | When prompts render | Rendered optimizer prompts per family/version |
 
-### campaign_state.json
+### dashboard.json
 
 Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `rounds_completed`, `total_queries_scored`, `total_backend_calls`, `cache_hit_rate`, `hit_rate`, `eta_s`, `candidate`, `query`. For per-query / per-candidate / per-round detail, read `campaign_output.log` or `rounds/round_NNN.json` directly.
+Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `rounds_completed`, `total_queries_scored`, `total_backend_calls`, `cache_hit_rate`, `hit_rate`, `eta_s`, `candidate`, `query`. For per-query / per-candidate / per-round detail, read `output.log` or `rounds/round_NNN.json` directly.
+
+---
+
+## migrate (v2 → v3 upgrade)
+
+```bash
+python -m promptpotter migrate --dry-run   # preview the move plan
+python -m promptpotter migrate              # execute
+```
+
+Walks legacy `.promptpotter/projects/{backend_id}/…` trees and rewrites them to the v3 tenant/cycle/library layout. Renames session artifacts per Wave B, moves backend-local files under `library/backends/{backend_id}/`, splits `events.jsonl` per cycle, drops hand-rolled MLflow data (the SDK regenerates), and archives unroutable Langfuse traces under `.promptpotter/migration-orphans/`. Idempotent — re-running after migration is a no-op.
+
+`build_stores` refuses to run on an un-migrated v2 tree and prints the migrate instruction. The migrate verb itself bypasses the guard.
 
 ---
 

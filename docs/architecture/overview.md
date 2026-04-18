@@ -65,27 +65,53 @@ SearchPoint (abstract)
 
 Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`. Field-by-field detail lives in the model files themselves (`promptpotter/domain/`). Prompt scheme: [prompt-scheme.md](prompt-scheme.md).
 
-## Persistence: Two Tiers
+## Persistence
+
+Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; everything splits into two peer trees: per-cycle (`campaigns/`) and cross-cycle (`library/`).
 
 ```
-{backend_id}/
-  sessions/{session_id}/        # Tier 1: live UI dashboard + HITL surface
-    session.json
-    campaign_state.json         # canonical live state (atomic rewrite)
-    campaign_control.json       # HITL pause/resume
-    rounds/round_NNN.json
-  campaigns/                    # Tier 2: source of truth for resume
-    {cycle_id}.json
-    {cycle_id}/trial_NNNN.json
-  dataset_runs/{run_id}.json    # content-addressed eval archive (shared)
-  search_memory.json            # materialized intelligence view
+.promptpotter/
+  schema_version                       # v3 marker; refuse-to-run if stale
+  active_session.json                  # { tenant_id, cycle_id } pointer
+  projects/{tenant_id}/
+    campaigns/{cycle_id}/              # per-cycle: all artifacts for one run
+      index.json                       # metadata + live session state (atomic rewrite)
+      dashboard.json                   # live counters
+      control.json                     # HITL pause/resume
+      output.log / log.md / journal.md / notes.md
+      recon.json                       # optional recon result
+      trial_NNNN.json                  # resume source of truth
+      round_NNNN_candidates.json       # pre-scoring checkpoint
+      rounds/round_NNN.json            # per-round LLM action audit
+      events.jsonl                     # human navigation log (observability mirror)
+      langfuse/
+        state.json                     # id maps persisted across resume
+        traces/{trace_id}.json
+        observations/{trace_id}/{obs_id}.json
+        scores/{trace_id}.jsonl
+        datasets/{name}/{item_id}.json
+      prompts/{family}/{version}/      # rendered optimizer prompts
+      archived/resumed_at_{ts}/        # mid-cycle rewind history
+    library/                           # cross-cycle: shared reference data
+      backends/{backend_id}/{backend.json, connector_profile.json, sync/, executions/, datasets/}
+      datasets/{name}/                 # tenant-global datasets (future)
+      dataset_runs/{run_id}.json       # content-addressed eval archive
+      dataset_runs.json
+      recon_plans/{plan_id}.json
+      mlruns/                          # MLflow SDK tracking root (opt-in)
+      search_memory.json               # materialized intelligence view
+      prompt_aliases.json
+      restructure_cache.json
+      obs/                             # orphan-event fallback for file_only emits
 ```
 
-Sessions are ephemeral display state; campaigns are the resume source of truth. The canonical session file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `campaign_state.json`. Non-CLI entry points (notebook, smoke tool, future API/webapp) auto-mint a session via `run_optimization()` when the caller passes `session_id=""` — CLI `init` still mints eagerly and passes the id through, so there is no double-mint.
+The canonical per-cycle file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `dashboard.json`. Non-CLI entry points (notebook, smoke tool, future API/webapp) auto-mint a cycle via `run_optimization()` when the caller passes `session_id=""` — CLI `init` mints eagerly and passes the id through, so there is no double-mint.
 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
-`obs/langfuse/events.jsonl` is a **pure observability mirror** parallel to Langfuse — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trial_NNNN.json`, which already carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
+`events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trial_NNNN.json`, which carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
+
+**Upgrading from v2.** Pre-Wave-A layouts rooted at `{backend_id}/…` are rejected at `build_stores` time. Run `python -m promptpotter migrate --dry-run` to preview, then `python -m promptpotter migrate` to rewrite to v3. Hand-rolled MLflow data is dropped (SDK regenerates); Langfuse traces whose cycle cannot be inferred land in `.promptpotter/migration-orphans/`.
 
 ## Where to Read Next
 

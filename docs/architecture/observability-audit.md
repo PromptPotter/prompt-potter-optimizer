@@ -187,8 +187,8 @@ constructor. No surface-specific subclasses.
 
 1. **Resume cloud trace map loss.** `_cloud_trace_ids` is in-memory; on
    resume, `get_cloud_trace_id` returns None and post-resume rounds attach
-   to nothing. Fix: persist to `sessions/{session_id}/langfuse_state.json`
-   (registered in `CAMPAIGN_SESSION_ARTIFACTS`).
+   to nothing. Fix: persist to `campaigns/{cycle_id}/langfuse/state.json`
+   (per-cycle, Wave C).
 2. **`_cloud_prompt_version` fragile lookup.** Uses
    `next(reversed(_cloud_trace_ids.values()))` — depends on dict insertion
    order and breaks on resume. Fix: pass `campaign_id` through the
@@ -196,9 +196,9 @@ constructor. No surface-specific subclasses.
 3. **Topology A and B never share dataset_item ids.**
    `_cloud_register_dataset` (live) and `_register_dataset_items` (backfill)
    each maintain their own `query → item_id` map. After this refactor,
-   both paths read from one shared `langfuse_state.json` so a campaign that
-   ran `register_dataset` live can later be backfilled without duplicating
-   items. Treat as a side-effect win, not a separate task.
+   both paths read from one shared `campaigns/{cycle_id}/langfuse/state.json`
+   so a campaign that ran `register_dataset` live can later be backfilled
+   without duplicating items. Treat as a side-effect win, not a separate task.
 
 ---
 

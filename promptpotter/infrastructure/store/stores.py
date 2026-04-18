@@ -57,6 +57,47 @@ _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROJECTS_ROOT = _REPO_ROOT / ".promptpotter" / "projects"
 DEFAULT_TENANT_ID = "default"
 
+SCHEMA_VERSION = 3
+
+
+class SchemaVersionError(RuntimeError):
+    """Raised when ``.promptpotter/`` is older than the current schema version."""
+
+
+def _check_schema_version(projects_root: Path) -> None:
+    """Refuse to build stores on an un-migrated v2 tree; write marker on fresh installs.
+
+    ``migrate`` bypasses this guard (it does not call :func:`build_stores`).
+    """
+    dotdir = projects_root.parent
+    marker = dotdir / "schema_version"
+    if marker.exists():
+        try:
+            current = int(marker.read_text(encoding="utf-8").strip())
+        except (OSError, ValueError) as exc:
+            raise SchemaVersionError(f"Could not read schema marker at {marker}: {exc}") from exc
+        if current != SCHEMA_VERSION:
+            raise SchemaVersionError(
+                f"schema_version={current} at {marker}; expected {SCHEMA_VERSION}. "
+                "Run `python -m promptpotter migrate` (dry-run first)."
+            )
+        return
+
+    # No marker. Detect v2 data by looking for any projects/{child}/sessions/.
+    if projects_root.is_dir():
+        for child in projects_root.iterdir():
+            if child.is_dir() and (child / "sessions").is_dir():
+                raise SchemaVersionError(
+                    "Detected v2 layout at "
+                    f"{child} (has a sessions/ subdir). "
+                    "Run `python -m promptpotter migrate --dry-run` to preview, "
+                    "then `python -m promptpotter migrate` to upgrade to v3."
+                )
+
+    # Fresh install (or already-v3 data without a marker) — stamp the marker.
+    dotdir.mkdir(parents=True, exist_ok=True)
+    marker.write_text(f"{SCHEMA_VERSION}\n", encoding="utf-8")
+
 
 @dataclass
 class ReusablePlanMatch:
@@ -497,6 +538,7 @@ def build_stores(
     """
     validate_path_component(tenant_id)
     root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
+    _check_schema_version(root)
     tenant_dir = root / tenant_id
     return Stores(
         base_dir=tenant_dir,

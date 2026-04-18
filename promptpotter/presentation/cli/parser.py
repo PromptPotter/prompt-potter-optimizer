@@ -104,4 +104,19 @@ def build_parser() -> argparse.ArgumentParser:
 
     sub.add_parser("show-status", help="Emit raw JSON dashboard state")
 
+    p_mig = sub.add_parser(
+        "migrate",
+        help="Migrate .promptpotter/ v2 (backend-axis) layout to v3 (tenant/cycle/library)",
+    )
+    p_mig.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="Print the move plan without touching the filesystem",
+    )
+    p_mig.add_argument(
+        "--from-path",
+        default=None,
+        help="Override .promptpotter/projects root (default: repo-local)",
+    )
+
     return parser

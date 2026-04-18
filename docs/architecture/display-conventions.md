@@ -42,4 +42,4 @@ When adding a new self-healing mechanism, escalation check, or any other finding
 
 ## Source of truth
 
-`promptpotter/infrastructure/persistence/session_emitter.py` populates `campaign_state.json.last_scoring_metadata` with the structured finding. Each entry point reads from there and formats using this convention — the data lives in one place, only the rendering is per-surface.
+`promptpotter/infrastructure/persistence/session_emitter.py` populates `dashboard.json.last_scoring_metadata` with the structured finding. Each entry point reads from there and formats using this convention — the data lives in one place, only the rendering is per-surface.
