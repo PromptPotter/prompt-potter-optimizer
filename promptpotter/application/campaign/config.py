@@ -100,7 +100,9 @@ class CampaignConfig(TypedDict, total=False):
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig
     adaptive_recon: SmartSearchConfig
-    scoring: str
+    # Scoring formula. Either a single string (interpreted as ``per_query``
+    # with the default per-round formula) or a dict ``{per_query, per_round}``.
+    scoring: str | dict[str, str]
 
 
 class LoopConfig(BaseModel):
@@ -243,6 +245,11 @@ class LoopConfig(BaseModel):
         None,
         description="Python expression evaluated per query result (None = exact match)",
     )
+    scoring_round_formula: str | None = Field(
+        None,
+        description="Python expression evaluated per round against the evaluator "
+        "registry namespace (None = default weighted sum).",
+    )
 
     # HITL mode
     pause_before_scoring: bool = Field(
@@ -279,11 +286,19 @@ class LoopConfig(BaseModel):
         filtered schema with overrides already baked in.
         """
         opt = dict(campaign_config.get("optimization", {}))
+        scoring_block = campaign_config.get("scoring")
+        if isinstance(scoring_block, dict):
+            query_formula = scoring_block.get("per_query")
+            round_formula = scoring_block.get("per_round")
+        else:
+            query_formula = scoring_block
+            round_formula = None
         return cls(
             **opt,
             model=campaign_config.get("optimizer_llm", {}).get("model"),
             sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
-            scoring_formula=campaign_config.get("scoring"),
+            scoring_formula=query_formula,
+            scoring_round_formula=round_formula,
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,

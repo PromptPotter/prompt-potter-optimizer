@@ -158,7 +158,11 @@ async def _run_query_loop(
             if save_run and ctx.pipeline_schema:
                 save_run(
                     results,
-                    compute_composite_score(results, ctx.pipeline_schema),
+                    compute_composite_score(
+                        results,
+                        ctx.pipeline_schema,
+                        round_scorer=ctx.round_scorer,
+                    ),
                     partial=True,
                 )
 
@@ -264,7 +268,7 @@ async def score_search_point(
         # Graceful/force stop — incremental save already persisted what we have.
         raise KeyboardInterrupt()
 
-    scores = compute_composite_score(results, pipeline_schema)
+    scores = compute_composite_score(results, pipeline_schema, round_scorer=ctx.round_scorer)
     if escalation_signal:
         scores["escalation_signal"] = escalation_signal.to_dict()
 

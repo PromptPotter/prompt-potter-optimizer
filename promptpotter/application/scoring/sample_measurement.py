@@ -203,6 +203,14 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
+        # Populate per-query evaluator values. Sits inside pipeline_data so
+        # the existing per-query scoring formula compiler flattens it into
+        # the formula namespace (``evaluators.retrieval_shortfall`` etc.).
+        from promptpotter.application.scoring.evaluators import materialize_query_values
+
+        query_evaluators = materialize_query_values(pipeline_schema, result)  # type: ignore[arg-type]
+        if query_evaluators:
+            pd["evaluators"] = query_evaluators
         if env.scorer:
             result["score"] = env.scorer(result)
             result["hit"] = result["score"] >= 1.0

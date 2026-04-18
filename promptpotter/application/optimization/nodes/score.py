@@ -42,6 +42,8 @@ class L1ScoringResult(BaseModel):
     all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
     escalation_signal: dict[str, Any] | None = None
     degraded_queries: int = 0
+    # Named evaluator values for the winner — populated from the registry.
+    winner_evaluators: dict[str, float] = Field(default_factory=dict)
 
     # Populated post-eval by round_execution (critique phase)
     critique_text: str = ""
@@ -54,6 +56,7 @@ def _select_round_winner(
     current_best: dict[str, Any],
     improvement_threshold: float,
     pipeline_schema: PipelineSchema | None = None,
+    round_scorer: Any = None,
 ) -> dict[str, Any]:
     """Compare candidates and select the round winner.
 
@@ -68,12 +71,14 @@ def _select_round_winner(
 
     # Score each candidate once, reuse for selection and display. Thread
     # the candidate's OptSearchPoint so the composite can fold in its
-    # OptSP-layer signals (runtime/validation failures).
+    # OptSP-layer signals (runtime/validation failures), and the
+    # round_scorer so composite uses the dataset's configured formula.
     candidate_scores = {
         c.id: compute_composite_score(
             all_candidate_results[c.id],
             pipeline_schema,
             opt_sp=c,
+            round_scorer=round_scorer,
         )
         for c in candidates
     }
@@ -84,16 +89,19 @@ def _select_round_winner(
     best_ps: OptSearchPoint = current_best["prompt_fields"]
     best_results = current_best["results"]
     best_label = current_best["label"]
+    best_evaluators: dict[str, float] = current_best.get("evaluators") or {}
     winner_idx: int | None = None
 
     for idx, candidate in enumerate(candidates):
-        c_acc = candidate_scores[candidate.id]["accuracy"]
+        c_scores = candidate_scores[candidate.id]
+        c_acc = c_scores["accuracy"]
         if c_acc > best_acc:
             best_acc = c_acc
-            best_composite = candidate_scores[candidate.id]["composite"]
+            best_composite = c_scores["composite"]
             best_ps = candidate
             best_results = all_candidate_results[candidate.id]
             best_label = candidate.changes_description or candidate.id[:12]
+            best_evaluators = dict(c_scores.get("evaluators") or {})
             winner_idx = idx
 
     return {
@@ -107,6 +115,7 @@ def _select_round_winner(
         "candidates_scored": len(candidates),
         "improved": best_acc > current_acc + improvement_threshold,
         "winner_idx": winner_idx,
+        "evaluators": best_evaluators,
     }
 
 
@@ -192,6 +201,7 @@ def _build_score_report(
         "composite": scores.get("composite", scores["accuracy"]),
         "hits": scores["hits"],
         "total": scores["total"],
+        "evaluators": dict(scores.get("evaluators") or {}),
         "escalation_aborted": aborted,
         "elimination_stopped": elimination_stopped,
         "scored_queries": len(results),
@@ -476,6 +486,7 @@ async def l1_score(
         cb,
         improvement_threshold,
         pipeline_schema=ctx.pipeline_schema,
+        round_scorer=ctx.round_scorer,
     )
 
     # Reuse pre-computed merged params for winner (no re-merge needed)
@@ -502,4 +513,5 @@ async def l1_score(
         all_candidate_results=dict(all_candidate_results),
         escalation_signal=escalation_signal,
         degraded_queries=count_degraded_queries(winner_entry.get("results", [])),
+        winner_evaluators=dict(winner_entry.get("evaluators") or {}),
     )

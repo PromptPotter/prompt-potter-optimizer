@@ -37,6 +37,19 @@ if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
+
+def _per_query_formula(campaign_config: CampaignConfig | None) -> str | None:
+    """Return the per-query scoring formula from a ``scoring`` block.
+
+    Accepts the legacy string shorthand or the twin-form dict.
+    """
+    raw = campaign_config.get("scoring") if campaign_config else None
+    if isinstance(raw, dict):
+        val = raw.get("per_query")
+        return val if isinstance(val, str) else None
+    return raw if isinstance(raw, str) else None
+
+
 __all__ = [
     # stats
     "fmt_ci",
@@ -347,7 +360,7 @@ async def run_optimization_notebook(
         l1_patience=l1_patience,
         pipeline_schema=session.pipeline_schema,
         recon_brief=recon_brief,
-        scoring_formula=campaign_config.get("scoring"),
+        scoring_formula=_per_query_formula(campaign_config),
     )
 
     # Resolve explicit experiment_id to full cycle_id

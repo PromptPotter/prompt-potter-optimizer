@@ -336,7 +336,10 @@ async def prepare_scoring_context(
         _fmt_query_result,
     )
 
-    scoring_formula = campaign_config.get("scoring") if campaign_config else None
+    _raw_scoring = campaign_config.get("scoring") if campaign_config else None
+    scoring_formula: str | None = (
+        _raw_scoring.get("per_query") if isinstance(_raw_scoring, dict) else _raw_scoring
+    )
     pbar: Any = None
 
     def _on_result(result: dict, index: int, total: int) -> None:

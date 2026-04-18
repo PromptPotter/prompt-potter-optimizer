@@ -1,8 +1,14 @@
 """Per-dataset scoring formula evaluator.
 
 Each dataset declares a scoring formula in ``campaign.json`` under the
-``"scoring"`` key.  The formula is a Python expression evaluated per
-query result with these names in scope:
+``"scoring"`` key. The block accepts two shapes:
+
+- **String shorthand** — legacy form, interpreted as ``per_query``. The
+  ``per_round`` side uses the evaluator-registry default.
+- **Twin form** — ``{"per_query": "...", "per_round": "..."}``. Either key
+  may be omitted; missing keys fall back to the default.
+
+Per-query formula namespace:
 
     hit                 — bool (1/0), exact match at rank 1
     ground_truth_rank   — int or None, 1-based position in ranking
@@ -11,6 +17,11 @@ query result with these names in scope:
     ground_truth        — str, expected answer
     error               — str or None
     <node_name>         — SimpleNamespace of that node's pipeline_data
+    evaluators          — SimpleNamespace of per-query Evaluator values
+
+Per-round formula namespace is built from ``application/scoring/evaluators``
+— every registered per-round evaluator whose ``applies(schema)`` is True
+contributes one named value. Undefined names raise ``NameError`` (fail loud).
 
 Scoring functions (add new ones here):
     rr(k)                              — reciprocal rank: 1/k if k else 0
@@ -250,3 +261,37 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
 
 def _default_scorer(result: dict) -> float:
     return float(result.get("hit", False))
+
+
+# ---------------------------------------------------------------------------
+# Per-round scoring formula — mirrors compile_scorer for round aggregates
+# ---------------------------------------------------------------------------
+
+# Type alias for per-round scoring callable: (values dict) -> float.
+RoundScorer = Callable[[dict[str, float]], float]
+
+
+def compile_round_scorer(formula: str | None) -> RoundScorer:
+    """Pre-compile a per-round scoring formula into a callable.
+
+    Returns a function ``(dict[str, float]) -> float`` clamped to [0, 1].
+    The input dict is the output of ``materialize_round_values()`` — every
+    registered per-round evaluator that applies to the current schema.
+    Referencing an undefined name in the formula raises ``NameError``
+    (fail loud — misconfigured formulas should not silently produce 0.0).
+    """
+    if not formula:
+        return _default_round_scorer
+
+    code = compile(formula, "<round_scoring>", "eval")
+
+    def _scorer(values: dict[str, float]) -> float:
+        raw = eval(code, _SAFE_BUILTINS, dict(values))
+        return max(0.0, min(1.0, float(raw)))
+
+    return _scorer
+
+
+def _default_round_scorer(values: dict[str, float]) -> float:
+    """Fallback per-round scorer: the registry's ``accuracy`` value, or 0."""
+    return max(0.0, min(1.0, float(values.get("accuracy", 0.0))))

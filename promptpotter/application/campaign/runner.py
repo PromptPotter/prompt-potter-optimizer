@@ -48,6 +48,7 @@ from promptpotter.infrastructure.persistence.session_emitter import CampaignPers
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.scoring import compile_round_scorer
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -183,6 +184,7 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
         "results": rr.results,
         "candidates_scored": rr.candidates_scored,
         "candidate_scores": list(rr.candidate_scores),
+        "evaluators": dict(rr.evaluators),
         "l1_stall_count": state.l1_stall_count,
         **state.escalation.to_checkpoint_dict(),
         "opt_search_point": state.opt_sp.model_dump(),
@@ -420,12 +422,16 @@ async def _init_optimization(
         raise ValueError("baseline.baseline_ps is required; run baseline evaluation first.")
 
     baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
+    baseline_round_scorer = (
+        compile_round_scorer(config.scoring_round_formula) if config.scoring_round_formula else None
+    )
     state = LoopState.from_baseline(
         baseline_osp,
         baseline.baseline_acc,
         task_context=config.task_context or TaskDecomposition(),
         schema=config.pipeline_schema,
         baseline_results=baseline.baseline_results,
+        round_scorer=baseline_round_scorer,
     )
 
     campaign_store, resolved_cycle_id, resumed_from_round = CampaignStore.bootstrap_cycle(
@@ -470,6 +476,7 @@ async def _init_optimization(
         max_consecutive_errors=config.max_consecutive_errors,
         stale_data_load_protocol=config.stale_data_load_protocol,
         scoring_formula=config.scoring_formula,
+        scoring_round_formula=config.scoring_round_formula,
     )
     if session.store:
         session.store.dataset_runs.register_prompt_alias(

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from collections.abc import Callable
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.recon.adaptive_recon import ReconEvent
 from promptpotter.application.recon.adaptive_recon import run_adaptive_recon as _adaptive_search
@@ -416,6 +416,19 @@ async def run_sensitivity_recon(
         session=session,
         experiment_id=experiment_id,
         session_id=session_id,
-        scoring_formula=campaign_config.get("scoring"),
+        scoring_formula=_extract_per_query_formula(campaign_config),
     )
     return recon_baseline_sp, recon_df, axis_profiles
+
+
+def _extract_per_query_formula(campaign_config: Any) -> str | None:
+    """Return the per-query formula string from a ``scoring`` block.
+
+    Accepts either a string (legacy shorthand) or a twin-form dict
+    ``{"per_query": ..., "per_round": ...}``.
+    """
+    raw = campaign_config.get("scoring") if campaign_config else None
+    if isinstance(raw, dict):
+        val = raw.get("per_query")
+        return val if isinstance(val, str) else None
+    return raw if isinstance(raw, str) else None

@@ -249,7 +249,9 @@ async def _score_and_select(
         _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
         if _subset and config.pipeline_schema:
             _subset_scores = compute_composite_score(
-                cast(list[QueryResult], _subset), config.pipeline_schema
+                cast(list[QueryResult], _subset),
+                config.pipeline_schema,
+                round_scorer=env.scoring_ctx.round_scorer if env.scoring_ctx else None,
             )
             _baseline_acc = _subset_scores["accuracy"]
             _baseline_comp = _subset_scores.get("composite", _baseline_acc)
@@ -409,6 +411,7 @@ async def execute_round(
         candidate_scores=scoring_result.candidate_scores,
         degraded_queries=scoring_result.degraded_queries,
         escalation_signal=scoring_result.escalation_signal,
+        evaluators=scoring_result.winner_evaluators,
     )
 
     # Update per-query warning inventory from ALL candidate results
@@ -459,6 +462,7 @@ async def execute_round(
                     model=config.model or "",
                     n_variants=config.n_variants,
                     optimizer_templates=["meta_scan_aware", "critique"],
+                    evaluators=dict(scoring_result.winner_evaluators),
                 )
             )
         with graceful("PromptVersion emit failed"):

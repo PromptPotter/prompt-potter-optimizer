@@ -14,7 +14,7 @@ from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
 
 from pydantic import BaseModel, Field
 
-from promptpotter.shared.scoring import Scorer
+from promptpotter.shared.scoring import RoundScorer, Scorer
 
 # ---------------------------------------------------------------------------
 # Per-query result types
@@ -122,6 +122,8 @@ class ScoringEnv:
     search_memory: SearchMemory | None = None
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
     scorer: Scorer | None = None
+    # Per-round scoring formula (composite). None = default formula.
+    round_scorer: RoundScorer | None = None
     # Graceful-stop hook: scorer checks between queries; caller owns the flag source.
     stop_check: Callable[[], bool] | None = None
 
@@ -139,6 +141,7 @@ class ScoringEnv:
         max_consecutive_errors: int,
         stale_data_load_protocol: list[str] | None,
         scoring_formula: str | None,
+        scoring_round_formula: str | None = None,
     ) -> ScoringEnv:
         """Build a ScoringEnv for an optimization-loop run.
 
@@ -146,10 +149,13 @@ class ScoringEnv:
         when not explicitly set) and the scoring-formula compilation so the
         caller just hands over raw config.
         """
-        from promptpotter.shared.scoring import compile_scorer
+        from promptpotter.shared.scoring import compile_round_scorer, compile_scorer
 
         derived_experiment_id = experiment_id or (
             cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
+        )
+        round_scorer = (
+            compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
         )
         return cls(
             backend_client=backend_client,
@@ -162,6 +168,7 @@ class ScoringEnv:
             max_consecutive_errors=max_consecutive_errors,
             stale_data_load_protocol=stale_data_load_protocol,
             scorer=compile_scorer(scoring_formula),
+            round_scorer=round_scorer,
         )
 
 

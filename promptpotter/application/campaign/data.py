@@ -214,13 +214,18 @@ async def prepare_scoring_context(
 
         if eval_dataset:
             logger.info(label)
+            scoring_block = campaign_config.get("scoring")
+            if isinstance(scoring_block, dict):
+                query_formula = scoring_block.get("per_query")
+            else:
+                query_formula = scoring_block
             campaign_rounds, baseline_results = await _run_baseline_scoring(
                 baseline,
                 eval_dataset,
                 svc,
                 pipeline_params=pipeline_params,
                 pipeline_schema=pipeline_schema,
-                scoring_formula=campaign_config.get("scoring"),
+                scoring_formula=query_formula,
                 on_result=on_result,
                 obs=obs,
             )

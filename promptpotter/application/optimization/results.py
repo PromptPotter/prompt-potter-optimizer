@@ -24,6 +24,7 @@ class RoundResult(BaseModel):
     candidate_scores: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
     escalation_signal: dict | None = None
+    evaluators: dict[str, float] = Field(default_factory=dict)
 
 
 class RunResult(BaseModel):

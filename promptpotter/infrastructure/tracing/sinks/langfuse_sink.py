@@ -297,6 +297,19 @@ class LangfuseSink:
             value=event.accuracy,
             comment=f"Round {event.round_num}: {'improved' if event.improved else 'no change'}",
         )
+        # Emit one Langfuse score per evaluator value. Each evaluator's name
+        # is suffixed with the round number so the cloud UI shows them as a
+        # per-round time series.
+        for ev_name, ev_value in (event.evaluators or {}).items():
+            try:
+                numeric = float(ev_value)
+            except (TypeError, ValueError):
+                continue
+            self._lf.create_score(
+                trace_id=trace_id,
+                name=f"{ev_name}_round_{event.round_num}",
+                value=numeric,
+            )
         self._persist()
 
     def _on_prompt_version(self, event: PromptVersion) -> None:

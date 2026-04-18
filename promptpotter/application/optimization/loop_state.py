@@ -112,16 +112,23 @@ class LoopState:
         task_context: TaskDecomposition,
         schema: PipelineSchema | None,
         baseline_results: list[dict] | None = None,
+        round_scorer: Any = None,
     ) -> LoopState:
         """Construct a fresh LoopState from an evaluated baseline.
 
         Composite is derived from ``baseline_results`` when a schema is
-        present; otherwise falls back to ``baseline_accuracy``.
+        present; otherwise falls back to ``baseline_accuracy``. Pass
+        ``round_scorer`` to use the dataset's configured per-round formula;
+        otherwise the registry's default formula is used.
         """
         from promptpotter.application.scoring.metrics import compute_composite_score
 
         composite = (
-            compute_composite_score(baseline_results, schema)["composite"]  # type: ignore[arg-type]
+            compute_composite_score(
+                baseline_results,  # type: ignore[arg-type]
+                schema,
+                round_scorer=round_scorer,
+            )["composite"]
             if baseline_results and schema is not None
             else baseline_accuracy
         )

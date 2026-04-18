@@ -81,6 +81,9 @@ def _make_initial_state(
         # escalation check fires, or when a candidate is scored invalid
         # by parse-time validation (Workstream A). Resets on each round.
         "last_scoring_metadata": None,
+        # Named evaluator values for the most recent round. Refreshed on
+        # every round_complete callback — history lives in events.jsonl.
+        "round_evaluators": {},
         # Historical (carried across resumes for display continuity)
         "rounds_completed": r.get("rounds_completed", 0),
         "total_queries_scored": r.get("total_queries_scored", 0),
@@ -357,6 +360,7 @@ class CampaignPersistenceEmitter:
         s["layer"] = "L1"
         s["rounds_completed"] = round_result.round
         s["elapsed_s"] = round(time.monotonic() - self._workflow_start, 1)
+        s["round_evaluators"] = dict(round_result.evaluators)
 
         mark = "IMPROVED" if improved else "no improvement"
         self._log_fh.write(

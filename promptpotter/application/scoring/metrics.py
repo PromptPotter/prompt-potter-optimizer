@@ -1,6 +1,11 @@
 """Scoring and metric computation for evaluation results.
 
-Pure computation — no I/O, no eval infrastructure dependencies.
+Driven by the evaluator registry in ``application/scoring/evaluators.py``.
+The per-round composite is whatever the dataset's per-round scoring formula
+evaluates to; when no formula is set, the default formula reproduces the
+pre-migration 4-bundle weighted sum.
+
+Pure computation — no I/O, no backend dependencies.
 """
 
 from __future__ import annotations
@@ -9,9 +14,14 @@ from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel
-
+from promptpotter.application.scoring.evaluators import (
+    Evaluator,
+    all_evaluators,
+    default_per_round_formula,
+    materialize_round_values,
+)
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.scoring import RoundScorer, compile_round_scorer
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import (
@@ -27,48 +37,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryResult
 
 
-class IntermediateMetric(BaseModel):
-    """A metric derived from a pipeline node's type."""
-
-    model_config = {"frozen": True}
-
-    name: str
-    node_type: str
-    pipeline_data_key: str
-    description: str = ""
-    default_weight: float = 0.0  # 0 = display-only
-
-
-NODE_TYPE_METRICS: dict[str, list[IntermediateMetric]] = {
-    "candidate_source": [
-        IntermediateMetric(
-            name="source_recall",
-            node_type="candidate_source",
-            pipeline_data_key="candidate_ranking",
-            description="Fraction of queries where ground truth appears in candidate list",
-        ),
-    ],
-    "ranker": [
-        IntermediateMetric(
-            name="candidate_recall",
-            node_type="ranker",
-            pipeline_data_key="final_ranking",
-            description="Fraction of LLM-ranked queries where ground truth was available",
-        ),
-    ],
-    "cache": [
-        IntermediateMetric(
-            name="cache_hit_rate",
-            node_type="cache",
-            pipeline_data_key="step_timings",
-            description="Fraction of queries resolved by cache",
-        ),
-    ],
-    "enricher": [],
-}
-
-
 __all__ = [
+    "Evaluator",
+    "all_evaluators",
     "compile_failure_analysis",
     "compile_query_difficulty",
     "compute_composite_score",
@@ -77,6 +48,7 @@ __all__ = [
     "count_failures",
     "extract_sample_diagnostics",
     "find_rank",
+    "is_degraded",
 ]
 
 
@@ -100,20 +72,14 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
 
 
 def _compute_accuracy(results: list[QueryResult]) -> dict:
-    """Compute accuracy metrics from evaluation results.
+    """Base scalars: hits, total, accuracy, errors.
 
-    Args:
-        results: List of result dicts with ``hit`` and ``error`` keys.
-
-    Returns:
-        Dict with keys: hits, total, accuracy, errors.
+    Kept as a thin function (not part of the registry) because several
+    consumers read ``hits`` / ``total`` directly.
     """
     total = len(results)
     hits = sum(1 for r in results if r.get("hit"))
     errors = sum(1 for r in results if is_error_result(r))
-    # Use mean per-query score (continuous) instead of binary hit rate.
-    # For exact-match scoring (score is 0 or 1), this equals hits/total.
-    # For rank-weighted scoring, this yields MRR.
     accuracy = sum(r.get("score", 0.0) for r in results) / total if total else 0.0
     return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
 
@@ -140,58 +106,16 @@ def _extract_candidate_label(c) -> str:
     return c[0] if isinstance(c, (list, tuple)) else str(c)
 
 
-def _compute_recall(
-    step: PipelineNode,
-    results: list[QueryResult],
-    candidate_key: str = "candidate_ranking",
-) -> float:
-    """Fraction of queries where GT appears in the candidate list for *step*."""
-
-    def _step_ran(r: QueryResult) -> bool:
-        pd = r.get("pipeline_data") or {}
-        if pd.get("terminated_at") == step.name:
-            return True
-        return (pd.get("step_timings") or {}).get(step.name) is not None
-
-    scoped = [r for r in results if _step_ran(r) and not is_error_result(r)]
-    if not scoped:
-        return 0.0
-    found = 0
-    for r in scoped:
-        pd = r.get("pipeline_data") or {}
-        candidates: list[Any] = pd.get(candidate_key, [])  # type: ignore[assignment]
-        gt = r.get("ground_truth", "")
-        if any(_extract_candidate_label(c) == gt for c in candidates):
-            found += 1
-    return found / len(scoped)
+# ---------------------------------------------------------------------------
+# Per-query diagnostics — used by failure analysis and critique payloads.
+# These remain in this module (not in the Evaluator registry) because they
+# return typed mixed values (bool/int/str/None), not the float the registry
+# requires. They piggyback on ``PipelineNode.node_type`` the same way the
+# registry's recall evaluators do.
+# ---------------------------------------------------------------------------
 
 
-def _compute_cache_hit_rate(step: PipelineNode, results: list[QueryResult]) -> float:
-    """Fraction of queries resolved by cache (non-null cache timing)."""
-    if not results:
-        return 0.0
-    cache_hits = non_error = 0
-    for r in results:
-        if is_error_result(r):
-            continue
-        non_error += 1
-        pd = r.get("pipeline_data") or {}
-        if (pd.get("step_timings") or {}).get(step.name) is not None:
-            cache_hits += 1
-    return cache_hits / non_error if non_error else 0.0
-
-
-def _compute_type_metric(
-    metric_def: IntermediateMetric,
-    step: PipelineNode,
-    results: list[QueryResult],
-) -> float:
-    """Compute a single type-based metric value."""
-    if metric_def.name in ("source_recall", "candidate_recall"):
-        return _compute_recall(step, results, candidate_key=metric_def.pipeline_data_key)
-    if metric_def.name == "cache_hit_rate":
-        return _compute_cache_hit_rate(step, results)
-    return 0.0
+_DIAG_NODE_TYPES = ("candidate_source", "ranker", "enricher", "cache")
 
 
 def extract_sample_diagnostics(
@@ -202,17 +126,13 @@ def extract_sample_diagnostics(
 
     Per-query complement to ``compute_pipeline_metrics()`` — returns a flat
     dict of named diagnostic values derived from the result's ``pipeline_data``
-    and the schema's node types.
-
-    Node-type metrics are namespaced as ``{node_name}_{metric}`` when multiple
-    nodes share a type, bare ``{metric}`` otherwise (same convention as
-    ``compute_pipeline_metrics``).
+    and the schema's node types. Node-type metrics are namespaced as
+    ``{node_name}_{metric}`` when multiple nodes share a type.
     """
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {}
 
-    # --- Infrastructure diagnostics (always present) ---
     diag["terminated_at"] = pd.get("terminated_at")
     diag["total_time_ms"] = pd.get("total_time")
     diag["degraded"] = bool((pd.get("diagnostics") or {}).get("warnings"))
@@ -221,10 +141,9 @@ def extract_sample_diagnostics(
     if not pd:
         return diag
 
-    # --- Node-type diagnostics ---
     type_steps: dict[str, list[PipelineNode]] = {}
     for step in pipeline_schema.nodes:
-        if step.node_type and step.node_type in NODE_TYPE_METRICS:
+        if step.node_type and step.node_type in _DIAG_NODE_TYPES:
             type_steps.setdefault(step.node_type, []).append(step)
 
     for _ntype, steps in type_steps.items():
@@ -245,7 +164,6 @@ def _extract_node_diagnostics(
 ) -> dict[str, float | bool | int | str | None]:
     """Extract per-query diagnostics for a single node, dispatched on node_type."""
     ntype = node.node_type
-
     if ntype == "candidate_source":
         return _diag_candidate_source(node, pipeline_data, ground_truth)
     if ntype == "ranker":
@@ -270,9 +188,7 @@ def _diag_candidate_source(
     pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
-    metrics = NODE_TYPE_METRICS.get("candidate_source", [])
-    key = metrics[0].pipeline_data_key if metrics else "candidate_ranking"
-    candidates = pd.get(key, [])
+    candidates = pd.get("candidate_ranking", [])
     pos = _gt_position(candidates, gt)
     return {
         "gt_in_source": pos is not None,
@@ -286,12 +202,9 @@ def _diag_ranker(
     pd: Mapping[str, Any],
     gt: str,
 ) -> dict[str, float | bool | int | str | None]:
-    metrics = NODE_TYPE_METRICS.get("ranker", [])
-    key = metrics[0].pipeline_data_key if metrics else "final_ranking"
-    candidates = pd.get(key, [])
+    candidates = pd.get("final_ranking", [])
     pos = _gt_position(candidates, gt)
 
-    # top_score_gap: difference between rank-1 and rank-2 scores (confidence signal)
     top_score_gap: float | None = None
     if len(candidates) >= 2:
         scores = []
@@ -315,7 +228,6 @@ def _diag_enricher(
     node: PipelineNode,
     pd: Mapping[str, Any],
 ) -> dict[str, float | bool | int | str | None]:
-    # Count enriched fields from observation mappings if available
     n = 0
     for mapping in node.observation_mappings:
         if pd.get(mapping.pipeline_key) is not None:
@@ -331,160 +243,59 @@ def _diag_cache(
     return {"cache_hit": timings.get(node.name) is not None}
 
 
-# Composite-score default weights. Sum = 1.0. Accuracy stays dominant;
-# the rest is split across health/cost/recall bundles so single-node
-# pipelines (e.g. BBEH llm_only) still get a meaningful composite beyond
-# raw accuracy, and multi-node pipelines (e.g. TermNorm) pick up the
-# recall signals on top.
-COMPOSITE_WEIGHT_ACCURACY = 0.7
-COMPOSITE_WEIGHT_HEALTH = 0.15  # errors + degradation + runtime failures
-COMPOSITE_WEIGHT_COST = 0.10  # latency + (future) token cost
-COMPOSITE_WEIGHT_RECALL = 0.05  # node-type recall metrics (enriches multi-node)
-
-# Latency budget for the cost bundle. Results with mean latency ≥ this
-# contribute 0 to the cost bundle; ≤ 0.2× contribute 1.0. Prototype value.
-COMPOSITE_LATENCY_BUDGET_MS = 10_000.0
-
-
-def _compute_health_bundle(
-    results: list[QueryResult],
-    *,
-    runtime_failure_count: int,
-) -> dict[str, float]:
-    """JobSP + OptSP health signals rolled into a single [0, 1] score.
-
-    - error_rate, degraded_rate: derived from results.
-    - runtime_failure_rate: count on opt_sp.memory divided by total queries
-      (bounded to [0, 1]).
-
-    Each sub-signal contributes as (1 - rate); the bundle is the mean so
-    one catastrophic dimension doesn't wipe the other two.
-    """
-    total = len(results) or 1
-    errors = sum(1 for r in results if is_error_result(r))
-    degraded = count_degraded_queries(results)
-    error_rate = errors / total
-    degraded_rate = degraded / total
-    rf_rate = min(runtime_failure_count / total, 1.0)
-    components = [
-        1.0 - error_rate,
-        1.0 - degraded_rate,
-        1.0 - rf_rate,
-    ]
-    return {
-        "health": sum(components) / len(components),
-        "error_rate": error_rate,
-        "degraded_rate": degraded_rate,
-        "runtime_failure_rate": rf_rate,
-    }
-
-
-def _compute_cost_bundle(results: list[QueryResult]) -> dict[str, float]:
-    """Cost / latency signals rolled into a single [0, 1] score.
-
-    Only latency for now. Token cost is a natural future extension —
-    slot it into this bundle when the backend starts reporting it.
-    """
-    latencies = []
-    for r in results:
-        pd = r.get("pipeline_data") or {}
-        t = pd.get("total_time")
-        if t is not None:
-            try:
-                latencies.append(float(t))
-            except (TypeError, ValueError):
-                continue
-    if not latencies:
-        return {"cost": 1.0, "mean_latency_ms": 0.0}
-    mean_latency = sum(latencies) / len(latencies)
-    latency_score = max(0.0, 1.0 - mean_latency / COMPOSITE_LATENCY_BUDGET_MS)
-    return {"cost": latency_score, "mean_latency_ms": mean_latency}
+# ---------------------------------------------------------------------------
+# Round-level composite — driven by the evaluator registry + scoring formula.
+# ---------------------------------------------------------------------------
 
 
 def compute_pipeline_metrics(
     pipeline_schema: PipelineSchema,
     results: list[QueryResult],
     *,
-    metric_weights: dict[str, float] | None = None,
     opt_sp: Any = None,
-) -> dict[str, float]:
-    """Compute intermediate metrics from pipeline node types.
+    round_scorer: RoundScorer | str | None = None,
+) -> dict[str, Any]:
+    """Compute round-level metrics from the evaluator registry.
 
-    Walks ``pipeline_schema.nodes``; for each with a ``node_type`` in the
-    registry, computes the corresponding metric scoped to queries where
-    the step ran.
+    Every per-round evaluator whose ``applies(schema)`` is True is
+    materialized into a flat ``evaluators`` dict; names are namespaced
+    when multiple nodes of the same type exist. The composite score is
+    the result of evaluating ``round_scorer`` against that namespace.
+
+    - ``round_scorer`` can be a compiled callable (via
+      ``shared.scoring.compile_round_scorer``), a formula string, or
+      ``None``. ``None`` uses the default formula produced by
+      ``default_per_round_formula(schema)`` — reproduces the pre-migration
+      4-bundle weighted sum on schemas that ship with recall nodes.
+    - ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
+      ``memory.validation_failures`` forces composite to 0.0 (structurally
+      invalid candidates), and ``memory.runtime_failures`` feeds the
+      ``runtime_failure_rate`` evaluator.
 
     The composite is **recorded, not gating**: ``_select_round_winner``
-    compares candidates on ``accuracy`` (the user's performance scoring
+    compares candidates on ``accuracy`` (the user's per-query scoring
     function). Composite is displayed and persisted so operators can see
-    whether a win came with hidden costs (latency, error bursts,
-    runtime failures), but it does not drive the optimization loop.
-
-    Signals folded into composite:
-      - accuracy (JobSP, dominant)
-      - health bundle: errors + degradation + OptSP runtime_failures
-      - cost bundle: mean latency (future: token cost)
-      - recall bundle: node-type recall metrics when the pipeline has them
-
-    ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
-    ``memory.validation_failures`` forces composite to 0.0 (a structurally
-    invalid candidate has no meaningful composite) and
-    ``memory.runtime_failures`` feeds the health bundle.
+    whether a win came with hidden costs.
     """
     base = _compute_accuracy(results)
-    accuracy = base["accuracy"]
-    weights = dict(metric_weights or {})
-    metric_values: dict[str, float] = {}
+    evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
 
-    # Node-type metrics (display + recall bundle)
-    type_steps: dict[str, list] = {}
-    for step in pipeline_schema.nodes:
-        if step.node_type and step.node_type in NODE_TYPE_METRICS:
-            type_steps.setdefault(step.node_type, []).append(step)
+    if callable(round_scorer):
+        scorer = round_scorer
+    elif isinstance(round_scorer, str):
+        scorer = compile_round_scorer(round_scorer)
+    else:
+        scorer = compile_round_scorer(default_per_round_formula(pipeline_schema))
 
-    for _ntype, steps in type_steps.items():
-        metrics = NODE_TYPE_METRICS.get(_ntype, [])
-        needs_namespace = len(steps) > 1
-        for step in steps:
-            for metric_def in metrics:
-                metric_name = (
-                    f"{step.name}_{metric_def.name}" if needs_namespace else metric_def.name
-                )
-                metric_values[metric_name] = _compute_type_metric(
-                    metric_def,
-                    step,
-                    results,
-                )
+    composite = scorer(evaluator_values)
 
-    # OptSP signals
+    # OptSP-layer counts for display and the validation-failure short-circuit.
     runtime_failure_count = 0
     validation_failure_count = 0
     if opt_sp is not None and hasattr(opt_sp, "memory"):
         runtime_failure_count = len(getattr(opt_sp.memory, "runtime_failures", []) or [])
         validation_failure_count = len(getattr(opt_sp.memory, "validation_failures", []) or [])
 
-    health = _compute_health_bundle(results, runtime_failure_count=runtime_failure_count)
-    cost = _compute_cost_bundle(results)
-
-    # Recall bundle: mean of available node-type metrics, or fall back to
-    # accuracy so single-node pipelines don't silently discount the weight.
-    recall_score = sum(metric_values.values()) / len(metric_values) if metric_values else accuracy
-
-    # Weighted composite — weights can be overridden per-metric via
-    # metric_weights for tuning experiments.
-    w_acc = weights.get("accuracy", COMPOSITE_WEIGHT_ACCURACY)
-    w_health = weights.get("health", COMPOSITE_WEIGHT_HEALTH)
-    w_cost = weights.get("cost", COMPOSITE_WEIGHT_COST)
-    w_recall = weights.get("recall", COMPOSITE_WEIGHT_RECALL)
-    composite = (
-        w_acc * accuracy
-        + w_health * health["health"]
-        + w_cost * cost["cost"]
-        + w_recall * recall_score
-    )
-
-    # Hard zero for structurally invalid candidates — keeps the composite
-    # honest even though the synthetic-0 path already sets accuracy=0.
     if validation_failure_count > 0:
         composite = 0.0
 
@@ -492,17 +303,10 @@ def compute_pipeline_metrics(
 
     return {
         **base,
-        **metric_values,
+        **evaluator_values,
+        "evaluators": dict(evaluator_values),
         "composite": round(composite, 6),
         "degraded_queries": degraded,
-        # Display-only breakdown so operators can see what moved the composite.
-        "health_bundle": round(health["health"], 6),
-        "error_rate": round(health["error_rate"], 6),
-        "degraded_rate": round(health["degraded_rate"], 6),
-        "runtime_failure_rate": round(health["runtime_failure_rate"], 6),
-        "cost_bundle": round(cost["cost"], 6),
-        "mean_latency_ms": round(cost["mean_latency_ms"], 2),
-        "recall_bundle": round(recall_score, 6),
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
     }
@@ -513,25 +317,30 @@ def compute_composite_score(
     pipeline_schema: PipelineSchema,
     *,
     opt_sp: Any = None,
-    metric_weights: dict[str, float] | None = None,
+    round_scorer: RoundScorer | str | None = None,
 ) -> dict:
     """Compute composite score — delegates to ``compute_pipeline_metrics()``.
 
     The composite is a **recorded** multi-signal diagnostic, not the
     winner-selection key. ``_select_round_winner`` compares candidates on
-    ``accuracy`` (the user's performance scoring function). See
-    ``compute_pipeline_metrics`` for the signal breakdown.
+    ``accuracy`` (the user's performance scoring function).
 
     Returns dict with at least: hits, total, accuracy, errors, composite,
-    plus the health/cost/recall bundle breakdown and any type-derived
-    metrics from the schema's node types.
+    evaluators (dict of named registry values), plus each evaluator's
+    value at top level for legacy key access.
     """
     return compute_pipeline_metrics(
         pipeline_schema,
         results,
         opt_sp=opt_sp,
-        metric_weights=metric_weights,
+        round_scorer=round_scorer,
     )
+
+
+# ---------------------------------------------------------------------------
+# Failure analysis + query difficulty — unchanged semantics, kept here so
+# consumers don't need to import from a new module.
+# ---------------------------------------------------------------------------
 
 
 def _classify_difficulty(hit_rate: float) -> DifficultyClass:
@@ -588,7 +397,6 @@ def compile_failure_analysis(
     if not failures:
         return FailureAnalysis(total_failures=0, total_results=len(results))
 
-    # Group by diagnostic key
     groups: dict[tuple[str, ...], list[QueryResult]] = defaultdict(list)
     diag_cache: dict[tuple[str, ...], dict] = {}
     for r in failures:
@@ -624,14 +432,7 @@ def compile_failure_analysis(
 def compile_query_difficulty(
     historical_results: Sequence[Sequence[Mapping[str, Any]]],
 ) -> QueryDifficulty:
-    """Classify queries by hit rate across multiple evaluation rounds.
-
-    Args:
-        historical_results: List of result sets (one per evaluation/round).
-
-    Returns:
-        QueryDifficulty with per-query classification.
-    """
+    """Classify queries by hit rate across multiple evaluation rounds."""
     from promptpotter.domain.analysis import QueryDifficulty, QueryProfile
 
     query_hits: dict[str, list[bool]] = defaultdict(list)
