@@ -1,66 +1,31 @@
 # BBEH — Dataset-Specific Notes
 
-Source of truth: `notebooks/bbeh_potter.ipynb`. This file captures the facts that
-diverge from the generic `/potter-run` flow and from `datasets/bbeh/dataset.md`
-(which contains stale guidance — see "Known doc drift" below).
+Source of truth: `notebooks/bbeh_potter.ipynb`. `datasets/bbeh/dataset.md` and `campaign.json` are partially stale — see "Known doc drift".
 
-## Primary entry point: notebook, not CLI
+## Entry point
 
-BBEH is driven from `notebooks/bbeh_potter.ipynb`. The skill's default CLI
-flow (`init → set-task → optimize → show-results`) is **not** how this dataset
-is run. The notebook:
+Authored and launched from the notebook — it owns what CLI doesn't: HF `BBEH/bbeh` load via `shared_config.py::load_and_split()`, `{input,target}` → `{query,ground_truth}` normalisation, per-task test eval of the global winner across 23 tasks, and `results_potter.json` export.
 
-1. Loads HuggingFace `BBEH/bbeh` via
-   `docs/research/bbeh-comparison/shared_config.py::load_and_split()`.
-2. Normalises `{input, target}` → `{query, ground_truth}`.
-3. Calls the notebook API (`init_services`, `prepare_scoring_context`,
-   `run_optimization_notebook`) from `promptpotter.presentation.ui.campaign`.
-4. Runs per-task test evaluation of the global winner across all 23 tasks.
-5. Exports `results_potter.json` next to `results_capo.json` and
-   `results_dspy.json` for the comparison table.
+**Resume via CLI works** (v3 parity): `run_optimization_notebook` auto-mints a session and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`. So `python -m promptpotter optimize` resumes an interrupted notebook run via the active pointer. Post-hoc renderers (`show-status` / `show-results`) are shared.
 
-When the user invokes `/potter-run bbeh`, default to **"open the notebook"**,
-not `python -m promptpotter init`. Only run the CLI path if the user
-explicitly asks for it.
+Default with no active BBEH session → open the notebook. With an active BBEH campaign dir on disk → confirm which surface the user wants.
 
-## Methodology — single global prompt, not per-task
+## Methodology — single global prompt
 
-**One prompt optimized over all 23 tasks, pooled.** The campaign sees the
-full 460-example mini split as one undifferentiated training pool and produces
-a single winner prompt. That winner is then evaluated per-task on the ~4,060
-non-mini examples, and per-task accuracies are reported (feeding the
-harmonic-mean metric BBEH is officially graded on).
+One prompt optimised over all 23 tasks pooled (460-example HF `mini` split = training pool). Winner evaluated per-task on ~4,060 non-mini examples; harmonic-mean across tasks is the official BBEH metric.
 
-Why not per-task:
+Per-task optimisation is rejected: 20 mini examples/task is noise, specialising inflates the score vs a single-deploy prompt, and HF mini/non-mini disjointness is lost if splits are redone.
 
-- 20 mini examples per task is noise-level. Per-task optimization hits 100%
-  accuracy and early-stops on round 1 without learning anything.
-- Specialising a different prompt per task inflates the score relative to
-  what would actually be deployed at inference time (one prompt, 23 tasks).
-- Leakage risk: HF mini/non-mini is disjoint by construction, so training on
-  pooled mini and evaluating on non-mini has zero overlap. Per-task schemes
-  are fine in principle but lose this disjointness guarantee if the split is
-  redone.
-
-**Sanity check** the notebook runs: `train_keys & test_keys == ∅` asserted
-inline. If that assert ever fires, stop immediately and report the leak.
-
-## Data split
+Inline assertion in the notebook: `train_keys & test_keys == ∅`. If it fires, stop and report the leak.
 
 | Slice | Count | Source |
 |-------|-------|--------|
-| Train (optimization) | 460 | HF `BBEH/bbeh` mini flag, pooled across 23 tasks |
-| Test (held-out eval) | ~4,060 | HF `BBEH/bbeh` non-mini, grouped per-task |
-| Tasks | 23 | HF-native task labels |
+| Train | 460 | HF `BBEH/bbeh` mini, pooled across 23 tasks |
+| Test  | ~4,060 | HF `BBEH/bbeh` non-mini, grouped per-task |
 
-Seed: `SPLIT_SEED = 42` from `shared_config.py`. The split is HF-native, not
-sampled — the seed only affects downstream shuffling.
+Seed `SPLIT_SEED = 42` from `shared_config.py` (HF-native split — seed only affects shuffling).
 
-## Hyperparameters (unmeasured starting points)
-
-The notebook's three headline dials are explicitly flagged as **pre-sweep**
-starting points, not tuned values. Any numbers reported from this setup are a
-**floor**, not a ceiling, for PromptPotter on BBEH.
+## Hyperparameters (pre-sweep floor, not ceiling)
 
 ```python
 MAX_ROUNDS = 8
@@ -68,99 +33,36 @@ N_VARIANTS = 4
 SP_BUDGET_TTEST = 15
 ```
 
-Other config the notebook sets (and that the dataset's `campaign.json` does
-**not** match as of 2026-04-18):
+Also: `l2_patience=5`, `l3_patience=3`, `creativity=0.7`, `improvement_threshold=0.01`, `seed=42`. Notebook injects `task_context` inline — **do not run `set-task`** for BBEH.
 
-- `l2_patience: 5`, `l3_patience: 3` (more forgiving than `campaign.json`'s
-  `l2_patience: 2, l3_patience: 1`)
-- `creativity: 0.7`, `improvement_threshold: 0.01`, `seed: 42`
-- `task_context.task_description` is set inline in the notebook (not loaded
-  from `datasets/bbeh/task_description.md`)
-
-If the user asks "what hyperparameters are we using?", cite the notebook
-values and flag that `datasets/bbeh/campaign.json` is out of sync.
-
-## Task context (inline, not from file)
-
-The notebook injects `task_context` directly into `campaign_config`:
-
-> Solve a reasoning problem from BIG-Bench Extra Hard (BBEH), which spans 23
-> diverse task types including boardgame QA, multi-step arithmetic, causal
-> reasoning, disambiguation, and adversarial distractor text. Read the input
-> carefully, reason step by step as needed, and return only the final answer.
-
-This bypasses `set-task --task-file`. For BBEH, do not run `set-task` from
-the CLI — the notebook is the authoritative source for task context.
+If asked "what hyperparameters are we using?", cite the notebook and flag that `datasets/bbeh/campaign.json` is out of sync.
 
 ## Pipeline
 
-Single-node `llm_only` pipeline (per `datasets/bbeh/pipeline.json`):
-
-- Model: `openai/gpt-oss-120b` via Groq (`MODEL_ID` from `shared_config.py`)
-- `max_tokens: 32000`, `reasoning_effort: "medium"` — both required for long
-  BBEH prompts; reducing either risks empty-output failures when hidden
-  reasoning tokens consume the output budget.
-- No retrieval, no enrichment, no ranking — plain LLM call with the optimized
-  prompt as system message, query as user message.
+Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` via Groq, `max_tokens=32000`, `reasoning_effort=medium`. Both are load-bearing — reducing either risks empty-output when reasoning tokens eat the output budget.
 
 ## Prerequisites
 
-1. `pip install -e ".[dev,jupyter]"` from repo root.
-2. `pip install datasets` (HuggingFace).
-3. `.env` with `GROQ_API_KEY` — notebook asserts it inline.
-4. Local backend at `http://127.0.0.1:8000` exposing the `llm_only` node
-   (check with `curl -s http://127.0.0.1:8000/status`).
-5. Smoke-test first: `python scripts/smoke_campaign.py --dataset bbeh`
-   (~90s).
+`.env` with `GROQ_API_KEY`, local backend on `:8000` exposing `llm_only`. First time: `python scripts/smoke_campaign.py --dataset bbeh` (~90s).
 
-## Export — results_potter.json schema
+## Export schema
 
-The notebook writes `docs/research/bbeh-comparison/results_potter.json` with
-the same top-level shape as `results_capo.json` / `results_dspy.json`:
+`docs/research/bbeh-comparison/results_potter.json` matches `results_capo.json` / `results_dspy.json`:
+- `per_task[task_name] = {accuracy, n_test}`
+- `config` = `{optimizer, max_rounds, n_variants, sp_budget_ttest, model_id, n_train, train_accuracy, baseline_train_accuracy, rounds, methodology, note}`
+- `optimized_prompts = {"__global__": winner}`
 
-- `per_task[task_name] = {accuracy: float, n_test: int}` — one entry per
-  BBEH task.
-- `config` — includes `optimizer`, `max_rounds`, `n_variants`,
-  `sp_budget_ttest`, `model_id`, `n_train`, `train_accuracy`,
-  `baseline_train_accuracy`, `rounds`, `methodology`, `note`.
-- `optimized_prompts = {"__global__": winner_prompt_str}` — single entry
-  since there is one global winner.
+`note` is conventionally `"unmeasured starting hyperparameters — pre-sweep"` so comparison tooling flags the number as a floor.
 
-`note` field is conventionally set to
-`"unmeasured starting hyperparameters — pre-sweep"` so downstream comparison
-tooling can flag the number as a floor.
+## Known doc drift (2026-04-18)
 
-## Known doc drift (as of 2026-04-18)
+- `datasets/bbeh/dataset.md`: "Per-task loop: 23 separate campaigns" — wrong, one global. `max_tokens: 16000` — `pipeline.json` actually sets 32000.
+- `datasets/bbeh/campaign.json`: diverges on `max_rounds`, `n_variants`, `sp_budget_ttest`, `l2_patience`, `l3_patience` — notebook's `build_campaign_config()` shadows it, safe to ignore for notebook runs. CLI path → flag and ask whether to sync first.
 
-`datasets/bbeh/dataset.md` contains two stale lines:
+## "Empty predictions" bug (deferred)
 
-1. Line 47: `"Per-task loop: 23 separate campaigns, one cycle_id per task"` —
-   **contradicted by the notebook**. Reality: one global campaign.
-2. Pipeline Notes block says `max_tokens: 16000` — `pipeline.json` actually
-   sets `32000`. The notebook hits the backend's pipeline defaults, so the
-   dataset.md value is descriptive but misleading.
+Project memory flags TermNorm `llm_only` returning empty → 0% campaigns. Notebook iteration suggests it's intermittent or narrowed. If many `0.0` accuracies appear, check `library/dataset_runs/*.json` for empty `predicted` strings before re-running.
 
-`datasets/bbeh/campaign.json` also diverges from the notebook on
-`max_rounds`, `n_variants`, `sp_budget_ttest`, `l2_patience`, `l3_patience`.
-It's safe to ignore for BBEH runs — the notebook's `build_campaign_config()`
-shadows it.
+## Related tools
 
-When running BBEH, trust the notebook. If the user wants the CLI path, flag
-the drift and ask whether to sync `campaign.json` and `dataset.md` first.
-
-## Memory note: "BBEH empty predictions bug"
-
-There's a project memory flagging that TermNorm `llm_only` returns empty on
-BBEH queries → 0% campaigns, deferred. The notebook's existence and its
-inline assertion `assert os.environ.get("GROQ_API_KEY")` suggest this is the
-working setup the user iterates with; the bug may be intermittent or have
-been narrowed since the memory was written. If a run produces suspiciously
-many `0.0` accuracies, check `dataset_runs/*.json` for empty `predicted`
-strings before re-running — that's the signature of the deferred bug.
-
-## Related tools comparison
-
-BBEH numbers feed `docs/research/table-sup-1.md`. CAPO and DSPy comparison
-notebooks live at `docs/research/bbeh-comparison/bbeh_capo.ipynb` and
-`bbeh_dspy.ipynb` respectively (Colab-based — unlike `bbeh_potter.ipynb`
-which runs locally against this repo).
+BBEH numbers feed `docs/research/table-sup-1.md`. CAPO/DSPy equivalents at `bbeh-comparison/bbeh_capo.ipynb` and `bbeh_dspy.ipynb` (Colab).
