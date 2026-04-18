@@ -72,6 +72,7 @@ async def _run_query_loop(
     *,
     prior_results: dict[str, QueryResult],
     on_result: Callable[[QueryResult, int, int], None] | None,
+    on_start: Callable[[str, int, int], None] | None,
     degradation_checks: list | None,
     candidate_idx: int,
     n_total_candidates: int,
@@ -88,6 +89,9 @@ async def _run_query_loop(
                 return QueryLoopResult(results, completed=False, stop_reason="graceful")
 
             query = qd["query"]
+
+            if on_start is not None:
+                on_start(query, i, len(dataset))
 
             # Reuse: prior-result cache from previous dataset_runs.
             if query in prior_results:
@@ -197,6 +201,7 @@ async def score_search_point(
     *,
     label: str = "Eval",
     on_result: Callable[[QueryResult, int, int], None] | None = None,
+    on_start: Callable[[str, int, int], None] | None = None,
     source: str = "",
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
@@ -256,6 +261,7 @@ async def score_search_point(
         ctx,
         prior_results=prior_results,
         on_result=on_result,
+        on_start=on_start,
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,

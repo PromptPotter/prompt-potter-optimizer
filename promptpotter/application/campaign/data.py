@@ -87,12 +87,13 @@ async def _run_baseline_scoring(
     dataset: list,
     session: SessionEnv,
     pipeline_params: dict | None = None,
-    on_result: Callable | None = None,
+    listener: Any | None = None,
     obs: Any | None = None,
     pipeline_schema: Any | None = None,
     scoring_formula: str | None = None,
 ) -> tuple[list, list]:
     """Score the baseline prompt and build initial campaign_rounds list."""
+    from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.shared.errors import graceful
@@ -136,13 +137,36 @@ async def _run_baseline_scoring(
         source="baseline",
         scorer=compile_scorer(scoring_formula),
     )
-    baseline_results, scores, _cached, _ = await score_search_point(
-        sp,
-        dataset,
-        ctx,
-        label="Baseline",
-        on_result=on_result,
-    )
+
+    # Wrap the listener with baseline pseudo-candidate coords (ci=0/ct=1) so
+    # the dashboard emitter ticks per-query during baseline exactly as it
+    # does during L1 scoring.  Without this, baseline is invisible on disk.
+    on_start_cb: Callable | None = None
+    on_result_cb: Callable | None = None
+    if listener is not None:
+        emit_phase(listener.on_phase, CampaignPhase.BASELINE, "enter", round=0)
+
+        def _baseline_on_start(query_text: str, qi: int, qt: int) -> None:
+            listener.on_sample_started(0, 1, qi, qt, query_text)
+
+        def _baseline_on_result(result: dict, qi: int, qt: int) -> None:
+            listener.on_sample_scored(0, 1, qi, qt, result)
+
+        on_start_cb = _baseline_on_start
+        on_result_cb = _baseline_on_result
+
+    try:
+        baseline_results, scores, _cached, _ = await score_search_point(
+            sp,
+            dataset,
+            ctx,
+            label="Baseline",
+            on_result=on_result_cb,
+            on_start=on_start_cb,
+        )
+    finally:
+        if listener is not None:
+            emit_phase(listener.on_phase, CampaignPhase.BASELINE, "exit", round=0)
 
     campaign_rounds = [
         {
@@ -168,7 +192,7 @@ async def prepare_scoring_context(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
     svc: Any = None,
-    on_result: Callable | None = None,
+    listener: Any | None = None,
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
@@ -226,7 +250,7 @@ async def prepare_scoring_context(
                 pipeline_params=pipeline_params,
                 pipeline_schema=pipeline_schema,
                 scoring_formula=query_formula,
-                on_result=on_result,
+                listener=listener,
                 obs=obs,
             )
 

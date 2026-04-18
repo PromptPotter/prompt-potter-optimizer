@@ -321,10 +321,14 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,
     pipeline_params: dict | None = None,
+    listener: Any | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, optionally run baseline.
 
-    Delegates to shared orchestration with notebook display.
+    Delegates to shared orchestration with notebook display.  A tqdm
+    progress bar + per-query print wraps the caller's ``listener`` so
+    baseline scoring is visible in the notebook without losing the
+    dashboard updates the caller's emitter drives on top.
     """
     from tqdm.auto import tqdm
 
@@ -342,15 +346,40 @@ async def prepare_scoring_context(
     )
     pbar: Any = None
 
-    def _on_result(result: dict, index: int, total: int) -> None:
-        nonlocal pbar
-        if pbar is None:
-            pbar = tqdm(total=total or 1, desc="Baseline eval", unit="query")
-        else:
-            pbar.total = total
-        is_cached = result.get("cached", False)
-        tqdm.write(_fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula))
-        pbar.update(1)
+    class _NotebookBaselineListener:
+        """Wraps the caller's listener and adds tqdm for the baseline phase."""
+
+        def __init__(self, inner: Any | None) -> None:
+            self._inner = inner
+
+        def on_phase(self, event: Any) -> None:
+            if self._inner is not None:
+                self._inner.on_phase(event)
+
+        def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
+            nonlocal pbar
+            if pbar is None:
+                pbar = tqdm(total=qt or 1, desc="Baseline eval", unit="query")
+            else:
+                pbar.total = qt
+            if self._inner is not None:
+                self._inner.on_sample_started(ci, ct, qi, qt, query_text)
+
+        def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+            is_cached = result.get("cached", False)
+            tqdm.write(_fmt_query_result(result, cached=is_cached, scoring_formula=scoring_formula))
+            if pbar is not None:
+                pbar.update(1)
+            if self._inner is not None:
+                self._inner.on_sample_scored(ci, ct, qi, qt, result)
+
+        def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+            if self._inner is not None:
+                self._inner.on_candidate_scored(idx, total, scores)
+
+        def on_round_complete(self, rr: Any, l1_stall_count: int) -> None:
+            if self._inner is not None:
+                self._inner.on_round_complete(rr, l1_stall_count)
 
     _obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
 
@@ -363,7 +392,7 @@ async def prepare_scoring_context(
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
             svc=session,
-            on_result=_on_result,
+            listener=_NotebookBaselineListener(listener),
             obs=_obs,
         )
     finally:

@@ -22,10 +22,11 @@ class RunListener:
 
     ``emitter`` is the persistence hook (writes campaign artifacts).
     ``display`` is an optional UI sink that implements the same event
-    methods (``on_phase``, ``on_candidate_scored``, ``on_sample_scored``,
-    ``on_round_complete``). ``control`` is a single callable for checkpoint
-    polling (CLI dashboard, notebook buttons). All calls are safe when a
-    listener is absent — no ``None`` guards needed at the callsite.
+    methods (``on_phase``, ``on_candidate_scored``, ``on_sample_started``,
+    ``on_sample_scored``, ``on_round_complete``). ``control`` is a single
+    callable for checkpoint polling (CLI dashboard, notebook buttons). All
+    calls are safe when a listener is absent — no ``None`` guards needed at
+    the callsite.
     """
 
     __slots__ = ("control", "display", "emitter")
@@ -52,6 +53,12 @@ class RunListener:
             self.emitter.on_candidate_scored(idx, total, scores)
         if self.display is not None:
             self.display.on_candidate_scored(idx, total, scores)
+
+    def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
+        if self.emitter is not None:
+            self.emitter.on_sample_started(ci, ct, qi, qt, query_text)
+        if self.display is not None:
+            self.display.on_sample_started(ci, ct, qi, qt, query_text)
 
     def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
         if self.emitter is not None:

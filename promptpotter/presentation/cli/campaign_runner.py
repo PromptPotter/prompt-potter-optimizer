@@ -272,7 +272,9 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
+    from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.campaign_setup import load_recon_brief
+    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
@@ -280,6 +282,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.optimization.pipeline import set_round_recorder
     from promptpotter.infrastructure.persistence.control import CampaignControlReader
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
+    from promptpotter.infrastructure.persistence.session_emitter import (
+        CampaignPersistenceEmitter,
+    )
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
@@ -313,6 +318,28 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     session_dir = session.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
     logger.info("Session: %s", session_dir)
 
+    # Build the emitter BEFORE baseline so the dashboard ticks through
+    # the BASELINE phase, not just the L1 rounds.  The emitter reads any
+    # prior dashboard.json for resume continuity; baseline accuracy is
+    # stamped later during the INIT exit phase.
+    pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0) or 0.0
+    prelim_config = LoopConfig.from_campaign_config(
+        campaign_config,
+        backend_id=ctx.backend_id,
+        project_root=str(session.store.base_dir),
+        session_id=ctx.session_id,
+        pipeline_schema=session.pipeline_schema,
+        dataset_name=session.dataset_name or "",
+    )
+    emitter = CampaignPersistenceEmitter.for_session(
+        prelim_config,
+        pre_baseline_acc,
+        ctx.state.get("cycle_id"),
+        resumed_from_round=resume_from_round,
+    )
+    control_reader = CampaignControlReader(session_dir).check
+    listener = RunListener(emitter=emitter, control=control_reader)
+
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
     _baseline, dataset, campaign_rounds, _baseline_results = await prepare_scoring_context(
@@ -321,6 +348,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         campaign_config,
         pipeline_params=pipeline_params,
         run_baseline=has_baseline,
+        listener=listener,
     )
 
     baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
@@ -343,9 +371,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.task_context,
             session_id=ctx.session_id,
-            control=CampaignControlReader(session_dir).check,
+            control=control_reader,
             cycle_id=ctx.state.get("cycle_id"),
             resume_from_round_override=resume_from_round,
+            emitter=emitter,
         )
     finally:
         set_round_recorder(None)

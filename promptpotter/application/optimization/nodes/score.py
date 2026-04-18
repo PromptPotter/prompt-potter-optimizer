@@ -414,6 +414,9 @@ async def _score_candidates(
 
     for idx, osp_c in enumerate(osp_candidates):
 
+        def _on_start(query_text, qi, qt, _ci=idx, _ct=n_candidates):
+            callbacks.on_sample_started(_ci, _ct, qi, qt, query_text)
+
         def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
             callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
             if obs:
@@ -452,6 +455,7 @@ async def _score_candidates(
             ctx,
             label=f"candidate_{idx}",
             on_result=_on_result,
+            on_start=_on_start,
             degradation_checks=all_checks or None,
             candidate_idx=idx,
             n_total_candidates=n_candidates,

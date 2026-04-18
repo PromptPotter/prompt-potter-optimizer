@@ -580,6 +580,7 @@ async def run_optimization(
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
+    emitter: CampaignPersistenceEmitter | None = None,
 ) -> RunResult:
     """Run the full optimization loop from a prepared baseline.
 
@@ -665,12 +666,13 @@ async def run_optimization(
         started_at=started_at,
     )
 
-    emitter = CampaignPersistenceEmitter.for_session(
-        config,
-        baseline.baseline_acc,
-        env.cycle_id,
-        resumed_from_round=env.resumed_from_round,
-    )
+    if emitter is None:
+        emitter = CampaignPersistenceEmitter.for_session(
+            config,
+            baseline.baseline_acc,
+            env.cycle_id,
+            resumed_from_round=env.resumed_from_round,
+        )
     cb.emitter = emitter
 
     stop_reason = await _run_round_loop(state, env, dataset, config, cb)

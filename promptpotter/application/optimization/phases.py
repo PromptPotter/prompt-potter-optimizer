@@ -22,6 +22,7 @@ class CampaignPhase(enum.StrEnum):
     """Feedback cycle phase names."""
 
     INIT = "init"
+    BASELINE = "baseline"
     L1_GENERATE = "l1_generate"
     L1_SCORE = "l1_score"
     REFINE_STRATEGY = "refine_strategy"

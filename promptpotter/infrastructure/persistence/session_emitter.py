@@ -135,6 +135,15 @@ def _make_initial_state(
         "rounds_completed": r.get("rounds_completed", 0),
         "total_queries_scored": r.get("total_queries_scored", 0),
         "total_backend_calls": r.get("total_backend_calls", 0),
+        # Liveness — per-query in-flight markers so a dashboard viewer
+        # can tell the loop is alive during a long LLM call.  Set by
+        # on_sample_started, cleared by on_sample_scored.
+        "query_in_flight": False,
+        "query_started_at": None,
+        "query_elapsed_s": 0.0,
+        "current_query_text": None,
+        "last_query_elapsed_s": 0.0,
+        "wallclock_serialized_at": None,
         # Config
         "model": config.model or "",
         "n_variants": config.n_variants,
@@ -183,6 +192,7 @@ class CampaignPersistenceEmitter:
         )
         self._workflow_start = time.monotonic()
         self._round_start = time.monotonic()
+        self._query_start: float | None = None
         self._rc = _RoundCounters()
 
         self._persist()
@@ -300,6 +310,29 @@ class CampaignPersistenceEmitter:
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
         self._persist()
 
+    def on_sample_started(
+        self,
+        ci: int,
+        ct: int,
+        qi: int,
+        qt: int,
+        query_text: str,
+    ) -> None:
+        s = self._state
+
+        candidate_label = f"C{ci + 1}/{ct}"
+        if s["candidate"] != candidate_label:
+            self._rc.candidate_hits = 0
+            s["candidate"] = candidate_label
+        s["query"] = f"{qi + 1}/{qt}"
+
+        self._query_start = time.monotonic()
+        s["query_in_flight"] = True
+        s["query_started_at"] = datetime.now(UTC).isoformat()
+        s["query_elapsed_s"] = 0.0
+        s["current_query_text"] = (query_text or "")[:120]
+        self._persist()
+
     def on_sample_scored(
         self,
         ci: int,
@@ -353,6 +386,14 @@ class CampaignPersistenceEmitter:
         # Historical
         s["total_queries_scored"] += 1
         s["total_backend_calls"] += 0 if is_cached else 1
+
+        # Clear in-flight markers — query landed.
+        s["query_in_flight"] = False
+        s["query_started_at"] = None
+        s["query_elapsed_s"] = 0.0
+        s["current_query_text"] = None
+        s["last_query_elapsed_s"] = round(query_time, 2)
+        self._query_start = None
 
         # Audit log line — the only live record of per-query detail.
         q_text = (result.get("query") or "")[:45]
@@ -461,6 +502,17 @@ class CampaignPersistenceEmitter:
     # -- Internal --------------------------------------------------------------
 
     def _persist(self) -> None:
+        # Wall-clock fields are overwritten here instead of only inside
+        # per-query callbacks so a dashboard reader always sees a fresh
+        # elapsed_s / round_elapsed_s / query_elapsed_s, even when the
+        # loop is blocked inside a long LLM call between callbacks.
+        now = time.monotonic()
+        s = self._state
+        s["elapsed_s"] = round(now - self._workflow_start, 1)
+        s["round_elapsed_s"] = round(now - self._round_start, 1)
+        if self._query_start is not None:
+            s["query_elapsed_s"] = round(now - self._query_start, 2)
+        s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
         write_json(self.state_path, self._state, default=str)
 
     def _append_log_md(self, section: str) -> None:

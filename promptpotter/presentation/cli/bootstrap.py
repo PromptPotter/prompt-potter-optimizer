@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -101,6 +101,7 @@ async def prepare_scoring_context(
     campaign_config: CampaignConfig | None = None,
     run_baseline: bool = True,
     pipeline_params: dict | None = None,
+    listener: Any | None = None,
 ):
     """Load baseline + dataset, optionally run baseline eval."""
     from promptpotter.application.campaign.data import prepare_scoring_context as _svc_prepare
@@ -113,6 +114,7 @@ async def prepare_scoring_context(
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
         svc=session,
+        listener=listener,
     )
 
     if _VERBOSE:

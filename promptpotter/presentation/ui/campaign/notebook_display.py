@@ -1,7 +1,8 @@
 """Notebook display — ``NotebookDisplay`` listener.
 
 Implements the ``RunListener`` display protocol (``on_phase``,
-``on_candidate_scored``, ``on_sample_scored``, ``on_round_complete``)
+``on_candidate_scored``, ``on_sample_started``, ``on_sample_scored``,
+``on_round_complete``)
 directly — no adapter needed. Pass an instance as ``display=`` to
 ``run_optimization``.
 """
@@ -126,6 +127,13 @@ class NotebookDisplay:
             and event.data["env"].resumed_from_round > 0
         ):
             del self.campaign_rounds[self.initial_len :]
+
+    def on_sample_started(
+        self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, query_text: str
+    ) -> None:
+        # Notebook display renders per-query output after the result lands;
+        # the dashboard (FileSink) surfaces the in-flight state instead.
+        pass
 
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
