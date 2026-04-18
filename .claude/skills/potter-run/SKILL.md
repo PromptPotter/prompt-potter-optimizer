@@ -33,6 +33,7 @@ Export: `python -m promptpotter export <format> --backend-id <id> -o <file>`
 
 Rules the whole flow obeys:
 
+- **Check for dataset-specific notes first.** Before running any CLI phase, look for `reference/{dataset}-notes.md`. If it exists, it supersedes the generic flow below. Current overrides: `reference/bbeh-notes.md` (BBEH runs via `notebooks/bbeh_potter.ipynb`, single global campaign, not CLI). When a dataset has notes, surface them in Phase 0.7 and default to the entry point the notes specify.
 - **Resume is the default.** `.promptpotter/active_session.json` stores `{backend_id, session_id}` like a browser's active tab. Every command except `init` reads it. If it points to a valid session matching the user's request, **skip `init`** and jump to whichever phase the session needs next. Only `init` (new/fresh / dataset mismatch) overwrites the pointer.
 - **`init_services` enforces the pointer.** The application-layer `init_services()` refuses to run against a backend different from the active pointer unless `take_over=True` is passed. CLI `init` passes it automatically; the smoke tool surfaces it as `--take-over`. Silent drift (working on dataset X while the pointer claims dataset Y) is no longer possible — you get a hard `ActiveSessionMismatchError` instead.
 - **Always `--skip-baseline`.** Baseline is evaluated automatically before the first round. Explicit baseline only when substantial historical data exists *and* the user asks.
@@ -208,6 +209,7 @@ Escalation model details: `reference/optimization-layers.md`, `docs/architecture
 
 ## References
 
+- `reference/bbeh-notes.md` — **BBEH overrides the generic flow**: runs via `notebooks/bbeh_potter.ipynb`, single global campaign (not per-task), specific hyperparameters, doc drift to watch for
 - `reference/benchmark-datasets.md` — dataset types, readiness checklist, cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation model
 - `reference/troubleshooting.md` — error diagnosis, stop reason recovery

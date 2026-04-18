@@ -39,7 +39,6 @@ from promptpotter.presentation.cli.bootstrap import (
     set_verbose,
 )
 from promptpotter.presentation.cli.commands.control import cmd_control
-from promptpotter.presentation.cli.commands.migrate import cmd_migrate
 from promptpotter.presentation.cli.commands.profile import cmd_profile
 from promptpotter.presentation.cli.commands.status import cmd_status
 from promptpotter.presentation.cli.commands.task_context import cmd_task_context
@@ -437,7 +436,6 @@ COMMANDS = {
     "profile": cmd_profile,
     "show-results": cmd_results,
     "show-status": cmd_status,
-    "migrate": cmd_migrate,
 }
 
 

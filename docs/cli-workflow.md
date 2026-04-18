@@ -248,19 +248,6 @@ Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `round
 
 ---
 
-## migrate (v2 → v3 upgrade)
-
-```bash
-python -m promptpotter migrate --dry-run   # preview the move plan
-python -m promptpotter migrate              # execute
-```
-
-Walks legacy `.promptpotter/projects/{backend_id}/…` trees and rewrites them to the v3 tenant/cycle/library layout. Renames session artifacts per Wave B, moves backend-local files under `library/backends/{backend_id}/`, splits `events.jsonl` per cycle, drops hand-rolled MLflow data (the SDK regenerates), and archives unroutable Langfuse traces under `.promptpotter/migration-orphans/`. Idempotent — re-running after migration is a no-op.
-
-`build_stores` refuses to run on an un-migrated v2 tree and prints the migrate instruction. The migrate verb itself bypasses the guard.
-
----
-
 ## Interrupt Handling
 
 The CLI uses a signal-flag pattern for graceful interrupts:

@@ -149,8 +149,6 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 **Persistence: session ≡ campaign (v3).** One mint point. Per-cycle artifacts live under `{tenant_id}/campaigns/{cycle_id}/` (dashboard, control, logs, trial_NNNN, candidates, langfuse shadow, events.jsonl, prompts); cross-cycle reference lives under `{tenant_id}/library/` (datasets, backends, dataset_runs, recon_plans, mlruns, search_memory, aliases). See `docs/architecture/overview.md § Persistence` for the full tree; state schema and resume flow in `promptpotter/infrastructure/persistence/session_emitter.py` and `application/campaign/lifecycle.py`.
 
-**Layout migration (v2 → v3).** `python -m promptpotter migrate` walks legacy `{backend_id}/…` trees and rewrites them to the tenant/cycle/library layout. Dry-run it first: `python -m promptpotter migrate --dry-run`. `build_stores` refuses to run on an un-migrated v2 tree and prints the migrate instruction.
-
 ### Key Patterns
 
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` in `infrastructure/store/` — frozen composite over focused leaf stores (BackendStore, CampaignStore, DatasetRunStore, PlanStore). `SessionStore` was merged into `CampaignStore` in Wave A (session ≡ campaign).

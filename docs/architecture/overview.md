@@ -71,7 +71,6 @@ Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; eve
 
 ```
 .promptpotter/
-  schema_version                       # v3 marker; refuse-to-run if stale
   active_session.json                  # { tenant_id, cycle_id } pointer
   projects/{tenant_id}/
     campaigns/{cycle_id}/              # per-cycle: all artifacts for one run
@@ -110,8 +109,6 @@ The canonical per-cycle file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`p
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
 `events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trial_NNNN.json`, which carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
-
-**Upgrading from v2.** Pre-Wave-A layouts rooted at `{backend_id}/…` are rejected at `build_stores` time. Run `python -m promptpotter migrate --dry-run` to preview, then `python -m promptpotter migrate` to rewrite to v3. Hand-rolled MLflow data is dropped (SDK regenerates); Langfuse traces whose cycle cannot be inferred land in `.promptpotter/migration-orphans/`.
 
 ## Where to Read Next
 
