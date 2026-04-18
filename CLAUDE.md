@@ -103,6 +103,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 ## Key Patterns
 
+- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `project_root`, `pipeline_schema`, `pipeline_params`, `recon_brief`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, CampaignStore, DatasetRunStore, PlanStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.

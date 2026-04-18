@@ -40,20 +40,24 @@ def session_dir(tmp_path: Path) -> Path:
 def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Path) -> None:
     """Emitter lifecycle (init + on_phase + on_query + on_candidate + on_round + finalize)
     must produce all CAMPAIGN_SESSION_ARTIFACTS."""
-    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.loop_env import LoopEnv
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 
-    config = LoopConfig(
-        backend_id="test_backend",
-        session_id="test_cycle",
+    config = CampaignConfig(optimization={"max_rounds": 5, "l1_patience": 3})
+    emitter = CampaignPersistenceEmitter(
+        session_dir,
         max_rounds=5,
         l1_patience=3,
+        active_nodes=[],
+        model="",
+        n_variants=5,
+        sp_budget_ttest=20,
+        pause_before_scoring=False,
     )
-    emitter = CampaignPersistenceEmitter(session_dir, config)
 
     # Simulate a single round lifecycle
     init_state = LoopState(current_accuracy=0.5)
@@ -161,6 +165,7 @@ def test_auto_mint_session_claims_active_pointer() -> None:
     """
     from types import SimpleNamespace
 
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.session_state import auto_mint_session
 
     created: dict = {}
@@ -189,7 +194,7 @@ def test_auto_mint_session_claims_active_pointer() -> None:
 
     minted = auto_mint_session(
         session,
-        {},
+        CampaignConfig(),
         cycle_hash="abcdef012345",
         baseline_acc=0.42,
         baseline_prompt_fields={"instruction": "seed"},

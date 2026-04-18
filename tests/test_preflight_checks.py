@@ -3,18 +3,14 @@
 from __future__ import annotations
 
 from promptpotter.application.campaign.config import (
-    LoopConfig,
+    CampaignConfig,
     PreflightWarning,
     run_preflight_checks,
 )
 
 
-def _cfg(sp_budget: int) -> LoopConfig:
-    return LoopConfig(
-        backend_id="test_backend",
-        session_id="test_session",
-        sp_budget_ttest=sp_budget,
-    )
+def _cfg(sp_budget: int) -> CampaignConfig:
+    return CampaignConfig(sp_budget_ttest=sp_budget)
 
 
 def test_sp_budget_exceeds_dataset_warns() -> None:

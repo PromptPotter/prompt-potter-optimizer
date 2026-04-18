@@ -199,7 +199,7 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 
 ---
 
-### Track 7: Config Aggregate Redesign
+### Track 7: Config Aggregate Redesign — **DONE**
 
 **Problem:** Three objects carry state into the optimization loop and their boundaries are accidental:
 
