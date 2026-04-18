@@ -97,51 +97,124 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **Problem:** `init` and `optimize` are two CLI verbs for what is conceptually one workflow. Nobody runs `init` alone — it sets up a session and sits there; `optimize` is always the next command. The split is an implementation artifact (session creation vs loop execution), not a user-facing distinction.
 
-On top of that, there are already at least four ways a cycle can start, and only one has a flag:
+On top of that, there are three ways a cycle can start, scattered across different flags and implicit behaviors:
 
 - Fresh baseline from `datasets/{name}/prompts/` (implicit, default)
-- Resume from last checkpoint in the active session (implicit, `optimize` with no args)
-- Fork from an events.jsonl write-point (`optimize --from <cycle>:<ref>` — landed in the interim between M8 and M9, see `docs/architecture/optimization.md § Forking a campaign`)
+- Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/architecture/optimization.md § Resuming mid-cycle`)
 - Recon-brief-seeded start (implicit, lives in session state)
 
-All four are "where does the baseline `OptSearchPoint` come from?" but they're scattered across different flags and implicit behaviors. The interim `optimize --from` change is a strict improvement over `init --fork-from`, but it's not the long-term shape — it normalizes the fork case while leaving the other three as-is.
+All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is explicitly out of scope — `optimization.md § Resuming mid-cycle` records the decision that the WAL complexity it would require is not worth it.
 
 **Why now (M9, not earlier):** Doing this as a standalone change would thrash the notebook UI layer, the API routers, and the active-session-pointer semantics for a gain that's mostly aesthetic. M9's stable-config / hierarchy / file-directory UI refactor is already touching all of these surfaces — Track 5 is cheap when it rides on top of Tracks 2 + 4, and expensive if it lands on its own.
 
 **Deliverables:**
 
 1. **Single loop verb.** Collapse `init` + `optimize` into one command. Working name: `run` (or keep `optimize` and remove `init` as a standalone verb — decided during the track). Creates the session if needed, then runs the loop. The three-command invocation `init → set-task → optimize` collapses to one (with `set-task` staying as an orthogonal concern, optionally merged via flag).
-2. **Unified `--from` / `--seed` argument** with a typed vocabulary covering all four starting conditions:
+2. **Unified `--from` / `--seed` argument** with a typed vocabulary covering the three real starting conditions:
    - `--from fresh` (default) — load baseline prompt from `datasets/{name}/prompts/`
-   - `--from resume` — last checkpoint of the active session
-   - `--from cycle:<cycle_id>:<event_ref>` — fork from events.jsonl write-point (current `optimize --from` behavior)
+   - `--from resume[:<round>]` — resume the active cycle; optional `:<round>` rewinds within it (current `optimize --from <int>` behavior, generalized)
    - `--from recon:<recon_id>` — recon-brief-seeded (currently implicit from session state)
    One concept, one knob, discoverable in `--help`.
-3. **First-class lineage model.** Today `parent_cycle_id` / `parent_event_ref` / `fork_from` are stamped as untyped strings into `campaign_config` so they ride along to `CampaignStart`. Promote to a typed `Lineage` model on the cycle record (or on `OptSearchPoint`) so "show me the fork tree" is a structured query, not a config-blob walk.
-4. **Notebook + API parity.** The notebook's `run_optimization_notebook()` and FastAPI's `/api/v1/campaigns` routes both need to accept the unified seed vocabulary. This is the part that would thrash the other entry points if done in isolation — M9 Track 4's shared view model and Track 2's hexagonal layout make it tractable.
-5. **Migration of interim `optimize --from`.** The `optimize --from cycle:<...>` flag added in the interim is already the right mechanism — this track just generalizes it to the other three seed sources and moves it onto the unified verb. No user-visible breakage beyond the verb rename.
+3. **Notebook + API parity.** The notebook's `run_optimization_notebook()` and FastAPI's `/api/v1/campaigns` routes both need to accept the unified seed vocabulary. This is the part that would thrash the other entry points if done in isolation — M9 Track 4's shared view model and Track 2's hexagonal layout make it tractable.
 
 **Sequencing:** Runs in Wave 3 or later, after Track 2 (hexagonal layout) and Track 4 (file-directory UI v0) are in place. Depends on the active-session pointer semantics being stable, which Track 4 clarifies.
 
-**Non-goal:** reshaping what the loop itself does. This is entirely a CLI / entry-point / lineage-model refactor — the L1→L2→L3 mechanics are untouched.
+**Non-goal:** reshaping what the loop itself does, or introducing fork-across-cycles. This is a CLI / entry-point refactor — the L1→L2→L3 mechanics are untouched, and cross-cycle lineage stays explicitly out of scope per `optimization.md § Resuming mid-cycle`.
+
+---
+
+### Track 6: Directory Reorganization — 2-Dir Layout with Convention Compliance
+
+**Problem:** Today the project store under `{backend_id}/` has ~8 top-level directories (`obs/`, `campaigns/`, `sessions/`, `dataset_runs/`, `adaptive_recon_plans/`, `sync/`, `executions/`, `datasets/`) plus loose files. That doesn't map cleanly to the future webapp dashboard, which should have a 1:1 relationship with directories (each top-level dir ≈ one main tab). Three specific problems compound the mess:
+
+1. **`obs/langfuse/events.jsonl` is mislabeled as Langfuse-native.** Langfuse has no on-disk convention — it's cloud-API only. `events.jsonl` is a PromptPotter-custom human navigation log that happens to live under `obs/langfuse/` today, which implies (falsely) that it's part of the Langfuse schema.
+2. **MLflow layout is non-compliant.** `obs/experiments/{campaign_id}/{run_id}/` hand-rolls `meta.yaml` / `params/` / `metrics/` files but uses UUID-like `campaign_id` at the experiment level (MLflow requires numeric experiment IDs) and diverges from MLflow's line formats (`artifacts/` is empty, metric step-timestamp encoding may not match). `mlflow ui` doesn't work out of the box.
+3. **Session and campaign have duplicated identities.** `init` mints a session; `optimize` mints a cycle. Today they are parallel, but conceptually they are the same thing — the session *is* the active campaign. Splitting them into parallel directories (`sessions/` sibling to `campaigns/`) is an implementation artifact.
+
+**Target:** Two top-level directories under a tenant partition. One for per-run data, one for cross-run reference.
+
+```
+.promptpotter/projects/{tenant_id}/
+├── active_session.json                  # pointer to active cycle_id
+├── campaigns/{cycle_id}/
+│   ├── trials/trial_{round:04d}.json    # resume WAL (state)
+│   ├── candidates/round_{round:04d}.json # pre-scoring checkpoint (state)
+│   ├── rounds/round_{round:03d}.json    # per-round LLM action audit
+│   ├── control.json                     # HITL signal (was campaign_control.json)
+│   ├── dashboard.json                   # live counters (was campaign_state.json)
+│   ├── events.jsonl                     # human navigation log
+│   ├── output.log                       # per-query audit (was campaign_output.log)
+│   ├── log.md                           # round-by-round summary (was campaign_log.md)
+│   ├── journal.md                       # user narrative (was notebook_journal.md)
+│   ├── notes.md                         # Claude notes (was claude_notes.md)
+│   ├── recon.json                       # this campaign's scan result (was recon_results.json)
+│   ├── index.json                       # cycle metadata (was campaigns/{cycle_id}.json)
+│   ├── prompts/{family}/{version}/      # rendered optimizer prompts
+│   ├── langfuse/                        # PromptPotter's shadow of Langfuse data model
+│   │   ├── traces/{trace_id}.json
+│   │   ├── observations/{trace_id}/{obs_id}.json
+│   │   ├── scores/{trace_id}.jsonl
+│   │   ├── datasets/{name}/{item_id}.json
+│   │   └── state.json                   # cloud id mappings (was sessions/{sid}/langfuse_state.json)
+│   └── archived/resumed_at_{ts}/        # rewind history
+└── library/
+    ├── datasets/{name}/                 # canonical prompts, pipeline, items, config
+    ├── backends/{backend_id}/           # backend.json, connector_profile.json, executions/, datasets/, sync/
+    ├── dataset_runs/{run_id}.json       # content-addressed query cache
+    ├── dataset_runs.json                # locked index
+    ├── mlruns/{numeric_exp_id}/{run_id}/...   # MLflow SDK-managed tracking root
+    ├── recon_plans/{plan_id}.json       # reusable plan definitions (was adaptive_recon_plans/)
+    ├── search_memory.json
+    ├── prompt_aliases.json
+    └── restructure_cache.json
+```
+
+**Three convention fixes:**
+
+1. **MLflow via the SDK at `library/mlruns/`.** Delete the hand-rolled `FileSink._write_mlflow_run()` / `_ensure_experiment()`. Call `mlflow.set_tracking_uri(f"file://{library}/mlruns")` + `mlflow.set_experiment(name=f"{tenant_id}/{campaign_id}")`, then `mlflow.start_run()` / `log_params` / `log_metrics` / `set_tags` per round. MLflow assigns numeric experiment IDs itself; campaign identity lives in the experiment *name*. Gated on `settings.MLFLOW_ENABLED` (default `False`) with `mlflow` as an optional `pip extra`. `mlflow ui --backend-store-uri file://…/library/mlruns` works out of the box.
+2. **Tenant partition as outer axis.** `{backend_id}` drops out of the outer path entirely — backends become peers under `library/backends/{backend_id}/`. The outer axis becomes `{tenant_id}`, mandatory, defaulting to `"default"` for the single-user CLI. Multi-tenant webapp picks tenant at auth time. `.promptpotter/projects/{tenant_id}/active_session.json` is the per-tenant pointer.
+3. **All 8 `CAMPAIGN_SESSION_ARTIFACTS` land directly in `campaigns/{cycle_id}/`.** Rename per the tree above. `session.json` disappears because session ≡ campaign.
+
+**Semantic invariant: session ≡ campaign.** One mint point. Code change:
+- Delete `SessionStore` (`infrastructure/store/session_store.py`); merge into `CampaignStore`.
+- `Stores` dataclass loses the `sessions` field.
+- `active_session.json` payload becomes `{tenant_id, cycle_id}` (was `{backend_id, session_id}`).
+- `CampaignStore.create()` is the single mint — called from `init` (or the merged `run` verb from Track 5).
+
+**Deliverables:**
+
+1. **All store classes repath.** `CampaignStore`, `DatasetRunStore`, `BackendStore`, `PlanStore` (renamed conceptually to recon-plans), `FileSink`, `LangfuseSink`, `session_emitter`, `control`, `round_recorder` — every path string updated.
+2. **Tenant threading.** `build_stores(base_dir, tenant_id="default")`; `FileSink.__init__(tenant_id=...)`; `--tenant` CLI flag on every subcommand; `TenantContext` from Track 2 wired through.
+3. **MLflow SDK adoption.** `mlflow` added as optional extra in `pyproject.toml`; `FileSink` MLflow block rewritten to use the SDK; hand-rolled writers deleted.
+4. **Migration script.** `promptpotter migrate` verb that walks existing `.promptpotter/projects/default/{backend_id}/…` (v2) trees and rewrites them to the new shape (v3). Writes `.promptpotter/schema_version=3` marker. Refuse to start on unmigrated v2 dirs without explicit `migrate` invocation.
+5. **Docs updated.** `CLAUDE.md § Architecture`, `docs/architecture/overview.md § Persistence`, `docs/architecture/optimization.md § Resuming mid-cycle` (path citations), `docs/architecture/observability-audit.md` (full sink mapping rewrite), `docs/observability.md` (navigation starting points), `docs/cli-workflow.md` (new `--tenant` flag).
+6. **Test updates.** `tests/test_artifact_parity.py` expected set updated to the new 8-file `CAMPAIGN_SESSION_ARTIFACTS`. Any test fixture with a path string in it.
+
+**Sequencing:** Wave 1, alongside Track 2. Both are foundational move-only work; other tracks build on both. Track 4 (file-directory UI v0) should render the *new* tree, not rework around the old one later. Track 5 (CLI unification) benefits from the session ≡ campaign invariant being in place before it collapses `init` + `optimize`.
+
+**Non-goals:**
+- The webapp itself — that's M10+. This plan builds the filesystem the webapp will read.
+- Cross-tenant sharing of datasets or backends. Datasets stay per-tenant. If multi-tenant sharing is needed later, add a `library/` sibling to `projects/` at `.promptpotter/` root.
+- Touching what the optimization loop does — purely a persistence / layout refactor.
 
 ---
 
 ## Wave Sequencing
 
 ```
-Wave 1: Track 2 (hierarchy refactor, move-only)
-        — foundation; other tracks are easier once the layout is right
+Wave 1: Track 2 (hierarchy refactor, move-only) + Track 6 (directory reorg, move-only)
+        — parallel; both foundational. Track 4's UI should target the post-reorg tree,
+        and Track 5's init+optimize collapse depends on Track 6's session ≡ campaign invariant.
 
 Wave 2: Track 3 (multi-dataset/pipeline) + Track 1 (meta-prompt eval protocol)
         — parallel; multi-dataset is prerequisite for meta-prompt evaluation on 2+ tasks
 
 Wave 3: Track 4 (file-directory UI v0) + Track 1 (systematic improvements + final configs)
-        — parallel; UI draft happens in the new presentation/ui/ location
+        — parallel; UI draft happens in the new presentation/ui/ location, renders the Track 6 tree
 
 Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
-        — runs last; depends on Track 2 (hexagonal layout) and Track 4
-        (stable active-session-pointer semantics)
+        — runs last; depends on Track 2 (hexagonal layout), Track 4
+        (stable active-session-pointer semantics), and Track 6 (session ≡ campaign invariant)
 ```
 
 ## Entry Criteria
@@ -156,7 +229,8 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 - [ ] `TenantContext` importable from `promptpotter.domain.tenant`; `SessionEnv.tenant` exists
 - [ ] Multi-dataset/pipeline working on at least two datasets in a single project store
 - [ ] File-directory UI v0 readable by a human browsing the session folder; CLI `show-status` and notebook both render from it
-- [ ] Single loop verb (`init` + `optimize` collapsed); unified `--from {fresh,resume,cycle:<ref>,recon:<id>}` seed vocabulary; typed `Lineage` model replacing stringly-typed `parent_cycle_id` / `fork_from` in `campaign_config`; notebook + API accept the same vocabulary
+- [ ] Single loop verb (`init` + `optimize` collapsed); unified `--from {fresh,resume[:<round>],recon:<id>}` seed vocabulary; notebook + API accept the same vocabulary
+- [ ] Two-directory layout in place: `campaigns/{cycle_id}/` (all per-run artifacts) and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; session ≡ campaign invariant enforced; migration script lands existing v2 layouts onto v3
 - [ ] `CLAUDE.md` Architecture section updated to reflect new hierarchy
 
 ## Key Existing Code

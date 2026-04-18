@@ -61,7 +61,7 @@ Produces: `session.json` with `pipeline_params`, `init_params`, `phase: "init"`.
 | `--config` | Campaign config JSON file |
 | `--skip-baseline` | Skip explicit baseline eval (default — auto-baseline runs before round 1) |
 
-Forking a campaign is not done here — see `optimize --from` below. `init` handles registration/setup only.
+Rewinding within an active cycle is not done here — see `optimize --from <round>` below. `init` handles registration/setup only. Fork-across-cycles (new `cycle_id`, parent pointer) is not a supported primitive — see `docs/architecture/optimization.md § Resuming mid-cycle`.
 
 ### set-task
 
