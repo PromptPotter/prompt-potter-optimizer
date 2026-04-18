@@ -133,14 +133,14 @@ def show_feedback_preflight(
         config,
         bl,
         dataset,
-        campaign_config=campaign_config,
+        exclude_nodes=(campaign_config or {}).get("exclude_nodes", []),
         recon_brief=recon_brief,
     )
 
     return recon_brief
 
 
-def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, recon_brief=None):
+def _print_preflight_sections(config, bl, dataset, *, exclude_nodes: list[str], recon_brief=None):
     """Print three-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
@@ -150,9 +150,11 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, reco
 
     _instr_preview = (instruction[:80] + "...") if len(instruction) > 80 else instruction
     _instr_preview = _instr_preview or "(empty)"
-    exclude = (campaign_config or {}).get("exclude_nodes", [])
     m = compute_preflight_metrics(
-        config, len(dataset), exclude_nodes=exclude, has_recon_brief=recon_brief is not None
+        config,
+        len(dataset),
+        exclude_nodes=exclude_nodes,
+        has_recon_brief=recon_brief is not None,
     )
 
     # ── Section 1: Configuration Summary ──
@@ -176,8 +178,8 @@ def _print_preflight_sections(config, bl, dataset, *, campaign_config=None, reco
     print(f"  Pipeline               : {m.pipeline_label}")
     if m.nodes_detail:
         print(f"    Nodes                : {m.nodes_detail}")
-    if exclude:
-        print(f"    Excluded             : {', '.join(exclude)}")
+    if exclude_nodes:
+        print(f"    Excluded             : {', '.join(exclude_nodes)}")
     print(f"  Strategy               : {m.strategy}")
 
     # ── Section 2: Round Pipeline ──

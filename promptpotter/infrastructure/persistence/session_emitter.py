@@ -138,7 +138,7 @@ class CampaignPersistenceEmitter:
         self._round_start = time.monotonic()
         self._rc = _RoundCounters()
 
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
         ensure_control_file(session_dir, pause_before_scoring=config.pause_before_scoring)
 
         # Append-only log — hold one handle for the emitter's lifetime so
@@ -243,7 +243,7 @@ class CampaignPersistenceEmitter:
             s["layer"] = "L3"
 
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
 
     def on_sample_scored(
         self,
@@ -308,7 +308,7 @@ class CampaignPersistenceEmitter:
             f"  [{s['total_queries_scored']:>3d}] {query_time:5.1f}s "
             f"{mark}{cache_mark} {q_text} -> {pred}\n"
         )
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         s = self._state
@@ -344,7 +344,7 @@ class CampaignPersistenceEmitter:
         self._log_fh.write(
             f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str}{invalid_mark} ===\n"
         )
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         s = self._state
@@ -368,7 +368,7 @@ class CampaignPersistenceEmitter:
             f"{round_result.label} {acc:.1%} — {mark} "
             f"(patience {l1_stall_count}) <<<\n\n"
         )
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
 
         self._append_log_md(
             f"## Round {round_result.round} — Evaluated\n"
@@ -382,7 +382,7 @@ class CampaignPersistenceEmitter:
         self._state["stop_reason"] = reason
         self._state["pause_point"] = pause_point
         self._state["workflow"] = "idle"
-        write_json(self.state_path, self._state, default=str)
+        self._persist()
 
     def finalize(
         self,
@@ -404,6 +404,9 @@ class CampaignPersistenceEmitter:
         self._log_fh.close()
 
     # -- Internal --------------------------------------------------------------
+
+    def _persist(self) -> None:
+        write_json(self.state_path, self._state, default=str)
 
     def _append_log_md(self, section: str) -> None:
         with self.log_md_path.open("a", encoding="utf-8") as f:

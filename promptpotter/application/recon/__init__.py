@@ -16,7 +16,7 @@ from __future__ import annotations
 
 from promptpotter.application.recon.adaptive_recon import (
     build_diagnostic_set,
-    load_filtered_variant_library,
+    filter_variant_library,
     run_adaptive_recon,
 )
 from promptpotter.application.recon.recon_advisor import (
@@ -43,8 +43,8 @@ __all__ = [
     "build_tunable_params",
     "convert_advisory_to_recon_variants",
     "decompose_recon_baseline",
+    "filter_variant_library",
     "finalize_scan",
-    "load_filtered_variant_library",
     "prepare_recon_brief",
     "preview_advisor_prompt",
     "resume_or_build_diagnostic",

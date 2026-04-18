@@ -8,12 +8,12 @@ import logging
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence import load_variant_library_rich
+from promptpotter.application.intelligence import load_variant_library, load_variant_library_rich
 from promptpotter.application.recon import (
     advise_recon as _advise_recon,
 )
 from promptpotter.application.recon import (
-    load_filtered_variant_library as _load_filtered_variants,
+    filter_variant_library,
 )
 from promptpotter.application.recon import (
     preview_advisor_prompt as _preview_advisor_prompt,
@@ -265,7 +265,11 @@ def preview_advisor_prompt(
         pipeline_params = campaign_config.get("pipeline_params") if campaign_config else None
         exclude_nodes = campaign_config.get("exclude_nodes") if campaign_config else None
 
-        variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
+        variant_library = load_variant_library()
+        if pipeline_params and pipeline_schema:
+            variant_library = filter_variant_library(
+                variant_library, pipeline_params, schema=pipeline_schema
+            )
 
         prompt = _preview_advisor_prompt(
             pipeline_schema=pipeline_schema,
@@ -375,7 +379,11 @@ async def recon_advisor(
         print("  Pipeline schema unavailable — start the backend and re-run init_services().")
         return {}
 
-    variant_library = _load_filtered_variants(pipeline_params, pipeline_schema)
+    variant_library = load_variant_library()
+    if pipeline_params and pipeline_schema:
+        variant_library = filter_variant_library(
+            variant_library, pipeline_params, schema=pipeline_schema
+        )
 
     llm_client, resolved_model = setup_llm(campaign_config)
     model = model or resolved_model
@@ -496,7 +504,11 @@ async def resume_or_build_diagnostic(
     """
     # Prepare variant library: base + recon_variants merge
     pipeline_params = campaign_config.get("pipeline_params")
-    variant_library = _load_filtered_variants(pipeline_params, session.pipeline_schema)
+    variant_library = load_variant_library()
+    if pipeline_params and session.pipeline_schema:
+        variant_library = filter_variant_library(
+            variant_library, pipeline_params, schema=session.pipeline_schema
+        )
     if recon_variants:
         variant_library["pipeline_params"] = recon_variants
 
