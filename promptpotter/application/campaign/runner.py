@@ -561,56 +561,6 @@ def _finalize_run(
 
 
 # ---------------------------------------------------------------------------
-# Session auto-mint (notebook / smoke / future API entry points)
-# ---------------------------------------------------------------------------
-
-
-def _auto_mint_session(
-    session: SessionEnv,
-    campaign_config: CampaignConfig,
-    baseline: CampaignBaseline,
-    dataset_size: int,
-    experiment_id: str | None,
-) -> str:
-    """Mint a session when the caller passed session_id=''.
-
-    CLI ``init`` mints at command-entry time; non-CLI entry points (notebook,
-    smoke, future API/webapp) rely on this branch so every run produces the
-    same five ``CAMPAIGN_SESSION_ARTIFACTS``. Claims the active-session
-    pointer to match CLI ``init`` behavior — ``show-status`` /
-    ``show-results`` find the session without ``--session <id>``.
-    """
-    from promptpotter.application.campaign.session_state import new_session_state
-
-    pipeline_params: dict = {}
-    active_steps: list[str] = []
-
-    state = new_session_state(
-        init_params={
-            "backend_url": session.backend_client.base_url,
-            "backend_id": session.backend_id,
-            "experiment_id": experiment_id,
-            "dataset_name": session.dataset_name,
-        },
-        campaign_config=dict(campaign_config),
-        pipeline_params=pipeline_params,
-        active_steps=active_steps,
-    )
-    state["baseline_accuracy"] = baseline.baseline_acc
-    state["dataset_count"] = dataset_size
-    # baseline_ps is OptSearchPoint when rounds exist, empty dict otherwise.
-    ps = baseline.baseline_ps
-    state["baseline_prompt_fields"] = (
-        ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
-    )
-
-    session_id = session.store.sessions.create(session.backend_id, state)
-    session.store.sessions.save_active_pointer(session.backend_id, session_id)
-    logger.info("Auto-minted session: %s", session_id)
-    return session_id
-
-
-# ---------------------------------------------------------------------------
 # Public entry point
 # ---------------------------------------------------------------------------
 
@@ -640,12 +590,19 @@ async def run_optimization(
     started_at = datetime.now(UTC).isoformat()
 
     if not session_id:
-        session_id = _auto_mint_session(
+        from promptpotter.application.campaign.session_state import auto_mint_session
+
+        ps = baseline.baseline_ps
+        baseline_prompt_fields = (
+            ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
+        )
+        session_id = auto_mint_session(
             session,
             campaign_config,
-            baseline,
-            len(dataset),
-            experiment_id,
+            baseline_acc=baseline.baseline_acc,
+            baseline_prompt_fields=baseline_prompt_fields,
+            dataset_size=len(dataset),
+            experiment_id=experiment_id,
         )
 
     config = LoopConfig.from_campaign_config(

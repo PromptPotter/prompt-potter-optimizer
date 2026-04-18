@@ -393,12 +393,26 @@ async def run_sensitivity_recon(
     """Prepare scan baseline and run sensitivity scan in one call.
 
     Absorbs ``decompose_recon_baseline()`` and ``run_recon()`` plumbing.
+    When called without ``session_id``, mints one so scan results land on
+    disk the same way the CLI ``recon`` command does — closes the
+    notebook/CLI parity gap for scan artifacts.
 
     Returns:
         (recon_baseline_sp, recon_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
+    from promptpotter.application.campaign.session_state import auto_mint_session
+
     from .search import decompose_recon_baseline
+
+    assert session is not None
+    if not session_id:
+        session_id = auto_mint_session(
+            session,
+            campaign_config,
+            dataset_size=len(dataset),
+            experiment_id=experiment_id or None,
+        )
 
     recon_baseline_sp, search_baseline = await decompose_recon_baseline(
         baseline,
@@ -406,7 +420,6 @@ async def run_sensitivity_recon(
         session=session,
         recon_variants=recon_variants,
     )
-    assert session is not None
     recon_df, axis_profiles = await run_recon(
         recon_baseline_sp,
         recon_variants,

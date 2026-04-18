@@ -147,13 +147,12 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 
 def test_auto_mint_session_claims_active_pointer() -> None:
-    """Non-CLI entry points (notebook/smoke) get a session auto-minted when
-    ``session_id=''`` — and the active pointer is claimed, so CLI commands
-    like ``show-status`` find the session without ``--session``."""
+    """Non-CLI entry points (notebook/smoke/scan) get a session auto-minted
+    when ``session_id=''`` — and the active pointer is claimed, so CLI
+    commands like ``show-status`` find the session without ``--session``."""
     from types import SimpleNamespace
 
-    from promptpotter.application.campaign.data import CampaignBaseline
-    from promptpotter.application.campaign.runner import _auto_mint_session
+    from promptpotter.application.campaign.session_state import auto_mint_session
 
     created: dict = {}
 
@@ -177,14 +176,15 @@ def test_auto_mint_session_claims_active_pointer() -> None:
         backend_client=backend_client,
         dataset_name="ds_test",
     )
-    baseline = CampaignBaseline(
-        baseline_ps={"instruction": "seed"},
-        baseline_acc=0.42,
-        baseline_results=None,
-        instruction="seed",
-    )
 
-    minted = _auto_mint_session(session, {}, baseline, dataset_size=7, experiment_id=None)
+    minted = auto_mint_session(
+        session,
+        {},
+        baseline_acc=0.42,
+        baseline_prompt_fields={"instruction": "seed"},
+        dataset_size=7,
+        experiment_id=None,
+    )
 
     assert minted == "sess_test_abc"
     assert created["backend_id"] == "bk_test"

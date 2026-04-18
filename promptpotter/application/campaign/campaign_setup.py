@@ -462,18 +462,32 @@ async def run_recon_and_persist(
 ):
     """Decompose scan baseline, run sensitivity scan, persist results.
 
+    Mints a session when called with ``session_id=""`` so non-CLI entry
+    points (notebook, future API) produce the same on-disk artifacts as
+    the CLI ``recon`` command. The CLI path passes a concrete id and is
+    unchanged.
+
     Returns ``(recon_baseline_sp, baseline_opt, df, profiles)``.
     """
     from promptpotter.application.campaign.config import (
         configure_and_apply_pipeline,
         create_llm_client,
     )
+    from promptpotter.application.campaign.session_state import auto_mint_session
     from promptpotter.application.recon.recon_report import (
         decompose_recon_baseline as _decompose_scan_baseline,
     )
     from promptpotter.application.recon.recon_runner import (
         run_recon as _run_recon,
     )
+
+    if not session_id:
+        session_id = auto_mint_session(
+            session,
+            campaign_config,
+            dataset_size=len(dataset),
+            experiment_id=experiment_id or None,
+        )
 
     # Configure pipeline (ensures filtered schema is applied with overrides baked in)
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log)

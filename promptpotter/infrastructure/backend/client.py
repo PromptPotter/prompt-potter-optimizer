@@ -41,13 +41,78 @@ def extract_pipeline_config(experiment_extract: dict) -> dict:
     }
 
 
+def _is_session_error(resp: httpx.Response) -> bool:
+    """True when a 400 response body names a missing/invalid session."""
+    try:
+        detail = resp.json().get("detail", "")
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception:
+        return False
+    return "session" in detail.lower()
+
+
+class _SessionGuard:
+    """Session-lifecycle state for stateful backends that require a
+    ``POST /sessions`` handshake with a ``terms`` array (TermNorm-shaped).
+
+    Keeps ``run_query()`` free of session semantics: the HTTP transport
+    asks the guard to initialize or recover; the guard owns the indexing
+    terms, the idempotency check, and the reinit handshake. When the
+    backend doesn't need a session, a ``None`` guard disables the rail.
+
+    This is internal to ``client.py`` — a future ``ConnectorProtocol``
+    (M11 Track 1) can cleanly take over this seam without touching the
+    callers of ``BackendClient.init_session``.
+    """
+
+    __slots__ = ("_terms",)
+
+    def __init__(self) -> None:
+        self._terms: list[str] | None = None
+
+    @property
+    def has_terms(self) -> bool:
+        return bool(self._terms)
+
+    async def set_terms(
+        self, http: httpx.AsyncClient, base_url: str, terms: list[str]
+    ) -> dict[str, Any]:
+        """Install terms and ``POST /sessions``. Idempotent for identical terms."""
+        if not terms:
+            logger.warning(
+                "init_session called with empty terms — session won't support /matches",
+            )
+            return {"status": "skipped", "terms_count": 0}
+        if self._terms == terms:
+            return {"status": "already_initialized", "terms_count": len(terms)}
+        resp = await http.post(f"{base_url}/sessions", json={"terms": terms})
+        resp.raise_for_status()
+        self._terms = terms
+        return resp.json()
+
+    async def recover(self, http: httpx.AsyncClient, base_url: str) -> bool:
+        """Reinit the session using stored terms. Returns True on success."""
+        if not self._terms:
+            logger.error(
+                "Backend requires session but no terms available. "
+                "Call init_session() with terms before running matches."
+            )
+            return False
+        logger.warning("Got 400 (no session) — re-initializing")
+        terms = self._terms
+        self._terms = None  # clear so idempotency guard re-sends
+        await self.set_terms(http, base_url, terms)
+        return True
+
+
 class BackendClient:
     """Async HTTP client for a single backend instance."""
 
     def __init__(self, base_url: str, timeout: float = 30.0):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._index_terms: list[str] | None = None
+        self._guard: _SessionGuard = _SessionGuard()
         self._http: httpx.AsyncClient | None = None
 
     def _get_http(self) -> httpx.AsyncClient:
@@ -132,24 +197,11 @@ class BackendClient:
     async def init_session(self, terms: list[str]) -> dict[str, Any]:
         """POST /sessions with terms array.
 
-        Idempotent: skips the HTTP call if already initialized with the
-        same terms.  Stores ``terms`` internally so that ``run_query()``
-        can auto-reinitialize the session if the backend restarts.
+        Thin pass-through to the session guard — idempotent for identical
+        terms, stores terms internally so ``run_query()`` can auto-recover
+        if the backend restarts mid-campaign.
         """
-        if not terms:
-            logger.warning(
-                "init_session called with empty terms — session won't support /matches",
-            )
-            return {"status": "skipped", "terms_count": 0}
-        if self._index_terms == terms:
-            return {"status": "already_initialized", "terms_count": len(terms)}
-        resp = await self._get_http().post(
-            f"{self.base_url}/sessions",
-            json={"terms": terms},
-        )
-        resp.raise_for_status()
-        self._index_terms = terms
-        return resp.json()
+        return await self._guard.set_terms(self._get_http(), self.base_url, terms)
 
     async def run_query(
         self,
@@ -160,8 +212,11 @@ class BackendClient:
 
         ``pipeline_params`` carries ``steps`` (which nodes to run) plus
         per-node override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
-        which become the ``node_config`` key in the wire payload.  The backend
+        which become the ``node_config`` key in the wire payload. The backend
         merges overrides with its own defaults — callers only send what changed.
+
+        HTTP 400 with "session" in the detail triggers a one-shot session
+        recovery via the guard, then retries once.
         """
         payload: dict[str, Any] = {"query": query}
 
@@ -194,31 +249,16 @@ class BackendClient:
             timeout=QUERY_TIMEOUT,
         )
 
-        # Auto-reinitialize session on 400 "no session" errors
-        if resp.status_code == 400:
-            try:
-                detail = resp.json().get("detail", "")
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception:
-                detail = ""
-            is_session_error = "session" in detail.lower()
-
-            if is_session_error and self._index_terms:
-                logger.warning("Got 400 (no session) — re-initializing")
-                terms = self._index_terms
-                self._index_terms = None  # clear so idempotency guard re-sends
-                await self.init_session(terms)
-                resp = await client.post(
-                    f"{self.base_url}/matches",
-                    json=payload,
-                    timeout=QUERY_TIMEOUT,
-                )
-            elif is_session_error:
-                logger.error(
-                    "Backend requires session but no terms available. "
-                    "Call init_session() with terms before running matches."
-                )
+        if (
+            resp.status_code == 400
+            and _is_session_error(resp)
+            and await self._guard.recover(client, self.base_url)
+        ):
+            resp = await client.post(
+                f"{self.base_url}/matches",
+                json=payload,
+                timeout=QUERY_TIMEOUT,
+            )
 
         resp.raise_for_status()
         return resp.json()

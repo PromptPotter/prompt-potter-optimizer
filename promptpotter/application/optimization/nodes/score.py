@@ -234,6 +234,131 @@ def _build_score_report(
     }
 
 
+def _handle_validation_skip(
+    osp_c: OptSearchPoint,
+    override: dict | None,
+    dataset: list,
+    idx: int,
+    n_candidates: int,
+) -> tuple[list[QueryResult], dict]:
+    """Synthetic-0 short-circuit for structurally invalid candidates.
+
+    A SearchPoint whose L1 parse-time validation produced ValidationFailures
+    does not run through the backend. We synthesize a 0-accuracy report and
+    let the existing accuracy comparator deprioritize it. See
+    docs/architecture/optimization.md.
+    """
+    logger.warning(
+        "Candidate %d/%d invalid (%d validation failure(s)) — skipping backend",
+        idx + 1,
+        n_candidates,
+        len(osp_c.memory.validation_failures),
+    )
+    results: list[QueryResult] = []
+    scores: dict[str, Any] = {
+        "accuracy": 0.0,
+        "composite": 0.0,
+        "hits": 0,
+        "total": 0,
+        "errors": 0,
+        "invalid": True,
+    }
+    report = _build_score_report(osp_c, override, scores, results, dataset, invalid=True)
+    return results, report
+
+
+def _handle_cache_hit(
+    osp_c: OptSearchPoint,
+    override: dict | None,
+    results: list[QueryResult],
+    scores: dict,
+    dataset: list,
+    elim_check: Any,
+    idx: int,
+    n_candidates: int,
+) -> dict:
+    """Full-run cache hit — register with elim_check and build replay report."""
+    logger.info(
+        "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
+        idx + 1,
+        n_candidates,
+        len(results),
+    )
+    elim_check.register_completed([r["score"] for r in results])
+    return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
+
+
+def _handle_scored_candidate(
+    osp_c: OptSearchPoint,
+    override: dict | None,
+    results: list[QueryResult],
+    scores: dict,
+    signal: EscalationSignal | None,
+    merged_pp_i: dict | None,
+    dataset: list,
+    elim_check: Any,
+    idx: int,
+    n_candidates: int,
+) -> tuple[dict, EscalationSignal | None]:
+    """Build report for a fully-scored candidate; attach RuntimeFailure on elimination.
+
+    Returns ``(report, residual_signal)``. Residual is ``None`` when
+    elimination was consumed (outer loop should continue); the signal itself
+    when true degradation should abort remaining candidates.
+
+    Self-healing (Rail 2): a degradation-elimination signal is converted to a
+    RuntimeFailure and appended in-place to ``osp_c.memory.runtime_failures``.
+    The failure is a property of the candidate that produced it, not a
+    round-level event. L2 reads it from candidate_scores next round.
+    """
+    elimination_stopped = (
+        signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
+    )
+    aborted = bool(signal) and len(results) < len(dataset)
+
+    # Register fully-completed candidates as priors for future elimination
+    if len(results) == len(dataset) and not aborted:
+        elim_check.register_completed([r["score"] for r in results])
+
+    new_rf: RuntimeFailure | None = None
+    if elimination_stopped and signal is not None and signal.check_name == "degradation":
+        cr = signal.check_result
+        dominant = cr.get("dominant_warning", "unknown:unknown")
+        problem_node = dominant.split(":")[0] if ":" in dominant else ""
+        observed_node_cfg = (merged_pp_i or {}).get(problem_node, {}) or {}
+        new_rf = RuntimeFailure(
+            source="degradation_check",
+            dominant_warning=dominant,
+            warning_types=dict(cr.get("warning_types") or {}),
+            degraded_rate=float(cr.get("degraded_rate", 0.0)),
+            degraded_count=int(cr.get("degraded_count", 0)),
+            total_evaluated=int(cr.get("total_evaluated", len(results))),
+            observed_config=dict(observed_node_cfg),
+        )
+        osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
+        logger.info(
+            "Candidate %d/%d eliminated — RuntimeFailure attached (%s, rate=%.0f%%, config=%s)",
+            idx + 1,
+            n_candidates,
+            dominant,
+            new_rf.degraded_rate * 100,
+            observed_node_cfg,
+        )
+
+    report = _build_score_report(
+        osp_c,
+        override,
+        scores,
+        results,
+        dataset,
+        aborted=aborted,
+        elimination_stopped=elimination_stopped,
+        new_runtime_failure=new_rf,
+    )
+    residual = None if (elimination_stopped or not signal) else signal
+    return report, residual
+
+
 async def _score_candidates(
     osp_candidates: list[OptSearchPoint],
     merged_pp: list[dict | None],
@@ -250,7 +375,10 @@ async def _score_candidates(
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each candidate against the dataset.
 
-    Returns (all_candidate_results, candidate_scores, escalation_signal).
+    Flat dispatch over three exit paths — validation-skip, cache-hit,
+    scored — each extracted into its own ``_handle_*`` helper.
+
+    Returns ``(all_candidate_results, candidate_scores, escalation_signal)``.
     """
     from promptpotter.application.optimization.elimination import EliminationCheck
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -279,6 +407,11 @@ async def _score_candidates(
                     report=c_report,
                 )
 
+    def _fire_candidate_callbacks(c_idx: int, c_report: dict) -> None:
+        candidate_scores.append(c_report)
+        callbacks.on_candidate_scored(c_idx, n_candidates, c_report)
+        _emit_candidate_scored(c_idx, c_report)
+
     for idx, osp_c in enumerate(osp_candidates):
 
         def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
@@ -295,39 +428,13 @@ async def _score_candidates(
                         score=float(result.get("score", 0.0)),
                     )
 
-        # Synthetic-0 early exit: a SearchPoint whose L1 parse-time validation
-        # produced ValidationFailures is structurally invalid. We do not run it
-        # through the backend at all — we synthesize a 0-accuracy report and
-        # let the existing accuracy comparator deprioritize it. See
-        # docs/architecture/optimization.md.
+        override = candidate_overrides[idx]
+
+        # Path 1 — validation-skip synthetic-0 (zero backend calls)
         if osp_c.memory.validation_failures:
-            logger.warning(
-                "Candidate %d/%d invalid (%d validation failure(s)) — skipping backend",
-                idx + 1,
-                n_candidates,
-                len(osp_c.memory.validation_failures),
-            )
-            results: list[QueryResult] = []
-            scores: dict[str, Any] = {
-                "accuracy": 0.0,
-                "composite": 0.0,
-                "hits": 0,
-                "total": 0,
-                "errors": 0,
-                "invalid": True,
-            }
+            results, report = _handle_validation_skip(osp_c, override, dataset, idx, n_candidates)
             all_candidate_results[osp_c.id] = results
-            report = _build_score_report(
-                osp_c,
-                candidate_overrides[idx],
-                scores,
-                results,
-                dataset,
-                invalid=True,
-            )
-            candidate_scores.append(report)
-            callbacks.on_candidate_scored(idx, n_candidates, report)
-            _emit_candidate_scored(idx, report)
+            _fire_candidate_callbacks(idx, report)
             continue
 
         sp = osp_c.to_job_search_point(
@@ -335,7 +442,6 @@ async def _score_candidates(
             schema=ctx.pipeline_schema,
         )
 
-        # Merge degradation + elimination checks for this candidate
         all_checks = list(degradation_checks or [])
         if elim_check.enabled:
             all_checks.append(elim_check)
@@ -350,97 +456,34 @@ async def _score_candidates(
             candidate_idx=idx,
             n_total_candidates=n_candidates,
         )
-
-        if was_cached:
-            logger.info(
-                "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
-                idx + 1,
-                n_candidates,
-                len(results),
-            )
-            all_candidate_results[osp_c.id] = results
-            elim_check.register_completed([r["score"] for r in results])
-
-            report = _build_score_report(
-                osp_c,
-                candidate_overrides[idx],
-                scores,
-                results,
-                dataset,
-                resumed_from_cache=True,
-            )
-            candidate_scores.append(report)
-            callbacks.on_candidate_scored(idx, n_candidates, report)
-            _emit_candidate_scored(idx, report)
-            continue
-
-        escalation_signal = signal
-        elimination_stopped = (
-            escalation_signal is not None
-            and escalation_signal.target == EscalationTarget.ELIMINATE_CANDIDATE
-        )
-
-        aborted = bool(escalation_signal) and len(results) < len(dataset)
         all_candidate_results[osp_c.id] = results
 
-        # Register fully-completed candidates as priors for future elimination
-        if len(results) == len(dataset) and not aborted:
-            elim_check.register_completed([r["score"] for r in results])
-
-        # Self-healing: convert a degradation elimination signal into a
-        # RuntimeFailure attached to THIS candidate's memory. Mirrors the
-        # ValidationFailure rail — the failure is a property of the
-        # candidate that produced it, not a round-level event. L2 reads it
-        # from candidate_scores next round and produces a directive that
-        # names the disallowed value range.
-        new_rf: RuntimeFailure | None = None
-        if (
-            elimination_stopped
-            and escalation_signal is not None
-            and escalation_signal.check_name == "degradation"
-        ):
-            cr = escalation_signal.check_result
-            dominant = cr.get("dominant_warning", "unknown:unknown")
-            problem_node = dominant.split(":")[0] if ":" in dominant else ""
-            observed_node_cfg = (merged_pp[idx] or {}).get(problem_node, {}) or {}
-            new_rf = RuntimeFailure(
-                source="degradation_check",
-                dominant_warning=dominant,
-                warning_types=dict(cr.get("warning_types") or {}),
-                degraded_rate=float(cr.get("degraded_rate", 0.0)),
-                degraded_count=int(cr.get("degraded_count", 0)),
-                total_evaluated=int(cr.get("total_evaluated", len(results))),
-                observed_config=dict(observed_node_cfg),
+        # Path 2 — full-run cache replay
+        if was_cached:
+            report = _handle_cache_hit(
+                osp_c, override, results, scores, dataset, elim_check, idx, n_candidates
             )
-            osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
-            logger.info(
-                "Candidate %d/%d eliminated — RuntimeFailure attached (%s, rate=%.0f%%, config=%s)",
-                idx + 1,
-                n_candidates,
-                dominant,
-                new_rf.degraded_rate * 100,
-                observed_node_cfg,
-            )
+            _fire_candidate_callbacks(idx, report)
+            continue
 
-        report = _build_score_report(
+        # Path 3 — scored (may be eliminated or aborted)
+        report, residual = _handle_scored_candidate(
             osp_c,
-            candidate_overrides[idx],
-            scores,
+            override,
             results,
+            scores,
+            signal,
+            merged_pp[idx],
             dataset,
-            aborted=aborted,
-            elimination_stopped=elimination_stopped,
-            new_runtime_failure=new_rf,
+            elim_check,
+            idx,
+            n_candidates,
         )
-        candidate_scores.append(report)
-        callbacks.on_candidate_scored(idx, n_candidates, report)
-        _emit_candidate_scored(idx, report)
+        _fire_candidate_callbacks(idx, report)
 
-        if escalation_signal:
-            if elimination_stopped:
-                escalation_signal = None  # consumed — continue to next candidate
-            else:
-                break  # true degradation escalation — abort remaining candidates
+        if residual is not None:
+            escalation_signal = residual
+            break  # true degradation escalation — abort remaining candidates
 
     return all_candidate_results, candidate_scores, escalation_signal
 
