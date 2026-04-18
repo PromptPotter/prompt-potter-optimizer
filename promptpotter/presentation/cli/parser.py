@@ -32,6 +32,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
+        "--tenant",
+        default="default",
+        help="Tenant partition under .promptpotter/projects/ (default: 'default')",
+    )
+    parser.add_argument(
         "-v",
         "--verbose",
         action="store_true",

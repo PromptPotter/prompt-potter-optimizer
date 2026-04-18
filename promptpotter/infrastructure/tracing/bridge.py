@@ -7,7 +7,7 @@ Call sites build event dataclasses from :mod:`events` and call
 The dual-state ``ObsLogger`` it replaces held both a file logger and a
 shadowed Langfuse client with six in-memory id maps that were lost on
 resume. :class:`LangfuseSink` now persists all id state to
-``sessions/{session_id}/langfuse_state.json`` after every mutation, so a
+``campaigns/{cycle_id}/langfuse_state.json`` after every mutation, so a
 campaign interrupted on the CLI and resumed from the notebook produces one
 continuous trace.
 """

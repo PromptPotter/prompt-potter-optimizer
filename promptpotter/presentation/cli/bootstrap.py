@@ -67,6 +67,7 @@ async def init_services_cli(
     experiment_id: str = DEFAULT_EXPERIMENT_ID,
     dataset_name: str | None = None,
     take_over: bool = False,
+    tenant_id: str = "default",
 ) -> SessionEnv:
     """Initialize services (logging + service init) for a CLI command."""
     from promptpotter.application.campaign.campaign_setup import init_services
@@ -82,6 +83,7 @@ async def init_services_cli(
         dataset_name=dataset_name,
         on_status=_status_sink,
         take_over=take_over,
+        tenant_id=tenant_id,
     )
 
 

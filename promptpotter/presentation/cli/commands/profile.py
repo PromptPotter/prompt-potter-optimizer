@@ -11,11 +11,11 @@ from promptpotter.presentation.cli.result import CommandResult
 
 async def cmd_profile(args: argparse.Namespace) -> CommandResult:
     """Manage connector profile — persistent per-backend defaults."""
-    store = build_stores()
+    store = build_stores(tenant_id=getattr(args, "tenant", "default"))
     backend_id = args.backend_id
 
     if args.save:
-        state, backend_id, _sid = store.sessions.load_active(args.session)
+        state, backend_id, _sid = store.campaigns.load_active(args.session)
         profile = state.get("campaign_config", {})
         store.backends.save_connector_profile(backend_id, profile)
         return CommandResult(

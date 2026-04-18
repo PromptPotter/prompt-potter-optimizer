@@ -8,7 +8,7 @@ Handles both trace topologies:
 
 The five id maps (campaign→trace, (campaign,round)→round_obs,
 (campaign,round,node)→node_obs, (dataset,query)→item, campaign→session) are
-persisted to ``sessions/{session_id}/langfuse_state.json`` after every
+persisted to ``campaigns/{cycle_id}/langfuse_state.json`` after every
 mutation. This is the fix for the resume bug where the in-memory trace map
 was lost and post-resume events attached to nothing.
 """
@@ -72,7 +72,9 @@ class LangfuseSink:
     # --- Persistence ---
 
     def _session_state_path(self, session_id: str) -> Path:
-        return self._base / self._backend_id / "sessions" / session_id / "langfuse_state.json"
+        # v3: session ≡ campaign; state lives inside the campaign dir
+        # (Wave C moves it to campaigns/{cycle_id}/langfuse/state.json).
+        return self._base / "campaigns" / session_id / "langfuse_state.json"
 
     def _bind_session(self, session_id: str) -> None:
         """Latch the session state path and restore any prior state."""

@@ -60,7 +60,7 @@ def auto_mint_session(
     commands find the session without ``--session <id>``.
 
     Prefer passing scalars over a domain object — this function is a
-    thin wrapper over ``new_session_state`` + ``SessionStore.create``,
+    thin wrapper over ``new_session_state`` + ``CampaignStore.create_session``,
     not a scored-baseline adapter.
     """
     state = new_session_state(
@@ -78,7 +78,7 @@ def auto_mint_session(
     state["dataset_count"] = dataset_size
     state["baseline_prompt_fields"] = baseline_prompt_fields or {}
 
-    session_id = session.store.sessions.create(session.backend_id, state)
-    session.store.sessions.save_active_pointer(session.backend_id, session_id)
-    logger.info("Auto-minted session: %s", session_id)
-    return session_id
+    cycle_id = session.store.campaigns.create_session(session.backend_id, state)
+    session.store.campaigns.save_active_pointer(session.store.tenant_id, cycle_id)
+    logger.info("Auto-minted session: %s", cycle_id)
+    return cycle_id

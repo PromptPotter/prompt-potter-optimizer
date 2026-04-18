@@ -63,7 +63,9 @@ class FileSink:
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
         from promptpotter.config.settings import settings
 
-        self.obs_root = Path(store_base_dir) / backend_id / "obs"
+        # v3: tenant root is the outer axis; obs lives under obs/{backend_id}/
+        # until Wave C relocates it into campaigns/{cycle_id}/ + library/mlruns/.
+        self.obs_root = Path(store_base_dir) / "obs" / backend_id
         self._enabled: bool = settings.OBS_ENABLED
         self._campaign_traces: dict[str, str] = {}
         # Per-NodeStart obs_id so NodeEnd can update the same JSON file.

@@ -1,12 +1,34 @@
+"""Campaign registry persistence.
+
+``CampaignStore`` is the single mint point for the session≡campaign invariant
+(v3). It owns both the campaign metadata file and the per-cycle artifact
+directory (trials + session state + logs + journal + notes + recon results).
+The legacy ``SessionStore`` is absorbed here; there is no separate
+``sessions`` store.
+
+Disk layout (v3; per-cycle artifact names get renamed in Wave B)::
+
+    {tenant_root}/campaigns/{cycle_id}.json                  # metadata + trial index
+    {tenant_root}/campaigns/{cycle_id}/                      # per-cycle dir
+      session.json                                            # session state (Wave B: deleted)
+      campaign_state.json                                     # live dashboard (Wave B: dashboard.json)
+      campaign_control.json                                   # HITL signals (Wave B: control.json)
+      campaign_output.log                                     # per-query audit (Wave B: output.log)
+      campaign_log.md                                         # round summary (Wave B: log.md)
+      notebook_journal.md                                     # user narrative (Wave B: journal.md)
+      claude_notes.md                                         # Claude notes (Wave B: notes.md)
+      recon_results.json                                      # this cycle's scan (Wave B: recon.json)
+      trial_NNNN.json                                         # optimizer resume WAL
+      round_NNNN_candidates.json                              # pre-scoring checkpoint
+
+The ``backend_id`` parameter on public methods is preserved for call-site
+stability; campaigns are tenant-global so it does not affect path
+construction. A campaign's ``backend_id`` is recorded in its metadata blob.
 """
-Campaign registry persistence.
 
-Stores campaign metadata and per-trial results to disk:
+from __future__ import annotations
 
-    {backend_id}/campaigns/{campaign_id}.json        — metadata + trial index
-    {backend_id}/campaigns/{campaign_id}/trial_NNNN.json  — trial detail
-"""
-
+import json
 import logging
 from datetime import UTC, datetime
 from pathlib import Path
@@ -25,16 +47,27 @@ logger = logging.getLogger(__name__)
 
 
 class CampaignStore(EntityStore):
-    """File I/O for campaign registry persistence."""
+    """File I/O for campaign registry + per-cycle session artifacts."""
 
     def __init__(self, base_dir: Path):
+        # base_dir is tenant root; campaigns nest directly under it
         super().__init__(base_dir, "campaigns")
 
-    def _trial_dir(self, backend_id: str, campaign_id: str) -> Path:
-        validate_path_component(campaign_id)
-        return self._entity_dir(backend_id) / campaign_id
+    # -- path helpers ---------------------------------------------------------
 
-    # -- Campaign CRUD --
+    def _entity_dir(self, _backend_id: str) -> Path:
+        """Parent dir for campaign metadata files. Tenant-global."""
+        return self._base_dir / "campaigns"
+
+    def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
+        """Per-cycle dir holding trials + session artifacts + logs."""
+        validate_path_component(cycle_id)
+        return self._entity_dir(_backend_id) / cycle_id
+
+    # Retained alias for existing resume/rewind call sites.
+    _trial_dir = _campaign_dir
+
+    # -- Campaign CRUD --------------------------------------------------------
 
     def create(
         self,
@@ -53,6 +86,7 @@ class CampaignStore(EntityStore):
             "updated_at": now,
             "status": "active",
             "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
+            "backend_id": backend_id,
             "n_trials": 0,
             "best_accuracy": 0.0,
             "best_trial_id": None,
@@ -86,7 +120,7 @@ class CampaignStore(EntityStore):
         cycle_id_override: str | None,
         *,
         resume_from_round_override: int | None = None,
-    ) -> tuple["CampaignStore | None", str | None, int]:
+    ) -> tuple[CampaignStore | None, str | None, int]:
         """Open the store and resume/create the cycle in one shot.
 
         Returns ``(store, cycle_id, resumed_from_round)``.  All-None on
@@ -96,13 +130,12 @@ class CampaignStore(EntityStore):
         are archived into ``archived/resumed_at_<ts>/`` and the trial
         index is rebuilt before resume.
         """
-        import json as _json
-
         from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
 
         if not (config.project_root and config.backend_id):
             return None, None, 0
         try:
+            # project_root points at the tenant root when built via build_stores.
             store = cls(Path(config.project_root))
             resolved = cycle_id_override or cycle_config_identity(
                 config, baseline_render, dataset, strict=config.strict_cycle_identity
@@ -121,7 +154,7 @@ class CampaignStore(EntityStore):
                 hot_update_keys=TUNING_KEYS if cycle_id_override else frozenset(),
             )
             return store, resolved, resumed_from
-        except (OSError, _json.JSONDecodeError, KeyError):
+        except (OSError, json.JSONDecodeError, KeyError):
             logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
             return None, None, 0
 
@@ -138,7 +171,7 @@ class CampaignStore(EntityStore):
         rebuilds the cycle's trial index to reflect only surviving trials
         (rounds 0..after_round). No-op on a cycle with no such trial.
         """
-        trial_dir = self._trial_dir(backend_id, cycle_id)
+        trial_dir = self._campaign_dir(backend_id, cycle_id)
         if not trial_dir.exists():
             raise LookupError(f"cycle {cycle_id!r} has no trials on disk")
 
@@ -283,11 +316,7 @@ class CampaignStore(EntityStore):
         n_rounds: int,
         finished_at: str,
     ) -> None:
-        """Write the terminal status/stop_reason + outcome summary to disk.
-
-        Wraps the underlying :meth:`update` in :func:`graceful` so finalize
-        paths never raise on store I/O errors.
-        """
+        """Write the terminal status/stop_reason + outcome summary to disk."""
         from promptpotter.shared.errors import graceful
 
         with graceful("Campaign completion update failed"):
@@ -311,21 +340,28 @@ class CampaignStore(EntityStore):
     ) -> list[dict[str, Any]]:
         """Load full campaign records for *campaign_ids*, or all campaigns when None.
 
-        Skips campaigns whose detail file is missing. Replaces the list-all +
-        per-id load fan-out that lived in application/campaign/reporting.py.
+        Skips campaigns whose detail file is missing.
         """
         if campaign_ids is None:
             campaign_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
         return [c for cid in campaign_ids if (c := self.load(backend_id, cid)) is not None]
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return summary for every campaign under *backend_id*."""
+        """Return summary for every campaign stored under this tenant.
+
+        Optionally filters by ``backend_id`` (matched against the
+        ``backend_id`` field inside each metadata blob). Campaigns are
+        tenant-global; the filter is a post-read pass, not a path scope.
+        Pass ``""`` to list all campaigns regardless of backend.
+        """
         campaigns_dir = self._entity_dir(backend_id)
         if not campaigns_dir.exists():
             return []
         results = []
         for path in sorted(campaigns_dir.glob("*.json")):
             data = read_json(path)
+            if backend_id and data.get("backend_id") and data["backend_id"] != backend_id:
+                continue
             results.append(
                 {
                     "campaign_id": data["campaign_id"],
@@ -340,7 +376,7 @@ class CampaignStore(EntityStore):
             )
         return results
 
-    # -- Trial CRUD --
+    # -- Trial CRUD -----------------------------------------------------------
 
     def add_trial(
         self,
@@ -353,11 +389,9 @@ class CampaignStore(EntityStore):
         validate_path_component(trial_id)
         round_num = trial.get("round", 0)
 
-        # Write trial detail
-        detail_path = self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json"
+        detail_path = self._campaign_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json"
         write_json(detail_path, trial)
 
-        # Update campaign index
         campaign_path = self._entity_path(backend_id, campaign_id)
         data = read_json(campaign_path)
 
@@ -372,17 +406,14 @@ class CampaignStore(EntityStore):
             "improved": trial.get("improved", False),
             "created_at": trial.get("created_at", ""),
         }
-        # Replace existing trial for same round (idempotent on replay)
         data["trials"] = [t for t in data["trials"] if t.get("round") != round_num]
         data["trials"].append(summary)
         data["n_trials"] = len(data["trials"])
 
-        # Track best
         if trial["accuracy"] > data.get("best_accuracy", 0.0):
             data["best_accuracy"] = trial["accuracy"]
             data["best_trial_id"] = trial_id
 
-        # Baseline is always round 0
         if round_num == 0:
             data["baseline_accuracy"] = trial["accuracy"]
 
@@ -399,7 +430,7 @@ class CampaignStore(EntityStore):
     ) -> dict[str, Any] | None:
         """Load a trial detail by round number.  Returns None if not found."""
         return read_json_optional(
-            self._trial_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
+            self._campaign_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
         )
 
     def complete(self, backend_id: str, campaign_id: str) -> None:
@@ -415,7 +446,9 @@ class CampaignStore(EntityStore):
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before evaluation (mid-round checkpoint)."""
-        path = self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
+        path = (
+            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
+        )
         write_json(path, candidates)
         logger.debug(
             "Saved %d candidates for round %d → %s",
@@ -432,7 +465,7 @@ class CampaignStore(EntityStore):
     ) -> list[dict[str, Any]] | None:
         """Load persisted candidates for a round.  Returns None if not on disk."""
         return read_json_optional(
-            self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json",
+            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json",
         )
 
     def delete_round_candidates(
@@ -442,10 +475,151 @@ class CampaignStore(EntityStore):
         round_num: int,
     ) -> None:
         """Delete persisted candidates for a round (forces fresh generation)."""
-        path = self._trial_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
+        path = (
+            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
+        )
         if path.exists():
             path.unlink()
             logger.debug(
                 "Deleted cached candidates for round %d (escalation invalidation)",
                 round_num,
             )
+
+    # ----------------------------------------------------------------------
+    # Session artifacts — absorbed from the deleted ``SessionStore`` class.
+    # Session ≡ campaign (v3): session_id IS the cycle_id.
+    # ----------------------------------------------------------------------
+
+    def _session_dir(self, backend_id: str, session_id: str) -> Path:
+        """Per-campaign artifact directory. Alias for ``_campaign_dir``."""
+        return self._campaign_dir(backend_id, session_id)
+
+    def create_session(self, backend_id: str, state: dict[str, Any]) -> str:
+        """Create a new session (= campaign cycle). Returns the cycle_id.
+
+        Mints a timestamp-based cycle_id, seeds the state blob with it, and
+        writes ``campaigns/{cycle_id}/session.json``. The campaign metadata
+        file is minted separately later (in ``bootstrap_cycle`` /
+        ``resume_or_create`` from the optimization runner) using the same
+        cycle_id — that is the session ≡ campaign invariant.
+        """
+        from promptpotter.infrastructure.store.stores import generate_session_id
+
+        cycle_id = generate_session_id()
+        state["session_id"] = cycle_id
+        state["created_at"] = datetime.now(UTC).isoformat()
+        self.save_session(backend_id, cycle_id, state)
+        return cycle_id
+
+    def save_session(self, backend_id: str, session_id: str, state: dict[str, Any]) -> None:
+        """Persist session state to ``campaigns/{cycle_id}/session.json``."""
+        path = self._session_dir(backend_id, session_id) / "session.json"
+        write_json(path, state)
+
+    def load_session(self, backend_id: str, session_id: str) -> dict[str, Any] | None:
+        """Load session state. Returns None if not found."""
+        path = self._session_dir(backend_id, session_id) / "session.json"
+        return read_json_optional(path)
+
+    # -- Scan results ---------------------------------------------------------
+
+    def save_recon_results(
+        self,
+        backend_id: str,
+        session_id: str,
+        scan_df_records: list[dict],
+        axis_profiles: list[dict],
+    ) -> None:
+        """Persist sensitivity scan results for this cycle."""
+        path = self._session_dir(backend_id, session_id) / "recon_results.json"
+        write_json(
+            path,
+            {
+                "recon_df": scan_df_records,
+                "axis_profiles": axis_profiles,
+                "saved_at": datetime.now(UTC).isoformat(),
+            },
+        )
+
+    def load_recon_results(
+        self,
+        backend_id: str,
+        session_id: str,
+    ) -> dict[str, Any] | None:
+        """Load scan results. Returns None if not found."""
+        path = self._session_dir(backend_id, session_id) / "recon_results.json"
+        return read_json_optional(path)
+
+    # -- Campaign log ---------------------------------------------------------
+
+    def append_log(
+        self,
+        backend_id: str,
+        session_id: str,
+        section: str,
+    ) -> None:
+        """Append a markdown section to the campaign log."""
+        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(section + "\n\n")
+
+    def load_log(self, backend_id: str, session_id: str) -> str:
+        """Load the full campaign log. Returns empty string if not found."""
+        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
+        if not path.exists():
+            return ""
+        return path.read_text(encoding="utf-8")
+
+    # -- Active session pointer ----------------------------------------------
+
+    def save_active_pointer(self, tenant_id: str, cycle_id: str) -> None:
+        """Persist pointer to the active campaign across CLI invocations."""
+        from promptpotter.infrastructure.store.stores import save_active_pointer
+
+        save_active_pointer(tenant_id, cycle_id)
+
+    def clear_active_pointer(self) -> None:
+        """Delete the active-session pointer file, if present. Idempotent."""
+        from promptpotter.infrastructure.store.stores import clear_active_pointer
+
+        clear_active_pointer()
+
+    def read_active_pointer(self) -> tuple[str, str]:
+        """Return ``(tenant_id, cycle_id)`` from the pointer, or ``("", "")``."""
+        from promptpotter.infrastructure.store.stores import read_active_pointer
+
+        return read_active_pointer()
+
+    def load_active(
+        self,
+        session_override: str | None = None,
+    ) -> tuple[dict[str, Any], str, str]:
+        """Load active session state + backend_id + cycle_id.
+
+        Reads ``.promptpotter/active_session.json`` to find the active
+        tenant+cycle, then loads the full session state. The ``backend_id``
+        is read from the state blob's ``init_params`` (not from the
+        pointer, which is tenant-scoped).
+
+        Raises ``SystemExit`` if no active session or session not found.
+        """
+        from promptpotter.infrastructure.store.stores import (
+            _ACTIVE_SESSION_PATH,
+            read_active_pointer,
+        )
+
+        if not _ACTIVE_SESSION_PATH.exists():
+            raise SystemExit("ERROR: No active session. Run 'init' first.")
+        _tid, cid = read_active_pointer()
+        cid = session_override or cid
+        if not cid:
+            raise SystemExit("ERROR: No active cycle_id in pointer.")
+
+        # backend_id does not affect path construction — campaigns are
+        # tenant-global. Recover backend_id from the loaded state blob.
+        state = self.load_session("", cid)
+        if not state:
+            raise SystemExit(f"ERROR: Session '{cid}' not found.")
+        bid = state.get("init_params", {}).get("backend_id", "") or ""
+        return state, bid, cid

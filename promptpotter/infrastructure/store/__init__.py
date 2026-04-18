@@ -10,10 +10,12 @@ from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
 from promptpotter.infrastructure.store.stores import (
     BackendStore,
     PlanStore,
-    SessionStore,
     Stores,
     build_stores,
+    clear_active_pointer,
     generate_session_id,
+    read_active_pointer,
+    save_active_pointer,
 )
 
 __all__ = [
@@ -21,8 +23,10 @@ __all__ = [
     "CampaignStore",
     "DatasetRunStore",
     "PlanStore",
-    "SessionStore",
     "Stores",
     "build_stores",
+    "clear_active_pointer",
     "generate_session_id",
+    "read_active_pointer",
+    "save_active_pointer",
 ]

@@ -21,7 +21,7 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
     file and optimize_result so a human can ``jq`` the same shape.
     """
     ctx = load_session(args)
-    session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
+    session_dir = ctx.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
 
     payload: dict[str, Any] = {
         "session_id": ctx.session_id,

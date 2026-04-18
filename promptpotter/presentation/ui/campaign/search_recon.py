@@ -132,9 +132,9 @@ async def run_recon(
     print(f"\nSensitivity scan complete: {len(df)} variants evaluated")
     show_axis_profiles(profiles)
 
-    # Persist scan results via SessionStore if session is active
+    # Persist scan results via CampaignStore if session is active
     if session_id and store and backend_id:
-        store.sessions.save_recon_results(
+        store.campaigns.save_recon_results(
             backend_id,
             session_id,
             df.to_dict(orient="records"),

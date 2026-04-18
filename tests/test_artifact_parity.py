@@ -17,15 +17,19 @@ from promptpotter.infrastructure.persistence.session_emitter import CAMPAIGN_SES
 
 @pytest.fixture
 def session_dir(tmp_path: Path) -> Path:
-    """Create a session directory with a minimal session.json."""
-    sdir = tmp_path / "test_backend" / "sessions" / "test_session"
+    """Create a campaign/session directory with a minimal session.json.
+
+    v3 layout: ``.promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/``
+    (session ≡ campaign). ``tmp_path`` stands in for the tenant root.
+    """
+    sdir = tmp_path / "campaigns" / "test_cycle"
     sdir.mkdir(parents=True)
     (sdir / "session.json").write_text(
         json.dumps(
             {
                 "phase": "optimizing",
                 "backend_id": "test_backend",
-                "session_id": "test_session",
+                "session_id": "test_cycle",
             }
         )
     )
@@ -44,7 +48,7 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
     config = LoopConfig(
         backend_id="test_backend",
-        session_id="test_session",
+        session_id="test_cycle",
         max_rounds=5,
         l1_patience=3,
     )
@@ -147,28 +151,32 @@ def test_emitter_produces_all_session_artifacts(tmp_path: Path, session_dir: Pat
 
 
 def test_auto_mint_session_claims_active_pointer() -> None:
-    """Non-CLI entry points (notebook/smoke/scan) get a session auto-minted
+    """Non-CLI entry points (notebook/smoke/scan) get a cycle auto-minted
     when ``session_id=''`` — and the active pointer is claimed, so CLI
-    commands like ``show-status`` find the session without ``--session``."""
+    commands like ``show-status`` find the cycle without ``--session``.
+
+    v3: session ≡ campaign; ``CampaignStore.create_session`` is the single
+    mint point, and the pointer payload is ``{tenant_id, cycle_id}``.
+    """
     from types import SimpleNamespace
 
     from promptpotter.application.campaign.session_state import auto_mint_session
 
     created: dict = {}
 
-    def fake_create(backend_id: str, state: dict) -> str:
+    def fake_create_session(backend_id: str, state: dict) -> str:
         created["backend_id"] = backend_id
         created["state"] = state
         return "sess_test_abc"
 
-    def fake_save_active_pointer(backend_id: str, session_id: str) -> None:
-        created["active_pointer"] = (backend_id, session_id)
+    def fake_save_active_pointer(tenant_id: str, cycle_id: str) -> None:
+        created["active_pointer"] = (tenant_id, cycle_id)
 
-    sessions_store = SimpleNamespace(
-        create=fake_create,
+    campaigns_store = SimpleNamespace(
+        create_session=fake_create_session,
         save_active_pointer=fake_save_active_pointer,
     )
-    store = SimpleNamespace(sessions=sessions_store)
+    store = SimpleNamespace(campaigns=campaigns_store, tenant_id="default")
     backend_client = SimpleNamespace(base_url="http://localhost:8000")
     session = SimpleNamespace(
         store=store,
@@ -191,7 +199,7 @@ def test_auto_mint_session_claims_active_pointer() -> None:
     assert created["state"]["dataset_count"] == 7
     assert created["state"]["baseline_accuracy"] == 0.42
     assert created["state"]["baseline_prompt_fields"] == {"instruction": "seed"}
-    assert created["active_pointer"] == ("bk_test", "sess_test_abc")
+    assert created["active_pointer"] == ("default", "sess_test_abc")
 
 
 def test_control_surface_reads_pause_signal(session_dir: Path) -> None:

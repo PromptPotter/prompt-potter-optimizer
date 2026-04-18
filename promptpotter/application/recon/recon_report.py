@@ -187,7 +187,7 @@ async def resume_or_build_diagnostic(
 ) -> DiagnosticResult:
     """Resume or build a smart-search diagnostic set.
 
-    Asks ``store.adaptive_recon.find_reusable_plan`` for an on-disk match. On a
+    Asks ``store.recon_plans.find_reusable_plan`` for an on-disk match. On a
     hit, post-processes the match according to its ``kind`` (complete / partial
     / sibling / diagnostic_only). On a miss, runs the LLM restructure + builds
     a fresh diagnostic set and saves the new plan.
@@ -212,7 +212,7 @@ async def resume_or_build_diagnostic(
         seed=ss.get("seed", 42),
     )
 
-    match = store.adaptive_recon.find_reusable_plan(backend_id, plan_id)
+    match = store.recon_plans.find_reusable_plan(backend_id, plan_id)
     if match is not None:
         plan = deserialize_adaptive_recon_plan(match.data)
         recon_results = plan.get("recon_results") or {}
@@ -277,7 +277,7 @@ async def resume_or_build_diagnostic(
         diag_summary,
         vl_hash,
     )
-    store.adaptive_recon.save(backend_id, plan_id, plan_data)
+    store.recon_plans.save(backend_id, plan_id, plan_data)
 
     return DiagnosticResult(
         plan_id=plan_id,

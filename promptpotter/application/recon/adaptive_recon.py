@@ -749,7 +749,7 @@ async def run_adaptive_recon(
 
     # Persist search results to plan
     if store and backend_id and plan_id:
-        store.adaptive_recon.update(
+        store.recon_plans.update(
             backend_id,
             plan_id,
             {

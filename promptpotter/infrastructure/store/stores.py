@@ -1,28 +1,32 @@
-"""Concrete store implementations — BackendStore, PlanStore, SessionStore.
+"""Concrete store implementations — BackendStore, PlanStore, ``Stores`` bundle.
 
-Consolidated from individual modules. These are simple file-based stores
-that follow identical patterns (EntityStore base or standalone CRUD).
-Larger stores (CampaignStore, DatasetRunStore) live in their own modules
-and are composed here via ``Stores`` / :func:`build_stores`.
+Consolidated from individual modules. Tenant is the outer axis; all
+per-tenant trees live under ``{projects_root}/{tenant_id}/``. Two top-level
+partitions live inside each tenant:
 
-Disk layout::
+- ``campaigns/{cycle_id}/``  — per-run state, artifacts, observability
+- ``library/``              — cross-run reference data (datasets, backends,
+                              dataset_runs cache, recon plans, aliases)
 
-    .promptpotter/projects/
-      {backend_id}/
-        backend.json
-        sync/
-          experiments.json
-          experiments/{experiment_id}.json
-        executions/{execution_id}.json
-        datasets/{name}.json
-        dataset_runs/{run_id}.json
+Disk layout (v3)::
+
+    .promptpotter/projects/{tenant_id}/
+      campaigns/{cycle_id}.json                     # campaign metadata
+      campaigns/{cycle_id}/                         # per-cycle state dir
+        session.json                                # (renamed in Wave B)
+        campaign_state.json / control / log.md / ... etc.
+        trial_NNNN.json
+        round_NNNN_candidates.json
+      library/
+        datasets/{name}.json                        # tenant-global datasets (future)
+        backends/{backend_id}/
+          backend.json, connector_profile.json
+          sync/, executions/, datasets/
+        dataset_runs/{run_id}.json                  # content-addressed
         dataset_runs.json
-        adaptive_recon_plans/{plan_id}.json
-        campaigns/{campaign_id}.json
-        campaigns/{campaign_id}/trial_NNNN.json
-        sessions/{session_id}/session.json
-        sessions/{session_id}/recon_results.json
-        sessions/{session_id}/campaign_log.md
+        prompt_aliases.json
+        recon_plans/{plan_id}.json                  # renamed from adaptive_recon_plans
+        search_memory.json
 """
 
 from __future__ import annotations
@@ -49,7 +53,8 @@ from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
 logger = logging.getLogger(__name__)
 
 _REPO_ROOT = Path(__file__).resolve().parents[3]
-DEFAULT_BASE_DIR = _REPO_ROOT / ".promptpotter" / "projects"
+DEFAULT_PROJECTS_ROOT = _REPO_ROOT / ".promptpotter" / "projects"
+DEFAULT_TENANT_ID = "default"
 
 
 @dataclass
@@ -71,10 +76,19 @@ class ReusablePlanMatch:
 
 
 class PlanStore(EntityStore):
-    """File I/O for smart search plan persistence and resume."""
+    """File I/O for smart search plan persistence and resume.
+
+    Tenant-global: plans live under ``library/recon_plans/`` regardless of
+    ``backend_id``. The ``backend_id`` parameter is preserved on public
+    methods for call-site stability but is ignored for path construction.
+    """
 
     def __init__(self, base_dir: Path):
-        super().__init__(base_dir, "adaptive_recon_plans")
+        # base_dir is tenant root; plans nest under library/recon_plans/
+        super().__init__(base_dir, "recon_plans")
+
+    def _entity_dir(self, _backend_id: str) -> Path:
+        return self._base_dir / "library" / "recon_plans"
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary metadata for all smart search plans on disk."""
@@ -117,7 +131,6 @@ class PlanStore(EntityStore):
         if status == "scan_partial" and scan:
             return ReusablePlanMatch(kind="partial", data=existing)
 
-        # diagnostic_built → prefer a sibling plan that already has scan data
         vl_hash = existing.get("variant_library_hash", "")
         current_n_diag = existing.get("config", {}).get("n_diagnostic", 6)
         siblings = [
@@ -143,14 +156,21 @@ class PlanStore(EntityStore):
 
 
 class BackendStore:
-    """File I/O for backend registration and synced API responses."""
+    """File I/O for backend registration and synced API responses.
+
+    Backends live under ``library/backends/{backend_id}/`` — peer entities
+    within the tenant, not outer axes themselves.
+    """
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
 
+    def _backends_root(self) -> Path:
+        return self._base_dir / "library" / "backends"
+
     def _backend_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)
-        return self._base_dir / backend_id
+        return self._backends_root() / backend_id
 
     def _sync_dir(self, backend_id: str) -> Path:
         return self._backend_dir(backend_id) / "sync"
@@ -170,10 +190,11 @@ class BackendStore:
 
     def list_all(self) -> list[BackendConnection]:
         """List all registered backends."""
-        if not self._base_dir.exists():
+        root = self._backends_root()
+        if not root.exists():
             return []
         backends = []
-        for d in sorted(self._base_dir.iterdir()):
+        for d in sorted(root.iterdir()):
             cfg = d / "backend.json"
             if cfg.exists():
                 backends.append(BackendConnection(**read_json(cfg)))
@@ -210,8 +231,7 @@ class BackendStore:
     # -- executions (absorbed from ExecutionStore) ----------------------------
 
     def _executions_dir(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / "executions"
+        return self._backend_dir(backend_id) / "executions"
 
     def load_execution(self, backend_id: str, execution_id: str) -> Execution | None:
         """Load an execution by ID. Returns None if not found."""
@@ -245,8 +265,7 @@ class BackendStore:
     # -- datasets (absorbed from DatasetStore) --------------------------------
 
     def _datasets_dir(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / "datasets"
+        return self._backend_dir(backend_id) / "datasets"
 
     def save_dataset(
         self,
@@ -387,182 +406,102 @@ class BackendStore:
         )
 
 
-# Thin pointer to the active session — survives across CLI invocations
+# ---------------------------------------------------------------------------
+# Active session pointer — survives across CLI invocations. Payload shape is
+# ``{tenant_id, cycle_id}`` (v3); ``backend_id`` is *not* part of the pointer
+# because it's no longer the project axis. Callers that need the backend_id
+# read it from the campaign's state blob.
+# ---------------------------------------------------------------------------
+
 _ACTIVE_SESSION_PATH = Path(__file__).resolve().parents[3] / ".promptpotter" / "active_session.json"
 
 
 def generate_session_id() -> str:
-    """Generate a unique session identifier."""
+    """Generate a unique cycle/session identifier.
+
+    Timestamp-suffixed so sort-order matches creation order. The identity
+    returned here is the ``cycle_id`` — session ≡ campaign (v3).
+    """
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
     short = uuid.uuid4().hex[:6]
     return f"{ts}_{short}"
 
 
-class SessionStore:
-    """File I/O for campaign session state."""
+def save_active_pointer(tenant_id: str, cycle_id: str) -> None:
+    """Persist pointer to the active campaign across CLI invocations."""
+    validate_path_component(tenant_id)
+    validate_path_component(cycle_id)
+    _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
+    _ACTIVE_SESSION_PATH.write_text(
+        json.dumps({"tenant_id": tenant_id, "cycle_id": cycle_id}),
+        encoding="utf-8",
+    )
 
-    def __init__(self, base_dir: Path):
-        self._base_dir = base_dir
 
-    def _session_dir(self, backend_id: str, session_id: str) -> Path:
-        validate_path_component(backend_id)
-        validate_path_component(session_id)
-        return self._base_dir / backend_id / "sessions" / session_id
+def clear_active_pointer() -> None:
+    """Delete the active-session pointer file, if present. Idempotent."""
+    _ACTIVE_SESSION_PATH.unlink(missing_ok=True)
 
-    # -- Session state ---------------------------------------------------------
 
-    def create(self, backend_id: str, state: dict[str, Any]) -> str:
-        """Create a new session. Returns session_id."""
-        session_id = generate_session_id()
-        state["session_id"] = session_id
-        state["created_at"] = datetime.now(UTC).isoformat()
-        self.save(backend_id, session_id, state)
-        return session_id
+def read_active_pointer() -> tuple[str, str]:
+    """Return ``(tenant_id, cycle_id)`` from the pointer, or ``("", "")``.
 
-    def save(self, backend_id: str, session_id: str, state: dict[str, Any]) -> None:
-        """Persist session state."""
-        path = self._session_dir(backend_id, session_id) / "session.json"
-        write_json(path, state)
-
-    def load(self, backend_id: str, session_id: str) -> dict[str, Any] | None:
-        """Load session state. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "session.json"
-        return read_json_optional(path)
-
-    # -- Scan results ----------------------------------------------------------
-
-    def save_recon_results(
-        self,
-        backend_id: str,
-        session_id: str,
-        scan_df_records: list[dict],
-        axis_profiles: list[dict],
-    ) -> None:
-        """Persist sensitivity scan results (fills the persistence gap)."""
-        path = self._session_dir(backend_id, session_id) / "recon_results.json"
-        write_json(
-            path,
-            {
-                "recon_df": scan_df_records,
-                "axis_profiles": axis_profiles,
-                "saved_at": datetime.now(UTC).isoformat(),
-            },
-        )
-
-    def load_recon_results(
-        self,
-        backend_id: str,
-        session_id: str,
-    ) -> dict[str, Any] | None:
-        """Load scan results. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "recon_results.json"
-        return read_json_optional(path)
-
-    # -- Campaign log ----------------------------------------------------------
-
-    def append_log(
-        self,
-        backend_id: str,
-        session_id: str,
-        section: str,
-    ) -> None:
-        """Append a markdown section to the campaign log."""
-        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(section + "\n\n")
-
-    def load_log(self, backend_id: str, session_id: str) -> str:
-        """Load the full campaign log. Returns empty string if not found."""
-        path = self._session_dir(backend_id, session_id) / "campaign_log.md"
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
-
-    # -- Active session pointer ------------------------------------------------
-
-    def save_active_pointer(self, backend_id: str, session_id: str) -> None:
-        """Persist pointer to the active session across CLI invocations."""
-        _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
-        _ACTIVE_SESSION_PATH.write_text(
-            json.dumps({"backend_id": backend_id, "session_id": session_id}),
-            encoding="utf-8",
-        )
-
-    def clear_active_pointer(self) -> None:
-        """Delete the active-session pointer file, if present. Idempotent."""
-        _ACTIVE_SESSION_PATH.unlink(missing_ok=True)
-
-    def read_active_pointer(self) -> tuple[str, str]:
-        """Return ``(backend_id, session_id)`` from the pointer, or ``("", "")``.
-
-        Unlike :meth:`load_active`, this does NOT raise if the pointer is missing
-        or the referenced session has been deleted — it only inspects the raw
-        pointer file. Used by guardrails that need to compare the pointer to a
-        requested backend without coupling to session lifecycle.
-        """
-        if not _ACTIVE_SESSION_PATH.exists():
-            return "", ""
-        try:
-            ptr = json.loads(_ACTIVE_SESSION_PATH.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError):
-            return "", ""
-        return ptr.get("backend_id", ""), ptr.get("session_id", "")
-
-    def load_active(
-        self,
-        session_override: str | None = None,
-    ) -> tuple[dict[str, Any], str, str]:
-        """Load active session state + backend_id + session_id.
-
-        Reads ``.promptpotter/active_session.json`` to find the active
-        session, then loads the full session state.
-
-        Raises ``SystemExit`` if no active session or session not found.
-        """
-        if not _ACTIVE_SESSION_PATH.exists():
-            raise SystemExit("ERROR: No active session. Run 'init' first.")
+    Does NOT raise if the pointer is missing or the referenced campaign has
+    been deleted — only inspects the raw pointer file. Used by guardrails
+    that need to compare the pointer to a requested tenant without coupling
+    to campaign lifecycle.
+    """
+    if not _ACTIVE_SESSION_PATH.exists():
+        return "", ""
+    try:
         ptr = json.loads(_ACTIVE_SESSION_PATH.read_text(encoding="utf-8"))
-        bid = ptr["backend_id"]
-        sid = session_override or ptr["session_id"]
-        state = self.load(bid, sid)
-        if not state:
-            raise SystemExit(f"ERROR: Session '{sid}' not found for backend '{bid}'.")
-        return state, bid, sid
+    except (OSError, json.JSONDecodeError):
+        return "", ""
+    return ptr.get("tenant_id", ""), ptr.get("cycle_id", "")
 
 
 # ---------------------------------------------------------------------------
-# Composite store — frozen bundle of the five focused stores.
+# Composite store — frozen bundle of the focused stores. ``SessionStore`` has
+# been merged into ``CampaignStore`` (session ≡ campaign invariant); no
+# separate ``sessions`` field.
 # ---------------------------------------------------------------------------
 
 
 @dataclass(frozen=True)
 class Stores:
-    """Composite bundle of focused stores sharing a single ``base_dir``.
+    """Composite bundle of focused stores rooted at a per-tenant ``base_dir``.
 
-    Construct via :func:`build_stores`. Callers access the leaf stores as
-    public attributes (``stores.backends``, ``stores.campaigns``, …); the
-    bundle itself carries no logic.
+    Construct via :func:`build_stores`. ``base_dir`` is the tenant root
+    (``{projects_root}/{tenant_id}/``). Session state lives inside
+    ``CampaignStore`` — one mint point.
     """
 
     base_dir: Path
+    tenant_id: str
     backends: BackendStore
     campaigns: CampaignStore
     dataset_runs: DatasetRunStore
-    adaptive_recon: PlanStore
-    sessions: SessionStore
+    recon_plans: PlanStore
 
 
-def build_stores(base_dir: Path | str | None = None) -> Stores:
-    """Assemble a :class:`Stores` bundle rooted at ``base_dir``.
+def build_stores(
+    projects_root: Path | str | None = None,
+    tenant_id: str = DEFAULT_TENANT_ID,
+) -> Stores:
+    """Assemble a :class:`Stores` bundle rooted under a tenant.
 
-    ``base_dir`` defaults to ``<repo_root>/.promptpotter/projects``.
+    ``projects_root`` defaults to ``<repo_root>/.promptpotter/projects``.
+    ``tenant_id`` defaults to ``"default"`` — the single-user CLI tenant.
+    Multi-tenant webapp picks a tenant at auth time.
     """
-    root = Path(base_dir) if base_dir else DEFAULT_BASE_DIR
+    validate_path_component(tenant_id)
+    root = Path(projects_root) if projects_root else DEFAULT_PROJECTS_ROOT
+    tenant_dir = root / tenant_id
     return Stores(
-        base_dir=root,
-        backends=BackendStore(root),
-        campaigns=CampaignStore(root),
-        dataset_runs=DatasetRunStore(root),
-        adaptive_recon=PlanStore(root),
-        sessions=SessionStore(root),
+        base_dir=tenant_dir,
+        tenant_id=tenant_id,
+        backends=BackendStore(tenant_dir),
+        campaigns=CampaignStore(tenant_dir),
+        dataset_runs=DatasetRunStore(tenant_dir),
+        recon_plans=PlanStore(tenant_dir),
     )

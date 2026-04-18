@@ -79,12 +79,14 @@ class NotebookDisplay:
 
     def _resolve_session_dir(self) -> Path | None:
         """Return the active session directory, or None if not yet minted."""
-        if not self._store or not self._backend_id:
+        if not self._store:
             return None
-        _, sid = self._store.sessions.read_active_pointer()
-        if not sid:
+        _, cid = self._store.campaigns.read_active_pointer()
+        if not cid:
             return None
-        return Path(self._store.base_dir) / self._backend_id / "sessions" / sid
+        # v3: session artifacts live inside the campaign dir; tenant is the
+        # outer axis (already baked into ``store.base_dir``).
+        return Path(self._store.base_dir) / "campaigns" / cid
 
     def note(self, action: str, body: str = "") -> None:
         """Append a narrative note to ``notebook_journal.md`` for Claude.

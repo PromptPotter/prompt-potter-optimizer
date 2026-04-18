@@ -70,6 +70,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
         take_over=True,  # cmd_init always rewrites the pointer
+        tenant_id=getattr(args, "tenant", "default"),
     )
     backend_id = session.backend_id  # may have been derived from dataset_name
 
@@ -91,8 +92,8 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         pipeline_params=pipeline_params,
         active_steps=active,
     )
-    session_id = session.store.sessions.create(backend_id, state)
-    session.store.sessions.save_active_pointer(backend_id, session_id)
+    session_id = session.store.campaigns.create_session(backend_id, state)
+    session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
 
     train_data: list[dict] | None = None
     if args.excel_path:
@@ -113,10 +114,10 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = baseline_acc
-    session.store.sessions.save(backend_id, session_id, state)
+    session.store.campaigns.save_session(backend_id, session_id, state)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
-    session.store.sessions.append_log(
+    session.store.campaigns.append_log(
         backend_id,
         session_id,
         f"""# Campaign Report — {session_id}
@@ -207,7 +208,7 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
     ctx = load_session(args)
     session = await init_services_cli(**ctx.init_params)
 
-    recon_data = session.store.sessions.load_recon_results(ctx.backend_id, ctx.session_id)
+    recon_data = session.store.campaigns.load_recon_results(ctx.backend_id, ctx.session_id)
     if not recon_data:
         sys.exit("ERROR: No recon results. Run 'recon' first.")
 
@@ -290,7 +291,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         ctx.backend_url,
         ctx.init_params.get("dataset_name"),
     )
-    session_dir = session.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
+    session_dir = session.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
     logger.info("Session: %s", session_dir)
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
@@ -391,7 +392,7 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
         )
         human_parts.append("Winner saved.")
 
-    session.store.sessions.append_log(
+    session.store.campaigns.append_log(
         ctx.backend_id,
         ctx.session_id,
         f"""## Results

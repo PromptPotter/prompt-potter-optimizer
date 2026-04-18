@@ -227,10 +227,13 @@ class CampaignPersistenceEmitter:
         the surviving trials are clamped so the UI doesn't show phantom
         rounds.
         """
-        if not (config.project_root and config.backend_id and config.session_id):
+        if not (config.project_root and config.session_id):
             return None
 
-        session_dir = Path(config.project_root) / config.backend_id / "sessions" / config.session_id
+        # v3 layout: session ≡ campaign. Session artifacts live at
+        # ``campaigns/{cycle_id}/`` under the tenant root (project_root is
+        # already scoped to the tenant by ``build_stores``).
+        session_dir = Path(config.project_root) / "campaigns" / config.session_id
 
         resume_from: dict[str, Any] | None = None
         prior_state = session_dir / "campaign_state.json"

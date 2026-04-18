@@ -17,7 +17,7 @@ async def cmd_control(args: argparse.Namespace) -> CommandResult:
     from promptpotter.infrastructure.store.base import write_json
 
     ctx = load_session(args)
-    session_dir = ctx.store.sessions._session_dir(ctx.backend_id, ctx.session_id)
+    session_dir = ctx.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
     control_path = session_dir / CONTROL_FILENAME
     if not control_path.exists():
         sys.exit(f"ERROR: No {CONTROL_FILENAME} — run 'optimize' first.")

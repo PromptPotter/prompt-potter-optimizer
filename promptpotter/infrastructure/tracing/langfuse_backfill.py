@@ -6,7 +6,7 @@ owns every Langfuse SDK call — this file is just a disk walker.
 
 Idempotency tracking (``backfilled_run_ids`` and legacy ``dataset_items``
 seed) lives in ``obs/langfuse/backfill_state.json``; the sink's own
-persisted id maps in ``sessions/{session_id}/langfuse_state.json`` are
+persisted id maps in ``campaigns/{cycle_id}/langfuse_state.json`` are
 the source of truth after the first replay.
 """
 

@@ -178,6 +178,7 @@ async def init_services(
     dataset_name: str | None = None,
     on_status: Callable[[str], None] | None = None,
     take_over: bool = False,
+    tenant_id: str = "default",
 ) -> SessionEnv:
     """Initialize store, client, pipeline schema, and load eval data.
 
@@ -187,7 +188,7 @@ async def init_services(
     no local evaluation path.
 
     Refuses to run if the active-session pointer
-    (``.promptpotter/active_session.json``) names a different ``backend_id``
+    (``.promptpotter/active_session.json``) names a different ``tenant_id``
     unless ``take_over=True`` is passed. CLI ``init`` passes ``take_over=True``;
     other surfaces (notebook, smoke tool) inherit the guardrail by default.
     """
@@ -204,24 +205,24 @@ async def init_services(
         # campaign/campaign_setup.py → services → promptpotter → repo_root
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
-    store = build_stores(project_root / ".promptpotter" / "projects")
+    store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
 
-    # Guardrail: refuse to drift to a different project silently.
-    active_bid, active_sid = store.sessions.read_active_pointer()
-    if active_bid and active_bid != backend_id:
+    # Guardrail: refuse to drift to a different tenant silently.
+    active_tid, active_cid = store.campaigns.read_active_pointer()
+    if active_tid and active_tid != tenant_id:
         if not take_over:
             raise ActiveSessionMismatchError(
-                active_backend_id=active_bid,
-                active_session_id=active_sid,
-                requested_backend_id=backend_id,
+                active_backend_id=active_tid,
+                active_session_id=active_cid,
+                requested_backend_id=tenant_id,
             )
         # Take-over: clear the pointer. The smoke tool / notebook is sessionless
-        # by design (M9 gap), so writing {backend_id, ""} would be a lie that
-        # downstream `SessionStore.load_active()` turns into an ugly "session not
-        # found" error. Clearing leaves the workspace in "no active session"
-        # state, which is what a CLI `init` then correctly recovers from.
-        store.sessions.clear_active_pointer()
-        _status(f"Took over active session: cleared pointer (was {active_bid!r})")
+        # by design (M9 gap), so writing {tenant_id, ""} would be a lie that
+        # downstream ``load_active()`` turns into an ugly "session not found"
+        # error. Clearing leaves the workspace in "no active session" state,
+        # which a CLI `init` then correctly recovers from.
+        store.campaigns.clear_active_pointer()
+        _status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
     pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)
     if pipeline_schema:
@@ -271,6 +272,7 @@ async def init_services(
         pipeline_schema=pipeline_schema,
         synced=False,
         dataset_name=dataset_name,
+        tenant=TenantContext(tenant_id=tenant_id),
     )
 
     # --- Dataset store path (preferred when available) ---
@@ -431,7 +433,7 @@ def load_recon_brief(
     Shared by CLI and notebook — avoids inlining DataFrame construction
     in each entry point.
     """
-    recon_data = session.store.sessions.load_recon_results(
+    recon_data = session.store.campaigns.load_recon_results(
         session.backend_id,
         session_id,
     )
@@ -548,7 +550,7 @@ async def run_recon_and_persist(
             failure_group_sensitivity,
         )
 
-        _sm_path = Path(session.store.base_dir) / session.backend_id / "search_memory.json"
+        _sm_path = Path(session.store.base_dir) / "library" / "search_memory.json"
         _sm = SearchMemory.load(_sm_path)
         _sm.refresh(session.store, session.backend_id)
         clusters = _sm.failure_clusters()
@@ -565,7 +567,7 @@ async def run_recon_and_persist(
 
     # Persist results
     if session_id and session.store and session.backend_id:
-        session.store.sessions.save_recon_results(
+        session.store.campaigns.save_recon_results(
             session.backend_id,
             session_id,
             df.to_dict(orient="records"),

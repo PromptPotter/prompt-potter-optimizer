@@ -25,7 +25,6 @@ from filelock import FileLock
 from promptpotter.infrastructure.store.base import (
     read_json,
     read_json_optional,
-    validate_path_component,
     write_json,
 )
 from promptpotter.shared.constants import (
@@ -39,19 +38,28 @@ logger = logging.getLogger(__name__)
 
 
 class DatasetRunStore:
-    """File I/O for dataset evaluation runs and incremental eval writes."""
+    """File I/O for dataset evaluation runs and incremental eval writes.
+
+    Tenant-global (v3): all dataset_runs live under ``library/dataset_runs/``
+    regardless of ``backend_id``. Content-addressed identity comes from
+    ``PipelineSchema.node_configs()`` — there's no cross-backend collision
+    risk since each config blob carries the backend's pipeline shape.
+
+    The ``backend_id`` parameter is preserved on public methods for
+    call-site stability but is ignored for path construction.
+    """
 
     def __init__(self, base_dir: Path):
+        # base_dir is the tenant root
         self._base_dir = base_dir
 
     # -- path helpers ---------------------------------------------------------
 
-    def _runs_dir(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / "dataset_runs"
+    def _runs_dir(self, _backend_id: str) -> Path:
+        return self._base_dir / "library" / "dataset_runs"
 
-    def _index_path(self, backend_id: str) -> Path:
-        return self._base_dir / backend_id / "dataset_runs.json"
+    def _index_path(self, _backend_id: str) -> Path:
+        return self._base_dir / "library" / "dataset_runs.json"
 
     # -- complete runs --------------------------------------------------------
 
@@ -226,9 +234,8 @@ class DatasetRunStore:
 
     # -- prompt alias groups ---------------------------------------------------
 
-    def _alias_path(self, backend_id: str) -> Path:
-        validate_path_component(backend_id)
-        return self._base_dir / backend_id / "prompt_aliases.json"
+    def _alias_path(self, _backend_id: str) -> Path:
+        return self._base_dir / "library" / "prompt_aliases.json"
 
     def register_alias(self, backend_id: str, *hashes: str) -> None:
         """Link rendered_prompt_hashes as semantically equivalent.

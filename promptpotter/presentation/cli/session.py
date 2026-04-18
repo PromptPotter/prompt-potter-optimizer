@@ -50,15 +50,15 @@ class SessionCtx:
     def save_phase(self, phase: str, *, log: str = "") -> None:
         """Set phase, persist state, optionally append log entry."""
         self.state["phase"] = phase
-        self.store.sessions.save(self.backend_id, self.session_id, self.state)
+        self.store.campaigns.save_session(self.backend_id, self.session_id, self.state)
         if log:
-            self.store.sessions.append_log(self.backend_id, self.session_id, log)
+            self.store.campaigns.append_log(self.backend_id, self.session_id, log)
 
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
-    store = build_stores()
-    state, backend_id, session_id = store.sessions.load_active(args.session)
+    store = build_stores(tenant_id=getattr(args, "tenant", "default"))
+    state, backend_id, session_id = store.campaigns.load_active(args.session)
     return SessionCtx(store, state, backend_id, session_id)
 
 
