@@ -113,6 +113,10 @@ Same connector, multiple datasets and pipelines per project. Dataset/pipeline be
 
 Draft the first non-notebook UI as a plain file-directory "view model" under the session store. The CLI and eventual webapp both read from the same files; nothing renders UI from in-memory state. Content mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. This is the seed the M10/M11 webapp slices will consume. Exact structure (temp vs permanent views, what belongs where) is intentionally left open and decided during the track.
 
+### Track 7: Config Aggregate Redesign
+
+Collapse the three-object config mess (`LoopConfig`, `SessionEnv`, `LoopEnv`) into a clean lifecycle split: `CampaignConfig` (Pydantic, user-authored, persisted) + `SessionEnv` (runtime context) + `LoopEnv` (loop infrastructure, unchanged). Delete `LoopConfig` and its lossy `from_campaign_config()` bridge. Move derived `pipeline_params`, `recon_brief`, `session_id`, `project_root` onto `SessionEnv` so user config stops being mutated at runtime. Existing `campaign.json` files parse unchanged via a flat-or-nested validator. Full spec in [`m9-stable-config-and-scaffolding.md § Track 7`](m9-stable-config-and-scaffolding.md).
+
 **Entry criteria:** M8 exit gate passed.
 
 **Exit gate:** Stable meta-prompts documented. Hexagonal layout in place and tests green. Multi-dataset/pipeline working on at least two datasets. File-directory UI v0 readable by a human browsing the session folder.

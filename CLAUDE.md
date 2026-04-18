@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
-An **optional sensitivity scan** (`application/recon/`) runs beforehand to surface which axes matter; it hands a `ReconBrief` to the optimizer as a starting-point hint. `optimize` runs end-to-end without the scan. The `ReconBrief` is the **only** sanctioned bridge between the two features.
+**Note:** `application/recon/` (sensitivity scan) is a dormant leftover from a prior iteration. Not used in the current workflow; may be revived later. Ignore unless explicitly working on reviving it.
 
 **Self-healing optimization — two rails.** Failures attach to the candidate that produced them (per-candidate `OptSearchPoint.memory`), never to the round. Rail 1 (`ValidationFailure`, pre-eval): L2 teaches L1 what not to propose. Rail 2 (`RuntimeFailure`, mid-eval): L2 adjusts its own strategy; L3 replans if the pattern persists. Full mechanics in [`docs/architecture/optimization.md § Self-healing optimization`](docs/architecture/optimization.md).
 
@@ -32,8 +32,6 @@ uvicorn promptpotter.main:app --port 8001 --reload
 # CLI workflow
 python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json --skip-baseline
 python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
-python -m promptpotter recon --variants-file datasets/lca-termnorm/recon_variants.json
-python -m promptpotter show-recon
 python -m promptpotter optimize             # full loop
 python -m promptpotter show-results
 python -m promptpotter show-status          # live dashboard
@@ -67,7 +65,7 @@ promptpotter/
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
-│   ├── recon/         # OPTIONAL — sensitivity scan
+│   ├── recon/         # DORMANT — legacy sensitivity scan, unused
 │   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library
 │   ├── scoring/       # score_search_point gateway
 │   └── datasets/
@@ -77,7 +75,7 @@ promptpotter/
 └── config/          # settings, APP_VERSION, logging
 ```
 
-**Directionality rule (strict):** `optimization/` MUST NOT import from `recon/`. `recon/` MAY import from `optimization/`. `intelligence/` MUST NOT import from either — it's shared ground. Sole runtime bridge: `RunConfig.recon_brief`.
+**Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
 - **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS`; `tests/test_artifact_parity.py` enforces.
@@ -93,7 +91,7 @@ promptpotter/
 ## Entry Points (Maturity Order)
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; `presentation/ui/campaign/` is pure display.
-2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`. Optional: `recon → show-recon` between set-task and optimize.
+2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
 3. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
 4. **Next.js webapp** (planned M10/M11): zero code today; consumes FastAPI API.
 
@@ -111,7 +109,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 - **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score.
 - **Optimizer LLM calls**: all go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
 - **Cycle identity**: two-tier. Experiment mode (default) hashes only the problem; strict mode (`strict_cycle_identity: true`) hashes everything for publication reproducibility. See `TUNING_KEYS` in `lifecycle.py`.
-- **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set; `recon_sample_size` controls scan queries. Sequential elimination early-stops inferior candidates via Welch's t-test.
+- **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set. Sequential elimination early-stops inferior candidates via Welch's t-test.
 - **Canonical prompt authoring**: dataset starting prompts live in `datasets/{name}/prompts/{node}.json` (or `default.json`) as `PromptTemplate` JSON. Monolithic `prompt` strings in `pipeline.json` are deprecated.
 - **Zero-signal sample filtering** (on by default, `min_observations=5`): queries with 0 variance across ≥ N samples are physically moved to `datasets/{name}.json::excluded` at round boundaries. Only sanctioned round-boundary mutation of the active dataset.
 
@@ -120,8 +118,6 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 ### Notebook ↔ CLI Session Parity
 
 **Campaign path closed:** `run_optimization` auto-mints a session when caller passes `session_id=""`, producing the same `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`.
-
-**Still open — scan path:** `run_sensitivity_scan` does not yet auto-mint; recon results don't persist from the notebook. Follow-up applies the same pattern.
 
 **M9 Track 4:** Shared file-directory view model — renderer unification is still that track's work.
 
