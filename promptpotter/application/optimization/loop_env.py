@@ -40,3 +40,5 @@ class LoopEnv:
     scoring_dataset: list[dict[str, Any]] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
+    zero_signal_filter_enabled: bool = False
+    zero_signal_filter_min_observations: int = 5

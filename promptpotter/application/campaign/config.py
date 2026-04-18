@@ -13,12 +13,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, TypedDict
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 # Sole sanctioned bridge from scan -> optimization: ReconBrief flows through RunConfig into L1.
 from promptpotter.application.recon.recon_report import ReconBrief
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import SessionEnv
@@ -126,20 +125,6 @@ class LoopConfig(BaseModel):
         "zero-signal filtering.",
     )
 
-    # Zero-signal sample filtering (deterministic, no LLM)
-    zero_signal_filter_enabled: bool = Field(
-        False,
-        description="Prune always-hit and always-miss queries from the active "
-        "dataset at round boundaries. Uses SearchMemory.dead_queries(). "
-        "Off by default — at small t-test budgets the filter rarely accumulates "
-        "enough observations to fire and can shrink the active dataset in ways "
-        "that confuse publication-grade benchmark runs. Opt in explicitly.",
-    )
-    zero_signal_filter_min_observations: int = Field(
-        5,
-        description="Minimum Bernoulli samples required before a query is "
-        "eligible for zero-signal exclusion.",
-    )
     sp_budget_ttest: int = Field(20, description="Eval subsample size (must be > 0)")
     seed: int = Field(42, description="Random seed for subsampling")
 
@@ -156,23 +141,6 @@ class LoopConfig(BaseModel):
     recon_brief: ReconBrief | None = Field(
         None, description="Scan analytics context for candidate gen"
     )
-
-    # Structured domain context (from TASK_DESCRIPTION decomposition)
-    task_context: TaskDecomposition | None = Field(
-        None,
-        description="Structured domain context for L1 gen and L2 refinement",
-    )
-
-    @field_validator("task_context", mode="before")
-    @classmethod
-    def _coerce_task_context(cls, v: object) -> TaskDecomposition | None:
-        if v is None:
-            return None
-        if isinstance(v, TaskDecomposition):
-            return v
-        if isinstance(v, dict):
-            return TaskDecomposition.from_dict(v)
-        return None
 
     # L2/L3 escalation
     enable_l2: bool = Field(True, description="Enable L2 refine_strategy loop")
@@ -240,17 +208,6 @@ class LoopConfig(BaseModel):
         description="Near-miss/miss ratio above which critique flags ranking issues",
     )
 
-    # Per-dataset scoring formula (see shared/scoring.py)
-    scoring_formula: str | None = Field(
-        None,
-        description="Python expression evaluated per query result (None = exact match)",
-    )
-    scoring_round_formula: str | None = Field(
-        None,
-        description="Python expression evaluated per round against the evaluator "
-        "registry namespace (None = default weighted sum).",
-    )
-
     # HITL mode
     pause_before_scoring: bool = Field(
         False,
@@ -276,36 +233,32 @@ class LoopConfig(BaseModel):
         session_id: str = "",
         pipeline_schema: PipelineSchema | None = None,
         recon_brief: ReconBrief | None = None,
-        task_context: TaskDecomposition | dict | None = None,
         dataset_name: str = "",
     ) -> LoopConfig:
         """Build from the notebook's ``campaign_config`` dict.
 
         Uses LoopConfig field defaults for any missing keys — defaults live
         on the pydantic fields, not here. ``pipeline_schema`` should be the
-        filtered schema with overrides already baked in.
+        filtered schema with overrides already baked in. ``task_context`` and
+        the scoring formulas flow outside LoopConfig (directly into
+        ``_init_optimization`` / ``ScoringEnv.for_loop``); zero-signal filter
+        flags live on ``LoopEnv``.
         """
-        opt = dict(campaign_config.get("optimization", {}))
-        scoring_block = campaign_config.get("scoring")
-        if isinstance(scoring_block, dict):
-            query_formula = scoring_block.get("per_query")
-            round_formula = scoring_block.get("per_round")
-        else:
-            query_formula = scoring_block
-            round_formula = None
+        opt = {
+            k: v
+            for k, v in campaign_config.get("optimization", {}).items()
+            if k not in {"zero_signal_filter_enabled", "zero_signal_filter_min_observations"}
+        }
         return cls(
             **opt,
             model=campaign_config.get("optimizer_llm", {}).get("model"),
             sp_budget_ttest=campaign_config.get("sp_budget_ttest", 20),
-            scoring_formula=query_formula,
-            scoring_round_formula=round_formula,
             backend_id=backend_id,
             project_root=project_root,
             session_id=session_id,
             dataset_name=dataset_name or campaign_config.get("dataset_name", ""),
             pipeline_schema=pipeline_schema,
             recon_brief=recon_brief,
-            task_context=task_context,
         )
 
 

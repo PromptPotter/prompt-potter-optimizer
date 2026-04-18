@@ -202,12 +202,12 @@ def _maybe_apply_zero_signal_filter(
 ) -> None:
     """Prune always-hit/always-miss queries from the active dataset.
 
-    Off by default — gated on ``config.zero_signal_filter_enabled``. When
+    Off by default — gated on ``env.zero_signal_filter_enabled``. When
     the filter fires, excluded queries are physically moved to the
     dataset's ``excluded`` sidelist on disk AND removed from the
     in-memory ``dataset`` list so the next round sees the smaller set.
     """
-    if not config.zero_signal_filter_enabled:
+    if not env.zero_signal_filter_enabled:
         return
     if not config.dataset_name:
         return
@@ -222,7 +222,7 @@ def _maybe_apply_zero_signal_filter(
             dataset_name=config.dataset_name,
             memory=memory,
             active_dataset=dataset,
-            min_observations=config.zero_signal_filter_min_observations,
+            min_observations=env.zero_signal_filter_min_observations,
             campaign_id=env.cycle_id or "",
         )
         if excluded:
@@ -397,6 +397,11 @@ async def _init_optimization(
     config: LoopConfig,
     *,
     cb: RunListener,
+    task_context: TaskDecomposition,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None,
+    zero_signal_filter_enabled: bool,
+    zero_signal_filter_min_observations: int,
     langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
@@ -424,12 +429,12 @@ async def _init_optimization(
 
     baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
     baseline_round_scorer = (
-        compile_round_scorer(config.scoring_round_formula) if config.scoring_round_formula else None
+        compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
     state = LoopState.from_baseline(
         baseline_osp,
         baseline.baseline_acc,
-        task_context=config.task_context or TaskDecomposition(),
+        task_context=task_context,
         schema=config.pipeline_schema,
         baseline_results=baseline.baseline_results,
         round_scorer=baseline_round_scorer,
@@ -476,8 +481,8 @@ async def _init_optimization(
         resolved_cycle_id,
         max_consecutive_errors=config.max_consecutive_errors,
         stale_data_load_protocol=config.stale_data_load_protocol,
-        scoring_formula=config.scoring_formula,
-        scoring_round_formula=config.scoring_round_formula,
+        scoring_formula=scoring_formula,
+        scoring_round_formula=scoring_round_formula,
     )
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
@@ -497,6 +502,8 @@ async def _init_optimization(
         scoring_dataset=sample_dataset(dataset, config.sp_budget_ttest, config.seed),
         degradation_checks=build_degradation_checks(config),
         resumed_from_round=resumed_from_round,
+        zero_signal_filter_enabled=zero_signal_filter_enabled,
+        zero_signal_filter_min_observations=zero_signal_filter_min_observations,
     )
 
     emit_phase(
@@ -648,9 +655,27 @@ async def run_optimization(
         session_id=session_id,
         recon_brief=recon_brief,
         pipeline_schema=session.pipeline_schema,
-        task_context=task_context,
         dataset_name=session.dataset_name or "",
     )
+
+    scoring_block = campaign_config.get("scoring")
+    if isinstance(scoring_block, dict):
+        scoring_formula = scoring_block.get("per_query")
+        scoring_round_formula = scoring_block.get("per_round")
+    else:
+        scoring_formula = scoring_block
+        scoring_round_formula = None
+
+    if isinstance(task_context, TaskDecomposition):
+        resolved_task_context = task_context
+    elif isinstance(task_context, dict):
+        resolved_task_context = TaskDecomposition.from_dict(task_context)
+    else:
+        resolved_task_context = TaskDecomposition()
+
+    opt_cfg: dict[str, Any] = dict(campaign_config.get("optimization", {}))
+    zero_signal_enabled = bool(opt_cfg.get("zero_signal_filter_enabled", False))
+    zero_signal_min_obs = int(opt_cfg.get("zero_signal_filter_min_observations", 5))
 
     cb = RunListener(display=display, control=control)
 
@@ -659,6 +684,11 @@ async def run_optimization(
         dataset,
         config,
         cb=cb,
+        task_context=resolved_task_context,
+        scoring_formula=scoring_formula,
+        scoring_round_formula=scoring_round_formula,
+        zero_signal_filter_enabled=zero_signal_enabled,
+        zero_signal_filter_min_observations=zero_signal_min_obs,
         langfuse_session_id=langfuse_session_id,
         cycle_id=cycle_id,
         resume_from_round_override=resume_from_round_override,
