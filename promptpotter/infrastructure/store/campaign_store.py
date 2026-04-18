@@ -45,6 +45,17 @@ from promptpotter.shared.constants import DEFAULT_CONNECTOR_TYPE
 logger = logging.getLogger(__name__)
 
 
+def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
+    """Return ``{tenant_root}/campaigns/{cycle_id}``.
+
+    Module-level so callers that don't hold a ``CampaignStore`` (e.g. the
+    emitter's classmethod constructor, which only has a raw project root)
+    can resolve the same path without instantiating a store.
+    """
+    validate_path_component(cycle_id)
+    return tenant_root / "campaigns" / cycle_id
+
+
 class CampaignStore(EntityStore):
     """File I/O for campaign registry + per-cycle session artifacts."""
 
@@ -60,8 +71,16 @@ class CampaignStore(EntityStore):
 
     def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
         """Per-cycle dir holding trials + session artifacts + logs."""
-        validate_path_component(cycle_id)
-        return self._entity_dir(_backend_id) / cycle_id
+        return campaign_dir_for(self._base_dir, cycle_id)
+
+    def campaign_dir(self, cycle_id: str) -> Path:
+        """Public accessor for the per-cycle artifact directory.
+
+        Single source of truth for ``{tenant_root}/campaigns/{cycle_id}``;
+        shared by the presentation layer and the emitter so the v3 layout
+        lives in one place.
+        """
+        return campaign_dir_for(self._base_dir, cycle_id)
 
     # Retained alias for existing resume/rewind call sites.
     _trial_dir = _campaign_dir

@@ -19,6 +19,7 @@ from promptpotter.application.optimization.phases import CampaignPhase
 from promptpotter.application.scoring.metrics import is_degraded
 from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.store.base import write_json
+from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
@@ -26,26 +27,37 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
 
 __all__ = [
+    "CAMPAIGN_NARRATIVE_ARTIFACTS",
+    "CAMPAIGN_OPERATIONAL_ARTIFACTS",
     "CAMPAIGN_SESSION_ARTIFACTS",
     "CampaignPersistenceEmitter",
-    "append_claude_note",
     "append_journal",
     "read_claude_notes",
 ]
 
 
-CAMPAIGN_SESSION_ARTIFACTS = {
-    # Emitter + create_session produce these on every campaign. ``recon.json``
-    # also lands in this dir but is a recon-path artifact, not an emitter
-    # output — so it's excluded from the parity contract.
+# Scalar/state/log files produced by the emitter on every campaign. These
+# are the operational persistence tier — consumed by resume, status, UI.
+CAMPAIGN_OPERATIONAL_ARTIFACTS = {
     "index.json",  # session state + campaign metadata (session ≡ campaign)
-    "dashboard.json",  # live scalar counters (was campaign_state.json)
-    "control.json",  # HITL control signals (was campaign_control.json)
-    "output.log",  # per-query audit log (was campaign_output.log)
-    "log.md",  # round-by-round markdown summary (was campaign_log.md)
-    "journal.md",  # user narrative (was notebook_journal.md)
-    "notes.md",  # Claude notes (was claude_notes.md)
+    "dashboard.json",  # live scalar counters
+    "control.json",  # HITL control signals
+    "output.log",  # per-query audit log
+    "log.md",  # round-by-round markdown summary
 }
+
+# Free-form markdown files that carry the notebook ↔ Claude narrative
+# exchange. Minted empty, written by ``append_journal`` (user) and by
+# Claude's external Write tool (notes). Not state — not used by resume.
+CAMPAIGN_NARRATIVE_ARTIFACTS = {
+    "journal.md",  # user narrative
+    "notes.md",  # Claude notes
+}
+
+# Union: what the parity contract enforces on every campaign mint.
+# ``recon.json`` lives alongside these but is a recon-path artifact, not an
+# emitter output — so it's not in the contract.
+CAMPAIGN_SESSION_ARTIFACTS = CAMPAIGN_OPERATIONAL_ARTIFACTS | CAMPAIGN_NARRATIVE_ARTIFACTS
 
 
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
@@ -53,29 +65,15 @@ def append_journal(session_dir: Path, action: str, body: str = "") -> None:
 
     Narrative exchange channel: the notebook user calls this to record
     what a cell just did or why. Claude reads the file to pick up intent
-    that doesn't show up in the scalar dashboard.
+    that doesn't show up in the scalar dashboard. ``session_dir`` must
+    exist — the emitter creates it on mint.
     """
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     entry = f"## {ts} \u2014 {action}\n"
     if body:
         entry += f"\n{body}\n"
-    path = session_dir / "journal.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
+    with (session_dir / "journal.md").open("a", encoding="utf-8") as f:
         f.write(entry + "\n")
-
-
-def append_claude_note(session_dir: Path, tag: str, body: str) -> None:
-    """Append a tagged note from Claude to ``notes.md``.
-
-    Tag is free-form (e.g. ``FYI``, ``RECOMMEND``, ``BLOCKER``). The
-    notebook renders this file via ``NotebookDisplay.render_claude_notes()``.
-    """
-    ts = datetime.now(UTC).isoformat(timespec="seconds")
-    path = session_dir / "notes.md"
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("a", encoding="utf-8") as f:
-        f.write(f"## {ts} [{tag}]\n\n{body}\n\n")
 
 
 def read_claude_notes(session_dir: Path) -> str:
@@ -233,10 +231,10 @@ class CampaignPersistenceEmitter:
         if not (config.project_root and config.session_id):
             return None
 
-        # v3 layout: session ≡ campaign. Session artifacts live at
-        # ``campaigns/{cycle_id}/`` under the tenant root (project_root is
-        # already scoped to the tenant by ``build_stores``).
-        session_dir = Path(config.project_root) / "campaigns" / config.session_id
+        # v3 layout: session ≡ campaign; ``project_root`` is already scoped
+        # to the tenant by ``build_stores``. Path construction delegated to
+        # ``CampaignStore.campaign_dir_for`` so the layout lives in one place.
+        session_dir = campaign_dir_for(Path(config.project_root), config.session_id)
 
         resume_from: dict[str, Any] | None = None
         prior_state = session_dir / "dashboard.json"

@@ -41,7 +41,7 @@ Rules the whole flow obeys:
 - **Stop on 502s.** If logs show `502 Bad Gateway`, halt and tell the user: "Backend is returning 502s — likely Groq rate-limiting. Please check and restart." Do not retry on your own.
 - **Never wipe project data without asking.** `rm -rf .promptpotter/projects/<id>` destroys cached results, campaign history, dataset runs — always spell out the full path and ask first.
 - **Phases 0–0.5 are silent.** Print nothing until the dashboard in Phase 0.7 — that's the first thing the user sees.
-- **Notebook ↔ Claude exchange channel.** Every session writes two markdown files alongside the dashboard: `notebook_journal.md` (user-written narrative via `display.note("...")`) and `claude_notes.md` (Claude-written structured notes, tags `[FYI]` / `[RECOMMEND]` / `[BLOCKER]`). Read the journal whenever you tail the session to pick up intent that isn't in the scalars; append recommendations to `claude_notes.md` instead of dumping them only into chat so the user can `display.render_claude_notes()` back into their cell.
+- **Notebook ↔ Claude exchange channel.** Every session mints two markdown files alongside the dashboard: `journal.md` (user-written narrative via `display.note("...")`) and `notes.md` (Claude-written structured notes, tags `[FYI]` / `[RECOMMEND]` / `[BLOCKER]`). Read the journal whenever you tail the session to pick up intent that isn't in the scalars; append recommendations to `notes.md` with the Write/Edit tool instead of dumping them only into chat so the user can `display.render_claude_notes()` back into their cell.
 
 ---
 
@@ -111,8 +111,8 @@ SESSION FILES
   ├── session.json          — {1-2 sentence state}
   ├── campaign_state.json   — {1-2 sentence state}
   ├── campaign_log.md       — {1-2 sentence state}
-  ├── notebook_journal.md   — {"(empty)" or "N entries, latest: …"}
-  ├── claude_notes.md       — {"(empty)" or "N notes"}
+  ├── journal.md            — {"(empty)" or "N entries, latest: …"}
+  ├── notes.md              — {"(empty)" or "N notes"}
   └── {any others actually present}
 
 WHERE THINGS LIVE

@@ -58,10 +58,9 @@ class NotebookDisplay:
         baseline_acc: float,
         l1_patience: int,
         pipeline_schema: PipelineSchema | None,
+        store: Stores,
         recon_brief: ReconBrief | None = None,
         scoring_formula: str | None = None,
-        store: Stores | None = None,
-        backend_id: str = "",
     ) -> None:
         self.campaign_rounds = campaign_rounds
         self.baseline_acc = baseline_acc
@@ -72,50 +71,50 @@ class NotebookDisplay:
         self.state.recon_brief = recon_brief
         self.query_counter = 0
         self.scoring_formula = scoring_formula
-        # Bidirectional exchange with Claude via session-tier artifacts.
         # Resolved lazily each call so auto-mint during the run is picked up.
         self._store = store
-        self._backend_id = backend_id
 
-    def _resolve_session_dir(self) -> Path | None:
-        """Return the active session directory, or None if not yet minted."""
-        if not self._store:
-            return None
+    def _resolve_session_dir(self) -> Path:
+        """Return the active session directory. Raises if no pointer set."""
         _, cid = self._store.campaigns.read_active_pointer()
         if not cid:
-            return None
-        # v3: session artifacts live inside the campaign dir; tenant is the
-        # outer axis (already baked into ``store.base_dir``).
-        return Path(self._store.base_dir) / "campaigns" / cid
+            raise RuntimeError(
+                "No active session — run init/auto-mint before calling "
+                "display.note() or display.render_claude_notes()."
+            )
+        return self._store.campaigns.campaign_dir(cid)
 
     def note(self, action: str, body: str = "") -> None:
         """Append a narrative note to ``journal.md`` for Claude.
 
         Call from any notebook cell to record intent or observations that
         don't surface in the scalar dashboard — e.g. ``display.note(
-        "skipping recon", "axes already known")``.
+        "skipping recon", "axes already known")``. Raises if no active
+        session is set.
         """
-        sdir = self._resolve_session_dir()
-        if sdir is None:
-            print(f"  {YELLOW}\u26a0 note: no active session \u2014 skipping journal write{RESET}")
-            return
-        append_journal(sdir, action, body)
+        append_journal(self._resolve_session_dir(), action, body)
 
-    def render_claude_notes(self) -> None:
-        """Render ``notes.md`` inline so Claude's notes appear in a cell."""
-        sdir = self._resolve_session_dir()
-        if sdir is None:
-            print(f"  {YELLOW}\u26a0 claude_notes: no active session{RESET}")
-            return
-        content = read_claude_notes(sdir).rstrip()
+    def _render_markdown_box(self, title: str, content: str, empty_label: str) -> None:
+        """Render a markdown file's contents in a titled box, or an empty label."""
         w = 74
         if not content:
-            print(f"  {DIM}(no claude notes yet){RESET}")
+            print(f"  {DIM}{empty_label}{RESET}")
             return
-        print(f"  {_box_top('CLAUDE NOTES', width=w)}")
+        print(f"  {_box_top(title, width=w)}")
         for line in content.split("\n"):
             print(f"  {_box_line(line, width=w)}")
         print(f"  {_box_bottom(width=w)}")
+
+    def render_claude_notes(self) -> None:
+        """Render ``notes.md`` inline so Claude's notes appear in a cell."""
+        content = read_claude_notes(self._resolve_session_dir()).rstrip()
+        self._render_markdown_box("CLAUDE NOTES", content, "(no claude notes yet)")
+
+    def render_journal(self) -> None:
+        """Render ``journal.md`` inline — user-written narrative, mirror of notes."""
+        path = self._resolve_session_dir() / "journal.md"
+        content = path.read_text(encoding="utf-8").rstrip() if path.exists() else ""
+        self._render_markdown_box("JOURNAL", content, "(no journal entries yet)")
 
     def on_phase(self, event: PhaseEvent) -> None:
         _dispatch_phase(event, self.state)
