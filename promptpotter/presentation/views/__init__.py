@@ -10,6 +10,7 @@ per concept.
 from __future__ import annotations
 
 from .dashboard import render_dashboard, render_status
+from .formatting import generate_supplemental, render_table
 from .rounds import (
     render_campaign_summary,
     render_flip_tracking,
@@ -18,10 +19,12 @@ from .rounds import (
 )
 
 __all__ = [
+    "generate_supplemental",
     "render_campaign_summary",
     "render_dashboard",
     "render_flip_tracking",
     "render_lineage",
     "render_progress",
     "render_status",
+    "render_table",
 ]
