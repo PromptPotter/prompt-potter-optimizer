@@ -68,7 +68,7 @@ BACKEND_LOCAL_CHILDREN: tuple[str, ...] = (
 class Move:
     src: Path
     dst: Path | None  # None means drop
-    kind: str  # "rename" | "move" | "merge-dir" | "drop" | "split-events" | "pointer"
+    kind: str  # "rename" | "move" | "merge-dir" | "merge-json" | "drop" | "split-events"
     note: str = ""
 
 
@@ -103,6 +103,17 @@ def _existing_schema_version(dotdir: Path) -> int | None:
         return None
 
 
+def _read_cycle_id(session_json_path: Path) -> str | None:
+    """Return the ``cycle_id`` field from a v2 session.json, if readable."""
+    try:
+        payload = json.loads(session_json_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    if isinstance(payload, dict) and isinstance(payload.get("cycle_id"), str):
+        return payload["cycle_id"] or None
+    return None
+
+
 def _add_session_moves(plan: MigrationPlan, backend_dir: Path) -> None:
     sessions_dir = backend_dir / "sessions"
     if not sessions_dir.is_dir():
@@ -110,14 +121,24 @@ def _add_session_moves(plan: MigrationPlan, backend_dir: Path) -> None:
     for sess_dir in sorted(sessions_dir.iterdir()):
         if not sess_dir.is_dir():
             continue
-        cid = sess_dir.name
-        cid_root = plan.tenant_root / "campaigns" / cid
+        session_id = sess_dir.name
 
+        # In v2, session_id and cycle_id could diverge: a session might init
+        # and then spawn a cycle under a different id. session.json is the
+        # source of truth — honor its cycle_id so per-cycle artifacts land
+        # together at the right destination.
         session_json = sess_dir / "session.json"
+        target_cid = session_id
         if session_json.exists():
-            plan.moves.append(
-                Move(session_json, None, "drop", "obsolete — merged into index.json in Wave B")
-            )
+            real_cid = _read_cycle_id(session_json)
+            if real_cid:
+                target_cid = real_cid
+        cid_root = plan.tenant_root / "campaigns" / target_cid
+
+        if session_json.exists():
+            # session.json held phase/init_params/pipeline_params; Wave B
+            # merged those into index.json. Union rather than drop.
+            plan.moves.append(Move(session_json, cid_root / "index.json", "merge-json"))
 
         for old_name, new_name in SESSION_FILE_RENAMES.items():
             src = sess_dir / old_name
@@ -144,10 +165,11 @@ def _add_campaign_moves(plan: MigrationPlan, backend_dir: Path) -> None:
         return
     for child in sorted(camps_dir.iterdir()):
         if child.is_file() and child.suffix == ".json":
-            # campaigns/{cid}.json → campaigns/{cid}/index.json
+            # campaigns/{cid}.json → campaigns/{cid}/index.json. Merge so any
+            # session.json content already routed to this cid is preserved.
             cid = child.stem
             dst = plan.tenant_root / "campaigns" / cid / "index.json"
-            plan.moves.append(Move(child, dst, "rename"))
+            plan.moves.append(Move(child, dst, "merge-json"))
         elif child.is_dir():
             # campaigns/{cid}/trial_*.json → campaigns/{cid}/trial_*.json (tenant-rooted)
             cid = child.name
@@ -292,6 +314,36 @@ def _merge_directory(src: Path, dst: Path, orphans_root: Path, tag: str) -> list
     return notes
 
 
+def _merge_json(src: Path, dst: Path) -> None:
+    """Union the contents of two JSON files; ``src`` keys overlay ``dst`` keys.
+
+    Used to unite v2 ``session.json`` and ``campaigns/{cid}.json`` into v3
+    ``index.json``. Because sessions are planned before campaigns, the
+    effective precedence on key collisions is: campaign metadata (trials,
+    status, baseline) overlays session metadata (phase, init_params,
+    pipeline_params) — both needed, rarely overlapping.
+    """
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        src_data = json.loads(src.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        src_data = {}
+    if dst.exists():
+        try:
+            existing = json.loads(dst.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            existing = {}
+    else:
+        existing = {}
+    if not isinstance(existing, dict):
+        existing = {}
+    if not isinstance(src_data, dict):
+        src_data = {}
+    merged = {**existing, **src_data}
+    dst.write_text(json.dumps(merged, indent=2), encoding="utf-8")
+    src.unlink()
+
+
 def _split_events(src: Path, tenant_root: Path, orphans_root: Path) -> tuple[int, int]:
     """Split events.jsonl by ``campaign_id`` field; orphans to migration-orphans."""
     routed = 0
@@ -359,6 +411,10 @@ def execute_plan(plan: MigrationPlan) -> list[str]:
 
         if mv.kind == "merge-dir":
             _merge_directory(mv.src, mv.dst, orphans_root, f"merge/{mv.dst.name}")
+            continue
+
+        if mv.kind == "merge-json":
+            _merge_json(mv.src, mv.dst)
             continue
 
         # rename / move — collision detection for singleton library files.
