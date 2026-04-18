@@ -401,15 +401,26 @@ async def run_sensitivity_recon(
         (recon_baseline_sp, recon_df, axis_profiles) — the JobSearchPoint
         baseline, per-variant DataFrame, and axis profile list.
     """
+    from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.application.campaign.session_state import auto_mint_session
+    from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
     from .search import decompose_recon_baseline
 
     assert session is not None
     if not session_id:
+        tmp_cfg = LoopConfig.from_campaign_config(
+            campaign_config,
+            backend_id=session.backend_id,
+            pipeline_schema=session.pipeline_schema,
+            dataset_name=session.dataset_name or "",
+        )
         session_id = auto_mint_session(
             session,
             campaign_config,
+            cycle_hash=cycle_hash_suffix(
+                tmp_cfg, baseline.render(), dataset, strict=tmp_cfg.strict_cycle_identity
+            ),
             dataset_size=len(dataset),
             experiment_id=experiment_id or None,
         )

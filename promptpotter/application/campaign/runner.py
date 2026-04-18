@@ -591,14 +591,25 @@ async def run_optimization(
 
     if not session_id:
         from promptpotter.application.campaign.session_state import auto_mint_session
+        from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
         ps = baseline.baseline_ps
         baseline_prompt_fields = (
             ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
         )
+        tmp_cfg = LoopConfig.from_campaign_config(
+            campaign_config,
+            backend_id=session.backend_id,
+            pipeline_schema=session.pipeline_schema,
+            dataset_name=session.dataset_name or "",
+        )
+        baseline_render = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
         session_id = auto_mint_session(
             session,
             campaign_config,
+            cycle_hash=cycle_hash_suffix(
+                tmp_cfg, baseline_render, dataset, strict=tmp_cfg.strict_cycle_identity
+            ),
             baseline_acc=baseline.baseline_acc,
             baseline_prompt_fields=baseline_prompt_fields,
             dataset_size=len(dataset),

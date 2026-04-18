@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import LoopConfig
 
-__all__ = ["TUNING_KEYS", "cycle_config_identity"]
+__all__ = ["TUNING_KEYS", "cycle_config_identity", "cycle_hash_suffix"]
 
 
 # Tuning keys — excluded from cycle identity in experiment mode.
@@ -85,3 +85,21 @@ def cycle_config_identity(
     payload = json.dumps(payload_dict, sort_keys=True)
     digest = hashlib.sha256(payload.encode()).hexdigest()[:12]
     return f"cycle_{digest}"
+
+
+def cycle_hash_suffix(
+    config: LoopConfig,
+    baseline_rendered: str,
+    dataset: list[dict],
+    *,
+    strict: bool = False,
+) -> str:
+    """Return the 12-hex content hash without the ``cycle_`` prefix.
+
+    Shared by ``generate_session_id`` so the session dir
+    (``{timestamp}_{suffix}``) and the cycle dir (``cycle_{suffix}``) pair
+    via a common signature.
+    """
+    return cycle_config_identity(config, baseline_rendered, dataset, strict=strict).removeprefix(
+        "cycle_"
+    )

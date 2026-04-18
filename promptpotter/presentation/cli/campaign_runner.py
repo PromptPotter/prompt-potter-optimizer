@@ -81,20 +81,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = campaign_config.get("exclude_nodes", [])
 
-    state = new_session_state(
-        init_params={
-            "backend_url": args.backend_url,
-            "backend_id": backend_id,
-            "experiment_id": args.experiment_id,
-            "dataset_name": dataset_name,
-        },
-        campaign_config=campaign_config,
-        pipeline_params=pipeline_params,
-        active_steps=active,
-    )
-    session_id = session.store.campaigns.create_session(backend_id, state)
-    session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
-
     train_data: list[dict] | None = None
     if args.excel_path:
         ds_result = prepare_datasets(session.store, backend_id, args.excel_path)
@@ -111,10 +97,43 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
     baseline_acc = campaign_rounds[-1]["accuracy"] if campaign_rounds else 0.0
+
+    # Compute the content-addressed cycle hash now that baseline + dataset are
+    # resolved, so the session dir's trailing 12-hex matches the ``cycle_<hash>``
+    # dir that ``bootstrap_cycle`` will derive for the same problem.
+    from promptpotter.application.campaign.config import LoopConfig
+    from promptpotter.domain.cycle_identity import cycle_hash_suffix
+
+    _tmp_cfg = LoopConfig.from_campaign_config(
+        cast("CampaignConfig", campaign_config),
+        backend_id=backend_id,
+        pipeline_schema=session.pipeline_schema,
+        dataset_name=dataset_name or "",
+    )
+    cycle_hash = cycle_hash_suffix(
+        _tmp_cfg,
+        baseline.render(),
+        dataset,
+        strict=_tmp_cfg.strict_cycle_identity,
+    )
+
+    state = new_session_state(
+        init_params={
+            "backend_url": args.backend_url,
+            "backend_id": backend_id,
+            "experiment_id": args.experiment_id,
+            "dataset_name": dataset_name,
+        },
+        campaign_config=campaign_config,
+        pipeline_params=pipeline_params,
+        active_steps=active,
+    )
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = baseline_acc
-    session.store.campaigns.save_session(backend_id, session_id, state)
+
+    session_id = session.store.campaigns.create_session(backend_id, state, cycle_hash)
+    session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
     session.store.campaigns.append_log(

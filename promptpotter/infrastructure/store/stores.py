@@ -34,7 +34,6 @@ from __future__ import annotations
 
 import json
 import logging
-import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -417,15 +416,17 @@ class BackendStore:
 _ACTIVE_SESSION_PATH = Path(__file__).resolve().parents[3] / ".promptpotter" / "active_session.json"
 
 
-def generate_session_id() -> str:
-    """Generate a unique cycle/session identifier.
+def generate_session_id(cycle_hash: str) -> str:
+    """Generate a cycle/session identifier with the problem hash as the tail.
 
-    Timestamp-suffixed so sort-order matches creation order. The identity
-    returned here is the ``cycle_id`` — session ≡ campaign (v3).
+    Format: ``{YYYYMMDD_HHMMSS}_{cycle_hash}``. The timestamp prefix keeps
+    sort-order == creation-order; the 12-hex ``cycle_hash`` suffix matches
+    ``cycle_<hash>`` produced by ``bootstrap_cycle`` so a session dir pairs
+    visually with its cycle dir.
     """
+    validate_path_component(cycle_hash)
     ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    short = uuid.uuid4().hex[:6]
-    return f"{ts}_{short}"
+    return f"{ts}_{cycle_hash}"
 
 
 def save_active_pointer(tenant_id: str, cycle_id: str) -> None:

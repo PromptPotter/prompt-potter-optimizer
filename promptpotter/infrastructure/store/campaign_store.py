@@ -521,17 +521,21 @@ class CampaignStore(EntityStore):
         """Per-campaign artifact directory. Alias for ``_campaign_dir``."""
         return self._campaign_dir(backend_id, session_id)
 
-    def create_session(self, backend_id: str, state: dict[str, Any]) -> str:
+    def create_session(self, backend_id: str, state: dict[str, Any], cycle_hash: str) -> str:
         """Mint a new cycle and persist the initial session state.
 
-        Generates a timestamp-based cycle_id and writes
-        ``campaigns/{cycle_id}/index.json`` seeded with the session state
-        blob. Campaign metadata (trials, config, baseline_accuracy, etc.)
-        is merged into the same index.json later by ``resume_or_create``.
+        ``cycle_hash`` is the 12-hex content-addressed tail (no ``cycle_``
+        prefix) returned by ``cycle_hash_suffix``. The session dir becomes
+        ``campaigns/{timestamp}_{cycle_hash}/``; its suffix matches the
+        ``cycle_{cycle_hash}`` dir that ``bootstrap_cycle`` produces for
+        the same problem, so the two pair at a glance.
+
+        Campaign metadata (trials, config, baseline_accuracy, etc.) is
+        merged into the same index.json later by ``resume_or_create``.
         """
         from promptpotter.infrastructure.store.stores import generate_session_id
 
-        cycle_id = generate_session_id()
+        cycle_id = generate_session_id(cycle_hash)
         state["session_id"] = cycle_id
         state["created_at"] = datetime.now(UTC).isoformat()
         self.save_session(backend_id, cycle_id, state)

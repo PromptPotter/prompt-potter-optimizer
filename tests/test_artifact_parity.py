@@ -165,9 +165,10 @@ def test_auto_mint_session_claims_active_pointer() -> None:
 
     created: dict = {}
 
-    def fake_create_session(backend_id: str, state: dict) -> str:
+    def fake_create_session(backend_id: str, state: dict, cycle_hash: str) -> str:
         created["backend_id"] = backend_id
         created["state"] = state
+        created["cycle_hash"] = cycle_hash
         return "sess_test_abc"
 
     def fake_save_active_pointer(tenant_id: str, cycle_id: str) -> None:
@@ -189,6 +190,7 @@ def test_auto_mint_session_claims_active_pointer() -> None:
     minted = auto_mint_session(
         session,
         {},
+        cycle_hash="abcdef012345",
         baseline_acc=0.42,
         baseline_prompt_fields={"instruction": "seed"},
         dataset_size=7,
@@ -197,6 +199,7 @@ def test_auto_mint_session_claims_active_pointer() -> None:
 
     assert minted == "sess_test_abc"
     assert created["backend_id"] == "bk_test"
+    assert created["cycle_hash"] == "abcdef012345"
     assert created["state"]["dataset_count"] == 7
     assert created["state"]["baseline_accuracy"] == 0.42
     assert created["state"]["baseline_prompt_fields"] == {"instruction": "seed"}

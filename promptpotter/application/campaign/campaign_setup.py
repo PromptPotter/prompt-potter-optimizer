@@ -484,9 +484,21 @@ async def run_recon_and_persist(
     )
 
     if not session_id:
+        from promptpotter.application.campaign.config import LoopConfig
+        from promptpotter.domain.cycle_identity import cycle_hash_suffix
+
+        tmp_cfg = LoopConfig.from_campaign_config(
+            campaign_config,
+            backend_id=session.backend_id,
+            pipeline_schema=session.pipeline_schema,
+            dataset_name=session.dataset_name or "",
+        )
         session_id = auto_mint_session(
             session,
             campaign_config,
+            cycle_hash=cycle_hash_suffix(
+                tmp_cfg, baseline.render(), dataset, strict=tmp_cfg.strict_cycle_identity
+            ),
             dataset_size=len(dataset),
             experiment_id=experiment_id or None,
         )

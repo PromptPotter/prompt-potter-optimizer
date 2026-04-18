@@ -47,6 +47,7 @@ def auto_mint_session(
     session: SessionEnv,
     campaign_config: CampaignConfig,
     *,
+    cycle_hash: str,
     baseline_acc: float = 0.0,
     baseline_prompt_fields: dict | None = None,
     dataset_size: int = 0,
@@ -59,9 +60,10 @@ def auto_mint_session(
     / notebook recon). Claims the active-session pointer so follow-up
     commands find the session without ``--session <id>``.
 
-    Prefer passing scalars over a domain object — this function is a
-    thin wrapper over ``new_session_state`` + ``CampaignStore.create_session``,
-    not a scored-baseline adapter.
+    ``cycle_hash`` is the 12-hex content-addressed suffix (no ``cycle_``
+    prefix) — callers compute it via ``cycle_hash_suffix`` so the minted
+    session dir ends in the same hash as the ``cycle_<hash>`` dir that
+    ``bootstrap_cycle`` produces for the same problem.
     """
     state = new_session_state(
         init_params={
@@ -78,7 +80,7 @@ def auto_mint_session(
     state["dataset_count"] = dataset_size
     state["baseline_prompt_fields"] = baseline_prompt_fields or {}
 
-    cycle_id = session.store.campaigns.create_session(session.backend_id, state)
+    cycle_id = session.store.campaigns.create_session(session.backend_id, state, cycle_hash)
     session.store.campaigns.save_active_pointer(session.store.tenant_id, cycle_id)
     logger.info("Auto-minted session: %s", cycle_id)
     return cycle_id
