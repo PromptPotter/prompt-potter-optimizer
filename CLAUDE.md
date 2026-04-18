@@ -30,7 +30,7 @@ python -m pytest tests/ -k "test_name"        # single test
 uvicorn promptpotter.main:app --port 8001 --reload
 
 # CLI workflow
-python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json --skip-baseline
+python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json
 python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
 python -m promptpotter optimize             # full loop
 python -m promptpotter show-results
@@ -49,7 +49,7 @@ CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pyt
 - **Terminology** — "eval" is banned from identifiers. Use: **loop**, **round**, **searchpoint**, **sample**, **measurement**, **scoring**, **match**.
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
 - **No fallbacks** in service code. Sole sanctioned exception: `_score_candidates()` validation-failure synthetic-0 — when `OptSearchPoint.memory.validation_failures` is non-empty the candidate loop synthesizes a `{accuracy: 0.0, invalid: True}` report instead of running an invalid SearchPoint. Any new fallback must be documented alongside this one.
-- **Skip baseline by default**: Always `init --skip-baseline`. Optimizer auto-measures a baseline on the `sp_budget_ttest` slice before round 1. Only run `--baseline` when ≥ 50 unique queries, ≥ 5 dataset runs exist and comparison is requested.
+- **Init never evaluates**: `init` is pure prep (load prompt + dataset, compute cycle hash, create session dir). The baseline runs as phase 0 of `optimize` on the `sp_budget_ttest` slice (≈15 queries). There is no `--skip-baseline` flag.
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.

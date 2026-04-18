@@ -47,9 +47,9 @@ python -m promptpotter init \
     --config datasets/lca-termnorm/campaign.json
 ```
 
-Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Baseline is skipped by default (`--skip-baseline`) — the optimizer evaluates it automatically before the first round. Omit `--skip-baseline` only when you have substantial historical data and want an explicit baseline comparison before starting.
+Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Pure prep — no backend scoring. The baseline runs automatically as phase 0 of `optimize` on the `sp_budget_ttest` slice.
 
-Produces: `campaigns/{cycle_id}/index.json` with `pipeline_params`, `init_params`, `phase: "init"`.
+Produces: `campaigns/{cycle_id}/` with `index.json`, `dashboard.json`, `control.json`, `events.jsonl`, `output.log`, `log.md`.
 
 **Init flags**:
 
@@ -59,7 +59,6 @@ Produces: `campaigns/{cycle_id}/index.json` with `pipeline_params`, `init_params
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
 | `--dataset-name` | Override dataset name from config |
 | `--config` | Campaign config JSON file |
-| `--skip-baseline` | Skip explicit baseline eval (default — auto-baseline runs before round 1) |
 
 Rewinding within an active cycle is not done here — see `optimize --from <round>` below. `init` handles registration/setup only. Fork-across-cycles (new `cycle_id`, parent pointer) is not a supported primitive — see `docs/architecture/optimization.md § Resuming mid-cycle`.
 

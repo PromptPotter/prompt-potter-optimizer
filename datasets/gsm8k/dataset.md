@@ -13,7 +13,6 @@ node enabled.
 --backend-id gsm8k
 --dataset-name gsm8k
 --config datasets/gsm8k/campaign.json
---skip-baseline
 ```
 
 ## Data

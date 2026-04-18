@@ -13,7 +13,6 @@ node enabled.
 --backend-id aime_2025
 --dataset-name aime_2025
 --config datasets/aime_2025/campaign.json
---skip-baseline
 ```
 
 ## Data

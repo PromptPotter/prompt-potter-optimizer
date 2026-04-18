@@ -23,7 +23,6 @@ Everything else (prompt variants, scoring framework) is shared.
 --backend-url http://127.0.0.1:8000
 --backend-id hotpotqa
 --config datasets/hotpotqa/campaign.json
---skip-baseline
 ```
 
 ## Data

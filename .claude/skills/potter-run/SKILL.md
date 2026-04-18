@@ -14,7 +14,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 
 | Command | Purpose |
 |---------|---------|
-| `init` | Connect + configure (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline`) |
+| `init` | Connect + configure (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`) |
 | `set-task` | Decompose task description (`--task-file` / `--task-text`) |
 | `optimize` | Run L1/L2/L3 loop |
 | `control` | `--pause` / `--resume` / `--stop` / `--pause-before-l2` — checked between queries (~5–10s lag) |
@@ -28,7 +28,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 
 - **Dataset overrides.** Check `reference/{dataset}-notes.md` first — if present it supersedes this flow.
 - **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. Every command except `init` reads it; if the pointer matches the target, skip `init` and jump to the phase the session needs. Only `init` overwrites the pointer. `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
-- **Always `--skip-baseline`.** Baseline auto-runs before round 1. Explicit baseline only if substantial history exists AND the user asks.
+- **Init is pure prep.** No backend scoring; baseline runs as phase 0 of `optimize`. There is no `--skip-baseline` flag.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop on 502s.** Halt, tell the user "Backend returning 502s — likely Groq rate-limiting. Check and restart." Don't retry.
 - **Never wipe project data without asking.** Spell out the full path first.
@@ -94,7 +94,7 @@ After the dashboard: 1–2 sentence resume/fresh recommendation, then ask.
 Flags come from `datasets/{name}/dataset.md § Init Flags` — never guess. Then:
 
 ```bash
-python -m promptpotter init {flags from dataset.md} --skip-baseline
+python -m promptpotter init {flags from dataset.md}
 ```
 
 Foreground, 30s timeout. If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.

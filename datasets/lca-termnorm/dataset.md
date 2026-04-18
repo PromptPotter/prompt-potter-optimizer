@@ -15,10 +15,9 @@
 --backend-url http://127.0.0.1:8000
 --backend-id local
 --config datasets/lca-termnorm/campaign.json
---skip-baseline
 ```
 
-Baseline is skipped by default — the optimizer evaluates it automatically before the first round. Only run explicit baseline when substantial historical data exists and you want to compare against it before starting.
+Init is pure prep — no scoring. The optimizer evaluates baseline as phase 0 on the `sp_budget_ttest` slice before round 1.
 
 `dataset_name` is set in `campaign.json` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
 

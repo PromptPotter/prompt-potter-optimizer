@@ -149,7 +149,7 @@ How and when this sequence runs inside M9 is open. The target shape is the contr
 
 1. `python -m ruff check promptpotter/ tests/ -q && python -m ruff format --check promptpotter/ tests/ -q && python -m mypy promptpotter/ --no-error-summary && python -m pytest tests/ --tb=no -q -p no:warnings` — all green.
 2. `tests/test_artifact_parity.py` passes under new module paths.
-3. CLI smoke: `python -m promptpotter init --skip-baseline … && python -m promptpotter show-status`.
+3. CLI smoke: `python -m promptpotter init … && python -m promptpotter show-status`.
 4. API smoke: `uvicorn promptpotter.main:app --port 8001` + hit `/api/v1/backends`.
 5. Notebook smoke: top cell import of `optimization_campaign.ipynb` succeeds.
 6. `grep -r "from promptpotter.services" promptpotter/ tests/ notebooks/` returns zero.

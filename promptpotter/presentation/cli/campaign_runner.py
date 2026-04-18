@@ -58,7 +58,11 @@ logger = logging.getLogger("promptpotter.presentation.cli")
 
 
 async def cmd_init(args: argparse.Namespace) -> CommandResult:
-    """Initialize services, load datasets, configure pipeline, create session."""
+    """Initialize services, load datasets, configure pipeline, create session.
+
+    Pure prep: no backend calls, no baseline scoring. The baseline runs as
+    phase 0 of ``optimize`` on the ``sp_budget_ttest`` slice.
+    """
     from promptpotter.application.campaign.data import prepare_datasets
 
     file_config = load_campaign_config(args.config)
@@ -89,26 +93,16 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = campaign_config.get("exclude_nodes", [])
 
-    train_data: list[dict] | None = None
+    train_data: list[dict] = []
     if args.excel_path:
         ds_result = prepare_datasets(session.store, args.excel_path)
-        train_data = ds_result.train_data
+        train_data = ds_result.train_data or []
     elif session.queries:
         train_data = session.queries
 
-    baseline, dataset, campaign_rounds, _br = await prepare_scoring_context(
-        session,
-        train_data,
-        cast("CampaignConfig", campaign_config),
-        run_baseline=not args.skip_baseline,
-        pipeline_params=pipeline_params,
-    )
+    baseline = load_cli_baseline(session)
+    dataset = train_data
 
-    baseline_acc = campaign_rounds[-1]["accuracy"] if campaign_rounds else 0.0
-
-    # Compute the content-addressed cycle hash now that baseline + dataset are
-    # resolved, so the session dir's trailing 12-hex matches the ``cycle_<hash>``
-    # dir that ``bootstrap_cycle`` will derive for the same problem.
     from promptpotter.application.campaign.config import LoopConfig
     from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
@@ -138,7 +132,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
-    state["baseline_accuracy"] = baseline_acc
+    state["baseline_accuracy"] = 0.0
 
     session_id = session.store.campaigns.create_session(backend_id, state, cycle_hash)
     session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
@@ -152,8 +146,8 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 ## Setup
 - Backend: {backend_id} @ {args.backend_url}
 - Active steps: {", ".join(active)} ({excl_str})
-- Eval data: {len(dataset)} queries
-- Baseline: {baseline_acc:.1%}""",
+- Dataset: {len(dataset)} queries
+- Baseline: pending (runs in optimize phase 0)""",
     )
 
     return CommandResult(
@@ -161,14 +155,13 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "session_id": session_id,
             "backend_id": backend_id,
             "phase": state["phase"],
-            "baseline_accuracy": baseline_acc,
             "dataset_count": len(dataset),
             "active_steps": active,
             "excluded_nodes": excluded,
         },
         human=(
             f"\nSession created: {session_id}\n"
-            f"Baseline: {baseline_acc:.1%} ({len(dataset)} queries)"
+            f"Dataset: {len(dataset)} queries (baseline runs in optimize phase 0)"
         ),
     )
 

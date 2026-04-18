@@ -57,7 +57,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")
-    p_init.add_argument("--skip-baseline", action="store_true")
 
     p_tc = sub.add_parser("set-task", help="Decompose and set task description")
     p_tc.add_argument("--task-file", default=None)

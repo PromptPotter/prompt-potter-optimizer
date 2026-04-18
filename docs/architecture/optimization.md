@@ -135,7 +135,9 @@ Architecturally feasible: `render()` already skips empty fields, `derive_candida
 Critique-guided optimization with 3-layer escalation, inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern.
 
 ```
-INIT: configure pipeline (baseline deferred to first optimize round) → bootstrap critique + sample thinking styles
+INIT (pure prep, no backend calls): load prompt + dataset, compute cycle_hash, write campaigns/{cycle_id}/ artifacts
+  ↓
+OPTIMIZE PHASE 0 (auto-baseline on sp_budget_ttest slice ≈15 queries) → bootstrap critique + sample thinking styles
   ↓
 ROUND 0: Growth (bootstrap critique + styles) → Eval → critique₀ → winner vs current best
   ↓
@@ -151,7 +153,7 @@ Each round:
 
 **Breadth over depth.** Failure analysis surfaces 2-3 distinct improvement directions ranked by failure count, not a single dominant fix. L1 receives all directions and generates candidates across them rather than N variations on one theme — this is the primary guard against mode collapse. The single `priority_fix` in critique output is one signal among several; `failure_highlights` and `suggested_axes` carry the breadth.
 
-**Init** configures the pipeline; baseline evaluation is deferred and runs automatically when `optimize` starts. The first critique is bootstrapped from baseline results at that point. When scan data is available (leaderboard, axis sensitivity, query difficulty), it feeds into both the bootstrap critique and subsequent rounds via `prepare_recon_brief()`.
+**Init is pure prep.** It loads the baseline prompt and dataset, computes the cycle hash, and writes the full `campaigns/{cycle_id}/` artifact set (`dashboard.json`, `control.json`, `events.jsonl`, `index.json`, logs). No backend calls, no scoring — so Ctrl+C during `init` is always safe. The baseline runs as **phase 0 of `optimize`**, auto-measured on the `sp_budget_ttest` slice (≈15 queries) before round 1; the first critique is bootstrapped from its results.
 
 ---
 
