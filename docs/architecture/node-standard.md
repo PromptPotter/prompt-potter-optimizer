@@ -62,7 +62,7 @@ Subtype of `llm`. Adds prompt template compilation (`prompt_family` → rendered
 
 ### `llm/meta` — Context-aware LLM node
 
-Subtype of `llm/structured`. Adds multi-source prompt assembly (recon_brief, critique, task_context, escalation_journal, etc.) + context-aware response parsing.
+Subtype of `llm/structured`. Adds multi-source prompt assembly (critique, task_context, escalation_journal, etc.) + context-aware response parsing.
 
 **Optimizer examples:** `l1_generate`, `l2_refine_strategy`, `l3_modify_plan` — each is an `llm/meta` node. Self-contained: give it the optimizer context, it assembles the meta-prompt from multiple sources, calls the LLM, and parses the structured response.
 
@@ -73,7 +73,7 @@ Subtype of `llm/structured`. Adds multi-source prompt assembly (recon_brief, cri
     "model": "...",
     "temperature": 0.7,
     "prompt_family": "meta_scan_aware",
-    "context_sources": ["recon_brief", "critique", "task_context", "escalation_journal"],
+    "context_sources": ["critique", "task_context", "escalation_journal"],
     "response_parser": "candidate_list"
   }
 }

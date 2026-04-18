@@ -5,7 +5,7 @@
 │                                                                        │
 │  L1 GENERATE (LLM)                                                     │
 │    in:  critique OR l2_directive (mutual exclusion),                   │
-│         task_context, thinking_styles, recon_brief, plan,            │
+│         task_context, thinking_styles, plan,                          │
 │         escalation_journal + warning_inventory (probe rounds only),   │
 │         failure_analysis (clustered failure patterns + signals),      │
 │         search_memory (failure clusters, top axes, dead queries)      │
@@ -357,21 +357,13 @@ That's it. `DegradationCheck` counts the warning, synthesises a `RuntimeFailure`
 
 Each round samples 2-3 styles from the variant library (`promptpotter/config/prompt_variants.json`, 35+ from published research) into the meta-prompt as mutation guidance. Structured diversity beyond temperature randomness.
 
-## Scan-Aware Generation
-
-When scan data is available, `prepare_recon_brief()` enriches the meta-prompt with `recon_brief` analytics and each candidate can include a `pipeline_params_override` for per-candidate exploration. Keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields), all other keys stay as node-level pipeline overrides. See [Sensitivity Scan](../specs/archive/sensitivity-scan.md) for scan workflow details.
-
-**Per-axis pruning rule.** After each scan variant evaluates, Wilson CIs are computed against baseline. If CIs **fully overlap** for every variant tested on an axis, the axis is marked noise and remaining values are skipped — early *pruning*, not early stopping. Always test ≥2 values per axis before any axis can be pruned, otherwise a single anomalous reading would silence a real effect.
-
-**Diagnostic-stratified sample selection.** `build_diagnostic_set()` stratifies misses by diagnostic pattern (`extract_sample_diagnostics()` output) so each distinct failure pattern is represented in the scan sample. Patterns are discovered from data, not hardcoded categories, so the stratification adapts to whatever pipeline is in front of it.
-
-### SearchMemory Intelligence Feed
+## SearchMemory Intelligence Feed
 
 Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
 **Round-boundary dataset mutation — zero-signal filter.** Immediately after `SearchMemory.on_round_complete()`, `campaign/runner.py::_maybe_apply_zero_signal_filter` runs. When enabled (`LoopConfig.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are physically moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. This is the **only** sanctioned round-boundary mutation of the active dataset; all other intelligence tiers are read-only signals into LLM prompts. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
 
-### Stale Data Load Protocol
+## Stale Data Load Protocol
 
 When a cached eval result is degraded (non-empty `diagnostics.warnings`), the protocol walks a 3-step ladder:
 

@@ -99,7 +99,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 **Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides; `--tenant <id>` selects the partition (default `"default"`).
 
-**Persistence: session ≡ campaign (v3).** Per-cycle artifacts live under `{tenant_id}/campaigns/{cycle_id}/` (dashboard, control, logs, trial_NNNN, candidates, langfuse shadow, events.jsonl, prompts). Cross-cycle reference under `{tenant_id}/library/` (datasets, backends, dataset_runs, recon_plans, mlruns, search_memory, aliases). Full tree in [`docs/architecture/overview.md § Persistence`](docs/architecture/overview.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/lifecycle.py`.
+**Persistence: session ≡ campaign (v3).** Per-cycle artifacts live under `{tenant_id}/campaigns/{cycle_id}/` (dashboard, control, logs, trial_NNNN, candidates, langfuse shadow, events.jsonl, prompts). Cross-cycle reference under `{tenant_id}/library/` (datasets, backends, dataset_runs, mlruns, search_memory, aliases). Full tree in [`docs/architecture/overview.md § Persistence`](docs/architecture/overview.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/lifecycle.py`.
 
 ## Key Patterns
 

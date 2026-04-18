@@ -62,7 +62,7 @@ LLM_MODEL=your-model-id
 
 ### 1. Notebook (recommended for exploration)
 
-The Jupyter notebook provides the full human-in-the-loop workflow: pipeline inspection, sensitivity scan, optimization, and results visualization.
+The Jupyter notebook provides the full human-in-the-loop workflow: pipeline inspection, optimization, and results visualization.
 
 ```bash
 pip install -e ".[jupyter,stats]"

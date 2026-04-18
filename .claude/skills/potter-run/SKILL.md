@@ -16,7 +16,6 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 |---------|---------|
 | `init` | Connect + configure (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--skip-baseline`) |
 | `set-task` | Decompose task description (`--task-file` / `--task-text`) |
-| `scan` / `show-scan` | Sensitivity scan over `--variants-file`, then analytics |
 | `optimize` | Run L1/L2/L3 loop |
 | `control` | `--pause` / `--resume` / `--stop` / `--pause-before-l2` — checked between queries (~5–10s lag) |
 | `show-status` | Live dashboard + session state |
@@ -44,7 +43,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 2. `curl -s {backend_url}/status` — backend up?
 3. `APP_VERSION` from `promptpotter/config/settings.py`
 4. Active pointer → campaign's `index.json` (state, `init_params`, `campaign_config`, `baseline_accuracy`) + `dashboard.json` (live `round`/`phase`/`best`/`stop_reason`)
-5. Count `.promptpotter/projects/{tenant_id}/library/dataset_runs/*.json`: <50 queries OR <5 runs = minimal (start from defaults); ≥50 AND ≥5 = substantial (propose best-known via `show-results` / `show-scan`)
+5. Count `.promptpotter/projects/{tenant_id}/library/dataset_runs/*.json`: <50 queries OR <5 runs = minimal (start from defaults); ≥50 AND ≥5 = substantial (propose best-known via `show-results`)
 
 **Print only if** no dataset arg, dataset not implemented (offer to build: scorer in `promptpotter/shared/scoring.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/builder.py::DATASET_LOADERS` returning `[{query, ground_truth}]`), or backend down.
 
@@ -110,18 +109,9 @@ python -m promptpotter set-task --task-file datasets/{dataset}/task_description.
 
 Skip only if the user says to.
 
-## Phase 3: Sensitivity scan (optional)
-
-Only if `datasets/{dataset}/scan_variants.json` exists and the user wants exploration:
-
-```bash
-python -m promptpotter scan --variants-file datasets/{dataset}/scan_variants.json
-python -m promptpotter show-scan
-```
-
 ## Phase 4: Optimize
 
-**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phases 0–3, then let them launch. On their return, read `log.md` + `dashboard.json` and summarize per round:
+**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phases 0–2, then let them launch. On their return, read `log.md` + `dashboard.json` and summarize per round:
 
 ```
 ROUND {N} COMPLETE

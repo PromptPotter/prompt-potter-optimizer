@@ -45,8 +45,7 @@ When optimization plateaus:
 1. **Lower `improvement_threshold`** — Default 0.01 (1%). If near-miss improvements are being discarded, try 0.005.
 2. **Increase `n_variants`** — More candidates per round = wider search. Try 7-10 instead of 5.
 3. **Increase `creativity`** — Higher meta-prompt temperature. Try 0.8-0.9.
-4. **Run a sensitivity scan** — Identifies which axes actually move the needle. Focus optimization on those.
-5. **Refine task_context** — Manually update `task_description.md` with more specific domain knowledge, then re-run `task-context`.
+4. **Refine task_context** — Manually update `task_description.md` with more specific domain knowledge, then re-run `task-context`.
 
 ## Orphan Process Detection
 

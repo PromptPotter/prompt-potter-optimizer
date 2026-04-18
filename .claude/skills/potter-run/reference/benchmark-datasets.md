@@ -46,7 +46,6 @@ def _aime_match(predicted: str, ground_truth: str) -> float:
 | `pipeline.json` | Pipeline definition — `llm_only` node with LLM defaults, prompt template variables, optimizer metadata |
 | `dataset.md` | Type, status, prerequisites, init flags |
 | `task_description.md` | Domain context for L2/L3 optimization layers |
-| `scan_variants.json` | (optional) Parameter variants for sensitivity scanning |
 
 ### Shared infrastructure (already built, no per-dataset work)
 

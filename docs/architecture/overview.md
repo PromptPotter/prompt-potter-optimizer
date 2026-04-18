@@ -7,43 +7,41 @@ Orientation page for `docs/architecture/`. Everything deep links out — read th
 Four entry points over a shared hexagonal core (`domain/` → `application/` → `infrastructure/` → `presentation/`):
 
 1. **Notebook** — `notebooks/optimization_campaign.ipynb` (primary, daily driver).
-2. **CLI** — `python -m promptpotter` (`init → [set-task] → [recon] → optimize → show-results`).
+2. **CLI** — `python -m promptpotter` (`init → [set-task] → optimize → show-results`).
 3. **FastAPI** — `promptpotter/main.py` mounts `/api/v1/{backends,campaigns}`.
 4. **Next.js webapp** — planned (M10 → M11), reads the file-directory view model.
 
 Layer contents:
 
 - **`domain/`** — `JobSearchPoint`, `OptSearchPoint`, `PipelineSchema`, `ScoringEnv`. Pure, no I/O.
-- **`application/`** — `campaign/`, `optimization/` (the core loop), `recon/` (optional scan), `intelligence/` (SearchMemory), `scoring/`, `datasets/`.
+- **`application/`** — `campaign/`, `optimization/` (the core loop), `intelligence/` (SearchMemory), `scoring/`, `datasets/`.
 - **`infrastructure/`** — `store/`, `backend/`, `llm/`, `tracing/`, `persistence/`.
 - **`presentation/`** — `cli/`, `api/`, `ui/`. Thin per-surface adapters.
 - Leaf: `shared/`, `config/`.
 
 Maturity order (features land left → right): Notebook > CLI > FastAPI > webapp. Don't invert.
 
-## Core Loop + Optional Recon
+## Core Loop
 
-One core feature — the critique-guided optimization loop — and one optional pre-step — the recon pass. Independent packages, no cross-imports. The only runtime handoff is `ReconBrief` through `RunConfig.recon_brief`.
+One core feature — the critique-guided optimization loop in `application/optimization/`.
 
 ```
-  OPTIONAL  (application/recon/)       CORE  (application/optimization/)
-  ─────────────────────────            ────────────────────────────────
-  Sensitivity Scan                     Critique-Guided Optimization Loop
-  ┌──────────────────┐                 ┌──────────────────────────────┐
-  │ 1 LLM:           │                 │ 5 LLMs:                      │
-  │  recon_advisor   │                 │  restructure  (one-time)     │
-  │                  │                 │  l1_generate  (every round)  │
-  │ OAT perturbation │    ReconBrief   │  critique     (every round)  │
-  │ Per-axis Δ       │───(optional)──► │  l2_context   (on stall)     │
-  │ Coverage report  │   starting-hint │  l3_plan      (rare)         │
-  └────────┬─────────┘                 └──────────┬───────────────────┘
-           │                                      │
-           │   application/intelligence/ — SearchMemory (shared)
-           └──────────────────► ◄─────────────────┘
-                  both write evaluations; both read aggregate history
+  CORE  (application/optimization/)
+  ────────────────────────────────
+  Critique-Guided Optimization Loop
+  ┌──────────────────────────────┐
+  │ 5 LLMs:                      │
+  │  restructure  (one-time)     │
+  │  l1_generate  (every round)  │
+  │  critique     (every round)  │
+  │  l2_context   (on stall)     │
+  │  l3_plan      (rare)         │
+  └──────────────┬───────────────┘
+                 │
+                 ▼
+      application/intelligence/ — SearchMemory
+      writes evaluations; reads aggregate history
 ```
-
-Skipping the recon pass leaves `optimize` fully functional — you lose a starting prior on which axes to move first, save the recon LLM cost, and skip a step.
 
 Directionality and import rules: see `CLAUDE.md § Architecture`. Loop internals: [optimization.md](optimization.md). SearchMemory: [search-memory-intelligence.md](search-memory-intelligence.md).
 
@@ -78,7 +76,6 @@ Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; eve
       dashboard.json                   # live counters
       control.json                     # HITL pause/resume
       output.log / log.md / journal.md / notes.md
-      recon.json                       # optional recon result
       trial_NNNN.json                  # resume source of truth
       round_NNNN_candidates.json       # pre-scoring checkpoint
       rounds/round_NNN.json            # per-round LLM action audit
@@ -96,7 +93,6 @@ Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; eve
       datasets/{name}/                 # tenant-global datasets (future)
       dataset_runs/{run_id}.json       # content-addressed eval archive
       dataset_runs.json
-      recon_plans/{plan_id}.json
       mlruns/                          # MLflow SDK tracking root (opt-in)
       search_memory.json               # materialized intelligence view
       prompt_aliases.json

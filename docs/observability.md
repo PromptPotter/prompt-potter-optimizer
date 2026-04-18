@@ -30,7 +30,7 @@ Each line is a self-contained JSON object with `event`, `timestamp`, and navigat
 | `trace_id` | `langfuse/scores/{trace_id}.jsonl` | Evaluation scores over time |
 | `prompt_fields_id` | `prompts/optimizer_prompt/{id_prefix}/` | Rendered prompt text + Layer 1 field metadata |
 
-Out-of-campaign emits (baseline, recon, historical backfill) have no bound `cycle_id`; they land in a shared `library/obs/` pool using the same tree shape.
+Out-of-campaign emits (baseline, historical backfill) have no bound `cycle_id`; they land in a shared `library/obs/` pool using the same tree shape.
 
 ---
 

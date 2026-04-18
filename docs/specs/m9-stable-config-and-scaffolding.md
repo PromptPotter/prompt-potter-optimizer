@@ -73,11 +73,11 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 4. CLI commands accept `--dataset` and `--pipeline` overrides; default comes from the active session.
 5. Two datasets demonstrably coexist (`datasets/lca-termnorm/` + one benchmark dataset) in a single project store without collision.
 
-**Open decisions during the track:** migration vs coexistence for legacy data, how `show-status` aggregates across datasets, whether `recon_variants` libraries are per-dataset or shared.
+**Open decisions during the track:** migration vs coexistence for legacy data, how `show-status` aggregates across datasets.
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation)
 
-**Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model. (Artifact-write parity is closed — `run_optimization` auto-mints a session when `session_id=""`, and the recon-path auto-mint is the next follow-up. Track 4 is about renderer unification only.)
+**Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model. (Artifact-write parity is closed — `run_optimization` auto-mints a session when `session_id=""`. Track 4 is about renderer unification only.)
 
 **Approach:** Instead of each entry point building its own render pipeline, the session writes a flat file-directory "view model" to disk. The CLI, the notebook, and the eventual webapp all read from the same files. The first cut mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. Think: what a human sees when they `cd` into the session folder and `cat` a few files.
 
