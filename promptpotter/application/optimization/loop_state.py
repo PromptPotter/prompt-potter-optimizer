@@ -159,20 +159,19 @@ class LoopState:
         self.escalation = EscalationCounters.from_checkpoint_dict(trial)
         self.l1_stall_count = trial["l1_stall_count"]
 
-    def apply_transition(
+    def adopt_transition(
         self,
-        transition: Any,
+        new_opt: OptSearchPoint,
+        pipeline_params: dict | None,
         *,
         schema: PipelineSchema | None,
     ) -> None:
-        """Adopt a TransitionResult's new opt_sp and rebuild current_sp."""
-        new_opt = transition.opt_search_point
+        """Adopt a new OptSearchPoint, preserving accumulated memory."""
         new_opt.memory = self.opt_sp.memory.model_copy(deep=True)
         self.opt_sp = new_opt
         assert self.current_sp is not None
-        base_params = transition.pipeline_params or self.current_sp.pipeline_params
         self.current_sp = self.opt_sp.to_job_search_point(
-            base_pipeline_params=base_params,
+            base_pipeline_params=pipeline_params or self.current_sp.pipeline_params,
             schema=schema,
         )
 

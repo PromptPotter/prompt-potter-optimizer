@@ -253,7 +253,6 @@ async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is campaign_state.json in session dir."""
-    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.campaign.campaign_setup import load_recon_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
@@ -311,7 +310,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     campaign_config.setdefault("optimization", {}).pop("pause_before_scoring", None)
     ctx.save_phase("optimizing")
 
-    control_cb = RunCallbacks(on_checkpoint=CampaignControlReader(session_dir).check)
     set_round_recorder(RoundRecorder(session_dir / "rounds"))
 
     baseline = extract_campaign_baseline(campaign_rounds)
@@ -326,7 +324,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.task_context,
             session_id=ctx.session_id,
-            callbacks=control_cb,
+            control=CampaignControlReader(session_dir).check,
             cycle_id=ctx.state.get("cycle_id"),
             resume_from_round_override=resume_from_round,
         )

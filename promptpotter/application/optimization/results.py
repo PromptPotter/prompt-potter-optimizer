@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
+
+from promptpotter.domain.analysis import EscalationSignal
 
 __all__ = ["RoundResult", "RunResult"]
 
 
 class RoundResult(BaseModel):
     """Result of a single feedback cycle round."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
     round: int
     label: str
@@ -23,7 +27,7 @@ class RoundResult(BaseModel):
     candidates_scored: int
     candidate_scores: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
-    escalation_signal: dict | None = None
+    escalation_signal: EscalationSignal | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
 
 

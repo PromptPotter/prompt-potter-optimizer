@@ -10,10 +10,11 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.callbacks import RunCallbacks
+from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.campaign_setup import SessionEnv
 from promptpotter.application.campaign.config import LoopConfig, run_preflight_checks
 from promptpotter.application.campaign.data import CampaignBaseline
@@ -77,7 +78,7 @@ async def _try_escalate_l2(
     env: LoopEnv,
     config: LoopConfig,
     round_num: int,
-    cb: RunCallbacks,
+    cb: RunListener,
     *,
     from_degradation: bool = False,
     esc_check_result: dict | None = None,
@@ -108,7 +109,7 @@ async def _handle_escalation_signal(
     config: LoopConfig,
     round_result: RoundResult,
     round_num: int,
-    cb: RunCallbacks,
+    cb: RunListener,
 ) -> None:
     """Handle a degradation escalation signal from a round result."""
     signal = round_result.escalation_signal
@@ -118,15 +119,15 @@ async def _handle_escalation_signal(
         CampaignPhase.ESCALATION,
         "enter",
         round=round_num,
-        check_name=signal["check_name"],
-        target=signal["target"],
-        degraded_rate=signal["check_result"].get("degraded_rate"),
-        warning_types=signal["check_result"].get("warning_types"),
+        check_name=signal.check_name,
+        target=signal.target,
+        degraded_rate=signal.check_result.get("degraded_rate"),
+        warning_types=signal.check_result.get("warning_types"),
     )
 
-    esc_check_result = signal["check_result"]
+    esc_check_result = signal.check_result
 
-    if signal["target"] in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
+    if signal.target in (EscalationTarget.L2, EscalationTarget.L3) and config.enable_l2:
         state.opt_sp.memory.record_escalation_event(
             round_num,
             esc_check_result,
@@ -148,7 +149,7 @@ async def _handle_escalation_signal(
             raise
         except Exception:
             logger.warning("L2 escalation failed", exc_info=True)
-    elif signal["target"] == EscalationTarget.ABORT_CAMPAIGN:
+    elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
         # Elimination signals (target=ELIMINATE_CANDIDATE) are absorbed inside
         # _score_candidates — only true degradation that L2/L3 cannot rescue
         # should ever reach this branch.
@@ -197,7 +198,7 @@ def _maybe_apply_zero_signal_filter(
     config: LoopConfig,
     round_num: int,
     dataset: list[dict[str, Any]],
-    cb: RunCallbacks,
+    cb: RunListener,
 ) -> None:
     """Prune always-hit/always-miss queries from the active dataset.
 
@@ -252,7 +253,7 @@ async def _post_round(
     round_num: int,
     config: LoopConfig,
     dataset: list[dict[str, Any]],
-    cb: RunCallbacks,
+    cb: RunListener,
 ) -> None:
     """Normal-path bookkeeping after a non-escalation round.
 
@@ -302,7 +303,7 @@ async def _run_round_loop(
     env: LoopEnv,
     dataset: list[dict[str, Any]],
     config: LoopConfig,
-    cb: RunCallbacks,
+    cb: RunListener,
 ) -> StopReason:
     """Execute the round loop: generate → score → escalate → stop."""
     hard_cap = config.hard_cap
@@ -395,7 +396,7 @@ async def _init_optimization(
     dataset: list[dict[str, Any]],
     config: LoopConfig,
     *,
-    cb: RunCallbacks,
+    cb: RunListener,
     langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
@@ -617,7 +618,8 @@ async def run_optimization(
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
-    callbacks: RunCallbacks | None = None,
+    display: Any = None,
+    control: Callable[[str], str | None] | None = None,
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
@@ -650,7 +652,7 @@ async def run_optimization(
         dataset_name=session.dataset_name or "",
     )
 
-    cb = callbacks or RunCallbacks()
+    cb = RunListener(display=display, control=control)
 
     state, env = await _init_optimization(
         baseline,
@@ -671,13 +673,7 @@ async def run_optimization(
         env.cycle_id,
         resumed_from_round=env.resumed_from_round,
     )
-    if emitter:
-        cb.attach(
-            on_phase=emitter.on_phase,
-            on_sample_scored=emitter.on_sample_scored,
-            on_candidate_scored=emitter.on_candidate_scored,
-            on_round_complete=emitter.on_round_complete,
-        )
+    cb.emitter = emitter
 
     stop_reason = await _run_round_loop(state, env, dataset, config, cb)
 

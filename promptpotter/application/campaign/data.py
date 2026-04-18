@@ -136,7 +136,7 @@ async def _run_baseline_scoring(
         source="baseline",
         scorer=compile_scorer(scoring_formula),
     )
-    baseline_results, scores, _cached = await score_search_point(
+    baseline_results, scores, _cached, _ = await score_search_point(
         sp,
         dataset,
         ctx,

@@ -6,10 +6,14 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
-from promptpotter.domain.analysis import EscalationTarget, RuntimeFailure, ValidationFailure
+from promptpotter.domain.analysis import (
+    EscalationSignal,
+    EscalationTarget,
+    RuntimeFailure,
+)
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
@@ -17,7 +21,7 @@ from promptpotter.infrastructure.tracing.events import CandidateScored, QuerySco
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunCallbacks
+    from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.domain.scoring import ScoringEnv
 
 logger = logging.getLogger(__name__)
@@ -28,7 +32,10 @@ __all__ = ["L1ScoringResult", "l1_score"]
 class L1ScoringResult(BaseModel):
     """Structured return value from ``l1_score()``."""
 
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     label: str
+    winner_osp: OptSearchPoint
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None
     winner_accuracy: float
@@ -40,7 +47,7 @@ class L1ScoringResult(BaseModel):
     candidate_scores: list[dict[str, Any]]
     winner_results: list[QueryResult]
     all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
-    escalation_signal: dict[str, Any] | None = None
+    escalation_signal: EscalationSignal | None = None
     degraded_queries: int = 0
     # Named evaluator values for the winner — populated from the registry.
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
@@ -152,27 +159,36 @@ def _parse_candidates(
 ) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
     """Normalize raw candidate dicts into OptSearchPoints with merged params.
 
+    Validates node_overrides against allowed-value sets (one producer of
+    truth — no ``__validation_failures__`` round-trip through the wire
+    dict). Failures attach to ``osp.memory.validation_failures`` and drive
+    the synthetic-0 short-circuit in ``_score_candidates``.
+
     Returns (osp_candidates, merged_pipeline_params, raw_overrides).
     """
+    from promptpotter.application.optimization.nodes.generate import validate_overrides
+
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
-    _meta_keys = {"__pipeline_params_override__", "__validation_failures__"}
     for c in candidates:
         override = c.get("__pipeline_params_override__")
         overrides.append(override)
         osp = OptSearchPoint.from_prompt_fields(
-            {k: v for k, v in c.items() if k not in _meta_keys},
+            {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
         )
-        # Re-attach parse-time validation failures so the scorer can short-
-        # circuit invalid candidates. Failures are produced by validate_overrides()
-        # in nodes/generate.py and ride through the candidate dict so they survive
-        # the prompt_field round trip.
-        raw_failures = c.get("__validation_failures__") or []
-        if raw_failures:
-            osp.memory.validation_failures = [
-                ValidationFailure(**f) if isinstance(f, dict) else f for f in raw_failures
-            ]
+        if schema and override:
+            failures = validate_overrides(override, schema)
+            if failures:
+                osp.memory.validation_failures = failures
+                for vf in failures:
+                    logger.warning(
+                        "candidate %s: validation failure on %s — proposed %r not in allowed %r",
+                        osp.id[:8],
+                        vf.axis,
+                        vf.value,
+                        vf.allowed,
+                    )
         osp_list.append(osp)
         merged.append(_merge_pipeline_params(pipeline_params, override, schema))
     return osp_list, merged, overrides
@@ -189,10 +205,15 @@ def _build_score_report(
     elimination_stopped: bool = False,
     resumed_from_cache: bool = False,
     invalid: bool = False,
-    validation_failures: list[dict] | None = None,
-    runtime_failures: list[dict] | None = None,
+    new_runtime_failure: RuntimeFailure | None = None,
 ) -> dict:
-    """Build unified candidate score report dict."""
+    """Build unified candidate score report dict.
+
+    Validation failures are read from ``osp.memory.validation_failures`` —
+    the single source of truth. ``new_runtime_failure`` is this-round-only
+    (the outer round accumulates across rounds).
+    """
+    vfs = osp.memory.validation_failures
     return {
         "candidate_id": osp.id,
         "changes_description": osp.changes_description or "",
@@ -207,8 +228,8 @@ def _build_score_report(
         "scored_queries": len(results),
         "expected_queries": len(dataset),
         "invalid": invalid,
-        **({"validation_failures": validation_failures} if validation_failures else {}),
-        **({"runtime_failures": runtime_failures} if runtime_failures else {}),
+        **({"validation_failures": [vf.to_dict() for vf in vfs]} if vfs else {}),
+        **({"runtime_failures": [new_runtime_failure.to_dict()]} if new_runtime_failure else {}),
         **({"resumed_from_cache": True} if resumed_from_cache else {}),
     }
 
@@ -221,12 +242,12 @@ async def _score_candidates(
     ctx: ScoringEnv,
     *,
     degradation_checks: list | None = None,
-    callbacks: RunCallbacks,
+    callbacks: RunListener,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
     obs_campaign_id: str = "",
     round_num: int = 0,
-) -> tuple[dict[str, list[QueryResult]], list[dict], dict | None]:
+) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each candidate against the dataset.
 
     Returns (all_candidate_results, candidate_scores, escalation_signal).
@@ -236,7 +257,7 @@ async def _score_candidates(
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []
-    escalation_signal: dict | None = None
+    escalation_signal: EscalationSignal | None = None
     n_candidates = len(osp_candidates)
 
     elim_check = EliminationCheck(
@@ -280,12 +301,11 @@ async def _score_candidates(
         # let the existing accuracy comparator deprioritize it. See
         # docs/architecture/optimization.md.
         if osp_c.memory.validation_failures:
-            failures = osp_c.memory.validation_failures
             logger.warning(
                 "Candidate %d/%d invalid (%d validation failure(s)) — skipping backend",
                 idx + 1,
                 n_candidates,
-                len(failures),
+                len(osp_c.memory.validation_failures),
             )
             results: list[QueryResult] = []
             scores: dict[str, Any] = {
@@ -295,7 +315,6 @@ async def _score_candidates(
                 "total": 0,
                 "errors": 0,
                 "invalid": True,
-                "validation_failures": [vf.to_dict() for vf in failures],
             }
             all_candidate_results[osp_c.id] = results
             report = _build_score_report(
@@ -305,7 +324,6 @@ async def _score_candidates(
                 results,
                 dataset,
                 invalid=True,
-                validation_failures=[vf.to_dict() for vf in failures],
             )
             candidate_scores.append(report)
             callbacks.on_candidate_scored(idx, n_candidates, report)
@@ -322,7 +340,7 @@ async def _score_candidates(
         if elim_check.enabled:
             all_checks.append(elim_check)
 
-        results, scores, was_cached = await score_search_point(
+        results, scores, was_cached, signal = await score_search_point(
             sp,
             dataset,
             ctx,
@@ -356,10 +374,10 @@ async def _score_candidates(
             _emit_candidate_scored(idx, report)
             continue
 
-        escalation_signal = scores.pop("escalation_signal", None)
+        escalation_signal = signal
         elimination_stopped = (
             escalation_signal is not None
-            and escalation_signal["target"] == EscalationTarget.ELIMINATE_CANDIDATE
+            and escalation_signal.target == EscalationTarget.ELIMINATE_CANDIDATE
         )
 
         aborted = bool(escalation_signal) and len(results) < len(dataset)
@@ -375,17 +393,17 @@ async def _score_candidates(
         # candidate that produced it, not a round-level event. L2 reads it
         # from candidate_scores next round and produces a directive that
         # names the disallowed value range.
-        runtime_failures_dicts: list[dict] | None = None
+        new_rf: RuntimeFailure | None = None
         if (
             elimination_stopped
             and escalation_signal is not None
-            and escalation_signal["check_name"] == "degradation"
+            and escalation_signal.check_name == "degradation"
         ):
-            cr = escalation_signal["check_result"]
+            cr = escalation_signal.check_result
             dominant = cr.get("dominant_warning", "unknown:unknown")
             problem_node = dominant.split(":")[0] if ":" in dominant else ""
             observed_node_cfg = (merged_pp[idx] or {}).get(problem_node, {}) or {}
-            rf = RuntimeFailure(
+            new_rf = RuntimeFailure(
                 source="degradation_check",
                 dominant_warning=dominant,
                 warning_types=dict(cr.get("warning_types") or {}),
@@ -394,14 +412,13 @@ async def _score_candidates(
                 total_evaluated=int(cr.get("total_evaluated", len(results))),
                 observed_config=dict(observed_node_cfg),
             )
-            osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, rf]
-            runtime_failures_dicts = [rf.to_dict()]
+            osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
             logger.info(
                 "Candidate %d/%d eliminated — RuntimeFailure attached (%s, rate=%.0f%%, config=%s)",
                 idx + 1,
                 n_candidates,
                 dominant,
-                rf.degraded_rate * 100,
+                new_rf.degraded_rate * 100,
                 observed_node_cfg,
             )
 
@@ -413,7 +430,7 @@ async def _score_candidates(
             dataset,
             aborted=aborted,
             elimination_stopped=elimination_stopped,
-            runtime_failures=runtime_failures_dicts,
+            new_runtime_failure=new_rf,
         )
         candidate_scores.append(report)
         callbacks.on_candidate_scored(idx, n_candidates, report)
@@ -436,7 +453,7 @@ async def l1_score(
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
-    callbacks: RunCallbacks,
+    callbacks: RunListener,
     degradation_checks: list | None = None,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
@@ -500,6 +517,7 @@ async def l1_score(
     winner_dict["changes_description"] = winner_osp.changes_description
     return L1ScoringResult(
         label=winner_entry["label"],
+        winner_osp=winner_osp,
         winner_prompt_fields=winner_dict,
         winner_pipeline_params=winner_pp,
         winner_accuracy=winner_entry["accuracy"],

@@ -10,17 +10,15 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
-    "L1PromptData",
-    "L2IntelligenceData",
     "TrajectoryReport",
     "assess_candidate_diversity",
     "build_candidate_comparison",
@@ -62,25 +60,6 @@ def format_pipeline_section(
             lines.append(f"    current: {json.dumps(current_vals)}")
         lines.append("")
     return "\n".join(lines) + "\n"
-
-
-@dataclass
-class L1PromptData:
-    """Data bundle for ``format_context_sections()``."""
-
-    task_context: TaskDecomposition | None = None
-    critique_text: str = ""
-    l2_directive: str = ""
-    thinking_styles: list[str] | None = None
-    plan: str = ""
-    warning_inventory: dict | None = None
-    escalation_journal: list[dict] | None = None
-    is_probe_round: bool = False
-    recon_brief: ReconBrief | None = None
-    scan_compact: bool = False
-    failure_analysis: FailureAnalysis | None = None
-    search_memory_digest: dict | None = None
-    pipeline_schema_text: str = ""
 
 
 def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str]) -> str:
@@ -135,28 +114,42 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
     return "\n".join(lines)
 
 
-def format_context_sections(ctx: L1PromptData) -> str:
+def format_context_sections(
+    *,
+    task_context: TaskDecomposition | None = None,
+    critique_text: str = "",
+    l2_directive: str = "",
+    thinking_styles: list[str] | None = None,
+    plan: str = "",
+    warning_inventory: dict | None = None,
+    escalation_journal: list[dict] | None = None,
+    is_probe_round: bool = False,
+    recon_brief: ReconBrief | None = None,
+    scan_compact: bool = False,
+    failure_analysis: FailureAnalysis | None = None,
+    search_memory_digest: dict | None = None,
+    pipeline_schema_text: str = "",
+) -> str:
     """Build the L1 intelligence bundle — scan, escalation, critique, directives, plan."""
     sections: list[str] = []
 
     # Pipeline schema — valid nodes and parameters
-    if ctx.pipeline_schema_text:
-        sections.append(ctx.pipeline_schema_text)
+    if pipeline_schema_text:
+        sections.append(pipeline_schema_text)
 
     # Scan analytics — full on first round, sensitivity-only thereafter
-    sc = ctx.recon_brief
-    if sc:
-        if ctx.scan_compact and sc.sensitivity_text:
-            sections.append(f"SCAN:\n{sc.sensitivity_text}")
+    if recon_brief:
+        if scan_compact and recon_brief.sensitivity_text:
+            sections.append(f"SCAN:\n{recon_brief.sensitivity_text}")
         else:
-            scan_parts = [f"SCAN:\nTested values per axis:\n{sc.tested_values}"]
-            if sc.sensitivity_text:
-                scan_parts.append(f"Top sensitivity drivers:\n{sc.sensitivity_text}")
+            scan_parts = [f"SCAN:\nTested values per axis:\n{recon_brief.tested_values}"]
+            if recon_brief.sensitivity_text:
+                scan_parts.append(f"Top sensitivity drivers:\n{recon_brief.sensitivity_text}")
             sections.append("\n".join(scan_parts))
 
     # Failure analysis (Wave 1c)
-    fa = ctx.failure_analysis
-    if fa and fa.patterns:
+    if failure_analysis and failure_analysis.patterns:
+        fa = failure_analysis
         fa_lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
         for i, pat in enumerate(fa.patterns[:3], 1):
             fa_lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
@@ -171,7 +164,6 @@ def format_context_sections(ctx: L1PromptData) -> str:
             if sig:
                 sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
                 fa_lines.append(f"     Signals: {sig_str}")
-        # Improvement directions
         fa_lines.append("IMPROVEMENT DIRECTIONS:")
         for i, pat in enumerate(fa.patterns[:3], 1):
             fa_lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
@@ -179,7 +171,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
 
     # Historical intelligence from SearchMemory (Wave 3c)
     hi = format_search_memory_block(
-        ctx.search_memory_digest,
+        search_memory_digest,
         {
             "failure_clusters": "Common failure patterns",
             "dead_queries": "Dead queries (never hit)",
@@ -191,8 +183,8 @@ def format_context_sections(ctx: L1PromptData) -> str:
         sections.append(hi)
 
     # Task context
-    if ctx.task_context:
-        tc_lines = "\n".join(f"  {k}: {v}" for k, v in ctx.task_context.items() if v)
+    if task_context:
+        tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
         if tc_lines:
             sections.append(f"CONTEXT:\n{tc_lines}")
 
@@ -200,22 +192,20 @@ def format_context_sections(ctx: L1PromptData) -> str:
     # Probe rounds always show (per-query warning detail IS the actionable data).
     # Non-probe: skip when l2_directive present — directive already absorbed
     # escalation data via L2 (no raw+digest double-exposure).
-    escalation_journal = ctx.escalation_journal
     if escalation_journal:
-        if ctx.is_probe_round:
-            # Probe round — enriched with warning inventory and history
+        if is_probe_round:
             probe_lines = [
                 "PROBE ROUND: These queries have recurring pipeline warnings. "
                 "Generate candidates that specifically address pipeline "
                 "robustness for the affected steps.",
             ]
-            if ctx.warning_inventory:
-                inv_text = summarize_warning_inventory(ctx.warning_inventory)
+            if warning_inventory:
+                inv_text = summarize_warning_inventory(warning_inventory)
                 if inv_text:
                     probe_lines.append("")
                     probe_lines.append(inv_text)
                 step_counts: dict[str, int] = {}
-                for entry in ctx.warning_inventory.values():
+                for entry in warning_inventory.values():
                     for wtype in entry.get("warnings", {}):
                         step = wtype.split(":")[0] if ":" in wtype else wtype
                         step_counts[step] = step_counts.get(step, 0) + 1
@@ -236,8 +226,7 @@ def format_context_sections(ctx: L1PromptData) -> str:
                                 f"  - degraded_rate={ej.get('degraded_rate', 0):.0%}, warnings={wt}"
                             )
             sections.append("\n".join(probe_lines))
-        elif not ctx.l2_directive:
-            # Normal round without directive — compact escalation alert
+        elif not l2_directive:
             latest = escalation_journal[-1]
             rate = latest.get("degraded_rate", 0)
             problem_step = latest.get("problem_step", "unknown")
@@ -254,105 +243,79 @@ def format_context_sections(ctx: L1PromptData) -> str:
                 alert_lines.append(f"Warning breakdown: {wtypes}")
             sections.append("\n".join(alert_lines))
 
-    # L2 directive
-    if ctx.l2_directive:
-        sections.append(f"DIRECTIVE:\n{ctx.l2_directive}")
+    if l2_directive:
+        sections.append(f"DIRECTIVE:\n{l2_directive}")
 
-    # Critique — always show (L2 directive is strategic, critique has failure data)
-    if ctx.critique_text:
-        sections.append(f"CRITIQUE:\n{ctx.critique_text}")
+    if critique_text:
+        sections.append(f"CRITIQUE:\n{critique_text}")
 
-    # Thinking styles
-    if ctx.thinking_styles:
-        styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(ctx.thinking_styles))
+    if thinking_styles:
+        styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(thinking_styles))
         sections.append(f"THINKING STYLES:\n{styles}")
 
-    # Strategic plan
-    if ctx.plan:
-        sections.append(f"PLAN:\n{ctx.plan}")
+    if plan:
+        sections.append(f"PLAN:\n{plan}")
 
     return "\n\n".join(sections)
 
 
-@dataclass
-class L2IntelligenceData:
-    """Data bundle for ``format_l2_intelligence()``."""
+def format_l2_intelligence(
+    *,
+    escalation_section: str = "",
+    warning_inventory: dict | None = None,
+    critique_text: str = "",
+    l2_directive: str = "",
+    search_memory_digest: dict | None = None,
+    trajectory: TrajectoryReport | None = None,
+    candidate_comparison: str | None = None,
+    diversity_alert: str | None = None,
+    validation_failures: list[dict] | None = None,
+    runtime_failures: list[dict] | None = None,
+    runtime_failures_accumulated: list[dict] | None = None,
+) -> str:
+    """Build the L2 refine_strategy intelligence bundle (mirrors ``format_context_sections``).
 
-    escalation_section: str = ""
-    warning_inventory: dict | None = None
-    critique_text: str = ""
-    l2_directive: str = ""
-    search_memory_digest: dict | None = None
-    trajectory: TrajectoryReport | None = None
-    candidate_comparison: str | None = None
-    diversity_alert: str | None = None
-    validation_failures: list[dict] | None = None
-    """Aggregated parse-time validation failures from the prior round's
-    candidates. Each entry carries axis/value/allowed/reason. Self-healing
-    signal: tells L2 the L1 prompt produced structurally invalid output and
-    L2 must produce a directive to prevent recurrence."""
-    runtime_failures: list[dict] | None = None
-    """NEW runtime-observed health failures from the prior round's candidates
-    (e.g. max_tokens=150 producing 100%% empty_content_reasoning_fallback on
-    reasoning models). L2-heals-itself rail: L2 must adjust its OWN strategy
-    (directive, task_context, optimizer_params) to steer L1 away from the
-    failing config region. Sibling of validation_failures but detected
-    mid-evaluation, not at parse time."""
-    runtime_failures_accumulated: list[dict] | None = None
-    """Runtime failures surviving from earlier rounds despite L2's prior
-    strategy adjustments. If this list is non-empty, L2's previous angle
-    didn't work and it must try something different. When the list keeps
-    growing across L2 rounds, L3 escalation uses the same trail to replan."""
-
-
-def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
-    """Build the L2 refine_strategy intelligence bundle (mirrors ``format_context_sections``)."""
+    ``validation_failures`` and ``runtime_failures`` are the self-healing
+    signals — L2 synthesises directives (to teach L1 the disallowed values)
+    and adjusts its own strategy when runtime failures persist across
+    rounds. See ``docs/architecture/optimization.md`` "Self-healing
+    optimization" for the full rationale.
+    """
     sections: list[str] = []
 
     # Escalation OR per-query warnings — never both. The escalation
     # stability report already contains aggregate warning counts; appending
     # per-query breakdown is redundant. L2's job is strategic (meta-settings,
     # directive), not per-query targeting — that's for probe rounds (L1).
-    esc = ctx.escalation_section
-    if not esc and ctx.warning_inventory:
-        warning_text = summarize_warning_inventory(ctx.warning_inventory)
+    esc = escalation_section
+    if not esc and warning_inventory:
+        warning_text = summarize_warning_inventory(warning_inventory)
         if warning_text:
             esc = warning_text + "\n"
     if esc:
         sections.append(esc)
 
-    # Previous critique
-    if ctx.critique_text:
-        sections.append("CRITIQUE:\n" + ctx.critique_text)
+    if critique_text:
+        sections.append("CRITIQUE:\n" + critique_text)
 
-    # Previous L2 directive
-    if ctx.l2_directive:
-        sections.append("PREVIOUS DIRECTIVE:\n" + ctx.l2_directive)
+    if l2_directive:
+        sections.append("PREVIOUS DIRECTIVE:\n" + l2_directive)
 
-    # Round trajectory — progression summary + classification when unhealthy
-    tr = ctx.trajectory
-    if tr:
-        sections.append(f"CAMPAIGN TRAJECTORY:\n  {tr.text}")
-        if tr.classification != "healthy":
+    if trajectory:
+        sections.append(f"CAMPAIGN TRAJECTORY:\n  {trajectory.text}")
+        if trajectory.classification != "healthy":
             sections.append(
-                f"TRAJECTORY DIAGNOSIS: [{tr.classification.upper()}] "
-                f"{tr.description}\n  Recommended: {tr.recommended_action}"
+                f"TRAJECTORY DIAGNOSIS: [{trajectory.classification.upper()}] "
+                f"{trajectory.description}\n  Recommended: {trajectory.recommended_action}"
             )
 
-    # Candidate comparison — what was tried last round
-    if ctx.candidate_comparison:
-        sections.append(f"LAST ROUND CANDIDATES:\n  {ctx.candidate_comparison}")
+    if candidate_comparison:
+        sections.append(f"LAST ROUND CANDIDATES:\n  {candidate_comparison}")
 
-    # Diversity alert — mode collapse detection
-    if ctx.diversity_alert:
-        sections.append(f"DIVERSITY ALERT:\n  {ctx.diversity_alert}")
+    if diversity_alert:
+        sections.append(f"DIVERSITY ALERT:\n  {diversity_alert}")
 
-    # Validation failures from the prior round — self-healing signal.
-    # L1 hallucinated values outside the user-declared allowed set. L2
-    # must produce a directive that explicitly tells L1 not to do this
-    # again. Without this section, L2 only sees aggregate accuracy and
-    # has no idea why the candidates were structurally invalid.
-    vfs = ctx.validation_failures or []
+    vfs = validation_failures or []
     if vfs:
         lines = [
             "L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):",
@@ -383,8 +346,8 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
     # survived L2's prior strategy adjustments, L2's last angle didn't work
     # and it must try a different one. (Runtime failures heal L2 itself,
     # not L1 — unlike validation_failures which L2 teaches L1 to avoid.)
-    rfs_new = ctx.runtime_failures or []
-    rfs_acc = ctx.runtime_failures_accumulated or []
+    rfs_new = runtime_failures or []
+    rfs_acc = runtime_failures_accumulated or []
     if rfs_new or rfs_acc:
         lines = [
             "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
@@ -439,7 +402,7 @@ def format_l2_intelligence(ctx: L2IntelligenceData) -> str:
 
     # Historical intelligence from SearchMemory
     hi = format_search_memory_block(
-        ctx.search_memory_digest,
+        search_memory_digest,
         {
             "axis_rankings": "Axis impact rankings",
             "bottleneck_distribution": "Bottleneck distribution",

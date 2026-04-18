@@ -5,10 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.nodes.formatting import (
-    L1PromptData,
-    format_context_sections,
-)
+from promptpotter.application.optimization.nodes.formatting import format_context_sections
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -159,21 +156,19 @@ async def l1_generate(
         "n_queries": str(len(current_results)),
         "rendered_prompt": opt_sp.render(),
         "context_sections": format_context_sections(
-            L1PromptData(
-                task_context=opt_sp.task_context or None,
-                critique_text=opt_sp.memory.critique_text,
-                l2_directive=opt_sp.memory.l2_directive,
-                thinking_styles=opt_sp.memory.thinking_styles or None,
-                plan=opt_sp.plan or "",
-                warning_inventory=opt_sp.memory.warning_inventory or None,
-                escalation_journal=opt_sp.memory.escalation_journal or None,
-                is_probe_round=is_probe_round,
-                recon_brief=recon_brief,
-                scan_compact=scan_compact,
-                failure_analysis=failure_analysis,
-                search_memory_digest=search_memory_digest,
-                pipeline_schema_text=schema_text,
-            )
+            task_context=opt_sp.task_context or None,
+            critique_text=opt_sp.memory.critique_text,
+            l2_directive=opt_sp.memory.l2_directive,
+            thinking_styles=opt_sp.memory.thinking_styles or None,
+            plan=opt_sp.plan or "",
+            warning_inventory=opt_sp.memory.warning_inventory or None,
+            escalation_journal=opt_sp.memory.escalation_journal or None,
+            is_probe_round=is_probe_round,
+            recon_brief=recon_brief,
+            scan_compact=scan_compact,
+            failure_analysis=failure_analysis,
+            search_memory_digest=search_memory_digest,
+            pipeline_schema_text=schema_text,
         ),
     }
     _template = load_optimizer_prompt("meta_scan_aware")
@@ -226,37 +221,22 @@ async def l1_generate(
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]
 
-        # Validate remaining overrides against allowed-value sets. Failures
-        # are recorded as a property of the SearchPoint (NOT silently dropped)
-        # so score_search_point() can short-circuit to a synthetic 0. See
+        # Validation of node_overrides against allowed-value sets is deferred
+        # to _parse_candidates in score.py — same wire dict, one producer of
+        # truth, no __validation_failures__ round-trip. See
         # docs/architecture/optimization.md.
-        validation_failures: list[ValidationFailure] = []
-        if pipeline_schema:
-            validation_failures = validate_overrides(node_overrides, pipeline_schema)
-            for vf in validation_failures:
-                logger.warning(
-                    "l1_generate: validation failure on %s — proposed %r not in allowed %r",
-                    vf.axis,
-                    vf.value,
-                    vf.allowed,
-                )
-
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
             **prompt_changes,
         )
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
-        if validation_failures:
-            child.memory.validation_failures = list(validation_failures)
         c_dict = child.prompt_field_dict()
         c_dict["id"] = child.id
         c_dict["parent_id"] = child.parent_id
         c_dict["changes_description"] = child.changes_description
         if node_overrides:
             c_dict["__pipeline_params_override__"] = node_overrides
-        if validation_failures:
-            c_dict["__validation_failures__"] = [vf.to_dict() for vf in validation_failures]
         candidates.append(c_dict)
 
         if obs:

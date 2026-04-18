@@ -279,7 +279,11 @@ async def _run_layer_transition(
         round_num=round_num,
     ):
         transition = await call()
-    state.apply_transition(transition, schema=config.pipeline_schema)
+    state.adopt_transition(
+        transition.opt_search_point,
+        transition.pipeline_params,
+        schema=config.pipeline_schema,
+    )
     if obs is not None:
         event_cls: type = L2Applied if phase == CampaignPhase.REFINE_STRATEGY else L3Applied
         with graceful(f"{event_cls.__name__} emit failed"):

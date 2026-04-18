@@ -1,9 +1,9 @@
-"""Notebook display — ``NotebookDisplay`` callback bundle.
+"""Notebook display — ``NotebookDisplay`` listener.
 
-Wires the primitives + phase-dispatch layers into the ``RunCallbacks``
-interface consumed by notebook optimization runs. The class is the only
-thing in this file; formatting helpers live in ``notebook_primitives``
-and phase handlers / analytics live in ``notebook_phase``.
+Implements the ``RunListener`` display protocol (``on_phase``,
+``on_candidate_scored``, ``on_sample_scored``, ``on_round_complete``)
+directly — no adapter needed. Pass an instance as ``display=`` to
+``run_optimization``.
 """
 
 from __future__ import annotations
@@ -36,14 +36,13 @@ from .notebook_primitives import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunCallbacks
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 class NotebookDisplay:
-    """Callback bundle for notebook optimization runs."""
+    """Notebook listener — consumed directly by ``RunListener.display``."""
 
     def __init__(
         self,
@@ -65,16 +64,6 @@ class NotebookDisplay:
         self.query_counter = 0
         self.scoring_formula = scoring_formula
 
-    def as_callbacks(self) -> RunCallbacks:
-        from promptpotter.application.campaign.callbacks import RunCallbacks
-
-        return RunCallbacks(
-            on_round_complete=self.on_round,
-            on_candidate_scored=self.on_candidate,
-            on_sample_scored=self.on_query,
-            on_phase=self.on_phase,
-        )
-
     def on_phase(self, event: PhaseEvent) -> None:
         _dispatch_phase(event, self.state)
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
@@ -86,7 +75,7 @@ class NotebookDisplay:
         ):
             del self.campaign_rounds[self.initial_len :]
 
-    def on_query(
+    def on_sample_scored(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
     ) -> None:
         self.query_counter += 1
@@ -102,7 +91,7 @@ class NotebookDisplay:
             flush=True,
         )
 
-    def on_candidate(self, idx: int, total: int, scores: dict) -> None:
+    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         label = f"C{idx + 1}"
         w = 66
 
@@ -172,7 +161,7 @@ class NotebookDisplay:
         else:
             print(f"  {_box_bottom(width=w)}")
 
-    def on_round(self, round_result: RoundResult, l1_stall_count: int) -> None:
+    def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         self.query_counter = 0
         self.state.l1_stall_count = l1_stall_count
 

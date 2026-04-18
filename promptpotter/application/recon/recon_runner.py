@@ -168,7 +168,7 @@ async def run_recon(
         axes.sort(key=_axis_sort_key)
 
     # Evaluate baseline
-    baseline_results, baseline_scores, baseline_cached = await score_search_point(
+    baseline_results, baseline_scores, baseline_cached, _ = await score_search_point(
         baseline,
         dataset,
         scan_ctx,
@@ -301,7 +301,7 @@ async def run_recon(
                     pp.setdefault(axis_node, {})[axis_name] = value
                 perturbed = baseline.derive(pipeline_params=pp)
 
-            results, scores, cached = await score_search_point(
+            results, scores, cached, _ = await score_search_point(
                 perturbed,
                 dataset,
                 scan_ctx,

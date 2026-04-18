@@ -201,7 +201,7 @@ async def score_search_point(
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
-) -> tuple[list[QueryResult], dict[str, Any], bool]:
+) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
     """Evaluate a search point via backend with chain-addressed caching.
 
     Two cache tiers (prior-result + per-node) share one prefix chain.
@@ -269,8 +269,6 @@ async def score_search_point(
         raise KeyboardInterrupt()
 
     scores = compute_composite_score(results, pipeline_schema, round_scorer=ctx.round_scorer)
-    if escalation_signal:
-        scores["escalation_signal"] = escalation_signal.to_dict()
 
     _save_run(results, scores)
     if store and backend_id:
@@ -293,4 +291,4 @@ async def score_search_point(
                 )
             )
 
-    return results, scores, False
+    return results, scores, False, escalation_signal

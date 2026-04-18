@@ -389,8 +389,6 @@ async def run_optimization_notebook(
         run_optimization as _orch_run_optimization,
     )
 
-    callbacks = display.as_callbacks()
-
     result = await _orch_run_optimization(
         dataset,
         campaign_config,
@@ -400,7 +398,7 @@ async def run_optimization_notebook(
         experiment_id=experiment_id,
         task_context=task_context,
         session_id=session_id,
-        callbacks=callbacks,
+        display=display,
         langfuse_session_id=langfuse_session_id,
         cycle_id=resolved_cycle_id,
     )

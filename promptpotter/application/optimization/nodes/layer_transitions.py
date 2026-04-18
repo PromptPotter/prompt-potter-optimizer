@@ -16,7 +16,6 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.nodes.formatting import (
-    L2IntelligenceData,
     assess_candidate_diversity,
     build_candidate_comparison,
     build_trajectory_report,
@@ -242,25 +241,23 @@ async def refine_strategy(
     runtime_failures_accumulated = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
 
     intelligence_sections = format_l2_intelligence(
-        L2IntelligenceData(
-            escalation_section=escalation_section,
-            warning_inventory=opt_sp.memory.warning_inventory or None,
-            critique_text=opt_sp.memory.critique_text,
-            l2_directive=opt_sp.memory.l2_directive,
-            search_memory_digest=(
-                search_memory.to_strategic_digest(include_correlations=True)
-                if search_memory is not None
-                else None
-            ),
-            trajectory=build_trajectory_report(rounds) if rounds else None,
-            candidate_comparison=(
-                build_candidate_comparison(candidate_scores) if candidate_scores else None
-            ),
-            diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
-            validation_failures=validation_failures or None,
-            runtime_failures=runtime_failures or None,
-            runtime_failures_accumulated=runtime_failures_accumulated,
-        )
+        escalation_section=escalation_section,
+        warning_inventory=opt_sp.memory.warning_inventory or None,
+        critique_text=opt_sp.memory.critique_text,
+        l2_directive=opt_sp.memory.l2_directive,
+        search_memory_digest=(
+            search_memory.to_strategic_digest(include_correlations=True)
+            if search_memory is not None
+            else None
+        ),
+        trajectory=build_trajectory_report(rounds) if rounds else None,
+        candidate_comparison=(
+            build_candidate_comparison(candidate_scores) if candidate_scores else None
+        ),
+        diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
+        validation_failures=validation_failures or None,
+        runtime_failures=runtime_failures or None,
+        runtime_failures_accumulated=runtime_failures_accumulated,
     )
 
     compile_vars = {

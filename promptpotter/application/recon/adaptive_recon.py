@@ -166,7 +166,7 @@ def make_scoring_fn(
             base_pipeline_params=_base_pp,
             schema=ctx.pipeline_schema,
         )
-        results, scores, cached = await score_search_point(
+        results, scores, cached, _ = await score_search_point(
             sp,
             dataset,
             ctx,

@@ -9,7 +9,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.callbacks import RunCallbacks
+from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.config import LoopConfig
 from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
@@ -26,7 +26,6 @@ from promptpotter.application.optimization.nodes.formatting import candidate_sum
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.application.scoring.metrics import compute_composite_score
-from promptpotter.domain.opt_search_point import OptSearchPoint
 
 # Module-level import for test monkeypatching.
 from promptpotter.infrastructure.llm import client as _llm_client
@@ -217,7 +216,7 @@ async def _score_and_select(
     env: LoopEnv,
     scoring_dataset: list[dict],
     config: LoopConfig,
-    callbacks: RunCallbacks,
+    callbacks: RunListener,
     obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1ScoringResult:
@@ -345,7 +344,7 @@ async def execute_round(
     env: LoopEnv,
     scoring_dataset: list[dict],
     config: LoopConfig,
-    callbacks: RunCallbacks,
+    callbacks: RunListener,
     degradation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
 ) -> RoundResult:
@@ -466,15 +465,15 @@ async def execute_round(
                 )
             )
         with graceful("PromptVersion emit failed"):
-            winner_osp = OptSearchPoint.from_prompt_fields(scoring_result.winner_prompt_fields)
+            w_osp = scoring_result.winner_osp
             obs.emit(
                 PromptVersion(
                     campaign_id=env.obs_campaign_id,
                     round_num=round_num,
-                    prompt_fields_id=winner_osp.id,
-                    rendered_prompt=winner_osp.render(),
-                    layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_id=winner_osp.parent_id,
+                    prompt_fields_id=w_osp.id,
+                    rendered_prompt=w_osp.render(),
+                    layer1_fields={f: getattr(w_osp, f) for f in PROMPT_STRING_FIELDS},
+                    parent_id=w_osp.parent_id,
                 )
             )
 
