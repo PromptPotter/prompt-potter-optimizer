@@ -1,4 +1,4 @@
-"""``show-status`` subcommand — raw JSON cat of the canonical dashboard files."""
+"""``show-status`` subcommand — dashboard + control + last result."""
 
 from __future__ import annotations
 
@@ -10,15 +10,17 @@ from typing import Any
 from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
 from promptpotter.presentation.cli.result import CommandResult
 from promptpotter.presentation.cli.session import load_session
+from promptpotter.presentation.views import render_status
 
 
 async def cmd_status(args: argparse.Namespace) -> CommandResult:
-    """Emit raw JSON from the canonical session artifacts.
+    """Emit dashboard + control + last result.
 
     ``dashboard.json`` is the single source of truth for the live dashboard
-    (see ``infrastructure/persistence/session_emitter.py``). The webapp
-    reads it directly; this command just cats it alongside the control
-    file and optimize_result so a human can ``jq`` the same shape.
+    (see ``infrastructure/persistence/session_emitter.py``). JSON mode
+    cats it alongside the control file and optimize_result so a human can
+    ``jq`` the same shape; human mode delegates to ``render_status`` in
+    ``presentation/views`` — the same renderer the notebook will adopt.
     """
     ctx = load_session(args)
     session_dir = ctx.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
@@ -38,4 +40,9 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 payload[key] = json.loads(path.read_text(encoding="utf-8"))
 
-    return CommandResult(data=payload)
+    human = render_status(
+        payload.get("dashboard", {}),
+        payload.get("control"),
+        payload.get("optimize_result"),
+    )
+    return CommandResult(data=payload, human=human)

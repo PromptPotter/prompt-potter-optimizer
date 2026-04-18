@@ -142,6 +142,8 @@ Features land left → right. Notebook is the daily driver and the testing groun
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb` — `promptpotter/presentation/ui/campaign/` is pure display, delegates to `application/`. Most features land here first.
 2. **CLI**: `python -m promptpotter` — scripted and local workflows. Core path: `init → [set-task] → optimize → show-results`. Optional recon step: `recon → show-recon` inserted between set-task and optimize. Lives at `presentation/cli/`.
+
+Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/` — pure functions over disk-loaded or in-memory round dicts. Live phase / candidate / per-query output during `optimize` is notebook-only for now; unifying the live listener is the next follow-up.
 3. **FastAPI REST API**: `promptpotter/main.py` mounts routers from `presentation/api/` — `/api/v1/backends`, `/api/v1/campaigns`. Programmatic access for automation and the webapp.
 4. **Next.js webapp** (planned, M10 → M11): browser surface, consumes the FastAPI API. Reads the M9 file-directory view model. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 

@@ -370,10 +370,11 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 async def cmd_results(args: argparse.Namespace) -> CommandResult:
     """Show campaign results, optionally save winner."""
     from promptpotter.application.campaign.utils import save_campaign_winner
-    from promptpotter.presentation.cli.renderers import (
+    from promptpotter.presentation.views import (
         render_campaign_summary,
         render_flip_tracking,
         render_lineage,
+        render_progress,
     )
 
     ctx = load_session(args)
@@ -394,6 +395,9 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
 
     human_parts = [render_campaign_summary(campaign_rounds)]
+    progress = render_progress(campaign_rounds)
+    if progress:
+        human_parts.append(progress)
     flips = render_flip_tracking(campaign_rounds)
     if flips:
         human_parts.append(flips)

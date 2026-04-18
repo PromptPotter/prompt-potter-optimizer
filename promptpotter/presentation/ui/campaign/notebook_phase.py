@@ -61,59 +61,14 @@ _fmt_delta = _fmt_delta_primitive
 
 
 def show_progress(campaign_rounds: list, window: int = 8) -> None:
-    """Print training-style progress summary after each round."""
-    if not campaign_rounds:
-        print("No rounds to display.")
-        return
+    """Print training-style progress summary after each round.
 
-    has_composite = any(
-        rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]
-        for rd in campaign_rounds
-    )
+    Thin wrapper over ``presentation.views.render_progress`` — the same
+    renderer the CLI ``show-results`` uses.
+    """
+    from promptpotter.presentation.views import render_progress
 
-    if has_composite:
-        print(
-            f"\n{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-            f" {'Rolling Avg':>13s} {'Trend':>8s}"
-        )
-    else:
-        print(f"\n{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}")
-    accuracies = []
-
-    for rd in campaign_rounds:
-        acc = rd["accuracy"]
-        accuracies.append(acc)
-        n = len(accuracies)
-
-        window_slice = accuracies[-window:]
-        rolling_avg = sum(window_slice) / len(window_slice)
-
-        if n <= 1:
-            trend_str = "-"
-        else:
-            delta = acc - accuracies[-2]
-            if abs(delta) < 0.001:
-                trend_str = "+0.0%  <-- plateau"
-            elif delta > 0:
-                trend_str = f"+{delta:.1%}"
-            else:
-                trend_str = f"{delta:.1%}"
-
-        round_label = str(rd["round"])
-
-        if has_composite:
-            comp = rd.get("composite", acc)
-            print(f"  {round_label:<5s} {acc:>8.1%} {comp:>9.4f} {rolling_avg:>12.1%}  {trend_str}")
-        else:
-            print(f"  {round_label:<5s} {acc:>8.1%} {rolling_avg:>12.1%}  {trend_str}")
-
-    if len(accuracies) >= 3:
-        recent = accuracies[-3:]
-        recent_avg = sum(recent) / len(recent)
-        if all(abs(a - recent_avg) < 0.005 for a in recent):
-            print(
-                f"  {YELLOW}-- Plateau: rolling avg stable at {recent_avg:.1%} for 3 rounds{RESET}"
-            )
+    print(render_progress(campaign_rounds, window=window))
 
 
 def show_axis_profiles(profiles: list[dict]) -> None:
@@ -323,92 +278,34 @@ def format_pipeline_overrides(
 
 
 def show_campaign_summary(campaign_rounds: list) -> None:
-    """Display campaign comparison table as DataFrame."""
-    if not campaign_rounds:
-        print("No campaign rounds to display.")
-        return
+    """Print campaign comparison table.
 
-    import pandas as pd
-    from IPython.display import display as ipy_display
+    Thin wrapper over ``presentation.views.render_campaign_summary``.
+    """
+    from promptpotter.presentation.views import render_campaign_summary
 
-    rows = []
-    for rd in campaign_rounds:
-        rows.append(
-            {
-                "round": rd["round"],
-                "label": rd["label"][:40],
-                "hit@1": rd["hits"],
-                "total": rd["total"],
-                "accuracy": f"{rd['accuracy']:.1%}",
-                "prompt_id": rd["prompt_fields"].id[:12],
-            }
-        )
-
-    print(f"CAMPAIGN SUMMARY ({len(campaign_rounds)} rounds)")
-    print(f"{'=' * 70}")
-    ipy_display(pd.DataFrame(rows))
+    print(render_campaign_summary(campaign_rounds))
 
 
 def show_flip_tracking(campaign_rounds: list) -> None:
-    """Compare first vs last round, display per-query flip table."""
-    if len(campaign_rounds) < 2:
-        print("Need at least 2 rounds for flip tracking.")
-        return
+    """Compare first vs last round, show per-query flips.
 
-    base_r = campaign_rounds[0]["results"]
-    final_r = campaign_rounds[-1]["results"]
+    Thin wrapper over ``presentation.views.render_flip_tracking``.
+    """
+    from promptpotter.presentation.views import render_flip_tracking
 
-    if not base_r or not final_r:
-        print("Skipping flip tracking — baseline or final results are empty.")
-        return
-
-    import pandas as pd
-    from IPython.display import display as ipy_display
-
-    flips = []
-    for br, fr in zip(base_r, final_r, strict=False):
-        b_hit = br["hit"]
-        f_hit = fr["hit"]
-        if b_hit != f_hit:
-            flips.append(
-                {
-                    "query": br["query"][:50],
-                    "flip": "MISS->HIT" if f_hit else "HIT->MISS",
-                    "base_pred": br["predicted"][:35],
-                    "final_pred": fr["predicted"][:35],
-                    "ground_truth": br["ground_truth"][:35],
-                }
-            )
-
-    gained = sum(1 for f in flips if f["flip"] == "MISS->HIT")
-    lost = sum(1 for f in flips if f["flip"] == "HIT->MISS")
-
-    print(f"FLIP TRACKING (baseline -> round {campaign_rounds[-1]['round']})")
-    print(f"  Queries gained (MISS->HIT): {gained}")
-    print(f"  Queries lost (HIT->MISS):   {lost}")
-    print(f"  Net change:                 {gained - lost:+d}")
-    print()
-    if flips:
-        ipy_display(pd.DataFrame(flips))
+    out = render_flip_tracking(campaign_rounds)
+    print(out if out else "Need at least 2 rounds with results for flip tracking.")
 
 
 def show_lineage_chain(campaign_rounds: list) -> None:
-    """Display OptSearchPoint lineage chain across rounds."""
-    if not campaign_rounds:
-        print("No campaign rounds to display.")
-        return
+    """Display OptSearchPoint lineage chain across rounds.
 
-    print("LINEAGE CHAIN")
-    print("=" * 50)
-    for i, rd in enumerate(campaign_rounds):
-        ps = rd["prompt_fields"]
-        parent = ps.parent_id[:12] if ps.parent_id else "root"
-        arrow = "  " if i == 0 else "  -> "
-        print(
-            f"{arrow}[{ps.id[:12]}] Round {rd['round']}: {rd['label'][:40]} ({rd['accuracy']:.1%})"
-        )
-        if ps.parent_id:
-            print(f"       parent: {parent}  |  changes: {ps.changes_description or 'none'}")
+    Thin wrapper over ``presentation.views.render_lineage``.
+    """
+    from promptpotter.presentation.views import render_lineage
+
+    print(render_lineage(campaign_rounds))
 
 
 # ---------------------------------------------------------------------------
