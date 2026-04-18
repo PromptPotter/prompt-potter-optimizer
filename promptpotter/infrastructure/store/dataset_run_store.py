@@ -43,34 +43,6 @@ class DatasetRunStore:
 
     def __init__(self, base_dir: Path):
         self._base_dir = base_dir
-        # In-memory caches — invalidated on save()/register_alias()
-        self._index_cache: dict[str, dict] = {}
-        self._alias_cache: dict[str, dict] = {}
-
-    # -- internal cache helpers -----------------------------------------------
-
-    def _load_index(self, backend_id: str) -> dict:
-        """Return cached index, loading from disk on first access."""
-        if backend_id not in self._index_cache:
-            self._index_cache[backend_id] = read_json_optional(self._index_path(backend_id)) or {
-                "dataset_runs": [],
-                "total": 0,
-                "schema_version": DATASET_RUNS_SCHEMA_VERSION,
-            }
-        return self._index_cache[backend_id]
-
-    def _load_aliases(self, backend_id: str) -> dict:
-        """Return cached alias data, loading from disk on first access."""
-        if backend_id not in self._alias_cache:
-            self._alias_cache[backend_id] = read_json_optional(self._alias_path(backend_id)) or {
-                "groups": []
-            }
-        return self._alias_cache[backend_id]
-
-    def _invalidate_cache(self, backend_id: str) -> None:
-        """Drop all in-memory caches for a backend (after write)."""
-        self._index_cache.pop(backend_id, None)
-        self._alias_cache.pop(backend_id, None)
 
     # -- path helpers ---------------------------------------------------------
 
@@ -141,7 +113,6 @@ class DatasetRunStore:
             index["total"] = len(entries)
             write_json(index_path, index)
 
-        self._invalidate_cache(backend_id)
         return detail_path
 
     def load_by_id(
@@ -154,7 +125,12 @@ class DatasetRunStore:
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
-        return self._load_index(backend_id).get("dataset_runs", [])
+        index = read_json_optional(self._index_path(backend_id)) or {
+            "dataset_runs": [],
+            "total": 0,
+            "schema_version": DATASET_RUNS_SCHEMA_VERSION,
+        }
+        return index.get("dataset_runs", [])
 
     def load_since(
         self,
@@ -281,7 +257,6 @@ class DatasetRunStore:
         data["groups"] = remaining
         path.parent.mkdir(parents=True, exist_ok=True)
         write_json(path, data)
-        self._alias_cache.pop(backend_id, None)
 
     def register_prompt_alias(
         self,
@@ -307,7 +282,7 @@ class DatasetRunStore:
         """Return all hashes equivalent to *rp_hash* (including itself)."""
         if not rp_hash:
             return set()
-        data = self._load_aliases(backend_id)
+        data = read_json_optional(self._alias_path(backend_id)) or {"groups": []}
         for group in data.get("groups", []):
             if rp_hash in group:
                 return set(group)

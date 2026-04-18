@@ -3,14 +3,13 @@ Pipeline discovery: factory and dynamic pipeline view.
 
 ``parse_pipeline_response()`` parses a backend ``GET /pipeline`` JSON
 response into a ``PipelineSchema``.  ``compute_pipeline_view()`` fetches
-and caches the response.  No backend-specific defaults — the schema is
-built entirely from the live response.
+the response.  No backend-specific defaults — the schema is built
+entirely from the live response.
 """
 
 from __future__ import annotations
 
 import logging
-import time
 from datetime import UTC
 from typing import TYPE_CHECKING, Any
 
@@ -21,8 +20,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-
-PIPELINE_CACHE_TTL: float = 30.0  # TTL for cached GET /pipeline responses
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.backend.client import BackendClient
@@ -173,25 +170,6 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     )
 
 
-_PIPELINE_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
-
-
-def _get_cached(base_url: str) -> dict[str, Any] | None:
-    """Return cached raw response if still within TTL, else None."""
-    entry = _PIPELINE_CACHE.get(base_url)
-    if entry is None:
-        return None
-    ts, data = entry
-    if (time.monotonic() - ts) > PIPELINE_CACHE_TTL:
-        del _PIPELINE_CACHE[base_url]
-        return None
-    return data
-
-
-def _set_cached(base_url: str, data: dict[str, Any]) -> None:
-    _PIPELINE_CACHE[base_url] = (time.monotonic(), data)
-
-
 async def compute_pipeline_view(
     backend_client: BackendClient,
 ) -> dict[str, Any]:
@@ -201,35 +179,19 @@ async def compute_pipeline_view(
       backend_pipeline  — PipelineSchema.model_dump()
       computed_nodes    — pipeline nodes as dicts (direct copy for now)
       fetched_at        — ISO timestamp
-      source            — "live" | "cached" | "default"
+      source            — "live" | "default"
     """
     from datetime import datetime
 
-    base_url = backend_client.base_url
-    source = "live"
-    raw: dict[str, Any] | None = None
+    try:
+        raw: dict[str, Any] | None = await backend_client.fetch_pipeline()
+        source = "live"
+    except Exception:
+        logger.warning("Backend unreachable at %s; returning empty schema", backend_client.base_url)
+        raw = None
+        source = "default"
 
-    # Check cache
-    cached = _get_cached(base_url)
-    if cached is not None:
-        raw = cached
-        source = "cached"
-
-    # Fetch from backend
-    if raw is None:
-        try:
-            raw = await backend_client.fetch_pipeline()
-            _set_cached(base_url, raw)
-            source = "live"
-        except Exception:
-            logger.warning("Backend unreachable at %s; returning empty schema", base_url)
-            raw = None
-            source = "default"
-
-    # Parse to PipelineSchema
     schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
-
-    # Computed steps (direct copy from backend pipeline for now)
     computed_nodes = [s.model_dump() for s in schema.nodes]
 
     return {

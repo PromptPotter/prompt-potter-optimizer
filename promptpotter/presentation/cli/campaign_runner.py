@@ -16,7 +16,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import logging
 import sys
@@ -330,12 +329,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         )
     finally:
         set_round_recorder(None)
-
-        if state_path.exists() and not ctx.state.get("cycle_id"):
-            with contextlib.suppress(json.JSONDecodeError, OSError):
-                live = json.loads(state_path.read_text(encoding="utf-8"))
-                if live.get("cycle_id"):
-                    ctx.state["cycle_id"] = live["cycle_id"]
 
     ctx.state["cycle_id"] = cycle_result.cycle_id
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
