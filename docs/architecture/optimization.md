@@ -363,7 +363,7 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
-**Round-boundary dataset mutation — zero-signal filter.** Immediately after `SearchMemory.on_round_complete()`, `campaign/runner.py::_maybe_apply_zero_signal_filter` runs. When enabled (`LoopConfig.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are physically moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. This is the **only** sanctioned round-boundary mutation of the active dataset; all other intelligence tiers are read-only signals into LLM prompts. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
+**Round-boundary dataset mutation — zero-signal filter.** Immediately after `SearchMemory.on_round_complete()`, `campaign/runner.py::_maybe_apply_zero_signal_filter` runs. When enabled (`CampaignConfig.optimization.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are physically moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. This is the **only** sanctioned round-boundary mutation of the active dataset; all other intelligence tiers are read-only signals into LLM prompts. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
 
 ## Stale Data Load Protocol
 

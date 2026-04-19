@@ -9,7 +9,7 @@ the *next* round loads the smaller active set.
 
 No LLM, no statistics beyond Bernoulli-variance gating.  Uses
 ``SearchMemory.dead_queries()`` which already tracks per-query hit
-sequences.  Off by default — enable via ``LoopConfig.zero_signal_filter_*``.
+sequences.  Off by default — enable via ``CampaignConfig.optimization.zero_signal_filter_*``.
 """
 
 from __future__ import annotations
