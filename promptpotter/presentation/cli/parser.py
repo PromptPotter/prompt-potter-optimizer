@@ -62,11 +62,6 @@ def build_parser() -> argparse.ArgumentParser:
     p_tc.add_argument("--task-file", default=None)
     p_tc.add_argument("--task-text", default=None)
 
-    p_recon = sub.add_parser("recon", help="Run reconnaissance pass (sensitivity scan)")
-    p_recon.add_argument("--variants-file", required=True, help="Recon variants JSON")
-    p_recon.add_argument("--sample-size", type=int, default=None)
-
-    sub.add_parser("show-recon", help="Show recon analytics and seed campaign")
     p_opt = sub.add_parser("optimize", help="Run optimization loop")
     p_opt.add_argument(
         "--from",

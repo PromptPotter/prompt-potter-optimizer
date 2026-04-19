@@ -44,7 +44,6 @@ from .notebook_primitives import (
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
-    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store import Stores
 
@@ -60,7 +59,6 @@ class NotebookDisplay:
         l1_patience: int,
         pipeline_schema: PipelineSchema | None,
         store: Stores,
-        recon_brief: ReconBrief | None = None,
         scoring_formula: str | None = None,
     ) -> None:
         self.campaign_rounds = campaign_rounds
@@ -69,7 +67,6 @@ class NotebookDisplay:
         self.pipeline_schema = pipeline_schema
         self.initial_len = len(campaign_rounds)
         self.state = _CycleDisplayState(baseline_accuracy=baseline_acc)
-        self.state.recon_brief = recon_brief
         self.query_counter = 0
         self.scoring_formula = scoring_formula
         # Resolved lazily each call so auto-mint during the run is picked up.

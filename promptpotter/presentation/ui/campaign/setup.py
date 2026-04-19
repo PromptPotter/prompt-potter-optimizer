@@ -134,9 +134,6 @@ def dev_reload() -> None:
         "promptpotter.application.optimization.nodes.generate",
         "promptpotter.application.optimization.nodes.score",
         "promptpotter.application.optimization.nodes.formatting",
-        "promptpotter.application.recon.adaptive_recon",
-        "promptpotter.application.recon.recon_runner",
-        "promptpotter.application.recon.recon_report",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
         "promptpotter.presentation.ui.campaign.notebook_primitives",
@@ -145,13 +142,10 @@ def dev_reload() -> None:
         "promptpotter.presentation.ui.campaign.optimize",
         "promptpotter.presentation.ui.campaign.setup",
         "promptpotter.presentation.ui.campaign.campaigns",
-        "promptpotter.presentation.ui.campaign.search",
-        "promptpotter.presentation.ui.campaign.search_recon",
         # NOTE: Do NOT reload promptpotter.domain.* or dataclass modules —
         # Pydantic/dataclass classes break when reloaded (existing
-        # instances fail type checks).  recon_results.py has ReconBrief
-        # dataclass, so it must not be reloaded.
-        # For model/dataclass changes, restart the kernel.
+        # instances fail type checks).  For model/dataclass changes,
+        # restart the kernel.
     ]:
         if mod in sys.modules:
             importlib.reload(sys.modules[mod])

@@ -3,7 +3,6 @@
     "dataset_name": "hotpotqa",
     "scoring": "hotpotqa_f1(predicted, ground_truth)",
     "sp_budget_ttest": 20,
-    "recon_sample_size": 50,
     "exclude_nodes": [],
     "pipeline_overrides": {},
     "optimization": {

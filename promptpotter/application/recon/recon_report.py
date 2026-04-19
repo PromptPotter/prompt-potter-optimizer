@@ -201,7 +201,15 @@ async def resume_or_build_diagnostic(
         serialize_adaptive_recon_plan,
     )
 
-    ss = campaign_config.adaptive_recon.model_dump()
+    # Recon is a dormant archive — ReconConfig was removed from CampaignConfig.
+    # If revived, restore a ReconConfig sub-model on CampaignConfig and replace
+    # these hardcoded defaults with campaign_config.adaptive_recon.model_dump().
+    ss: dict[str, Any] = {
+        "n_diagnostic": 6,
+        "max_rounds": 3,
+        "stop_threshold": 0.0,
+        "seed": 42,
+    }
     if variant_library is None:
         variant_library = load_variant_library()
 
@@ -209,7 +217,7 @@ async def resume_or_build_diagnostic(
         baseline.instruction,
         variant_library,
         ss,
-        seed=campaign_config.adaptive_recon.seed,
+        seed=int(ss["seed"]),
     )
 
     match = store.recon_plans.find_reusable_plan(backend_id, plan_id)
@@ -259,7 +267,7 @@ async def resume_or_build_diagnostic(
     diagnostic, diag_summary = build_diagnostic_set(
         dataset,
         baseline_results,
-        n_queries=ss.get("n_diagnostic", 6),
+        n_queries=int(ss.get("n_diagnostic", 6)),
     )
     vl_hash = hashlib.sha256(json.dumps(variant_library, sort_keys=True).encode()).hexdigest()[:12]
     config = {

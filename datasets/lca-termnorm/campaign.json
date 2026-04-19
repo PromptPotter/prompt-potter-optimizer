@@ -3,8 +3,9 @@
     "dataset_name": "train",
     "scoring": "rr(ground_truth_rank)",
     "sp_budget_ttest": 20,
-    "recon_sample_size": 10,
-    "exclude_nodes": ["llm_ranking"],
+    "exclude_nodes": [
+      "llm_ranking"
+    ],
     "pipeline_overrides": {
       "web_search": {
         "max_sites": 10,

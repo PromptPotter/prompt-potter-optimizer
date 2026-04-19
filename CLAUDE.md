@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
-**Note:** `application/recon/` (sensitivity scan) is a dormant leftover from a prior iteration. Not used in the current workflow; may be revived later. Ignore unless explicitly working on reviving it.
+**Note:** `application/recon/` (sensitivity scan) is a dormant code archive from a prior iteration. No CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it. Revive by re-wiring the seams if needed. Ignore otherwise.
 
 **Self-healing optimization — two rails.** Failures attach to the candidate that produced them (per-candidate `OptSearchPoint.memory`), never to the round. Rail 1 (`ValidationFailure`, pre-eval): L2 teaches L1 what not to propose. Rail 2 (`RuntimeFailure`, mid-eval): L2 adjusts its own strategy; L3 replans if the pattern persists. Full mechanics in [`docs/architecture/optimization.md § Self-healing optimization`](docs/architecture/optimization.md).
 
@@ -103,7 +103,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 ## Key Patterns
 
-- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `project_root`, `pipeline_schema`, `pipeline_params`, `recon_brief`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
+- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `project_root`, `pipeline_schema`, `pipeline_params`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, CampaignStore, DatasetRunStore, PlanStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.

@@ -46,10 +46,6 @@ class SessionCtx:
     def task_context(self) -> dict | None:
         return self.state.get("task_context")
 
-    @property
-    def recon_variants(self) -> dict:
-        return self.state.get("recon_variants") or {}
-
     def save_phase(self, phase: str, *, log: str = "") -> None:
         """Set phase, persist state, optionally append log entry."""
         self.state["phase"] = phase

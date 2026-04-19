@@ -4,9 +4,9 @@
 Pydantic sub-models with ``extra='forbid'`` so typos in persisted
 ``campaign.json`` files surface as ``ValidationError`` instead of silent
 drops.  Runtime context (``session_id``, ``project_root``, ``pipeline_schema``,
-``recon_brief``, ``pipeline_params``) lives on ``SessionEnv``; loop
-infrastructure on ``LoopEnv``.  The three objects are cleanly separated —
-services take whichever two they need.
+``pipeline_params``) lives on ``SessionEnv``; loop infrastructure on
+``LoopEnv``.  The three objects are cleanly separated — services take
+whichever two they need.
 """
 
 from __future__ import annotations
@@ -29,7 +29,6 @@ __all__ = [
     "OptimizationConfig",
     "OptimizerLLMConfig",
     "PreflightWarning",
-    "ReconConfig",
     "compute_preflight_metrics",
     "configure_and_apply_pipeline",
     "create_llm_client",
@@ -108,17 +107,6 @@ class OptimizerLLMConfig(BaseModel):
     max_tokens: int = Field(2000)
 
 
-class ReconConfig(BaseModel):
-    """Sensitivity scan parameters (``campaign_config.adaptive_recon``)."""
-
-    model_config = ConfigDict(extra="forbid")
-
-    n_diagnostic: int = Field(6)
-    max_rounds: int = Field(3)
-    stop_threshold: float = Field(0.0)
-    seed: int = Field(42)
-
-
 class CampaignConfig(BaseModel):
     """Top-level user-authored campaign configuration.
 
@@ -137,7 +125,6 @@ class CampaignConfig(BaseModel):
     dataset_name: str = Field("")
     starting_prompt: str = Field("default")
     sp_budget_ttest: int = Field(20)
-    recon_sample_size: int = Field(50)
     exclude_nodes: list[str] = Field(default_factory=list)
     pipeline_overrides: dict = Field(default_factory=dict)
     scoring: str | dict[str, str] | None = Field(None)
@@ -145,7 +132,6 @@ class CampaignConfig(BaseModel):
     # Nested
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
-    adaptive_recon: ReconConfig = Field(default_factory=ReconConfig)
 
     @model_validator(mode="before")
     @classmethod
@@ -239,7 +225,6 @@ def compute_preflight_metrics(
     dataset_size: int,
     *,
     exclude_nodes: list[str] | None = None,
-    has_recon_brief: bool = False,
 ) -> PreflightMetrics:
     """Derive display-ready metrics from ``CampaignConfig`` + ``SessionEnv``.
 
@@ -273,7 +258,7 @@ def compute_preflight_metrics(
         est_calls=est_calls,
         l2_label=f"enabled, patience={opt.l2_patience}" if opt.enable_l2 else "disabled",
         l3_label=f"enabled, patience={opt.l3_patience}" if opt.enable_l3 else "disabled",
-        strategy="RECON-AWARE" if has_recon_brief else "FREEFORM",
+        strategy="FREEFORM",
     )
 
 

@@ -1,6 +1,5 @@
-"""Tests for Wave 2a: min_sample_size() and build_diagnostic_set() auto-adjustment."""
+"""Tests for min_sample_size — inverse of min_detectable_effect."""
 
-from promptpotter.application.recon.adaptive_recon import build_diagnostic_set
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     min_sample_size,
@@ -30,29 +29,3 @@ class TestMinSampleSize:
     def test_large_mde_small_n(self):
         n = min_sample_size(0.5)
         assert n < 20
-
-
-class TestBuildDiagnosticSetAutoAdjust:
-    def _make_data(self, n: int) -> tuple[list, list]:
-        dataset = [{"query": f"q{i}", "ground_truth": f"gt{i}"} for i in range(n)]
-        baseline = [{"query": f"q{i}", "hit": i % 2 == 0} for i in range(n)]
-        return dataset, baseline
-
-    def test_small_n_adjusted_upward(self):
-        """When n_queries=3 and pool is large enough, auto-adjust kicks in."""
-        dataset, baseline = self._make_data(100)
-        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=3)
-        # Should have been adjusted upward from 3
-        assert summary["n_queries"] > 3
-
-    def test_adjustment_clamped_to_pool(self):
-        """When pool is smaller than min_n, clamp to pool size."""
-        dataset, baseline = self._make_data(10)
-        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=3)
-        assert summary["n_queries"] <= 10
-
-    def test_large_n_not_adjusted(self):
-        """When n_queries already exceeds min_n, no adjustment."""
-        dataset, baseline = self._make_data(200)
-        _diagnostic, summary = build_diagnostic_set(dataset, baseline, n_queries=100)
-        assert summary["n_queries"] == 100

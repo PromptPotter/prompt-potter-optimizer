@@ -34,7 +34,6 @@ from .notebook_primitives import (
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
@@ -77,40 +76,12 @@ def show_feedback_preflight(
     *,
     session: SessionEnv | None = None,
     pipeline_schema: PipelineSchema | None = None,
-    recon_df=None,
-    axis_profiles=None,
-    recon_variants=None,
-    difficulty_df=None,
-) -> ReconBrief | None:
+) -> None:
     """Display a rich pre-flight walkthrough for the feedback cycle.
 
-    Builds scan context from raw DataFrames when available, then prints
-    three sections: configuration summary, round pipeline walkthrough,
-    and scan context preview.
-
-    Returns:
-        ReconBrief (or None) for passing to the run cell.
+    Prints two sections: configuration summary and round pipeline
+    walkthrough.
     """
-    # Build scan context from scan data when available
-    recon_brief = None
-    if recon_df is not None and axis_profiles is not None and recon_variants is not None:
-        from promptpotter.application.recon import prepare_recon_brief
-        from promptpotter.application.recon.recon_report import compute_difficulty_summary
-
-        baseline_acc = 0.0
-        if campaign_rounds:
-            baseline_acc = campaign_rounds[-1].get("accuracy", 0.0)
-
-        difficulty_summary = compute_difficulty_summary(difficulty_df)
-
-        recon_brief = prepare_recon_brief(
-            recon_df,
-            axis_profiles,
-            recon_variants,
-            baseline_acc,
-            difficulty_summary=difficulty_summary,
-        )
-
     _bl = _extract_campaign_baseline(campaign_rounds)
     bl = {
         "baseline_ps": _bl.baseline_ps,
@@ -125,11 +96,8 @@ def show_feedback_preflight(
         bl,
         dataset,
         exclude_nodes=list(campaign_config.exclude_nodes),
-        recon_brief=recon_brief,
         pipeline_schema=pipeline_schema or (session.pipeline_schema if session else None),
     )
-
-    return recon_brief
 
 
 def _print_preflight_sections(
@@ -139,10 +107,9 @@ def _print_preflight_sections(
     dataset: list,
     *,
     exclude_nodes: list[str],
-    recon_brief=None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> None:
-    """Print three-section preflight walkthrough."""
+    """Print two-section preflight walkthrough."""
     baseline_acc = bl["baseline_acc"]
     instruction = bl["instruction"]
     baseline_results = bl["baseline_results"]
@@ -156,7 +123,6 @@ def _print_preflight_sections(
         session,
         len(dataset),
         exclude_nodes=exclude_nodes,
-        has_recon_brief=recon_brief is not None,
     )
 
     opt = config.optimization
@@ -185,7 +151,6 @@ def _print_preflight_sections(
         print(f"    Nodes                : {m.nodes_detail}")
     if exclude_nodes:
         print(f"    Excluded             : {', '.join(exclude_nodes)}")
-    print(f"  Strategy               : {m.strategy}")
 
     # ── Section 2: Round Pipeline ──
     print()
@@ -207,41 +172,13 @@ def _print_preflight_sections(
 
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
-    print(f"     Strategy: {m.strategy}")
-    if recon_brief:
-        improving = recon_brief.improving_axes
-        leaderboard = recon_brief.leaderboard_text
-        n_leaderboard = leaderboard.count("\n") + 1 if leaderboard.strip() else 0
-        tested = recon_brief.tested_values
-        n_tested = (
-            sum(1 for line in tested.split("\n") if line.strip() and "values tested" in line)
-            if tested
-            else 0
-        )
-        sensitivity = recon_brief.sensitivity_text
-        n_axes = sensitivity.count("\n") + 1 if sensitivity.strip() else 0
-        difficulty = recon_brief.difficulty_text
-
-        print(f"     Scan leaderboard: {n_leaderboard} entries")
-        if n_leaderboard > 0:
-            # Show top performer from leaderboard
-            first_line = leaderboard.strip().split("\n")[0].strip()
-            print(f"     Top performer: {first_line}")
-        print(f"     Sensitivity axes: {n_axes}")
-        print(f"     Difficulty: {difficulty.strip()}")
-        print(f"     Improving axes: {len(improving)} ({', '.join(improving)})")
-        print(f"     Tested values: {n_tested} axes with per-value data")
-    else:
-        print("     (no scan data — LLM generates from failures only)")
+    print("     LLM generates from failures + critique + SearchMemory")
 
     # Step 4: LLM candidate generation
     print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")
     print(f"     Model: {model_name}  |  Temperature: {opt.creativity}")
     print(f"     Candidates: {opt.n_variants}")
-    if recon_brief:
-        print("     Output: prompt + pipeline_params_override per candidate")
-    else:
-        print("     Output: prompt variants")
+    print("     Output: prompt + pipeline_params_override per candidate")
 
     # Step 5: Backend evaluation
     print(f"  {CYAN}5. BACKEND EVALUATION{RESET}")
@@ -274,50 +211,6 @@ def _print_preflight_sections(
             f" {m.eff_queries}q, sequential elimination)"
         )
 
-    # ── Section 3: Scan Context Preview ──
-    if recon_brief:
-        print()
-        print(f"  {BOLD}SCAN CONTEXT PREVIEW{RESET} (injected into LLM meta-prompt)")
-        print("  " + "-" * 66)
-
-        # Leaderboard (top 10)
-        leaderboard = recon_brief.leaderboard_text
-        if leaderboard.strip():
-            lines = leaderboard.strip().split("\n")
-            print(f"  {CYAN}Leaderboard:{RESET}")
-            for line in lines[:10]:
-                print(f"  {line}")
-            if len(lines) > 10:
-                print(f"    ... {len(lines) - 10} more")
-
-        # Axis sensitivity
-        sensitivity = recon_brief.sensitivity_text
-        if sensitivity.strip():
-            print(f"  {CYAN}Axis sensitivity:{RESET}")
-            for line in sensitivity.strip().split("\n"):
-                print(f"  {line}")
-
-        # Difficulty
-        difficulty = recon_brief.difficulty_text
-        if difficulty.strip():
-            print(f"  {CYAN}Query difficulty:{RESET}")
-            print(f"  {difficulty.strip()}")
-
-        # Improving axes
-        improving = recon_brief.improving_axes
-        if improving:
-            print(f"  {CYAN}Improving axes:{RESET} {', '.join(improving)}")
-
-        # Tested values
-        tested = recon_brief.tested_values
-        if tested.strip():
-            lines = tested.strip().split("\n")
-            print(f"  {CYAN}Tested values:{RESET}")
-            for line in lines[:15]:
-                print(f"  {line}")
-            if len(lines) > 15:
-                print(f"    ... {len(lines) - 15} more lines")
-
     print("=" * 70)
 
 
@@ -332,7 +225,6 @@ async def run_optimization_notebook(
     campaign_config: CampaignConfig,
     *,
     langfuse_session_id: str | None = None,
-    recon_brief: ReconBrief | None = None,
     experiment_id: str | None = None,
     session: SessionEnv | None = None,
     task_context: TaskDecomposition | dict | None = None,
@@ -355,11 +247,6 @@ async def run_optimization_notebook(
     _bl = _extract_campaign_baseline(campaign_rounds)
     baseline_acc = _bl.baseline_acc
 
-    # --- Warn if scan context was lost (kernel restart) ---
-    if recon_brief is None and any(r.get("round") == "search" for r in campaign_rounds):
-        print(f"  {YELLOW}⚠ Scan context not available — running without scan data.{RESET}")
-        print("    Run the preflight cell to rebuild recon_brief from scan variables.")
-
     l1_patience = campaign_config.optimization.l1_patience
     display = NotebookDisplay(
         campaign_rounds=campaign_rounds,
@@ -367,7 +254,6 @@ async def run_optimization_notebook(
         l1_patience=l1_patience,
         pipeline_schema=session.pipeline_schema,
         store=store,
-        recon_brief=recon_brief,
         scoring_formula=_per_query_formula(campaign_config),
     )
 
@@ -402,7 +288,6 @@ async def run_optimization_notebook(
         campaign_config,
         baseline=_bl,
         session=session,
-        recon_brief=recon_brief,
         experiment_id=experiment_id,
         task_context=task_context,
         session_id=session_id,

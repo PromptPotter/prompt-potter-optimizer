@@ -37,10 +37,8 @@ logger = logging.getLogger(__name__)
 
 ORIGIN_ORDER = [
     "baseline",
-    "run_recon",
     "feedback_cycle",
     "optimization_loop",
-    "adaptive_recon_winner",
     "other",
 ]
 

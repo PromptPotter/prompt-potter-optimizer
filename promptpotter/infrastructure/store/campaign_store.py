@@ -2,9 +2,9 @@
 
 ``CampaignStore`` is the single mint point for the session≡campaign invariant
 (v3). It owns the per-cycle artifact directory — campaign metadata, session
-state, trials, dashboard, logs, journal, notes, recon results — all
-co-located. The legacy ``SessionStore`` is absorbed here; there is no
-separate ``sessions`` store, and no separate ``session.json``.
+state, trials, dashboard, logs, journal, notes — all co-located. The legacy
+``SessionStore`` is absorbed here; there is no separate ``sessions`` store,
+and no separate ``session.json``.
 
 Disk layout (v3)::
 
@@ -16,7 +16,6 @@ Disk layout (v3)::
       log.md                                                  # round-by-round summary
       journal.md                                              # user narrative
       notes.md                                                # Claude notes
-      recon.json                                              # this cycle's scan result
       trial_NNNN.json                                         # optimizer resume WAL
       round_NNNN_candidates.json                              # pre-scoring checkpoint
 
@@ -581,35 +580,6 @@ class CampaignStore(EntityStore):
     def load_session(self, backend_id: str, session_id: str) -> dict[str, Any] | None:
         """Load merged session state + metadata. Returns None if not found."""
         return read_json_optional(self._entity_path(backend_id, session_id))
-
-    # -- Scan results ---------------------------------------------------------
-
-    def save_recon_results(
-        self,
-        backend_id: str,
-        session_id: str,
-        scan_df_records: list[dict],
-        axis_profiles: list[dict],
-    ) -> None:
-        """Persist sensitivity scan results for this cycle."""
-        path = self._session_dir(backend_id, session_id) / "recon.json"
-        write_json(
-            path,
-            {
-                "recon_df": scan_df_records,
-                "axis_profiles": axis_profiles,
-                "saved_at": datetime.now(UTC).isoformat(),
-            },
-        )
-
-    def load_recon_results(
-        self,
-        backend_id: str,
-        session_id: str,
-    ) -> dict[str, Any] | None:
-        """Load scan results. Returns None if not found."""
-        path = self._session_dir(backend_id, session_id) / "recon.json"
-        return read_json_optional(path)
 
     # -- Campaign log ---------------------------------------------------------
 

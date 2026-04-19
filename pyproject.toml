@@ -181,6 +181,7 @@ extend_exclude = [
 # groq is retained for provider-registration symmetry even though calls
 # route through the OpenAI-compatible client.
 DEP002 = [
+    "ipython",
     "uvicorn",
     "jupyterlab",
     "groq",

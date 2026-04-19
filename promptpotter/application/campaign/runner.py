@@ -12,7 +12,7 @@ import asyncio
 import logging
 from collections.abc import Callable
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.campaign_setup import SessionEnv
@@ -50,9 +50,6 @@ from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.shared.errors import graceful
 from promptpotter.shared.scoring import compile_round_scorer
-
-if TYPE_CHECKING:
-    from promptpotter.application.recon.recon_report import ReconBrief
 
 logger = logging.getLogger(__name__)
 
@@ -588,7 +585,6 @@ async def run_optimization(
     *,
     baseline: CampaignBaseline,
     session: SessionEnv,
-    recon_brief: ReconBrief | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
@@ -607,10 +603,8 @@ async def run_optimization(
     """
     started_at = datetime.now(UTC).isoformat()
 
-    # Thread recon_brief + project_root onto session so downstream helpers
-    # have a single source of truth.
-    if recon_brief is not None:
-        session.recon_brief = recon_brief
+    # Thread project_root onto session so downstream helpers have a single
+    # source of truth.
     if not session.project_root and session.store is not None:
         session.project_root = str(session.store.base_dir)
 

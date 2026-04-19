@@ -17,7 +17,6 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -125,9 +124,7 @@ async def l1_generate(
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
-    recon_brief: ReconBrief | None = None,
     is_probe_round: bool = False,
-    scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
     search_memory_digest: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
@@ -164,8 +161,6 @@ async def l1_generate(
             warning_inventory=opt_sp.memory.warning_inventory or None,
             escalation_journal=opt_sp.memory.escalation_journal or None,
             is_probe_round=is_probe_round,
-            recon_brief=recon_brief,
-            scan_compact=scan_compact,
             failure_analysis=failure_analysis,
             search_memory_digest=search_memory_digest,
             pipeline_schema_text=schema_text,

@@ -9,7 +9,7 @@
         "max_tokens": 8192,
         "output_format": "json",
         "prompt_family": "meta_scan_aware",
-        "context_sources": ["recon_brief", "critique", "task_context", "escalation_journal"],
+        "context_sources": ["critique", "task_context", "escalation_journal"],
         "response_parser": "candidate_list"
       }
     },
@@ -61,14 +61,6 @@
         "prompt_family": "l3_modify_plan",
         "context_sources": ["critique", "task_context", "plan", "escalation_journal"],
         "response_parser": "transition_result"
-      }
-    },
-    "recon_advisor": {
-      "type": "llm/meta",
-      "config": {
-        "temperature": 0.3,
-        "max_tokens": 2000,
-        "output_format": "json"
       }
     },
     "restructure": {

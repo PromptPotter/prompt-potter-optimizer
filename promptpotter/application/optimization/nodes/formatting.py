@@ -13,7 +13,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
-    from promptpotter.application.recon.recon_report import ReconBrief
     from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
@@ -124,28 +123,16 @@ def format_context_sections(
     warning_inventory: dict | None = None,
     escalation_journal: list[dict] | None = None,
     is_probe_round: bool = False,
-    recon_brief: ReconBrief | None = None,
-    scan_compact: bool = False,
     failure_analysis: FailureAnalysis | None = None,
     search_memory_digest: dict | None = None,
     pipeline_schema_text: str = "",
 ) -> str:
-    """Build the L1 intelligence bundle — scan, escalation, critique, directives, plan."""
+    """Build the L1 intelligence bundle — escalation, critique, directives, plan."""
     sections: list[str] = []
 
     # Pipeline schema — valid nodes and parameters
     if pipeline_schema_text:
         sections.append(pipeline_schema_text)
-
-    # Scan analytics — full on first round, sensitivity-only thereafter
-    if recon_brief:
-        if scan_compact and recon_brief.sensitivity_text:
-            sections.append(f"SCAN:\n{recon_brief.sensitivity_text}")
-        else:
-            scan_parts = [f"SCAN:\nTested values per axis:\n{recon_brief.tested_values}"]
-            if recon_brief.sensitivity_text:
-                scan_parts.append(f"Top sensitivity drivers:\n{recon_brief.sensitivity_text}")
-            sections.append("\n".join(scan_parts))
 
     # Failure analysis (Wave 1c)
     if failure_analysis and failure_analysis.patterns:

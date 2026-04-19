@@ -54,8 +54,6 @@ CAMPAIGN_NARRATIVE_ARTIFACTS = {
 }
 
 # Union: what the parity contract enforces on every campaign mint.
-# ``recon.json`` lives alongside these but is a recon-path artifact, not an
-# emitter output — so it's not in the contract.
 CAMPAIGN_SESSION_ARTIFACTS = CAMPAIGN_OPERATIONAL_ARTIFACTS | CAMPAIGN_NARRATIVE_ARTIFACTS
 
 

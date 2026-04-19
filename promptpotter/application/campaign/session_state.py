@@ -55,9 +55,8 @@ def auto_mint_session(
 ) -> str:
     """Mint a session when the caller has no session_id yet.
 
-    Shared across the optimize path (``run_optimization`` when called
-    outside CLI ``init``) and the scan path (``run_recon_and_persist``
-    / notebook recon). Claims the active-session pointer so follow-up
+    Used by the optimize path (``run_optimization`` when called
+    outside CLI ``init``). Claims the active-session pointer so follow-up
     commands find the session without ``--session <id>``.
 
     ``cycle_hash`` is the 12-hex content-addressed suffix (no ``cycle_``

@@ -1,11 +1,8 @@
-"""Campaign initialization and scan orchestration.
+"""Campaign initialization — store, backend client, dataset, pipeline schema.
 
 Sets up project store, backend client, and loads campaign data.
 Prefers dataset loading via DatasetStore; falls back to experiment
 sync from backend when no dataset_name is provided.
-
-Scan orchestration wires the sensitivity scanner to campaign state
-and persistence.
 """
 
 from __future__ import annotations
@@ -15,9 +12,8 @@ import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from promptpotter.application.recon.recon_report import ReconBrief
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -30,7 +26,6 @@ from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
@@ -40,9 +35,7 @@ __all__ = [
     "SessionEnv",
     "init_services",
     "load_baseline_prompt",
-    "load_recon_brief",
     "resolve_campaign_id",
-    "run_recon_and_persist",
 ]
 
 
@@ -51,12 +44,11 @@ class SessionEnv:
     """Return value from ``init_services()``.
 
     Carries session-scoped identity + infrastructure + runtime-derived
-    state.  Fields ``session_id``, ``project_root``, ``recon_brief``, and
-    ``pipeline_params`` are populated as the session progresses —
+    state.  Fields ``session_id``, ``project_root``, and ``pipeline_params``
+    are populated as the session progresses —
     ``configure_and_apply_pipeline`` sets ``pipeline_params``; ``auto_mint_session``
-    / CLI ``init`` set ``session_id`` and ``project_root``; the recon path
-    sets ``recon_brief``.  No user-authored knob lives here — those live
-    on ``CampaignConfig``.
+    / CLI ``init`` set ``session_id`` and ``project_root``.  No user-authored
+    knob lives here — those live on ``CampaignConfig``.
     """
 
     store: Stores
@@ -72,7 +64,6 @@ class SessionEnv:
     dataset_name: str | None = None
     session_id: str = ""
     project_root: str = ""
-    recon_brief: ReconBrief | None = None
     pipeline_params: dict = field(default_factory=dict)
 
 
@@ -429,175 +420,3 @@ def resolve_campaign_id(
         return None
     logger.warning("No campaign matching '%s'", short_id)
     return None
-
-
-# ---------------------------------------------------------------------------
-# Scan orchestration — run sensitivity scan, persist, load scan context
-# ---------------------------------------------------------------------------
-
-
-def load_recon_brief(
-    session: SessionEnv,
-    session_id: str,
-    recon_variants: dict,
-    baseline_acc: float,
-) -> ReconBrief | None:
-    """Reconstruct scan context from persisted scan results.
-
-    Shared by CLI and notebook — avoids inlining DataFrame construction
-    in each entry point.
-    """
-    recon_data = session.store.campaigns.load_recon_results(
-        session.backend_id,
-        session_id,
-    )
-    if not recon_data:
-        return None
-    import pandas as pd
-
-    from promptpotter.application.recon.recon_report import prepare_recon_brief
-
-    recon_df = pd.DataFrame(recon_data["recon_df"])
-    axis_profiles = recon_data["axis_profiles"]
-    return prepare_recon_brief(recon_df, axis_profiles, recon_variants, baseline_acc)
-
-
-async def run_recon_and_persist(
-    baseline,
-    campaign_config: CampaignConfig,
-    recon_variants: dict,
-    dataset: list,
-    *,
-    session: SessionEnv,
-    recon_sample_size: int = 0,
-    experiment_id: str = "",
-    session_id: str = "",
-    log: Callable[[str], None] = logger.info,
-    progress_cb: Callable | None = None,
-    on_result: Callable | None = None,
-):
-    """Decompose scan baseline, run sensitivity scan, persist results.
-
-    Mints a session when called with ``session_id=""`` so non-CLI entry
-    points (notebook, future API) produce the same on-disk artifacts as
-    the CLI ``recon`` command. The CLI path passes a concrete id and is
-    unchanged.
-
-    Returns ``(recon_baseline_sp, baseline_opt, df, profiles)``.
-    """
-    from promptpotter.application.campaign.config import (
-        configure_and_apply_pipeline,
-        create_llm_client,
-    )
-    from promptpotter.application.campaign.session_state import auto_mint_session
-    from promptpotter.application.recon.recon_report import (
-        decompose_recon_baseline as _decompose_scan_baseline,
-    )
-    from promptpotter.application.recon.recon_runner import (
-        run_recon as _run_recon,
-    )
-
-    if not session_id:
-        from promptpotter.domain.cycle_identity import cycle_hash_suffix
-
-        active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-        session_id = auto_mint_session(
-            session,
-            campaign_config,
-            cycle_hash=cycle_hash_suffix(
-                campaign_config,
-                baseline.render(),
-                dataset,
-                active_steps,
-                strict=campaign_config.optimization.strict_cycle_identity,
-            ),
-            dataset_size=len(dataset),
-            experiment_id=experiment_id or None,
-        )
-    session.session_id = session_id
-
-    # Configure pipeline (ensures filtered schema is applied with overrides baked in)
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=log)
-
-    ps = session.pipeline_schema
-
-    # Decompose scan baseline
-    llm_client, llm_model = create_llm_client(campaign_config)
-    result = await _decompose_scan_baseline(
-        baseline,
-        campaign_config,
-        llm_client,
-        llm_model,
-        pipeline_params=pipeline_params,
-        session=session,
-        recon_variants=recon_variants,
-        pipeline_schema=ps,
-    )
-    recon_baseline_sp = result.baseline_jsp
-    baseline_opt = result.search_baseline
-
-    # Init backend session
-    if session.index_terms:
-        await session.backend_client.init_session(session.index_terms)
-
-    # Run scan
-    log(f"Running sensitivity scan ({len(recon_variants)} axes) ...")
-    scan_kwargs: dict[str, Any] = {
-        "sample_size": recon_sample_size,
-        "pipeline_schema": ps,
-        "experiment_id": experiment_id,
-        "scoring_formula": campaign_config.scoring,
-    }
-    if progress_cb is not None:
-        scan_kwargs["progress_cb"] = progress_cb
-    if on_result is not None:
-        scan_kwargs["on_result"] = on_result
-
-    df, profiles = await _run_recon(
-        recon_baseline_sp,
-        recon_variants,
-        dataset,
-        session,
-        baseline_opt=baseline_opt,
-        **scan_kwargs,
-    )
-
-    if df is None or (hasattr(df, "empty") and df.empty):
-        log("Scan returned no results")
-        return recon_baseline_sp, baseline_opt, None, []
-
-    log(f"Sensitivity scan complete: {len(df)} variants evaluated")
-
-    # Failure group sensitivity — cross-tabulate scan results with failure groups
-    if session.store and session.backend_id:
-        from promptpotter.application.intelligence.search_memory import SearchMemory
-        from promptpotter.application.recon.failure_groups import (
-            failure_group_sensitivity,
-        )
-
-        _sm_path = Path(session.store.base_dir) / "library" / "search_memory.json"
-        _sm = SearchMemory.load(_sm_path)
-        _sm.refresh(session.store, session.backend_id)
-        clusters = _sm.failure_clusters()
-        if clusters:
-            scan_rows = df.to_dict(orient="records")
-            fg_result = failure_group_sensitivity(scan_rows, clusters)
-            if fg_result.sensitivities:
-                _sm.ingest_failure_groups(fg_result)
-                _sm.save(_sm_path)
-                log(
-                    f"Failure group analysis: {len(fg_result.sensitivities)} "
-                    f"axis x group correlations ingested into SearchMemory"
-                )
-
-    # Persist results
-    if session_id and session.store and session.backend_id:
-        session.store.campaigns.save_recon_results(
-            session.backend_id,
-            session_id,
-            df.to_dict(orient="records"),
-            profiles,
-        )
-        log(f"Scan results persisted to session {session_id}")
-
-    return recon_baseline_sp, baseline_opt, df, profiles

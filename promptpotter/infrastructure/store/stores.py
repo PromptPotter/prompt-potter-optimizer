@@ -6,7 +6,7 @@ partitions live inside each tenant:
 
 - ``campaigns/{cycle_id}/``  — per-run state, artifacts, observability
 - ``library/``              — cross-run reference data (datasets, backends,
-                              dataset_runs cache, recon plans, aliases)
+                              dataset_runs cache, aliases)
 
 Disk layout (v3)::
 
@@ -15,7 +15,6 @@ Disk layout (v3)::
       campaigns/{cycle_id}/                         # per-cycle state dir
         index.json                                  # session state + campaign metadata
         dashboard.json / control.json / output.log / log.md / journal.md / notes.md
-        recon.json                                  # (optional, recon path)
         trial_NNNN.json
         round_NNNN_candidates.json
       library/
@@ -26,7 +25,6 @@ Disk layout (v3)::
         dataset_runs/{run_id}.json                  # content-addressed
         dataset_runs.json
         prompt_aliases.json
-        recon_plans/{plan_id}.json                  # renamed from adaptive_recon_plans
         search_memory.json
 """
 

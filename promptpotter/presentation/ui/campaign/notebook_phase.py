@@ -18,10 +18,8 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.phases import PhaseEvent
-from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import min_detectable_effect
 
 from .notebook_primitives import (
@@ -48,10 +46,6 @@ from .notebook_primitives import (
     _fmt_delta as _fmt_delta_primitive,
 )
 
-if TYPE_CHECKING:
-    from promptpotter.application.recon.recon_report import ReconBrief
-
-
 _fmt_delta = _fmt_delta_primitive
 
 
@@ -69,172 +63,6 @@ def show_progress(campaign_rounds: list, window: int = 8) -> None:
     from promptpotter.presentation.views import render_progress
 
     print(render_progress(campaign_rounds, window=window))
-
-
-def show_axis_profiles(profiles: list[dict]) -> None:
-    """Display axis profiles as a formatted table."""
-    if not profiles:
-        print("No axis profiles to display.")
-        return
-
-    print(f"\n{'Rank':<5s} {'Axis':<25s} {'Type':<15s} {'Card':<5s} {'Range':<8s} {'Budget':<8s}")
-    print("-" * 70)
-    for rank, p in enumerate(profiles, 1):
-        print(
-            f"  {rank:<3d} {p['axis']:<25s} {p['axis_type']:<15s} "
-            f"{p['cardinality']:<5d} {p['sensitivity_range']:<8.3f} "
-            f"{p['exploration_budget']:<8s}"
-        )
-
-
-def show_recon_leaderboard(
-    recon_df,
-    axis_profiles: list[dict],
-) -> None:
-    """Display variant leaderboard and per-axis statistics from scan results."""
-    import pandas as pd
-    from IPython.display import display as ipy_display
-
-    if recon_df.empty:
-        print("No scan data to display.")
-        return
-
-    sort_col = "composite" if "composite" in recon_df.columns else "accuracy"
-    ranked = recon_df.sort_values(sort_col, ascending=False).reset_index(drop=True)
-
-    rows = []
-    for i, r in ranked.iterrows():
-        label = r["value_preview"]
-        if r["delta"] == 0.0:
-            label = f"{label} (baseline)"
-        rows.append(
-            {
-                "rank": i + 1,
-                "axis": r["axis"],
-                "variant": label,
-                "accuracy": f"{r['accuracy']:.1%}",
-                "delta": f"{r['delta']:+.1%}" if r["delta"] != 0.0 else "-",
-                "hits/total": f"{r['hits']}/{r['total']}",
-                "errors": int(r.get("errors", 0)),
-            }
-        )
-
-    print("VARIANT LEADERBOARD (all scan combos)")
-    print("=" * 70)
-    ipy_display(pd.DataFrame(rows))
-
-    profile_lookup = {p["axis"]: p for p in axis_profiles}
-    axis_rows = []
-    for axis_name, grp in recon_df.groupby("axis", sort=False):
-        prof = profile_lookup.get(axis_name, {})
-        accs = grp["accuracy"]
-        axis_rows.append(
-            {
-                "axis": axis_name,
-                "type": prof.get("axis_type", grp["axis_type"].iloc[0]),
-                "variants": len(grp),
-                "mean_acc": f"{accs.mean():.1%}",
-                "std_acc": f"{accs.std():.1%}" if len(grp) > 1 else "-",
-                "best_acc": f"{accs.max():.1%}",
-                "worst_acc": f"{accs.min():.1%}",
-                "sensitivity": f"{prof.get('sensitivity_range', accs.max() - accs.min()):.3f}",
-                "budget": prof.get("exploration_budget", "?"),
-            }
-        )
-
-    print("\nPER-AXIS STATISTICS")
-    print("=" * 70)
-    ipy_display(pd.DataFrame(axis_rows))
-
-
-def show_recon_query_difficulty(
-    store,
-    backend_id: str,
-):
-    """Aggregate per-query hit rates across scan runs and classify difficulty.
-
-    Returns:
-        DataFrame sorted by hit_rate ascending (hardest first).
-    """
-    import pandas as pd
-    from IPython.display import display as ipy_display
-
-    summaries = store.dataset_runs.list_all(backend_id)
-    scan_summaries = [s for s in summaries if s.get("source") == "run_recon"]
-
-    if not scan_summaries:
-        print("No run_recon runs found.")
-        return pd.DataFrame()
-
-    query_stats: dict[str, dict] = {}
-    for summary in scan_summaries:
-        detail = store.dataset_runs.load_by_id(backend_id, summary["run_id"])
-        if not detail:
-            continue
-        for item in detail.get("dataset_run_items", []):
-            q = item.get("query", "")
-            if not q:
-                continue
-            if q not in query_stats:
-                query_stats[q] = {
-                    "ground_truth": item.get("ground_truth", ""),
-                    "n_measurements": 0,
-                    "n_hits": 0,
-                    "n_errors": 0,
-                }
-            qs = query_stats[q]
-            qs["n_measurements"] += 1
-            if item.get("hit"):
-                qs["n_hits"] += 1
-            if is_error_result(item):
-                qs["n_errors"] += 1
-
-    if not query_stats:
-        print("No query-level data found in scan runs.")
-        return pd.DataFrame()
-
-    rows = []
-    for query, qs in query_stats.items():
-        n = qs["n_measurements"]
-        hit_rate = qs["n_hits"] / n if n else 0.0
-        error_rate = qs["n_errors"] / n if n else 0.0
-
-        if error_rate == 1.0:
-            classification = "error"
-        elif hit_rate == 1.0:
-            classification = "easy"
-        elif hit_rate == 0.0:
-            classification = "hard"
-        else:
-            classification = "discriminating"
-
-        rows.append(
-            {
-                "query": query[:60],
-                "ground_truth": qs["ground_truth"][:50],
-                "hit_rate": hit_rate,
-                "hits/evals": f"{qs['n_hits']}/{n}",
-                "error_rate": error_rate,
-                "classification": classification,
-            }
-        )
-
-    df = pd.DataFrame(rows).sort_values("hit_rate", ascending=True).reset_index(drop=True)
-
-    counts = df["classification"].value_counts()
-    total = len(df)
-    parts = []
-    for cat in ("easy", "discriminating", "hard", "error"):
-        c = counts.get(cat, 0)
-        parts.append(f"{cat}: {c} ({c / total:.0%})")
-
-    print(f"QUERY DIFFICULTY ({total} queries across {len(scan_summaries)} scan runs)")
-    print("=" * 70)
-    print(f"  {' | '.join(parts)}")
-    print()
-    ipy_display(df)
-
-    return df
 
 
 def format_pipeline_overrides(
@@ -326,7 +154,6 @@ class _CycleDisplayState:
     round_num: int = 0
     baseline_accuracy: float = 0.0
     baseline_total: int = 0  # sample count for significance tests
-    recon_brief: ReconBrief | None = None  # cached for scan reasoning display
     candidates_meta: list = field(default_factory=list)  # from l1_generate exit
     n_scoring_queries: int = 0  # from generate:exit, used in evaluate:enter banner
     current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
@@ -560,7 +387,6 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     model = config.model or "(default)"
     l2 = "enabled" if config.enable_l2 else "disabled"
     l3 = "enabled" if config.enable_l3 else "disabled"
-    scan = "YES" if config.recon_brief is not None else "NO"
     sample = config.sp_budget_ttest
     state.baseline_total = sample
 
@@ -578,7 +404,6 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    print(_dbox_line(f"Scan context   {scan}"))
     critique = "enabled" if config.enable_critique else "disabled"
     print(_dbox_line(f"Critique       {critique}"))
     print(_dbox_bottom())
@@ -639,7 +464,6 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_variants", 0)
     model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)
-    scan = "YES" if d.get("has_recon_brief") else "NO"
     crit = "YES" if d.get("has_critique") else "NO"
 
     new_flat = _flatten_sp_summary(
@@ -665,24 +489,8 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_node_top("GENERATE"))
     print(_node_line(f"Current best    {acc:.1%}"))
     print(_node_line(f"Prompt          {preview}"))
-    print(
-        _node_line(
-            f"Candidates      {n}   Creativity: {creativity}   Scan: {scan}   Critique: {crit}"
-        )
-    )
+    print(_node_line(f"Candidates      {n}   Creativity: {creativity}   Critique: {crit}"))
     print(_node_line(f"Model           {model}"))
-
-    if state.recon_brief and d.get("has_recon_brief"):
-        axes = state.recon_brief.improving_axes
-        bl_acc = state.recon_brief.baseline_accuracy
-        if axes:
-            print(
-                _node_line(
-                    f"{CYAN}Scan focus:{RESET} {len(axes)} improving axes [{', '.join(axes)}]"
-                )
-            )
-        if bl_acc > 0:
-            print(_node_line(f"{CYAN}Scan baseline:{RESET} {bl_acc:.1%}"))
 
     print(_node_bottom())
 

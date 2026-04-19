@@ -1,15 +1,14 @@
 """CLI campaign runner — terminal orchestration for PromptPotter optimization.
 
-Dispatch file. Contains the five core campaign-lifecycle commands (init,
-scan, show-scan, optimize, show-results), the ``COMMANDS`` registry, and
-``main()``. Everything else lives in sibling modules:
+Dispatch file. Contains the core campaign-lifecycle commands (init,
+optimize, show-results), the ``COMMANDS`` registry, and ``main()``.
+Everything else lives in sibling modules:
 
 - ``result.py`` — ``CommandResult``
 - ``session.py`` — ``SessionCtx``, ``load_session``, ``load_campaign_config``
 - ``bootstrap.py`` — service init, pipeline config, scoring setup, verbose toggle
 - ``parser.py`` — argparse schema
 - ``commands/`` — non-lifecycle commands (profile, control, status, set-task)
-- ``renderers.py`` — plain-text display helpers for ``show-results``
 """
 
 from __future__ import annotations
@@ -163,116 +162,9 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_recon(args: argparse.Namespace) -> CommandResult:
-    """Run reconnaissance pass (sensitivity scan) with provided variants."""
-    from promptpotter.application.campaign.campaign_setup import run_recon_and_persist
-    from promptpotter.application.recon.recon_advisor import (
-        flatten_recon_variants,
-        resolve_schema_axes,
-    )
-    from promptpotter.shared.constants import PROMPT_STRING_FIELDS
-
-    ctx = load_session(args)
-
-    with open(args.variants_file) as f:
-        recon_variants = json.load(f)
-
-    session = await init_services_cli(**ctx.init_params)
-
-    resolve_schema_axes(flatten_recon_variants(recon_variants), session.pipeline_schema)
-    prompt_axes = [k for k in recon_variants if k in PROMPT_STRING_FIELDS]
-    node_axes = [k for k in recon_variants if k not in PROMPT_STRING_FIELDS]
-    logger.info(
-        "Recon variants resolved: %d prompt axes, %d node axes", len(prompt_axes), len(node_axes)
-    )
-
-    baseline = load_cli_baseline(session)
-    sample_size = (
-        args.sample_size if args.sample_size is not None else ctx.campaign_config.recon_sample_size
-    )
-    _recon_bl, _baseline_opt, recon_df, _axis_profiles = await run_recon_and_persist(
-        baseline,
-        ctx.campaign_config,
-        recon_variants,
-        session.queries or [],
-        session=session,
-        recon_sample_size=sample_size,
-        experiment_id=ctx.init_params["experiment_id"],
-        session_id=ctx.session_id,
-        log=logger.info,
-    )
-
-    ctx.state["recon_variants"] = recon_variants
-    records = recon_df.to_dict(orient="records") if recon_df is not None else []
-    best = max(records, key=lambda r: r.get("accuracy", 0)) if records else {}
-    ctx.save_phase(
-        "recon",
-        log=f"## Recon\n- Axes: {len(recon_variants)}, variants: {len(records)}\n"
-        f"- Best: {best.get('axis', '?')}={best.get('value_preview', '?')} "
-        f"\u2192 {best.get('accuracy', 0):.1%} (delta: {best.get('delta', 0):+.1%})",
-    )
-    return CommandResult(data={"n_variants": len(records), "best": best})
-
-
-async def cmd_show_recon(args: argparse.Namespace) -> CommandResult:
-    """Show recon analytics and seed campaign from recon winner."""
-    import pandas as pd
-
-    from promptpotter.application.recon.recon_report import finalize_scan
-
-    ctx = load_session(args)
-    session = await init_services_cli(**ctx.init_params)
-
-    recon_data = session.store.campaigns.load_recon_results(ctx.backend_id, ctx.session_id)
-    if not recon_data:
-        sys.exit("ERROR: No recon results. Run 'recon' first.")
-
-    recon_df = pd.DataFrame(recon_data["recon_df"])
-    axis_profiles = recon_data["axis_profiles"]
-
-    human_parts: list[str] = []
-    if not recon_df.empty:
-        best_row = recon_df.loc[recon_df["accuracy"].idxmax()]
-        human_parts.append(
-            f"Recon results: {len(recon_df)} variants across {recon_df['axis'].nunique()} axes"
-        )
-        human_parts.append(
-            f"Best: {best_row['axis']}={best_row.get('value_preview', '?')} "
-            f"({best_row['accuracy']:.1%}, delta={best_row.get('delta', 0):+.1%})"
-        )
-
-    recon_baseline_sp = load_cli_baseline(session)
-    campaign_rounds: list = []
-    finalized = finalize_scan(
-        recon_df,
-        axis_profiles,
-        recon_baseline_sp.to_job_search_point(),
-        ctx.recon_variants,
-        campaign_rounds=campaign_rounds,
-        campaign_config=ctx.campaign_config,
-        existing_pipeline_params=session.pipeline_params,
-    )
-    if finalized.merged_pipeline_params:
-        session.pipeline_params = finalized.merged_pipeline_params
-
-    if campaign_rounds:
-        ctx.state["baseline_accuracy"] = campaign_rounds[-1].get("accuracy", 0.0)
-        ctx.state["baseline_prompt_fields"] = campaign_rounds[-1].get("prompt_fields", {})
-
-    ctx.save_phase("recon-results")
-    return CommandResult(
-        data={
-            "n_variants": len(recon_df),
-            "baseline_accuracy": ctx.state.get("baseline_accuracy", 0.0),
-        },
-        human="\n".join(human_parts) if human_parts else None,
-    )
-
-
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.application.campaign.campaign_setup import load_recon_brief
     from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
@@ -352,9 +244,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         listener=listener,
     )
 
-    baseline_acc = campaign_rounds[-1].get("accuracy", 0.0) if campaign_rounds else 0.0
-    recon_brief = load_recon_brief(session, ctx.session_id, ctx.recon_variants, baseline_acc)
-
     # Clear HITL pause flag after baseline completes so resume doesn't re-pause.
     campaign_config.optimization.pause_before_scoring = False
     ctx.save_phase("optimizing")
@@ -369,7 +258,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             campaign_config,
             baseline=baseline,
             session=session,
-            recon_brief=recon_brief,
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.task_context,
             session_id=ctx.session_id,
@@ -483,8 +371,6 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
 COMMANDS = {
     "init": cmd_init,
     "set-task": cmd_task_context,
-    "recon": cmd_recon,
-    "show-recon": cmd_show_recon,
     "optimize": cmd_optimize,
     "control": cmd_control,
     "profile": cmd_profile,
