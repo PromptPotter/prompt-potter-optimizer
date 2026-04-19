@@ -178,6 +178,45 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
 
+def _build_live_display(
+    args: argparse.Namespace,
+    *,
+    session,
+    campaign_config,
+    campaign_rounds: list,
+    baseline_acc: float,
+):
+    """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
+    from promptpotter.presentation.ui.campaign.notebook_primitives import set_display_tags
+    from promptpotter.shared.scoring import split_scoring_block
+
+    set_display_tags(session.pipeline_schema)
+    scoring_formula, _ = split_scoring_block(campaign_config.scoring)
+
+    opt = campaign_config.optimization
+    max_rounds = opt.max_rounds or 999
+    if getattr(args, "verbose", False):
+        from promptpotter.presentation.ui.campaign.notebook_display import NotebookDisplay
+
+        return NotebookDisplay(
+            campaign_rounds=campaign_rounds,
+            baseline_acc=baseline_acc,
+            l1_patience=opt.l1_patience,
+            pipeline_schema=session.pipeline_schema,
+            store=session.store,
+            scoring_formula=scoring_formula,
+        )
+    from promptpotter.presentation.views.live_cli import CliDisplay
+
+    return CliDisplay(
+        baseline_acc=baseline_acc,
+        max_rounds=max_rounds,
+        l1_patience=opt.l1_patience,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        scoring_formula=scoring_formula,
+    )
+
+
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.callbacks import RunListener
@@ -264,6 +303,14 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         run_baseline=has_baseline,
         listener=listener,
     )
+    display = _build_live_display(
+        args,
+        session=session,
+        campaign_config=campaign_config,
+        campaign_rounds=campaign_rounds,
+        baseline_acc=pre_baseline_acc,
+    )
+    listener.display = display  # keep for any post-baseline emitter dispatch on `listener`
     ctx.save_phase("optimizing")
 
     set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
@@ -279,6 +326,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             experiment_id=ctx.state.get("experiment_id"),
             task_context=ctx.task_context,
             session_id=ctx.session_id,
+            display=display,
             control=control_reader,
             cycle_id=ctx.cycle_id,
             resume_from_round_override=resume_from_round,
