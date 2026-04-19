@@ -2,8 +2,10 @@
 
 **Version:** 0.1.0
 **Date:** 2026-04-12
-**Status:** Planned
+**Status:** Track 7 shipped 2026-04-19 (convergence-efficiency); other tracks ongoing
 **Depends on:** M8 Campaign Intelligence (Complete)
+
+> **Post-ship note (2026-04-19).** Track 7 shipped with `ReconConfig` + `SessionEnv.recon_brief` wired through so the recon path kept working. A follow-up cleanup on the same branch removed those seams along with the CLI `recon`/`show-recon` subcommands, the notebook UI wrappers, and the `recon_brief` parameter through L1. `application/recon/` remains as a dormant code archive (see CLAUDE.md).
 
 ---
 

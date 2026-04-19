@@ -2,7 +2,7 @@
 
 **Version:** 0.1.0
 **Date:** 2026-04-12
-**Status:** Planned
+**Status:** Shipped (hexagonal layout in place: `domain/`, `application/`, `infrastructure/`, `presentation/`)
 **Parent:** M9 ([`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md))
 
 ---
