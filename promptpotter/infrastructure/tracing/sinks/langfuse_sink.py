@@ -72,7 +72,8 @@ class LangfuseSink:
     # --- Persistence ---
 
     def _session_state_path(self, session_id: str) -> Path:
-        # v3: session ≡ campaign; state lives inside campaigns/{cid}/langfuse/.
+        # ``session_id`` here is the campaign cycle_id (the sink uses
+        # campaign-scoped state); the Langfuse shadow is per-campaign.
         return self._base / "campaigns" / session_id / "langfuse" / "state.json"
 
     def _bind_session(self, session_id: str) -> None:

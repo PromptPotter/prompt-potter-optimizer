@@ -38,15 +38,11 @@ if TYPE_CHECKING:
 
 
 def _per_query_formula(campaign_config: CampaignConfig | None) -> str | None:
-    """Return the per-query scoring formula from a ``scoring`` block.
+    """Return the per-query scoring formula from a ``scoring`` block."""
+    from promptpotter.shared.scoring import split_scoring_block
 
-    Accepts the legacy string shorthand or the twin-form dict.
-    """
     raw = campaign_config.scoring if campaign_config else None
-    if isinstance(raw, dict):
-        val = raw.get("per_query")
-        return val if isinstance(val, str) else None
-    return raw if isinstance(raw, str) else None
+    return split_scoring_block(raw)[0]
 
 
 __all__ = [

@@ -295,3 +295,27 @@ def compile_round_scorer(formula: str | None) -> RoundScorer:
 def _default_round_scorer(values: dict[str, float]) -> float:
     """Fallback per-round scorer: the registry's ``accuracy`` value, or 0."""
     return max(0.0, min(1.0, float(values.get("accuracy", 0.0))))
+
+
+# ---------------------------------------------------------------------------
+# Twin-form scoring block parsing — single source of truth
+# ---------------------------------------------------------------------------
+
+
+def split_scoring_block(
+    block: str | dict[str, str] | None,
+) -> tuple[str | None, str | None]:
+    """Normalize the campaign ``scoring`` field to ``(per_query, per_round)``.
+
+    Three accepted shapes:
+
+    - ``None`` / ``""`` → ``(None, None)`` (defaults apply downstream)
+    - ``str`` → legacy shorthand, interpreted as ``per_query`` only
+    - ``dict`` → ``{"per_query": ..., "per_round": ...}``; missing keys
+      become ``None``.
+    """
+    if isinstance(block, dict):
+        return block.get("per_query"), block.get("per_round")
+    if isinstance(block, str) and block:
+        return block, None
+    return None, None

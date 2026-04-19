@@ -432,6 +432,7 @@ async def _init_optimization(
         "enter",
         config=config,
         dataset=dataset,
+        env=session,
         warnings=preflight_warnings,
     )
 
@@ -462,6 +463,7 @@ async def _init_optimization(
         dataset,
         active_steps,
         cycle_id,
+        parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
     )
 
@@ -619,7 +621,7 @@ async def run_optimization(
             ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
         )
         baseline_render = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
-        session_id = auto_mint_session(
+        session_id, minted_cycle_id = auto_mint_session(
             session,
             campaign_config,
             cycle_hash=cycle_hash_suffix(
@@ -634,15 +636,15 @@ async def run_optimization(
             dataset_size=len(dataset),
             experiment_id=experiment_id,
         )
+        # Use the minted cycle if the caller didn't pin one explicitly.
+        cycle_id = cycle_id or minted_cycle_id
     session.session_id = session_id
+    if cycle_id:
+        session.cycle_id = cycle_id
 
-    scoring_block = campaign_config.scoring
-    if isinstance(scoring_block, dict):
-        scoring_formula = scoring_block.get("per_query")
-        scoring_round_formula = scoring_block.get("per_round")
-    else:
-        scoring_formula = scoring_block
-        scoring_round_formula = None
+    from promptpotter.shared.scoring import split_scoring_block
+
+    scoring_formula, scoring_round_formula = split_scoring_block(campaign_config.scoring)
 
     if isinstance(task_context, TaskDecomposition):
         resolved_task_context = task_context

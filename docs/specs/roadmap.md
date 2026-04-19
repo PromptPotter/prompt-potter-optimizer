@@ -38,7 +38,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## Parity: Entry-Point Parity -- Complete
 
-Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `campaign_state.json`, `campaign_output.log`, `campaign_log.md`. `FileControlSurface` extracted for bidirectional control. Parity test enforces artifact manifest. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
+Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log`, `log.md` (per-cycle) plus `session.json`, `journal.md`, `notes.md`, `control.json` (per-session). `FileControlSurface` extracted for bidirectional control. Parity tests enforce both artifact sets. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
 
 ---
 
@@ -70,7 +70,7 @@ promptpotter/
 │   ├── search_point.py     # JobSearchPoint, PromptTemplate, OptSearchPoint
 │   ├── pipeline.py         # PipelineSchema, PipelineNode, NodeOutputSchema
 │   ├── scoring.py          # ScoringEnv, RoundResult, composite formulas
-│   ├── campaign.py         # LoopState, RunConfig, RunCallbacks
+│   ├── campaign.py         # LoopState, RunConfig, RunListener
 │   └── tenant.py           # TenantContext (new — the multi-tenant seam)
 │
 ├── application/            # use cases / orchestration — no direct disk or network

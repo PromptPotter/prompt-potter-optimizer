@@ -14,9 +14,9 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
-from pydantic import BaseModel, ConfigDict, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import SessionEnv
@@ -132,19 +132,6 @@ class CampaignConfig(BaseModel):
     # Nested
     optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
-
-    @model_validator(mode="before")
-    @classmethod
-    def _strip_runtime_fields(cls, data: Any) -> Any:
-        """Drop legacy runtime field ``pipeline_params`` if present in input.
-
-        Historical ``campaign.json`` files may have accidentally persisted
-        ``pipeline_params`` due to the old in-place mutation bug.  Strip
-        it on load so existing files parse; going forward nothing writes it.
-        """
-        if isinstance(data, dict) and "pipeline_params" in data:
-            data = {k: v for k, v in data.items() if k != "pipeline_params"}
-        return data
 
 
 def load_campaign_config(raw: dict | CampaignConfig | None) -> CampaignConfig:
@@ -293,7 +280,7 @@ def configure_and_apply_pipeline(
     from promptpotter.infrastructure.backend.client import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
-    experiment_extract: dict | None = getattr(session, "experiment_extract", None)
+    experiment_extract: dict = session.experiment_extract
     exclude = list(campaign_config.exclude_nodes)
     overrides = campaign_config.pipeline_overrides
 

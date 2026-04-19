@@ -5,7 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 
-from promptpotter.infrastructure.store import build_stores
+from promptpotter.infrastructure.store import build_stores, read_active_pointer
 from promptpotter.presentation.cli.result import CommandResult
 
 
@@ -15,7 +15,15 @@ async def cmd_profile(args: argparse.Namespace) -> CommandResult:
     backend_id = args.backend_id
 
     if args.save:
-        state, backend_id, _sid = store.campaigns.load_active(args.session)
+        _tid, pointer_sid, _cid = read_active_pointer()
+        sid = getattr(args, "session", None) or pointer_sid
+        state = store.sessions.read(sid) if sid else None
+        if not state:
+            return CommandResult(
+                data={"saved": False, "error": "no_active_session"},
+                human="ERROR: No active session — run `init` first.",
+            )
+        backend_id = backend_id or state.get("init_params", {}).get("backend_id", "")
         profile = state.get("campaign_config", {})
         store.backends.save_connector_profile(backend_id, profile)
         return CommandResult(

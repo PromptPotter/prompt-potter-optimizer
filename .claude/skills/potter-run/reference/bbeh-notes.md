@@ -6,7 +6,7 @@ Source of truth: `notebooks/bbeh_potter.ipynb`. `datasets/bbeh/dataset.md` and `
 
 Authored and launched from the notebook — it owns what CLI doesn't: HF `BBEH/bbeh` load via `shared_config.py::load_and_split()`, `{input,target}` → `{query,ground_truth}` normalisation, per-task test eval of the global winner across 23 tasks, and `results_potter.json` export.
 
-**Resume via CLI works** (v3 parity): `run_optimization_notebook` auto-mints a session and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`. So `python -m promptpotter optimize` resumes an interrupted notebook run via the active pointer. Post-hoc renderers (`show-status` / `show-results`) are shared.
+**Resume via CLI works**: `run_optimization_notebook` auto-mints a session+cycle pair and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`. So `python -m promptpotter optimize` resumes an interrupted notebook run via the active pointer. Post-hoc renderers (`show-status` / `show-results`) are shared.
 
 Default with no active BBEH session → open the notebook. With an active BBEH campaign dir on disk → confirm which surface the user wants.
 

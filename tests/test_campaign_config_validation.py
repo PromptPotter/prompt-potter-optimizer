@@ -41,10 +41,11 @@ def test_unknown_optimizer_llm_key_rejected() -> None:
         CampaignConfig.model_validate({"optimizer_llm": {"modle": "x"}})  # typo: modle
 
 
-def test_legacy_pipeline_params_is_stripped() -> None:
-    """Historical configs with leaked ``pipeline_params`` still parse; the field is dropped."""
-    cfg = CampaignConfig.model_validate({"dataset_name": "x", "pipeline_params": {"steps": ["a"]}})
-    assert "pipeline_params" not in cfg.model_dump()
+def test_legacy_pipeline_params_is_rejected() -> None:
+    """Runtime ``pipeline_params`` lives on ``SessionEnv``; it must not appear
+    in user-authored campaign config and Pydantic raises if it does."""
+    with pytest.raises(ValidationError):
+        CampaignConfig.model_validate({"dataset_name": "x", "pipeline_params": {"steps": ["a"]}})
 
 
 def test_defaults_round_trip_cleanly() -> None:

@@ -11,17 +11,12 @@ from __future__ import annotations
 
 from typing import Any
 
+from promptpotter.presentation.views.formatting import fmt_pct as _fmt_pct
+
 
 def _get(d: dict, key: str, default: Any = "-") -> Any:
     v = d.get(key, default)
     return default if v is None or v == "" else v
-
-
-def _fmt_pct(v: Any) -> str:
-    try:
-        return f"{float(v):.1%}"
-    except (TypeError, ValueError):
-        return "-"
 
 
 def _fmt_secs(v: Any) -> str:

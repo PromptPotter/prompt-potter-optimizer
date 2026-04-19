@@ -237,12 +237,10 @@ async def prepare_scoring_context(
             label = ""
 
         if eval_dataset:
+            from promptpotter.shared.scoring import split_scoring_block
+
             logger.info(label)
-            scoring_block = campaign_config.scoring
-            if isinstance(scoring_block, dict):
-                query_formula = scoring_block.get("per_query")
-            else:
-                query_formula = scoring_block
+            query_formula, _ = split_scoring_block(campaign_config.scoring)
             campaign_rounds, baseline_results = await _run_baseline_scoring(
                 baseline,
                 eval_dataset,

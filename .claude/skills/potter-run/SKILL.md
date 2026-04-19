@@ -76,10 +76,14 @@ DATA ASSESSMENT
 WARNINGS (omit if clean)
   ⚠ e.g. "backend unreachable", "llm_ranking in active nodes"
 
-SESSION FILES at .promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/
-  index.json · dashboard.json · control.json · output.log · log.md · journal.md · notes.md
+SESSION FILES at .promptpotter/projects/{tenant_id}/sessions/{session_id}/
+  session.json · journal.md · notes.md · control.json
+  Parity set = SESSION_ARTIFACTS in session_emitter.py
+
+CAMPAIGN FILES at .promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/
+  index.json (with parent_session_id) · dashboard.json · output.log · log.md
   (+ round_NNNN_candidates.json, trial_NNNN.json if present)
-  Parity set = CAMPAIGN_SESSION_ARTIFACTS in session_emitter.py
+  Parity set = CAMPAIGN_ARTIFACTS in session_emitter.py
 
 LIBRARY (cross-cycle, at .promptpotter/projects/{tenant_id}/library/)
   dataset_runs/ · obs/langfuse/ · search_memory/ · backends/{backend_id}/

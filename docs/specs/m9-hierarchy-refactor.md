@@ -27,7 +27,7 @@ promptpotter/
 │   ├── search_point.py     # JobSearchPoint, PromptTemplate, OptSearchPoint
 │   ├── pipeline.py         # PipelineSchema, PipelineNode, NodeOutputSchema
 │   ├── scoring.py          # ScoringEnv, RoundResult, composite formulas
-│   ├── campaign.py         # LoopState, RunConfig, RunCallbacks
+│   ├── campaign.py         # LoopState, RunConfig, RunListener
 │   └── tenant.py           # TenantContext (new — the multi-tenant seam)
 │
 ├── application/            # use cases / orchestration — no direct disk or network
@@ -99,7 +99,7 @@ Moved intact in M9; each gets its own splitting spec later.
 
 ## Invariants Preserved
 
-- **Three-layer I/O architecture** (persistence / display / control): persistence → `infrastructure/persistence/`, display → `presentation/ui/formatters/`, control → `infrastructure/persistence/control/`. The `CAMPAIGN_SESSION_ARTIFACTS` parity test moves with the persistence code.
+- **Three-layer I/O architecture** (persistence / display / control): persistence → `infrastructure/persistence/`, display → `presentation/ui/formatters/`, control → `infrastructure/persistence/control/`. The `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` parity tests move with the persistence code.
 - **`score_search_point()` as single scoring gateway.** Lives at `application/scoring/search_point_scorer.py`.
 - **`llm_call()` as single optimizer LLM primitive.** Lives at `application/optimization/pipeline.py`, backed by `infrastructure/llm/`.
 - **`shared/` rule** (leaf-only, no domain deps). Unchanged.

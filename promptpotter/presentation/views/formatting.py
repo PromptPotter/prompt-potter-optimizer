@@ -26,25 +26,34 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
 
 __all__ = [
+    "fmt_ci",
+    "fmt_pct",
+    "fmt_pvalue",
     "generate_supplemental",
     "render_table",
 ]
 
 
 # ---------------------------------------------------------------------------
-# Primitive formatters
+# Primitive formatters — public, shared by views, dashboard, notebook UI
 # ---------------------------------------------------------------------------
 
 
-def _fmt_pct(value: float) -> str:
-    return f"{value:.1%}"
+def fmt_pct(value: Any) -> str:
+    """Render a fraction in [0, 1] as ``"XX.X%"``; non-numerics → ``"-"``."""
+    try:
+        return f"{float(value):.1%}"
+    except (TypeError, ValueError):
+        return "-"
 
 
-def _fmt_ci(lower: float, upper: float) -> str:
+def fmt_ci(lower: float, upper: float) -> str:
+    """Format a 95% CI bracket: ``[X.X%-Y.Y%]``."""
     return f"[{lower:.1%}-{upper:.1%}]"
 
 
-def _fmt_pvalue(p: float) -> str:
+def fmt_pvalue(p: float) -> str:
+    """Format a p-value with significance tier (***, **, *, ns)."""
     if p < 0.001:
         return "p<0.001 ***"
     if p < 0.01:
@@ -52,6 +61,13 @@ def _fmt_pvalue(p: float) -> str:
     if p < 0.05:
         return f"p={p:.2f} *"
     return f"p={p:.2f} (ns)"
+
+
+# Underscore aliases retained for the existing call sites in this module
+# (gradual migration; the public name is the canonical one).
+_fmt_pct = fmt_pct
+_fmt_ci = fmt_ci
+_fmt_pvalue = fmt_pvalue
 
 
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:

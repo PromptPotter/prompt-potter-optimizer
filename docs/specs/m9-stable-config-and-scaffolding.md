@@ -16,7 +16,7 @@ M9 is foundation work. The optimization loop (L1/L2/L3) is functionally complete
 1. **Meta-prompts are proof-of-concept.** `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against a multi-node retrieval pipeline and need systematic evaluation before any benchmark number is meaningful.
 2. **Flat service layout.** `promptpotter/services/` mixes orchestration with I/O and has files up to 37KB. A multi-tenant webapp lands on top of this as duplication or leakage.
 3. **Single dataset/pipeline assumption.** Nothing in store paths or campaign state cleanly distinguishes HotPotQA from GSM8K from TermNorm running in the same project.
-4. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Artifact-write parity is closed (`run_optimization` auto-mints a session when the caller passes `session_id=""`, so notebook/smoke/future-API produce the same five `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`); **view-model unification remains** — Track 4 below.
+4. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Artifact-write parity is closed (`run_optimization` auto-mints a session+cycle pair when the caller passes `session_id=""`, so notebook/smoke/future-API produce the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`); **view-model unification remains** — Track 4 below.
 
 M9 delivers the foundation. M10 populates it with benchmark results. M11 generalizes the connector.
 
@@ -131,33 +131,35 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 
 1. **`obs/langfuse/events.jsonl` is mislabeled as Langfuse-native.** Langfuse has no on-disk convention — it's cloud-API only. `events.jsonl` is a PromptPotter-custom human navigation log that happens to live under `obs/langfuse/` today, which implies (falsely) that it's part of the Langfuse schema.
 2. **MLflow layout is non-compliant.** `obs/experiments/{campaign_id}/{run_id}/` hand-rolls `meta.yaml` / `params/` / `metrics/` files but uses UUID-like `campaign_id` at the experiment level (MLflow requires numeric experiment IDs) and diverges from MLflow's line formats (`artifacts/` is empty, metric step-timestamp encoding may not match). `mlflow ui` doesn't work out of the box.
-3. **Session and campaign have duplicated identities.** `init` mints a session; `optimize` mints a cycle. Today they are parallel, but conceptually they are the same thing — the session *is* the active campaign. Splitting them into parallel directories (`sessions/` sibling to `campaigns/`) is an implementation artifact.
+3. **Session and campaign identities need explicit separation.** `init` mints a session; `optimize` mints a cycle. They are *not* the same thing — a session is the operator workspace and may host multiple campaigns over time (1:N), even if today the relation is 1:1. The directory layout makes this explicit by giving each its own top-level tree, and by recording the parent link on every campaign.
 
-**Target:** Two top-level directories under a tenant partition. One for per-run data, one for cross-run reference.
+**Target:** Three top-level directories under a tenant partition: per-session, per-cycle, and cross-run reference.
 
 ```
 .promptpotter/projects/{tenant_id}/
-├── active_session.json                  # pointer to active cycle_id
+├── active_session.json                  # pointer: { tenant_id, session_id, cycle_id }
+├── sessions/{session_id}/
+│   ├── session.json                     # operator metadata + current_cycle_id pointer
+│   ├── journal.md                       # user narrative (notebook ↔ Claude exchange)
+│   ├── notes.md                         # Claude notes
+│   └── control.json                     # HITL signal
 ├── campaigns/{cycle_id}/
 │   ├── trials/trial_{round:04d}.json    # resume WAL (state)
 │   ├── candidates/round_{round:04d}.json # pre-scoring checkpoint (state)
 │   ├── rounds/round_{round:03d}.json    # per-round LLM action audit
-│   ├── control.json                     # HITL signal (was campaign_control.json)
-│   ├── dashboard.json                   # live counters (was campaign_state.json)
+│   ├── dashboard.json                   # live counters
 │   ├── events.jsonl                     # human navigation log
-│   ├── output.log                       # per-query audit (was campaign_output.log)
-│   ├── log.md                           # round-by-round summary (was campaign_log.md)
-│   ├── journal.md                       # user narrative (was notebook_journal.md)
-│   ├── notes.md                         # Claude notes (was claude_notes.md)
+│   ├── output.log                       # per-query audit
+│   ├── log.md                           # round-by-round summary
 │   ├── recon.json                       # this campaign's scan result (was recon_results.json)
-│   ├── index.json                       # cycle metadata (was campaigns/{cycle_id}.json)
+│   ├── index.json                       # cycle metadata + trial index + parent_session_id
 │   ├── prompts/{family}/{version}/      # rendered optimizer prompts
 │   ├── langfuse/                        # PromptPotter's shadow of Langfuse data model
 │   │   ├── traces/{trace_id}.json
 │   │   ├── observations/{trace_id}/{obs_id}.json
 │   │   ├── scores/{trace_id}.jsonl
 │   │   ├── datasets/{name}/{item_id}.json
-│   │   └── state.json                   # cloud id mappings (was sessions/{sid}/langfuse_state.json)
+│   │   └── state.json                   # cloud id mappings
 │   └── archived/resumed_at_{ts}/        # rewind history
 └── library/
     ├── datasets/{name}/                 # canonical prompts, pipeline, items, config
@@ -175,13 +177,13 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 
 1. **MLflow via the SDK at `library/mlruns/`.** Delete the hand-rolled `FileSink._write_mlflow_run()` / `_ensure_experiment()`. Call `mlflow.set_tracking_uri(f"file://{library}/mlruns")` + `mlflow.set_experiment(name=f"{tenant_id}/{campaign_id}")`, then `mlflow.start_run()` / `log_params` / `log_metrics` / `set_tags` per round. MLflow assigns numeric experiment IDs itself; campaign identity lives in the experiment *name*. Gated on `settings.MLFLOW_ENABLED` (default `False`) with `mlflow` as an optional `pip extra`. `mlflow ui --backend-store-uri file://…/library/mlruns` works out of the box.
 2. **Tenant partition as outer axis.** `{backend_id}` drops out of the outer path entirely — backends become peers under `library/backends/{backend_id}/`. The outer axis becomes `{tenant_id}`, mandatory, defaulting to `"default"` for the single-user CLI. Multi-tenant webapp picks tenant at auth time. `.promptpotter/projects/{tenant_id}/active_session.json` is the per-tenant pointer.
-3. **All 8 `CAMPAIGN_SESSION_ARTIFACTS` land directly in `campaigns/{cycle_id}/`.** Rename per the tree above. `session.json` disappears because session ≡ campaign.
+3. **Per-cycle artifacts in `CAMPAIGN_ARTIFACTS` land in `campaigns/{cycle_id}/`; per-session artifacts in `SESSION_ARTIFACTS` land in `sessions/{session_id}/`.** The two sets are disjoint and parity is enforced by `tests/test_artifact_parity.py`.
 
-**Semantic invariant: session ≡ campaign.** One mint point. Code change:
-- Delete `SessionStore` (`infrastructure/store/session_store.py`); merge into `CampaignStore`.
-- `Stores` dataclass loses the `sessions` field.
-- `active_session.json` payload becomes `{tenant_id, cycle_id}` (was `{backend_id, session_id}`).
-- `CampaignStore.create()` is the single mint — called from `init` (or the merged `run` verb from Track 5).
+**Semantic invariant: sessions and campaigns are separate.** Two mint points per `init` (one for each tree); the parent pointer in `index.json::parent_session_id` keeps the link addressable. Code shape:
+- `SessionStore` (`infrastructure/store/session_store.py`) owns `sessions/{session_id}/`.
+- `CampaignStore` owns `campaigns/{cycle_id}/`; its `create()` records `parent_session_id` on the campaign.
+- `Stores` dataclass exposes both `sessions` and `campaigns` fields.
+- `active_session.json` payload is `{tenant_id, session_id, cycle_id}`.
 
 **Deliverables:**
 
@@ -190,9 +192,9 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 3. **MLflow SDK adoption.** `mlflow` added as optional extra in `pyproject.toml`; `FileSink` MLflow block rewritten to use the SDK; hand-rolled writers deleted.
 4. **Migration script.** `promptpotter migrate` verb that walks existing `.promptpotter/projects/default/{backend_id}/…` (v2) trees and rewrites them to the new shape (v3). Writes `.promptpotter/schema_version=3` marker. Refuse to start on unmigrated v2 dirs without explicit `migrate` invocation.
 5. **Docs updated.** `CLAUDE.md § Architecture`, `docs/architecture/overview.md § Persistence`, `docs/architecture/optimization.md § Resuming mid-cycle` (path citations), `docs/architecture/observability-audit.md` (full sink mapping rewrite), `docs/observability.md` (navigation starting points), `docs/cli-workflow.md` (new `--tenant` flag).
-6. **Test updates.** `tests/test_artifact_parity.py` expected set updated to the new 8-file `CAMPAIGN_SESSION_ARTIFACTS`. Any test fixture with a path string in it.
+6. **Test updates.** `tests/test_artifact_parity.py` split into `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` parity assertions plus a check that every campaign records a `parent_session_id`. Any test fixture with a path string in it.
 
-**Sequencing:** Wave 1, alongside Track 2. Both are foundational move-only work; other tracks build on both. Track 4 (file-directory UI v0) should render the *new* tree, not rework around the old one later. Track 5 (CLI unification) benefits from the session ≡ campaign invariant being in place before it collapses `init` + `optimize`.
+**Sequencing:** Wave 1, alongside Track 2. Both are foundational move-only work; other tracks build on both. Track 4 (file-directory UI v0) should render the *new* tree, not rework around the old one later. Track 5 (CLI unification) needs the two-tree layout in place to know where `init` writes session state versus where `optimize` writes campaign state.
 
 **Non-goals:**
 - The webapp itself — that's M10+. This plan builds the filesystem the webapp will read.
@@ -291,7 +293,7 @@ LoopEnv  (per-run infrastructure, transient)
 ```
 Wave 1: Track 2 (hierarchy refactor, move-only) + Track 6 (directory reorg, move-only)
         — parallel; both foundational. Track 4's UI should target the post-reorg tree,
-        and Track 5's init+optimize collapse depends on Track 6's session ≡ campaign invariant.
+        and Track 5's init+optimize collapse depends on Track 6's two-tree layout.
 
 Wave 2: Track 3 (multi-dataset/pipeline) + Track 7 (config aggregate redesign) + Track 1 (meta-prompt eval protocol)
         — parallel; Track 3 and Track 7 both reshape SessionEnv — landing together keeps its
@@ -302,7 +304,8 @@ Wave 3: Track 4 (file-directory UI v0) + Track 1 (systematic improvements + fina
 
 Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
         — runs last; depends on Track 2 (hexagonal layout), Track 4
-        (stable active-session-pointer semantics), and Track 6 (session ≡ campaign invariant)
+        (stable active-session-pointer semantics), and Track 6 (two-tree layout
+        with parent_session_id link)
 ```
 
 ## Entry Criteria
@@ -318,7 +321,7 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 - [ ] Multi-dataset/pipeline working on at least two datasets in a single project store
 - [ ] File-directory UI v0 readable by a human browsing the session folder; CLI `show-status` and notebook both render from it
 - [ ] Single loop verb (`init` + `optimize` collapsed); unified `--from {fresh,resume[:<round>],recon:<id>}` seed vocabulary; notebook + API accept the same vocabulary
-- [ ] Two-directory layout in place: `campaigns/{cycle_id}/` (all per-run artifacts) and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; session ≡ campaign invariant enforced; migration script lands existing v2 layouts onto v3
+- [ ] Three-tree layout in place: `sessions/{session_id}/` (per-session metadata + journal/notes/control), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`), and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; campaigns and sessions cleanly separated with parity tests for both sets
 - [ ] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models; runtime fields (`session_id`, `project_root`, `recon_brief`, `pipeline_params`) live on `SessionEnv`; no service mutates user config; legacy `campaign.json` files parse unchanged
 - [ ] `CLAUDE.md` Architecture section updated to reflect new hierarchy
 

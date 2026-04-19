@@ -393,7 +393,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 | `escalation` | `EscalationCheck` fires mid-eval |
 | `zero_signal_filter` | Dataset sweep removed always-hit/always-miss queries |
 
-Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `RunCallbacks` for the callback interface.
+Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `RunListener` for the callback interface.
 
 ---
 

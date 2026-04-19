@@ -65,17 +65,20 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`. Fie
 
 ## Persistence
 
-Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; everything splits into two peer trees: per-cycle (`campaigns/`) and cross-cycle (`library/`).
+Sessions and campaigns are separate concepts with two mint points per `init`. A session is the operator workspace identifier; a campaign is one optimization cycle inside it. Today the relation is 1:1; the layout is wired so a session can host several campaigns over time (1:N) without any reorg. Each campaign records its parent in `index.json::parent_session_id`; each session points at its current cycle in `session.json::current_cycle_id`. Tenant is the outer axis; per-tenant content splits into three peer trees:
 
 ```
 .promptpotter/
-  active_session.json                  # { tenant_id, cycle_id } pointer
+  active_session.json                  # { tenant_id, session_id, cycle_id } pointer
   projects/{tenant_id}/
-    campaigns/{cycle_id}/              # per-cycle: all artifacts for one run
-      index.json                       # metadata + live session state (atomic rewrite)
-      dashboard.json                   # live counters
+    sessions/{session_id}/             # per-session: operator workspace
+      session.json                     # metadata + current_cycle_id pointer
+      journal.md / notes.md            # notebook ↔ Claude exchange
       control.json                     # HITL pause/resume
-      output.log / log.md / journal.md / notes.md
+    campaigns/{cycle_id}/              # per-cycle: all artifacts for one optimization
+      index.json                       # campaign metadata + trial index + parent_session_id
+      dashboard.json                   # live counters
+      output.log / log.md
       trial_NNNN.json                  # resume source of truth
       round_NNNN_candidates.json       # pre-scoring checkpoint
       rounds/round_NNN.json            # per-round LLM action audit
@@ -100,7 +103,7 @@ Session ≡ campaign — one mint point per cycle. Tenant is the outer axis; eve
       obs/                             # orphan-event fallback for file_only emits
 ```
 
-The canonical per-cycle file set is declared in `CAMPAIGN_SESSION_ARTIFACTS` (`promptpotter/infrastructure/persistence/session_emitter.py`) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `dashboard.json`. Non-CLI entry points (notebook, smoke tool, future API/webapp) auto-mint a cycle via `run_optimization()` when the caller passes `session_id=""` — CLI `init` mints eagerly and passes the id through, so there is no double-mint.
+The canonical artifact sets are declared in `promptpotter/infrastructure/persistence/session_emitter.py` (`CAMPAIGN_ARTIFACTS` for per-cycle files, `SESSION_ARTIFACTS` for per-session files) and enforced by `tests/test_artifact_parity.py`. Don't add a new writer that competes with `dashboard.json`. Non-CLI entry points (notebook, smoke tool, future API/webapp) auto-mint both a session and a cycle via `run_optimization()` when the caller passes `session_id=""` — CLI `init` mints eagerly and passes both ids through, so there is no double-mint.
 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 

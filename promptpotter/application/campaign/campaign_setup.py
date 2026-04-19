@@ -44,11 +44,12 @@ class SessionEnv:
     """Return value from ``init_services()``.
 
     Carries session-scoped identity + infrastructure + runtime-derived
-    state.  Fields ``session_id``, ``project_root``, and ``pipeline_params``
-    are populated as the session progresses —
-    ``configure_and_apply_pipeline`` sets ``pipeline_params``; ``auto_mint_session``
-    / CLI ``init`` set ``session_id`` and ``project_root``.  No user-authored
-    knob lives here — those live on ``CampaignConfig``.
+    state.  Fields ``session_id``, ``cycle_id``, ``project_root``, and
+    ``pipeline_params`` are populated as the session progresses —
+    ``configure_and_apply_pipeline`` sets ``pipeline_params``;
+    ``auto_mint_session`` / CLI ``init`` set ``session_id``, ``cycle_id``,
+    and ``project_root``.  No user-authored knob lives here — those live
+    on ``CampaignConfig``.
     """
 
     store: Stores
@@ -63,6 +64,7 @@ class SessionEnv:
     tenant: TenantContext | None = None
     dataset_name: str | None = None
     session_id: str = ""
+    cycle_id: str = ""
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
 
@@ -196,6 +198,10 @@ async def init_services(
     unless ``take_over=True`` is passed. CLI ``init`` passes ``take_over=True``;
     other surfaces (notebook, smoke tool) inherit the guardrail by default.
     """
+    from promptpotter.infrastructure.store import (
+        clear_active_pointer,
+        read_active_pointer,
+    )
     from promptpotter.shared.errors import ActiveSessionMismatchError
 
     def _status(msg: str) -> None:
@@ -212,20 +218,20 @@ async def init_services(
     store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
 
     # Guardrail: refuse to drift to a different tenant silently.
-    active_tid, active_cid = store.campaigns.read_active_pointer()
+    active_tid, active_sid, _active_cid = read_active_pointer()
     if active_tid and active_tid != tenant_id:
         if not take_over:
             raise ActiveSessionMismatchError(
-                active_backend_id=active_tid,
-                active_session_id=active_cid,
-                requested_backend_id=tenant_id,
+                active_tenant_id=active_tid,
+                active_session_id=active_sid,
+                requested_tenant_id=tenant_id,
             )
         # Take-over: clear the pointer. The smoke tool / notebook is sessionless
-        # by design (M9 gap), so writing {tenant_id, ""} would be a lie that
-        # downstream ``load_active()`` turns into an ugly "session not found"
-        # error. Clearing leaves the workspace in "no active session" state,
-        # which a CLI `init` then correctly recovers from.
-        store.campaigns.clear_active_pointer()
+        # by design (M9 gap), so writing a partial pointer would be a lie that
+        # downstream ``load_session()`` turns into an ugly "not found" error.
+        # Clearing leaves the workspace in "no active session" state, which
+        # a CLI ``init`` then correctly recovers from.
+        clear_active_pointer()
         _status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
     pipeline_schema = _load_static_pipeline_schema(project_root, dataset_name)

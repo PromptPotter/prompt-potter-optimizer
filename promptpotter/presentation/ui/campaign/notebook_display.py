@@ -74,13 +74,15 @@ class NotebookDisplay:
 
     def _resolve_session_dir(self) -> Path:
         """Return the active session directory. Raises if no pointer set."""
-        _, cid = self._store.campaigns.read_active_pointer()
-        if not cid:
+        from promptpotter.infrastructure.store import read_active_pointer
+
+        _, sid, _cid = read_active_pointer()
+        if not sid:
             raise RuntimeError(
                 "No active session — run init/auto-mint before calling "
                 "display.note() or display.render_claude_notes()."
             )
-        return self._store.campaigns.campaign_dir(cid)
+        return self._store.sessions.session_dir(sid)
 
     def note(self, action: str, body: str = "") -> None:
         """Append a narrative note to ``journal.md`` for Claude.

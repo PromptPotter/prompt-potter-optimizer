@@ -27,6 +27,7 @@ class SessionCtx:
     state: dict
     backend_id: str
     session_id: str
+    cycle_id: str
 
     @property
     def init_params(self) -> dict:
@@ -47,11 +48,11 @@ class SessionCtx:
         return self.state.get("task_context")
 
     def save_phase(self, phase: str, *, log: str = "") -> None:
-        """Set phase, persist state, optionally append log entry."""
+        """Set phase, persist the whole state, optionally append log entry."""
         self.state["phase"] = phase
-        self.store.campaigns.save_session(self.backend_id, self.session_id, self.state)
-        if log:
-            self.store.campaigns.append_log(self.backend_id, self.session_id, log)
+        self.store.sessions.update(self.session_id, dict(self.state))
+        if log and self.cycle_id:
+            self.store.campaigns.append_log(self.backend_id, self.cycle_id, log)
 
 
 def no_dataset_hint() -> str:
@@ -64,6 +65,7 @@ def no_dataset_hint() -> str:
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
+    from promptpotter.infrastructure.store import read_active_pointer
     from promptpotter.infrastructure.store.stores import _ACTIVE_SESSION_PATH
 
     if not _ACTIVE_SESSION_PATH.exists():
@@ -72,8 +74,18 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
             "To start a campaign, init one of the available datasets:\n\n" + no_dataset_hint()
         )
     store = build_stores(tenant_id=getattr(args, "tenant", "default"))
-    state, backend_id, session_id = store.campaigns.load_active(args.session)
-    return SessionCtx(store, state, backend_id, session_id)
+    _tid, pointer_sid, pointer_cid = read_active_pointer()
+    session_id = getattr(args, "session", None) or pointer_sid
+    if not session_id:
+        raise SystemExit("ERROR: No active session_id in pointer.")
+
+    state = store.sessions.read(session_id)
+    if not state:
+        raise SystemExit(f"ERROR: Session '{session_id}' not found.")
+
+    cycle_id = getattr(args, "cycle", None) or state.get("current_cycle_id") or pointer_cid or ""
+    backend_id = state.get("init_params", {}).get("backend_id", "") or ""
+    return SessionCtx(store, state, backend_id, session_id, cycle_id)
 
 
 def load_campaign_config(config_path: str | None) -> dict:

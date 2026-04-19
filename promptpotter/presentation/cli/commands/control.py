@@ -6,7 +6,6 @@ import argparse
 import json
 import sys
 
-from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
 from promptpotter.presentation.cli.parser import SIGNAL_ACTIONS
 from promptpotter.presentation.cli.result import CommandResult
 from promptpotter.presentation.cli.session import load_session
@@ -17,10 +16,9 @@ async def cmd_control(args: argparse.Namespace) -> CommandResult:
     from promptpotter.infrastructure.store.base import write_json
 
     ctx = load_session(args)
-    session_dir = ctx.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
-    control_path = session_dir / CONTROL_FILENAME
+    control_path = ctx.store.sessions.control_path(ctx.session_id)
     if not control_path.exists():
-        sys.exit(f"ERROR: No {CONTROL_FILENAME} — run 'optimize' first.")
+        sys.exit(f"ERROR: No {control_path.name} — run 'optimize' first.")
 
     control = json.loads(control_path.read_text(encoding="utf-8"))
     key, value = SIGNAL_ACTIONS[args.signal]

@@ -366,7 +366,8 @@ def _print_sp_diff(
 def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     config = d["config"]
     dataset = d["dataset"]
-    schema = config.pipeline_schema
+    session = d.get("env")
+    schema = session.pipeline_schema if session is not None else None
 
     warnings = d.get("warnings") or []
     if warnings:
@@ -375,8 +376,9 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
             print(f"{YELLOW}\u26a0 {BOLD}{w.title}{RESET}")
             print(f"    {YELLOW}{w.detail}{RESET}")
 
-    state.max_rounds = config.max_rounds or 0
-    state.patience = config.l1_patience
+    opt = config.optimization
+    state.max_rounds = opt.max_rounds or 0
+    state.patience = opt.l1_patience
     state.original_sp_flat = _flatten_sp_summary(
         schema.to_pipeline_params() if schema else None,
     )
@@ -384,9 +386,9 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
         {s: sorted(k) for s, k in schema.node_param_keys().items()} if schema else None
     )
 
-    model = config.model or "(default)"
-    l2 = "enabled" if config.enable_l2 else "disabled"
-    l3 = "enabled" if config.enable_l3 else "disabled"
+    model = config.optimizer_llm.model or "(default)"
+    l2 = "enabled" if opt.enable_l2 else "disabled"
+    l3 = "enabled" if opt.enable_l3 else "disabled"
     sample = config.sp_budget_ttest
     state.baseline_total = sample
 
@@ -397,14 +399,14 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(
         _dbox_line(f"Max rounds     {state.max_rounds or 999!s:<15s}Patience    {state.patience}")
     )
-    print(_dbox_line(f"Candidates     {config.n_variants}"))
+    print(_dbox_line(f"Candidates     {opt.n_variants}"))
     sample_label = f"{sample} of {len(dataset)}"
     mde = min_detectable_effect(sample)
     print(_dbox_line(f"Sample size    {sample_label}"))
     print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    critique = "enabled" if config.enable_critique else "disabled"
+    critique = "enabled" if opt.enable_critique else "disabled"
     print(_dbox_line(f"Critique       {critique}"))
     print(_dbox_bottom())
 

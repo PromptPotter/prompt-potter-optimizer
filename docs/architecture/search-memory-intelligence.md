@@ -198,7 +198,7 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 
 **In-round effect.** `apply_zero_signal_exclusions()` also mutates the in-memory `dataset` list passed into `_run_round_loop`, and prunes `env.scoring_dataset` — so the *current* run's next round immediately sees the smaller set, not just future runs.
 
-**User surfacing.** When the filter fires, `emit_phase("zero_signal_filter", "applied", count=N, always_miss=..., always_hit=..., examples=[...])` is dispatched via `RunCallbacks.on_phase`. Notebook/CLI presenters render the message.
+**User surfacing.** When the filter fires, `emit_phase("zero_signal_filter", "applied", count=N, always_miss=..., always_hit=..., examples=[...])` is dispatched via `RunListener.on_phase`. Notebook/CLI presenters render the message.
 
 **Config.** Two `CampaignConfig.optimization` fields:
 - `zero_signal_filter_enabled: bool = True` — master switch (on by default).

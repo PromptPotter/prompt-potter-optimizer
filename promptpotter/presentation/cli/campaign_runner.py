@@ -114,6 +114,11 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         strict=campaign_config.optimization.strict_cycle_identity,
     )
 
+    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
+
+    session_id = mint_session_id()
+    cycle_id = f"cycle_{cycle_hash}"
+
     state = new_session_state(
         init_params={
             "backend_url": args.backend_url,
@@ -128,16 +133,25 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = 0.0
+    state["current_cycle_id"] = cycle_id
 
-    session_id = session.store.campaigns.create_session(backend_id, state, cycle_hash)
-    session.store.campaigns.save_active_pointer(session.store.tenant_id, session_id)
+    session.store.sessions.create(session_id, state)
+    session.store.sessions.ensure_narrative_files(session_id)
+    session.store.campaigns.create(
+        backend_id,
+        cycle_id,
+        {"parent_session_id": session_id},
+    )
+    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     session.session_id = session_id
+    session.cycle_id = cycle_id
 
     excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
     session.store.campaigns.append_log(
         backend_id,
-        session_id,
-        f"""# Campaign Report — {session_id}
+        cycle_id,
+        f"""# Campaign Report — {cycle_id}
+(session {session_id})
 
 ## Setup
 - Backend: {backend_id} @ {args.backend_url}
@@ -149,6 +163,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     return CommandResult(
         data={
             "session_id": session_id,
+            "cycle_id": cycle_id,
             "backend_id": backend_id,
             "phase": state["phase"],
             "dataset_count": len(dataset),
@@ -157,6 +172,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         },
         human=(
             f"\nSession created: {session_id}\n"
+            f"Cycle: {cycle_id}\n"
             f"Dataset: {len(dataset)} queries (baseline runs in optimize phase 0)"
         ),
     )
@@ -181,23 +197,22 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
+    session.cycle_id = ctx.cycle_id
     pipeline_params = configure_pipeline(session, campaign_config)
     train_data = session.queries or []
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
     if resume_from_round is not None:
-        prior_cycle = ctx.state.get("cycle_id")
-        if not prior_cycle:
+        if not ctx.cycle_id:
             raise ValueError(
                 "--from requires an active cycle on this session; run `optimize` first"
             )
         if resume_from_round < 0:
             raise ValueError(f"--from must be >= 0, got {resume_from_round}")
-        logger.info("Resuming cycle %s from after round %d", prior_cycle, resume_from_round)
+        logger.info("Resuming cycle %s from after round %d", ctx.cycle_id, resume_from_round)
     else:
-        prior_cycle = ctx.state.get("cycle_id")
-        if prior_cycle:
-            logger.info("Resuming cycle %s", prior_cycle)
+        if ctx.cycle_id:
+            logger.info("Resuming cycle %s", ctx.cycle_id)
 
     log_startup_summary(
         session,
@@ -206,8 +221,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         ctx.backend_url,
         ctx.init_params.get("dataset_name"),
     )
-    session_dir = session.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
+    session_dir = session.store.sessions.session_dir(ctx.session_id)
+    campaign_dir = session.store.campaigns.campaign_dir(ctx.cycle_id)
     logger.info("Session: %s", session_dir)
+    logger.info("Campaign: %s", campaign_dir)
 
     # Build the emitter BEFORE baseline so the dashboard ticks through
     # the BASELINE phase, not just the L1 rounds.  The emitter reads any
@@ -216,9 +233,13 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0) or 0.0
     opt = campaign_config.optimization
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
+    # HITL pause is honored once at startup; for subsequent resume passes
+    # within this command run we want the optimizer to skip the pause.
+    # Stamp the override locally — never mutate the user's CampaignConfig.
+    pause_before_scoring = opt.pause_before_scoring
     emitter = CampaignPersistenceEmitter.for_session(
         pre_baseline_acc,
-        ctx.state.get("cycle_id"),
+        ctx.cycle_id,
         project_root=str(session.store.base_dir),
         session_id=ctx.session_id,
         max_rounds=opt.max_rounds or 999,
@@ -227,7 +248,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         model=campaign_config.optimizer_llm.model or "",
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
-        pause_before_scoring=opt.pause_before_scoring,
+        pause_before_scoring=pause_before_scoring,
         resumed_from_round=resume_from_round,
     )
     control_reader = CampaignControlReader(session_dir).check
@@ -243,15 +264,12 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         run_baseline=has_baseline,
         listener=listener,
     )
-
-    # Clear HITL pause flag after baseline completes so resume doesn't re-pause.
-    campaign_config.optimization.pause_before_scoring = False
     ctx.save_phase("optimizing")
 
-    set_round_recorder(RoundRecorder(session_dir / "rounds"))
+    set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
 
     baseline = extract_campaign_baseline(campaign_rounds)
-    state_path = session_dir / "dashboard.json"
+    state_path = campaign_dir / "dashboard.json"
     try:
         cycle_result = await _orch_run_optimization(
             dataset,
@@ -262,18 +280,18 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             task_context=ctx.task_context,
             session_id=ctx.session_id,
             control=control_reader,
-            cycle_id=ctx.state.get("cycle_id"),
+            cycle_id=ctx.cycle_id,
             resume_from_round_override=resume_from_round,
             emitter=emitter,
         )
     finally:
         set_round_recorder(None)
 
-    ctx.state["cycle_id"] = cycle_result.cycle_id
+    ctx.state["current_cycle_id"] = cycle_result.cycle_id
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
 
-    result_path = session_dir / "optimize_result.json"
+    result_path = campaign_dir / "optimize_result.json"
     result_path.write_text(
         json.dumps(cycle_result.model_dump(), indent=2, default=str), encoding="utf-8"
     )
@@ -336,7 +354,7 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
 
     session.store.campaigns.append_log(
         ctx.backend_id,
-        ctx.session_id,
+        ctx.cycle_id,
         f"""## Results
 - Rounds: {len(campaign_rounds)}
 - Best: {best.get("accuracy", 0):.1%} (round {best.get("round", "?")})

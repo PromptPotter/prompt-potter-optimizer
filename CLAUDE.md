@@ -46,7 +46,7 @@ CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pyt
 - **Logging** via `logging` module, never `print()`. Setup in `promptpotter/config/logging.py`.
 - **No backward compatibility** — freely break signatures, rename, restructure. No shims.
 - Pipeline components are called **nodes**, not "building blocks" or "services".
-- **Terminology** — "eval" is banned from identifiers. Use: **loop**, **round**, **searchpoint**, **sample**, **measurement**, **scoring**, **match**.
+- **Terminology** — "eval" is banned from identifiers (function/class/variable/field names; use **loop**, **round**, **searchpoint**, **sample**, **measurement**, **scoring**, **match**). User-facing display labels may use natural English.
 - **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
 - **No fallbacks** in service code. Sole sanctioned exception: `_score_candidates()` validation-failure synthetic-0 — when `OptSearchPoint.memory.validation_failures` is non-empty the candidate loop synthesizes a `{accuracy: 0.0, invalid: True}` report instead of running an invalid SearchPoint. Any new fallback must be documented alongside this one.
 - **Init never evaluates**: `init` is pure prep (load prompt + dataset, compute cycle hash, create session dir). The baseline runs as phase 0 of `optimize` on the `sp_budget_ttest` slice (≈15 queries). There is no `--skip-baseline` flag.
@@ -78,8 +78,8 @@ promptpotter/
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts → `CAMPAIGN_SESSION_ARTIFACTS`; `tests/test_artifact_parity.py` enforces.
-- **Display** (per-entry-point) — caller passes `RunCallbacks`. MUST NOT write to disk.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts go in `CAMPAIGN_ARTIFACTS` (per-cycle, in `campaigns/{cycle_id}/`) or `SESSION_ARTIFACTS` (per-session, in `sessions/{session_id}/`); `tests/test_artifact_parity.py` enforces both sets.
+- **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
 **SearchPoint hierarchy** — `JobSearchPoint` (frozen target spec, pipeline_params) and `PromptTemplate` → `OptSearchPoint` (optimizer state + memory). All services: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state traced at both layers: `JobSearchPoint` → `dataset_runs/` (content-addressed, shared); `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Details in [`docs/architecture/overview.md`](docs/architecture/overview.md).
@@ -97,14 +97,19 @@ promptpotter/
 
 Features land left → right. Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`; live-phase per-query output is notebook-only pending M9 Track 4.
 
-**Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides; `--tenant <id>` selects the partition (default `"default"`).
+**Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
 
-**Persistence: session ≡ campaign (v3).** Per-cycle artifacts live under `{tenant_id}/campaigns/{cycle_id}/` (dashboard, control, logs, trial_NNNN, candidates, langfuse shadow, events.jsonl, prompts). Cross-cycle reference under `{tenant_id}/library/` (datasets, backends, dataset_runs, mlruns, search_memory, aliases). Full tree in [`docs/architecture/overview.md § Persistence`](docs/architecture/overview.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/lifecycle.py`.
+**Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
+- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json` (with `current_cycle_id` pointer), `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trial_NNNN.json`, `round_NNNN_candidates.json`, langfuse shadow, events.jsonl, prompts.
+- `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
+
+Full tree in [`docs/architecture/overview.md § Persistence`](docs/architecture/overview.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.
 
 ## Key Patterns
 
-- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `project_root`, `pipeline_schema`, `pipeline_params`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
-- **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, CampaignStore, DatasetRunStore, PlanStore).
+- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `cycle_id`, `project_root`, `pipeline_schema`, `pipeline_params`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
+- **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore, PlanStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.
 - **HITL mode**: `RunConfig.pause_before_scoring` raises `PauseForReviewError` between L1 generate and score.
@@ -118,7 +123,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 ### Notebook ↔ CLI Session Parity
 
-**Campaign path closed:** `run_optimization` auto-mints a session when caller passes `session_id=""`, producing the same `CAMPAIGN_SESSION_ARTIFACTS` as CLI `init`.
+**Campaign path closed:** `run_optimization` auto-mints a session+cycle pair when caller passes `session_id=""`, producing the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`.
 
 **M9 Track 4:** Shared file-directory view model — renderer unification is still that track's work.
 

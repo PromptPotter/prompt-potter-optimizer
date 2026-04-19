@@ -645,7 +645,7 @@ def candidate_summaries(candidates: list[dict]) -> list[dict]:
 
 
 # ---------------------------------------------------------------------------
-# Warning inventory helpers (moved from critique.py to break circular dep)
+# Warning inventory helpers
 # ---------------------------------------------------------------------------
 
 

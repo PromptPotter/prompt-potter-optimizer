@@ -42,7 +42,7 @@ def apply_zero_signal_exclusions(
     round's loop iterates the smaller set.
 
     The caller is responsible for surfacing the result to the UI
-    (``RunCallbacks.on_phase`` or similar).
+    (``RunListener.on_phase`` or similar).
     """
     dead = memory.dead_queries(min_observations=min_observations)
     if not dead:

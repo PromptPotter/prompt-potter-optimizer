@@ -23,19 +23,26 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
     ``presentation/views`` — the same renderer the notebook will adopt.
     """
     ctx = load_session(args)
-    session_dir = ctx.store.campaigns._session_dir(ctx.backend_id, ctx.session_id)
+    session_dir = ctx.store.sessions.session_dir(ctx.session_id)
+    campaign_dir = ctx.store.campaigns.campaign_dir(ctx.cycle_id) if ctx.cycle_id else None
 
     payload: dict[str, Any] = {
         "session_id": ctx.session_id,
+        "cycle_id": ctx.cycle_id,
         "backend_id": ctx.backend_id,
         "phase": ctx.state["phase"],
     }
-    for key, filename in (
-        ("dashboard", "dashboard.json"),
-        ("control", CONTROL_FILENAME),
-        ("optimize_result", "optimize_result.json"),
-    ):
-        path = session_dir / filename
+    sources = [
+        ("control", session_dir / CONTROL_FILENAME),
+    ]
+    if campaign_dir is not None:
+        sources.extend(
+            [
+                ("dashboard", campaign_dir / "dashboard.json"),
+                ("optimize_result", campaign_dir / "optimize_result.json"),
+            ]
+        )
+    for key, path in sources:
         if path.exists():
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 payload[key] = json.loads(path.read_text(encoding="utf-8"))

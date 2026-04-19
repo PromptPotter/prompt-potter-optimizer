@@ -10,23 +10,12 @@ from __future__ import annotations
 
 import re
 
+from promptpotter.presentation.views.formatting import fmt_ci, fmt_pvalue
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.scoring import extract_display_answer
 from promptpotter.shared.statistics import wilson_ci
 
-
-def fmt_ci(lower: float, upper: float) -> str:
-    """Format a CI as '[X.X%-Y.Y%]'."""
-    return f"[{lower:.1%}-{upper:.1%}]"
-
-
-def fmt_pvalue(p: float) -> str:
-    """Format a p-value with significance marker."""
-    if p < 0.01:
-        return f"p={p:.3f} **"
-    if p < 0.05:
-        return f"p={p:.3f} *"
-    return f"p={p:.3f}"
+__all__ = ["fmt_ci", "fmt_pvalue"]
 
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")

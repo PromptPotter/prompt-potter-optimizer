@@ -7,13 +7,14 @@ tests and narrow wiring.
 
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
+from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import (
     BackendStore,
     PlanStore,
     Stores,
     build_stores,
     clear_active_pointer,
-    generate_session_id,
+    mint_session_id,
     read_active_pointer,
     save_active_pointer,
 )
@@ -23,10 +24,11 @@ __all__ = [
     "CampaignStore",
     "DatasetRunStore",
     "PlanStore",
+    "SessionStore",
     "Stores",
     "build_stores",
     "clear_active_pointer",
-    "generate_session_id",
+    "mint_session_id",
     "read_active_pointer",
     "save_active_pointer",
 ]

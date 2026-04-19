@@ -9,28 +9,28 @@ from __future__ import annotations
 
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import patch
 
 import pytest
 
 from promptpotter.infrastructure.persistence.session_emitter import (
-    CAMPAIGN_NARRATIVE_ARTIFACTS,
-    CAMPAIGN_OPERATIONAL_ARTIFACTS,
-    CAMPAIGN_SESSION_ARTIFACTS,
+    CAMPAIGN_ARTIFACTS,
+    SESSION_ARTIFACTS,
     append_journal,
     read_claude_notes,
 )
 from promptpotter.presentation.ui.campaign.notebook_display import NotebookDisplay
 
 
-def test_artifact_set_splits_operational_and_narrative() -> None:
-    """The split exposes two named tiers; the union matches the contract."""
-    assert CAMPAIGN_OPERATIONAL_ARTIFACTS.isdisjoint(CAMPAIGN_NARRATIVE_ARTIFACTS)
-    assert CAMPAIGN_SESSION_ARTIFACTS == (
-        CAMPAIGN_OPERATIONAL_ARTIFACTS | CAMPAIGN_NARRATIVE_ARTIFACTS
-    )
-    assert "journal.md" in CAMPAIGN_NARRATIVE_ARTIFACTS
-    assert "notes.md" in CAMPAIGN_NARRATIVE_ARTIFACTS
-    assert len(CAMPAIGN_NARRATIVE_ARTIFACTS) == 2
+def test_artifact_sets_split_session_and_campaign() -> None:
+    """Per-cycle and per-session artifact sets are disjoint."""
+    assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
+    assert "journal.md" in SESSION_ARTIFACTS
+    assert "notes.md" in SESSION_ARTIFACTS
+    assert "session.json" in SESSION_ARTIFACTS
+    assert "control.json" in SESSION_ARTIFACTS
+    assert "dashboard.json" in CAMPAIGN_ARTIFACTS
+    assert "index.json" in CAMPAIGN_ARTIFACTS
 
 
 def test_append_journal_writes_timestamped_section(tmp_path: Path) -> None:
@@ -53,12 +53,11 @@ def test_read_claude_notes_returns_file_contents(tmp_path: Path) -> None:
     assert "FYI" in read_claude_notes(tmp_path)
 
 
-def _make_display(tmp_path: Path, cycle_id: str) -> NotebookDisplay:
-    campaigns = SimpleNamespace(
-        read_active_pointer=lambda: ("default", cycle_id),
-        campaign_dir=lambda cid: tmp_path / "campaigns" / cid,
+def _make_display(tmp_path: Path, session_id: str) -> NotebookDisplay:
+    sessions = SimpleNamespace(
+        session_dir=lambda sid: tmp_path / "sessions" / sid,
     )
-    store = SimpleNamespace(campaigns=campaigns, base_dir=tmp_path)
+    store = SimpleNamespace(sessions=sessions, base_dir=tmp_path)
     return NotebookDisplay(
         campaign_rounds=[],
         baseline_acc=0.0,
@@ -69,18 +68,28 @@ def _make_display(tmp_path: Path, cycle_id: str) -> NotebookDisplay:
 
 
 def test_notebook_display_note_routes_to_journal(tmp_path: Path) -> None:
-    cycle_dir = tmp_path / "campaigns" / "cycle_abc"
-    cycle_dir.mkdir(parents=True)
-    (cycle_dir / "journal.md").touch()
+    session_dir = tmp_path / "sessions" / "s_abc12345"
+    session_dir.mkdir(parents=True)
+    (session_dir / "journal.md").touch()
 
-    display = _make_display(tmp_path, "cycle_abc")
-    display.note("smoke", "body")
+    display = _make_display(tmp_path, "s_abc12345")
+    with patch(
+        "promptpotter.infrastructure.store.read_active_pointer",
+        return_value=("default", "s_abc12345", "cycle_xyz"),
+    ):
+        display.note("smoke", "body")
 
-    content = (cycle_dir / "journal.md").read_text(encoding="utf-8")
+    content = (session_dir / "journal.md").read_text(encoding="utf-8")
     assert "smoke" in content and "body" in content
 
 
 def test_notebook_display_note_raises_without_active_pointer(tmp_path: Path) -> None:
     display = _make_display(tmp_path, "")
-    with pytest.raises(RuntimeError, match="No active session"):
+    with (
+        patch(
+            "promptpotter.infrastructure.store.read_active_pointer",
+            return_value=("", "", ""),
+        ),
+        pytest.raises(RuntimeError, match="No active session"),
+    ):
         display.note("will not write")

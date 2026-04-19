@@ -1,0 +1,144 @@
+"""SessionStore — per-session metadata under ``{tenant_root}/sessions/``.
+
+A session is a long-lived workspace identifier. One session today hosts
+exactly one campaign (1:1); the model is wired so it can host multiple
+campaigns over time (1:N) without a layout change. Each campaign records
+its parent in ``campaigns/{cycle_id}/index.json::parent_session_id``;
+each session points back at its current cycle in
+``sessions/{session_id}/session.json::current_cycle_id``.
+
+Disk layout::
+
+    {tenant_root}/sessions/{session_id}/
+      session.json      # metadata + current_cycle_id pointer
+      journal.md        # operator narrative (notebook ↔ Claude exchange)
+      notes.md          # Claude notes
+      control.json      # HITL control signals
+"""
+
+from __future__ import annotations
+
+import logging
+from datetime import UTC, datetime
+from pathlib import Path
+from typing import Any
+
+from promptpotter.infrastructure.store.base import (
+    read_json,
+    read_json_optional,
+    validate_path_component,
+    write_json,
+)
+
+logger = logging.getLogger(__name__)
+
+
+def session_dir_for(tenant_root: Path, session_id: str) -> Path:
+    """Return ``{tenant_root}/sessions/{session_id}``.
+
+    Module-level so callers that don't hold a ``SessionStore`` (e.g. the
+    emitter's classmethod constructor, which only has a raw project root)
+    can resolve the same path without instantiating a store.
+    """
+    validate_path_component(session_id)
+    return tenant_root / "sessions" / session_id
+
+
+class SessionStore:
+    """File I/O for per-session artifacts.
+
+    Sessions are tenant-scoped (no ``backend_id`` axis). The store is
+    rooted at the tenant directory; per-session content nests under
+    ``sessions/{session_id}/``.
+    """
+
+    def __init__(self, base_dir: Path):
+        self._base_dir = base_dir
+
+    # -- Path helpers ---------------------------------------------------------
+
+    def session_dir(self, session_id: str) -> Path:
+        """Public accessor for ``{tenant_root}/sessions/{session_id}``."""
+        return session_dir_for(self._base_dir, session_id)
+
+    def _state_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "session.json"
+
+    def journal_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "journal.md"
+
+    def notes_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "notes.md"
+
+    def control_path(self, session_id: str) -> Path:
+        return self.session_dir(session_id) / "control.json"
+
+    # -- Session CRUD ---------------------------------------------------------
+
+    def create(self, session_id: str, state: dict[str, Any]) -> Path:
+        """Write ``session.json`` with timestamps.
+
+        Idempotent: a re-create preserves the existing ``created_at`` and
+        merges new keys over old. ``updated_at`` is always now.
+        """
+        path = self._state_path(session_id)
+        existing = read_json_optional(path) or {}
+        now = datetime.now(UTC).isoformat()
+        data = {
+            **existing,
+            **state,
+            "session_id": session_id,
+            "created_at": existing.get("created_at", now),
+            "updated_at": now,
+        }
+        write_json(path, data)
+        return path
+
+    def read(self, session_id: str) -> dict[str, Any] | None:
+        return read_json_optional(self._state_path(session_id))
+
+    def update(self, session_id: str, updates: dict[str, Any]) -> None:
+        """Merge *updates* into ``session.json``. Updates ``updated_at``."""
+        path = self._state_path(session_id)
+        data = read_json(path)
+        data.update(updates)
+        data["updated_at"] = datetime.now(UTC).isoformat()
+        write_json(path, data)
+
+    def set_current_cycle(self, session_id: str, cycle_id: str) -> None:
+        """Record the cycle currently bound to this session."""
+        self.update(session_id, {"current_cycle_id": cycle_id})
+
+    def read_current_cycle(self, session_id: str) -> str | None:
+        data = self.read(session_id)
+        return data.get("current_cycle_id") if data else None
+
+    def list_all(self) -> list[dict[str, Any]]:
+        """Return summary metadata for every session under this tenant."""
+        sessions_root = self._base_dir / "sessions"
+        if not sessions_root.exists():
+            return []
+        out: list[dict[str, Any]] = []
+        for sdir in sorted(sessions_root.iterdir()):
+            data = read_json_optional(sdir / "session.json")
+            if data is None:
+                continue
+            out.append(
+                {
+                    "session_id": data.get("session_id", sdir.name),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
+                    "current_cycle_id": data.get("current_cycle_id"),
+                    "phase": data.get("phase"),
+                }
+            )
+        return out
+
+    # -- Narrative artifacts (touch on mint, append by helpers) ---------------
+
+    def ensure_narrative_files(self, session_id: str) -> None:
+        """Create empty journal.md / notes.md so parity holds from mint."""
+        sdir = self.session_dir(session_id)
+        sdir.mkdir(parents=True, exist_ok=True)
+        for name in ("journal.md", "notes.md"):
+            (sdir / name).touch()

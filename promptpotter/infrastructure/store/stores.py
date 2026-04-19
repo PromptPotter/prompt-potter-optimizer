@@ -1,20 +1,29 @@
 """Concrete store implementations — BackendStore, PlanStore, ``Stores`` bundle.
 
-Consolidated from individual modules. Tenant is the outer axis; all
-per-tenant trees live under ``{projects_root}/{tenant_id}/``. Two top-level
-partitions live inside each tenant:
+Tenant is the outer axis; all per-tenant trees live under
+``{projects_root}/{tenant_id}/``. Three top-level partitions live inside
+each tenant:
 
-- ``campaigns/{cycle_id}/``  — per-run state, artifacts, observability
-- ``library/``              — cross-run reference data (datasets, backends,
-                              dataset_runs cache, aliases)
+- ``sessions/{session_id}/``  — operator session metadata, journal/notes/control
+- ``campaigns/{cycle_id}/``   — per-cycle optimization artifacts (trials,
+                                dashboard, logs); each campaign records its
+                                ``parent_session_id`` in ``index.json``
+- ``library/``                — cross-run reference data (datasets, backends,
+                                dataset_runs cache, aliases)
 
-Disk layout (v3)::
+Sessions and campaigns are separate concepts. Today the relation is 1:1
+(one session hosts one campaign); the layout is wired so a future
+1:N relationship needs no reorg.
+
+Disk layout::
 
     .promptpotter/projects/{tenant_id}/
-      campaigns/{cycle_id}.json                     # campaign metadata
-      campaigns/{cycle_id}/                         # per-cycle state dir
-        index.json                                  # session state + campaign metadata
-        dashboard.json / control.json / output.log / log.md / journal.md / notes.md
+      sessions/{session_id}/
+        session.json                                # metadata + current_cycle_id
+        journal.md / notes.md / control.json
+      campaigns/{cycle_id}/
+        index.json                                  # campaign metadata + trial index + parent_session_id
+        dashboard.json / output.log / log.md
         trial_NNNN.json
         round_NNNN_candidates.json
       library/
@@ -47,6 +56,7 @@ from promptpotter.infrastructure.store.base import (
 )
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
+from promptpotter.infrastructure.store.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
 
@@ -402,34 +412,33 @@ class BackendStore:
 
 # ---------------------------------------------------------------------------
 # Active session pointer — survives across CLI invocations. Payload shape is
-# ``{tenant_id, cycle_id}`` (v3); ``backend_id`` is *not* part of the pointer
-# because it's no longer the project axis. Callers that need the backend_id
-# read it from the campaign's state blob.
+# ``{tenant_id, session_id, cycle_id}``; ``backend_id`` is *not* part of the
+# pointer because it's no longer the project axis. Callers that need the
+# backend_id read it from the session's state blob.
 # ---------------------------------------------------------------------------
 
 _ACTIVE_SESSION_PATH = Path(__file__).resolve().parents[3] / ".promptpotter" / "active_session.json"
 
 
-def generate_session_id(cycle_hash: str) -> str:
-    """Generate a cycle/session identifier with the problem hash as the tail.
+def mint_session_id() -> str:
+    """Mint a fresh, opaque session id (``s_<8 hex>``).
 
-    Format: ``{YYYYMMDD_HHMMSS}_{cycle_hash}``. The timestamp prefix keeps
-    sort-order == creation-order; the 12-hex ``cycle_hash`` suffix matches
-    ``cycle_<hash>`` produced by ``bootstrap_cycle`` so a session dir pairs
-    visually with its cycle dir.
+    Random — no relation to problem identity. Stays stable across
+    multiple campaigns under the same session in the future 1:N world.
     """
-    validate_path_component(cycle_hash)
-    ts = datetime.now(UTC).strftime("%Y%m%d_%H%M%S")
-    return f"{ts}_{cycle_hash}"
+    import uuid
+
+    return f"s_{uuid.uuid4().hex[:8]}"
 
 
-def save_active_pointer(tenant_id: str, cycle_id: str) -> None:
-    """Persist pointer to the active campaign across CLI invocations."""
+def save_active_pointer(tenant_id: str, session_id: str, cycle_id: str) -> None:
+    """Persist pointer to the active session+campaign across CLI invocations."""
     validate_path_component(tenant_id)
+    validate_path_component(session_id)
     validate_path_component(cycle_id)
     _ACTIVE_SESSION_PATH.parent.mkdir(parents=True, exist_ok=True)
     _ACTIVE_SESSION_PATH.write_text(
-        json.dumps({"tenant_id": tenant_id, "cycle_id": cycle_id}),
+        json.dumps({"tenant_id": tenant_id, "session_id": session_id, "cycle_id": cycle_id}),
         encoding="utf-8",
     )
 
@@ -439,27 +448,31 @@ def clear_active_pointer() -> None:
     _ACTIVE_SESSION_PATH.unlink(missing_ok=True)
 
 
-def read_active_pointer() -> tuple[str, str]:
-    """Return ``(tenant_id, cycle_id)`` from the pointer, or ``("", "")``.
+def read_active_pointer() -> tuple[str, str, str]:
+    """Return ``(tenant_id, session_id, cycle_id)`` from the pointer.
 
-    Does NOT raise if the pointer is missing or the referenced campaign has
-    been deleted — only inspects the raw pointer file. Used by guardrails
-    that need to compare the pointer to a requested tenant without coupling
-    to campaign lifecycle.
+    Returns ``("", "", "")`` when the pointer is missing or unreadable.
+    Does NOT raise if a referenced session/campaign has been deleted —
+    only inspects the raw pointer file. Used by guardrails that need to
+    compare the pointer to a requested tenant without coupling to session
+    lifecycle.
     """
     if not _ACTIVE_SESSION_PATH.exists():
-        return "", ""
+        return "", "", ""
     try:
         ptr = json.loads(_ACTIVE_SESSION_PATH.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError):
-        return "", ""
-    return ptr.get("tenant_id", ""), ptr.get("cycle_id", "")
+        return "", "", ""
+    return (
+        ptr.get("tenant_id", ""),
+        ptr.get("session_id", ""),
+        ptr.get("cycle_id", ""),
+    )
 
 
 # ---------------------------------------------------------------------------
-# Composite store — frozen bundle of the focused stores. ``SessionStore`` has
-# been merged into ``CampaignStore`` (session ≡ campaign invariant); no
-# separate ``sessions`` field.
+# Composite store — frozen bundle of the focused stores. Sessions and
+# campaigns are separate stores rooted at peer subtrees.
 # ---------------------------------------------------------------------------
 
 
@@ -468,13 +481,15 @@ class Stores:
     """Composite bundle of focused stores rooted at a per-tenant ``base_dir``.
 
     Construct via :func:`build_stores`. ``base_dir`` is the tenant root
-    (``{projects_root}/{tenant_id}/``). Session state lives inside
-    ``CampaignStore`` — one mint point.
+    (``{projects_root}/{tenant_id}/``). Sessions and campaigns are peer
+    trees under the tenant; a campaign records its parent session via
+    ``index.json::parent_session_id``.
     """
 
     base_dir: Path
     tenant_id: str
     backends: BackendStore
+    sessions: SessionStore
     campaigns: CampaignStore
     dataset_runs: DatasetRunStore
     recon_plans: PlanStore
@@ -501,6 +516,7 @@ def build_stores(
         base_dir=tenant_dir,
         tenant_id=tenant_id,
         backends=BackendStore(tenant_dir, ds_root),
+        sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         dataset_runs=DatasetRunStore(tenant_dir),
         recon_plans=PlanStore(tenant_dir),

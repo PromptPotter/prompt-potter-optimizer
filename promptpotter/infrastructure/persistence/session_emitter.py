@@ -1,9 +1,10 @@
 """Campaign session emitter — writes the live dashboard + audit log.
 
-Owns the per-session artifacts in ``CAMPAIGN_SESSION_ARTIFACTS`` — this
-module is the canonical source for the file set; ``tests/test_artifact_parity.py``
-enforces parity across entry points.  Instantiated by ``run_optimization()``
-so every entry point produces identical artifacts.
+Owns the per-cycle operational artifacts in ``CAMPAIGN_ARTIFACTS`` and
+ensures the per-session narrative artifacts in ``SESSION_ARTIFACTS``
+exist. ``tests/test_artifact_parity.py`` enforces both sets across entry
+points. Instantiated by ``run_optimization()`` so every entry point
+produces identical artifacts.
 """
 
 from __future__ import annotations
@@ -20,41 +21,39 @@ from promptpotter.application.scoring.metrics import is_degraded
 from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
+from promptpotter.infrastructure.store.session_store import session_dir_for
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
 
 __all__ = [
-    "CAMPAIGN_NARRATIVE_ARTIFACTS",
-    "CAMPAIGN_OPERATIONAL_ARTIFACTS",
-    "CAMPAIGN_SESSION_ARTIFACTS",
+    "CAMPAIGN_ARTIFACTS",
+    "SESSION_ARTIFACTS",
     "CampaignPersistenceEmitter",
     "append_journal",
     "read_claude_notes",
 ]
 
 
-# Scalar/state/log files produced by the emitter on every campaign. These
-# are the operational persistence tier — consumed by resume, status, UI.
-CAMPAIGN_OPERATIONAL_ARTIFACTS = {
-    "index.json",  # session state + campaign metadata (session ≡ campaign)
+# Per-cycle operational artifacts — produced by the emitter under
+# ``campaigns/{cycle_id}/``. Consumed by resume, status, UI.
+CAMPAIGN_ARTIFACTS = {
+    "index.json",  # campaign metadata + trial index + parent_session_id
     "dashboard.json",  # live scalar counters
-    "control.json",  # HITL control signals
     "output.log",  # per-query audit log
     "log.md",  # round-by-round markdown summary
 }
 
-# Free-form markdown files that carry the notebook ↔ Claude narrative
-# exchange. Minted empty, written by ``append_journal`` (user) and by
-# Claude's external Write tool (notes). Not state — not used by resume.
-CAMPAIGN_NARRATIVE_ARTIFACTS = {
-    "journal.md",  # user narrative
+# Per-session artifacts — produced under ``sessions/{session_id}/``.
+# session.json is owned by SessionStore; the emitter ensures the
+# free-form narrative pair + control.json exist for parity from mint.
+SESSION_ARTIFACTS = {
+    "session.json",  # session metadata + current_cycle_id pointer
+    "journal.md",  # operator narrative (notebook ↔ Claude exchange)
     "notes.md",  # Claude notes
+    "control.json",  # HITL control signals
 }
-
-# Union: what the parity contract enforces on every campaign mint.
-CAMPAIGN_SESSION_ARTIFACTS = CAMPAIGN_OPERATIONAL_ARTIFACTS | CAMPAIGN_NARRATIVE_ARTIFACTS
 
 
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
@@ -172,12 +171,15 @@ class _RoundCounters:
 
 
 class CampaignPersistenceEmitter:
-    """Writes session dashboard + audit log. Not an optimizer checkpoint —
-    resume uses ``campaigns/{cycle_id}/trial_NNNN.json``; counters here are
-    display continuity only."""
+    """Writes per-cycle dashboard + audit log under ``campaigns/{cycle_id}/``,
+    and ensures per-session narrative + control files exist under
+    ``sessions/{session_id}/``. Not an optimizer checkpoint — resume uses
+    ``campaigns/{cycle_id}/trial_NNNN.json``; counters here are display
+    continuity only."""
 
     def __init__(
         self,
+        campaign_dir: Path,
         session_dir: Path,
         *,
         max_rounds: int,
@@ -190,9 +192,10 @@ class CampaignPersistenceEmitter:
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
     ) -> None:
-        self.state_path = session_dir / "dashboard.json"
-        self.log_path = session_dir / "output.log"
-        self.log_md_path = session_dir / "log.md"
+        self.state_path = campaign_dir / "dashboard.json"
+        self.log_path = campaign_dir / "output.log"
+        self.log_md_path = campaign_dir / "log.md"
+        self.session_dir = session_dir
 
         self._patience_max: int = l1_patience
         self._state: dict[str, Any] = _make_initial_state(
@@ -211,10 +214,12 @@ class CampaignPersistenceEmitter:
         self._rc = _RoundCounters()
 
         self._persist()
-        ensure_control_file(session_dir, pause_before_scoring=pause_before_scoring)
 
-        # Bidirectional exchange channel — user narrative + Claude notes.
-        # Created empty so parity holds from session mint; helpers append.
+        # Per-session narrative + control. ``ensure_control_file`` is
+        # idempotent; narrative pair is touched so parity holds from mint
+        # even if SessionStore.ensure_narrative_files wasn't called yet.
+        session_dir.mkdir(parents=True, exist_ok=True)
+        ensure_control_file(session_dir, pause_before_scoring=pause_before_scoring)
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
@@ -250,7 +255,7 @@ class CampaignPersistenceEmitter:
         pause_before_scoring: bool,
         resumed_from_round: int | None = None,
     ) -> CampaignPersistenceEmitter | None:
-        """Construct the emitter for a run, or ``None`` if session_dir is unknown.
+        """Construct the emitter for a run, or ``None`` if ids are unknown.
 
         Reads the prior ``dashboard.json`` (if present) to carry UI
         counters across resumes — optimizer resume is a separate concern
@@ -261,16 +266,15 @@ class CampaignPersistenceEmitter:
         the surviving trials are clamped so the UI doesn't show phantom
         rounds.
         """
-        if not (project_root and session_id):
+        if not (project_root and session_id and cycle_id):
             return None
 
-        # v3 layout: session ≡ campaign; ``project_root`` is already scoped
-        # to the tenant by ``build_stores``. Path construction delegated to
-        # ``CampaignStore.campaign_dir_for`` so the layout lives in one place.
-        session_dir = campaign_dir_for(Path(project_root), session_id)
+        tenant_root = Path(project_root)
+        campaign_dir = campaign_dir_for(tenant_root, cycle_id)
+        session_dir = session_dir_for(tenant_root, session_id)
 
         resume_from: dict[str, Any] | None = None
-        prior_state = session_dir / "dashboard.json"
+        prior_state = campaign_dir / "dashboard.json"
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
@@ -290,6 +294,7 @@ class CampaignPersistenceEmitter:
                 resume_from["best"] = 0.0
 
         return cls(
+            campaign_dir,
             session_dir,
             max_rounds=max_rounds,
             l1_patience=l1_patience,
