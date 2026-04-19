@@ -64,13 +64,6 @@ def fmt_pvalue(p: float) -> str:
     return f"p={p:.2f} (ns)"
 
 
-# Underscore aliases retained for the existing call sites in this module
-# (gradual migration; the public name is the canonical one).
-_fmt_pct = fmt_pct
-_fmt_ci = fmt_ci
-_fmt_pvalue = fmt_pvalue
-
-
 def render_pipeline_overrides(
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None = None,
@@ -148,10 +141,10 @@ def _comparison_rows(data: dict[str, Any]) -> list[list[str]]:
     return [
         [
             s["name"],
-            _fmt_pct(s["baseline"]),
-            _fmt_pct(s["best"]),
-            f"+{s['improvement']:.1%}" if s["improvement"] > 0 else _fmt_pct(s["improvement"]),
-            _fmt_ci(s["ci_lower"], s["ci_upper"]),
+            fmt_pct(s["baseline"]),
+            fmt_pct(s["best"]),
+            f"+{s['improvement']:.1%}" if s["improvement"] > 0 else fmt_pct(s["improvement"]),
+            fmt_ci(s["ci_lower"], s["ci_upper"]),
             str(s["rounds_to_best"]),
             str(s["scoring_budget"]),
             s.get("stop_reason", ""),
@@ -162,7 +155,7 @@ def _comparison_rows(data: dict[str, Any]) -> list[list[str]]:
 
 def _significance_rows(data: dict[str, Any]) -> list[list[str]]:
     return [
-        [p["campaign_a"], p["campaign_b"], f"{p['p_value']:.4f}", _fmt_pvalue(p["p_value"])]
+        [p["campaign_a"], p["campaign_b"], f"{p['p_value']:.4f}", fmt_pvalue(p["p_value"])]
         for p in data["pairwise_significance"]
     ]
 
@@ -184,7 +177,7 @@ def _convergence_rows(data: dict[str, Any]) -> list[list[str]]:
         for cid in campaign_ids:
             series = convergence[cid]
             match = next((e for e in series if e["round"] == r), None)
-            row.append(_fmt_pct(match["accuracy"]) if match else "-")
+            row.append(fmt_pct(match["accuracy"]) if match else "-")
         rows.append(row)
     return rows
 
@@ -197,7 +190,7 @@ def _parameter_impact_rows(data: dict[str, Any]) -> list[list[str]]:
             [
                 ai["axis"],
                 f"{ai['effect_size']:.3f}",
-                _fmt_pct(ai["consistency"]),
+                fmt_pct(ai["consistency"]),
                 ai["classification"],
                 top_val,
                 str(ai["sample_count"]),
@@ -211,7 +204,7 @@ def _failure_rows(data: list[dict[str, Any]]) -> list[list[str]]:
         [
             f["pattern"],
             str(f["query_count"]),
-            _fmt_pct(f["fraction"]),
+            fmt_pct(f["fraction"]),
             "; ".join(f["example_queries"][:2]),
         ]
         for f in data
@@ -222,14 +215,14 @@ def _difficulty_rows(data: dict[str, Any]) -> list[list[str]]:
     s = data["summary"]
     total = s.get("total", 1) or 1
     return [
-        ["Easy (hit rate >= 80%)", str(s.get("n_easy", 0)), _fmt_pct(s["n_easy"] / total)],
+        ["Easy (hit rate >= 80%)", str(s.get("n_easy", 0)), fmt_pct(s["n_easy"] / total)],
         [
             "Discriminating (var >= 0.1)",
             str(s.get("n_discriminating", 0)),
-            _fmt_pct(s["n_discriminating"] / total),
+            fmt_pct(s["n_discriminating"] / total),
         ],
-        ["Hard (0 < hit rate < 20%)", str(s.get("n_hard", 0)), _fmt_pct(s["n_hard"] / total)],
-        ["Dead (hit rate = 0%)", str(s.get("n_dead", 0)), _fmt_pct(s["n_dead"] / total)],
+        ["Hard (0 < hit rate < 20%)", str(s.get("n_hard", 0)), fmt_pct(s["n_hard"] / total)],
+        ["Dead (hit rate = 0%)", str(s.get("n_dead", 0)), fmt_pct(s["n_dead"] / total)],
     ]
 
 

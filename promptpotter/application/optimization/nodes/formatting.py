@@ -73,6 +73,16 @@ def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
+def _runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
+    """Parse the common (rate_pct, dominant, cfg_str, n_evaluated) tuple from an RF dict."""
+    rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
+    dominant = rf.get("dominant_warning", "unknown")
+    cfg = rf.get("observed_config") or {}
+    cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k != "prompt"]
+    cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
+    return rate_pct, dominant, cfg_str, rf.get("total_evaluated", 0)
+
+
 def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
     """Render the accumulated RuntimeFailure trail for L3 ``modify_plan``.
 
@@ -92,14 +102,8 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
         "",
     ]
     for rf in runtime_failures:
-        rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
-        dominant = rf.get("dominant_warning", "unknown")
-        cfg = rf.get("observed_config") or {}
-        cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k not in ("prompt",)]
-        cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
-        lines.append(
-            f"  ⚠ {dominant} — {rate_pct}% degradation on {rf.get('total_evaluated', 0)} queries"
-        )
+        rate_pct, dominant, cfg_str, n = _runtime_failure_fields(rf)
+        lines.append(f"  ⚠ {dominant} — {rate_pct}% degradation on {n} queries")
         lines.append(f"    observed_config: {cfg_str}")
 
     lines.append("")
@@ -260,7 +264,7 @@ def format_l2_intelligence(
     runtime_failures: list[dict] | None = None,
     runtime_failures_accumulated: list[dict] | None = None,
 ) -> str:
-    """Build the L2 refine_strategy intelligence bundle (mirrors ``format_context_sections``).
+    """Build the L2 refine_strategy intelligence bundle.
 
     ``validation_failures`` and ``runtime_failures`` are the self-healing
     signals — L2 synthesises directives (to teach L1 the disallowed values)
@@ -344,17 +348,10 @@ def format_l2_intelligence(
         ]
 
         def _render_rf(rf: dict) -> list[str]:
-            rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
-            dominant = rf.get("dominant_warning", "unknown")
-            cfg = rf.get("observed_config") or {}
-            cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k not in ("prompt",)]
-            cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
+            rate_pct, dominant, cfg_str, n = _runtime_failure_fields(rf)
             changes = rf.get("candidate_changes") or ""
-            head = (f"  ⚠ {changes[:60]}" if changes else "  ⚠") + (
-                f" — {rate_pct}% degraded on "
-                f"{rf.get('total_evaluated', 0)} queries, "
-                f"dominant={dominant}"
-            )
+            prefix = f"  ⚠ {changes[:60]}" if changes else "  ⚠"
+            head = f"{prefix} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
             return [head, f"    observed_config: {cfg_str}"]
 
         if rfs_new:

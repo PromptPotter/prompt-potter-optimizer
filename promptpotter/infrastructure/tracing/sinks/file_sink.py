@@ -15,7 +15,7 @@ import logging
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, ClassVar
 
 from promptpotter.infrastructure.store.base import (
     append_jsonl,
@@ -41,6 +41,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundStart,
     RoundWinnerChosen,
 )
+from promptpotter.infrastructure.tracing.sinks.base import EventSink
 
 logger = logging.getLogger(__name__)
 
@@ -55,7 +56,7 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-class FileSink:
+class FileSink(EventSink):
     """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in)."""
 
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
@@ -65,13 +66,17 @@ class FileSink:
         self._tenant_id = self._tenant_root.name
         self._library_dir = self._tenant_root / "library"
         self._backend_id = backend_id
-        self._enabled: bool = settings.OBS_ENABLED
+        self._obs_enabled: bool = settings.OBS_ENABLED
         self._cycle_id: str | None = None
         self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
         # Per-NodeStart obs_id so NodeEnd can update the same JSON file.
         # Keyed by (campaign_id, round_num, node_id).
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
+
+    @property
+    def enabled(self) -> bool:
+        return self._obs_enabled
 
     # --- Scope resolution ---
 
@@ -193,87 +198,87 @@ class FileSink:
             mlflow.set_tags(tags)
 
     # --- Event dispatch ---
+    # Topology B (QueryEvalStart / QueryNodeSpan / QueryEvalEnd) is
+    # Langfuse-only — the file sink has no analogue for backfill replay.
 
-    def handle(self, event: Event) -> None:
-        if not self._enabled:
-            return
-        if isinstance(event, DatasetRegistered):
-            self._on_dataset_registered(event)
-        elif isinstance(event, CampaignStart):
-            self._on_campaign_start(event)
-        elif isinstance(event, DatasetRun):
-            self._on_dataset_run(event)
-        elif isinstance(event, RoundStart):
-            self._on_round_start(event)
-        elif isinstance(event, NodeStart):
-            self._on_node_start(event)
-        elif isinstance(event, NodeEnd):
-            self._on_node_end(event)
-        elif isinstance(event, RoundEnd):
-            self._on_round_end(event)
-        elif isinstance(event, PromptVersion):
-            self._on_prompt_version(event)
-        elif isinstance(event, CampaignEnd):
-            self._on_campaign_end(event)
-        elif isinstance(event, CandidateCreated):
-            self._on_write_point(
-                "candidate_created",
-                event,
-                extra={
-                    "candidate_idx": event.candidate_idx,
-                    "candidate_id": event.candidate_id,
-                },
-            )
-        elif isinstance(event, QueryScored):
-            self._on_write_point(
-                "query_scored",
-                event,
-                extra={
-                    "candidate_idx": event.candidate_idx,
-                    "query_idx": event.query_idx,
-                    "hit": event.hit,
-                    "score": event.score,
-                },
-            )
-        elif isinstance(event, CandidateScored):
-            self._on_write_point(
-                "candidate_scored",
-                event,
-                extra={
-                    "candidate_idx": event.candidate_idx,
-                    "report": event.report,
-                },
-            )
-        elif isinstance(event, RoundWinnerChosen):
-            self._on_write_point(
-                "round_winner_chosen",
-                event,
-                extra={
-                    "winner_candidate_id": event.winner_candidate_id,
-                    "winner_accuracy": event.winner_accuracy,
-                    "improved": event.improved,
-                },
-            )
-        elif isinstance(event, CritiqueWritten):
-            self._on_write_point(
-                "critique_written",
-                event,
-                extra={"critique_text": event.critique_text},
-            )
-        elif isinstance(event, L2Applied):
-            self._on_write_point(
-                "l2_applied",
-                event,
-                extra={"changes_description": event.changes_description},
-            )
-        elif isinstance(event, L3Applied):
-            self._on_write_point(
-                "l3_applied",
-                event,
-                extra={"changes_description": event.changes_description},
-            )
-        # Topology B (QueryEvalStart / QueryNodeSpan / QueryEvalEnd) is
-        # Langfuse-only — the file sink has no analogue for backfill replay.
+    _HANDLERS: ClassVar[dict[type[Event], str]] = {
+        DatasetRegistered: "_on_dataset_registered",
+        CampaignStart: "_on_campaign_start",
+        DatasetRun: "_on_dataset_run",
+        RoundStart: "_on_round_start",
+        NodeStart: "_on_node_start",
+        NodeEnd: "_on_node_end",
+        RoundEnd: "_on_round_end",
+        PromptVersion: "_on_prompt_version",
+        CampaignEnd: "_on_campaign_end",
+        CandidateCreated: "_on_candidate_created",
+        QueryScored: "_on_query_scored",
+        CandidateScored: "_on_candidate_scored",
+        RoundWinnerChosen: "_on_round_winner_chosen",
+        CritiqueWritten: "_on_critique_written",
+        L2Applied: "_on_l2_applied",
+        L3Applied: "_on_l3_applied",
+    }
+
+    # --- Write-point wrappers (route to shared _on_write_point) ---
+
+    def _on_candidate_created(self, event: CandidateCreated) -> None:
+        self._on_write_point(
+            "candidate_created",
+            event,
+            extra={"candidate_idx": event.candidate_idx, "candidate_id": event.candidate_id},
+        )
+
+    def _on_query_scored(self, event: QueryScored) -> None:
+        self._on_write_point(
+            "query_scored",
+            event,
+            extra={
+                "candidate_idx": event.candidate_idx,
+                "query_idx": event.query_idx,
+                "hit": event.hit,
+                "score": event.score,
+            },
+        )
+
+    def _on_candidate_scored(self, event: CandidateScored) -> None:
+        self._on_write_point(
+            "candidate_scored",
+            event,
+            extra={"candidate_idx": event.candidate_idx, "report": event.report},
+        )
+
+    def _on_round_winner_chosen(self, event: RoundWinnerChosen) -> None:
+        self._on_write_point(
+            "round_winner_chosen",
+            event,
+            extra={
+                "winner_candidate_id": event.winner_candidate_id,
+                "winner_accuracy": event.winner_accuracy,
+                "improved": event.improved,
+            },
+        )
+
+    def _on_critique_written(self, event: CritiqueWritten) -> None:
+        self._on_write_point(
+            "critique_written",
+            event,
+            extra={"critique_text": event.critique_text},
+        )
+
+    def _on_l2_applied(self, event: L2Applied) -> None:
+        self._on_write_point(
+            "l2_applied",
+            event,
+            extra={"changes_description": event.changes_description},
+        )
+
+    def _on_l3_applied(self, event: L3Applied) -> None:
+        self._on_write_point(
+            "l3_applied",
+            event,
+            extra={"changes_description": event.changes_description},
+        )
 
     # --- Fork-addressable write-point handler (shared) ---
 
@@ -545,7 +550,3 @@ class FileSink:
                 "best_round": event.best_round,
             }
         )
-
-    def flush(self) -> None:
-        # Disk writes are synchronous; nothing to do.
-        return

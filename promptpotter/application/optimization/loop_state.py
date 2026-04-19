@@ -19,7 +19,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
 
-__all__ = ["EscalationCounters", "LayerCounter", "LoopState"]
+__all__ = ["EscalationState", "LayerCounter", "LoopState"]
 
 
 @dataclass
@@ -44,9 +44,10 @@ class LayerCounter:
 
 
 @dataclass
-class EscalationCounters:
-    """L2/L3 escalation tracking — two nested ``LayerCounter`` instances."""
+class EscalationState:
+    """All escalation-layer tracking — L1 stall counter + L2/L3 ``LayerCounter`` instances."""
 
+    l1_stall_count: int = 0
     l2: LayerCounter = field(default_factory=LayerCounter)
     l3: LayerCounter = field(default_factory=LayerCounter)
 
@@ -58,6 +59,7 @@ class EscalationCounters:
 
     def to_checkpoint_dict(self) -> dict[str, int]:
         return {
+            "l1_stall_count": self.l1_stall_count,
             "l2_round": self.l2.round,
             "l3_round": self.l3.round,
             "l2_stall_count": self.l2.stall_count,
@@ -65,8 +67,9 @@ class EscalationCounters:
         }
 
     @classmethod
-    def from_checkpoint_dict(cls, d: dict) -> EscalationCounters:
+    def from_checkpoint_dict(cls, d: dict) -> EscalationState:
         return cls(
+            l1_stall_count=d["l1_stall_count"],
             l2=LayerCounter(round=d["l2_round"], stall_count=d["l2_stall_count"]),
             l3=LayerCounter(round=d["l3_round"], stall_count=d["l3_stall_count"]),
         )
@@ -90,14 +93,13 @@ class LoopState:
     best_composite: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
-    l1_stall_count: int = 0
 
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
     probe_next_round: bool = False
     failure_analysis: FailureAnalysis | None = None
     search_memory: Any = None
-    escalation: EscalationCounters = field(default_factory=EscalationCounters)
+    escalation: EscalationState = field(default_factory=EscalationState)
 
     state_version: int = 1
 
@@ -156,8 +158,7 @@ class LoopState:
     def restore_from_trial(self, trial: dict[str, Any]) -> None:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
-        self.escalation = EscalationCounters.from_checkpoint_dict(trial)
-        self.l1_stall_count = trial["l1_stall_count"]
+        self.escalation = EscalationState.from_checkpoint_dict(trial)
 
     def adopt_transition(
         self,

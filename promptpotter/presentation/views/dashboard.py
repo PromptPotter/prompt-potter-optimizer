@@ -11,7 +11,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.presentation.views.formatting import fmt_pct as _fmt_pct
+from promptpotter.presentation.views.formatting import fmt_pct
 
 
 def _get(d: dict, key: str, default: Any = "-") -> Any:
@@ -53,9 +53,9 @@ def render_dashboard(dashboard: dict) -> str:
         f"    layer         : {_get(d, 'layer')}",
         f"    candidate     : {_get(d, 'candidate')}",
         f"    patience      : {_get(d, 'patience')}",
-        f"    baseline      : {_fmt_pct(d.get('baseline'))}",
-        f"    best          : {_fmt_pct(d.get('best'))}  (round {_get(d, 'best_round')})",
-        f"    current       : {_fmt_pct(d.get('current_acc'))}",
+        f"    baseline      : {fmt_pct(d.get('baseline'))}",
+        f"    best          : {fmt_pct(d.get('best'))}  (round {_get(d, 'best_round')})",
+        f"    current       : {fmt_pct(d.get('current_acc'))}",
         f"    cycle_id      : {_get(d, 'cycle_id')}",
     ]
     if d.get("stop_reason"):
@@ -73,9 +73,9 @@ def render_dashboard(dashboard: dict) -> str:
         f"    active        : {', '.join(active) if active else '-'}",
         f"    excluded      : {', '.join(excluded) if excluded else '-'}",
         f"    terminated_at : {_get(d, 'terminated_at')}",
-        f"    cache_hit_rate: {_fmt_pct(d.get('cache_hit_rate'))}",
+        f"    cache_hit_rate: {fmt_pct(d.get('cache_hit_rate'))}",
         "  Quality",
-        f"    hit_rate      : {_fmt_pct(d.get('hit_rate'))}",
+        f"    hit_rate      : {fmt_pct(d.get('hit_rate'))}",
         f"    degraded      : {_get(d, 'degraded_count', 0)}",
         f"    errors        : {_get(d, 'error_count', 0)}",
         f"    improvement   : streak {_get(d, 'improvement_streak', 0)}",
@@ -117,7 +117,7 @@ def render_status(
     if result:
         parts.append(
             "\nLAST RESULT\n" + "=" * 70 + "\n"
-            f"  best_accuracy : {_fmt_pct(result.get('best_accuracy'))}\n"
+            f"  best_accuracy : {fmt_pct(result.get('best_accuracy'))}\n"
             f"  best_round    : {result.get('best_round', '-')}\n"
             f"  n_rounds      : {result.get('n_rounds', '-')}\n"
             f"  stop_reason   : {result.get('stop_reason', '-')}"

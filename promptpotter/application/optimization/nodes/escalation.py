@@ -320,7 +320,7 @@ async def _do_l2_transition(
 
     enter = {
         "l2_round": state.escalation.l2.round,
-        "l1_stall_count": state.l1_stall_count,
+        "l1_stall_count": state.escalation.l1_stall_count,
         "current_params": state.opt_sp.optimizer_params,
         "current_accuracy": state.current_accuracy,
         "best_accuracy": state.best_accuracy,

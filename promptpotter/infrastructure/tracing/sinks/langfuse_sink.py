@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, ClassVar
 
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.events import (
@@ -35,6 +35,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundEnd,
     RoundStart,
 )
+from promptpotter.infrastructure.tracing.sinks.base import EventSink
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
@@ -42,8 +43,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 
-class LangfuseSink:
+class LangfuseSink(EventSink):
     """Dispatches events to a ``LangfuseLogger``; owns persisted id state."""
+
+    @property
+    def enabled(self) -> bool:
+        return self._lf.enabled
+
+    _HANDLERS: ClassVar[dict[type[Event], str]] = {
+        CampaignStart: "_on_campaign_start",
+        DatasetRegistered: "_on_dataset_registered",
+        DatasetRun: "_on_dataset_run",
+        RoundStart: "_on_round_start",
+        NodeStart: "_on_node_start",
+        NodeEnd: "_on_node_end",
+        RoundEnd: "_on_round_end",
+        PromptVersion: "_on_prompt_version",
+        CampaignEnd: "_on_campaign_end",
+        QueryEvalStart: "_on_query_eval_start",
+        QueryNodeSpan: "_on_query_node_span",
+        QueryEvalEnd: "_on_query_eval_end",
+    }
 
     def __init__(
         self,
@@ -116,36 +136,6 @@ class LangfuseSink:
 
     def get_langfuse_trace_id(self, campaign_id: str) -> str | None:
         return self._trace_ids.get(campaign_id)
-
-    # --- Dispatch ---
-
-    def handle(self, event: Event) -> None:
-        if not self._lf.enabled:
-            return
-        if isinstance(event, CampaignStart):
-            self._on_campaign_start(event)
-        elif isinstance(event, DatasetRegistered):
-            self._on_dataset_registered(event)
-        elif isinstance(event, DatasetRun):
-            self._on_dataset_run(event)
-        elif isinstance(event, RoundStart):
-            self._on_round_start(event)
-        elif isinstance(event, NodeStart):
-            self._on_node_start(event)
-        elif isinstance(event, NodeEnd):
-            self._on_node_end(event)
-        elif isinstance(event, RoundEnd):
-            self._on_round_end(event)
-        elif isinstance(event, PromptVersion):
-            self._on_prompt_version(event)
-        elif isinstance(event, CampaignEnd):
-            self._on_campaign_end(event)
-        elif isinstance(event, QueryEvalStart):
-            self._on_query_eval_start(event)
-        elif isinstance(event, QueryNodeSpan):
-            self._on_query_node_span(event)
-        elif isinstance(event, QueryEvalEnd):
-            self._on_query_eval_end(event)
 
     # --- Topology A ---
 

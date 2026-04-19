@@ -120,7 +120,7 @@ class RoundSnapshot:
                 for r in state.rounds
             ],
             current_round=round_num,
-            l1_stall_count=state.l1_stall_count,
+            l1_stall_count=state.escalation.l1_stall_count,
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
             pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),

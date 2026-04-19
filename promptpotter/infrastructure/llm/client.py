@@ -10,8 +10,8 @@ returns a configured singleton.
 import asyncio
 import logging
 from abc import ABC, abstractmethod
-from collections.abc import Callable
-from typing import TYPE_CHECKING, Any, Literal
+from collections.abc import Awaitable, Callable
+from typing import TYPE_CHECKING, Any, Literal, TypeVar
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -34,6 +34,8 @@ LLM_BASE_DELAY: float = 1.0  # seconds
 
 logger = logging.getLogger(__name__)
 
+T = TypeVar("T")
+
 __all__ = [
     "AnthropicClient",
     "LLMClientBase",
@@ -41,6 +43,33 @@ __all__ = [
     "OpenAICompatibleClient",
     "get_llm_client",
 ]
+
+
+def _backoff_delay(attempt: int) -> float:
+    """Exponential backoff delay (seconds) for 0-indexed attempt N."""
+    return LLM_BASE_DELAY * (2**attempt)
+
+
+def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
+    """Salvage Groq's ``json_validate_failed`` 400 by extracting failed_generation.
+
+    Returns ``(content, parsed)`` when the error body carries a recoverable
+    ``failed_generation`` block that re-parses as JSON, otherwise ``None``
+    (caller should fall through to retry).
+    """
+    fg_key = "'failed_generation': '"
+    fg_start = err_str.find(fg_key)
+    if fg_start < 0:
+        return None
+    fg_text = err_str[fg_start + len(fg_key) :]
+    fg_end = fg_text.rfind("'}")
+    if fg_end <= 0:
+        return None
+    fg_text = fg_text[:fg_end].replace("\\n", "\n").replace("\\'", "'")
+    parsed = try_parse_json(fg_text, "json_repair")
+    if parsed is None:
+        return None
+    return fg_text, parsed
 
 
 class LLMResponse(BaseModel):
@@ -83,6 +112,46 @@ class LLMClientBase(ABC):
             LLMResponse with content and usage info.
         """
         ...
+
+    async def _retry_send(
+        self,
+        send: Callable[[], Awaitable[T]],
+        provider_name: str,
+    ) -> T:
+        """Run ``send()`` with exponential backoff on transient (5xx / 429 / connection) failures.
+
+        Re-raises non-retryable exceptions (4xx other than 429, unknown errors)
+        so the caller can apply provider-specific handling. Subclasses with
+        special 4xx logic (e.g. JSON-validate repair) implement their own loop
+        on top of ``_backoff_delay`` / ``_repair_json_validate_failure``.
+        """
+        last_exc: Exception | None = None
+        for attempt in range(LLM_MAX_APP_RETRIES + 1):
+            try:
+                return await send()
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
+            except Exception as exc:
+                status = getattr(exc, "status_code", None)
+                is_connection = "Connection" in type(exc).__name__
+                if status not in LLM_RETRY_STATUSES and not is_connection:
+                    raise
+                if attempt >= LLM_MAX_APP_RETRIES:
+                    raise
+                last_exc = exc
+                delay = _backoff_delay(attempt)
+                logger.warning(
+                    "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
+                    provider_name,
+                    attempt + 1,
+                    LLM_MAX_APP_RETRIES + 1,
+                    status,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
+        assert last_exc is not None
+        raise last_exc
 
 
 class OpenAICompatibleClient(LLMClientBase):
@@ -146,7 +215,9 @@ class OpenAICompatibleClient(LLMClientBase):
 
         request_params.update(kwargs)
 
-        # App-level retry for transient server errors
+        # App-level retry: 5xx / 429 / connection retry via _retry_send;
+        # 4xx (404 model-not-found, 400 json_validate_failed) handled here
+        # because they require provider-specific transformations.
         last_exc: Exception | None = None
         for attempt in range(LLM_MAX_APP_RETRIES + 1):
             try:
@@ -163,65 +234,55 @@ class OpenAICompatibleClient(LLMClientBase):
                         f"Update campaign_config['optimizer_llm']['model'] or "
                         f"set EXPERIMENT_ID = None to use current config."
                     ) from exc
-                # Groq JSON mode: invalid generation — try to salvage
+
+                # Groq JSON mode quirk: 400 json_validate_failed → try repair, else retry
                 is_json_validate_failed = status == 400 and "json_validate_failed" in str(exc)
                 if is_json_validate_failed:
-                    # Extract failed_generation from error body and try repair
-                    err_str = str(exc)
-                    fg_key = "'failed_generation': '"
-                    fg_start = err_str.find(fg_key)
-                    if fg_start >= 0:
-                        fg_text = err_str[fg_start + len(fg_key) :]
-                        # Find matching end quote (skip escaped quotes)
-                        fg_end = fg_text.rfind("'}")
-                        if fg_end > 0:
-                            fg_text = fg_text[:fg_end]
-                            # Unescape Python string repr artifacts
-                            fg_text = fg_text.replace("\\n", "\n").replace("\\'", "'")
-                            parsed = try_parse_json(fg_text, self._provider_name)
-                            if parsed is not None:
-                                logger.info(
-                                    "%s: salvaged failed_generation via JSON repair",
-                                    self._provider_name,
-                                )
-                                return LLMResponse(
-                                    content=fg_text,
-                                    model=request_params.get("model", ""),
-                                    usage={"prompt_tokens": 0, "completion_tokens": 0},
-                                    parsed=parsed,
-                                )
-                    # Repair failed — fall through to retry
-                    last_exc = exc
-                    if attempt < LLM_MAX_APP_RETRIES:
-                        delay = LLM_BASE_DELAY * (2**attempt)
+                    repaired = _repair_json_validate_failure(str(exc))
+                    if repaired is not None:
+                        fg_text, parsed = repaired
                         logger.info(
-                            "%s JSON validation failed (attempt %d/%d), retrying in %.1fs",
+                            "%s: salvaged failed_generation via JSON repair",
                             self._provider_name,
-                            attempt + 1,
-                            LLM_MAX_APP_RETRIES + 1,
-                            delay,
                         )
-                        await asyncio.sleep(delay)
-                        continue
-                    raise
+                        return LLMResponse(
+                            content=fg_text,
+                            model=request_params.get("model", ""),
+                            usage={"prompt_tokens": 0, "completion_tokens": 0},
+                            parsed=parsed,
+                        )
+                    # Repair miss — treat as retryable
+                    last_exc = exc
+                    if attempt >= LLM_MAX_APP_RETRIES:
+                        raise
+                    delay = _backoff_delay(attempt)
+                    logger.info(
+                        "%s JSON validation failed (attempt %d/%d), retrying in %.1fs",
+                        self._provider_name,
+                        attempt + 1,
+                        LLM_MAX_APP_RETRIES + 1,
+                        delay,
+                    )
+                    await asyncio.sleep(delay)
+                    continue
 
                 is_connection = "Connection" in type(exc).__name__
-                if status in LLM_RETRY_STATUSES or is_connection:
-                    last_exc = exc
-                    if attempt < LLM_MAX_APP_RETRIES:
-                        delay = LLM_BASE_DELAY * (2**attempt)
-                        logger.warning(
-                            "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
-                            self._provider_name,
-                            attempt + 1,
-                            LLM_MAX_APP_RETRIES + 1,
-                            status,
-                            delay,
-                            exc,
-                        )
-                        await asyncio.sleep(delay)
-                        continue
-                raise
+                if status not in LLM_RETRY_STATUSES and not is_connection:
+                    raise
+                last_exc = exc
+                if attempt >= LLM_MAX_APP_RETRIES:
+                    raise
+                delay = _backoff_delay(attempt)
+                logger.warning(
+                    "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
+                    self._provider_name,
+                    attempt + 1,
+                    LLM_MAX_APP_RETRIES + 1,
+                    status,
+                    delay,
+                    exc,
+                )
+                await asyncio.sleep(delay)
         else:
             raise last_exc  # type: ignore[misc]
 
@@ -299,7 +360,10 @@ class AnthropicClient(LLMClientBase):
         if system_message:
             request_params["system"] = system_message
 
-        response = await client.messages.create(**request_params)
+        async def _send():
+            return await client.messages.create(**request_params)
+
+        response = await self._retry_send(_send, "Anthropic")
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = (
