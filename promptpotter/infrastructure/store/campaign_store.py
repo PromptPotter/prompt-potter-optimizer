@@ -88,7 +88,7 @@ class CampaignStore(EntityStore):
     def create(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         metadata: dict[str, Any],
     ) -> Path:
         """Create/augment a campaign's ``index.json`` with metadata.
@@ -98,11 +98,11 @@ class CampaignStore(EntityStore):
         clobbering trial/best/baseline accumulators — defaults only fill
         gaps. ``parent_session_id`` flows through ``metadata``.
         """
-        path = self._entity_path(backend_id, campaign_id)
+        path = self._entity_path(backend_id, cycle_id)
         existing = read_json_optional(path) or {}
         now = datetime.now(UTC).isoformat()
         defaults: dict[str, Any] = {
-            "campaign_id": campaign_id,
+            "campaign_id": cycle_id,
             "created_at": existing.get("created_at", now),
             "updated_at": now,
             "status": "active",
@@ -127,11 +127,11 @@ class CampaignStore(EntityStore):
     def update(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         updates: dict[str, Any],
     ) -> None:
         """Merge *updates* into the campaign file and write back (+ timestamp)."""
-        path = self._entity_path(backend_id, campaign_id)
+        path = self._entity_path(backend_id, cycle_id)
         data = read_json(path)
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
@@ -377,15 +377,15 @@ class CampaignStore(EntityStore):
     def load_many(
         self,
         backend_id: str,
-        campaign_ids: list[str] | None = None,
+        cycle_ids: list[str] | None = None,
     ) -> list[dict[str, Any]]:
-        """Load full campaign records for *campaign_ids*, or all campaigns when None.
+        """Load full campaign records for *cycle_ids*, or all campaigns when None.
 
         Skips campaigns whose detail file is missing.
         """
-        if campaign_ids is None:
-            campaign_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
-        return [c for cid in campaign_ids if (c := self.load(backend_id, cid)) is not None]
+        if cycle_ids is None:
+            cycle_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
+        return [c for cid in cycle_ids if (c := self.load(backend_id, cid)) is not None]
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign stored under this tenant.
@@ -428,7 +428,7 @@ class CampaignStore(EntityStore):
     def add_trial(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         trial: dict[str, Any],
     ) -> Path:
         """Persist a trial detail file and update the campaign index."""
@@ -436,10 +436,10 @@ class CampaignStore(EntityStore):
         validate_path_component(trial_id)
         round_num = trial.get("round", 0)
 
-        detail_path = self._campaign_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json"
+        detail_path = self._campaign_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json"
         write_json(detail_path, trial)
 
-        campaign_path = self._entity_path(backend_id, campaign_id)
+        campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
         summary = {
@@ -472,30 +472,28 @@ class CampaignStore(EntityStore):
     def load_trial(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         round_num: int,
     ) -> dict[str, Any] | None:
         """Load a trial detail by round number.  Returns None if not found."""
         return read_json_optional(
-            self._campaign_dir(backend_id, campaign_id) / f"trial_{round_num:04d}.json",
+            self._campaign_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json",
         )
 
-    def complete(self, backend_id: str, campaign_id: str) -> None:
+    def complete(self, backend_id: str, cycle_id: str) -> None:
         """Mark a campaign as completed."""
-        self.update(backend_id, campaign_id, {"status": "completed"})
-        logger.info("Campaign %s completed", campaign_id)
+        self.update(backend_id, cycle_id, {"status": "completed"})
+        logger.info("Campaign %s completed", cycle_id)
 
     def save_round_candidates(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         round_num: int,
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before evaluation (mid-round checkpoint)."""
-        path = (
-            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
-        )
+        path = self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json"
         write_json(path, candidates)
         logger.debug(
             "Saved %d candidates for round %d → %s",
@@ -507,24 +505,22 @@ class CampaignStore(EntityStore):
     def load_round_candidates(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         round_num: int,
     ) -> list[dict[str, Any]] | None:
         """Load persisted candidates for a round.  Returns None if not on disk."""
         return read_json_optional(
-            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json",
+            self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json",
         )
 
     def delete_round_candidates(
         self,
         backend_id: str,
-        campaign_id: str,
+        cycle_id: str,
         round_num: int,
     ) -> None:
         """Delete persisted candidates for a round (forces fresh generation)."""
-        path = (
-            self._campaign_dir(backend_id, campaign_id) / f"round_{round_num:04d}_candidates.json"
-        )
+        path = self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json"
         if path.exists():
             path.unlink()
             logger.debug(

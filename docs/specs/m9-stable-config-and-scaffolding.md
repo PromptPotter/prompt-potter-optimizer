@@ -330,15 +330,16 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Area | Files |
 |------|-------|
 | Meta-prompts | `promptpotter/config/optimizer_prompts/*.json` |
-| Optimizer pipeline | `promptpotter/services/optimizer/pipeline.py`, `optimizer_pipeline.json` |
-| LLM client | `promptpotter/services/llm_client.py` |
+| Optimizer pipeline | `promptpotter/application/optimization/pipeline.py`, `optimizer_pipeline.json` |
+| LLM client | `promptpotter/infrastructure/llm/client.py` |
 | Scoring | `promptpotter/shared/scoring.py` |
-| Dataset builder | `promptpotter/services/dataset_builder.py` |
-| Dataset store | `promptpotter/services/store/dataset_run_store.py` |
-| Session store | `promptpotter/services/store/session_store.py` |
-| CLI dashboard | `promptpotter/cli/campaign_runner.py` (show-status) |
+| Dataset builder | `promptpotter/application/datasets/builder.py` |
+| Dataset store | `promptpotter/infrastructure/store/dataset_run_store.py` |
+| Session store | `promptpotter/infrastructure/store/session_store.py` |
+| Campaign store | `promptpotter/infrastructure/store/campaign_store.py` |
+| CLI dashboard | `promptpotter/presentation/cli/campaign_runner.py` (show-status) |
 | Notebook | `notebooks/optimization_campaign.ipynb` |
-| UI layer | `promptpotter/ui/campaign/` |
+| UI layer | `promptpotter/presentation/ui/campaign/` |
 
 ## Risks
 

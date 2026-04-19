@@ -15,16 +15,16 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
-from promptpotter.application.recon.failure_groups import preview as _preview
-from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.scoring import ScoringEnv
-from promptpotter.shared.constants import (
+from promptpotter.application.recon._constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
     MIN_DIAGNOSTIC_QUERIES,
     RECON_TARGET_MDE,
 )
+from promptpotter.application.recon.failure_groups import preview as _preview
+from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import min_sample_size
 

@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
-**Note:** `application/recon/` (sensitivity scan) is a dormant code archive from a prior iteration. No CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it. Revive by re-wiring the seams if needed. Ignore otherwise.
+**Note — `application/recon/` is a preserved template, not dead code.** The sensitivity-scan / recon pass is kept as a working-shape reference for anyone who wants to revive it later. It is dormant by design: no CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it. **Do not remove it** — the structure itself is the spec. To revive, re-wire the seams; otherwise ignore.
 
 **Self-healing optimization — two rails.** Failures attach to the candidate that produced them (per-candidate `OptSearchPoint.memory`), never to the round. Rail 1 (`ValidationFailure`, pre-eval): L2 teaches L1 what not to propose. Rail 2 (`RuntimeFailure`, mid-eval): L2 adjusts its own strategy; L3 replans if the pattern persists. Full mechanics in [`docs/architecture/optimization.md § Self-healing optimization`](docs/architecture/optimization.md).
 
@@ -65,7 +65,7 @@ promptpotter/
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
-│   ├── recon/         # DORMANT — legacy sensitivity scan, unused
+│   ├── recon/         # TEMPLATE — dormant sensitivity-scan archive, preserved for future revival
 │   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library
 │   ├── scoring/       # score_search_point gateway
 │   └── datasets/

@@ -12,13 +12,14 @@ from promptpotter.application.campaign.data import (
 )
 from promptpotter.application.optimization.results import RunResult
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.presentation.views import render_pipeline_overrides
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     proportion_test,
     wilson_ci,
 )
 
-from .notebook_phase import format_pipeline_overrides, show_progress
+from .notebook_phase import show_progress
 from .notebook_primitives import (
     BOLD,
     CYAN,
@@ -333,7 +334,12 @@ async def run_optimization_notebook(
         print(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
     print(_dbox_bottom())
 
-    format_pipeline_overrides(result.winner_pipeline_params, session.pipeline_schema)
+    overrides_block = render_pipeline_overrides(
+        result.winner_pipeline_params, session.pipeline_schema
+    )
+    if overrides_block:
+        print()
+        print(overrides_block)
 
     if interrupted:
         raise KeyboardInterrupt(f"optimization interrupted after {result.n_rounds} rounds")

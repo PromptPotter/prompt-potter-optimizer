@@ -10,8 +10,8 @@ score.[^scoring] The evaluation budget per round is *N* x *K* backend calls,
 which dominates wall-clock time. The candidates are pre-enumerated — there is no
 parameter space to search, only a fixed set to compare.
 
-[^gen]: `services/campaign/l1_optimizer.py:l1_generate()`.
-[^scoring]: `shared/scoring.py:compile_scorer()` — user-defined formula
+[^gen]: `promptpotter/application/optimization/nodes/generate.py:l1_generate()`.
+[^scoring]: `promptpotter/shared/scoring.py:compile_scorer()` — user-defined formula
 compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
 
 ## Candidate Elimination
@@ -29,8 +29,8 @@ early. The round winner is selected from all candidates (including
 early-stopped) by composite score, subject to an improvement threshold
 (default delta > 0.01).[^winner]
 
-[^elim]: `services/search/sequential_elimination.py:should_stop_early()`.
-[^winner]: `services/campaign/l1_optimizer.py:_select_round_winner()`.
+[^elim]: `promptpotter/shared/statistics.py:should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
+[^winner]: `promptpotter/application/optimization/nodes/score.py:_select_round_winner()`.
 
 ### Design Rationale
 

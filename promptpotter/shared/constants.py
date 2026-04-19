@@ -7,12 +7,6 @@ import from here.
 
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
-DEFAULT_DIAGNOSTIC_QUERIES: int = 6
-
-# search/adaptive_recon — diagnostic set thresholds
-MIN_DIAGNOSTIC_QUERIES: int = 3
-DIAGNOSTIC_HIT_RATIO: float = 0.75
-RECON_TARGET_MDE: float = 0.15  # 15% minimum detectable effect for scan sizing
 
 # stores/dataset_run_store — file lock parameters
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale

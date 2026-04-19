@@ -15,7 +15,7 @@ knows the landscape better, and a fresh optimization starts from
 higher ground. This shared memory lives in the `intelligence/` package
 and is independent of both the optimization loop and the scan.
 
-[^impl]: `services/search/search_memory.py`.
+[^impl]: `promptpotter/application/intelligence/search_memory.py`.
 
 ## 1. Data Model
 
@@ -68,8 +68,9 @@ Per-query failure tracking: which pipeline step terminated processing
 
 ### L1 Generate (meta-prompt)
 
-Built by `build_l1_search_memory_digest()`.[^l1fmt] Injected as a
-"HISTORICAL INTELLIGENCE" section in the L1 meta-prompt via
+Built by `SearchMemory.to_l1_digest()` then rendered through
+`format_search_memory_block()`.[^l1fmt] Injected as a "HISTORICAL
+INTELLIGENCE" section in the L1 meta-prompt via
 `format_context_sections()`.
 
 | Signal | Source accessor | Prompt text |
@@ -79,11 +80,12 @@ Built by `build_l1_search_memory_digest()`.[^l1fmt] Injected as a
 | High-impact axes | `axis_rankings()[:3]` | "High-impact axes: web_search.max_sites (effect=0.082, consistently_impactful)" |
 | Best values | `top_k_values(top_axis, 3)` | "Best-performing values: 7 (acc=72.0%), 5 (acc=68.0%)" |
 
-[^l1fmt]: `services/campaign/formatting.py:build_l1_search_memory_digest()`.
+[^l1fmt]: `promptpotter/application/intelligence/search_memory.py:SearchMemory.to_l1_digest()` + `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
 
 ### L2 Refine (intelligence bundle)
 
-Built by `build_strategic_search_memory_digest()`.[^l2fmt] Injected via
+Built by `SearchMemory.to_strategic_digest()` then rendered through
+`format_search_memory_block()`.[^l2fmt] Injected via
 `format_l2_intelligence()`.
 
 | Signal | Source accessor | Prompt text |
@@ -91,7 +93,7 @@ Built by `build_strategic_search_memory_digest()`.[^l2fmt] Injected via
 | Axis rankings | `axis_rankings()[:5]` | "Axis impact rankings: ..." |
 | Bottleneck distribution | `bottleneck_distribution()` | "Bottleneck distribution: web_search: 45%, token_matching: 30%" |
 
-[^l2fmt]: `services/campaign/formatting.py:build_strategic_search_memory_digest()`.
+[^l2fmt]: `promptpotter/application/intelligence/search_memory.py:SearchMemory.to_strategic_digest()` + `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
 
 ### Critique Agent (Every-Round Intelligence Hub)
 
@@ -113,7 +115,7 @@ The critique agent also receives `round_history` — a list of
 per-round dicts with accuracy, composite, pipeline_params, degraded
 count, and candidate count.[^rh]
 
-[^crit]: `services/campaign/round_execution.py`.
+[^crit]: `promptpotter/application/optimization/nodes/round_execution.py`.
 [^rh]: `round_execution.py` — built from `state.rounds`.
 
 ## 3. Design Principle: L1 Stays Clean

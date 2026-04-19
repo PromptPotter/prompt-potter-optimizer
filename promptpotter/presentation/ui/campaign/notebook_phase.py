@@ -65,46 +65,6 @@ def show_progress(campaign_rounds: list, window: int = 8) -> None:
     print(render_progress(campaign_rounds, window=window))
 
 
-def format_pipeline_overrides(
-    pipeline_params: dict | None,
-    pipeline_schema=None,
-) -> None:
-    """Print pipeline_params as a copy-paste ready ``pipeline_overrides`` dict.
-
-    Output uses nested format: ``{"node_name": {"param": value}}``.
-    """
-    if not pipeline_params:
-        return
-
-    node_entries: list[tuple[str, dict]] = []
-    for key, val in pipeline_params.items():
-        if key == "steps" or not isinstance(val, dict):
-            continue
-        tunable = {}
-        if pipeline_schema:
-            node = pipeline_schema.get_node(key)
-            if node:
-                tunable = {k: v for k, v in val.items() if k in node.param_keys}
-        if not tunable:
-            tunable = val
-        if tunable:
-            node_entries.append((key, tunable))
-
-    if not node_entries:
-        return
-
-    print(f"\n  {CYAN}Copy-paste pipeline_overrides:{RESET}")
-    print(f"  {DIM}{'─' * 60}{RESET}")
-    print('  "pipeline_overrides": {')
-    for node_name, params in node_entries:
-        print(f'      "{node_name}": {{')
-        for param, val in params.items():
-            print(f'          "{param}": {val!r},')
-        print("      },")
-    print("  }")
-    print(f"  {DIM}{'─' * 60}{RESET}")
-
-
 def show_campaign_summary(campaign_rounds: list) -> None:
     """Print campaign comparison table.
 

@@ -37,7 +37,6 @@ def new_session_state(
         "dataset_count": 0,
         "baseline_accuracy": 0.0,
         "task_context": None,
-        "recon_variants": None,
         "current_cycle_id": None,
         "experiment_id": None,
     }

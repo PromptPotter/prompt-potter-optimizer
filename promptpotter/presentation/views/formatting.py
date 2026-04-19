@@ -30,6 +30,7 @@ __all__ = [
     "fmt_pct",
     "fmt_pvalue",
     "generate_supplemental",
+    "render_pipeline_overrides",
     "render_table",
 ]
 
@@ -68,6 +69,53 @@ def fmt_pvalue(p: float) -> str:
 _fmt_pct = fmt_pct
 _fmt_ci = fmt_ci
 _fmt_pvalue = fmt_pvalue
+
+
+def render_pipeline_overrides(
+    pipeline_params: dict | None,
+    pipeline_schema: PipelineSchema | None = None,
+) -> str:
+    """Render ``pipeline_params`` as a copy-paste-ready ``pipeline_overrides`` block.
+
+    Nested format ``{"node_name": {"param": value}}``.  When ``pipeline_schema``
+    is given, only keys listed in each node's ``param_keys`` are shown; nodes
+    without a schema entry fall back to all key/value pairs.  Returns an empty
+    string when there is nothing to render.
+    """
+    if not pipeline_params:
+        return ""
+
+    node_entries: list[tuple[str, dict]] = []
+    for key, val in pipeline_params.items():
+        if key == "steps" or not isinstance(val, dict):
+            continue
+        tunable: dict = {}
+        if pipeline_schema:
+            node = pipeline_schema.get_node(key)
+            if node:
+                tunable = {k: v for k, v in val.items() if k in node.param_keys}
+        if not tunable:
+            tunable = val
+        if tunable:
+            node_entries.append((key, tunable))
+
+    if not node_entries:
+        return ""
+
+    rule = "─" * 60
+    parts = [
+        "  Copy-paste pipeline_overrides:",
+        f"  {rule}",
+        '  "pipeline_overrides": {',
+    ]
+    for node_name, params in node_entries:
+        parts.append(f'      "{node_name}": {{')
+        for param, val in params.items():
+            parts.append(f'          "{param}": {val!r},')
+        parts.append("      },")
+    parts.append("  }")
+    parts.append(f"  {rule}")
+    return "\n".join(parts)
 
 
 def _md_table(headers: list[str], rows: list[list[str]]) -> str:
