@@ -1,12 +1,10 @@
 """Per-dataset scoring formula evaluator.
 
-Each dataset declares a scoring formula in ``campaign.json`` under the
-``"scoring"`` key. The block accepts two shapes:
+Each dataset declares a scoring formula in ``campaign.json`` under ``"scoring"``.
+Accepted shapes:
 
-- **String shorthand** — legacy form, interpreted as ``per_query``. The
-  ``per_round`` side uses the evaluator-registry default.
-- **Twin form** — ``{"per_query": "...", "per_round": "..."}``. Either key
-  may be omitted; missing keys fall back to the default.
+- **String shorthand** — interpreted as ``per_query``; ``per_round`` uses the evaluator-registry default.
+- **Twin form** — ``{"per_query": "...", "per_round": "..."}``; omitted keys fall back to defaults.
 
 Per-query formula namespace:
 
@@ -19,15 +17,9 @@ Per-query formula namespace:
     <node_name>         — SimpleNamespace of that node's pipeline_data
     evaluators          — SimpleNamespace of per-query Evaluator values
 
-Per-round formula namespace is built from ``application/scoring/evaluators``
-— every registered per-round evaluator whose ``applies(schema)`` is True
+Per-round formula namespace is built from ``application/scoring/evaluators`` —
+every registered per-round evaluator whose ``applies(schema)`` is True
 contributes one named value. Undefined names raise ``NameError`` (fail loud).
-
-Scoring functions (add new ones here):
-    rr(k)                              — reciprocal rank: 1/k if k else 0
-    gsm8k_match(predicted, ground_truth) — numeric extraction + comparison
-    aime_match(predicted, ground_truth)  — \\boxed{} extraction + integer comparison (AIME 0-999)
-    exact_match(predicted, ground_truth) — case-insensitive whitespace-stripped equality
 
 No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 """

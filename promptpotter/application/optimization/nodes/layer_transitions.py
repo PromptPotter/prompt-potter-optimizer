@@ -1,11 +1,4 @@
-"""Layer transition functions for the 3-loop feedback cycle.
-
-L2 (refine_strategy): Analyzes L1 failure patterns and adjusts OptSearchPoint
-    parameters and strategy to improve generation quality.
-
-L3 (modify_plan): Analyzes why L2 adjustments didn't help and suggests
-    a new strategic plan.
-"""
+"""L2 (refine_strategy) / L3 (modify_plan) transitions for the 3-loop feedback cycle."""
 
 from __future__ import annotations
 
@@ -49,11 +42,7 @@ class TransitionAction(enum.StrEnum):
 
 @dataclass
 class TransitionResult:
-    """Return value from L2/L3 transitions.
-
-    Bundles the new OptSearchPoint with optional pipeline_params changes,
-    keeping both dimensions of the search space in one result.
-    """
+    """L2/L3 transition result — new OptSearchPoint plus optional pipeline_params changes."""
 
     opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None

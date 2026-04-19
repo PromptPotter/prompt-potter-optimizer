@@ -1,22 +1,8 @@
 """OptSearchPoint — the optimizer's full working state.
 
-Inherits from ``PromptTemplate`` (the 8-field prompt scheme shared by all
-prompts — job prompts and optimizer meta-prompts alike). Where
-``JobSearchPoint`` is a flat, frozen, content-hashable target-layer
-specification (pipeline_params), OptSearchPoint holds everything the
-optimizer needs: prompt decomposition fields (inherited from
-PromptTemplate), L2/L3 state, and optimization memory.
-
-Class hierarchy::
-
-    SearchPoint (abstract — render())
-        ├── JobSearchPoint (frozen target layer)
-        └── PromptTemplate (8 prompt fields + render/compile)
-                └── OptSearchPoint (+ lineage, L2/L3, memory)
-
-The rendering bridge: ``render()`` (on PromptTemplate) assembles prompt
-fields into a string; ``to_job_search_point()`` projects into a
-JobSearchPoint for evaluation by injecting the rendered prompt into
+Inherits ``PromptTemplate`` (8 prompt fields) and adds lineage, L2/L3 state,
+and optimization memory. ``to_job_search_point()`` projects into a frozen
+``JobSearchPoint`` for evaluation by rendering prompt fields into
 ``pipeline_params``.
 
 Two-layer tracing:

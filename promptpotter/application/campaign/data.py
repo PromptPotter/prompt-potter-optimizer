@@ -271,14 +271,7 @@ def prepare_datasets(
     *,
     force: bool = False,
 ) -> DatasetSummary:
-    """Load/create datasets and build session terms.
-
-    Pure orchestration — no display.  The notebook wrapper prints the
-    summary table.
-
-    Returns:
-        DatasetSummary with train_data, index_terms, splits dict, and unique query count.
-    """
+    """Load/create datasets and build session terms (pure orchestration — notebook prints the summary)."""
     from promptpotter.application.datasets.builder import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,

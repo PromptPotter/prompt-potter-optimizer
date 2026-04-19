@@ -38,12 +38,7 @@ __all__ = [
 
 
 class OptimizationConfig(BaseModel):
-    """Optimization loop parameters (``campaign_config.optimization``).
-
-    Every knob that controls loop behaviour lives here — thresholds,
-    patience, temperatures, zero-signal filter, stale-data protocol, etc.
-    ``extra='forbid'`` catches typos.
-    """
+    """Optimization loop parameters (``campaign_config.optimization``)."""
 
     model_config = ConfigDict(extra="forbid")
 

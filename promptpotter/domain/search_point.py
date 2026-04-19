@@ -1,17 +1,7 @@
-"""SearchPoint hierarchy and TaskDecomposition.
+"""SearchPoint hierarchy (abstract → JobSearchPoint + PromptTemplate → OptSearchPoint).
 
-SearchPoint is the abstract base for any point in a pipeline's search space.
-Three-level hierarchy (see ``opt_search_point.py`` for full tree)::
-
-    SearchPoint (abstract — render())
-        ├── JobSearchPoint      — target evaluation space (pipeline_params, frozen)
-        └── PromptTemplate      — 8-field prompt scheme (render/compile)
-                └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
-
-Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``
-
-TaskDecomposition carries the structured domain context produced by
-LLM-assisted decomposition of user task descriptions.
+Formula: ``f(JobSearchPoint, PipelineSchema, dataset) → scores``. ``TaskDecomposition``
+carries LLM-decomposed structured domain context.
 """
 
 from __future__ import annotations
@@ -41,16 +31,12 @@ class SearchPoint(BaseModel):
 
 
 class JobSearchPoint(SearchPoint):
-    """A point in the target evaluation space.
+    """Frozen point in the target evaluation space: pipeline_params + optional prompt_fields.
 
-    Frozen (immutable). Use ``derive()`` to create variants.
-    Carries pipeline_params + optional prompt_fields.
-    The rendered prompt lives inside ``pipeline_params`` as a node config
-    value — the prompt is just another tunable pipeline parameter.
-
-    When ``prompt_fields`` is set (populated by
-    ``OptSearchPoint.to_job_search_point()``), ``derive()`` can produce
-    prompt-field variants without an ``OptSearchPoint``.
+    Rendered prompt is injected into ``pipeline_params`` as a node config value — the
+    prompt is just another tunable pipeline parameter. Use ``derive()`` for variants;
+    when ``prompt_fields`` is set, ``derive()`` can vary prompt fields without an
+    ``OptSearchPoint``.
     """
 
     model_config = {"frozen": True}

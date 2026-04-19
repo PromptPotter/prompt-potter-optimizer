@@ -58,13 +58,7 @@ SESSION_ARTIFACTS = {
 
 
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
-    """Append a timestamped user note to ``journal.md``.
-
-    Narrative exchange channel: the notebook user calls this to record
-    what a cell just did or why. Claude reads the file to pick up intent
-    that doesn't show up in the scalar dashboard. ``session_dir`` must
-    exist — the emitter creates it on mint.
-    """
+    """Append a timestamped user note to ``journal.md`` (notebook ↔ Claude narrative channel)."""
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     entry = f"## {ts} \u2014 {action}\n"
     if body:
@@ -260,8 +254,8 @@ class CampaignPersistenceEmitter:
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if ids are unknown.
 
-        Reads the prior ``dashboard.json`` (if present) to carry UI
-        counters across resumes — optimizer resume is a separate concern
+        Reads prior ``dashboard.json`` (if present) to carry UI counters
+        across resumes — optimizer resume is a separate concern
         via ``LoopState.restore_from_trial``.
 
         On a mid-cycle rewind (``--from N``), ``resumed_from_round`` is the
@@ -542,11 +536,7 @@ class CampaignPersistenceEmitter:
         self._log_fh.close()
 
     def write_result(self, result: RunResult) -> None:
-        """Persist the final ``RunResult`` as ``optimize_result.json``.
-
-        Called by ``run_optimization`` after ``finalize`` so every entry
-        point produces the same campaign artifact set.
-        """
+        """Persist the final ``RunResult`` as ``optimize_result.json``."""
         write_json(self.result_path, result.model_dump(), default=str)
 
     # -- Internal --------------------------------------------------------------

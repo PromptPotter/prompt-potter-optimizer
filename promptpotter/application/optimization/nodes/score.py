@@ -131,10 +131,7 @@ def _merge_pipeline_params(
     overrides: dict | None,
     schema: PipelineSchema | None,
 ) -> dict | None:
-    """Deep-merge candidate pipeline_params overrides into the base params.
-
-    Drops overrides for nodes not in the active pipeline steps.
-    """
+    """Deep-merge ``overrides`` into ``base``; drop overrides for nodes outside active steps."""
     if not overrides:
         return base
     merged: dict = copy.deepcopy(base or {})

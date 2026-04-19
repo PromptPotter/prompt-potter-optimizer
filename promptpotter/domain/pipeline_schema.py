@@ -1,13 +1,7 @@
-"""
-PipelineSchema — backend-agnostic description of an LLM pipeline.
+"""PipelineSchema — backend-agnostic description of an LLM pipeline.
 
-Describes the nodes, parameters, observation mappings, and metadata of
-a backend pipeline so that PromptPotter services can work generically
-instead of hardcoding backend-specific constants.
-
-Derivation methods:
-  node_param_keys()       → node name → param keys
-  obs_extraction_map()    → observation name → extraction rules
+Describes nodes, parameters, observation mappings, and metadata so
+PromptPotter services can stay generic instead of hardcoding backend-specific constants.
 """
 
 import enum
@@ -35,13 +29,7 @@ class NodeType(enum.StrEnum):
 
 
 class ObservationMapping(BaseModel):
-    """Maps one trace observation field to a pipeline_data key.
-
-    Mirrors the semantics of ``_ObsField`` in ``context.py``:
-    - ``pipeline_key``: key written into the pipeline_data dict
-    - ``output_field``: sub-key to extract from observation output (None → full dict)
-    - ``is_llm``: whether to also extract model info from observation metadata
-    """
+    """Maps one trace observation field to a pipeline_data key."""
 
     model_config = {"frozen": True}
 
@@ -51,12 +39,7 @@ class ObservationMapping(BaseModel):
 
 
 class NodeOutputSchema(BaseModel):
-    """Resolved output schema for a pipeline node.
-
-    Carries the field names and descriptions from the backend's schema registry
-    so that downstream consumers (scan advisor, notebooks) can reason about
-    what a node produces without calling the registry directly.
-    """
+    """Resolved output schema for a pipeline node (field names + descriptions from the backend's registry)."""
 
     model_config = {"frozen": True}
 
