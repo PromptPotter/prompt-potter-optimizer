@@ -101,7 +101,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json` (with `current_cycle_id` pointer), `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trial_NNNN.json`, `round_NNNN_candidates.json`, langfuse shadow, events.jsonl, prompts.
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, events.jsonl, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
 Full tree in [`docs/architecture/overview.md § Persistence`](docs/architecture/overview.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.

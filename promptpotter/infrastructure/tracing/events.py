@@ -91,7 +91,7 @@ class NodeEnd:
 # Observability markers for durable mid-round transitions. events.jsonl is
 # a pure observability mirror: nothing reads these events back for state
 # reconstruction. Resume and fork are driven by
-# ``campaigns/{cycle_id}/trial_NNNN.json`` via ``CampaignStore``.
+# ``campaigns/{cycle_id}/trials/trial_NNNN.json`` via ``CampaignStore``.
 
 
 @dataclass(frozen=True, slots=True)

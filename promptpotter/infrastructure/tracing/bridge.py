@@ -131,7 +131,7 @@ class ObservabilityBridge:
 
         events.jsonl is a pure observability mirror — nothing reads these
         events back for state reconstruction. Resume uses
-        ``campaigns/{cycle_id}/trial_NNNN.json`` via ``CampaignStore``.
+        ``campaigns/{cycle_id}/trials/trial_NNNN.json`` via ``CampaignStore``.
         """
         if not self._enabled:
             return

@@ -79,8 +79,8 @@ Sessions and campaigns are separate concepts with two mint points per `init`. A 
       index.json                       # campaign metadata + trial index + parent_session_id
       dashboard.json                   # live counters
       output.log / log.md
-      trial_NNNN.json                  # resume source of truth
-      round_NNNN_candidates.json       # pre-scoring checkpoint
+      trials/trial_NNNN.json           # resume source of truth
+      candidates/round_NNNN.json       # pre-scoring checkpoint
       rounds/round_NNN.json            # per-round LLM action audit
       events.jsonl                     # human navigation log (observability mirror)
       langfuse/
@@ -107,7 +107,7 @@ The canonical artifact sets are declared in `promptpotter/infrastructure/persist
 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
-`events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trial_NNNN.json`, which carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
+`events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind feature (`optimize --from <round>`) are driven by `campaigns/{cycle_id}/trials/trial_NNNN.json`, which carries the full serialized `OptSearchPoint`. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
 
 ## Where to Read Next
 

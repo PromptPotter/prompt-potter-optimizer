@@ -1,7 +1,7 @@
 # Methods: SearchMemory as Intelligence Feed
 
 SearchMemory is a materialized view over all historical evaluation data,
-persisted at `{backend_id}/search_memory.json`. It is refreshed
+persisted at `library/search_memory.json` (tenant-global). It is refreshed
 incrementally before each optimization round and provides read-only
 intelligence to L1 generate, L2 refine, and the critique agent.[^impl]
 

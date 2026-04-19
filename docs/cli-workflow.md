@@ -89,12 +89,12 @@ Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds
 
 Rewinds the active cycle to after round N and resumes in-place. Same `cycle_id`, same campaign directory — **not** a new campaign. Trial files for rounds > N are moved into `campaigns/{cycle_id}/archived/resumed_at_<ts>/` and the cycle's trial index is rebuilt to reflect only the surviving 0..N entries. `dataset_runs/` content-addressed cache replays any unchanged per-query results automatically.
 
-To edit optimizer state by hand, modify `campaigns/{cycle_id}/trial_{N:04d}.json` between runs — keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. See [architecture/optimization.md § Resuming mid-cycle](architecture/optimization.md#resuming-mid-cycle).
+To edit optimizer state by hand, modify `campaigns/{cycle_id}/trials/trial_{N:04d}.json` between runs — keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. See [architecture/optimization.md § Resuming mid-cycle](architecture/optimization.md#resuming-mid-cycle).
 
 Examples:
 
 ```bash
-# Resume from after round 2 — archives trial_0003+ and continues at round 3.
+# Resume from after round 2 — archives trials/trial_0003+ and continues at round 3.
 python -m promptpotter optimize --from 2
 ```
 
@@ -207,7 +207,8 @@ The active pointer lives at `.promptpotter/active_session.json` (see [Active Ses
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
 | `log.md` | End of each round | Structured markdown report |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
-| `trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
+| `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
+| `candidates/round_NNNN.json` | Each round's pre-scoring step | Generated candidate list checkpoint |
 | `events.jsonl` | Every observability event | Flat navigation log |
 | `langfuse/` | During optimization | Trace/observation/score shadow + id-map `state.json` |
 | `prompts/` | When prompts render | Rendered optimizer prompts per family/version |

@@ -1,7 +1,7 @@
 """Round-table renderers: campaign summary, flip tracking, lineage, progress.
 
 All functions take ``rounds: list[dict]`` — either trial dicts loaded from
-``campaigns/{cycle_id}/trial_NNNN.json`` (CLI path) or the notebook's
+``campaigns/{cycle_id}/trials/trial_NNNN.json`` (CLI path) or the notebook's
 in-memory ``campaign_rounds`` list. Both shapes carry ``round``, ``label``,
 ``accuracy``, ``hits``, ``total``, ``results``. Lineage-facing fields
 (``id``, ``parent_id``, ``changes_description``) can come from either

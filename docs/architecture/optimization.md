@@ -441,23 +441,23 @@ campaign_config = {
 
 ## Resuming mid-cycle
 
-`optimize --from <round>` rewinds the active cycle to a specific round boundary and continues from there. It is **not** a new campaign: the same `cycle_id`, the same `campaigns/{cycle_id}/` directory, trial files appended past the rewind point after the next run. Use it when you want to edit the optimizer state by hand (edit `trial_NNNN.json` between runs), discard a bad trajectory, or re-enter HITL review.
+`optimize --from <round>` rewinds the active cycle to a specific round boundary and continues from there. It is **not** a new campaign: the same `cycle_id`, the same `campaigns/{cycle_id}/` directory, trial files appended past the rewind point after the next run. Use it when you want to edit the optimizer state by hand (edit `trials/trial_NNNN.json` between runs), discard a bad trajectory, or re-enter HITL review.
 
-### The only snapshot source is `trial_NNNN.json`
+### The only snapshot source is `trials/trial_NNNN.json`
 
-Each completed round writes `campaigns/{cycle_id}/trial_{round:04d}.json` via `CampaignStore.add_trial`. That file already carries the full serialized `OptSearchPoint` (`opt_search_point` key), so resume rehydrates the exact optimizer state via `LoopState.restore_from_trial` — no separate write-ahead log. `events.jsonl` is a pure observability mirror parallel to Langfuse; nothing reads it for state reconstruction.
+Each completed round writes `campaigns/{cycle_id}/trials/trial_{round:04d}.json` via `CampaignStore.add_trial`. That file already carries the full serialized `OptSearchPoint` (`opt_search_point` key), so resume rehydrates the exact optimizer state via `LoopState.restore_from_trial` — no separate write-ahead log. `events.jsonl` is a pure observability mirror parallel to Langfuse; nothing reads it for state reconstruction.
 
 ### What `--from N` does
 
 1. `optimize --from N` requires an active cycle on the session (run `optimize` at least once first).
-2. `CampaignStore.rewind_to_round(backend_id, cycle_id, N)` moves `trial_{M:04d}.json` and `round_{M:04d}_candidates.json` for every `M > N` into `campaigns/{cycle_id}/archived/resumed_at_<ts>/`, then rebuilds the in-memory trial index (`trials`, `n_trials`, `best_accuracy`, `best_trial_id`) from the surviving files.
+2. `CampaignStore.rewind_to_round(backend_id, cycle_id, N)` moves `trials/trial_{M:04d}.json` and `candidates/round_{M:04d}.json` for every `M > N` into `campaigns/{cycle_id}/archived/resumed_at_<ts>/{trials,candidates}/`, then rebuilds the in-memory trial index (`trials`, `n_trials`, `best_accuracy`, `best_trial_id`) from the surviving files.
 3. `resume_or_create` opens the same cycle and returns `resumed_from_round = N + 1`. The runner loads `trial_N` via `LoopState.restore_from_trial` and begins round `N + 1` with that state as the baseline.
 4. The dashboard's `rounds_completed` / `best_round` are clamped so the UI does not show phantom rounds from the archived trajectory.
 5. `dataset_runs/` is unchanged — content-addressed per-query results replay automatically for any unchanged `(prompt_hash, query)` pair.
 
 ### Editing the snapshot by hand
 
-To alter optimizer state before resuming, edit `campaigns/{cycle_id}/trial_{N:04d}.json` between runs. Keep the file valid JSON and leave the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On the next `optimize --from N`, the edited trial is what `restore_from_trial` sees.
+To alter optimizer state before resuming, edit `campaigns/{cycle_id}/trials/trial_{N:04d}.json` between runs. Keep the file valid JSON and leave the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`. On the next `optimize --from N`, the edited trial is what `restore_from_trial` sees.
 
 ### Examples
 

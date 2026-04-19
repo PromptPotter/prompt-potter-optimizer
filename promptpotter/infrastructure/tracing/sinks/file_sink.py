@@ -282,7 +282,7 @@ class FileSink:
 
         events.jsonl is a pure observability mirror — metadata only, no
         OptSearchPoint snapshots. Resume reads
-        ``campaigns/{cycle_id}/trial_NNNN.json``.
+        ``campaigns/{cycle_id}/trials/trial_NNNN.json``.
         """
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         payload = {

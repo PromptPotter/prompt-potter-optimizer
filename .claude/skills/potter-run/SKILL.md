@@ -82,7 +82,7 @@ SESSION FILES at .promptpotter/projects/{tenant_id}/sessions/{session_id}/
 
 CAMPAIGN FILES at .promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/
   index.json (with parent_session_id) · dashboard.json · output.log · log.md
-  (+ round_NNNN_candidates.json, trial_NNNN.json if present)
+  (+ candidates/round_NNNN.json, trials/trial_NNNN.json if present)
   Parity set = CAMPAIGN_ARTIFACTS in session_emitter.py
 
 LIBRARY (cross-cycle, at .promptpotter/projects/{tenant_id}/library/)

@@ -65,7 +65,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.application.optimization.loop_env import LoopEnv
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.phases import PhaseEvent
-    from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.application.optimization.results import RoundResult, RunResult
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 
     session_dir, campaign_dir = session_and_campaign_dirs
@@ -171,6 +171,20 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         best_round=0,
         stop_reason="max_rounds",
         cycle_id="cycle_test_001",
+    )
+    emitter.write_result(
+        RunResult(
+            rounds=[round_result],
+            n_rounds=1,
+            best_accuracy=0.6,
+            best_round=0,
+            baseline_accuracy=0.5,
+            winner_prompt_fields={"instruction": "test"},
+            stop_reason="max_rounds",
+            started_at="2026-04-19T00:00:00+00:00",
+            finished_at="2026-04-19T00:01:00+00:00",
+            cycle_id="cycle_test_001",
+        )
     )
 
     missing_campaign = [a for a in CAMPAIGN_ARTIFACTS if not (campaign_dir / a).exists()]

@@ -179,7 +179,7 @@ Add alt starting points by dropping more files in the same directory (`zero_shot
 
 ## Potter Trace Dataset
 
-The `potter_traces` dataset loader (`application/datasets/trace_dataset.py`) is the raw material for future self-optimization. It reads archived `campaigns/{cycle_id}/trial_NNNN.json` files and emits one row per round-to-round transition — the potter-state context at round N, the prompt change the potter actually made, and the accuracy delta that resulted. Pure-read, no new persistence, registered through the normal `DATASET_LOADERS` dict.
+The `potter_traces` dataset loader (`application/datasets/trace_dataset.py`) is the raw material for future self-optimization. It reads archived `campaigns/{cycle_id}/trials/trial_NNNN.json` files and emits one row per round-to-round transition — the potter-state context at round N, the prompt change the potter actually made, and the accuracy delta that resulted. Pure-read, no new persistence, registered through the normal `DATASET_LOADERS` dict.
 
 Row schema:
 

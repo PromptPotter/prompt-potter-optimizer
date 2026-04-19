@@ -55,7 +55,7 @@ class RoundRecorder:
 
         Round files are the LLM-call audit trail — every ``add_action`` from
         ``pipeline.py``'s ``llm_call()`` during the round. Round *outcome*
-        (accuracy, hits, decision, opt_sp) lives in ``trial_NNNN.json`` via
+        (accuracy, hits, decision, opt_sp) lives in ``trials/trial_NNNN.json`` via
         ``_checkpoint_round`` — this file is not the place for that data.
         """
         if not self._actions:

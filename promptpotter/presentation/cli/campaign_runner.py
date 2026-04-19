@@ -292,10 +292,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     ctx.save_phase("optimize")
 
     result_path = campaign_dir / "optimize_result.json"
-    result_path.write_text(
-        json.dumps(cycle_result.model_dump(), indent=2, default=str), encoding="utf-8"
-    )
-
     return CommandResult(
         data=cycle_result.model_dump(),
         human=(

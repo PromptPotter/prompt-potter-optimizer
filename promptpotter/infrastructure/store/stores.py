@@ -24,8 +24,8 @@ Disk layout::
       campaigns/{cycle_id}/
         index.json                                  # campaign metadata + trial index + parent_session_id
         dashboard.json / output.log / log.md
-        trial_NNNN.json
-        round_NNNN_candidates.json
+        trials/trial_NNNN.json
+        candidates/round_NNNN.json
       library/
         datasets/{name}.json                        # tenant-global datasets (future)
         backends/{backend_id}/

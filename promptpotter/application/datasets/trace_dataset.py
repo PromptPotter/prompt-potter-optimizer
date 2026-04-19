@@ -1,6 +1,6 @@
 """Potter trace dataset loader.
 
-Reads archived ``campaigns/{cycle_id}/trial_NNNN.json`` files and emits one
+Reads archived ``campaigns/{cycle_id}/trials/trial_NNNN.json`` files and emits one
 row per ``(trial_N → trial_N+1)`` transition.  Each row is the raw material
 for self-optimization: the potter-state context at round N, the prompt change
 the potter actually made, and the accuracy delta that resulted.

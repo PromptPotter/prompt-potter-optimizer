@@ -12,8 +12,8 @@ Disk layout::
       dashboard.json                                          # live scalar counters
       output.log                                              # per-query audit
       log.md                                                  # round-by-round summary
-      trial_NNNN.json                                         # optimizer resume WAL
-      round_NNNN_candidates.json                              # pre-scoring checkpoint
+      trials/trial_NNNN.json                                  # optimizer resume WAL
+      candidates/round_NNNN.json                              # pre-scoring checkpoint
 
 The ``backend_id`` parameter on public methods is preserved for call-site
 stability; campaigns are tenant-global so it does not affect path
@@ -76,8 +76,11 @@ class CampaignStore(EntityStore):
         """
         return campaign_dir_for(self._base_dir, cycle_id)
 
-    # Retained alias for existing resume/rewind call sites.
-    _trial_dir = _campaign_dir
+    def _trials_dir(self, backend_id: str, cycle_id: str) -> Path:
+        return self._campaign_dir(backend_id, cycle_id) / "trials"
+
+    def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
+        return self._campaign_dir(backend_id, cycle_id) / "candidates"
 
     def _entity_path(self, backend_id: str, entity_id: str) -> Path:
         """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""
@@ -167,7 +170,8 @@ class CampaignStore(EntityStore):
         if not (session.project_root and session.backend_id):
             return None, None, 0
         try:
-            # project_root points at the tenant root when built via build_stores.
+            # session.project_root is the tenant base dir (str(store.base_dir));
+            # CampaignStore nests campaigns/ directly under it.
             store = cls(Path(session.project_root))
             resolved = cycle_id_override or cycle_config_identity(
                 config,
@@ -203,49 +207,61 @@ class CampaignStore(EntityStore):
     ) -> None:
         """Archive trial/candidate files for rounds > ``after_round``.
 
-        Moves ``trial_{M:04d}.json`` and ``round_{M:04d}_candidates.json``
-        for M > after_round into ``archived/resumed_at_<ts>/``, then
-        rebuilds the cycle's trial index to reflect only surviving trials
+        Moves ``trials/trial_{M:04d}.json`` and
+        ``candidates/round_{M:04d}.json`` for M > after_round into
+        ``archived/resumed_at_<ts>/{trials,candidates}/``, then rebuilds
+        the cycle's trial index to reflect only surviving trials
         (rounds 0..after_round). No-op on a cycle with no such trial.
         """
-        trial_dir = self._campaign_dir(backend_id, cycle_id)
-        if not trial_dir.exists():
+        cycle_dir = self._campaign_dir(backend_id, cycle_id)
+        trials_dir = self._trials_dir(backend_id, cycle_id)
+        candidates_dir = self._candidates_dir(backend_id, cycle_id)
+
+        if not trials_dir.exists():
             raise LookupError(f"cycle {cycle_id!r} has no trials on disk")
 
-        target = trial_dir / f"trial_{after_round:04d}.json"
+        target = trials_dir / f"trial_{after_round:04d}.json"
         if not target.exists():
             raise LookupError(
-                f"--from {after_round}: trial_{after_round:04d}.json not found in {trial_dir}"
+                f"--from {after_round}: trial_{after_round:04d}.json not found in {trials_dir}"
             )
 
         survivors: list[Path] = []
-        to_archive: list[Path] = []
-        for p in sorted(trial_dir.glob("trial_*.json")):
+        to_archive_trials: list[Path] = []
+        to_archive_candidates: list[Path] = []
+        for p in sorted(trials_dir.glob("trial_*.json")):
             try:
                 n = int(p.stem.removeprefix("trial_"))
             except ValueError:
                 continue
-            (to_archive if n > after_round else survivors).append(p)
-        for p in sorted(trial_dir.glob("round_*_candidates.json")):
-            try:
-                n = int(p.stem.removeprefix("round_").removesuffix("_candidates"))
-            except ValueError:
-                continue
-            if n > after_round:
-                to_archive.append(p)
+            (to_archive_trials if n > after_round else survivors).append(p)
+        if candidates_dir.exists():
+            for p in sorted(candidates_dir.glob("round_*.json")):
+                try:
+                    n = int(p.stem.removeprefix("round_"))
+                except ValueError:
+                    continue
+                if n > after_round:
+                    to_archive_candidates.append(p)
 
-        if to_archive:
+        archived_count = len(to_archive_trials) + len(to_archive_candidates)
+        if archived_count:
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-            archive_dir = trial_dir / "archived" / f"resumed_at_{ts}"
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            for p in to_archive:
-                p.rename(archive_dir / p.name)
+            archive_root = cycle_dir / "archived" / f"resumed_at_{ts}"
+            if to_archive_trials:
+                (archive_root / "trials").mkdir(parents=True, exist_ok=True)
+                for p in to_archive_trials:
+                    p.rename(archive_root / "trials" / p.name)
+            if to_archive_candidates:
+                (archive_root / "candidates").mkdir(parents=True, exist_ok=True)
+                for p in to_archive_candidates:
+                    p.rename(archive_root / "candidates" / p.name)
             logger.info(
                 "Rewind cycle %s to round %d: archived %d file(s) → %s",
                 cycle_id,
                 after_round,
-                len(to_archive),
-                archive_dir,
+                archived_count,
+                archive_root,
             )
 
         self._rebuild_trial_index(backend_id, cycle_id, survivors)
@@ -436,7 +452,7 @@ class CampaignStore(EntityStore):
         validate_path_component(trial_id)
         round_num = trial.get("round", 0)
 
-        detail_path = self._campaign_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json"
+        detail_path = self._trials_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json"
         write_json(detail_path, trial)
 
         campaign_path = self._entity_path(backend_id, cycle_id)
@@ -477,7 +493,7 @@ class CampaignStore(EntityStore):
     ) -> dict[str, Any] | None:
         """Load a trial detail by round number.  Returns None if not found."""
         return read_json_optional(
-            self._campaign_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json",
+            self._trials_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json",
         )
 
     def complete(self, backend_id: str, cycle_id: str) -> None:
@@ -493,7 +509,7 @@ class CampaignStore(EntityStore):
         candidates: list[dict[str, Any]],
     ) -> None:
         """Persist generated candidates before evaluation (mid-round checkpoint)."""
-        path = self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json"
+        path = self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(path, candidates)
         logger.debug(
             "Saved %d candidates for round %d → %s",
@@ -510,7 +526,7 @@ class CampaignStore(EntityStore):
     ) -> list[dict[str, Any]] | None:
         """Load persisted candidates for a round.  Returns None if not on disk."""
         return read_json_optional(
-            self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json",
+            self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json",
         )
 
     def delete_round_candidates(
@@ -520,7 +536,7 @@ class CampaignStore(EntityStore):
         round_num: int,
     ) -> None:
         """Delete persisted candidates for a round (forces fresh generation)."""
-        path = self._campaign_dir(backend_id, cycle_id) / f"round_{round_num:04d}_candidates.json"
+        path = self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
         if path.exists():
             path.unlink()
             logger.debug(

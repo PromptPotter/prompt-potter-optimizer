@@ -44,12 +44,14 @@ class SessionEnv:
     """Return value from ``init_services()``.
 
     Carries session-scoped identity + infrastructure + runtime-derived
-    state.  Fields ``session_id``, ``cycle_id``, ``project_root``, and
-    ``pipeline_params`` are populated as the session progresses —
+    state.  Fields ``session_id``, ``cycle_id``, and ``pipeline_params``
+    are populated as the session progresses —
     ``configure_and_apply_pipeline`` sets ``pipeline_params``;
-    ``auto_mint_session`` / CLI ``init`` set ``session_id``, ``cycle_id``,
-    and ``project_root``.  No user-authored knob lives here — those live
-    on ``CampaignConfig``.
+    ``auto_mint_session`` / CLI ``init`` set ``session_id`` and
+    ``cycle_id``.  ``project_root`` here is the **tenant base dir**
+    (``store.base_dir``, e.g. ``.promptpotter/projects/{tenant}/``), not
+    the git repo root — every persistence consumer reads it that way.
+    No user-authored knob lives here — those live on ``CampaignConfig``.
     """
 
     store: Stores
@@ -283,7 +285,7 @@ async def init_services(
         synced=False,
         dataset_name=dataset_name,
         tenant=TenantContext(tenant_id=tenant_id),
-        project_root=str(project_root),
+        project_root=str(store.base_dir),
     )
 
     # --- Dataset store path (preferred when available) ---

@@ -25,7 +25,7 @@ from promptpotter.infrastructure.store.session_store import session_dir_for
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.phases import PhaseEvent
-    from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.application.optimization.results import RoundResult, RunResult
 
 __all__ = [
     "CAMPAIGN_ARTIFACTS",
@@ -43,6 +43,7 @@ CAMPAIGN_ARTIFACTS = {
     "dashboard.json",  # live scalar counters
     "output.log",  # per-query audit log
     "log.md",  # round-by-round markdown summary
+    "optimize_result.json",  # final RunResult snapshot
 }
 
 # Per-session artifacts — produced under ``sessions/{session_id}/``.
@@ -174,7 +175,7 @@ class CampaignPersistenceEmitter:
     """Writes per-cycle dashboard + audit log under ``campaigns/{cycle_id}/``,
     and ensures per-session narrative + control files exist under
     ``sessions/{session_id}/``. Not an optimizer checkpoint — resume uses
-    ``campaigns/{cycle_id}/trial_NNNN.json``; counters here are display
+    ``campaigns/{cycle_id}/trials/trial_NNNN.json``; counters here are display
     continuity only."""
 
     def __init__(
@@ -192,9 +193,11 @@ class CampaignPersistenceEmitter:
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
     ) -> None:
+        self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
         self.log_path = campaign_dir / "output.log"
         self.log_md_path = campaign_dir / "log.md"
+        self.result_path = campaign_dir / "optimize_result.json"
         self.session_dir = session_dir
 
         self._patience_max: int = l1_patience
@@ -537,6 +540,14 @@ class CampaignPersistenceEmitter:
                 f"- Cycle ID: {cycle_id or 'N/A'}"
             )
         self._log_fh.close()
+
+    def write_result(self, result: RunResult) -> None:
+        """Persist the final ``RunResult`` as ``optimize_result.json``.
+
+        Called by ``run_optimization`` after ``finalize`` so every entry
+        point produces the same campaign artifact set.
+        """
+        write_json(self.result_path, result.model_dump(), default=str)
 
     # -- Internal --------------------------------------------------------------
 

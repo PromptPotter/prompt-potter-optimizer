@@ -4,8 +4,10 @@ A persistent, incrementally-updated statistical index over ALL historical
 search points and their evaluation results.  Exposes atomic data accessors
 for consumers (recon_advisor, L1, L2, critique) to compose what they need.
 
-Persisted to disk at ``{backend_id}/search_memory.json``.  Updated lazily
-via ``refresh()`` which loads only new dataset runs since the last watermark.
+Persisted to disk at ``library/search_memory.json`` (tenant-global, single
+file — `dataset_runs/` is also tenant-global, so per-backend partitioning
+would conflate sources). Updated lazily via ``refresh()`` which loads only
+new dataset runs since the last watermark.
 """
 
 from __future__ import annotations
@@ -647,7 +649,7 @@ class SearchMemory:
                     "SearchMemory: recomputed failure group correlations at round %d",
                     round_num,
                 )
-            self.save(Path(store.base_dir) / backend_id / "search_memory.json")
+            self.save(Path(store.base_dir) / "library" / "search_memory.json")
 
         # Adaptive scoring-set swap (needs 3+ rounds of history)
         if round_num < 2:
@@ -713,7 +715,7 @@ class SearchMemory:
         """
         if not (store and backend_id):
             return None
-        path = Path(store.base_dir) / backend_id / "search_memory.json"
+        path = Path(store.base_dir) / "library" / "search_memory.json"
         mem = cls.load(path)
         if mem.refresh(store, backend_id):
             mem.save(path)

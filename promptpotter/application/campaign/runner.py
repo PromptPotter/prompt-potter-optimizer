@@ -605,11 +605,6 @@ async def run_optimization(
     """
     started_at = datetime.now(UTC).isoformat()
 
-    # Thread project_root onto session so downstream helpers have a single
-    # source of truth.
-    if not session.project_root and session.store is not None:
-        session.project_root = str(session.store.base_dir)
-
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
 
     if not session_id:
@@ -694,7 +689,7 @@ async def run_optimization(
     finished_at = datetime.now(UTC).isoformat()
     langfuse_trace_id = _finalize_run(state, env, session, emitter, stop_reason, finished_at)
 
-    return RunResult(
+    run_result = RunResult(
         rounds=state.rounds,
         n_rounds=len(state.rounds),
         best_accuracy=state.best_accuracy,
@@ -710,3 +705,6 @@ async def run_optimization(
         session_id=session_id or None,
         resumed_from_round=env.resumed_from_round,
     )
+    if emitter:
+        emitter.write_result(run_result)
+    return run_result
