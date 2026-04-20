@@ -203,6 +203,7 @@ def _build_score_report(
     *,
     aborted: bool = False,
     elimination_stopped: bool = False,
+    elimination_context: dict | None = None,
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
@@ -211,7 +212,10 @@ def _build_score_report(
 
     Validation failures are read from ``osp.memory.validation_failures`` —
     the single source of truth. ``new_runtime_failure`` is this-round-only
-    (the outer round accumulates across rounds).
+    (the outer round accumulates across rounds). ``elimination_context``
+    is a display-only sidecar populated from ``signal.check_result`` when
+    the Wilcoxon elimination triggers; the authoritative archive lives in
+    the trial JSON ``elimination_cut`` decision record.
     """
     vfs = osp.memory.validation_failures
     return {
@@ -231,6 +235,7 @@ def _build_score_report(
         **({"validation_failures": [vf.to_dict() for vf in vfs]} if vfs else {}),
         **({"runtime_failures": [new_runtime_failure.to_dict()]} if new_runtime_failure else {}),
         **({"resumed_from_cache": True} if resumed_from_cache else {}),
+        **({"elimination_context": elimination_context} if elimination_context else {}),
     }
 
 
@@ -375,6 +380,17 @@ def _handle_scored_candidate(
             new_rf.total_evaluated,
         )
 
+    elim_ctx: dict | None = None
+    if elimination_stopped and signal is not None and signal.check_name == "elimination":
+        cr = signal.check_result
+        elim_ctx = {
+            "triggered_p": float(cr.get("triggered_p", 1.0)),
+            "triggered_by_prior_idx": int(cr.get("triggered_by_prior", -1)),
+            "queries_evaluated": int(cr.get("queries_evaluated", len(results))),
+            "total_queries": int(cr.get("total_queries", len(dataset))),
+            "n_priors": int(cr.get("n_priors", 0)),
+        }
+
     report = _build_score_report(
         osp_c,
         override,
@@ -383,6 +399,7 @@ def _handle_scored_candidate(
         dataset,
         aborted=aborted,
         elimination_stopped=elimination_stopped,
+        elimination_context=elim_ctx,
         new_runtime_failure=new_rf,
     )
     residual = None if (elimination_stopped or not signal) else signal
@@ -468,6 +485,11 @@ async def _score_candidates(
 
         override = candidate_overrides[idx]
 
+        # Pre-scoring header — one line naming the mutation under test.
+        # Fires for all three paths (validation-skip / cache-hit / scored)
+        # so the display shows what was tested even when no backend call ran.
+        callbacks.on_candidate_started(idx, n_candidates, osp_c.changes_description or "", override)
+
         # Path 1 — validation-skip synthetic-0 (zero backend calls)
         if osp_c.memory.validation_failures:
             results, report = _handle_validation_skip(osp_c, override, dataset, idx, n_candidates)
@@ -522,29 +544,43 @@ async def _score_candidates(
             n_candidates,
         )
         if (
-            decisions is not None
-            and signal is not None
+            signal is not None
             and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
             and signal.check_name == elim_check.name
         ):
             cr = signal.check_result
-            record_decision(
-                decisions,
-                "elimination_cut",
-                {
-                    "candidate_id": osp_c.id,
-                    "prior_candidate_ids": priors_at_test,
-                    "queries_evaluated": int(cr.get("queries_evaluated", len(results))),
-                    "alpha": float(elim_check.alpha),
-                    "n_min": int(elim_check.n_min),
-                    "round_num": round_num,
-                },
-                True,
-                data={
-                    "triggered_p": float(cr.get("triggered_p", 0.0)),
-                    "triggered_by_prior": int(cr.get("triggered_by_prior", -1)),
-                },
-            )
+            trigger_idx = int(cr.get("triggered_by_prior", -1))
+            if 0 <= trigger_idx < len(priors_at_test):
+                prior_id = priors_at_test[trigger_idx]
+                prior_label = next(
+                    (
+                        f"C{i + 1}"
+                        for i, r in enumerate(candidate_scores)
+                        if r.get("candidate_id") == prior_id
+                    ),
+                    None,
+                )
+                if prior_label and isinstance(report.get("elimination_context"), dict):
+                    report["elimination_context"]["triggered_by_prior_label"] = prior_label
+
+            if decisions is not None:
+                record_decision(
+                    decisions,
+                    "elimination_cut",
+                    {
+                        "candidate_id": osp_c.id,
+                        "prior_candidate_ids": priors_at_test,
+                        "queries_evaluated": int(cr.get("queries_evaluated", len(results))),
+                        "alpha": float(elim_check.alpha),
+                        "n_min": int(elim_check.n_min),
+                        "round_num": round_num,
+                    },
+                    True,
+                    data={
+                        "triggered_p": float(cr.get("triggered_p", 0.0)),
+                        "triggered_by_prior": trigger_idx,
+                    },
+                )
         _fire_candidate_callbacks(idx, report)
 
         if residual is not None:

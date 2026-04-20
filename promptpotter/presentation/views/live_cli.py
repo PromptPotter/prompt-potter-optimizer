@@ -25,9 +25,10 @@ from promptpotter.presentation.ui.campaign.notebook_primitives import (
     _fmt_delta,
     _fmt_query_result,
     _scoreboard,
+    build_candidate_summary,
+    fmt_candidate_header,
 )
-from promptpotter.presentation.views.formatting import fmt_ci, fmt_pct
-from promptpotter.shared.statistics import wilson_ci
+from promptpotter.presentation.views.formatting import fmt_pct
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.phases import PhaseEvent
@@ -142,10 +143,28 @@ class CliDisplay:
         header = _PHASE_HEADERS.get(phase, phase)
         self._write(f"→ R{self.current_round}/{self.max_rounds}  {header}")
 
+    def on_candidate_started(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        # Close any still-open bar (e.g. final query of prior candidate) so
+        # the header lands above the fresh bar.
+        self._close_pbar()
+        self._write(fmt_candidate_header(idx, total, changes_description, pp_override))
+
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
         if self._in_baseline:
             if self._pbar is None:
-                self._pbar = tqdm(total=qt or 1, desc="  baseline", unit="q", leave=False)
+                self._pbar = tqdm(
+                    total=qt or 1,
+                    desc="  baseline",
+                    unit="q",
+                    leave=False,
+                    ncols=60,
+                )
             return
         if ci != self._current_cand_idx:
             self._close_pbar()
@@ -157,6 +176,7 @@ class CliDisplay:
                 desc=f"  cand {ci + 1}/{ct}",
                 unit="q",
                 leave=False,
+                ncols=60,
             )
 
     def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
@@ -174,18 +194,14 @@ class CliDisplay:
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         self._close_pbar()
-        if scores.get("invalid"):
-            self._write(f"  cand {idx + 1}/{total}  {YELLOW}INVALID{RESET}")
-            return
-        acc = scores["accuracy"]
-        hits = scores.get("hits", 0)
-        n = scores.get("total", 0)
-        ci_lo, ci_hi = wilson_ci(hits, n)
-        delta = acc - self.baseline_acc
-        self._write(
-            f"  cand {idx + 1}/{total}  acc={fmt_pct(acc)} "
-            f"{fmt_ci(ci_lo, ci_hi)}  {_fmt_delta(delta)} vs baseline"
-        )
+        summary = build_candidate_summary(scores, self.baseline_acc)
+        # Flat CLI layout: label+tag on one line; body_line indented under it
+        # when non-empty (skipped on invalid); detail lines follow.
+        self._write(f"  cand {idx + 1}/{total}  {summary.tag}")
+        if summary.body_line:
+            self._write(f"    {summary.body_line}")
+        for line in summary.detail_lines:
+            self._write(f"    {line}")
 
     def on_round_complete(self, rr: RoundResult, l1_stall_count: int) -> None:
         self._close_pbar()

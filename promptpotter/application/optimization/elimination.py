@@ -10,12 +10,8 @@ statistically inferior.
 
 from __future__ import annotations
 
-import logging
-
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.shared.statistics import should_stop_early
-
-logger = logging.getLogger(__name__)
 
 
 class EliminationCheck:
@@ -72,14 +68,6 @@ class EliminationCheck:
         if not stop:
             return None
 
-        logger.info(
-            "Elimination: candidate %d stopped at query %d/%d (p=%.4f vs prior %d)",
-            candidate_idx,
-            n,
-            self.n_queries,
-            ctx.get("triggered_p", 0.0),
-            ctx.get("triggered_by_prior", -1),
-        )
         return EscalationSignal(
             check_name=self.name,
             target=EscalationTarget.ELIMINATE_CANDIDATE,

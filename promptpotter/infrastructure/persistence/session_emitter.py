@@ -346,6 +346,19 @@ class CampaignPersistenceEmitter:
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
         self._persist()
 
+    def on_candidate_started(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        # Display-only event — the candidate's mutation is already archived
+        # on the OptSearchPoint and in the trial JSON. The emitter ignores
+        # it so RunListener.on_candidate_started fan-out doesn't need None
+        # guards at the callsite.
+        return
+
     def on_sample_started(
         self,
         ci: int,

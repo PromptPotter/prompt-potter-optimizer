@@ -10,7 +10,7 @@ directly — no adapter needed. Pass an instance as ``display=`` to
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -19,11 +19,9 @@ from promptpotter.infrastructure.persistence.session_emitter import (
     read_claude_notes,
 )
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.statistics import wilson_ci
 
 from .notebook_phase import _CycleDisplayState, _dispatch_phase
 from .notebook_primitives import (
-    CYAN,
     DIM,
     GREEN,
     RED,
@@ -33,13 +31,12 @@ from .notebook_primitives import (
     _box_bottom_info,
     _box_line,
     _box_top,
-    _fmt_delta,
     _fmt_query_result,
     _node_bottom,
     _node_line,
     _node_top,
-    _pp_val,
-    fmt_ci,
+    build_candidate_summary,
+    fmt_candidate_header,
 )
 
 if TYPE_CHECKING:
@@ -150,73 +147,31 @@ class NotebookDisplay:
             flush=True,
         )
 
+    def on_candidate_started(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        print(fmt_candidate_header(idx, total, changes_description, pp_override), flush=True)
+
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        label = f"C{idx + 1}"
         w = 66
+        label = f"C{idx + 1}"
+        summary = build_candidate_summary(scores, self.state.baseline_accuracy)
 
-        acc = scores["accuracy"]
-        hits = scores.get("hits", 0)
-        n = scores.get("total", 0)
-        comp = scores.get("composite")
+        print(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
 
-        ci_lo, ci_hi = wilson_ci(hits, n)
-        delta = acc - self.state.baseline_accuracy
+        if summary.body_line:
+            print(f"  {_box_line(summary.body_line, width=w)}")
 
-        # Validation-failure branch: candidate never ran the backend because
-        # parse-time validation rejected an L1-proposed value as out-of-set.
-        # Render with the ⚠ … ↳ "addressed by" convention so the user sees
-        # both what happened and how the loop reacted.
-        if scores.get("invalid"):
-            failures = scores.get("validation_failures") or []
-            acc_tag = f"{YELLOW}INVALID{RESET}"
-            print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
-            for vf in failures:
-                axis = vf.get("axis", "?")
-                value = vf.get("value", "?")
-                allowed = vf.get("allowed") or []
-                allowed_str = ", ".join(allowed[:3]) + (
-                    f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
-                )
-                cause = f"{YELLOW}\u26a0{RESET} {axis} = {value!r}  \u2209 [{allowed_str}]"
-                response = "  \u21b3 scored 0 (no backend call); L2 directive will name this value"
-                print(f"  {_box_line(cause, width=w)}")
-                print(f"  {_box_line(response, width=w)}")
-            print(f"  {_box_bottom(width=w)}")
-            return
-
-        acc_tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
-        print(f"  {_box_top(f'{label}/{total}', acc_tag, width=w)}")
-
-        meta: dict[str, Any] = {}
-        if idx < len(self.state.candidates_meta):
-            meta = self.state.candidates_meta[idx]
-        pp = meta.get("pipeline_params_override")
-        parts: list[str] = []
-        if pp:
-            for node, val in pp.items():
-                if isinstance(val, dict):
-                    for k, v in val.items():
-                        parts.append(f"{node}.{k}: {_pp_val(v)}")
-                else:
-                    parts.append(f"{node}: {_pp_val(val)}")
-        mutations = f"{CYAN}{'  '.join(parts)}{RESET}  " if parts else ""
-        if scores.get("escalation_aborted"):
-            scored_q = scores.get("scored_queries", n)
-            expected_q = scores.get("expected_queries", n)
-            hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
-        else:
-            hit_str = f"{hits}/{n} hits"
-        content = f"{mutations}{hit_str}  vs baseline: {_fmt_delta(delta)}"
-        print(f"  {_box_line(content, width=w)}")
-
-        bottom_parts: list[str] = []
-        if comp is not None and comp != acc:
-            bottom_parts.append(f"composite={comp:.4f}")
-        degraded = scores.get("degraded_queries", 0)
-        if degraded:
-            bottom_parts.append(f"{YELLOW}\u26a0 {degraded}/{n} degraded{RESET}")
-        if bottom_parts:
-            print(f"  {_box_bottom_info('  '.join(bottom_parts), width=w)}")
+        # Detail lines: all but last go as box_line; last folds into the
+        # bottom_info rule when present so the box doesn't grow a dead row.
+        for line in summary.detail_lines[:-1]:
+            print(f"  {_box_line(line, width=w)}")
+        if summary.detail_lines:
+            print(f"  {_box_bottom_info(summary.detail_lines[-1], width=w)}")
         else:
             print(f"  {_box_bottom(width=w)}")
 

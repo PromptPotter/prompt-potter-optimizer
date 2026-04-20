@@ -48,6 +48,18 @@ class RunListener:
         if self.display is not None:
             self.display.on_phase(event)
 
+    def on_candidate_started(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        if self.emitter is not None:
+            self.emitter.on_candidate_started(idx, total, changes_description, pp_override)
+        if self.display is not None:
+            self.display.on_candidate_started(idx, total, changes_description, pp_override)
+
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         if self.emitter is not None:
             self.emitter.on_candidate_scored(idx, total, scores)
