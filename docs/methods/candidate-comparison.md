@@ -20,8 +20,8 @@ Candidates are evaluated sequentially on **Q** in the same deterministic
 order. The first candidate runs to completion (*K* queries), establishing a
 reference population. Each subsequent candidate is evaluated query by query;
 once a minimum sample *n_min* (default 20) is reached, a **one-sided paired
-Welch's *t*-test** is computed after every query against **all** previously
-evaluated candidates on the shared query prefix.[^elim]
+Wilcoxon signed-rank test** is computed after every query against **all**
+previously evaluated candidates on the shared query prefix.[^elim]
 
 Holm-Bonferroni correction is applied across the pairwise tests. If any
 corrected *p*-value falls below alpha (default 0.05), the candidate is stopped
@@ -39,10 +39,14 @@ via cache lookup, others require multi-step enrichment. Pairing on the same
 query removes this nuisance variance. The paired design detects a 3–5% accuracy
 difference with *n* = 50 queries, where an unpaired test requires *n* > 200.
 
-**Welch's *t*-test.** Scores are continuous in [0, 1], and the *t*-test on
-paired differences is robust to non-normality for *n* >= 20 (the minimum sample
-floor). When the scoring formula reduces to binary hit/miss, the *t*-test on
-{-1, 0, 1} differences remains valid, generalizing across formulas without a
+**Wilcoxon signed-rank.** Per-query scores in PromptPotter are often binary
+(`{0, 1}`) or concentrated near the endpoints, so paired differences have
+heavy mass at zero and the normal approximation used by the paired *t*-test
+is weak exactly at the small-*n* regime where elimination fires. The
+signed-rank test is the paired, non-parametric analogue: it drops the
+normality assumption, keeps the per-query pairing that makes the design
+powerful, and reduces to the sign test (with continuity correction) on
+`{-1, 0, +1}` differences — subsuming the binary case without a
 test-selection branch.
 
 **One-sided test.** The elimination question is directional ("is a prior
@@ -62,7 +66,5 @@ evaluated on the full query set.
 
 - **Cluster-correlated queries** could inflate Type I error. The deterministic
   query order mitigates ordering effects but not latent correlation.
-- **Binary scoring** makes the *t*-test valid but suboptimal — McNemar's test
-  would be more natural for paired binary outcomes.
 - **Candidate stationarity** is assumed (performance stable across queries).
   Holds by construction for stateless pipeline configurations.

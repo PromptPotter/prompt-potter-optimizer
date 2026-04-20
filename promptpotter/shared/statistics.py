@@ -88,31 +88,41 @@ def min_sample_size(target_mde: float, alpha: float = 0.05, power: float = 0.8) 
 
 
 # ---------------------------------------------------------------------------
-# Sequential candidate elimination — paired Welch's t-test + Holm-Bonferroni
+# Sequential candidate elimination — paired Wilcoxon signed-rank + Holm-Bonferroni
 # ---------------------------------------------------------------------------
 
 
-def _paired_ttest_pvalue(current: list[float], prior: list[float]) -> float:
-    """One-sided paired t-test p-value (H_a: prior is better than current).
+def _paired_signed_rank_pvalue(current: list[float], prior: list[float]) -> float:
+    """One-sided paired Wilcoxon signed-rank p-value (H_a: prior > current).
 
-    Uses ``scipy.stats.ttest_rel`` on the shared prefix, then converts
-    the two-sided p-value to one-sided.  Returns 1.0 when variance of
-    differences is zero (identical score vectors).
+    Non-parametric replacement for the paired t-test: valid on binary,
+    ordinal, and continuous per-query scores without a normality
+    assumption. Returns 1.0 when scipy rejects the input (all-zero
+    differences or all diffs of the same sign at very small n).
     """
-    from scipy.stats import ttest_rel  # type: ignore[import-untyped]
+    from scipy.stats import wilcoxon  # type: ignore[import-untyped]
 
     n = min(len(current), len(prior))
     if n < 2:
         return 1.0
 
-    stat, p_two = ttest_rel(prior[:n], current[:n])
-
-    if math.isnan(p_two):
+    # scipy.wilcoxon with zero_method="wilcox" raises when every paired
+    # difference is zero; short-circuit to preserve "no evidence → don't
+    # reject" semantics.
+    if all(prior[i] == current[i] for i in range(n)):
         return 1.0
 
-    if stat > 0:
-        return p_two / 2
-    return 1 - p_two / 2
+    try:
+        _, p = wilcoxon(
+            prior[:n],
+            current[:n],
+            alternative="greater",
+            zero_method="wilcox",
+        )
+    except ValueError:
+        return 1.0
+
+    return float(p) if not math.isnan(p) else 1.0
 
 
 def _holm_bonferroni(p_values: list[float], alpha: float) -> list[bool]:
@@ -145,8 +155,9 @@ def should_stop_early(
 ) -> tuple[bool, dict[str, Any]]:
     """Decide whether to eliminate the current candidate.
 
-    Runs a one-sided paired t-test against each prior population on the
-    shared query prefix, then applies Holm-Bonferroni correction.
+    Runs a one-sided paired Wilcoxon signed-rank test against each prior
+    population on the shared query prefix, then applies Holm-Bonferroni
+    correction.
 
     Returns:
         ``(stop, context)`` where *context* carries p-values and the
@@ -155,7 +166,7 @@ def should_stop_early(
     if not prior_populations:
         return False, {}
 
-    p_values = [_paired_ttest_pvalue(current_scores, prior) for prior in prior_populations]
+    p_values = [_paired_signed_rank_pvalue(current_scores, prior) for prior in prior_populations]
     rejections = _holm_bonferroni(p_values, alpha)
 
     ctx: dict[str, Any] = {"p_values": p_values, "rejections": rejections}

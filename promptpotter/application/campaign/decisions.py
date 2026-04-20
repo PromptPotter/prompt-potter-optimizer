@@ -242,7 +242,7 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
 
 @replayer("elimination_cut")
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-run the Welch t-test gate under rescored scores.
+    """Re-run the Wilcoxon signed-rank gate under rescored scores.
 
     ``inputs_ref`` carries:
 

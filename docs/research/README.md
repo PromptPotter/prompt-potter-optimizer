@@ -48,7 +48,7 @@ Together, the four metrics separate three concerns: *how good* (Acc), *how much 
 | **Auto-injected scoring** | 🟢 | 🔴 | 🔴 | `compile_scorer()` — per-dataset formula from `campaign.json`, compiled once, injected into all eval paths |
 | **IDE-native operation** | 🟢 | 🔴 | 🔴 | `/potter-run` Claude Code skill — full campaign lifecycle from the terminal |
 | **Prompt + pipeline optimization** | 🟢 | 🔴 | 🔴 | 8-field prompt decomposition + per-node `pipeline_params` — optimizes prompts AND pipeline config jointly |
-| **Statistical early-stopping** | 🟢 | 🟡 | 🔴 | Sequential elimination via paired Welch's t-test + Holm-Bonferroni (α=0.05) after 20 queries |
+| **Statistical early-stopping** | 🟢 | 🟡 | 🔴 | Sequential elimination via paired Wilcoxon signed-rank test + Holm-Bonferroni (α=0.05) after 20 queries |
 | **Cross-run learning** | 🟢 | 🔴 | 🔴 | SearchMemory — parameter impact, axis exhaustion, value trends, query tractability, failure-group × axis correlation |
 
 ### Feature matrix
@@ -61,7 +61,7 @@ Together, the four metrics separate three concerns: *how good* (Acc), *how much 
 | **Multi-step pipeline** | 🟢 | 🔴 | 🔴 | Per-node params, PipelineSchema from backend | No — single LLM call only | Single LLM call (custom script for multi-step) |
 | **Budget control** | 🟢 | 🟡 | 🟡 | `sp_budget_ttest` (adaptive), early-stopping | Token budget callback (`max_tokens_for_termination`) | `maxConcurrency`, `repeat`, `timeoutMs` |
 | **Scoring** | 🟡 | 🟡 | 🟢 | Composite formula (`compile_scorer()`), custom per-dataset | `accuracy_score` (classification), reward function, LLM-as-judge | 40+ assertion types (deterministic + model-graded) |
-| **Candidate selection** | 🟢 | 🟡 | 🔴 | Sequential elimination, Welch's t-test early-stop | CAPO: paired t-test racing (α=0.2). Others: full eval or subsampling | Pass/fail assertions, weighted aggregation |
+| **Candidate selection** | 🟢 | 🟡 | 🔴 | Sequential elimination, Wilcoxon signed-rank early-stop | CAPO: paired t-test racing (α=0.2). Others: full eval or subsampling | Pass/fail assertions, weighted aggregation |
 | **Cross-run learning** | 🟢 | 🔴 | 🔴 | SearchMemory (parameter impact, axis exhaustion, failure groups) | None (in-memory only, lost on exit) | None (each eval independent) |
 | **Few-shot optimization** | 🟡 | 🟢 | 🔴 | Pipeline-level (backend handles examples) | CAPO: joint instruction + few-shot optimization | Not applicable (manual) |
 | **Prompt representation** | 🟢 | 🔴 | 🔴 | 8-field decomposition (persona, task_intent, etc.) | Opaque string (monolithic instruction) | Opaque string templates (Nunjucks) |

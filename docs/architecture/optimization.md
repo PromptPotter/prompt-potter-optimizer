@@ -315,7 +315,7 @@ For the prompt-injection routing (who reads each failure list), see [`informatio
 | Check | Fires | Action | Target enum |
 |---|---|---|---|
 | **Validation failure** | L1 parse time, before evaluation | Synthetic 0; skip backend. Surface on `OptSearchPoint.memory.validation_failures`; L2 reads via `candidate_scores` next round and teaches L1 via directive. | (no signal — handled in `_score_candidates`) |
-| `EliminationCheck` | Mid-evaluation, after `n_min` queries | Stop scoring this candidate (Welch t-test says it can't beat the leader); continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
+| `EliminationCheck` | Mid-evaluation, after `n_min` queries | Stop scoring this candidate (Wilcoxon signed-rank says it can't beat the leader); continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
 | `EmptyOutputCheck` | Mid-evaluation, after 3 queries | Stop scoring this candidate; continue with the next | `EscalationTarget.ELIMINATE_CANDIDATE` |
 | `DegradationCheck` | Mid-evaluation, after 3 queries | Stop scoring this candidate; synthesise a `RuntimeFailure` and attach to its `OptSearchPoint.memory.runtime_failures`; mirror to outer memory after the round. L2 reads *NEW + ACCUMULATED* next round and adjusts its own strategy; L3 replans when the pattern persists. | `EscalationTarget.ELIMINATE_CANDIDATE` |
 
@@ -345,7 +345,7 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 | 3 | **DegradationCheck — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py:98-121` |
 | 4 | **DegradationCheck — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py:123-149` |
 | 5 | **EmptyOutputCheck** — `empty_predicted_rate >= threshold` | every query | **3** | eliminated | — | `application/optimization/nodes/escalation.py::EmptyOutputCheck` |
-| 6 | **EliminationCheck** (Welch t-test vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
+| 6 | **EliminationCheck** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
 ### Ordering inside `_run_query_loop`
 
@@ -356,7 +356,7 @@ For each query, `search_point_scorer._run_query_loop` runs:
 3. `on_result` fires → display renders the query line with annotations.
 4. Iterate every enabled check in the shared `degradation_checks` list; first one to return a signal ends the candidate.
 
-Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. `_score_candidates` currently wires degradation checks first (from `build_degradation_checks`), then appends `EliminationCheck`. Fatal warnings therefore beat any rate check; rate checks beat Welch's t-test.
+Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. `_score_candidates` currently wires degradation checks first (from `build_degradation_checks`), then appends `EliminationCheck`. Fatal warnings therefore beat any rate check; rate checks beat the Wilcoxon signed-rank gate.
 
 ### `FATAL_WARNINGS` is a hardcoded invariant, not a tunable
 
@@ -546,9 +546,9 @@ At the first divergence, the campaign stops. Nothing is broken: the traces are i
 
 ### Two-tier decision records
 
-Every decision record splits into two halves: a flow-determining half and an archival half. The flow-determining half — `kind`, `inputs_ref`, `outcome` — is what divergence detection looks at. `inputs_ref` stores pointers and invariants only: candidate ids, round numbers, and gate parameters that do not depend on the active scorer (e.g. the Welch `alpha` / `n_min` pair for `elimination_cut`, the patience for L2/L3 triggers). Anything that is a function of scored numbers — a beat-threshold, a running-max, a stall count — is **derived** on replay from the rescored trial view, never stored, because a persisted value computed under the old scorer would manufacture divergences. For `round_winner`, the replayer pulls the beat-threshold from the mean of the most recent prior trial's rescored winner results, or from the rescored baseline for round 0; the threshold the recorder saw under the old scorer lives in `data` as a forensic anchor. `outcome` is the branch actually taken — a winner id, a boolean gate. Divergence fires if and only if the replayer re-derives a different `outcome` under the current scorer.
+Every decision record splits into two halves: a flow-determining half and an archival half. The flow-determining half — `kind`, `inputs_ref`, `outcome` — is what divergence detection looks at. `inputs_ref` stores pointers and invariants only: candidate ids, round numbers, and gate parameters that do not depend on the active scorer (e.g. the Wilcoxon `alpha` / `n_min` pair for `elimination_cut`, the patience for L2/L3 triggers). Anything that is a function of scored numbers — a beat-threshold, a running-max, a stall count — is **derived** on replay from the rescored trial view, never stored, because a persisted value computed under the old scorer would manufacture divergences. For `round_winner`, the replayer pulls the beat-threshold from the mean of the most recent prior trial's rescored winner results, or from the rescored baseline for round 0; the threshold the recorder saw under the old scorer lives in `data` as a forensic anchor. `outcome` is the branch actually taken — a winner id, a boolean gate. Divergence fires if and only if the replayer re-derives a different `outcome` under the current scorer.
 
-The archival half — `data` — carries everything that matters for meta-analysis but has no business in a gate: full LLM outputs (L2 directive text, L3 plan JSON, critique), diagnostic context (t-test p-values, stall counts, the recorded threshold under the old scorer), anything the record should preserve for later inspection. `replay_decisions` never reads `data`. A rescoring that wiggles numeric inputs but leaves the gate intact does not flip the archival payload either — the split is what lets "noisy rescore that doesn't change the flow" pass silently instead of firing a spurious fork.
+The archival half — `data` — carries everything that matters for meta-analysis but has no business in a gate: full LLM outputs (L2 directive text, L3 plan JSON, critique), diagnostic context (signed-rank p-values, stall counts, the recorded threshold under the old scorer), anything the record should preserve for later inspection. `replay_decisions` never reads `data`. A rescoring that wiggles numeric inputs but leaves the gate intact does not flip the archival payload either — the split is what lets "noisy rescore that doesn't change the flow" pass silently instead of firing a spurious fork.
 
 ### Recorded decision kinds
 
@@ -557,7 +557,7 @@ Five kinds are recorded today; the first four are divergence-gated, the fifth is
 | Kind | Gate | Divergence-gated? |
 |------|------|------|
 | `round_winner` | Which candidate's rescored mean score beats the round baseline (strict `>`). On replay the baseline is the rescored mean of the prior trial's winner results, or the rescored campaign baseline for round 0. | Yes. |
-| `elimination_cut` | Welch t-test with Holm-Bonferroni correction against fully-scored priors. | Yes — replayer reruns `should_stop_early` on rescored scores. |
+| `elimination_cut` | Wilcoxon signed-rank with Holm-Bonferroni correction against fully-scored priors. | Yes — replayer reruns `should_stop_early` on rescored scores. |
 | `l2_escalation_trigger` | Patience gate on the rolling stall count since L2's last entry. | Yes for patience-triggered L2 (replayer reconstructs stall count from rescored prior trials); non-divergent for degradation-triggered L2 (gate depends on the degradation detector, which isn't rescore-replayable in this pass). |
 | `l3_escalation_trigger` | Patience gate on the stall count since L3's last entry. Same shape as L2. | Yes. |
 | `probe_round_commitment` | Projection of L2's LLM-output `action` field. | No. Probe is determined by L2's LLM output, which is invariant under pure scorer swap and can't be replayed without re-calling the LLM. Recording still matters: the `data` archive (directive preview, warned-query summary) lets meta-optimization attribute downstream divergences. |

@@ -3,9 +3,9 @@
 ``EliminationCheck`` implements the ``DegradationCheck`` protocol consumed
 by ``optimization/nodes/score.py::_score_candidates``. It compares the
 in-progress candidate's per-query scores against fully-evaluated priors
-via Welch's t-test (with Holm-Bonferroni correction) and emits an
-``EscalationSignal`` to abort early when the candidate is statistically
-inferior.
+via the Wilcoxon signed-rank test (with Holm-Bonferroni correction) and
+emits an ``EscalationSignal`` to abort early when the candidate is
+statistically inferior.
 """
 
 from __future__ import annotations

@@ -9,40 +9,44 @@ scipy = pytest.importorskip("scipy")
 from promptpotter.application.optimization.elimination import EliminationCheck  # noqa: E402
 from promptpotter.shared.statistics import (  # noqa: E402
     _holm_bonferroni,
-    _paired_ttest_pvalue,
+    _paired_signed_rank_pvalue,
     should_stop_early,
 )
 
 # ---------------------------------------------------------------------------
-# _paired_ttest_pvalue
+# _paired_signed_rank_pvalue
 # ---------------------------------------------------------------------------
 
 
-class TestPairedTtestPvalue:
+class TestPairedSignedRankPvalue:
     def test_identical_scores_returns_one(self):
         scores = [0.5] * 30
-        assert _paired_ttest_pvalue(scores, scores) == 1.0
+        assert _paired_signed_rank_pvalue(scores, scores) == 1.0
 
     def test_current_clearly_worse(self):
         prior = [0.8] * 30
         current = [0.3] * 30
-        p = _paired_ttest_pvalue(current, prior)
+        p = _paired_signed_rank_pvalue(current, prior)
         assert p < 0.001
 
     def test_current_clearly_better(self):
         prior = [0.3] * 30
         current = [0.8] * 30
-        p = _paired_ttest_pvalue(current, prior)
+        p = _paired_signed_rank_pvalue(current, prior)
         assert p > 0.99
 
     def test_similar_means_high_p(self):
         prior = [0.5 + 0.01 * (i % 3 - 1) for i in range(30)]
         current = [0.5 + 0.01 * ((i + 1) % 3 - 1) for i in range(30)]
-        p = _paired_ttest_pvalue(current, prior)
+        p = _paired_signed_rank_pvalue(current, prior)
         assert p > 0.05
 
     def test_too_few_samples(self):
-        assert _paired_ttest_pvalue([0.5], [0.8]) == 1.0
+        assert _paired_signed_rank_pvalue([0.5], [0.8]) == 1.0
+
+    def test_all_zero_differences_returns_one(self):
+        scores = [0.5] * 30
+        assert _paired_signed_rank_pvalue(scores, scores) == 1.0
 
 
 # ---------------------------------------------------------------------------
