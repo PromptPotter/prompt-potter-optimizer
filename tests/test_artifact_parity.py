@@ -57,6 +57,15 @@ def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
     return sdir, cdir
 
 
+def test_artifact_sets_are_disjoint_and_well_formed() -> None:
+    """CAMPAIGN_ARTIFACTS and SESSION_ARTIFACTS must never overlap; each
+    fixed key must land in the expected set. Prevents a file from being
+    written into both trees."""
+    assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
+    assert {"journal.md", "notes.md", "session.json", "control.json"} <= SESSION_ARTIFACTS
+    assert {"dashboard.json", "index.json"} <= CAMPAIGN_ARTIFACTS
+
+
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:
     """Emitter lifecycle must produce all CAMPAIGN_ARTIFACTS in the campaign
     dir and ensure all SESSION_ARTIFACTS in the session dir."""
