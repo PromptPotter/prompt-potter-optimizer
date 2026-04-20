@@ -101,6 +101,12 @@ class LoopState:
     search_memory: Any = None
     escalation: EscalationState = field(default_factory=EscalationState)
 
+    # Decision records recorded by escalation that fires AFTER execute_round
+    # has built its RoundResult (patience-triggered L2/L3, probe commits,
+    # degradation-triggered escalations). Flushed into the next trial's
+    # ``decisions`` list by the round loop before ``campaign_store.add_trial``.
+    pending_decisions: list[dict] = field(default_factory=list)
+
     state_version: int = 1
 
     # -- Construction / restore ------------------------------------------------

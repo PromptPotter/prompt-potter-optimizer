@@ -279,6 +279,13 @@ async def _post_round(
 
     cb.on_round_complete(round_result, state.escalation.l1_stall_count)
 
+    # Flush any escalation decisions accumulated at end of the *previous*
+    # round (patience-triggered L2/L3, probe commits, degradation-triggered
+    # escalations) into this round's trial so divergence replay sees them.
+    if state.pending_decisions:
+        round_result.decisions.extend(state.pending_decisions)
+        state.pending_decisions.clear()
+
     if env.campaign_store and env.cycle_id:
         with graceful("Round checkpoint failed"):
             env.campaign_store.add_trial(

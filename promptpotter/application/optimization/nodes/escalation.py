@@ -374,7 +374,24 @@ async def _do_l2_transition(
         state.opt_sp.task_context = transition.task_context
     state.opt_sp.memory.l2_directive = transition.l2_directive
     state.escalation.l2.record_entry(state.best_accuracy, state.best_composite)
-    if transition.action == TransitionAction.PROBE:
+    from promptpotter.application.campaign.decisions import record_decision
+
+    is_probe = transition.action == TransitionAction.PROBE
+    record_decision(
+        state.pending_decisions,
+        "probe_round_commitment",
+        {
+            "round_num": round_num,
+            "l2_round": state.escalation.l2.round,
+        },
+        is_probe,
+        data={
+            "action": str(transition.action),
+            "l2_directive_preview": (transition.l2_directive or "")[:200],
+            "changes_description": transition.opt_search_point.changes_description or "",
+        },
+    )
+    if is_probe:
         state.probe_next_round = True
         logger.debug("L2 requested probe — next round uses warned queries")
     logger.debug(
@@ -522,6 +539,7 @@ async def escalate_l2(
     exhaustion resets counters instead of stopping — the degradation
     investigation loop continues.
     """
+    from promptpotter.application.campaign.decisions import record_decision
     from promptpotter.application.optimization.nodes.round_execution import PauseForReviewError
     from promptpotter.application.optimization.phases import StopReason
 
@@ -530,6 +548,29 @@ async def escalate_l2(
     esc.l2.record_outcome(state.best_composite)
 
     l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
+    # Record the L2 gate decision before the branch. ``entry_round`` points
+    # to the round whose rescored best_composite is L2's stall baseline —
+    # -1 if L2 has never fired. ``outcome`` is the flow-determining bool
+    # (True = L2 fires this round; False = patience-deferred / exhausted).
+    entry_round_l2 = esc.l2.round if esc.l2.round > 0 else -1
+    record_decision(
+        state.pending_decisions,
+        "l2_escalation_trigger",
+        {
+            "round_num": round_num,
+            "l2_patience": opt.l2_patience,
+            "from_degradation": from_degradation,
+            "entry_round": entry_round_l2,
+        },
+        not l2_stalled,
+        data={
+            "l2_round": esc.l2.round,
+            "stall_count": esc.l2.stall_count,
+            "best_composite_at_entry": esc.l2.best_composite_at_entry,
+            "best_composite_this_round": state.best_composite,
+            "best_accuracy": state.best_accuracy,
+        },
+    )
     if not l2_stalled:
         await _do_l2_transition(
             state,
@@ -570,6 +611,23 @@ async def escalate_l2(
     # L2 stalled, L3 enabled — track L3 stall
     esc.l3.record_outcome(state.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
+    entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
+    record_decision(
+        state.pending_decisions,
+        "l3_escalation_trigger",
+        {
+            "round_num": round_num,
+            "l3_patience": opt.l3_patience,
+            "entry_round": entry_round_l3,
+        },
+        not l3_exhausted,
+        data={
+            "l3_round": esc.l3.round,
+            "stall_count": esc.l3.stall_count,
+            "best_composite_at_entry": esc.l3.best_composite_at_entry,
+            "best_composite_this_round": state.best_composite,
+        },
+    )
     if not l3_exhausted:
         await _do_l3_transition(
             state,

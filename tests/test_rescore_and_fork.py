@@ -138,6 +138,233 @@ def test_replay_decisions_returns_none_when_outcome_matches() -> None:
 
 
 # ---------------------------------------------------------------------------
+# Decision `data` sidecar — archived, never compared for divergence
+# ---------------------------------------------------------------------------
+
+
+def test_decision_data_roundtrips_and_is_ignored_by_replay() -> None:
+    """``data`` survives to_dict/from_dict and mutating it never fires divergence."""
+    from promptpotter.application.campaign.decisions import Decision
+
+    d = Decision(
+        kind="round_winner",
+        inputs_ref={"candidate_ids": [], "current_best_accuracy": 0.0},
+        outcome="",
+        data={"llm_output": "raw critique text", "diag": 42},
+    )
+    restored = Decision.from_dict(d.to_dict())
+    assert restored.data == {"llm_output": "raw critique text", "diag": 42}
+
+    # Mutate data arbitrarily; outcome unchanged → no divergence.
+    trial = {
+        "round": 0,
+        "all_candidate_results": {},
+        "decisions": [
+            {
+                **d.to_dict(),
+                "data": {"llm_output": "COMPLETELY DIFFERENT TEXT"},
+            }
+        ],
+    }
+    assert replay_decisions(trial) is None
+
+
+# ---------------------------------------------------------------------------
+# elimination_cut replayer
+# ---------------------------------------------------------------------------
+
+
+def _score_row(score: float) -> dict:
+    return {"query": "q", "predicted": "p", "ground_truth": "g", "score": score, "hit": False}
+
+
+def test_replay_elimination_cut_matches_under_rescoring() -> None:
+    """Candidate that was eliminated under the recorded scorer stays
+    eliminated under a rescored view that preserves the same ordering."""
+    # Priors score ≈ 1.0 everywhere; current candidate consistently below.
+    priors_c0 = [_score_row(1.0) for _ in range(10)]
+    priors_c1 = [_score_row(1.0) for _ in range(10)]
+    current = [_score_row(0.0) for _ in range(6)]
+    trial = {
+        "round": 2,
+        "all_candidate_results": {"c0": priors_c0, "c1": priors_c1, "c2": current},
+        "decisions": [
+            {
+                "kind": "elimination_cut",
+                "inputs_ref": {
+                    "candidate_id": "c2",
+                    "prior_candidate_ids": ["c0", "c1"],
+                    "queries_evaluated": 6,
+                    "alpha": 0.2,
+                    "n_min": 4,
+                    "round_num": 2,
+                },
+                "outcome": True,
+                "data": {"triggered_p": 0.001},
+            }
+        ],
+    }
+    assert replay_decisions(trial) is None
+
+
+def test_replay_elimination_cut_flags_divergence_when_rescored_scores_flip() -> None:
+    """Under a rescored view where the current candidate now matches the
+    priors, the t-test no longer rejects → recorded ``True`` diverges."""
+    priors_c0 = [_score_row(1.0) for _ in range(10)]
+    priors_c1 = [_score_row(1.0) for _ in range(10)]
+    # Rescored scores: current candidate is tied with priors.
+    current = [_score_row(1.0) for _ in range(6)]
+    trial = {
+        "round": 2,
+        "all_candidate_results": {"c0": priors_c0, "c1": priors_c1, "c2": current},
+        "decisions": [
+            {
+                "kind": "elimination_cut",
+                "inputs_ref": {
+                    "candidate_id": "c2",
+                    "prior_candidate_ids": ["c0", "c1"],
+                    "queries_evaluated": 6,
+                    "alpha": 0.2,
+                    "n_min": 4,
+                    "round_num": 2,
+                },
+                "outcome": True,
+                "data": {},
+            }
+        ],
+    }
+    div = replay_decisions(trial)
+    assert div is not None
+    assert div.kind == "elimination_cut"
+    assert div.recorded_outcome is True
+    assert div.current_outcome is False
+
+
+# ---------------------------------------------------------------------------
+# l2_escalation_trigger replayer
+# ---------------------------------------------------------------------------
+
+
+def _round_trial(round_num: int, winner_score: float) -> dict:
+    """Minimal trial with a rescorable winner composite."""
+    return {
+        "round": round_num,
+        "results": [_score_row(winner_score), _score_row(winner_score)],
+        "all_candidate_results": {},
+        "decisions": [],
+    }
+
+
+def test_replay_l2_trigger_fires_when_not_stalled() -> None:
+    """L2 never fired yet → stall=0 → fires (outcome=True), no divergence."""
+    trial = {
+        "round": 3,
+        "results": [_score_row(0.5)],
+        "all_candidate_results": {},
+        "decisions": [
+            {
+                "kind": "l2_escalation_trigger",
+                "inputs_ref": {
+                    "round_num": 3,
+                    "l2_patience": 2,
+                    "from_degradation": False,
+                    "entry_round": -1,
+                },
+                "outcome": True,
+                "data": {},
+            }
+        ],
+    }
+    assert replay_decisions(trial, prior_trials=[_round_trial(0, 0.5)]) is None
+
+
+def test_replay_l2_trigger_flags_divergence_when_rescored_improvement_resets_stall() -> None:
+    """L2 entered at round 1 with baseline=0.5. Rescored rounds 2 and 3 both
+    beat baseline, so stall=0 under rescoring. Recorded outcome was
+    ``False`` (patience exhausted); replayer returns ``True`` → divergence."""
+    prior = [
+        _round_trial(0, 0.5),
+        _round_trial(1, 0.5),  # L2 entered here; baseline = 0.5
+        _round_trial(2, 0.9),  # beats baseline → improvement
+        _round_trial(3, 0.9),
+    ]
+    trial = {
+        "round": 4,
+        "results": [_score_row(0.9)],
+        "all_candidate_results": {},
+        "decisions": [
+            {
+                "kind": "l2_escalation_trigger",
+                "inputs_ref": {
+                    "round_num": 4,
+                    "l2_patience": 2,
+                    "from_degradation": False,
+                    "entry_round": 1,
+                },
+                "outcome": False,  # recorded: patience exhausted
+                "data": {},
+            }
+        ],
+    }
+    div = replay_decisions(trial, prior_trials=prior)
+    assert div is not None
+    assert div.kind == "l2_escalation_trigger"
+    assert div.recorded_outcome is False
+    assert div.current_outcome is True
+
+
+def test_replay_l2_trigger_from_degradation_is_non_divergent() -> None:
+    """Degradation-triggered L2 isn't replayable (would need re-running
+    the degradation detector). Replayer raises → non-divergence."""
+    trial = {
+        "round": 3,
+        "results": [_score_row(0.5)],
+        "all_candidate_results": {},
+        "decisions": [
+            {
+                "kind": "l2_escalation_trigger",
+                "inputs_ref": {
+                    "round_num": 3,
+                    "l2_patience": 2,
+                    "from_degradation": True,
+                    "entry_round": -1,
+                },
+                "outcome": True,
+                "data": {},
+            }
+        ],
+    }
+    assert replay_decisions(trial) is None
+
+
+# ---------------------------------------------------------------------------
+# probe_round_commitment — recorded but not divergence-gated
+# ---------------------------------------------------------------------------
+
+
+def test_replay_probe_commitment_is_silently_skipped() -> None:
+    """Probe is an LLM-output projection; no replayer registered. Unknown
+    kinds are silently skipped by ``replay_decisions`` — which is exactly
+    the ``recorded, not divergence-gated`` semantics we want."""
+    assert "probe_round_commitment" not in REPLAYERS
+    trial = {
+        "round": 1,
+        "results": [],
+        "all_candidate_results": {},
+        "decisions": [
+            {
+                "kind": "probe_round_commitment",
+                "inputs_ref": {"round_num": 1, "l2_round": 1},
+                "outcome": True,
+                "data": {"action": "TransitionAction.PROBE", "l2_directive_preview": "…"},
+            }
+        ],
+    }
+    # Even if the outcome is nonsensical, replay never returns a Divergence.
+    assert replay_decisions(trial) is None
+
+
+# ---------------------------------------------------------------------------
 # fork_cycle
 # ---------------------------------------------------------------------------
 

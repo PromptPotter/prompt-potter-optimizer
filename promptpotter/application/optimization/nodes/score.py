@@ -284,7 +284,7 @@ def _handle_cache_hit(
         n_candidates,
         len(results),
     )
-    elim_check.register_completed([r["score"] for r in results])
+    elim_check.register_completed([r["score"] for r in results], candidate_id=osp_c.id)
     return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
 
 
@@ -318,7 +318,7 @@ def _handle_scored_candidate(
 
     # Register fully-completed candidates as priors for future elimination
     if len(results) == len(dataset) and not aborted:
-        elim_check.register_completed([r["score"] for r in results])
+        elim_check.register_completed([r["score"] for r in results], candidate_id=osp_c.id)
 
     new_rf: RuntimeFailure | None = None
     if elimination_stopped and signal is not None and signal.check_name == "degradation":
@@ -372,14 +372,19 @@ async def _score_candidates(
     elimination_alpha: float = 0.2,
     obs_campaign_id: str = "",
     round_num: int = 0,
+    decisions: list[dict] | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each candidate against the dataset.
 
     Flat dispatch over three exit paths — validation-skip, cache-hit,
     scored — each extracted into its own ``_handle_*`` helper.
 
+    ``decisions`` (when provided) accumulates ``elimination_cut`` decision
+    records — one per eliminated candidate — for divergence replay.
+
     Returns ``(all_candidate_results, candidate_scores, escalation_signal)``.
     """
+    from promptpotter.application.campaign.decisions import record_decision
     from promptpotter.application.optimization.elimination import EliminationCheck
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -471,6 +476,9 @@ async def _score_candidates(
             continue
 
         # Path 3 — scored (may be eliminated or aborted)
+        # Snapshot priors BEFORE the helper registers this candidate so
+        # the decision record points to the exact priors the t-test saw.
+        priors_at_test = elim_check.prior_ids_snapshot()
         report, residual = _handle_scored_candidate(
             osp_c,
             override,
@@ -483,6 +491,30 @@ async def _score_candidates(
             idx,
             n_candidates,
         )
+        if (
+            decisions is not None
+            and signal is not None
+            and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
+            and signal.check_name == elim_check.name
+        ):
+            cr = signal.check_result
+            record_decision(
+                decisions,
+                "elimination_cut",
+                {
+                    "candidate_id": osp_c.id,
+                    "prior_candidate_ids": priors_at_test,
+                    "queries_evaluated": int(cr.get("queries_evaluated", len(results))),
+                    "alpha": float(elim_check.alpha),
+                    "n_min": int(elim_check.n_min),
+                    "round_num": round_num,
+                },
+                True,
+                data={
+                    "triggered_p": float(cr.get("triggered_p", 0.0)),
+                    "triggered_by_prior": int(cr.get("triggered_by_prior", -1)),
+                },
+            )
         _fire_candidate_callbacks(idx, report)
 
         if residual is not None:
@@ -519,6 +551,7 @@ async def l1_score(
         pipeline_params,
         ctx.pipeline_schema,
     )
+    decisions: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await _score_candidates(
         osp_candidates,
         merged_pp,
@@ -531,6 +564,7 @@ async def l1_score(
         elimination_alpha=elimination_alpha,
         obs_campaign_id=obs_campaign_id,
         round_num=round_num,
+        decisions=decisions,
     )
 
     evaluated_candidates = [
@@ -555,10 +589,10 @@ async def l1_score(
 
     # Record the winner-selection decision for divergence replay. Pointers
     # only (candidate ids + baseline-beat threshold); replayer re-derives
-    # per-candidate accuracies from the rescored trial.
+    # per-candidate accuracies from the rescored trial. ``decisions`` may
+    # already contain elimination_cut records from ``_score_candidates``.
     from promptpotter.application.campaign.decisions import record_decision
 
-    decisions: list[dict] = []
     w_idx = winner_entry["winner_idx"]
     winner_id = evaluated_candidates[w_idx].id if w_idx is not None and evaluated_candidates else ""
     record_decision(

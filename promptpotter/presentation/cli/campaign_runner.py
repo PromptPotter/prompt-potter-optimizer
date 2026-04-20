@@ -346,6 +346,11 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             },
             human=(
                 f"{div}\n\n"
+                f"Checked decisions: round_winner, elimination_cut, "
+                f"l2_escalation_trigger, l3_escalation_trigger. "
+                f"(probe_round_commitment is recorded but not divergence-gated — "
+                f"it depends on L2's LLM output, which is invariant under a "
+                f"pure scorer swap.)\n\n"
                 f"Run `python -m promptpotter fork` to branch here under the "
                 f"new scorer, or revert `campaign.json::scoring` to continue "
                 f"the original trajectory. `--no-divergence-check` silences "

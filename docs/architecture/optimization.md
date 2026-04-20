@@ -490,11 +490,31 @@ The separation is enforced at one seam: whenever a trace crosses from disk into 
 
 ### Decisions are pure functions of scored results
 
-The optimizer's choices — which candidate wins a round, which ones get eliminated early, when to escalate from L1 to L2 — all derive from scored numbers. No hidden state, no scorer-invisible preferences. That makes them replayable: the same decision function, given freshly rescored inputs, will produce whatever outcome those inputs justify.
+The optimizer's choices — which candidate wins a round, which ones get eliminated early, when to escalate from L1 to L2, when L3 replans — all derive from scored numbers. No hidden state, no scorer-invisible preferences. That makes them replayable: the same decision function, given freshly rescored inputs, will produce whatever outcome those inputs justify.
 
 When a campaign commits a decision, it also records that decision — its kind, enough to re-derive it, and the outcome it reached. On resume, after rescoring prior trials under the current scorer, the optimizer walks each recorded decision and re-runs the corresponding decision function against the rescored view. If the re-run matches the record, that round stands; if it differs, that's the divergence point — the first place the current policy would have sent the campaign somewhere other than where it actually went.
 
 At the first divergence, the campaign stops. Nothing is broken: the traces are intact, the recorded decisions are historically accurate, and both policies have valid readings of the same data. The halt exists to prevent silent drift onto a path the current scorer no longer chooses. The user sees a concrete report — round, decision kind, recorded outcome, current outcome — and decides how to proceed. An opt-out exists for exploratory work where the halt isn't wanted; it leaves the rescoring in place and only suppresses the stop.
+
+### Two-tier decision records
+
+Every decision record splits into two halves: a flow-determining half and an archival half. The flow-determining half — `kind`, `inputs_ref`, `outcome` — is what divergence detection looks at. `inputs_ref` stores pointers (candidate ids, round numbers, thresholds), not full inputs; the replayer re-derives its own inputs from the rescored trial view. `outcome` is the branch actually taken — a winner id, a boolean gate. Divergence fires if and only if the replayer re-derives a different `outcome` under the current scorer.
+
+The archival half — `data` — carries everything that matters for meta-analysis but has no business in a gate: full LLM outputs (L2 directive text, L3 plan JSON, critique), diagnostic context (t-test p-values, stall counts), anything the record should preserve for later inspection. `replay_decisions` never reads `data`. A rescoring that wiggles numeric inputs but leaves the gate intact does not flip the archival payload either — the split is what lets "noisy rescore that doesn't change the flow" pass silently instead of firing a spurious fork.
+
+### Recorded decision kinds
+
+Five kinds are recorded today; the first four are divergence-gated, the fifth is archive-only.
+
+| Kind | Gate | Divergence-gated? |
+|------|------|------|
+| `round_winner` | Which candidate's rescored mean score beats the round baseline. | Yes. |
+| `elimination_cut` | Welch t-test with Holm-Bonferroni correction against fully-scored priors. | Yes — replayer reruns `should_stop_early` on rescored scores. |
+| `l2_escalation_trigger` | Patience gate on the rolling stall count since L2's last entry. | Yes for patience-triggered L2 (replayer reconstructs stall count from rescored prior trials); non-divergent for degradation-triggered L2 (gate depends on the degradation detector, which isn't rescore-replayable in this pass). |
+| `l3_escalation_trigger` | Patience gate on the stall count since L3's last entry. Same shape as L2. | Yes. |
+| `probe_round_commitment` | Projection of L2's LLM-output `action` field. | No. Probe is determined by L2's LLM output, which is invariant under pure scorer swap and can't be replayed without re-calling the LLM. Recording still matters: the `data` archive (directive preview, warned-query summary) lets meta-optimization attribute downstream divergences. |
+
+Escalation decisions fire after `execute_round` has already built the round's result, so they accumulate on `LoopState.pending_decisions` and flush into the next trial's `decisions` list before `add_trial`. The replayer reads the gate's `round_num` from `inputs_ref`, finds the relevant prior trials, and reconstructs the gate state — it doesn't care that the record landed in a later trial than the round it refers to.
 
 ### Fork commits to the new policy
 
@@ -504,7 +524,7 @@ Past decisions under the old scorer aren't retroactively corrected. Fork doesn't
 
 ### Why the mechanism is durable
 
-The replay-and-fork machinery treats decision *kinds* as opaque. It doesn't know what "round winner" or "elimination cut" means at the domain level — it only knows that each decision has an identity, stored inputs, and a way to re-derive its outcome. Adding a new kind of decision is additive: write it as a function of scored results, register a way to rerun it, and everything else — resume, divergence detection, fork — works without changes.
+The replay-and-fork machinery treats decision *kinds* as opaque. It doesn't know what "round winner" or "elimination cut" means at the domain level — it only knows that each decision has an identity, stored inputs, a branch outcome, and optionally an archival sidecar. Adding a new kind of decision is additive: write it as a function of scored results, register a way to rerun it via `@replayer(kind)`, and everything else — resume, divergence detection, fork, the CLI halt message — works without changes. This is the hook meta-optimization relies on: when the optimizer itself becomes the search target (varying L2/L3 prompts, patience thresholds, elimination alphas across `OptSearchPoint`s), comprehensive decision recording means fork can attribute divergence at the *earliest* decision a config change would have altered, rather than whichever happened to be registered.
 
 ## Key Files
 

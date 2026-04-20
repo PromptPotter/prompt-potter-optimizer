@@ -33,10 +33,20 @@ class EliminationCheck:
         self.n_queries = n_queries
         self.enabled = True
         self._prior_scores: list[list[float]] = []
+        self._prior_ids: list[str] = []
 
-    def register_completed(self, scores: list[float]) -> None:
-        """Register a fully-evaluated candidate's per-query scores as a prior."""
+    def register_completed(self, scores: list[float], candidate_id: str = "") -> None:
+        """Register a fully-evaluated candidate's per-query scores as a prior.
+
+        ``candidate_id`` is recorded alongside so elimination-cut decision
+        records can point to the exact priors that triggered the test.
+        """
         self._prior_scores.append(scores)
+        self._prior_ids.append(candidate_id)
+
+    def prior_ids_snapshot(self) -> list[str]:
+        """Return the list of prior candidate ids, in registration order."""
+        return list(self._prior_ids)
 
     def evaluate(
         self,
