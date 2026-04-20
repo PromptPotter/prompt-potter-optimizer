@@ -325,9 +325,7 @@ async def score_search_point(
 
     display_name = f"{ctx.experiment_id}_{safe_label}" if ctx.experiment_id else safe_label
 
-    def _save_run(
-        results: list[QueryResult], scores: dict[str, Any], *, partial: bool = False
-    ) -> None:
+    def _save_run(results: list[QueryResult], scores: dict[str, Any]) -> None:
         if not (store and backend_id):
             return
         run_data = build_dataset_run_data(
@@ -341,8 +339,6 @@ async def score_search_point(
             experiment_id=ctx.experiment_id,
             pipeline_schema=pipeline_schema,
         )
-        if partial:
-            run_data["partial"] = True
         store.dataset_runs.save(backend_id, run_id, run_data)
 
     batch = await _run_query_loop(

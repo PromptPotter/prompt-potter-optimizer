@@ -558,6 +558,10 @@ class CampaignPersistenceEmitter:
         # per-query callbacks so a dashboard reader always sees a fresh
         # elapsed_s / round_elapsed_s / query_elapsed_s, even when the
         # loop is blocked inside a long LLM call between callbacks.
+        #
+        # Direct write (no tempfile+rename) — dashboard.json is a pure
+        # display file; all readers already suppress JSONDecodeError on
+        # partial reads, and the file is rewritten on the next callback.
         now = time.monotonic()
         s = self._state
         s["elapsed_s"] = round(now - self._workflow_start, 1)
@@ -565,7 +569,10 @@ class CampaignPersistenceEmitter:
         if self._query_start is not None:
             s["query_elapsed_s"] = round(now - self._query_start, 2)
         s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
-        write_json(self.state_path, self._state, default=str)
+        self.state_path.write_text(
+            json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
 
     def _append_log_md(self, section: str) -> None:
         with self.log_md_path.open("a", encoding="utf-8") as f:
