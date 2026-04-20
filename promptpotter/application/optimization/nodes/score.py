@@ -314,11 +314,14 @@ def _handle_scored_candidate(
     elimination_stopped = (
         signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
     )
-    aborted = bool(signal) and len(results) < len(dataset)
+    scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
+    aborted = bool(signal) and (scoring_error_abort or len(results) < len(dataset))
 
     # Register fully-completed candidates as priors for future elimination.
     # Error rows carry no ``score`` (see ``rescore_results``); treat as 0.0,
-    # matching the ``_compute_accuracy`` convention.
+    # matching the ``_compute_accuracy`` convention. Scoring-error aborts are
+    # padded to full length but must NOT seed priors — their per-query scores
+    # are synthetic 0s from errors, not a real distribution.
     if len(results) == len(dataset) and not aborted:
         elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
 
@@ -345,6 +348,31 @@ def _handle_scored_candidate(
             dominant,
             new_rf.degraded_rate * 100,
             observed_node_cfg,
+        )
+    elif scoring_error_abort and signal is not None:
+        # Rail 2: a consecutive-error abort (e.g. backend rejected params →
+        # 502 cascade) attaches to the candidate that produced it, not the
+        # round. L2 reads this next round to avoid proposing the bad config.
+        cr = signal.check_result
+        degraded_count = int(cr.get("degraded_count", 0))
+        total_evaluated = int(cr.get("total_evaluated", len(results)))
+        new_rf = RuntimeFailure(
+            source="scoring_error_abort",
+            dominant_warning=str(cr.get("dominant_warning") or "scoring_error"),
+            warning_types=dict(cr.get("warning_types") or {}),
+            degraded_rate=(degraded_count / total_evaluated) if total_evaluated else 0.0,
+            degraded_count=degraded_count,
+            total_evaluated=total_evaluated,
+            observed_config=dict(merged_pp_i or {}),
+        )
+        osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
+        logger.info(
+            "Candidate %d/%d scoring-error abort — RuntimeFailure attached (%s, %d/%d errors)",
+            idx + 1,
+            n_candidates,
+            new_rf.dominant_warning,
+            new_rf.degraded_count,
+            new_rf.total_evaluated,
         )
 
     report = _build_score_report(

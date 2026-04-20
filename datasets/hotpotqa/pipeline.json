@@ -24,6 +24,9 @@
       },
       "optimizer": {
         "param_keys": ["model", "temperature", "max_tokens", "reasoning_effort", "persona", "task_intent", "problem_description", "instruction", "thinking_style", "answer_format"],
+        "param_allowed_values": {
+          "reasoning_effort": ["none", "default", "low", "medium", "high"]
+        },
         "langfuse_type": "generation"
       }
     }

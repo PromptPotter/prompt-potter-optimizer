@@ -73,6 +73,11 @@ class PipelineNode(BaseModel):
     node_type: NodeType = NodeType.NONE
     param_keys: set[str] = Field(default_factory=set)
     param_descriptions: dict[str, str] = Field(default_factory=dict)
+    # Enum constraints per param, sourced from the backend's /pipeline response.
+    # Drives both L1 prompt guidance and the JSON-schema enum constraint
+    # on structured-output generation, plus post-hoc ValidationFailure
+    # attachment in ``validate_overrides`` (same Rail 1 path as ``model``).
+    param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"

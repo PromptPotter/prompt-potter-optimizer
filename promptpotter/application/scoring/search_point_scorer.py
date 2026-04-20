@@ -101,6 +101,54 @@ def _materialize_cached(
     return cast(QueryResult, r)
 
 
+def _build_scoring_error_signal(
+    *,
+    results: list[QueryResult],
+    stop_reason: str,
+    candidate_idx: int,
+    n_total_candidates: int,
+) -> EscalationSignal:
+    """Build an ELIMINATE_CANDIDATE signal for a consecutive-error abort.
+
+    Carries the error histogram + last seen error so the caller can mint a
+    RuntimeFailure. Uses lazy import to avoid a cycle with ``domain.analysis``.
+    """
+    from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
+
+    # Skip rows whose error is the abort-reason padding — those are synthetic
+    # markers inserted after the cascade to bring results up to dataset length,
+    # not the real backend failure that triggered it.
+    real_errors = [
+        r for r in results if is_error_result(r) and str(r.get("error") or "") != stop_reason
+    ]
+    warning_types: dict[str, int] = {}
+    for r in real_errors:
+        key = str(error_category(r.get("error")) or "unknown")
+        warning_types[key] = warning_types.get(key, 0) + 1
+    last_error = ""
+    for r in reversed(real_errors):
+        err = r.get("error")
+        if err:
+            last_error = str(err)
+            break
+    dominant = last_error or stop_reason or "scoring_error"
+    return EscalationSignal(
+        check_name="scoring_error_abort",
+        target=EscalationTarget.ELIMINATE_CANDIDATE,
+        check_result={
+            "stop_reason": stop_reason,
+            "dominant_warning": dominant,
+            "warning_types": warning_types,
+            "degraded_count": len(real_errors),
+            "total_evaluated": len(results),
+            "last_error": last_error,
+        },
+        candidate_idx=candidate_idx,
+        candidates_scored=candidate_idx + 1,
+        candidates_skipped=n_total_candidates - candidate_idx - 1,
+    )
+
+
 async def _run_query_loop(
     search_point: JobSearchPoint,
     dataset: list[dict[str, Any]],
@@ -117,6 +165,18 @@ async def _run_query_loop(
     """Evaluate dataset queries, reusing prior results where available."""
     results: list[QueryResult] = []
     consecutive_errors = 0
+
+    def _check_escalation() -> EscalationSignal | None:
+        return next(
+            (
+                s
+                for c in (degradation_checks or [])
+                if c.enabled
+                for s in (c.evaluate(results, candidate_idx, n_total_candidates),)
+                if s
+            ),
+            None,
+        )
 
     try:
         for i, qd in enumerate(dataset):
@@ -149,6 +209,16 @@ async def _run_query_loop(
                 results.append(cached_r)
                 if on_result is not None:
                     on_result(cached_r, i, len(dataset))
+                # Elimination must see cached rows too — otherwise a candidate
+                # whose priors already dominate it runs one extra real query.
+                esc_signal = _check_escalation()
+                if esc_signal:
+                    return QueryLoopResult(
+                        results,
+                        completed=False,
+                        stop_reason="escalation",
+                        escalation_signal=esc_signal,
+                    )
                 continue
 
             # Miss → backend call.
@@ -193,7 +263,7 @@ async def _run_query_loop(
                         _error_result(rq["query"], rq.get("ground_truth", ""), abort_reason)
                         for rq in dataset[i + 1 :]
                     )
-                    return QueryLoopResult(results, stop_reason=abort_reason)
+                    return QueryLoopResult(results, completed=False, stop_reason=abort_reason)
             else:
                 consecutive_errors = 0
 
@@ -211,16 +281,7 @@ async def _run_query_loop(
                     partial=True,
                 )
 
-            esc_signal = next(
-                (
-                    s
-                    for c in (degradation_checks or [])
-                    if c.enabled
-                    for s in (c.evaluate(results, candidate_idx, n_total_candidates),)
-                    if s
-                ),
-                None,
-            )
+            esc_signal = _check_escalation()
             if esc_signal:
                 return QueryLoopResult(
                     results,
@@ -313,7 +374,18 @@ async def score_search_point(
 
     if not batch.completed and not escalation_signal:
         # Graceful/force stop — incremental save already persisted what we have.
-        raise KeyboardInterrupt()
+        if batch.stop_reason in {"graceful", "force"}:
+            raise KeyboardInterrupt()
+        # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
+        # pipeline ERROR). Synthesize a candidate-scoped escalation so the
+        # caller can attach a RuntimeFailure (Rail 2) and continue with the
+        # next candidate — never kill the round.
+        escalation_signal = _build_scoring_error_signal(
+            results=results,
+            stop_reason=batch.stop_reason or "",
+            candidate_idx=candidate_idx,
+            n_total_candidates=n_total_candidates,
+        )
 
     scores = compute_composite_score(results, pipeline_schema, round_scorer=ctx.round_scorer)
 

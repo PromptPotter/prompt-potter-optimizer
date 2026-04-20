@@ -24,7 +24,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal, cast
 
 from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -95,6 +95,7 @@ async def llm_call(
     node: str | None = None,
     config: dict | None = None,
     trace_meta: dict | None = None,
+    json_schema: dict | None = None,
     **overrides,
 ) -> LLMResponse:
     """Execute an LLM call with config defaults and runtime overrides.
@@ -103,6 +104,11 @@ async def llm_call(
     or ``config`` to pass a config dict directly.  At least one is required.
 
     Precedence: ``_LLM_DEFAULTS < config < overrides``.
+
+    ``json_schema``: optional JSON Schema dict (OpenAI/Groq structured-
+    output format). When supplied, the call runs with
+    ``output_format='json_schema'`` regardless of node config — the caller
+    is asserting the provider must honor it. No graceful fallback.
 
     If a :class:`RoundRecorder` is active (via :func:`set_round_recorder`),
     the call is traced: messages, config, response, and optional
@@ -120,12 +126,18 @@ async def llm_call(
 
     _t0 = time.monotonic()
 
+    effective_output_format = cast(
+        Literal["text", "json", "json_schema"],
+        "json_schema" if json_schema else merged["output_format"],
+    )
+
     response = await llm_client.chat(
         messages=messages,
         model=merged.get("model"),
         temperature=merged["temperature"],
         max_tokens=merged["max_tokens"],
-        output_format=merged["output_format"],
+        output_format=effective_output_format,
+        json_schema=json_schema,
     )
 
     # Trace to round recorder if active

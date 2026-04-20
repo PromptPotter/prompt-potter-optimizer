@@ -95,7 +95,8 @@ class LLMClientBase(ABC):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
+        output_format: Literal["text", "json", "json_schema"] = "text",
+        json_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
         """Send a chat completion request.
@@ -105,7 +106,13 @@ class LLMClientBase(ABC):
             model: Model identifier (uses default if not specified).
             temperature: Sampling temperature (0.0 = deterministic).
             max_tokens: Maximum response tokens.
-            output_format: "text" or "json" (enables JSON mode).
+            output_format: "text", "json" (plain JSON mode), or "json_schema"
+                (structured output with the provided ``json_schema``). When
+                "json_schema" is selected, ``json_schema`` MUST be supplied
+                and the provider must support ``response_format=json_schema``
+                — no graceful fallback; a rejection surfaces as-is.
+            json_schema: OpenAI-compatible JSON Schema dict. Required when
+                ``output_format == "json_schema"``.
             **kwargs: Additional provider-specific parameters.
 
         Returns:
@@ -199,7 +206,8 @@ class OpenAICompatibleClient(LLMClientBase):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
+        output_format: Literal["text", "json", "json_schema"] = "text",
+        json_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
         client = self._ensure_client()
@@ -212,6 +220,17 @@ class OpenAICompatibleClient(LLMClientBase):
         }
         if output_format == "json":
             request_params["response_format"] = {"type": "json_object"}
+        elif output_format == "json_schema":
+            if not json_schema:
+                raise ValueError("output_format='json_schema' requires json_schema arg")
+            request_params["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": json_schema.get("name", "response_schema"),
+                    "schema": json_schema.get("schema", json_schema),
+                    "strict": json_schema.get("strict", False),
+                },
+            }
 
         request_params.update(kwargs)
 
@@ -291,7 +310,7 @@ class OpenAICompatibleClient(LLMClientBase):
         content = response.choices[0].message.content or ""
         parsed = (
             try_parse_json(content, self._provider_name)
-            if output_format == "json" and content
+            if output_format in ("json", "json_schema") and content
             else None
         )
 
@@ -335,9 +354,15 @@ class AnthropicClient(LLMClientBase):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int = 1000,
-        output_format: Literal["text", "json"] = "text",
+        output_format: Literal["text", "json", "json_schema"] = "text",
+        json_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
+        if output_format == "json_schema":
+            raise NotImplementedError(
+                "Anthropic client does not support response_format=json_schema. "
+                "Use a JSON-schema-capable provider (Groq/OpenAI) for structured output."
+            )
         client = self._ensure_client()
 
         # Separate system message (Anthropic API convention)
