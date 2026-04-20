@@ -1,18 +1,16 @@
-"""Scoring models — query results, infrastructure bundle, and ground truth comparison.
+"""Scoring models — query results and the infrastructure bundle.
 
 ``QueryResult`` / ``QueryResultFull`` define the per-query measurement schema.
-``ScoringEnv`` bundles infrastructure for dataset scoring calls.
-``ExactMatchComparator`` compares pipeline output to expected answers.
+``ScoringEnv`` bundles infrastructure for dataset scoring calls. Ground-truth
+comparison is owned by the compiled ``Scorer`` callable (from
+``shared/scoring.py``) — there is no separate comparator class.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass
-from enum import StrEnum
-from typing import TYPE_CHECKING, Any, Protocol, TypedDict, runtime_checkable
-
-from pydantic import BaseModel, Field
+from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, runtime_checkable
 
 from promptpotter.shared.scoring import RoundScorer, Scorer
 
@@ -34,19 +32,22 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryResult(TypedDict):
-    """Core per-query evaluation result — always present.
+    """Core per-query evaluation result.
 
-    ``hit`` and ``score`` are the *active-scorer projection* — a view over
-    the authoritative ``scored`` audit map (optional, populated by
-    ``rescore_results``) which accumulates one entry per scorer the trace
-    has been evaluated under: ``{scorer_id: {score, hit, formula}}``.
+    Raw trace fields (``query``, ``ground_truth``, ``predicted``, ``error``,
+    ``pipeline_data``) are populated at measurement time. ``hit`` and ``score``
+    are the *active-scorer projection* — written exclusively by
+    ``rescore_results`` (``shared/scoring.py``), which also populates the
+    authoritative ``scored`` audit map (``{scorer_id: {score, hit, formula}}``
+    — one entry per scorer the trace has been evaluated under). They are
+    ``NotRequired`` because a freshly measured trace has not yet been scored.
     """
 
     query: str
     ground_truth: str
     predicted: str
-    hit: bool
-    score: float
+    hit: NotRequired[bool]
+    score: NotRequired[float]
     error: str | None
     pipeline_data: PipelineData | None
 
@@ -122,6 +123,11 @@ class ScoringEnv:
     """
 
     backend_client: QueryRunner
+    # Per-dataset scoring formula (compiled callable from shared/scoring.py).
+    # Required — ``rescore_results`` is the sole writer of ``hit``/``score``
+    # on results, so a live scorer must be threaded through every path that
+    # measures or loads traces.
+    scorer: Scorer
     store: Stores | None = None
     backend_id: str = ""
     pipeline_schema: PipelineSchema | None = None
@@ -132,8 +138,6 @@ class ScoringEnv:
     # Stale data load protocol — optimizer pipeline node sequence
     stale_data_load_protocol: list[str] | None = None
     search_memory: SearchMemory | None = None
-    # Per-dataset scoring formula (compiled callable from shared/scoring.py)
-    scorer: Scorer | None = None
     # Tag recorded alongside every score this scorer produces — forms the
     # key into the per-trace ``scored`` multi-scorer map. Derived from
     # ``campaign.json::scoring.id`` (or auto-hashed from the formula).
@@ -231,82 +235,4 @@ class ScoringEnv:
             scoring_round_formula=scoring_round_formula,
             scorer_id=scorer_id,
             source="baseline",
-        )
-
-
-# ---------------------------------------------------------------------------
-# Ground truth comparison
-# ---------------------------------------------------------------------------
-
-
-class GroundTruthResult(StrEnum):
-    """Single-sample comparison outcome."""
-
-    PASS = "pass"
-    FAIL = "fail"
-    ERROR = "error"
-
-
-class GroundTruthOutput(BaseModel):
-    """Result of comparing pipeline output to ground truth."""
-
-    result: GroundTruthResult = Field(..., description="pass, fail, or error")
-    score: float = Field(
-        ..., ge=0.0, le=1.0, description="Comparison score (0.0 = mismatch, 1.0 = match)"
-    )
-    expected: Any = Field(..., description="Expected value (ground truth)")
-    actual: Any = Field(..., description="Actual value from pipeline")
-
-
-class ExactMatchComparator:
-    """
-    Compares expected and actual for exact equality.
-
-    Config options:
-        strip: Strip leading/trailing whitespace (default: True)
-    """
-
-    def __init__(self, config: dict[str, Any] | None = None):
-        self.config = config or {}
-        self.strip = self.config.get("strip", True)
-
-    def _normalize(self, value: Any) -> Any:
-        """Normalize a value for comparison."""
-        if isinstance(value, str) and self.strip:
-            return value.strip()
-        return value
-
-    def compare(self, expected: Any, actual: Any) -> GroundTruthOutput:
-        """Compare expected and actual for exact match."""
-        if expected is None and actual is None:
-            return GroundTruthOutput(
-                result=GroundTruthResult.PASS,
-                score=1.0,
-                expected=expected,
-                actual=actual,
-            )
-
-        if expected is None or actual is None:
-            return GroundTruthOutput(
-                result=GroundTruthResult.FAIL,
-                score=0.0,
-                expected=expected,
-                actual=actual,
-            )
-
-        norm_expected = self._normalize(expected)
-        norm_actual = self._normalize(actual)
-
-        if norm_expected == norm_actual:
-            return GroundTruthOutput(
-                result=GroundTruthResult.PASS,
-                score=1.0,
-                expected=expected,
-                actual=actual,
-            )
-        return GroundTruthOutput(
-            result=GroundTruthResult.FAIL,
-            score=0.0,
-            expected=expected,
-            actual=actual,
         )

@@ -241,10 +241,18 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
     """Pre-compile a scoring formula into a callable.
 
     Returns a function ``(QueryResult dict) -> float`` clamped to [0, 1].
-    ``None`` or empty string → exact-match default ``float(hit)``.
+    ``None`` or empty string raises — since ``rescore_results`` is the sole
+    writer of ``hit``/``score`` on traces, a missing formula would silently
+    mark every query a MISS (the prior fallback read ``r["hit"]`` which
+    fresh traces no longer carry).
     """
     if not formula:
-        return _default_scorer
+        raise ValueError(
+            "compile_scorer: scoring formula is required. "
+            "Set ``campaign_config.scoring`` (e.g. "
+            '"exact_match(predicted, ground_truth)") — otherwise every '
+            "query scores 0 because fresh traces carry no ``hit`` field."
+        )
 
     code = compile(formula, "<scoring>", "eval")
 
@@ -260,13 +268,9 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
     return _scorer
 
 
-def _default_scorer(result: dict) -> float:
-    return float(result.get("hit", False))
-
-
 def rescore_results(
     results: list[dict],
-    scorer: Scorer | None,
+    scorer: Scorer,
     scorer_id: str = EMPTY_SCORER_ID,
     formula: str | None = None,
 ) -> list[dict]:
@@ -286,16 +290,15 @@ def rescore_results(
     never touched. Error results (tagged ``error`` or ``predicted == "ERROR"``)
     are skipped — their ``hit`` was never a policy question.
 
-    Idempotent under the same ``scorer_id``: running twice overwrites the
-    same map entry identically. No-op when *scorer* is ``None`` (tests,
-    legacy paths).
+    **Contract:** this is the sole writer of top-level ``hit`` / ``score`` on
+    result dicts. Traces emitted by ``measure_sample`` carry only raw facts
+    until this function has run. Callers that load historical traces without
+    a scorer (SearchMemory cold paths) must skip the rescore step explicitly
+    rather than passing ``None``.
 
-    This is the single arithmetic site for the data-vs-view boundary.
-    Every load path (cache hit, trial reload, SearchMemory ingest) and
-    fresh-sample path (``measure_sample``) routes through here.
+    Idempotent under the same ``scorer_id``: running twice overwrites the
+    same map entry identically.
     """
-    if scorer is None:
-        return results
     from promptpotter.shared.errors import is_error_result
 
     for r in results:

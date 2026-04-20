@@ -18,6 +18,7 @@ import asyncio
 import json
 import logging
 import sys
+from pathlib import Path
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -70,6 +71,14 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "ERROR: init requires a dataset name. Silent defaults to the "
             "TermNorm production experiment are no longer allowed.\n\n" + no_dataset_hint()
         )
+
+    # Auto-load the dataset's campaign.json when --config wasn't given.
+    # Without this, the session persists with scoring=null and default
+    # optimization knobs — the dataset's own file is the intended source of truth.
+    if not args.config:
+        default_config_path = Path("datasets") / dataset_name / "campaign.json"
+        if default_config_path.exists():
+            file_config = load_campaign_config(str(default_config_path))
 
     session = await init_services_cli(
         backend_url=args.backend_url,
@@ -293,6 +302,20 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     control_reader = CampaignControlReader(session_dir).check
     listener = RunListener(emitter=emitter, control=control_reader)
 
+    # Build the display BEFORE baseline runs so baseline's per-query output
+    # reaches the terminal. Without this, ``listener.display`` is None during
+    # baseline, ``RunListener.on_sample_scored`` silently drops, and the CLI
+    # goes dark for the entire BASELINE phase. The post-baseline re-assignment
+    # keeps the display wired across the handoff into L1 (idempotent).
+    display = _build_live_display(
+        args,
+        session=session,
+        campaign_config=campaign_config,
+        campaign_rounds=[],
+        baseline_acc=pre_baseline_acc,
+    )
+    listener.display = display
+
     # Re-run baseline (fast — cached) to populate baseline_results for critique
     _baseline, dataset, campaign_rounds, _baseline_results = await prepare_scoring_context(
         session,
@@ -301,14 +324,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         pipeline_params=pipeline_params,
         listener=listener,
     )
-    display = _build_live_display(
-        args,
-        session=session,
-        campaign_config=campaign_config,
-        campaign_rounds=campaign_rounds,
-        baseline_acc=pre_baseline_acc,
-    )
-    listener.display = display  # keep for any post-baseline emitter dispatch on `listener`
     ctx.save_phase("optimizing")
 
     set_round_recorder(RoundRecorder(campaign_dir / "rounds"))

@@ -39,15 +39,32 @@ def write_json(
     to atomically swap it into place.  This prevents partial/corrupt files
     if the process crashes mid-write.
 
+    On Windows, ``os.replace()`` fails with PermissionError (WinError 5)
+    when the destination is briefly held by another process — OneDrive
+    sync, antivirus, a stale reader. Retry up to 3 times with 100 ms back-off
+    before giving up; POSIX never hits the retry branch.
+
     ``default`` is forwarded to ``json.dump`` for non-native types (e.g.
     pass ``str`` to coerce enums / datetimes to their ``str`` form).
     """
+    import time
+
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=default)
-        os.replace(tmp, path)
+        last_exc: OSError | None = None
+        for attempt in range(3):
+            try:
+                os.replace(tmp, path)
+                return
+            except PermissionError as exc:
+                last_exc = exc
+                if attempt < 2:
+                    time.sleep(0.1)
+        if last_exc is not None:
+            raise last_exc
     except Exception:
         # Clean up temp file on failure (fd already closed by os.fdopen)
         with contextlib.suppress(OSError):

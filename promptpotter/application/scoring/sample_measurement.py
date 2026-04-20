@@ -22,14 +22,12 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.domain.scoring import ExactMatchComparator, GroundTruthResult, QueryResult
+from promptpotter.domain.scoring import QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
     from promptpotter.domain.scoring import ScoringEnv
-
-_comparator = ExactMatchComparator({"strip": True})
 
 logger = logging.getLogger(__name__)
 
@@ -121,13 +119,16 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 
 
 def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
-    """Build a standard error result dict."""
+    """Build a standard error result dict.
+
+    Error rows intentionally carry no ``hit``/``score`` — those fields are
+    owned exclusively by ``rescore_results``, which skips error rows. The
+    display formatter renders these via the ``error`` branch.
+    """
     return {
         "query": query,
         "predicted": "ERROR",
         "ground_truth": ground_truth,
-        "hit": False,
-        "score": 0.0,
         "error": error_msg or "unknown error",
         "pipeline_data": None,
     }
@@ -170,7 +171,6 @@ async def measure_sample(
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
                 " — pipeline internal failure for this query.",
             )
-        comparison = _comparator.compare(ground_truth, predicted)
         gt_rank = next(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
             None,
@@ -196,8 +196,6 @@ async def measure_sample(
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
-            "hit": comparison.result == GroundTruthResult.PASS,
-            "score": comparison.score,
             "error": None,
             "n_candidates": len(ranked),
             "ground_truth_rank": gt_rank,

@@ -23,6 +23,9 @@ from promptpotter.application.scoring.stale_data import execute_stale_data_proto
 from promptpotter.domain.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
 from promptpotter.domain.scoring import QueryResult, ScoringEnv
 from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.shared.scoring import compile_scorer
+
+_TRIVIAL_SCORER = compile_scorer("float(hit)")
 
 
 def _llm_only_schema() -> PipelineSchema:
@@ -75,6 +78,7 @@ async def test_samplescan_probe_preserves_pipeline_steps(monkeypatch):
 
     env = ScoringEnv(
         backend_client=object(),  # type: ignore[arg-type]
+        scorer=_TRIVIAL_SCORER,
         pipeline_schema=_llm_only_schema(),
     )
     query_data = {"query": "q", "ground_truth": "gt"}
@@ -128,6 +132,7 @@ async def test_degraded_prior_result_routes_through_protocol(monkeypatch):
 
     env = ScoringEnv(
         backend_client=object(),  # type: ignore[arg-type]
+        scorer=_TRIVIAL_SCORER,
         pipeline_schema=_llm_only_schema(),
         stale_data_load_protocol=["rerun"],
     )
@@ -178,6 +183,7 @@ async def test_clean_prior_result_skips_protocol(monkeypatch):
     )
     env = ScoringEnv(
         backend_client=object(),  # type: ignore[arg-type]
+        scorer=_TRIVIAL_SCORER,
         pipeline_schema=_llm_only_schema(),
         stale_data_load_protocol=["rerun"],
     )

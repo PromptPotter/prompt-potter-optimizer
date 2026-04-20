@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import re
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
@@ -57,9 +58,12 @@ class QueryLoopResult:
     escalation_signal: EscalationSignal | None = None
 
 
+_BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
+
+
 def _materialize_cached(
     item: QueryResult,
-    scorer: Scorer | None,
+    scorer: Scorer,
     scorer_id: str,
     scorer_formula: str | None,
 ) -> QueryResult:
@@ -69,12 +73,31 @@ def _materialize_cached(
     active scorer owns those fields on load, and its result lands in
     ``r["scored"][scorer_id]`` so the trace accumulates a multi-scorer
     audit map (see ``shared/scoring.py::rescore_results``).
+
+    Drift detection: when the cached item was previously scored (carried a
+    ``hit`` field on disk) and rescoring flips the outcome, emit a warning
+    so policy divergences don't silently accumulate. The known-benign case
+    is bold-wrapper stripping (``**answer**`` vs ``answer``) — when the
+    predicted string contains ``**…**`` markers we silently overwrite.
     """
+    archived_hit = item.get("hit") if "hit" in item else None
     r: dict = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
     rescore_results([r], scorer, scorer_id, scorer_formula)
+    rescored_hit = r.get("hit", False)
+    if archived_hit is not None and bool(archived_hit) != bool(rescored_hit):
+        predicted = r.get("predicted") or ""
+        if not _BOLD_MARKER_RE.search(predicted):
+            logger.warning(
+                "Cache rescore drift on %r: archived hit=%s → rescored hit=%s "
+                "(scorer=%s). Policy divergence — not explained by bold-wrapper strip.",
+                (r.get("query") or "")[:60],
+                archived_hit,
+                rescored_hit,
+                scorer_id,
+            )
     return cast(QueryResult, r)
 
 
