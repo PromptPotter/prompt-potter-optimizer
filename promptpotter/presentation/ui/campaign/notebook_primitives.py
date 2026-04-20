@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import re
 
+from promptpotter.application.optimization.nodes.critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.escalation import FATAL_WARNINGS
 from promptpotter.presentation.views.formatting import fmt_ci, fmt_pvalue
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.scoring import extract_display_answer
@@ -310,6 +312,15 @@ def _find_gt_rank(r: dict) -> int | None:
     return None
 
 
+def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
+    """Append a per-query annotation line under the query it describes.
+
+    ``indent`` mirrors the query line's leading whitespace so the emoji sits
+    directly under the HIT/MISS tag instead of floating at column 0.
+    """
+    return line + f"\n{indent}{color}{emoji} {text}{RESET}"
+
+
 def _fmt_query_result(
     r: dict,
     cached: bool = False,
@@ -365,7 +376,7 @@ def _fmt_query_result(
 
     line = f"{indent}{time_col} {tag} {step} -> {pred!r} gt:{gt!r} q:{q!r}"
 
-    _ann_indent = ""
+    _ann_indent = " " * len(indent) if indent else "      "
 
     diag = pd.get("diagnostics", {})
     warnings = diag.get("warnings", [])
@@ -379,24 +390,62 @@ def _fmt_query_result(
             line += f"\n{_ann_indent}{YELLOW}\u26a0 {w['step']}: {msg}{RESET}"
 
     if r.get("retry_of_degraded"):
-        comp = r.get("rerun_comparison")
-        rerun_detail = ""
-        if comp:
-            rerun_detail = f" | {comp['hit_change']}"
-            if comp.get("rank_change"):
-                rerun_detail += f" rank {comp['rank_change']}"
-        line += f"\n{_ann_indent}{YELLOW}\U0001f504 rerun of degraded cache{rerun_detail}{RESET}"
-    elif r.get("samplescan_probe"):
-        line += f"\n{_ann_indent}{YELLOW}\U0001f52c samplescan probe{RESET}"
-    elif r.get("switched_out"):
-        line += f"\n{_ann_indent}{YELLOW}\U0001f500 switched out (unreliable){RESET}"
-    elif r.get("persistently_degraded"):
-        line += f"\n{_ann_indent}{RED}\u26a0 persistently degraded{RESET}"
-    elif r.get("degraded_observed"):
-        obs = r.get("degraded_obs_count", "?")
-        threshold = r.get("degraded_obs_threshold", "?")
-        line += (
-            f"\n{_ann_indent}{DIM}\u21a9 degraded observed ({obs}/{threshold} toward rerun){RESET}"
+        comp = r.get("rerun_comparison") or {}
+        detail = f"; result: {comp['hit_change']}" if comp.get("hit_change") else ""
+        if comp.get("rank_change"):
+            detail += f" (rank {comp['rank_change']})"
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            YELLOW,
+            "\U0001f504",
+            f"cache had pipeline warnings \u2192 reran{detail}",
         )
+    elif r.get("samplescan_resolved"):
+        cfg = r.get("samplescan_config") or {}
+        n = cfg.get("n_candidates", "?")
+        thr = cfg.get("resolved_threshold", "?")
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            YELLOW,
+            "\U0001f52c",
+            f"cache had warnings + rerun still degraded \u2192 resampled {n} fresh calls "
+            f"(threshold {thr}); result accepted",
+        )
+    elif r.get("switched_out"):
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            YELLOW,
+            "\U0001f500",
+            "query degrades \u226550% of the time historically \u2192 using cached answer "
+            "(resampling would likely degrade again)",
+        )
+    elif r.get("persistently_degraded"):
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            RED,
+            "\u26a0",
+            "entire stale-data ladder exhausted \u2192 still degraded; "
+            "score counts but flag this candidate",
+        )
+    elif r.get("degraded_observed"):
+        # Fatal warnings kill the candidate on this same query (see
+        # DegradationCheck fast-path). The "toward rerun" counter would
+        # suggest "more data coming" — meaningless when the candidate is
+        # already dead. The ⚠ warning line above tells the real story.
+        if not any(w in FATAL_WARNINGS for w in extract_warning_types(r)):
+            obs = r.get("degraded_obs_count", "?")
+            threshold = r.get("degraded_obs_threshold", "?")
+            line = _append_annotation(
+                line,
+                _ann_indent,
+                DIM,
+                "\u21a9",
+                f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
+                f"trigger (not yet at threshold)",
+            )
 
     return line

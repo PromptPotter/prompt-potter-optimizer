@@ -69,7 +69,7 @@ class QueryResultFull(QueryResult, total=False):
     # Stale-data protocol fields (set by stale_data.py)
     retry_of_degraded: bool
     rerun_comparison: dict[str, Any]
-    samplescan_probe: bool
+    samplescan_resolved: bool
     samplescan_config: dict[str, Any]
     degraded_observed: bool
     degraded_obs_count: int

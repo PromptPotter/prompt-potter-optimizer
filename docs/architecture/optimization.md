@@ -334,6 +334,54 @@ New mechanisms land by following one of the two rails, not by inventing parallel
 
 ---
 
+## Candidate elimination pathways — full ladder and display contract
+
+Six independent mechanisms can end a candidate's evaluation early or annotate a query. They run in a fixed order and each owns its own memory field and display annotation. Maintainers tracing "why did this candidate die at n=1?" should walk this ladder from top to bottom.
+
+| # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
+|---|---|---|---|---|---|---|
+| 1 | **Validation skip** — `OptSearchPoint.memory.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `memory.validation_failures` | `application/optimization/nodes/score.py::_score_candidates` (path 1) |
+| 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
+| 3 | **DegradationCheck — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py:98-121` |
+| 4 | **DegradationCheck — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py:123-149` |
+| 5 | **EmptyOutputCheck** — `empty_predicted_rate >= threshold` | every query | **3** | eliminated | — | `application/optimization/nodes/escalation.py::EmptyOutputCheck` |
+| 6 | **EliminationCheck** (Welch t-test vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
+
+### Ordering inside `_run_query_loop`
+
+For each query, `search_point_scorer._run_query_loop` runs:
+
+1. Prior-result cache lookup (may replay a cached result).
+2. If result is degraded → `execute_stale_data_protocol` (may decorate with `degraded_observed`, trigger rerun/samplescan/sampleswitch, or return unchanged).
+3. `on_result` fires → display renders the query line with annotations.
+4. Iterate every enabled check in the shared `degradation_checks` list; first one to return a signal ends the candidate.
+
+Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. `_score_candidates` currently wires degradation checks first (from `build_degradation_checks`), then appends `EliminationCheck`. Fatal warnings therefore beat any rate check; rate checks beat Welch's t-test.
+
+### `FATAL_WARNINGS` is a hardcoded invariant, not a tunable
+
+`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `escalation.py:51`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+
+### Display contract
+
+Per-query annotations render in this order, with a **mutual-exclusion rule**:
+
+1. `⚠ {step}: {message}` — one line per diagnostic warning (always renders).
+2. One status annotation from this exclusive set:
+   - `🔄 cache had pipeline warnings → reran; result: …` — `retry_of_degraded`
+   - `🔬 cache had warnings + rerun still degraded → resampled N fresh calls …` — `samplescan_resolved` (flag set by the samplescan rescue step)
+   - `🔀 query degrades ≥50% of the time historically → using cached answer …` — `switched_out`
+   - `⚠ entire stale-data ladder exhausted → still degraded …` — `persistently_degraded`
+   - `↩ pipeline warning observed; X/Y occurrences toward rerun trigger …` — `degraded_observed` **AND** no fatal warning on this query
+
+**Do not use the bare word "probe" here.** The stale-data ladder's rescue step is called "samplescan rescue" or "samplescan (resample)" — "probe" is reserved for the L2/L3 **probe round** mechanism (round-scoped action targeting queries with recurring pipeline warnings), which is a completely different thing.
+
+The fatal-warning suppression of `↩ …` is load-bearing: when mechanism 3 fires, the candidate is dead on this very query, so a counter reading "1/3 toward rerun" would suggest more data is coming and confuse the reader. The `⚠ …` line alone tells the story. Rule lives in `presentation/ui/campaign/notebook_primitives.py::_fmt_query_result` (the `elif r.get("degraded_observed")` branch). All annotation lines are indented to match the query line they describe (via `_ann_indent = " " * len(indent)` in `_fmt_query_result`) so they visually attach to the prior HIT/MISS line.
+
+If a new status annotation is added, it joins the exclusive set and must reason about fatal-warning interaction the same way.
+
+---
+
 ## Wiring a New Node
 
 Reference: `web_search`. Default chain works for **any** target pipeline node that emits warnings.

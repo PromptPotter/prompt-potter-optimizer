@@ -1,6 +1,6 @@
 """Regression tests for the stale-data protocol.
 
-Guards against the samplescan probe erasing the campaign's pipeline identity
+Guards against the samplescan rescue erasing the campaign's pipeline identity
 by passing ``pipeline_params=None`` to ``measure_sample``. When that happens,
 the wire payload has no ``steps`` key, and the backend falls back to its full
 default pipeline — for TermNorm that means ``fuzzy_matching → web_search → …``
@@ -53,13 +53,13 @@ def _degraded_cached_result() -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_samplescan_probe_preserves_pipeline_steps(monkeypatch):
-    """Samplescan must probe within the campaign's declared pipeline.
+async def test_samplescan_preserves_pipeline_steps(monkeypatch):
+    """Samplescan must resample within the campaign's declared pipeline.
 
     Passing ``pipeline_params=None`` (pre-fix behavior) erases the schema-
     derived ``steps`` filter and causes the TermNorm backend to run its full
     default research pipeline. This test captures the ``measure_sample`` call
-    args and asserts the probe carries the correct ``steps`` list.
+    args and asserts the samplescan rescue carries the correct ``steps`` list.
     """
     captured: dict[str, Any] = {}
 
@@ -93,14 +93,14 @@ async def test_samplescan_probe_preserves_pipeline_steps(monkeypatch):
     )
 
     assert step_taken == "samplescan"
-    assert result["samplescan_probe"] is True
+    assert result["samplescan_resolved"] is True
 
-    probe_params = captured["pipeline_params"]
-    assert probe_params is not None, (
+    resample_params = captured["pipeline_params"]
+    assert resample_params is not None, (
         "samplescan must not pass pipeline_params=None — that erases the "
         "steps restriction and makes the backend run its full default pipeline"
     )
-    assert probe_params["steps"] == ["llm_only"]
+    assert resample_params["steps"] == ["llm_only"]
 
 
 @pytest.mark.asyncio

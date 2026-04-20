@@ -123,7 +123,7 @@ async def execute_stale_data_protocol(
                 env.pipeline_schema.to_pipeline_params() if env.pipeline_schema is not None else {}
             )
             result = dict(await measure_sample(query_data, env, pipeline_params=probe_params))
-            result["samplescan_probe"] = True
+            result["samplescan_resolved"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,
                 "resolved_threshold": resolved_threshold,
