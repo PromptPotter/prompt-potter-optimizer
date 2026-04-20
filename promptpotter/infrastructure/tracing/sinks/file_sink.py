@@ -36,7 +36,6 @@ from promptpotter.infrastructure.tracing.events import (
     NodeEnd,
     NodeStart,
     PromptVersion,
-    QueryScored,
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
@@ -220,7 +219,6 @@ class FileSink(EventSink):
         PromptVersion: "_on_prompt_version",
         CampaignEnd: "_on_campaign_end",
         CandidateCreated: "_on_candidate_created",
-        QueryScored: "_on_query_scored",
         CandidateScored: "_on_candidate_scored",
         RoundWinnerChosen: "_on_round_winner_chosen",
         CritiqueWritten: "_on_critique_written",
@@ -235,18 +233,6 @@ class FileSink(EventSink):
             "candidate_created",
             event,
             extra={"candidate_idx": event.candidate_idx, "candidate_id": event.candidate_id},
-        )
-
-    def _on_query_scored(self, event: QueryScored) -> None:
-        self._on_write_point(
-            "query_scored",
-            event,
-            extra={
-                "candidate_idx": event.candidate_idx,
-                "query_idx": event.query_idx,
-                "hit": event.hit,
-                "score": event.score,
-            },
         )
 
     def _on_candidate_scored(self, event: CandidateScored) -> None:

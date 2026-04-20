@@ -17,7 +17,7 @@ from promptpotter.domain.analysis import (
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.scoring import QueryResult
-from promptpotter.infrastructure.tracing.events import CandidateScored, QueryScored
+from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -471,17 +471,6 @@ async def _score_candidates(
 
         def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
             callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
-            if obs:
-                with graceful("QueryScored emit failed"):
-                    obs.emit_write_point(
-                        QueryScored,
-                        campaign_id=obs_campaign_id,
-                        round_num=round_num,
-                        candidate_idx=_ci,
-                        query_idx=qi,
-                        hit=bool(result.get("hit", False)),
-                        score=float(result.get("score", 0.0)),
-                    )
 
         override = candidate_overrides[idx]
 

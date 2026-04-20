@@ -105,18 +105,6 @@ class CandidateCreated:
 
 
 @dataclass(frozen=True, slots=True)
-class QueryScored:
-    """One backend query finished for a specific candidate."""
-
-    campaign_id: str
-    round_num: int
-    candidate_idx: int
-    query_idx: int
-    hit: bool
-    score: float
-
-
-@dataclass(frozen=True, slots=True)
 class CandidateScored:
     """A candidate finished its full scoring loop (report built)."""
 
@@ -233,7 +221,6 @@ OptimizationEvent = Union[
     RoundEnd,
     CampaignEnd,
     CandidateCreated,
-    QueryScored,
     CandidateScored,
     RoundWinnerChosen,
     CritiqueWritten,
