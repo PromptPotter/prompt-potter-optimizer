@@ -50,7 +50,7 @@ CAMPAIGN_ARTIFACTS = {
 # session.json is owned by SessionStore; the emitter ensures the
 # free-form narrative pair + control.json exist for parity from mint.
 SESSION_ARTIFACTS = {
-    "session.json",  # session metadata + current_cycle_id pointer
+    "session.json",  # session metadata
     "journal.md",  # operator narrative (notebook ↔ Claude exchange)
     "notes.md",  # Claude notes
     "control.json",  # HITL control signals

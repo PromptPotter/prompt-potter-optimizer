@@ -19,7 +19,7 @@ Disk layout::
 
     .promptpotter/projects/{tenant_id}/
       sessions/{session_id}/
-        session.json                                # metadata + current_cycle_id
+        session.json                                # session metadata
         journal.md / notes.md / control.json
       campaigns/{cycle_id}/
         index.json                                  # campaign metadata + trial index + parent_session_id

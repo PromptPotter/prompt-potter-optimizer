@@ -6,9 +6,10 @@ Three stable contracts:
    projects the active scorer onto top-level ``score`` / ``hit``. Idempotent.
 2. ``replay_decisions`` returns the first ``Divergence`` when a registered
    replayer re-derives a different outcome under a changed scorer.
-3. ``fork_cycle`` copies index + trials + candidates for rounds 0..R into
-   a new cycle directory with ``parent_cycle_id`` + ``forked_from_round``
-   set, and retargets the active-session pointer.
+3. ``fork_cycle`` copies index + trials + candidates for rounds 0..R-1
+   into a new cycle directory (round R itself is dropped so it re-runs),
+   with ``parent_cycle_id`` + ``forked_from_round`` set, and retargets
+   the active-session pointer.
 """
 
 from __future__ import annotations
@@ -464,15 +465,19 @@ def test_fork_cycle_copies_trials_and_sets_parent_pointer(tmp_path: Path, monkey
     assert new_cycle.startswith(old_cycle + "_fork_")
     new_dir = tmp_path / tenant / "campaigns" / new_cycle
     assert (new_dir / "trials" / "trial_0000.json").exists()
-    assert (new_dir / "trials" / "trial_0002.json").exists()
+    assert (new_dir / "trials" / "trial_0001.json").exists()
+    assert not (new_dir / "trials" / "trial_0002.json").exists(), (
+        "round R (the one we're re-running) must not be copied"
+    )
     assert not (new_dir / "trials" / "trial_0003.json").exists(), "rounds > R must not be copied"
-    assert (new_dir / "candidates" / "round_0002.json").exists()
+    assert (new_dir / "candidates" / "round_0001.json").exists()
+    assert not (new_dir / "candidates" / "round_0002.json").exists()
 
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
     assert index["campaign_id"] == new_cycle
     assert index["parent_cycle_id"] == old_cycle
     assert index["forked_from_round"] == 2
-    assert index["n_trials"] == 3  # rounds 0, 1, 2
+    assert index["n_trials"] == 2  # rounds 0, 1 survive; round 2 is re-run
 
     pointer = json.loads(ptr.read_text(encoding="utf-8"))
     assert pointer == {"tenant_id": tenant, "session_id": "s_test", "cycle_id": new_cycle}

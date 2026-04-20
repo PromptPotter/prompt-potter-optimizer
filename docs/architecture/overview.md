@@ -65,14 +65,14 @@ Universal contract: `f(JobSearchPoint, PipelineSchema, dataset) → scores`. Fie
 
 ## Persistence
 
-Sessions and campaigns are separate concepts with two mint points per `init`. A session is the operator workspace identifier; a campaign is one optimization cycle inside it. Today the relation is 1:1; the layout is wired so a session can host several campaigns over time (1:N) without any reorg. Each campaign records its parent in `index.json::parent_session_id`; each session points at its current cycle in `session.json::current_cycle_id`. Tenant is the outer axis; per-tenant content splits into three peer trees:
+Sessions and campaigns are separate concepts with two mint points per `init`. A session is the operator workspace identifier; a campaign is one optimization cycle inside it. Today the relation is 1:1; the layout is wired so a session can host several campaigns over time (1:N) without any reorg. Each campaign records its parent in `index.json::parent_session_id`; the workspace-wide active cycle is recorded once, in `.promptpotter/active_session.json` (single source of truth — `save_active_pointer` / `read_active_pointer` in `infrastructure/store/stores.py`). Tenant is the outer axis; per-tenant content splits into three peer trees:
 
 ```
 .promptpotter/
   active_session.json                  # { tenant_id, session_id, cycle_id } pointer
   projects/{tenant_id}/
     sessions/{session_id}/             # per-session: operator workspace
-      session.json                     # metadata + current_cycle_id pointer
+      session.json                     # session metadata
       journal.md / notes.md            # notebook ↔ Claude exchange
       control.json                     # HITL pause/resume
     campaigns/{cycle_id}/              # per-cycle: all artifacts for one optimization

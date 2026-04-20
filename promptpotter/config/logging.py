@@ -23,6 +23,23 @@ class _CliFormatter(logging.Formatter):
         return record.getMessage()
 
 
+class _TqdmStreamHandler(logging.StreamHandler):
+    """StreamHandler that writes through ``tqdm.write`` so log lines don't
+    trample an active progress bar. Falls back to plain stream writes if
+    tqdm isn't importable for some reason.
+    """
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            from tqdm.auto import tqdm
+
+            msg = self.format(record)
+            tqdm.write(msg, file=self.stream)
+            self.flush()
+        except Exception:
+            self.handleError(record)
+
+
 def setup_logging(
     level: int = logging.INFO,
     *,
@@ -37,7 +54,9 @@ def setup_logging(
     root = logging.getLogger()
     if root.handlers:
         return  # already configured (e.g. by pytest)
-    handler = logging.StreamHandler(sys.stderr)
+    handler: logging.StreamHandler = (
+        _TqdmStreamHandler(sys.stderr) if style == "cli" else logging.StreamHandler(sys.stderr)
+    )
     if style == "cli":
         handler.setFormatter(_CliFormatter())
     else:

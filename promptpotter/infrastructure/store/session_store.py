@@ -3,14 +3,14 @@
 A session is a long-lived workspace identifier. One session today hosts
 exactly one campaign (1:1); the model is wired so it can host multiple
 campaigns over time (1:N) without a layout change. Each campaign records
-its parent in ``campaigns/{cycle_id}/index.json::parent_session_id``;
-each session points back at its current cycle in
-``sessions/{session_id}/session.json::current_cycle_id``.
+its parent in ``campaigns/{cycle_id}/index.json::parent_session_id``.
+The currently-active cycle for the whole workspace is recorded in
+``.promptpotter/active_session.json`` (see ``stores.save_active_pointer``).
 
 Disk layout::
 
     {tenant_root}/sessions/{session_id}/
-      session.json      # metadata + current_cycle_id pointer
+      session.json      # session metadata
       journal.md        # operator narrative (notebook ↔ Claude exchange)
       notes.md          # Claude notes
       control.json      # HITL control signals
@@ -18,7 +18,6 @@ Disk layout::
 
 from __future__ import annotations
 
-import logging
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -29,8 +28,6 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
-
-logger = logging.getLogger(__name__)
 
 
 def session_dir_for(tenant_root: Path, session_id: str) -> Path:
@@ -104,35 +101,6 @@ class SessionStore:
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
-
-    def set_current_cycle(self, session_id: str, cycle_id: str) -> None:
-        """Record the cycle currently bound to this session."""
-        self.update(session_id, {"current_cycle_id": cycle_id})
-
-    def read_current_cycle(self, session_id: str) -> str | None:
-        data = self.read(session_id)
-        return data.get("current_cycle_id") if data else None
-
-    def list_all(self) -> list[dict[str, Any]]:
-        """Return summary metadata for every session under this tenant."""
-        sessions_root = self._base_dir / "sessions"
-        if not sessions_root.exists():
-            return []
-        out: list[dict[str, Any]] = []
-        for sdir in sorted(sessions_root.iterdir()):
-            data = read_json_optional(sdir / "session.json")
-            if data is None:
-                continue
-            out.append(
-                {
-                    "session_id": data.get("session_id", sdir.name),
-                    "created_at": data.get("created_at", ""),
-                    "updated_at": data.get("updated_at", ""),
-                    "current_cycle_id": data.get("current_cycle_id"),
-                    "phase": data.get("phase"),
-                }
-            )
-        return out
 
     # -- Narrative artifacts (touch on mint, append by helpers) ---------------
 

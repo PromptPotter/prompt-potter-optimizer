@@ -40,7 +40,6 @@ def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
             {
                 "session_id": session_id,
                 "phase": "optimizing",
-                "current_cycle_id": cycle_id,
             }
         )
     )
@@ -268,7 +267,6 @@ def test_auto_mint_session_claims_active_pointer() -> None:
     assert sessions_calls["create"][0] == sid
     assert sessions_calls["create"][1]["dataset_count"] == 7
     assert sessions_calls["create"][1]["baseline_accuracy"] == 0.42
-    assert sessions_calls["create"][1]["current_cycle_id"] == cid
     assert sessions_calls["ensure"] == sid
     assert campaigns_calls["create"] == ("bk_test", cid, {"parent_session_id": sid})
     assert pointer_calls["pointer"] == ("default", sid, cid)

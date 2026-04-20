@@ -7,10 +7,12 @@ that point the user has two options:
 1. Revert ``campaign.json::scoring`` to the original policy and resume
    the recorded trajectory.
 2. Commit to the new policy by running ``fork`` — this mints a fresh
-   ``cycle_id`` seeded with the first ``R`` trials from the parent
-   (copied verbatim) and a ``parent_cycle_id`` pointer on its
-   ``index.json``. The original cycle is untouched; the active session
-   pointer is retargeted to the new cycle.
+   ``cycle_id`` seeded with trials ``0..R-1`` from the parent (copied
+   verbatim, where ``R`` is the divergent round) and a ``parent_cycle_id``
+   pointer on its ``index.json``. Round ``R`` itself is not copied — it's
+   the round the new cycle will re-run under the current scorer. The
+   original cycle is untouched; the active session pointer is retargeted
+   to the new cycle.
 
 Traces in ``library/dataset_runs/`` are content-addressed and shared —
 nothing is copied there. Only the per-cycle trial/candidate JSON tree
@@ -59,13 +61,15 @@ def fork_cycle(
     old_cycle_id: str,
     fork_from_round: int,
 ) -> str:
-    """Mint a new cycle branching from round ``fork_from_round`` of ``old_cycle_id``.
+    """Mint a new cycle that redoes round ``fork_from_round`` of ``old_cycle_id``.
 
     Copies ``index.json`` (rewriting ``campaign_id``, adding
     ``parent_cycle_id`` + ``forked_from_round``), plus trials
-    ``0..fork_from_round`` and candidates ``round_0..round_{R}`` verbatim.
-    Rebuilds the new cycle's trial index from the copied survivors, then
-    retargets ``.promptpotter/active_session.json`` at the new cycle.
+    ``0..fork_from_round - 1`` and their candidates verbatim. Round
+    ``fork_from_round`` is the one the new cycle will re-run, so it is
+    deliberately NOT copied — carrying it over would bring the divergent
+    decision that triggered the fork along for the ride. Retargets
+    ``.promptpotter/active_session.json`` at the new cycle.
 
     Returns the new ``cycle_id``.
     """
@@ -107,7 +111,7 @@ def _copy_index(
     data = read_json_optional(src) or {}
 
     # Keep surviving trials (rounds 0..R) in the index; recompute best.
-    survivors = [t for t in (data.get("trials") or []) if t.get("round", -1) <= fork_from_round]
+    survivors = [t for t in (data.get("trials") or []) if t.get("round", -1) < fork_from_round]
     best_acc = 0.0
     best_trial_id: str | None = None
     for t in survivors:
@@ -145,7 +149,7 @@ def _copy_trials(old_dir: Path, new_dir: Path, fork_from_round: int) -> None:
             n = int(p.stem.removeprefix("trial_"))
         except ValueError:
             continue
-        if n <= fork_from_round:
+        if n < fork_from_round:
             shutil.copyfile(p, dst / p.name)
 
 
@@ -160,5 +164,5 @@ def _copy_candidates(old_dir: Path, new_dir: Path, fork_from_round: int) -> None
             n = int(p.stem.removeprefix("round_"))
         except ValueError:
             continue
-        if n <= fork_from_round:
+        if n < fork_from_round:
             shutil.copyfile(p, dst / p.name)

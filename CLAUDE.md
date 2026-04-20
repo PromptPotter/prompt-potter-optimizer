@@ -102,7 +102,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 **Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
-- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json` (with `current_cycle_id` pointer), `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
+- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, events.jsonl, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 

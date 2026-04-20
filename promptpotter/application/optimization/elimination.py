@@ -66,7 +66,7 @@ class EliminationCheck:
         if n < self.n_min:
             return None
 
-        current_scores = [r["score"] for r in results_so_far]
+        current_scores = [r.get("score", 0.0) for r in results_so_far]
         stop, ctx = should_stop_early(current_scores, self._prior_scores, self.alpha)
 
         if not stop:

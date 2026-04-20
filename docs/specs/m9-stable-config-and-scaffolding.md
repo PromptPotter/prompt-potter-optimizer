@@ -139,7 +139,7 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 .promptpotter/projects/{tenant_id}/
 ├── active_session.json                  # pointer: { tenant_id, session_id, cycle_id }
 ├── sessions/{session_id}/
-│   ├── session.json                     # operator metadata + current_cycle_id pointer
+│   ├── session.json                     # operator metadata
 │   ├── journal.md                       # user narrative (notebook ↔ Claude exchange)
 │   ├── notes.md                         # Claude notes
 │   └── control.json                     # HITL signal

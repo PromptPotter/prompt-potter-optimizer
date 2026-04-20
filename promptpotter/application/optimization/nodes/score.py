@@ -284,7 +284,7 @@ def _handle_cache_hit(
         n_candidates,
         len(results),
     )
-    elim_check.register_completed([r["score"] for r in results], candidate_id=osp_c.id)
+    elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
     return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
 
 
@@ -316,9 +316,11 @@ def _handle_scored_candidate(
     )
     aborted = bool(signal) and len(results) < len(dataset)
 
-    # Register fully-completed candidates as priors for future elimination
+    # Register fully-completed candidates as priors for future elimination.
+    # Error rows carry no ``score`` (see ``rescore_results``); treat as 0.0,
+    # matching the ``_compute_accuracy`` convention.
     if len(results) == len(dataset) and not aborted:
-        elim_check.register_completed([r["score"] for r in results], candidate_id=osp_c.id)
+        elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
 
     new_rf: RuntimeFailure | None = None
     if elimination_stopped and signal is not None and signal.check_name == "degradation":

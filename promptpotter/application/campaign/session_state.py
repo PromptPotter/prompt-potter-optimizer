@@ -37,7 +37,6 @@ def new_session_state(
         "dataset_count": 0,
         "baseline_accuracy": 0.0,
         "task_context": None,
-        "current_cycle_id": None,
         "experiment_id": None,
     }
 
@@ -87,7 +86,6 @@ def auto_mint_session(
     state["baseline_accuracy"] = baseline_acc
     state["dataset_count"] = dataset_size
     state["baseline_prompt_fields"] = baseline_prompt_fields or {}
-    state["current_cycle_id"] = cycle_id
 
     sessions = session.store.sessions
     sessions.create(session_id, state)

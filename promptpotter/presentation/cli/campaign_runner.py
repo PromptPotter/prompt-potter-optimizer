@@ -19,6 +19,7 @@ import json
 import logging
 import sys
 from pathlib import Path
+from typing import Any
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -142,7 +143,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     state["baseline_prompt_fields"] = baseline.prompt_field_dict()
     state["dataset_count"] = len(dataset)
     state["baseline_accuracy"] = 0.0
-    state["current_cycle_id"] = cycle_id
 
     session.store.sessions.create(session_id, state)
     session.store.sessions.ensure_narrative_files(session_id)
@@ -185,6 +185,31 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             f"Dataset: {len(dataset)} queries (baseline runs in optimize phase 0)"
         ),
     )
+
+
+def _wire_display_baseline(display: Any, fresh: float) -> None:
+    """Rewire display baseline fields after post-construction baseline re-run.
+
+    Covers both ``CliDisplay`` (baseline_acc / original_baseline / best_acc)
+    and ``NotebookDisplay`` (state.baseline_accuracy), which both cache
+    baseline into multiple fields at construction and otherwise only advance
+    them on improvement.
+    """
+    if display is None:
+        return
+    current = getattr(display, "baseline_acc", None)
+    if current == fresh and getattr(display, "original_baseline", fresh) == fresh:
+        state = getattr(display, "state", None)
+        if state is None or getattr(state, "baseline_accuracy", fresh) == fresh:
+            return
+    display.baseline_acc = fresh
+    if hasattr(display, "original_baseline"):
+        display.original_baseline = fresh
+    if getattr(display, "best_acc", 0.0) < fresh:
+        display.best_acc = fresh
+    state = getattr(display, "state", None)
+    if state is not None and hasattr(state, "baseline_accuracy"):
+        state.baseline_accuracy = fresh
 
 
 def _build_live_display(
@@ -329,6 +354,12 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
 
     baseline = extract_campaign_baseline(campaign_rounds)
+    # Display was built with ``pre_baseline_acc`` from resume state (0.0 on
+    # first run or when prior kill happened before baseline finished). The
+    # re-run above produced the fresh value — rewire it now so per-candidate
+    # deltas, round headers, and best-tracking render against the actual
+    # baseline instead of 0 %.
+    _wire_display_baseline(display, baseline.baseline_acc)
     state_path = campaign_dir / "dashboard.json"
     from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -373,7 +404,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     finally:
         set_round_recorder(None)
 
-    ctx.state["current_cycle_id"] = cycle_result.cycle_id
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
 
@@ -468,10 +498,11 @@ async def cmd_fork(args: argparse.Namespace) -> CommandResult:
 
     Reads the fork hint written by ``cmd_optimize``'s
     :class:`ResumeDivergenceError` handler, calls :func:`fork_cycle` to
-    mint a new cycle with a ``parent_cycle_id`` pointer and the first
-    ``R`` trials copied verbatim, and retargets the active session
-    pointer at the new cycle. The user then runs ``optimize`` to
-    continue from round ``R+1`` under the current scorer — no further
+    mint a new cycle with a ``parent_cycle_id`` pointer and trials
+    ``0..R-1`` copied verbatim (round ``R`` — the divergent one — is
+    dropped so the new cycle re-runs it), and retargets the active
+    session pointer at the new cycle. The user then runs ``optimize``
+    to continue from round ``R`` under the current scorer — no further
     divergence-halt because the new cycle's decisions were recorded
     under the same scorer.
     """
@@ -519,8 +550,8 @@ async def cmd_fork(args: argparse.Namespace) -> CommandResult:
             f"  new:     {new_cycle_id}\n"
             f"  at:      round {hint['fork_from_round']}\n"
             f"Active session pointer retargeted. Run `python -m "
-            f"promptpotter optimize` to continue under the current "
-            f"scorer from round {int(hint['fork_from_round']) + 1}."
+            f"promptpotter optimize` to re-run round "
+            f"{hint['fork_from_round']} under the current scorer."
         ),
     )
 

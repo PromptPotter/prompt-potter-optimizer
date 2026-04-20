@@ -83,7 +83,7 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     if not state:
         raise SystemExit(f"ERROR: Session '{session_id}' not found.")
 
-    cycle_id = getattr(args, "cycle", None) or state.get("current_cycle_id") or pointer_cid or ""
+    cycle_id = getattr(args, "cycle", None) or pointer_cid or ""
     backend_id = state.get("init_params", {}).get("backend_id", "") or ""
     return SessionCtx(store, state, backend_id, session_id, cycle_id)
 
