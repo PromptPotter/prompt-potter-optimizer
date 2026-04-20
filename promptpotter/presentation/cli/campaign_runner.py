@@ -294,13 +294,11 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     listener = RunListener(emitter=emitter, control=control_reader)
 
     # Re-run baseline (fast — cached) to populate baseline_results for critique
-    has_baseline = ctx.state.get("baseline_accuracy", 0) > 0
     _baseline, dataset, campaign_rounds, _baseline_results = await prepare_scoring_context(
         session,
         train_data,
         campaign_config,
         pipeline_params=pipeline_params,
-        run_baseline=has_baseline,
         listener=listener,
     )
     display = _build_live_display(

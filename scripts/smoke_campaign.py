@@ -184,7 +184,6 @@ async def _run(args: argparse.Namespace) -> int:
         session,
         train_slice,
         campaign_config,
-        run_baseline=False,
         pipeline_params=pipeline_params,
     )
 

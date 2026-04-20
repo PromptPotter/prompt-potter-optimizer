@@ -99,18 +99,16 @@ async def prepare_scoring_context(
     session: SessionEnv,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
-    run_baseline: bool = True,
     pipeline_params: dict | None = None,
     listener: Any | None = None,
 ):
-    """Load baseline + dataset, optionally run baseline eval."""
+    """Load baseline + dataset, run baseline eval on full dataset."""
     from promptpotter.application.campaign.data import prepare_scoring_context as _svc_prepare
 
     baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
         session.experiment_extract,
         train_data,
         campaign_config,
-        run_baseline=run_baseline,
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
         svc=session,

@@ -313,11 +313,10 @@ async def prepare_scoring_context(
     session: SessionEnv,
     train_data: list[dict] | None,
     campaign_config: CampaignConfig | None = None,
-    run_baseline: bool = True,
     pipeline_params: dict | None = None,
     listener: Any | None = None,
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
-    """Load baseline prompt, set dataset, optionally run baseline.
+    """Load baseline prompt, set dataset, run baseline on full dataset.
 
     Delegates to shared orchestration with notebook display.  A tqdm
     progress bar + per-query print wraps the caller's ``listener`` so
@@ -382,7 +381,6 @@ async def prepare_scoring_context(
             session.experiment_extract,
             train_data,
             campaign_config,
-            run_baseline=run_baseline,
             pipeline_params=pipeline_params,
             pipeline_schema=session.pipeline_schema,
             svc=session,
