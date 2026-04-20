@@ -143,7 +143,6 @@ async def test_cache_replay_triggers_elimination_without_extra_measure(monkeypat
         degradation_checks=[check],
         candidate_idx=1,
         n_total_candidates=3,
-        save_run=None,
     )
 
     assert batch.stop_reason == "escalation"

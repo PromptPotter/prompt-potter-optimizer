@@ -160,7 +160,6 @@ async def _run_query_loop(
     degradation_checks: list | None,
     candidate_idx: int,
     n_total_candidates: int,
-    save_run: Callable[..., None] | None,
 ) -> QueryLoopResult:
     """Evaluate dataset queries, reusing prior results where available."""
     results: list[QueryResult] = []
@@ -270,17 +269,6 @@ async def _run_query_loop(
             if on_result is not None:
                 on_result(result, i, len(dataset))
 
-            if save_run and ctx.pipeline_schema:
-                save_run(
-                    results,
-                    compute_composite_score(
-                        results,
-                        ctx.pipeline_schema,
-                        round_scorer=ctx.round_scorer,
-                    ),
-                    partial=True,
-                )
-
             esc_signal = _check_escalation()
             if esc_signal:
                 return QueryLoopResult(
@@ -367,13 +355,13 @@ async def score_search_point(
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
-        save_run=_save_run,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal
 
     if not batch.completed and not escalation_signal:
-        # Graceful/force stop — incremental save already persisted what we have.
+        # Graceful/force stop — in-progress candidate is discarded; resume
+        # replays from trial JSON at candidate granularity.
         if batch.stop_reason in {"graceful", "force"}:
             raise KeyboardInterrupt()
         # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,

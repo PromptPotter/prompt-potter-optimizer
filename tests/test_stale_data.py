@@ -150,7 +150,6 @@ async def test_degraded_prior_result_routes_through_protocol(monkeypatch):
         degradation_checks=None,
         candidate_idx=0,
         n_total_candidates=1,
-        save_run=None,
     )
 
     assert len(calls) == 1, "degraded cached result must invoke the recovery protocol"
@@ -199,7 +198,6 @@ async def test_clean_prior_result_skips_protocol(monkeypatch):
         degradation_checks=None,
         candidate_idx=0,
         n_total_candidates=1,
-        save_run=None,
     )
 
     assert calls == [], "clean cached results must not invoke the recovery protocol"

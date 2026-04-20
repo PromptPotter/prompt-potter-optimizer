@@ -380,7 +380,6 @@ class CampaignPersistenceEmitter:
         s["query_started_at"] = datetime.now(UTC).isoformat()
         s["query_elapsed_s"] = 0.0
         s["current_query_text"] = (query_text or "")[:120]
-        self._persist()
 
     def on_sample_scored(
         self,
