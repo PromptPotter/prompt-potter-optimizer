@@ -200,20 +200,21 @@ async def prepare_scoring_context(
 ) -> tuple[OptSearchPoint, list[dict], list, list]:
     """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
 
-    Baseline evaluates the loaded prompt on the **same seeded t-test slice
-    that L1 uses** — ``sample_dataset(dataset, sp_budget_ttest, seed)`` with
-    ``seed = campaign_config.optimization.seed``. Identical call, identical
-    output as ``runner.py``'s L1 sampler, so baseline results populate the
-    per-query cache (``DatasetRunStore.load_reusable_results``, keyed by
-    query text under matching ``node_configs``) in the exact shape L1
-    round 1 will then request — 100% cache hit.
+    Baseline evaluates the loaded prompt on the **same t-test slice that L1
+    uses** — ``sample_dataset(dataset, sp_budget_ttest)``, the deterministic
+    top-``sp_budget_ttest`` prefix. Datasets are already shuffled at creation,
+    so no second RNG is needed. Byte-identical to ``runner.py``'s L1 sampler,
+    so baseline populates the per-query cache
+    (``DatasetRunStore.load_reusable_results``, keyed by query text under
+    matching ``node_configs``) in the exact shape L1 round 1 requests —
+    100% hit bridge.
 
     Skipped only when the prompt is genuinely empty (param-only optimization)
     or when ``svc`` / ``campaign_config`` is missing.
 
-    ``sp_budget_ttest`` and ``seed`` stay on ``CampaignConfig.optimization``
-    and never enter ``pipeline_params`` → the ``JobSearchPoint`` hash
-    remains target-layer-pure.
+    ``sp_budget_ttest`` stays on ``CampaignConfig.optimization`` and never
+    enters ``pipeline_params`` → the ``JobSearchPoint`` hash remains
+    target-layer-pure.
     """
     from promptpotter.application.datasets.builder import sample_dataset
 
@@ -232,13 +233,11 @@ async def prepare_scoring_context(
         from promptpotter.shared.scoring import split_scoring_block
 
         sp_budget = campaign_config.sp_budget_ttest or 15
-        seed = campaign_config.optimization.seed
-        eval_dataset = sample_dataset(dataset, sp_budget, seed)
+        eval_dataset = sample_dataset(dataset, sp_budget)
         logger.info(
-            "Baseline eval on t-test slice (%d/%d queries, seed=%d) — shared with L1",
+            "Baseline eval on t-test slice (%d/%d queries, top-N prefix) — shared with L1",
             len(eval_dataset),
             len(dataset),
-            seed,
         )
         spec = split_scoring_block(campaign_config.scoring)
         campaign_rounds, baseline_results = await _run_baseline_scoring(

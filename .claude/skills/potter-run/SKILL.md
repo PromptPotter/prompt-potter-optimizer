@@ -32,78 +32,65 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop on 502s.** Halt, tell the user "Backend returning 502s — likely Groq rate-limiting. Check and restart." Don't retry.
 - **Never wipe project data without asking.** Spell out the full path first.
-- **Phases 0–0.5 are silent.** The Phase 0.7 dashboard is the first thing the user sees.
+- **Phases 0–0.5 are silent.** The Phase 0.7 outlook is the first thing the user sees — pick the tier that matches state + intent, don't stack sections.
+- **Treat defaults as correct.** Documented config (BBEH `campaign.json` vs notebook drift, notebook-driven entry, "don't run `set-task`" for BBEH) is expected state, not a warning. Warnings come from the anomaly allowlist in Phase 0.7 — nothing else.
 - **Notebook ↔ Claude channel.** Every session has `journal.md` (user narrative) and `notes.md` (your structured notes, tags `[FYI]` / `[RECOMMEND]` / `[BLOCKER]`). Read the journal to pick up intent; append to `notes.md` via Write/Edit so `display.render_claude_notes()` can surface it back.
 
 ---
 
+## Configs are the source of truth
+
+Persistent configs decide behavior — the skill does not carry a parallel default-ladder.
+
+- `datasets/{name}/dataset.md` — init flags, entry point (CLI vs notebook)
+- `datasets/{name}/campaign.json` — hyperparameters (max_rounds, n_variants, sp_budget_ttest, patiences)
+- `datasets/{name}/pipeline.json` — pipeline + model + caps
+- BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
+- Active session: `.promptpotter/active_session.json` → `campaigns/{cycle_id}/index.json` + `dashboard.json`
+
+Read these. Don't recommend parameter tweaks unless the user asks. Don't classify data volume ("minimal"/"substantial") or propose leaderboard picks unbidden.
+
 ## Phase 0: Audit (silent)
 
-1. `ls datasets/`, read target's `dataset.md` + `campaign.json`
+1. Read `datasets/{name}/dataset.md` + `campaign.json` + `pipeline.json` (+ BBEH notebook).
 2. `curl -s {backend_url}/status` — backend up?
-3. `APP_VERSION` from `promptpotter/config/settings.py`
-4. Active pointer → campaign's `index.json` (state, `init_params`, `campaign_config`, `baseline_accuracy`) + `dashboard.json` (live `round`/`phase`/`best`/`stop_reason`)
-5. Count `.promptpotter/projects/{tenant_id}/library/dataset_runs/*.json`: <50 queries OR <5 runs = minimal (start from defaults); ≥50 AND ≥5 = substantial (propose best-known via `show-results`)
+3. Active pointer → `index.json` + `dashboard.json` if present.
 
-**Print only if** no dataset arg, dataset not implemented (offer to build: scorer in `promptpotter/shared/scoring.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/builder.py::DATASET_LOADERS` returning `[{query, ground_truth}]`), or backend down.
+**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/shared/scoring.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/builder.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
 
-## Phase 0.4: Smoke test (new datasets only)
+If `datasets/{name}/` has never produced a `dataset_runs/` entry, suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
 
-If `datasets/{name}/` has never produced a `dataset_runs/` entry: `python scripts/smoke_campaign.py --dataset {name}` (~90s, 5 queries × 3 candidates). Catches loader, pipeline, connectivity bugs before real credits are spent.
+## Phase 0.7: Outlook
 
-## Phase 0.7: Campaign Dashboard
+Default shape: one sentence, one compact box, or 3–5 bullets — or a combination. Two modes:
 
-First thing the user sees. Build from active pointer + `index.json` + `dashboard.json`.
+**No active session** — one sentence: which entry point the dataset uses (per `dataset.md`) and what to run. No box, no ask.
 
-```
-PROMPTPOTTER CAMPAIGN DASHBOARD
-════════════════════════════════
-Session:  {cycle_id}              Phase: {phase}
-Dataset:  {dataset_name}          Queries: {dataset_count}
-Backend:  {backend_id} @ {url}    PromptPotter: v{version}
-Baseline: {baseline}%             Best: {best}%
-Pipeline: {active_steps}
-Scoring:  {formula from campaign.json}
+**Active session** — compact 4–6 line box from `dashboard.json` via `render_dashboard` in `promptpotter/presentation/views/dashboard.py` (or mirror: `cycle_id · dataset · phase · round/max · best vs baseline`) + one sentence: resume command or next phase.
 
-OPTIMIZATION STATUS (resumed/completed only)
-  Round: {round}/{max_rounds}   Layer: {L1/L2/L3}
-  Stop:  {stop_reason or "running"}
-  Cache: {cache_hit_rate}%       Queries evaluated: {total}
+If the user's intent is genuinely ambiguous ("should I resume or start over?"), ask once — one question, no `(a)/(b)` stacking.
 
-DATA ASSESSMENT
-  Dataset runs: {n}   Unique queries: {n_unique}   → minimal | substantial
+### Anomaly allowlist (the only sources of warnings)
 
-WARNINGS (omit if clean)
-  ⚠ e.g. "backend unreachable", "llm_ranking in active nodes"
+- Backend `/status` non-200 or connection refused
+- `llm_ranking` in active_nodes on TermNorm
+- Active-session pointer points at a different dataset than requested
+- Recent `dataset_runs/*.json` show empty `predicted` strings (BBEH regression)
+- `ActiveSessionMismatchError` on `init_services()`
 
-SESSION FILES at .promptpotter/projects/{tenant_id}/sessions/{session_id}/
-  session.json · journal.md · notes.md · control.json
-  Parity set = SESSION_ARTIFACTS in session_emitter.py
-
-CAMPAIGN FILES at .promptpotter/projects/{tenant_id}/campaigns/{cycle_id}/
-  index.json (with parent_session_id) · dashboard.json · output.log · log.md
-  (+ candidates/round_NNNN.json, trials/trial_NNNN.json if present)
-  Parity set = CAMPAIGN_ARTIFACTS in session_emitter.py
-
-LIBRARY (cross-cycle, at .promptpotter/projects/{tenant_id}/library/)
-  dataset_runs/ · obs/langfuse/ · search_memory/ · backends/{backend_id}/
-```
-
-After the dashboard: 1–2 sentence resume/fresh recommendation, then ask.
+Surface anomalies as a one-line flag at the top, then the normal outlook. Never warn about documented config (notebook-driven datasets, `campaign.json` ↔ notebook drift, "don't run `set-task`" for BBEH, data volume) — that's expected state.
 
 ---
 
 ## Phase 1: Initialize (skip if resuming)
 
-Flags come from `datasets/{name}/dataset.md § Init Flags` — never guess. Then:
+Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess.
 
 ```bash
 python -m promptpotter init {flags from dataset.md}
 ```
 
 Foreground, 30s timeout. If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
-
-If Phase 0 found substantial data, show the leaderboard first and ask "start from best, or fresh?" before init.
 
 ## Phase 2: Task context
 
@@ -141,11 +128,10 @@ Escalation model: `reference/optimization-layers.md`, `docs/architecture/optimiz
 
 ## Operator style
 
+- **Default shape**: one sentence, one compact box, or 3–5 bullets — or a combination. Anomaly flag + outlook is the only stacking allowed.
+- **Defer to configs.** Report what's on disk; don't second-guess the configured hyperparameters, data volume, or pipeline choice unless the user asks.
 - Interpret results, don't dump CLI output.
-- **Always surface the kill command** for in-flight optimizer runs:
-  ```
-  Kill if stuck: tasklist | findstr python → taskkill //F //PID <pid>
-  ```
+- **Kill command is situational** — surface `tasklist | findstr python → taskkill //F //PID <pid>` only when recommending a long-running launch in *this* turn.
 - Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → check `log.md` in the campaign dir.
 - Respect user-specified timeouts/stop methods exactly; ask before assuming.
 

@@ -173,21 +173,17 @@ def split_train_test(
     return train, {"test_processes": test_proc, "test_material": test_mat}
 
 
-def sample_dataset(
-    dataset: list[dict],
-    sample_size: int,
-    seed: int = 42,
-) -> list[dict]:
-    """Deterministic subsample of eval queries.
+def sample_dataset(dataset: list[dict], sample_size: int) -> list[dict]:
+    """Top-``sample_size`` slice of eval queries.
 
-    ``sample_size`` must be a positive integer.  Returns the full list
-    unchanged only when the dataset is already at or below that size.
+    Datasets are already shuffled at creation (train/test split, HF load),
+    so the loop-time slice is the deterministic prefix — no second RNG.
+    This makes partial prior runs (which walk natural order) bridge
+    cleanly into the next baseline on the same slice.
     """
     if sample_size <= 0:
         raise ValueError(f"sp_budget_ttest must be > 0, got {sample_size}")
-    if len(dataset) <= sample_size:
-        return dataset
-    return random.Random(seed).sample(dataset, sample_size)
+    return dataset[:sample_size]
 
 
 _GSM8K_ANSWER_RE = re.compile(r"####\s*(-?[\d,]+\.?\d*)")

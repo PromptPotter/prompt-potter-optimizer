@@ -646,7 +646,7 @@ async def _init_optimization(
         campaign_store=campaign_store,
         cycle_id=resolved_cycle_id,
         obs_campaign_id=obs_campaign_id,
-        scoring_dataset=sample_dataset(dataset, config.sp_budget_ttest, opt.seed),
+        scoring_dataset=sample_dataset(dataset, config.sp_budget_ttest),
         degradation_checks=build_degradation_checks(config),
         resumed_from_round=resumed_from_round,
     )
