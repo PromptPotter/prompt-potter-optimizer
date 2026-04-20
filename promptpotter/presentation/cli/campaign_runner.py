@@ -191,7 +191,7 @@ def _build_live_display(
     from promptpotter.shared.scoring import split_scoring_block
 
     set_display_tags(session.pipeline_schema)
-    scoring_formula, _ = split_scoring_block(campaign_config.scoring)
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
 
     opt = campaign_config.optimization
     max_rounds = opt.max_rounds or 999
@@ -317,6 +317,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     baseline = extract_campaign_baseline(campaign_rounds)
     state_path = campaign_dir / "dashboard.json"
+    from promptpotter.shared.errors import ResumeDivergenceError
+
     try:
         cycle_result = await _orch_run_optimization(
             dataset,
@@ -331,6 +333,24 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             cycle_id=ctx.cycle_id,
             resume_from_round_override=resume_from_round,
             emitter=emitter,
+            no_divergence_check=getattr(args, "no_divergence_check", False),
+        )
+    except ResumeDivergenceError as div:
+        return CommandResult(
+            data={
+                "error": "resume_divergence",
+                "round": div.round_num,
+                "kind": div.kind,
+                "recorded_outcome": div.recorded_outcome,
+                "current_outcome": div.current_outcome,
+            },
+            human=(
+                f"{div}\n\n"
+                f"Run `python -m promptpotter fork` to branch here under the "
+                f"new scorer, or revert `campaign.json::scoring` to continue "
+                f"the original trajectory. `--no-divergence-check` silences "
+                f"this halt if the trajectory divergence is acceptable."
+            ),
         )
     finally:
         set_round_recorder(None)
@@ -425,6 +445,68 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     )
 
 
+async def cmd_fork(args: argparse.Namespace) -> CommandResult:
+    """Branch the active cycle at the divergence point recorded in ``fork_hint.json``.
+
+    Reads the fork hint written by ``cmd_optimize``'s
+    :class:`ResumeDivergenceError` handler, calls :func:`fork_cycle` to
+    mint a new cycle with a ``parent_cycle_id`` pointer and the first
+    ``R`` trials copied verbatim, and retargets the active session
+    pointer at the new cycle. The user then runs ``optimize`` to
+    continue from round ``R+1`` under the current scorer — no further
+    divergence-halt because the new cycle's decisions were recorded
+    under the same scorer.
+    """
+    from promptpotter.application.campaign.fork import fork_cycle, load_fork_hint
+
+    ctx = load_session(args)
+    if not ctx.cycle_id:
+        return CommandResult(
+            data={"error": "no_active_cycle"},
+            human="No active cycle on this session — run `init` + `optimize` first.",
+        )
+
+    session = await init_services_cli(**ctx.init_params)
+    hint = load_fork_hint(session.store, ctx.cycle_id)
+    if hint is None:
+        return CommandResult(
+            data={"error": "no_fork_hint"},
+            human=(
+                f"No fork_hint.json in campaigns/{ctx.cycle_id}/. Fork is "
+                f"only available after `optimize` halts with a "
+                f"ResumeDivergenceError; see `docs/architecture/"
+                f"optimization.md § Rescore-on-resume and --fork`."
+            ),
+        )
+
+    new_cycle_id = fork_cycle(
+        session.store,
+        ctx.init_params.get("tenant_id", "default"),
+        ctx.session_id,
+        ctx.backend_id,
+        ctx.cycle_id,
+        int(hint["fork_from_round"]),
+    )
+
+    return CommandResult(
+        data={
+            "old_cycle_id": ctx.cycle_id,
+            "new_cycle_id": new_cycle_id,
+            "forked_from_round": hint["fork_from_round"],
+            "divergence": hint.get("divergence", {}),
+        },
+        human=(
+            f"Forked cycle\n"
+            f"  parent:  {ctx.cycle_id}\n"
+            f"  new:     {new_cycle_id}\n"
+            f"  at:      round {hint['fork_from_round']}\n"
+            f"Active session pointer retargeted. Run `python -m "
+            f"promptpotter optimize` to continue under the current "
+            f"scorer from round {int(hint['fork_from_round']) + 1}."
+        ),
+    )
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Dispatch
 # ─────────────────────────────────────────────────────────────────────────────
@@ -434,6 +516,7 @@ COMMANDS = {
     "init": cmd_init,
     "set-task": cmd_task_context,
     "optimize": cmd_optimize,
+    "fork": cmd_fork,
     "control": cmd_control,
     "profile": cmd_profile,
     "show-results": cmd_results,

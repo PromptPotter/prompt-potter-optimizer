@@ -496,6 +496,27 @@ class CampaignStore(EntityStore):
             self._trials_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json",
         )
 
+    def load_trials_range(
+        self,
+        backend_id: str,
+        cycle_id: str,
+        start: int,
+        end: int,
+    ) -> list[dict[str, Any]]:
+        """Load trials for rounds ``start..end`` inclusive, in round order.
+
+        Missing trials are skipped silently (``None`` from
+        :meth:`load_trial`). Used by the resume-divergence walker in
+        :mod:`promptpotter.application.campaign.decisions` to re-derive
+        each recorded decision under the current scorer.
+        """
+        out: list[dict[str, Any]] = []
+        for r in range(start, end + 1):
+            trial = self.load_trial(backend_id, cycle_id, r)
+            if trial is not None:
+                out.append(trial)
+        return out
+
     def complete(self, backend_id: str, cycle_id: str) -> None:
         """Mark a campaign as completed."""
         self.update(backend_id, cycle_id, {"status": "completed"})

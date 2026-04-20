@@ -31,6 +31,7 @@ from promptpotter.application.scoring.stale_data import (
 from promptpotter.application.scoring.stale_data import is_degraded as _is_degraded
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
+from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import EscalationSignal
@@ -56,12 +57,24 @@ class QueryLoopResult:
     escalation_signal: EscalationSignal | None = None
 
 
-def _materialize_cached(item: QueryResult) -> QueryResult:
-    """Stamp a prior-cache item as cached with zeroed timing."""
+def _materialize_cached(
+    item: QueryResult,
+    scorer: Scorer | None,
+    scorer_id: str,
+    scorer_formula: str | None,
+) -> QueryResult:
+    """Stamp a prior-cache item as cached with zeroed timing, rescored.
+
+    ``hit``/``score`` persisted on the prior run are a stale view — the
+    active scorer owns those fields on load, and its result lands in
+    ``r["scored"][scorer_id]`` so the trace accumulates a multi-scorer
+    audit map (see ``shared/scoring.py::rescore_results``).
+    """
     r: dict = {**item, "cached": True}
     pd = r.get("pipeline_data")
     if isinstance(pd, dict):
         r["pipeline_data"] = {**pd, "total_time": 0.0}
+    rescore_results([r], scorer, scorer_id, scorer_formula)
     return cast(QueryResult, r)
 
 
@@ -95,7 +108,12 @@ async def _run_query_loop(
 
             # Reuse: prior-result cache from previous dataset_runs.
             if query in prior_results:
-                cached_r = _materialize_cached(prior_results[query])
+                cached_r = _materialize_cached(
+                    prior_results[query],
+                    ctx.scorer,
+                    ctx.scorer_id,
+                    ctx.scorer_formula,
+                )
                 if _is_degraded(cached_r) and ctx.stale_data_load_protocol:
                     recovered, _step = await _execute_stale_data_protocol(
                         ctx.stale_data_load_protocol,

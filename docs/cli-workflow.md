@@ -60,7 +60,7 @@ Produces: `campaigns/{cycle_id}/` with `index.json`, `dashboard.json`, `control.
 | `--dataset-name` | Override dataset name from config |
 | `--config` | Campaign config JSON file |
 
-Rewinding within an active cycle is not done here — see `optimize --from <round>` below. `init` handles registration/setup only. Fork-across-cycles (new `cycle_id`, parent pointer) is not a supported primitive — see `docs/architecture/optimization.md § Resuming mid-cycle`.
+Rewinding within an active cycle is not done here — see `optimize --from <round>` below. `init` handles registration/setup only. Fork-across-cycles (new `cycle_id`, parent pointer) is available via `python -m promptpotter fork` after `optimize` halts on a resume-divergence — see `docs/architecture/optimization.md § Decision records and resume-divergence replay`.
 
 ### set-task
 

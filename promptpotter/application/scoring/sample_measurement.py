@@ -211,9 +211,14 @@ async def measure_sample(
         query_evaluators = materialize_query_values(pipeline_schema, result)  # type: ignore[arg-type]
         if query_evaluators:
             pd["evaluators"] = query_evaluators
-        if env.scorer:
-            result["score"] = env.scorer(result)
-            result["hit"] = result["score"] >= 1.0
+        from promptpotter.shared.scoring import rescore_results
+
+        rescore_results(
+            [result],  # type: ignore[list-item]
+            env.scorer,
+            env.scorer_id,
+            env.scorer_formula,
+        )
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)

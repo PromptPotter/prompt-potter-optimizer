@@ -34,7 +34,13 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryResult(TypedDict):
-    """Core per-query evaluation result — always present."""
+    """Core per-query evaluation result — always present.
+
+    ``hit`` and ``score`` are the *active-scorer projection* — a view over
+    the authoritative ``scored`` audit map (optional, populated by
+    ``rescore_results``) which accumulates one entry per scorer the trace
+    has been evaluated under: ``{scorer_id: {score, hit, formula}}``.
+    """
 
     query: str
     ground_truth: str
@@ -47,6 +53,12 @@ class QueryResult(TypedDict):
 
 class QueryResultFull(QueryResult, total=False):
     """Extended result with optional fields from eval pipeline and stale-data protocol."""
+
+    # Multi-scorer audit map — {scorer_id: {score, hit, formula}}.
+    # Accumulated by ``rescore_results``; persisted to both trial JSON
+    # and ``library/dataset_runs/`` items so parent + forked cycles can
+    # share the same traces with their own scorer-specific views.
+    scored: dict[str, dict]
 
     # Eval pipeline
     n_candidates: int
@@ -122,6 +134,11 @@ class ScoringEnv:
     search_memory: SearchMemory | None = None
     # Per-dataset scoring formula (compiled callable from shared/scoring.py)
     scorer: Scorer | None = None
+    # Tag recorded alongside every score this scorer produces — forms the
+    # key into the per-trace ``scored`` multi-scorer map. Derived from
+    # ``campaign.json::scoring.id`` (or auto-hashed from the formula).
+    scorer_id: str = "none"
+    scorer_formula: str | None = None
     # Per-round scoring formula (composite). None = default formula.
     round_scorer: RoundScorer | None = None
     # Graceful-stop hook: scorer checks between queries; caller owns the flag source.
@@ -142,6 +159,7 @@ class ScoringEnv:
         stale_data_load_protocol: list[str] | None,
         scoring_formula: str | None,
         scoring_round_formula: str | None = None,
+        scorer_id: str | None = None,
     ) -> ScoringEnv:
         """Build a ScoringEnv for an optimization-loop run.
 
@@ -149,7 +167,11 @@ class ScoringEnv:
         when not explicitly set) and the scoring-formula compilation so the
         caller just hands over raw config.
         """
-        from promptpotter.shared.scoring import compile_round_scorer, compile_scorer
+        from promptpotter.shared.scoring import (
+            auto_scorer_id,
+            compile_round_scorer,
+            compile_scorer,
+        )
 
         derived_experiment_id = experiment_id or (
             cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
@@ -168,6 +190,8 @@ class ScoringEnv:
             max_consecutive_errors=max_consecutive_errors,
             stale_data_load_protocol=stale_data_load_protocol,
             scorer=compile_scorer(scoring_formula),
+            scorer_id=scorer_id or auto_scorer_id(scoring_formula),
+            scorer_formula=scoring_formula,
             round_scorer=round_scorer,
         )
 

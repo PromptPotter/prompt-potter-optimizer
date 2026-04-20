@@ -174,7 +174,13 @@ async def _handle_escalation_signal(
 
 
 def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str, Any]:
-    """Build the checkpoint dict for ``campaign_store.add_trial``."""
+    """Build the checkpoint dict for ``campaign_store.add_trial``.
+
+    ``all_candidate_results`` + ``decisions`` make the trial self-contained
+    for divergence replay: the resume flow rescores everything under the
+    current scorer and re-runs registered replayers (see
+    ``application/campaign/decisions.py``).
+    """
     return {
         "trial_id": f"round_{round_num}",
         "round": round_num,
@@ -186,8 +192,10 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
         "improved": rr.improved,
         "prompt_fields": rr.prompt_fields,
         "results": rr.results,
+        "all_candidate_results": dict(rr.all_candidate_results),
         "candidates_scored": rr.candidates_scored,
         "candidate_scores": list(rr.candidate_scores),
+        "decisions": list(rr.decisions),
         "evaluators": dict(rr.evaluators),
         **state.escalation.to_checkpoint_dict(),
         "opt_search_point": state.opt_sp.model_dump(),
@@ -406,6 +414,90 @@ async def _run_round_loop(
 # ---------------------------------------------------------------------------
 
 
+def _resume_with_divergence_check(
+    campaign_store: CampaignStore,
+    backend_id: str,
+    cycle_id: str,
+    resumed_from_round: int,
+    scoring_ctx: ScoringEnv,
+    state: LoopState,
+    *,
+    skip_divergence_check: bool,
+) -> None:
+    """Rescore prior trials under the active scorer and halt on first divergence.
+
+    Side effects on clean resume:
+
+    - Mutates each loaded trial's ``results`` and
+      ``all_candidate_results`` in place by rescoring via
+      :func:`rescore_results` — this is the boundary where persisted
+      stale views get replaced with the current-policy projection.
+    - Calls ``state.restore_from_trial`` with the last trial.
+
+    On divergence: writes ``campaigns/{cycle_id}/fork_hint.json`` so
+    ``fork`` can mint a branched cycle rooted at the divergence point,
+    then raises :class:`ResumeDivergenceError`.
+
+    ``skip_divergence_check`` keeps the rescoring (always correct) but
+    silences the halt — the opt-out behind ``--no-divergence-check``.
+    """
+    from promptpotter.application.campaign.decisions import replay_decisions
+    from promptpotter.infrastructure.store.base import write_json
+    from promptpotter.shared.errors import ResumeDivergenceError
+    from promptpotter.shared.scoring import rescore_results
+
+    prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)
+    for t in prior:
+        rescore_results(
+            list(t.get("results") or []),
+            scoring_ctx.scorer,
+            scoring_ctx.scorer_id,
+            scoring_ctx.scorer_formula,
+        )
+        for items in (t.get("all_candidate_results") or {}).values():
+            rescore_results(
+                list(items or []),
+                scoring_ctx.scorer,
+                scoring_ctx.scorer_id,
+                scoring_ctx.scorer_formula,
+            )
+
+    if not skip_divergence_check:
+        for i, t in enumerate(prior):
+            div = replay_decisions(t, prior_trials=prior[:i])
+            if div is None:
+                continue
+            fork_hint = {
+                "cycle_id": cycle_id,
+                "fork_from_round": div.round_num,
+                "divergence": {
+                    "kind": div.kind,
+                    "recorded_outcome": div.recorded_outcome,
+                    "current_outcome": div.current_outcome,
+                    "inputs_ref": dict(div.inputs_ref),
+                },
+                "scorer_id": scoring_ctx.scorer_id,
+                "scorer_formula": scoring_ctx.scorer_formula,
+            }
+            write_json(
+                campaign_store.campaign_dir(cycle_id) / "fork_hint.json",
+                fork_hint,
+            )
+            raise ResumeDivergenceError(
+                round_num=div.round_num,
+                kind=div.kind,
+                recorded_outcome=div.recorded_outcome,
+                current_outcome=div.current_outcome,
+                diagnostics={
+                    "scorer_id": scoring_ctx.scorer_id,
+                    "fork_hint": "run `python -m promptpotter fork` to branch here",
+                },
+            )
+
+    if prior:
+        state.restore_from_trial(prior[-1])
+
+
 async def _init_optimization(
     baseline: CampaignBaseline,
     dataset: list[dict[str, Any]],
@@ -415,6 +507,8 @@ async def _init_optimization(
     task_context: TaskDecomposition,
     scoring_formula: str | None,
     scoring_round_formula: str | None,
+    scorer_id: str,
+    no_divergence_check: bool,
     langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
@@ -479,17 +573,6 @@ async def _init_optimization(
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
 
-    if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
-        trial = campaign_store.load_trial(
-            session.backend_id, resolved_cycle_id, resumed_from_round - 1
-        )
-        if trial:
-            state.restore_from_trial(trial)
-    else:
-        # Only seed thinking_styles on fresh init — restore_from_trial's
-        # value must win on resume, so don't overwrite it there.
-        state.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
-
     scoring_ctx = ScoringEnv.for_loop(
         session.backend_client,
         session.store,
@@ -502,13 +585,35 @@ async def _init_optimization(
         stale_data_load_protocol=opt.stale_data_load_protocol,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
+        scorer_id=scorer_id,
     )
+
+    if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
+        _resume_with_divergence_check(
+            campaign_store,
+            session.backend_id,
+            resolved_cycle_id,
+            resumed_from_round,
+            scoring_ctx,
+            state,
+            skip_divergence_check=no_divergence_check,
+        )
+    else:
+        # Only seed thinking_styles on fresh init — restore_from_trial's
+        # value must win on resume, so don't overwrite it there.
+        state.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()
         )
 
-    search_memory = SearchMemory.ensure_for(session.store, session.backend_id)
+    search_memory = SearchMemory.ensure_for(
+        session.store,
+        session.backend_id,
+        scorer=scoring_ctx.scorer,
+        scorer_id=scoring_ctx.scorer_id,
+        scorer_formula=scoring_ctx.scorer_formula,
+    )
     state.search_memory = search_memory
     if search_memory:
         scoring_ctx.search_memory = search_memory
@@ -597,6 +702,7 @@ async def run_optimization(
     cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
     emitter: CampaignPersistenceEmitter | None = None,
+    no_divergence_check: bool = False,
 ) -> RunResult:
     """Run the full optimization loop from a prepared baseline.
 
@@ -640,7 +746,9 @@ async def run_optimization(
 
     from promptpotter.shared.scoring import split_scoring_block
 
-    scoring_formula, scoring_round_formula = split_scoring_block(campaign_config.scoring)
+    scoring_spec = split_scoring_block(campaign_config.scoring)
+    scoring_formula = scoring_spec.per_query
+    scoring_round_formula = scoring_spec.per_round
 
     if isinstance(task_context, TaskDecomposition):
         resolved_task_context = task_context
@@ -659,6 +767,8 @@ async def run_optimization(
         task_context=resolved_task_context,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
+        scorer_id=scoring_spec.scorer_id,
+        no_divergence_check=no_divergence_check,
         langfuse_session_id=langfuse_session_id,
         cycle_id=cycle_id,
         resume_from_round_override=resume_from_round_override,

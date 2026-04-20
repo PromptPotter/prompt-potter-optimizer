@@ -24,8 +24,16 @@ class RoundResult(BaseModel):
     prompt_fields: dict
     pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)
+    # Per-candidate scored results — persisted so resume can rescore
+    # them under a changed scorer and replay decisions without needing
+    # to re-evaluate the pipeline. Keyed by candidate id.
+    all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[dict] = Field(default_factory=list)
+    # Decision records produced this round (round_winner, elimination_cut,
+    # escalate_l2, …). Consumed by the divergence replay walker in
+    # ``application/campaign/decisions.py``.
+    decisions: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
     escalation_signal: EscalationSignal | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)

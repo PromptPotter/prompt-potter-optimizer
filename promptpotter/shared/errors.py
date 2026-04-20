@@ -57,6 +57,46 @@ class ActiveSessionMismatchError(RuntimeError):
         )
 
 
+class ResumeDivergenceError(RuntimeError):
+    """Raised when a resumed campaign diverges from the recorded trajectory.
+
+    A decision recorded in a prior trial (round winner, elimination cut,
+    escalation trigger, …) re-derives to a different outcome under the
+    currently active scorer. The only mechanism: every recorded decision is
+    a pure function of scored results, and rescoring changes the inputs.
+
+    Emit ``fork`` to branch a new cycle from this point under the new
+    policy, or revert ``campaign.json::scoring`` to continue the original
+    trajectory.
+    """
+
+    def __init__(
+        self,
+        *,
+        round_num: int,
+        kind: str,
+        recorded_outcome: Any,
+        current_outcome: Any,
+        diagnostics: dict[str, Any] | None = None,
+    ) -> None:
+        self.round_num = round_num
+        self.kind = kind
+        self.recorded_outcome = recorded_outcome
+        self.current_outcome = current_outcome
+        self.diagnostics = diagnostics or {}
+        super().__init__(self._format())
+
+    def _format(self) -> str:
+        lines = [
+            f"Resume divergence at round {self.round_num}, decision {self.kind!r}:",
+            f"  recorded: {self.recorded_outcome}",
+            f"  current:  {self.current_outcome}",
+        ]
+        for k, v in self.diagnostics.items():
+            lines.append(f"  {k}: {v}")
+        return "\n".join(lines)
+
+
 def is_error_result(result: Mapping[str, Any]) -> bool:
     """Return True if *result* represents a failed evaluation.
 

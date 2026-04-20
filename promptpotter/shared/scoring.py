@@ -26,16 +26,25 @@ No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
 
 from __future__ import annotations
 
+import hashlib
 import logging
 import math
 import re
 from collections.abc import Callable
 from types import SimpleNamespace
+from typing import NamedTuple
 
 logger = logging.getLogger(__name__)
 
 # Type alias for per-dataset scoring callable
 Scorer = Callable[[dict], float]
+
+# Sentinel scorer ids. ``default_hit`` tags the ``float(hit)`` fallback
+# used when no formula is configured; ``none`` tags untagged/legacy paths
+# (rescore helpers called without a scorer). Exposed so trace readers
+# can recognize them when inspecting the per-result ``scored`` map.
+DEFAULT_SCORER_ID = "default_hit"
+EMPTY_SCORER_ID = "none"
 
 # ---------------------------------------------------------------------------
 # Scoring functions — one registry, add new helpers here
@@ -255,6 +264,52 @@ def _default_scorer(result: dict) -> float:
     return float(result.get("hit", False))
 
 
+def rescore_results(
+    results: list[dict],
+    scorer: Scorer | None,
+    scorer_id: str = EMPTY_SCORER_ID,
+    formula: str | None = None,
+) -> list[dict]:
+    """Apply *scorer* to each result, accumulating a multi-scorer audit map.
+
+    For each non-error result:
+
+    - Compute ``score = scorer(r)`` and ``hit = score >= 1.0``.
+    - Write ``r["scored"][scorer_id] = {"score", "hit", "formula"}`` —
+      accumulates across rescoring passes so a trace carries one entry
+      per scorer it's been evaluated under.
+    - Project the active scorer's ``score`` / ``hit`` onto the top level
+      of *r* for existing readers (loop decisions, display, SearchMemory).
+
+    Raw trace fields (``query``, ``predicted``, ``ground_truth``,
+    ``pipeline_data``, ``error``, ``n_candidates``, ``ground_truth_rank``) are
+    never touched. Error results (tagged ``error`` or ``predicted == "ERROR"``)
+    are skipped — their ``hit`` was never a policy question.
+
+    Idempotent under the same ``scorer_id``: running twice overwrites the
+    same map entry identically. No-op when *scorer* is ``None`` (tests,
+    legacy paths).
+
+    This is the single arithmetic site for the data-vs-view boundary.
+    Every load path (cache hit, trial reload, SearchMemory ingest) and
+    fresh-sample path (``measure_sample``) routes through here.
+    """
+    if scorer is None:
+        return results
+    from promptpotter.shared.errors import is_error_result
+
+    for r in results:
+        if is_error_result(r):
+            continue
+        score = scorer(r)
+        hit = score >= 1.0
+        scored = r.setdefault("scored", {})
+        scored[scorer_id] = {"score": score, "hit": hit, "formula": formula}
+        r["score"] = score
+        r["hit"] = hit
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Per-round scoring formula — mirrors compile_scorer for round aggregates
 # ---------------------------------------------------------------------------
@@ -294,20 +349,57 @@ def _default_round_scorer(values: dict[str, float]) -> float:
 # ---------------------------------------------------------------------------
 
 
+class ScoringSpec(NamedTuple):
+    """Parsed ``campaign.json::scoring`` block.
+
+    ``scorer_id`` tags every score computed under ``per_query`` so traces
+    accumulate a multi-scorer audit map. When the campaign config omits
+    ``id``, it is auto-derived from the formula hash (stable as long as
+    the formula is stable).
+
+    Tuple layout preserves legacy ``(per_query, per_round)`` destructuring:
+    ``(per_query, per_round, scorer_id)``.
+    """
+
+    per_query: str | None
+    per_round: str | None
+    scorer_id: str
+
+
+DEFAULT_SCORER_ID = "default_hit"
+_EMPTY_SCORER_ID = "none"
+
+
+def auto_scorer_id(per_query: str | None) -> str:
+    """Derive a stable scorer id from the formula string.
+
+    ``None``/empty → ``"default_hit"`` (the ``float(hit)`` fallback).
+    Non-empty formula → ``"auto_" + sha256(formula)[:10]``.
+    """
+    if not per_query:
+        return DEFAULT_SCORER_ID
+    h = hashlib.sha256(per_query.encode("utf-8")).hexdigest()[:10]
+    return f"auto_{h}"
+
+
 def split_scoring_block(
     block: str | dict[str, str] | None,
-) -> tuple[str | None, str | None]:
-    """Normalize the campaign ``scoring`` field to ``(per_query, per_round)``.
+) -> ScoringSpec:
+    """Normalize the campaign ``scoring`` field to ``(per_query, per_round, scorer_id)``.
 
-    Three accepted shapes:
+    Accepted shapes:
 
-    - ``None`` / ``""`` → ``(None, None)`` (defaults apply downstream)
-    - ``str`` → legacy shorthand, interpreted as ``per_query`` only
-    - ``dict`` → ``{"per_query": ..., "per_round": ...}``; missing keys
-      become ``None``.
+    - ``None`` / ``""`` → ``(None, None, "default_hit")``.
+    - ``str`` → shorthand, interpreted as ``per_query``; id auto-derived.
+    - ``dict`` → ``{"id": ..., "per_query": ..., "per_round": ...}``;
+      missing ``per_query``/``per_round`` become ``None``; missing
+      ``id`` auto-derived from ``per_query``.
     """
     if isinstance(block, dict):
-        return block.get("per_query"), block.get("per_round")
+        per_query = block.get("per_query")
+        per_round = block.get("per_round")
+        scorer_id = block.get("id") or auto_scorer_id(per_query)
+        return ScoringSpec(per_query, per_round, scorer_id)
     if isinstance(block, str) and block:
-        return block, None
-    return None, None
+        return ScoringSpec(block, None, auto_scorer_id(block))
+    return ScoringSpec(None, None, DEFAULT_SCORER_ID)

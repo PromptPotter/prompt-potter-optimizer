@@ -74,6 +74,24 @@ def build_parser() -> argparse.ArgumentParser:
         "trial index, and loads trial_N as the restart baseline. Omit to "
         "resume from the latest completed round (default).",
     )
+    p_opt.add_argument(
+        "--no-divergence-check",
+        dest="no_divergence_check",
+        action="store_true",
+        help="On resume, rescore cached traces under the current scorer "
+        "but skip the decision-replay halt — continue even if a prior "
+        "round's winner would flip under the new policy. Use when you "
+        "accept that historical trajectory stays as-recorded.",
+    )
+
+    sub.add_parser(
+        "fork",
+        help="Branch the active cycle at the last-detected divergence "
+        "point; mints a new cycle_id with a parent pointer and resets "
+        "the active-session pointer to it. Requires fork_hint.json in "
+        "the current campaign (written when `optimize` halts on "
+        "ResumeDivergenceError).",
+    )
 
     p_ctl = sub.add_parser("control", help="Write control signal to dashboard")
     p_ctl.add_argument(

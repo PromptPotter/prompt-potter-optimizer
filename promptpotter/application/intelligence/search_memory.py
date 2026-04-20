@@ -20,6 +20,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -497,10 +498,27 @@ class SearchMemory:
 
     # --- Lifecycle ---
 
-    def refresh(self, store: Stores, backend_id: str) -> bool:
-        """Incrementally update from new dataset runs; returns True if anything was added."""
+    def refresh(
+        self,
+        store: Stores,
+        backend_id: str,
+        scorer: Scorer | None = None,
+        scorer_id: str = "none",
+        scorer_formula: str | None = None,
+    ) -> bool:
+        """Incrementally update from new dataset runs; returns True if anything was added.
+
+        When *scorer* is given, each run's items are rescored under
+        *scorer_id* before ingest — historical ``hit`` values on disk are
+        a stale view; the active policy re-derives them and writes into
+        the per-item ``scored`` audit map. Without a scorer, persisted
+        values are used as-is (tests, legacy callers).
+        """
         added = 0
         for run_id, detail in store.dataset_runs.load_since(backend_id, self._watermark):
+            if scorer is not None:
+                items = detail.get("dataset_run_items") or []
+                rescore_results(items, scorer, scorer_id, scorer_formula)
             self._ingest_run(detail)
             self._watermark.add(run_id)
             added += 1
@@ -529,7 +547,21 @@ class SearchMemory:
 
         backend_id = env.scoring_ctx.backend_id if env.scoring_ctx else ""
         store = env.scoring_ctx.store if env.scoring_ctx else None
-        if store and backend_id and self.refresh(store, backend_id):
+        sc = env.scoring_ctx
+        scorer = sc.scorer if sc else None
+        scorer_id = sc.scorer_id if sc else "none"
+        scorer_formula = sc.scorer_formula if sc else None
+        if (
+            store
+            and backend_id
+            and self.refresh(
+                store,
+                backend_id,
+                scorer=scorer,
+                scorer_id=scorer_id,
+                scorer_formula=scorer_formula,
+            )
+        ):
             if round_num > 0 and round_num % 5 == 0 and self.recompute_failure_group_correlations():
                 logger.info(
                     "SearchMemory: recomputed failure group correlations at round %d",
@@ -589,13 +621,22 @@ class SearchMemory:
         cls,
         store: Stores | None,
         backend_id: str,
+        scorer: Scorer | None = None,
+        scorer_id: str = "none",
+        scorer_formula: str | None = None,
     ) -> SearchMemory | None:
         """Load + refresh; returns ``None`` when ``store`` or ``backend_id`` is missing."""
         if not (store and backend_id):
             return None
         path = Path(store.base_dir) / "library" / "search_memory.json"
         mem = cls.load(path)
-        if mem.refresh(store, backend_id):
+        if mem.refresh(
+            store,
+            backend_id,
+            scorer=scorer,
+            scorer_id=scorer_id,
+            scorer_formula=scorer_formula,
+        ):
             mem.save(path)
         return mem
 

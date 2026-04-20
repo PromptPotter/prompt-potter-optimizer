@@ -470,7 +470,41 @@ python -m promptpotter optimize
 python -m promptpotter optimize --from 2
 ```
 
-Forking across cycles (new `cycle_id`, parent pointer, independent trajectory) is not a supported primitive — if you need that, copy the campaign directory to a new name before running. The complexity was not worth the WAL it required.
+## Data vs. scoring policy
+
+A trace is a record of what the pipeline did — the query, the prediction, the ground truth, how nodes ranked candidates, what timed out. A score is a judgment *over* a trace — "how good was this?" — and the answer changes with what you're optimizing for. The two belong to different worlds: the trace is a fact, the score is a policy, and conflating them is how campaigns end up silently drifting when a scoring formula is edited mid-flight.
+
+PromptPotter keeps them separate. Traces are written once and never edited. Scores are a view, produced by applying the active scoring policy on demand.
+
+### Traces carry a ledger of scores
+
+Since a trace can be judged under many policies, each telling a different story, we persist scores as a ledger rather than a single slot. Every time a trace is evaluated, the result is written alongside the identity of the scorer that produced it — a name the user chooses in `campaign.json`, or an auto-derived hash of the formula when they don't. The ledger grows; past interpretations stay retrievable. Two cycles sharing the same trace corpus but running under different scorers each see their own reading of the same underlying data, without corrupting each other.
+
+Cycle identity reflects this split. A cycle is hashed from its pipeline, prompts, and dataset — the things that determine what traces it produces — and deliberately not from its scoring formula. Editing the formula doesn't mint a new cycle; the traces it produces are still addressable in the shared corpus, and their ledgers simply gain another entry.
+
+### Rescore-on-load
+
+The separation is enforced at one seam: whenever a trace crosses from disk into memory, it gets rescored under the currently active scorer. Fresh samples, cache hits, trial reloads, cross-campaign memory ingest — all four paths go through the same rescoring step. This is what makes stale numbers structurally impossible. The `hit` and `score` fields you read at runtime are always the current policy's view, even if the trace itself was captured under an older one.
+
+## Decision-replay and fork
+
+### Decisions are pure functions of scored results
+
+The optimizer's choices — which candidate wins a round, which ones get eliminated early, when to escalate from L1 to L2 — all derive from scored numbers. No hidden state, no scorer-invisible preferences. That makes them replayable: the same decision function, given freshly rescored inputs, will produce whatever outcome those inputs justify.
+
+When a campaign commits a decision, it also records that decision — its kind, enough to re-derive it, and the outcome it reached. On resume, after rescoring prior trials under the current scorer, the optimizer walks each recorded decision and re-runs the corresponding decision function against the rescored view. If the re-run matches the record, that round stands; if it differs, that's the divergence point — the first place the current policy would have sent the campaign somewhere other than where it actually went.
+
+At the first divergence, the campaign stops. Nothing is broken: the traces are intact, the recorded decisions are historically accurate, and both policies have valid readings of the same data. The halt exists to prevent silent drift onto a path the current scorer no longer chooses. The user sees a concrete report — round, decision kind, recorded outcome, current outcome — and decides how to proceed. An opt-out exists for exploratory work where the halt isn't wanted; it leaves the rescoring in place and only suppresses the stop.
+
+### Fork commits to the new policy
+
+If the user wants the new scoring policy to continue, `fork` mints a new cycle rooted at the divergence point with a pointer back to its parent. Trials up to the divergence round are copied into the new tree; the shared trace data stays where it is in the corpus. The old cycle is left untouched — its trials, its decisions, its history all stand exactly as they were, readable and rescorable. From the fork point forward, the new cycle makes its decisions under the current scorer; the old cycle remains the record of what happened under the original one.
+
+Past decisions under the old scorer aren't retroactively corrected. Fork doesn't rewrite the past — it just says, from here on, something different is going to happen. Both cycles' trajectories are retrievable side by side, grounded in the same traces, and neither lies about the policy that produced it.
+
+### Why the mechanism is durable
+
+The replay-and-fork machinery treats decision *kinds* as opaque. It doesn't know what "round winner" or "elimination cut" means at the domain level — it only knows that each decision has an identity, stored inputs, and a way to re-derive its outcome. Adding a new kind of decision is additive: write it as a function of scored results, register a way to rerun it, and everything else — resume, divergence detection, fork — works without changes.
 
 ## Key Files
 

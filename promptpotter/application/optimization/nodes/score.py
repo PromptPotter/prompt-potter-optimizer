@@ -51,6 +51,9 @@ class L1ScoringResult(BaseModel):
     degraded_queries: int = 0
     # Named evaluator values for the winner — populated from the registry.
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
+    # Decision records produced during this L1 scoring pass (round_winner
+    # and any elimination cuts fired). Flow through to RoundResult.decisions.
+    decisions: list[dict] = Field(default_factory=list)
 
     # Populated post-eval by round_execution (critique phase)
     critique_text: str = ""
@@ -550,8 +553,26 @@ async def l1_score(
         round_scorer=ctx.round_scorer,
     )
 
-    # Reuse pre-computed merged params for winner (no re-merge needed)
+    # Record the winner-selection decision for divergence replay. Pointers
+    # only (candidate ids + baseline-beat threshold); replayer re-derives
+    # per-candidate accuracies from the rescored trial.
+    from promptpotter.application.campaign.decisions import record_decision
+
+    decisions: list[dict] = []
     w_idx = winner_entry["winner_idx"]
+    winner_id = evaluated_candidates[w_idx].id if w_idx is not None and evaluated_candidates else ""
+    record_decision(
+        decisions,
+        "round_winner",
+        {
+            "candidate_ids": [c.id for c in evaluated_candidates],
+            "current_best_accuracy": cb["accuracy"],
+            "round_num": round_num,
+        },
+        winner_id,
+    )
+
+    # Reuse pre-computed merged params for winner (no re-merge needed)
     winner_pp = merged_pp[w_idx] if w_idx is not None else pipeline_params
 
     winner_osp: OptSearchPoint = winner_entry["prompt_fields"]
@@ -576,4 +597,5 @@ async def l1_score(
         escalation_signal=escalation_signal,
         degraded_queries=count_degraded_queries(winner_entry.get("results", [])),
         winner_evaluators=dict(winner_entry.get("evaluators") or {}),
+        decisions=decisions,
     )

@@ -10,6 +10,8 @@ PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipe
 
 **Self-healing optimization — two rails.** Failures attach to the candidate that produced them (per-candidate `OptSearchPoint.memory`), never to the round. Rail 1 (`ValidationFailure`, pre-eval): L2 teaches L1 what not to propose. Rail 2 (`RuntimeFailure`, mid-eval): L2 adjusts its own strategy; L3 replans if the pattern persists. Full mechanics in [`docs/architecture/optimization.md § Self-healing optimization`](docs/architecture/optimization.md).
 
+**Data vs. scoring policy — rescore-on-load + decision-replay + fork.** Traces are facts; scores are policy. Each trace carries a ledger of `{scorer_id: {score, hit, formula}}`; every load boundary rescores under the active scorer. On resume, recorded decisions (round winner, …) are replayed against rescored inputs — first mismatch halts with a fork hint. `python -m promptpotter fork` mints a new cycle rooted at the divergence point with a `parent_cycle_id` pointer. Full mechanics in [`docs/architecture/optimization.md § Data vs. scoring policy`](docs/architecture/optimization.md).
+
 ## Commands
 
 ```bash
