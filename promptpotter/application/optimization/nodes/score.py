@@ -588,9 +588,12 @@ async def l1_score(
     )
 
     # Record the winner-selection decision for divergence replay. Pointers
-    # only (candidate ids + baseline-beat threshold); replayer re-derives
-    # per-candidate accuracies from the rescored trial. ``decisions`` may
-    # already contain elimination_cut records from ``_score_candidates``.
+    # only — replayer re-derives the beat-threshold from the prior trial's
+    # rescored winner results (or the rescored baseline for round 0), and
+    # per-candidate accuracies from the rescored ``all_candidate_results``.
+    # The recorded threshold lives in ``data=`` as a forensic anchor only.
+    # ``decisions`` may already contain elimination_cut records from
+    # ``_score_candidates``.
     from promptpotter.application.campaign.decisions import record_decision
 
     w_idx = winner_entry["winner_idx"]
@@ -600,10 +603,10 @@ async def l1_score(
         "round_winner",
         {
             "candidate_ids": [c.id for c in evaluated_candidates],
-            "current_best_accuracy": cb["accuracy"],
             "round_num": round_num,
         },
         winner_id,
+        data={"current_best_accuracy_at_record": cb["accuracy"]},
     )
 
     # Reuse pre-computed merged params for winner (no re-merge needed)

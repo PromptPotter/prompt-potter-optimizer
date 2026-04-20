@@ -97,10 +97,15 @@ class ReplayContext:
 
     ``prior_trials`` carries earlier rounds (same rescoring applied) for
     decisions that span multiple rounds (L2/L3 improvement-gate triggers).
+
+    ``baseline_results`` is the per-query baseline evaluation list
+    (rescored under the active scorer) — the round-0 predecessor for
+    threshold derivation when ``prior_trials`` is empty.
     """
 
     trial: dict[str, Any]
     prior_trials: list[dict[str, Any]] = field(default_factory=list)
+    baseline_results: list[dict[str, Any]] = field(default_factory=list)
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
@@ -145,6 +150,7 @@ def record_decision(
 def replay_decisions(
     trial: dict[str, Any],
     prior_trials: list[dict[str, Any]] | None = None,
+    baseline_results: list[dict[str, Any]] | None = None,
 ) -> Divergence | None:
     """Walk ``trial['decisions']`` in order; return the first mismatch.
 
@@ -152,8 +158,15 @@ def replay_decisions(
     are silently skipped — forward-compat. A decision whose replayer
     raises is treated as a non-divergence (``logged, continue``); hard
     failures belong in the scorer or replayer itself, not here.
+
+    ``baseline_results`` threads the rescored baseline to replayers that
+    need a round-0 threshold (currently ``round_winner``).
     """
-    ctx = ReplayContext(trial=trial, prior_trials=list(prior_trials or []))
+    ctx = ReplayContext(
+        trial=trial,
+        prior_trials=list(prior_trials or []),
+        baseline_results=list(baseline_results or []),
+    )
     for rec in trial.get("decisions") or []:
         kind = rec.get("kind", "")
         fn = REPLAYERS.get(kind)
@@ -196,20 +209,28 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive the round's winner id from rescored per-candidate results.
 
     Mirrors ``_select_round_winner`` in ``application/optimization/nodes/score.py``:
-    pick the candidate whose rescored mean score beats
-    ``current_best_accuracy`` by more than the nothing (strict >), else
-    the recorded current-best wins (outcome ``""``).
+    both sides compare candidates on ``mean(score)`` with strict ``>``.
+    ``improvement_threshold`` only affects the node's ``improved`` display
+    flag, not winner selection.
 
-    ``inputs_ref`` carries:
+    The beat-threshold is **derived**, never read from ``inputs_ref`` —
+    a stale persisted threshold (computed under the old scorer) would
+    manufacture false divergences. Derivation order:
 
-    - ``candidate_ids``: list of candidate ids evaluated this round.
-    - ``current_best_accuracy``: float — baseline-or-prior-winner score.
+    - If ``prior_trials`` is non-empty: mean of the most recent prior
+      trial's rescored winner results (``trial['results']``).
+    - Else: mean of the rescored baseline results
+      (``ctx.baseline_results``).
 
-    Reads ``trial['all_candidate_results']`` — per-candidate result lists,
+    ``inputs_ref`` carries only ``candidate_ids`` (pointers). Reads
+    ``trial['all_candidate_results']`` — per-candidate result lists,
     already rescored under the active scorer at trial-load time.
     """
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
-    best_acc = float(inputs_ref.get("current_best_accuracy", 0.0))
+    if ctx.prior_trials:
+        best_acc = _mean_score(list(ctx.prior_trials[-1].get("results") or []))
+    else:
+        best_acc = _mean_score(list(ctx.baseline_results))
     winner_id = ""
     for cid in inputs_ref.get("candidate_ids") or []:
         acc = _mean_score(all_results.get(cid) or [])

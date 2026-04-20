@@ -160,6 +160,7 @@ class ScoringEnv:
         scoring_formula: str | None,
         scoring_round_formula: str | None = None,
         scorer_id: str | None = None,
+        source: str = "optimization_loop",
     ) -> ScoringEnv:
         """Build a ScoringEnv for an optimization-loop run.
 
@@ -185,7 +186,7 @@ class ScoringEnv:
             backend_id=backend_id,
             pipeline_schema=pipeline_schema,
             obs=obs,
-            source="optimization_loop",
+            source=source,
             experiment_id=derived_experiment_id,
             max_consecutive_errors=max_consecutive_errors,
             stale_data_load_protocol=stale_data_load_protocol,
@@ -193,6 +194,43 @@ class ScoringEnv:
             scorer_id=scorer_id or auto_scorer_id(scoring_formula),
             scorer_formula=scoring_formula,
             round_scorer=round_scorer,
+        )
+
+    @classmethod
+    def for_baseline(
+        cls,
+        backend_client: QueryRunner,
+        store: Stores | None,
+        backend_id: str,
+        pipeline_schema: PipelineSchema | None,
+        obs: ObservabilityBridge | None,
+        *,
+        scoring_formula: str | None,
+        scoring_round_formula: str | None = None,
+        scorer_id: str | None = None,
+    ) -> ScoringEnv:
+        """Build a ScoringEnv for baseline scoring (phase 0 of ``optimize``).
+
+        Thin delegation to ``for_loop`` — keeps one source of truth for the
+        scorer-trio compilation. The three hard-defaults below are the only
+        baseline-specific divergences (baseline runs before ``cycle_id`` is
+        bound and on a small scoring set, so it doesn't carry the loop's
+        cycle-derived ``experiment_id`` or stale-data protocol).
+        """
+        return cls.for_loop(
+            backend_client,
+            store,
+            backend_id,
+            pipeline_schema,
+            obs,
+            experiment_id="",
+            cycle_id=None,
+            max_consecutive_errors=3,
+            stale_data_load_protocol=None,
+            scoring_formula=scoring_formula,
+            scoring_round_formula=scoring_round_formula,
+            scorer_id=scorer_id,
+            source="baseline",
         )
 
 

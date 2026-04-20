@@ -110,6 +110,42 @@ def test_replay_decisions_flags_round_winner_divergence() -> None:
     assert div.round_num == 3
 
 
+def test_replay_round_winner_uses_rescored_baseline_not_stale_threshold() -> None:
+    """A uniform rescaling of scores (B = A/2 everywhere) must not flag
+    divergence: both baseline and candidates shrink proportionally, so the
+    recorded winner stays the winner. The stale ``current_best_accuracy``
+    stored in inputs_ref under scorer A would have survived into the
+    replayer and fabricated a divergence — this regression test pins the
+    fix that derives the beat-threshold from the rescored baseline."""
+
+    def _r(score: float) -> dict:
+        return {"query": "q", "predicted": "p", "ground_truth": "g", "score": score, "hit": False}
+
+    trial = {
+        "round": 0,
+        "all_candidate_results": {
+            # Under scorer B (rescaled /2), c1 beats rescored baseline (0.4)
+            # cleanly; c2 loses. Recorded winner was c1 under scorer A,
+            # still c1 under B.
+            "c1": [_r(0.5), _r(0.5)],
+            "c2": [_r(0.1), _r(0.1)],
+        },
+        "decisions": [
+            {
+                "kind": "round_winner",
+                # The stale threshold (0.8, under the OLD scorer A) is now
+                # in ``data`` — the replayer must ignore it and derive its
+                # own threshold from the rescored baseline.
+                "inputs_ref": {"candidate_ids": ["c1", "c2"], "round_num": 0},
+                "outcome": "c1",
+                "data": {"current_best_accuracy_at_record": 0.8},
+            }
+        ],
+    }
+    rescored_baseline = [_r(0.4), _r(0.4)]
+    assert replay_decisions(trial, baseline_results=rescored_baseline) is None
+
+
 def test_replay_decisions_returns_none_when_outcome_matches() -> None:
     def _r(score: float) -> dict:
         return {

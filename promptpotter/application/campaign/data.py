@@ -91,13 +91,14 @@ async def _run_baseline_scoring(
     obs: Any | None = None,
     pipeline_schema: Any | None = None,
     scoring_formula: str | None = None,
+    scoring_round_formula: str | None = None,
+    scorer_id: str | None = None,
 ) -> tuple[list, list]:
     """Score the baseline prompt and build initial campaign_rounds list."""
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.shared.errors import graceful
-    from promptpotter.shared.scoring import compile_scorer
 
     backend_client = session.backend_client
     store = session.store
@@ -128,14 +129,17 @@ async def _run_baseline_scoring(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    ctx = ScoringEnv(
-        backend_client=backend_client,
-        store=store,
-        backend_id=backend_id,
-        pipeline_schema=pipeline_schema,
-        obs=obs,
-        source="baseline",
-        scorer=compile_scorer(scoring_formula),
+    # Go through ScoringEnv.for_baseline so the trace's ``scored`` audit
+    # map is keyed by the active scorer_id, matching the loop's bookkeeping.
+    ctx = ScoringEnv.for_baseline(
+        backend_client,
+        store,
+        backend_id,
+        pipeline_schema,
+        obs,
+        scoring_formula=scoring_formula,
+        scoring_round_formula=scoring_round_formula,
+        scorer_id=scorer_id,
     )
 
     # Wrap the listener with baseline pseudo-candidate coords (ci=0/ct=1) so
@@ -240,14 +244,16 @@ async def prepare_scoring_context(
             from promptpotter.shared.scoring import split_scoring_block
 
             logger.info(label)
-            query_formula = split_scoring_block(campaign_config.scoring).per_query
+            spec = split_scoring_block(campaign_config.scoring)
             campaign_rounds, baseline_results = await _run_baseline_scoring(
                 baseline,
                 eval_dataset,
                 svc,
                 pipeline_params=pipeline_params,
                 pipeline_schema=pipeline_schema,
-                scoring_formula=query_formula,
+                scoring_formula=spec.per_query,
+                scoring_round_formula=spec.per_round,
+                scorer_id=spec.scorer_id,
                 listener=listener,
                 obs=obs,
             )

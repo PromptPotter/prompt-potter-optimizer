@@ -469,9 +469,25 @@ def _resume_with_divergence_check(
                 scoring_ctx.scorer_formula,
             )
 
+    # Rescore the baseline too — round 0's replay_round_winner needs the
+    # rescored baseline as its beat-threshold. ``state.current_results``
+    # holds the baseline at walker-entry (restore_from_trial hasn't fired
+    # yet). Safe to rescore in place; LoopState holds the same list.
+    baseline_results_rescored = list(state.current_results or [])
+    rescore_results(
+        baseline_results_rescored,
+        scoring_ctx.scorer,
+        scoring_ctx.scorer_id,
+        scoring_ctx.scorer_formula,
+    )
+
     if not skip_divergence_check:
         for i, t in enumerate(prior):
-            div = replay_decisions(t, prior_trials=prior[:i])
+            div = replay_decisions(
+                t,
+                prior_trials=prior[:i],
+                baseline_results=baseline_results_rescored,
+            )
             if div is None:
                 continue
             fork_hint = {

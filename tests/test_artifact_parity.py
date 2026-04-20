@@ -320,3 +320,110 @@ def test_control_surface_l2_pause(session_and_campaign_dirs: tuple[Path, Path]) 
     surface = CampaignControlReader(session_dir)
     assert surface.check("after_round") is None
     assert surface.check("before_l2_scoring") == "pause"
+
+
+def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
+    """FileSink's Langfuse shadow must be wire-format compatible: camelCase
+    fields on observations/scores, and nested spans carry parentObservationId.
+
+    A JSON from ``campaigns/{cycle_id}/langfuse/`` should be uploadable to
+    Langfuse's ingestion API without a transform pass.
+    """
+    from promptpotter.infrastructure.tracing.events import (
+        CampaignEnd,
+        CampaignStart,
+        NodeEnd,
+        NodeStart,
+        RoundEnd,
+        RoundStart,
+    )
+    from promptpotter.infrastructure.tracing.sinks.file_sink import FileSink
+
+    tenant_root = tmp_path / "default"
+    tenant_root.mkdir()
+    sink = FileSink(str(tenant_root), backend_id="bk_test")
+
+    cycle_id = "cycle_wire_parity"
+    campaign_id = "cmp_wire_parity"
+
+    sink.handle(
+        CampaignStart(
+            campaign_id=campaign_id,
+            config={"max_rounds": 1},
+            baseline_accuracy=0.5,
+            session_id=cycle_id,
+        )
+    )
+    sink.handle(RoundStart(campaign_id=campaign_id, round_num=0))
+    sink.handle(
+        NodeStart(
+            campaign_id=campaign_id,
+            round_num=0,
+            node_id="l1_generate",
+            node_type="llm",
+            obs_type="generation",
+            input_data={"prompt": "hello"},
+        )
+    )
+    sink.handle(
+        NodeEnd(
+            campaign_id=campaign_id,
+            round_num=0,
+            node_id="l1_generate",
+            output_data={"text": "world"},
+        )
+    )
+    sink.handle(
+        RoundEnd(
+            campaign_id=campaign_id,
+            round_num=0,
+            accuracy=0.7,
+            hits=7,
+            total=10,
+            improved=True,
+            winner_prompt_fields_id="abc",
+            candidate_scores=[{"candidate": "c0", "accuracy": 0.7}],
+            next_action="continue",
+        )
+    )
+    sink.handle(
+        CampaignEnd(
+            campaign_id=campaign_id,
+            best_accuracy=0.7,
+            n_rounds=1,
+            stop_reason="max_rounds",
+            best_round=0,
+        )
+    )
+
+    campaign_root = tenant_root / "campaigns" / cycle_id
+
+    trace_files = list((campaign_root / "langfuse" / "traces").glob("*.json"))
+    assert len(trace_files) == 1
+    trace_id = json.loads(trace_files[0].read_text())["id"]
+
+    obs_dir = campaign_root / "langfuse" / "observations" / trace_id
+    observations = [json.loads(p.read_text()) for p in obs_dir.glob("*.json")]
+    assert len(observations) == 2, "round + node observation expected (single obs per round)"
+
+    for obs in observations:
+        assert "traceId" in obs and obs["traceId"] == trace_id
+        assert "startTime" in obs
+        assert "endTime" in obs
+        for snake in ("trace_id", "start_time", "end_time"):
+            assert snake not in obs, f"snake_case field {snake!r} leaked into {obs['name']}"
+
+    round_obs = next(o for o in observations if o["name"].startswith("round_"))
+    node_obs = next(o for o in observations if o["name"] == "l1_generate")
+    assert "parentObservationId" not in round_obs, "round span has no parent (trace-level)"
+    assert node_obs["parentObservationId"] == round_obs["id"], "node must nest under round"
+
+    score_files = list((campaign_root / "langfuse" / "scores").glob("*.jsonl"))
+    assert score_files, "at least one score jsonl expected"
+    scores = [json.loads(line) for p in score_files for line in p.read_text().splitlines() if line]
+    assert scores, "at least one score entry expected"
+    for score in scores:
+        assert "traceId" in score and score["traceId"] == trace_id
+        assert "dataType" in score
+        for snake in ("trace_id", "data_type"):
+            assert snake not in score, f"snake_case field {snake!r} leaked into score"
