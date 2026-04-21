@@ -1,12 +1,4 @@
-"""Pure compute functions backing the evaluator registry.
-
-Every ``_compute_*`` function is pure (keyword-only, no I/O, no
-mutation) and returns a float. They're referenced by name from
-``evaluators._REGISTRY``.
-
-Adding a new evaluator = write a ``_compute_*`` here, then register it in
-``evaluators.py``.
-"""
+"""Pure keyword-only compute functions referenced by ``evaluators._REGISTRY``."""
 
 from __future__ import annotations
 
@@ -19,9 +11,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryResult
 
 
-# Latency budget for the ``latency_norm`` evaluator. Mean latency ≥ this
-# contributes 0; ≤ 0 contributes 1.0. Kept here so the composite math that
-# used to live in ``metrics.py`` has one home.
+# Latency budget for ``latency_norm``: ≥ budget → 0.0, ≤ 0 → 1.0.
 LATENCY_BUDGET_MS = 10_000.0
 
 
@@ -40,11 +30,6 @@ __all__ = [
     "compute_source_recall",
     "has_limit_node",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Core per-round computes.
-# ---------------------------------------------------------------------------
 
 
 def compute_accuracy(*, results: list[QueryResult], **_: Any) -> float:
@@ -93,11 +78,6 @@ def compute_latency_norm(*, results: list[QueryResult], **_: Any) -> float:
         return 1.0
     mean_ms = sum(latencies) / len(latencies)
     return max(0.0, 1.0 - mean_ms / LATENCY_BUDGET_MS)
-
-
-# ---------------------------------------------------------------------------
-# Node-type-bound computes.
-# ---------------------------------------------------------------------------
 
 
 def _extract_candidate_label(c: Any) -> str:
@@ -157,11 +137,6 @@ def compute_cache_hit_rate(*, results: list[QueryResult], node: PipelineNode, **
         if (pd.get("step_timings") or {}).get(node.name) is not None:
             cache_hits += 1
     return cache_hits / non_error if non_error else 0.0
-
-
-# ---------------------------------------------------------------------------
-# Retrieval shortfall + pipeline compactness.
-# ---------------------------------------------------------------------------
 
 
 _LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_tokens")
@@ -231,19 +206,9 @@ def compute_mean_retrieval_shortfall(
 
 
 def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
-    """Return ``1 - (active_steps - 1) / (max(active_steps, 1) - 1)``.
-
-    Smaller pipelines score higher (more compact). For a single-node pipeline
-    compactness is 1.0. The cycle-wide baseline used to live in a comment in
-    the plan; in practice we anchor to the schema itself (``len(active_steps)``
-    vs. 1), which keeps the signal meaningful across datasets with very
-    different pipeline depth.
-    """
+    """Smaller pipelines score higher; single-node = 1.0, worst-case anchored at 12 nodes."""
     n = len(schema.active_steps)
     if n <= 1:
         return 1.0
-    # Anchor at 12 node pipelines as the worst case — tuned to produce a
-    # graceful slope for real pipelines (2-6 nodes). Cycle-wide calibration
-    # can replace this anchor when a campaign accumulates multi-pipeline data.
     worst = 12
     return max(0.0, 1.0 - (n - 1) / (worst - 1))

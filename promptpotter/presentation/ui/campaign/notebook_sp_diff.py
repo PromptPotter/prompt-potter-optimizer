@@ -1,15 +1,4 @@
-"""SearchPoint diff — mutable display state + 3-column flattened diff.
-
-``_CycleDisplayState`` is the per-cycle mutable dict threaded through the
-phase-handler closures in ``notebook_phase``. It holds round metadata
-(round number, max rounds, patience) and three snapshots of the
-SearchPoint's flattened dot-notation dict (``original`` / ``previous`` /
-``current``) so the render code can diff them without peeking at service
-state.
-
-``_print_sp_diff`` is the shared table renderer — it de-duplicates long
-values into ``[a]``/``[b]`` lookup codes and groups rows by pipeline node.
-"""
+"""SearchPoint diff state + 3-column flattened diff table for phase-handler display."""
 
 from __future__ import annotations
 
@@ -35,37 +24,23 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Display state — tracks cycle metadata across phase callbacks (display-only)
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class _CycleDisplayState:
-    """Mutable display state threaded through phase/callback closures.
-
-    Populated exclusively from PhaseEvent data — never touches services.
-    """
+    """Mutable display state threaded through phase/callback closures (populated from PhaseEvents)."""
 
     max_rounds: int = 0
     patience: int = 0
     l1_stall_count: int = 0
     round_num: int = 0
     baseline_accuracy: float = 0.0
-    baseline_total: int = 0  # sample count for significance tests
-    candidates_meta: list = field(default_factory=list)  # from l1_generate exit
-    n_scoring_queries: int = 0  # from generate:exit, used in evaluate:enter banner
-    current_pipeline_params: dict | None = None  # raw pp for candidate eval callback
-    # 3-column SP diff tracking (flattened dot-notation dicts)
+    baseline_total: int = 0
+    candidates_meta: list = field(default_factory=list)
+    n_scoring_queries: int = 0
+    current_pipeline_params: dict | None = None
     original_sp_flat: dict[str, str] = field(default_factory=dict)
     previous_sp_flat: dict[str, str] = field(default_factory=dict)
     current_sp_flat: dict[str, str] = field(default_factory=dict)
     node_param_keys: dict[str, list[str]] | None = None
-
-
-# ---------------------------------------------------------------------------
-# SP flatten + diff helpers
-# ---------------------------------------------------------------------------
 
 
 def _flatten_sp_summary(

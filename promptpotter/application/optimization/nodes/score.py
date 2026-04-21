@@ -1,19 +1,4 @@
-"""L1 scoring — top-level orchestrator.
-
-Drives a round of the feedback loop:
-
-1. ``parse_candidates`` — normalize raw candidates into ``OptSearchPoint``
-   objects, attach ``ValidationFailure`` entries on invalid overrides.
-2. ``score_candidates`` — dispatch each candidate over three exit paths
-   (validation-skip / cache-hit / scored) and collect per-candidate reports.
-3. ``select_round_winner`` — pick the winner on accuracy, with composite
-   as secondary metric.
-4. ``record_decision("round_winner")`` — append a divergence-gated entry so
-   rescore-on-load can replay the selection.
-
-The measurement plumbing lives in ``candidate_measurement``; winner
-selection lives in ``winner_selection``. Each file owns one concern.
-"""
+"""L1 scoring orchestrator: parse → score → select winner → record decision."""
 
 from __future__ import annotations
 
@@ -123,8 +108,6 @@ async def l1_score(
         round_scorer=ctx.round_scorer,
     )
 
-    # Decision is divergence-gated on candidate_ids + round_num; recorded
-    # threshold in data= is forensic only (replayer re-derives it).
     from promptpotter.application.campaign.decisions import record_decision
 
     w_idx = winner_entry["winner_idx"]
@@ -141,28 +124,30 @@ async def l1_score(
     )
 
     winner_pp = merged_pp[w_idx] if w_idx is not None else pipeline_params
-
     winner_osp: OptSearchPoint = winner_entry["prompt_fields"]
-    winner_dict = winner_osp.prompt_field_dict()
-    winner_dict["id"] = winner_osp.id
-    winner_dict["parent_id"] = winner_osp.parent_id
-    winner_dict["changes_description"] = winner_osp.changes_description
+    winner_results = winner_entry["results"]
+    winner_dict = {
+        **winner_osp.prompt_field_dict(),
+        "id": winner_osp.id,
+        "parent_id": winner_osp.parent_id,
+        "changes_description": winner_osp.changes_description,
+    }
     return L1ScoringResult(
         label=winner_entry["label"],
         winner_osp=winner_osp,
         winner_prompt_fields=winner_dict,
         winner_pipeline_params=winner_pp,
         winner_accuracy=winner_entry["accuracy"],
-        winner_composite=winner_entry.get("composite", winner_entry["accuracy"]),
+        winner_composite=winner_entry["composite"],
         hits=winner_entry["hits"],
         total=winner_entry["total"],
         improved=winner_entry["improved"],
         candidates_scored=winner_entry["candidates_scored"],
         candidate_scores=candidate_scores,
-        winner_results=winner_entry.get("results", []),
-        all_candidate_results=dict(all_candidate_results),
+        winner_results=winner_results,
+        all_candidate_results=all_candidate_results,
         escalation_signal=escalation_signal,
-        degraded_queries=count_degraded_queries(winner_entry.get("results", [])),
-        winner_evaluators=dict(winner_entry.get("evaluators") or {}),
+        degraded_queries=count_degraded_queries(winner_results),
+        winner_evaluators=winner_entry["evaluators"],
         decisions=decisions,
     )

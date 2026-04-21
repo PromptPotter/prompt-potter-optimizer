@@ -1,21 +1,10 @@
-"""Evaluator registry + adaptors + compile_round_scorer.
-
-Covers the migration invariants:
-- Every existing scoring signal is a registry entry and returns the same
-  value the pre-migration code produced.
-- The default per-round formula reproduces today's composite math on the
-  signals that apply to a given schema.
-- The three adaptor methods (DSPy, pydantic-evals, Langfuse) route through
-  a single ``compute`` per evaluator.
-- ``compile_round_scorer`` fails loud on undefined names in a formula.
-"""
+"""Evaluator registry + materialization + compile_round_scorer invariants."""
 
 from __future__ import annotations
 
 import pytest
 
 from promptpotter.application.scoring.evaluators import (
-    Evaluator,
     all_evaluators,
     default_per_round_formula,
     materialize_round_values,
@@ -213,96 +202,6 @@ def test_composite_zeroed_on_validation_failure():
     )
     scored = compute_composite_score(results, schema, opt_sp=fake_opt_sp)
     assert scored["composite"] == 0.0
-
-
-# ---------------------------------------------------------------------------
-# Adaptors — DSPy, pydantic-evals, Langfuse
-# ---------------------------------------------------------------------------
-
-
-def _retrieval_shortfall_evaluator() -> Evaluator:
-    return next(ev for ev in all_evaluators() if ev.name == "retrieval_shortfall")
-
-
-def test_dspy_adaptor_runs_on_per_query():
-    ev = next(ev for ev in all_evaluators() if ev.scope == "per_query")
-    # Build a minimal result-shaped gold/pred that compute can handle.
-    gold = {
-        "query": "q",
-        "ground_truth": "gt",
-        "pipeline_data": {"final_ranking": [{"candidate": "gt"}]},
-    }
-    pred = {"predicted": "gt", "hit": True, "score": 1.0}
-    value = ev(gold=gold, pred=pred)
-    assert isinstance(value, float)
-    # schema arg is missing for the DSPy adaptor path — retrieval_shortfall
-    # returns 1.0 when schema is None (no limits to check), which is fine.
-
-
-def test_dspy_adaptor_rejects_per_round_evaluator():
-    ev = next(ev for ev in all_evaluators() if ev.name == "accuracy")
-    with pytest.raises(ValueError, match="per-round"):
-        ev(gold={}, pred={})
-
-
-def test_pydantic_evals_adaptor_shape():
-    from types import SimpleNamespace
-
-    ev = next(ev for ev in all_evaluators() if ev.scope == "per_query")
-    ctx = SimpleNamespace(
-        inputs={"query": "q", "pipeline_data": {"final_ranking": []}},
-        output={"predicted": "gt", "hit": True, "score": 1.0},
-        expected_output="gt",
-    )
-    out = ev.evaluate(ctx)
-    assert isinstance(out, dict)
-    assert ev.name in out
-    assert isinstance(out[ev.name], float)
-
-
-def test_langfuse_to_score_shape():
-    ev = next(ev for ev in all_evaluators() if ev.name == "accuracy")
-    payload = ev.to_score(0.75, comment="round 3")
-    assert payload == {
-        "name": "accuracy",
-        "value": 0.75,
-        "dataType": "NUMERIC",
-        "comment": "round 3",
-    }
-    no_comment = ev.to_score(0.5)
-    assert "comment" not in no_comment
-
-
-def test_adaptors_share_one_compute():
-    """Calling __call__, evaluate(ctx), and compute() directly yields the same value."""
-    from types import SimpleNamespace
-
-    ev = next(ev for ev in all_evaluators() if ev.scope == "per_query")
-    gold = {
-        "query": "q",
-        "ground_truth": "gt",
-        "pipeline_data": {"final_ranking": [{"candidate": "gt"}]},
-    }
-    pred = {"predicted": "gt", "hit": True, "score": 1.0}
-
-    dspy_value = ev(gold=gold, pred=pred)
-
-    ctx = SimpleNamespace(
-        inputs=gold,
-        output=pred,
-        expected_output="gt",
-    )
-    pe_value = ev.evaluate(ctx)[ev.name]
-
-    direct_value = ev.compute(result={**gold, **pred})
-
-    assert dspy_value == pytest.approx(direct_value)
-    assert pe_value == pytest.approx(direct_value)
-
-
-# ---------------------------------------------------------------------------
-# compile_round_scorer
-# ---------------------------------------------------------------------------
 
 
 def test_round_scorer_fails_loud_on_missing_name():

@@ -1,19 +1,4 @@
-"""Candidate measurement — parse, evaluate, dispatch over three exit paths.
-
-``score_candidates`` drives a candidate list through ``score_search_point``
-with three exit paths:
-
-- **validation-skip synthetic-0** — candidate has pre-eval
-  ``ValidationFailure`` entries on its ``OptSearchPoint.memory``; skip the
-  backend call and synthesize an ``accuracy=0`` report (Rail 1).
-- **full-run cache hit** — replay cached results; register priors for the
-  Wilcoxon elimination check without re-running.
-- **scored candidate** — run ``score_search_point``, register priors, and
-  attach a ``RuntimeFailure`` on mid-eval escalation (Rail 2).
-
-See ``docs/architecture/optimization.md`` for the full self-healing
-contract.
-"""
+"""Candidate measurement — dispatches each candidate over three exit paths (validation-skip / cache-hit / scored). See ``docs/architecture/optimization.md`` for the self-healing contract."""
 
 from __future__ import annotations
 
@@ -139,16 +124,8 @@ def _handle_validation_skip(
     osp_c: OptSearchPoint,
     override: dict | None,
     dataset: list,
-    idx: int,
-    n_candidates: int,
 ) -> tuple[list[QueryResult], dict]:
     """Synthetic-0 short-circuit for invalid candidates — no backend call."""
-    logger.warning(
-        "Candidate %d/%d invalid (%d validation failure(s)) — skipping backend",
-        idx + 1,
-        n_candidates,
-        len(osp_c.memory.validation_failures),
-    )
     results: list[QueryResult] = []
     scores: dict[str, Any] = {
         "accuracy": 0.0,
@@ -169,16 +146,8 @@ def _handle_cache_hit(
     scores: dict,
     dataset: list,
     elim_check: Any,
-    idx: int,
-    n_candidates: int,
 ) -> dict:
     """Full-run cache hit — register with elim_check and build replay report."""
-    logger.info(
-        "Candidate %d/%d: full-run cache hit (%d queries) — skipped",
-        idx + 1,
-        n_candidates,
-        len(results),
-    )
     elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
     return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
 
@@ -192,8 +161,6 @@ def _handle_scored_candidate(
     merged_pp_i: dict | None,
     dataset: list,
     elim_check: Any,
-    idx: int,
-    n_candidates: int,
     round_num: int,
 ) -> tuple[dict, EscalationSignal | None]:
     """Build report for a scored candidate; attach RuntimeFailure on elimination (Rail 2)."""
@@ -242,16 +209,6 @@ def _handle_scored_candidate(
         )
     if new_rf is not None:
         osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
-        logger.info(
-            "Candidate %d/%d %s — RuntimeFailure attached (%s, rate=%.0f%%, %d/%d)",
-            idx + 1,
-            n_candidates,
-            new_rf.source,
-            new_rf.dominant_warning,
-            new_rf.degraded_rate * 100,
-            new_rf.degraded_count,
-            new_rf.total_evaluated,
-        )
 
     elim_ctx: dict | None = None
     if elimination_stopped and signal is not None and signal.check_name == "elimination":
@@ -351,6 +308,7 @@ async def score_candidates(
     candidate_scores: list[dict] = []
     escalation_signal: EscalationSignal | None = None
     n_candidates = len(osp_candidates)
+    obs = ctx.obs
 
     elim_check = EliminationCheck(
         n_min=elimination_n_min,
@@ -358,42 +316,28 @@ async def score_candidates(
         n_queries=len(dataset),
     )
 
-    obs = ctx.obs
-
-    def _emit_candidate_scored(c_idx: int, c_report: dict) -> None:
+    def _fire(idx: int, report: dict) -> None:
+        candidate_scores.append(report)
+        callbacks.on_candidate_scored(idx, n_candidates, report)
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
                     CandidateScored,
                     campaign_id=obs_campaign_id,
                     round_num=round_num,
-                    candidate_idx=c_idx,
-                    report=c_report,
+                    candidate_idx=idx,
+                    report=report,
                 )
 
-    def _fire_candidate_callbacks(c_idx: int, c_report: dict) -> None:
-        candidate_scores.append(c_report)
-        callbacks.on_candidate_scored(c_idx, n_candidates, c_report)
-        _emit_candidate_scored(c_idx, c_report)
-
     for idx, osp_c in enumerate(osp_candidates):
-
-        def _on_start(query_text, qi, qt, _ci=idx, _ct=n_candidates):
-            callbacks.on_sample_started(_ci, _ct, qi, qt, query_text)
-
-        def _on_result(result, qi, qt, _ci=idx, _ct=n_candidates):
-            callbacks.on_sample_scored(_ci, _ct, qi, qt, result)
-
         override = candidate_overrides[idx]
-
-        # Fires for all three paths so display shows what was tested.
         callbacks.on_candidate_started(idx, n_candidates, osp_c.changes_description or "", override)
 
         # Path 1 — validation-skip synthetic-0.
         if osp_c.memory.validation_failures:
-            results, report = _handle_validation_skip(osp_c, override, dataset, idx, n_candidates)
+            results, report = _handle_validation_skip(osp_c, override, dataset)
             all_candidate_results[osp_c.id] = results
-            _fire_candidate_callbacks(idx, report)
+            _fire(idx, report)
             continue
 
         sp = osp_c.to_job_search_point(
@@ -404,6 +348,12 @@ async def score_candidates(
         all_checks = list(degradation_checks or [])
         if elim_check.enabled:
             all_checks.append(elim_check)
+
+        def _on_result(r, qi, qt, _ci=idx):
+            callbacks.on_sample_scored(_ci, n_candidates, qi, qt, r)
+
+        def _on_start(qtxt, qi, qt, _ci=idx):
+            callbacks.on_sample_started(_ci, n_candidates, qi, qt, qtxt)
 
         results, scores, was_cached, signal = await score_search_point(
             sp,
@@ -420,26 +370,13 @@ async def score_candidates(
 
         # Path 2 — full-run cache replay
         if was_cached:
-            report = _handle_cache_hit(
-                osp_c, override, results, scores, dataset, elim_check, idx, n_candidates
-            )
-            _fire_candidate_callbacks(idx, report)
+            _fire(idx, _handle_cache_hit(osp_c, override, results, scores, dataset, elim_check))
             continue
 
         # Path 3 — scored. Snapshot priors BEFORE helper registers this candidate.
         priors_at_test = elim_check.prior_ids_snapshot()
         report, residual = _handle_scored_candidate(
-            osp_c,
-            override,
-            results,
-            scores,
-            signal,
-            merged_pp[idx],
-            dataset,
-            elim_check,
-            idx,
-            n_candidates,
-            round_num,
+            osp_c, override, results, scores, signal, merged_pp[idx], dataset, elim_check, round_num
         )
         if (
             signal is not None
@@ -457,7 +394,7 @@ async def score_candidates(
                 round_num,
                 len(results),
             )
-        _fire_candidate_callbacks(idx, report)
+        _fire(idx, report)
 
         if residual is not None:
             escalation_signal = residual

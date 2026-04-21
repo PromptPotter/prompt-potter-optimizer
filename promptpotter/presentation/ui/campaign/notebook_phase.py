@@ -1,13 +1,4 @@
-"""Phase-handler dispatch — route PhaseEvents to per-phase formatters.
-
-Each ``_print_*`` handler formats one ``(phase, event)`` pair during a
-feedback cycle. ``_dispatch_phase`` is the single entry point; it reads
-``_CycleDisplayState`` (imported from ``notebook_sp_diff``) and writes
-display output.
-
-Analytics functions (``show_*``) live in ``notebook_analytics``. SP-diff
-rendering lives in ``notebook_sp_diff``.
-"""
+"""Phase-handler dispatch: route (phase, event) pairs to per-phase formatters."""
 
 from __future__ import annotations
 
@@ -43,11 +34,6 @@ from .notebook_sp_diff import (
 )
 
 __all__ = ["_CycleDisplayState", "_dispatch_phase"]
-
-
-# ---------------------------------------------------------------------------
-# Phase handlers — one per (phase, event) pair
-# ---------------------------------------------------------------------------
 
 
 def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
@@ -439,10 +425,6 @@ def _print_backend_warning(d: dict, state: _CycleDisplayState) -> None:
         print(_dbox_line(f"  {wt}: {count} occurrences"))
     print(_dbox_bottom())
 
-
-# ---------------------------------------------------------------------------
-# Phase dispatch
-# ---------------------------------------------------------------------------
 
 _PHASE_HANDLERS: dict[str, Callable] = {
     "init:enter": _print_init_enter,

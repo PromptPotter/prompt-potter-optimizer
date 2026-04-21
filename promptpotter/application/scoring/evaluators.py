@@ -1,26 +1,4 @@
-"""Capability Evaluators — registry, adaptors, materializers.
-
-One ``Evaluator`` type holds a named scoring signal. Each evaluator has a
-``scope`` (``per_query`` | ``per_round``), an ``applies(schema)`` predicate,
-and a single ``compute`` callable (imported from ``evaluator_computes``).
-Three framework adaptors wrap the same underlying ``compute`` so callers
-can hand an evaluator to DSPy, pydantic-evals, or Langfuse without
-re-implementing the signal.
-
-The registry in this module is the single source of truth for what
-evaluators exist. ``materialize_round_values()`` and
-``materialize_query_values()`` are the only functions callers invoke
-directly — they evaluate the registry against a schema + results, handling
-node-type namespacing for evaluators that bind to a specific
-``PipelineNode.node_type``.
-
-Adding a new evaluator:
-    1. Write a ``compute_*`` function in ``evaluator_computes``.
-    2. Append an ``Evaluator(...)`` entry to ``_REGISTRY`` below.
-    3. Reference it by name in a per-round or per-query scoring formula.
-
-Composite is not special — it is whatever the per-round formula evaluates to.
-"""
+"""Evaluator registry + materializers. Registry is single source of truth; compute fns live in ``evaluator_computes``."""
 
 from __future__ import annotations
 
@@ -65,18 +43,6 @@ __all__ = [
 
 @dataclass(frozen=True)
 class Evaluator:
-    """A named scoring signal.
-
-    ``compute`` is the single underlying math. The three public adaptors
-    (``__call__``, ``evaluate``, ``to_score``) all route through it or
-    accept its output; callers pick the shape they need.
-
-    For evaluators that target a specific pipeline ``node_type``, set
-    ``node_type`` — the materializer fans out one concrete value per
-    matching node (namespaced when multiple nodes of that type exist).
-    Leave ``node_type`` as ``None`` for schema-wide signals.
-    """
-
     name: str
     description: str
     scope: Scope
@@ -85,85 +51,8 @@ class Evaluator:
     node_type: str | None = None
     applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
-    # ----- Adaptors --------------------------------------------------------
-
-    def __call__(
-        self,
-        gold: dict | None = None,
-        pred: dict | None = None,
-        trace: Any = None,
-    ) -> float:
-        """DSPy-style metric: ``(gold, pred, trace) -> float``.
-
-        Builds a synthetic per-query ``result`` dict from ``gold`` and
-        ``pred`` and runs ``compute``. Only meaningful for per-query
-        evaluators; per-round evaluators should be materialized via
-        ``materialize_round_values()``.
-        """
-        if self.scope != "per_query":
-            raise ValueError(
-                f"Evaluator {self.name!r} is per-round; use "
-                "materialize_round_values() instead of the DSPy adaptor."
-            )
-        result: dict[str, Any] = {}
-        if gold:
-            result.update(gold)
-        if pred:
-            result.update(pred)
-        return float(self.compute(result=result))
-
-    def evaluate(self, ctx: Any) -> dict[str, float]:
-        """pydantic-evals adaptor: ``evaluate(ctx) -> {name: value}``.
-
-        Reads ``ctx.inputs``, ``ctx.output``, ``ctx.expected_output`` (the
-        fields pydantic-evals' ``EvaluatorContext`` exposes) into a synthetic
-        per-query result, runs ``compute``, and returns a single-entry dict
-        keyed on this evaluator's name.
-        """
-        if self.scope != "per_query":
-            raise ValueError(f"Evaluator {self.name!r} is per-round; call compute directly.")
-        inputs = getattr(ctx, "inputs", None) or {}
-        output = getattr(ctx, "output", None)
-        expected = getattr(ctx, "expected_output", None)
-        result: dict[str, Any] = {
-            **(inputs if isinstance(inputs, dict) else {"query": inputs}),
-            "predicted": output if not isinstance(output, dict) else output.get("predicted", ""),
-            "ground_truth": expected if not isinstance(expected, dict) else "",
-        }
-        if isinstance(output, dict):
-            result.update(output)
-        return {self.name: float(self.compute(result=result))}
-
-    def to_score(self, value: float, *, comment: str = "") -> dict[str, Any]:
-        """Langfuse score shape: ``{name, value, dataType, comment}``.
-
-        Adaptor consumers can hand the return value to
-        ``LangfuseLogger.create_score(**...)`` directly.
-        """
-        payload: dict[str, Any] = {
-            "name": self.name,
-            "value": float(value),
-            "dataType": self.data_type,
-        }
-        if comment:
-            payload["comment"] = comment
-        return payload
-
-
-# ---------------------------------------------------------------------------
-# Registry — single source of truth.
-# ---------------------------------------------------------------------------
-
-
-def _has_node_type(node_type: str) -> Callable[[PipelineSchema], bool]:
-    def _check(schema: PipelineSchema) -> bool:
-        return any(n.node_type == node_type for n in schema.nodes)
-
-    return _check
-
 
 _REGISTRY: list[Evaluator] = [
-    # --- Core per-round signals (always apply) ---
     Evaluator(
         name="accuracy",
         description="Mean per-query score across the round's result set.",
@@ -196,14 +85,13 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_latency_norm,
     ),
-    # --- Node-type-bound per-round signals (namespaced when multiple nodes share a type) ---
     Evaluator(
         name="source_recall",
         description="Fraction of queries where GT appears in a candidate_source node's output.",
         scope="per_round",
         compute=compute_source_recall,
         node_type="candidate_source",
-        applies=_has_node_type("candidate_source"),
+        applies=lambda s: any(n.node_type == "candidate_source" for n in s.nodes),
     ),
     Evaluator(
         name="candidate_recall",
@@ -211,7 +99,7 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_candidate_recall,
         node_type="ranker",
-        applies=_has_node_type("ranker"),
+        applies=lambda s: any(n.node_type == "ranker" for n in s.nodes),
     ),
     Evaluator(
         name="cache_hit_rate",
@@ -219,9 +107,8 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_cache_hit_rate,
         node_type="cache",
-        applies=_has_node_type("cache"),
+        applies=lambda s: any(n.node_type == "cache" for n in s.nodes),
     ),
-    # --- New evaluators shipped with the migration ---
     Evaluator(
         name="retrieval_shortfall",
         description=(
@@ -255,18 +142,10 @@ def all_evaluators() -> list[Evaluator]:
     return list(_REGISTRY)
 
 
-# ---------------------------------------------------------------------------
-# Materialization — turn the registry into concrete values for a schema.
-# ---------------------------------------------------------------------------
-
-
 def _concrete_round_entries(
     schema: PipelineSchema,
 ) -> list[tuple[str, Evaluator, PipelineNode | None]]:
-    """Yield ``(output_name, evaluator, node_or_none)`` for every per-round
-    evaluator that ``applies(schema)``. For node-type-bound evaluators with
-    multiple matching nodes, names are namespaced as ``{node_name}_{name}``.
-    """
+    """Per-round evaluators that apply. Node-type-bound names get namespaced when >1 matching node."""
     out: list[tuple[str, Evaluator, PipelineNode | None]] = []
     for ev in _REGISTRY:
         if ev.scope != "per_round":
@@ -290,12 +169,7 @@ def materialize_round_values(
     *,
     opt_sp: Any = None,
 ) -> dict[str, float]:
-    """Run every per-round evaluator that applies; return ``{name: value}``.
-
-    Node-type evaluators with multiple matching nodes produce one entry per
-    matching node with a ``{node_name}_{name}`` prefix. Schema-wide
-    evaluators produce exactly one entry at their declared name.
-    """
+    """Run every per-round evaluator that applies; return ``{name: value}``."""
     values: dict[str, float] = {}
     for display_name, ev, node in _concrete_round_entries(schema):
         kwargs: dict[str, Any] = {"results": results, "schema": schema, "opt_sp": opt_sp}
@@ -320,23 +194,8 @@ def materialize_query_values(
     return values
 
 
-# ---------------------------------------------------------------------------
-# Default per-round formula — reproduces the pre-migration composite math.
-# ---------------------------------------------------------------------------
-
-
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """Return the default per-round scoring formula for *schema*.
-
-    Mirrors the pre-migration 4-bundle weighted sum:
-    ``0.7*accuracy + 0.15*health + 0.10*latency_norm + 0.05*recall``, where
-    the health bundle is mean((1-error_rate)+(1-degraded_rate)+(1-runtime_failure_rate))
-    and the recall bundle is the mean of whichever recall evaluators apply
-    (falls back to ``accuracy`` when none apply).
-    """
-    # Build the recall term from the concrete names produced by
-    # _concrete_round_entries so multi-node schemas pick up their
-    # namespaced keys (e.g. ``web_search_source_recall``).
+    """Default per-round formula: 0.7*accuracy + 0.15*health + 0.10*latency_norm + 0.05*recall."""
     recall_names: list[str] = []
     for display_name, ev, _node in _concrete_round_entries(schema):
         if ev.node_type in ("candidate_source", "ranker", "cache"):

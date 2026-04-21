@@ -58,7 +58,7 @@ class SessionEnv:
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
     synced: bool
-    queries: list[dict] = field(default_factory=list)
+    queries: list[Sample] = field(default_factory=list)
     experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
@@ -194,6 +194,8 @@ def _check_active_pointer(tenant_id: str, take_over: bool, status: Callable[[str
 
 def _hydrate_dataset(base: SessionEnv, dataset_name: str, status: Callable[[str], None]) -> None:
     """Load items from DatasetStore; auto-populate from DATASET_LOADERS registry if empty."""
+    from promptpotter.application.datasets.builder import samples_from_dicts
+
     ds = base.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")):
         from promptpotter.application.datasets.builder import DATASET_LOADERS
@@ -213,7 +215,8 @@ def _hydrate_dataset(base: SessionEnv, dataset_name: str, status: Callable[[str]
         )
 
     items = ds["items"]
-    base.queries = [item for item in items if item.get("query") and item.get("ground_truth")]
+    valid = [item for item in items if item.get("query") and item.get("ground_truth")]
+    base.queries = samples_from_dicts(valid)
     base.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
     logger.info(
         "Loaded dataset %r from store: %d items, %d session terms",
@@ -279,7 +282,9 @@ async def _hydrate_experiment(
 
     exp_name = extract.get("experiment", {}).get("name", experiment_id)
     status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
-    base.queries = queries
+    from promptpotter.application.datasets.builder import samples_from_dicts
+
+    base.queries = samples_from_dicts(queries)
     base.experiment_extract = extract
     base.index_terms = index_terms
 
