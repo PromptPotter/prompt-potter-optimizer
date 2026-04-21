@@ -131,8 +131,6 @@ async def _generate_or_load_candidates(
 
     from promptpotter.application.optimization.nodes.generate import l1_generate
 
-    sm_ctx = search_memory.to_l1_digest() if search_memory else None
-
     client = _llm_client.get_llm_client()
     async with observed_node(
         f"l1_generate_r{round_num}",
@@ -151,7 +149,7 @@ async def _generate_or_load_candidates(
             model=model,
             is_probe_round=state.probe_next_round,
             failure_analysis=state.failure_analysis,
-            search_memory_digest=sm_ctx,
+            search_memory=search_memory,
             pipeline_schema=session.pipeline_schema,
             obs=obs,
             obs_campaign_id=env.obs_campaign_id,
@@ -194,6 +192,16 @@ async def _run_critique(
     crit_llm = _llm_client.get_llm_client()
     agent = CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
 
+    _CRITIQUE_SM_KEYS = frozenset(
+        {
+            "discriminating_queries",
+            "failure_clusters",
+            "tractability",
+            "exhausted_axes",
+            "value_trends",
+            "improvement_attribution",
+        }
+    )
     cctx = RoundSnapshot.from_round_state(
         state,
         scoring_result,
@@ -201,7 +209,7 @@ async def _run_critique(
         schema,
         round_num=round_num,
         search_memory_digest=(
-            state.search_memory.to_critique_digest() if state.search_memory else None
+            state.search_memory.digest(_CRITIQUE_SM_KEYS) if state.search_memory else None
         ),
     )
     result = await agent.run(cctx)

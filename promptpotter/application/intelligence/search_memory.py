@@ -6,7 +6,7 @@ counts, flips) lives in :class:`SampleIndex`; SearchMemory composes it
 and retains only the axis-side aggregate state + digest builders.
 
 Public surface — consumers import only these:
-    * ``to_l1_digest()`` / ``to_critique_digest()`` / ``to_strategic_digest()``
+    * ``digest(keys=..., include_correlations=..., include_clusters=...)``
     * ``on_round_complete()`` / ``record_flips_from_rounds()``
     * ``query_degradation_rate()`` / ``query_degradation_count()``
     * ``dead_queries()`` / ``axis_rankings()`` / ``top_k_values()``
@@ -276,119 +276,169 @@ class SearchMemory:
             return True
         return False
 
-    # --- Prompt digests ---
+    # --- Prompt digest (one parameterized entry point) ---
 
-    def to_l1_digest(self) -> dict[str, str] | None:
-        """SearchMemory context dict for the L1 generation prompt."""
-        ctx: dict[str, str] = {}
-
-        clusters = self.sample_index.failure_clusters(3)
-        if clusters:
-            ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
-
-        dead = self.sample_index.dead(include_always_hit=False)
-        if dead:
-            ctx["dead_queries"] = f"{len(dead)} queries never hit"
-
-        rankings = self.axis_rankings()[:3]
-        if rankings:
-            ctx["top_axes"] = _fmt_axis_rankings(rankings)
-            top_vals = self.top_k_values(rankings[0].axis, k=3)
-            if top_vals:
-                ctx["top_values"] = "; ".join(
-                    f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
-                )
-
-        return ctx or None
-
-    def to_critique_digest(self) -> dict[str, str] | None:
-        """SearchMemory context dict for the critique agent."""
-        ctx: dict[str, str] = {}
-
-        disc = self.sample_index.discriminating()
-        if disc:
-            ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
-
-        fc = self.sample_index.failure_clusters(3)
-        if fc:
-            ctx["failure_clusters"] = _fmt_clusters(fc, with_counts=False)
-
-        persistent = self.sample_index.persistent_failures(min_streak=3)
-        if persistent:
-            ctx["tractability"] = _fmt_persistent_failures(persistent)
-
-        exhausted = self._exhausted_axes()
-        if exhausted:
-            ctx["exhausted_axes"] = "; ".join(
-                f"{a.axis} ({self._values_tested_count(a.axis)} values tested, "
-                f"effect={a.effect_size:.3f})"
-                for a in exhausted[:5]
-            )
-
-        rankings = self.axis_rankings()[:3]
-        trend_parts = []
-        for a in rankings:
-            trend = self._axis_value_trend(a.axis)
-            if trend not in ("flat", "non_numeric"):
-                trend_parts.append(f"{a.axis}: {trend}")
-        if trend_parts:
-            ctx["value_trends"] = "; ".join(trend_parts)
-
-        attributions = self._format_recent_attributions(limit=3)
-        if attributions:
-            ctx["improvement_attribution"] = attributions
-
-        return ctx or None
-
-    def to_strategic_digest(
+    def digest(
         self,
+        keys: frozenset[str] | set[str] | None = None,
         *,
         include_correlations: bool = False,
         include_clusters: bool = False,
     ) -> dict[str, str] | None:
-        """SearchMemory context dict for L2/L3 strategic prompts."""
+        """Unified digest. Caller selects which keys to materialize.
+
+        When *keys* is ``None``, every available key is returned; otherwise
+        the result is filtered to the intersection of populated keys and
+        *keys*. ``include_correlations`` and ``include_clusters`` gate the
+        more expensive strategic-layer computations.
+
+        Known keys — one table, one digest:
+
+        * ``failure_clusters`` — dominant failure modes with query counts
+        * ``dead_queries`` — samples never hit (count only)
+        * ``top_axes`` — top-3 axis impacts
+        * ``top_values`` — best-performing values on the top axis
+        * ``discriminating_queries`` — samples that vary across configs
+        * ``tractability`` — persistent-failure breakdown
+        * ``exhausted_axes`` — axes tested with negligible effect
+        * ``value_trends`` — directional trends on top axes
+        * ``improvement_attribution`` — recent positive flips
+        * ``axis_rankings`` — top-5 axes with classification
+        * ``bottleneck_distribution`` — termination-step failure share
+        * ``persistent_failures`` — intractable + chronic (terse)
+        * ``failure_group_insights`` — axis × failure-group correlations
+        * ``volatile_queries`` — frequently flipping samples
+        """
         ctx: dict[str, str] = {}
+        want = None if keys is None else set(keys)
 
-        rankings = self.axis_rankings()[:5]
-        if rankings:
-            ctx["axis_rankings"] = _fmt_axis_rankings(rankings)
+        def emit(key: str, value: str) -> None:
+            if value and (want is None or key in want):
+                ctx[key] = value
 
-        bottleneck = self.bottleneck_distribution()
-        if bottleneck:
-            ctx["bottleneck_distribution"] = "; ".join(
-                f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
-            )
+        # Failure clusters — format depends on whether cluster-rich layers asked.
+        need_clusters = want is None or "failure_clusters" in want
+        if need_clusters and include_clusters:
+            c3 = self.sample_index.failure_clusters(3)
+            if c3:
+                emit("failure_clusters", _fmt_clusters(c3, with_counts=True))
+        elif need_clusters:
+            # Non-strategic callers: same top-3 clusters, different count-formatting
+            # preserved per historical behavior (critique: no counts; L1: with counts).
+            c3 = self.sample_index.failure_clusters(3)
+            if c3:
+                if want is not None and "dead_queries" in want:
+                    # L1 shape: include counts
+                    emit("failure_clusters", _fmt_clusters(c3, with_counts=True))
+                else:
+                    # Critique shape: no counts
+                    emit("failure_clusters", _fmt_clusters(c3, with_counts=False))
 
-        persistent = self.sample_index.persistent_failures(min_streak=3)
-        if persistent:
-            ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
+        # Dead queries (L1 only)
+        if want is None or "dead_queries" in want:
+            dead = self.sample_index.dead(include_always_hit=False)
+            if dead:
+                emit("dead_queries", f"{len(dead)} queries never hit")
 
-        if include_clusters:
-            clusters = self.sample_index.failure_clusters(3)
-            if clusters:
-                ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
+        # Critique-only signals
+        if want is None or "discriminating_queries" in want:
+            disc = self.sample_index.discriminating()
+            if disc:
+                emit("discriminating_queries", f"{len(disc)} queries vary across configs")
 
-        if include_correlations and rankings:
-            fg_lines = []
-            for a in rankings[:3]:
-                corr = self._parameter_failure_correlation(a.axis)
-                if corr:
-                    parts = [
-                        f"{mode}: {delta:+.0%}"
-                        for mode, delta in sorted(corr.items(), key=lambda x: -abs(x[1]))[:3]
-                    ]
-                    fg_lines.append(f"{a.axis} → {', '.join(parts)}")
-            if fg_lines:
-                ctx["failure_group_insights"] = "; ".join(fg_lines)
+        if want is None or "tractability" in want:
+            persistent = self.sample_index.persistent_failures(min_streak=3)
+            if persistent:
+                emit("tractability", _fmt_persistent_failures(persistent))
 
-            flips = self.sample_index.flips(limit=50)
-            if flips:
-                flip_counts = Counter(f["query"] for f in flips)
-                volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
-                if volatile:
-                    ctx["volatile_queries"] = "; ".join(
-                        f"{q[:50]} ({n} flips)" for q, n in volatile
+        if want is None or "exhausted_axes" in want:
+            exhausted = self._exhausted_axes()
+            if exhausted:
+                emit(
+                    "exhausted_axes",
+                    "; ".join(
+                        f"{a.axis} ({self._values_tested_count(a.axis)} values tested, "
+                        f"effect={a.effect_size:.3f})"
+                        for a in exhausted[:5]
+                    ),
+                )
+
+        if want is None or "value_trends" in want:
+            rankings3 = self.axis_rankings()[:3]
+            trend_parts = []
+            for a in rankings3:
+                trend = self._axis_value_trend(a.axis)
+                if trend not in ("flat", "non_numeric"):
+                    trend_parts.append(f"{a.axis}: {trend}")
+            if trend_parts:
+                emit("value_trends", "; ".join(trend_parts))
+
+        if want is None or "improvement_attribution" in want:
+            attributions = self._format_recent_attributions(limit=3)
+            if attributions:
+                emit("improvement_attribution", attributions)
+
+        # L1 axis digest (top-3 rankings + top values on the winner)
+        if want is None or "top_axes" in want or "top_values" in want:
+            rankings3 = self.axis_rankings()[:3]
+            if rankings3:
+                emit("top_axes", _fmt_axis_rankings(rankings3))
+                top_vals = self.top_k_values(rankings3[0].axis, k=3)
+                if top_vals:
+                    emit(
+                        "top_values",
+                        "; ".join(
+                            f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
+                        ),
                     )
+
+        # Strategic (L2/L3) signals
+        if want is None or "axis_rankings" in want:
+            rankings5 = self.axis_rankings()[:5]
+            if rankings5:
+                emit("axis_rankings", _fmt_axis_rankings(rankings5))
+
+        if want is None or "bottleneck_distribution" in want:
+            bottleneck = self.bottleneck_distribution()
+            if bottleneck:
+                emit(
+                    "bottleneck_distribution",
+                    "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items()),
+                )
+
+        if want is None or "persistent_failures" in want:
+            persistent = self.sample_index.persistent_failures(min_streak=3)
+            if persistent:
+                emit("persistent_failures", _fmt_persistent_failures(persistent, terse=True))
+
+        if include_correlations:
+            rankings3 = self.axis_rankings()[:3]
+            if rankings3:
+                if want is None or "failure_group_insights" in want:
+                    fg_lines = []
+                    for a in rankings3:
+                        corr = self._parameter_failure_correlation(a.axis)
+                        if corr:
+                            parts = [
+                                f"{mode}: {delta:+.0%}"
+                                for mode, delta in sorted(corr.items(), key=lambda x: -abs(x[1]))[
+                                    :3
+                                ]
+                            ]
+                            fg_lines.append(f"{a.axis} → {', '.join(parts)}")
+                    if fg_lines:
+                        emit("failure_group_insights", "; ".join(fg_lines))
+
+                if want is None or "volatile_queries" in want:
+                    flips = self.sample_index.flips(limit=50)
+                    if flips:
+                        flip_counts = Counter(f["query"] for f in flips)
+                        volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
+                        if volatile:
+                            emit(
+                                "volatile_queries",
+                                "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile),
+                            )
 
         return ctx or None
 

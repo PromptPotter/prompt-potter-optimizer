@@ -17,14 +17,14 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.optimization.nodes.formatting import (
-    assess_candidate_diversity,
-    build_candidate_comparison,
-    build_trajectory_report,
-    format_escalation_report,
-    format_l2_intelligence,
     format_pipeline_section,
     format_runtime_failures_for_l3,
     format_search_memory_block,
+)
+from promptpotter.application.optimization.nodes.inbox_registry import (
+    InboxCtx,
+    Layer,
+    assemble_inbox,
 )
 from promptpotter.application.optimization.phases import CampaignPhase
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
@@ -176,21 +176,6 @@ class L2RefineStrategy(LayerTransition):
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
 
     def assemble_intelligence(self, opt_sp: OptSearchPoint, **ctx: Any) -> dict:
-        pipeline_params = ctx.get("pipeline_params")
-        pipeline_schema = ctx.get("pipeline_schema")
-        search_memory = ctx.get("search_memory")
-        escalation_check_result = ctx.get("escalation_check_result")
-        rounds = ctx.get("rounds")
-        candidate_scores = ctx.get("candidate_scores")
-        current_round_num = int(ctx.get("round_num", 0))
-
-        escalation_section = format_escalation_report(
-            escalation_check_result,
-            opt_sp.memory.escalation_journal or None,
-            pipeline_params,
-            pipeline_schema=pipeline_schema,
-        )
-
         task_context_section = ""
         if opt_sp.task_context:
             tc_display = {
@@ -201,43 +186,22 @@ class L2RefineStrategy(LayerTransition):
                 + json.dumps(tc_display, indent=2)
             )
 
-        # Validation failures (parse-time rail) still arrive per-round via candidate_scores
-        # — they're synthetic-0'd and not mirrored to outer memory.
-        validation_failures: list[dict] = []
-        for cs in candidate_scores or []:
-            validation_failures.extend(cs.get("validation_failures") or [])
-
-        # Runtime failures (mid-eval rail) are mirrored onto outer memory in
-        # execute_round BEFORE L2 fires; one list, partitioned at format time
-        # by first_seen_round.
-        runtime_failures = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
-
-        intelligence_sections = format_l2_intelligence(
-            escalation_section=escalation_section,
-            warning_inventory=opt_sp.memory.warning_inventory or None,
-            critique_text=opt_sp.memory.critique_text,
-            l2_directive=opt_sp.memory.l2_directive,
-            search_memory_digest=(
-                search_memory.to_strategic_digest(include_correlations=True)
-                if search_memory is not None
-                else None
-            ),
-            trajectory=build_trajectory_report(rounds) if rounds else None,
-            candidate_comparison=(
-                build_candidate_comparison(candidate_scores) if candidate_scores else None
-            ),
-            diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
-            validation_failures=validation_failures or None,
-            runtime_failures=runtime_failures,
-            current_round_num=current_round_num,
+        inbox_ctx = InboxCtx(
+            opt_sp=opt_sp,
+            pipeline_schema=ctx.get("pipeline_schema"),
+            search_memory=ctx.get("search_memory"),
+            round_num=int(ctx.get("round_num", 0)),
+            rounds=ctx.get("rounds"),
+            candidate_scores=ctx.get("candidate_scores"),
+            escalation_check_result=ctx.get("escalation_check_result"),
+            pipeline_params=ctx.get("pipeline_params"),
         )
+        inbox = assemble_inbox(Layer.L2, inbox_ctx)
 
         return {
             "current_params": json.dumps(opt_sp.optimizer_params),
             "task_context_section": task_context_section,
-            "intelligence_sections": (
-                ("\n\n" + intelligence_sections) if intelligence_sections else ""
-            ),
+            "inbox": ("\n\n" + inbox) if inbox else "",
         }
 
     def build_result(
@@ -355,8 +319,18 @@ class L3ModifyPlan(LayerTransition):
             "runtime_failures_section": (
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
             ),
-            "intelligence_section": format_search_memory_block(
-                search_memory.to_strategic_digest(include_clusters=True)
+            "inbox": format_search_memory_block(
+                search_memory.digest(
+                    frozenset(
+                        {
+                            "axis_rankings",
+                            "bottleneck_distribution",
+                            "failure_clusters",
+                            "persistent_failures",
+                        }
+                    ),
+                    include_clusters=True,
+                )
                 if search_memory is not None
                 else None,
                 {

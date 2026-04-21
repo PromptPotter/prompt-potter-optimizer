@@ -1,110 +1,174 @@
 # Information Flow — Optimization Loop
 
-What gets injected into each LLM node's prompt, where it originates, and
-how it gets there. Execution order is in
-[`optimization.md`](optimization.md); this file owns the data.
+Every optimizer LLM prompt (L1, L2, Critique, L3) receives an `{{inbox}}`
+block assembled from one declarative catalogue:
+[`promptpotter/application/optimization/nodes/inbox_registry.py`](../../promptpotter/application/optimization/nodes/inbox_registry.py).
 
-Each bullet below reads `item (origin → retention)`. Retention is how
-the data survives between production and consumption:
+One registry. One function (`assemble_inbox`). One table below. Replaces
+the four bespoke formatters + three scattered mutex `if/elif` blocks
+that used to live in `formatting.py`.
 
-| Retention | Meaning |
-|-----------|---------|
-| `opt_sp.*` | Persisted on `OptSearchPoint` — survives across rounds in campaign trial JSON |
-| `LoopState.*` | Transient within one optimization cycle |
-| `config.*` | Immutable within cycle (set at campaign init or scan phase) |
-| `SearchMemory` | Cross-campaign materialized view, queried at format time |
-| *(ephemeral)* | Computed and consumed within a single round, not stored |
+## How to read
 
----
+- **Source** — where the raw value lives. `opt_sp.memory.*` survives
+  across rounds; `LoopState.*` is transient within a cycle; `ctx.*` is
+  a per-round computed value; `SearchMemory` is the cross-campaign
+  aggregate.
+- **Retention** — `memory` (checkpointed on `OptSearchPoint.memory`),
+  `opt_sp` (checkpointed on `OptSearchPoint` top-level), `transient`
+  (computed per-round, not stored), `config` (immutable in-cycle),
+  `search_memory` (cross-campaign).
+- **L1 / L2** — section label shown in that layer's prompt, or `—`
+  when the field is not consumed by that layer.
+- **Mutex** — ``(group, priority)``; fields sharing a group produce
+  only the highest-priority populated section.
 
-## L1 Generate — inbox
+## L1 / L2 inbox (from registry)
 
-Fires every round.
+Row order is the section order inside each layer's assembled inbox.
+Rows with `—` in a layer column are skipped when rendering that layer.
 
-- **Rendered prompt** (`opt_sp.render()` → *(ephemeral)*) — full template with the 8 prompt-scheme fields.
-- **L1 guidance — critique text XOR l2_directive** (`CritiqueAgent.run()` → `opt_sp.memory.critique_text`; `refine_strategy()` → `opt_sp.memory.l2_directive`). Mutual exclusion is enforced in `format_context_sections()` at the `if/elif` junction: when both are populated, the directive wins because L2 digests the critique when it fires. Directive is cleared by `clear_volatile()` on improvement; critique regenerates every round.
-- **Task context** (`opt_sp.task_context`) — read-only from L1's view (L2 owns edits).
-- **Thinking styles** (`sample_thinking_styles()` → `opt_sp.memory.thinking_styles`) — 3 sampled.
-- **Plan** (`opt_sp.plan`) — read-only from L1's view (L3 owns edits).
-- **Failure analysis** (`compile_failure_analysis()` → `LoopState.failure_analysis`) — top 3 clustered failure patterns with example queries and signals.
-- **SearchMemory digest** (`SearchMemory.to_l1_digest()` → *(ephemeral)*) — failure clusters, dead queries, top axes, best-performing values.
-- **Probe-round-only extras** (`opt_sp.memory.warning_inventory` + `opt_sp.memory.escalation_journal`) — per-query warning breakdown + recent step attempts. L1 sees these only when `state.probe_next_round` is set (L2 requested a targeted probe).
+| Field | Source | Retention | L1 | L2 | Mutex |
+|-------|--------|-----------|----|----|-------|
+| `pipeline_schema_text` | precomputed in `l1_generate` | config | _(raw — no header)_ | — | |
+| `failure_analysis` | `LoopState.failure_analysis` | transient | `FAILURE ANALYSIS ...` | — | |
+| `search_memory_l1` | `SearchMemory.digest({failure_clusters, dead_queries, top_axes, top_values})` | search_memory | `HISTORICAL INTELLIGENCE:` | — | |
+| `task_context` | `opt_sp.task_context` | opt_sp | `CONTEXT:` | — | |
+| `escalation_probe` | `opt_sp.memory.escalation_journal` (probe-round only) | memory | _probe-round block_ | — | |
+| `escalation_alert` | `opt_sp.memory.escalation_journal` (non-probe, no directive) | memory | `PIPELINE ISSUE: ...` | — | |
+| `l2_directive` | `opt_sp.memory.l2_directive` | memory | `DIRECTIVE:` | `PREVIOUS DIRECTIVE:` | `(L1, guidance, 2)` |
+| `critique_text` | `opt_sp.memory.critique_text` | memory | `CRITIQUE:` | `CRITIQUE:` | `(L1, guidance, 1)` |
+| `thinking_styles` | `opt_sp.memory.thinking_styles` | memory | `THINKING STYLES:` | — | |
+| `plan` | `opt_sp.plan` | opt_sp | `PLAN:` | — | |
+| `escalation_section` | `ctx.escalation_check_result` + `opt_sp.memory.escalation_journal` | transient | — | `PIPELINE STABILITY REPORT ...` | |
+| `warning_inventory` | `opt_sp.memory.warning_inventory` (L2 fallback when no escalation) | memory | — | `## RECURRING PIPELINE WARNINGS ...` | |
+| `trajectory` | `build_trajectory_report(LoopState.rounds)` | transient | — | `CAMPAIGN TRAJECTORY:` | |
+| `candidate_comparison` | `build_candidate_comparison(candidate_scores)` | transient | — | `LAST ROUND CANDIDATES:` | |
+| `diversity_alert` | `assess_candidate_diversity(LoopState.rounds)` | transient | — | `DIVERSITY ALERT:` | |
+| `validation_failures` | `candidate_scores[*].validation_failures` | transient | — | `L1 VALIDATION FAILURES ...` | |
+| `runtime_failures` | `opt_sp.memory.runtime_failures` | memory | — | `RUNTIME FAILURES — L2 SELF-HEALING ...` | |
+| `search_memory_l2` | `SearchMemory.digest({axis_rankings, bottleneck_distribution, failure_group_insights, persistent_failures, volatile_queries}, include_correlations=True)` | search_memory | — | `HISTORICAL INTELLIGENCE:` | |
 
----
+### Mutex rules (the three rules hiding in prose before)
 
-## Critique — inbox
+- **L1 `guidance`.** `l2_directive` wins over `critique_text` on L1 —
+  when L2 fires it digests the critique into a directive, so the
+  directive absorbs the signal. `clear_volatile()` wipes `l2_directive`
+  on improvement; `critique_text` regenerates every round.
+- **L2 `escalation_section` vs `warning_inventory`.** L2's fallback rule
+  implemented by the `warning_inventory` source: it returns `None`
+  whenever `escalation_section`'s source produces content. Same single
+  slot, two sources, escalation wins.
+- **L1 `escalation_probe` vs `escalation_alert`.** Both source from
+  `opt_sp.memory.escalation_journal` but their sources gate on
+  `ctx.is_probe_round` — probe returns the per-query block in probe
+  rounds only; alert returns the aggregated banner only when NOT a
+  probe AND no `l2_directive` is active.
 
-Fires every round. Sole reader of raw eval results; acts as the every-round intelligence hub.
+## Critique inbox
 
-- **Eval results (raw)** (`score_search_point()` → *(ephemeral)*) — sole reader. Per-query hit/miss, diagnostics, warnings, term-matching detail.
-- **Round history** (`LoopState.rounds`) — accuracy trajectory + per-round pipeline_params for trend framing.
-- **Pipeline schema** (`config.pipeline_schema`) — `candidate_keys` only, derived from ranker / candidate_source nodes.
-- **SearchMemory digest** (`SearchMemory.to_critique_digest()`) — discriminating queries, tractability profiles, axis exhaustion, value trends, failure clusters.
+Critique keeps its own assembler (in
+[`critique.py`](../../promptpotter/application/optimization/nodes/critique.py))
+because its sections share cross-cutting state (`anomalies` accumulator,
+near-miss-query set passed between `_rank_analysis_section` and
+`_failure_details_section`). Each section is a private helper:
 
----
+| Section | Source |
+|---------|--------|
+| `## SCORING SUMMARY` | `RoundSnapshot.{accuracy, composite, degraded_queries, current_round, l1_stall_count, best_accuracy, best_round}` |
+| `## PIPELINE HEALTH` | `RoundSnapshot.results` termination distribution |
+| `## RUNTIME FAILURES THIS ROUND` | `RoundSnapshot.runtime_failures` |
+| `## CANDIDATE RANK ANALYSIS` | `RoundSnapshot.{results, candidate_keys}` |
+| `## ROUND EVOLUTION` | `RoundSnapshot.round_history` |
+| `## QUERY CATEGORIES` | `RoundSnapshot.results` by termination step |
+| `## FAILURE DETAILS` | `RoundSnapshot.{results, candidate_keys, pipeline_schema}` |
+| `## SUCCESSES` | `RoundSnapshot.results` filtered to hits |
+| `## ANOMALY FLAGS` | accumulated across sections above |
+| `## HISTORICAL INTELLIGENCE` | `SearchMemory.digest({discriminating_queries, failure_clusters, tractability, exhausted_axes, value_trends, improvement_attribution})` |
+| `## THIS ROUND` | `RoundSnapshot.round_analysis` (trajectory + cross-candidate diff) |
+| `## AVAILABLE SCHEMA MUTATIONS` | pipeline-schema nodes with mutable `output_schema` |
 
-## L2 Refine — inbox
+Critique is the only layer with raw `QueryResult` access — it's the
+every-round intelligence hub. Its output lands on
+`opt_sp.memory.critique_text` and then flows into L1/L2's `critique_text`
+inbox field.
 
-Fires on escalation only (stall, degradation). L2 is a strategic meta-controller: it owns `task_context`, meta-settings, and the `l2_directive`; it does NOT set pipeline_params.
+## L3 — multi-hole template
 
-- **Previous critique text** (`opt_sp.memory.critique_text`) — L2 builds on it, then its directive absorbs it for L1's next round.
-- **Previous L2 directive** (`opt_sp.memory.l2_directive`) — evolves or supersedes it.
-- **Escalation journal** (`opt_sp.memory.escalation_journal`) — full history of degradation events (round, problem_step, step_config, outcome).
-- **Escalation report XOR warning inventory** (`format_escalation_report()` OR `opt_sp.memory.warning_inventory`) — mutual exclusion: L2 sees the aggregated stability report when escalation fires, else the per-query warning breakdown. The report already contains aggregate warning counts.
-- **Task context + optimizer params** (`opt_sp.task_context`, `opt_sp.optimizer_params`) — editable; L2's primary knobs are `creativity`, `n_variants`, `sp_budget_ttest`.
-- **Pipeline schema via escalation** (`config.pipeline_schema`) — surfaced only through the escalation report's "problem step available parameters" line. L2 does not see the full pipeline parameter listing; that's L1's domain.
-- **Validation failures** (`opt_sp.memory.validation_failures`) — parse-time invariant violations from L1's last round. Rail 1 input: L2's job is to teach L1 by naming the disallowed value in the next directive.
-- **Runtime failures** (`opt_sp.memory.runtime_failures`) — mid-eval `DegradationCheck` records. `format_l2_intelligence()` partitions this single list at format time by `first_seen_round == current_round` into NEW (this round) vs ACCUMULATED (surviving earlier rounds). Rail 2 input: L2's job is to adjust its OWN strategy — tighten directive, refine task_context, narrow optimizer_params.
-- **Trajectory + candidate comparison** (`build_trajectory_report()`, `build_candidate_comparison()` → *(ephemeral)*) — classification (healthy / plateau / oscillating / ceiling) and per-candidate accuracy diff.
-- **SearchMemory digest** (`SearchMemory.to_strategic_digest(include_correlations=True)`) — axis rankings, bottleneck distribution, failure group × axis correlations, persistent failures.
+L3 fires when L2 stalls and owns the strategic plan. Its prompt keeps
+four non-inbox holes for context anchoring:
 
----
+| Hole | Source |
+|------|--------|
+| `{{current_plan}}` | `opt_sp.plan` |
+| `{{l2_summary}}` | last 3 `LoopState.rounds` via `l2_history` |
+| `{{rendered_prompt}}` | `opt_sp.render()` |
+| `{{pipeline_section}}` | `format_pipeline_section(pipeline_params, schema)` |
+| `{{runtime_failures_section}}` | `format_runtime_failures_for_l3(opt_sp.memory.runtime_failures)` |
+| `{{inbox}}` | `SearchMemory.digest({axis_rankings, bottleneck_distribution, failure_clusters, persistent_failures}, include_clusters=True)` |
 
-## L3 Plan — inbox
+## Self-healing rails
 
-Fires when L2 stalls. L3 owns the strategic plan and may propose pipeline_params deltas.
+Two independent flows use the above inbox:
 
-- **Rendered prompt + current plan** (`opt_sp.render()`, `opt_sp.plan`) — plan is editable.
-- **L2 history** (last 3 rounds from `state.escalation` → *(ephemeral)*) — `{l2_round, params, acc_change}` triples.
-- **Pipeline schema** (`config.pipeline_schema`) — full per-node parameter keys (contrast with L2's escalation-report-only view).
-- **Runtime failures** (`opt_sp.memory.runtime_failures`) — the L2→L3 escalation trail. `format_runtime_failures_for_l3()` renders these as "patterns L2 couldn't reduce; replan required." L3 treats them as discovered constraints: change pipeline_params, swap nodes, or rewrite plan text to escape the failing region.
-- **SearchMemory digest** (`SearchMemory.to_strategic_digest(include_clusters=True)`) — axis rankings, bottleneck distribution, failure clusters, persistent failures.
+**Rail 1 — Validation failures.** L1 parse-time invariant check
+(`validate_overrides()`) finds a proposed value outside the allowed
+set. The candidate short-circuits to synthetic 0; the failure lands on
+`opt_sp.memory.validation_failures`. L2's next round receives it in the
+`validation_failures` inbox field and produces a directive that names
+the disallowed value. L1 heals on the following round via the
+`guidance` mutex — the directive absorbs the critique channel.
 
----
+**Rail 2 — Runtime failures.** `DegradationCheck` fires mid-evaluation
+when `degraded_rate ≥ threshold`. `_score_candidates()` synthesises a
+`RuntimeFailure` (with `first_seen_round` + `candidate_label`) attached
+to the failing candidate's `memory.runtime_failures`. End-of-round,
+`execute_round` mirrors new failures onto the outer
+`state.opt_sp.memory.runtime_failures` — deduped by
+`(source, dominant_warning, observed_config)`. L2 reads the mirror via
+the `runtime_failures` inbox field, partitioned at format time into
+NEW (this round) vs ACCUMULATED (surviving earlier rounds). L2 heals
+itself by adjusting directive / task_context / optimizer_params. When
+ACCUMULATED patterns persist across L2 rounds, L3 receives the trail
+via `{{runtime_failures_section}}` and must replan the pipeline itself.
 
-## Self-Healing Rails
+The rails differ in **who heals** and **what the healing action is**:
+Rail 1 is L1 self-healing via L2 directive; Rail 2 is L2 self-healing
+with L3 escalation.
 
-Two independent flows use the above inboxes:
-
-**Rail 1 — Validation failures.** L1 parse-time invariant check (`validate_overrides()`) finds a proposed value outside the allowed set. The candidate short-circuits to synthetic 0; the failure lands on its `OptSearchPoint.memory.validation_failures`. L2 next round receives it in the "L1 VALIDATION FAILURES" section and produces a directive that names the disallowed value by name. L1 heals on the following round via the directive/critique mutual exclusion. L1 never sees the raw failure.
-
-**Rail 2 — Runtime failures.** `DegradationCheck` fires mid-evaluation when `degraded_rate ≥ threshold`. `_score_candidates()` synthesises a `RuntimeFailure` (now carrying `first_seen_round` and `candidate_label`) attached to the failing candidate's `memory.runtime_failures`. End-of-round, `execute_round` mirrors new failures onto the outer `state.opt_sp.memory.runtime_failures`, deduped by `(source, dominant_warning, observed_config)`. L2 then reads only outer memory and partitions at format time — NEW vs ACCUMULATED is a display view, not two separate data paths. L2 heals itself by adjusting directive / task_context / optimizer_params. When ACCUMULATED patterns keep growing across L2 rounds, L3 receives the trail via `format_runtime_failures_for_l3()` and must replan the pipeline itself.
-
-Rails differ in **who heals** and **what the healing action is**: rail 1 is L1 self-healing via L2 directive; rail 2 is L2 self-healing with L3 escalation.
-
----
-
-## Internal (not a prompt injection)
-
-**Stale data observations** — accumulated during eval → `opt_sp` → aggregated cross-campaign by SearchMemory. Consumed by `l1_evaluate`'s stale data protocol (`sampleswitch` queries SearchMemory's per-query degradation rate). Never enters an LLM prompt.
-
----
-
-## Compression Chain
+## Compression chain
 
 ```
 eval results ──► Critique (LLM) ──► critique_text ──► L2 (LLM) ──► l2_directive ──► L1 (LLM)
                  1st hop                               2nd hop
 ```
 
-When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy compression. The directive/critique mutual exclusion ensures L1 gets the most processed form available. Round trajectory and failure group insights will feed L2 directly (bypassing this chain), so L2 can produce better-informed directives for L1.
+When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy
+compression. The `guidance` mutex ensures L1 sees the most-processed
+form available. Validation failures bypass critique entirely and feed
+L2 directly (1 hop instead of 2) — the signal is already structured,
+no eval-result digestion needed.
 
-Validation failures bypass critique entirely and feed L2 directly (1 hop instead of 2) — the signal is already structured, no eval-result digestion needed.
+L3 sees only `{{l2_summary}}` (last 3 L2 outcomes: what changed,
+whether accuracy moved) — never L2's directive or reasoning. Strategy
+from outcomes, not tactics.
 
-L3 sees only `l2_summary` (last 3 L2 outcomes: what changed, whether accuracy moved) — never L2's directive or reasoning. Strategy from outcomes, not tactics.
+## Internal — not a prompt injection
 
----
+**Stale data observations** — accumulated during eval →
+`opt_sp.memory.warning_inventory` → aggregated cross-campaign by
+`SearchMemory`. Consumed by L1's stale data protocol (`sampleswitch`
+queries SearchMemory's per-query degradation rate). Never enters an
+LLM prompt.
 
-## Self-Optimization (Meta-Level)
+## Self-optimization (meta-level)
 
-The potter's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively, which is what enables a future self-optimization mode. The trace dataset (`potter_traces` loader) freezes archived campaign transitions into `{round_context → next_directive → score_delta}` rows that an outer-loop PromptPotter instance can score meta-prompt variants against. See [prompt-scheme.md § Optimizer Meta-Prompts](prompt-scheme.md#optimizer-meta-prompts) and [§ Potter Trace Dataset](prompt-scheme.md#potter-trace-dataset).
+The potter's own prompts are themselves `PromptTemplate` instances —
+the 8-field decomposition applies recursively, which is what enables a
+future self-optimization mode. The trace dataset (`potter_traces`
+loader) freezes archived campaign transitions into
+`{round_context → next_directive → score_delta}` rows that an
+outer-loop PromptPotter instance can score meta-prompt variants
+against. See
+[prompt-scheme.md § Optimizer Meta-Prompts](prompt-scheme.md#optimizer-meta-prompts)
+and [§ Potter Trace Dataset](prompt-scheme.md#potter-trace-dataset).

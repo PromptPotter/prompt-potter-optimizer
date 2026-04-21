@@ -5,7 +5,11 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.nodes.formatting import format_context_sections
+from promptpotter.application.optimization.nodes.inbox_registry import (
+    InboxCtx,
+    Layer,
+    assemble_inbox,
+)
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -21,6 +25,7 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -199,7 +204,7 @@ async def l1_generate(
     model: str | None = None,
     is_probe_round: bool = False,
     failure_analysis: FailureAnalysis | None = None,
-    search_memory_digest: dict | None = None,
+    search_memory: SearchMemory | None = None,
     pipeline_schema: PipelineSchema | None = None,
     obs: ObservabilityBridge | None = None,
     obs_campaign_id: str = "",
@@ -211,24 +216,22 @@ async def l1_generate(
 
     schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
 
+    inbox_ctx = InboxCtx(
+        opt_sp=opt_sp,
+        pipeline_schema=pipeline_schema,
+        search_memory=search_memory,
+        round_num=round_num,
+        is_probe_round=is_probe_round,
+        failure_analysis=failure_analysis,
+        pipeline_schema_text=schema_text,
+    )
+
     _compile_vars = {
         "n_variants": str(n_variants),
         "accuracy_pct": f"{current_accuracy:.1%}",
         "n_queries": str(len(current_results)),
         "rendered_prompt": opt_sp.render(),
-        "context_sections": format_context_sections(
-            task_context=opt_sp.task_context or None,
-            critique_text=opt_sp.memory.critique_text,
-            l2_directive=opt_sp.memory.l2_directive,
-            thinking_styles=opt_sp.memory.thinking_styles or None,
-            plan=opt_sp.plan or "",
-            warning_inventory=opt_sp.memory.warning_inventory or None,
-            escalation_journal=opt_sp.memory.escalation_journal or None,
-            is_probe_round=is_probe_round,
-            failure_analysis=failure_analysis,
-            search_memory_digest=search_memory_digest,
-            pipeline_schema_text=schema_text,
-        ),
+        "inbox": assemble_inbox(Layer.L1, inbox_ctx),
     }
     _template = load_optimizer_prompt("meta_scan_aware")
     meta_prompt = _template.compile_prompt(**_compile_vars)

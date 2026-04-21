@@ -1,0 +1,729 @@
+"""Inbox registry — single declarative catalogue of optimizer-prompt inputs.
+
+Every L1/L2 prompt receives an ``{{inbox}}`` block assembled from the
+fields declared here. Each :class:`InboxField` owns:
+
+    * which layer(s) consume it,
+    * how to source its raw value from an :class:`InboxCtx`,
+    * how to render that value into a section string,
+    * the section label/header shown in each consuming layer,
+    * optional mutex membership for mutually-exclusive pairs (e.g.
+      ``l2_directive`` wins over ``critique_text`` on L1 only).
+
+:func:`assemble_inbox` is the one function callers need. It walks
+:data:`LAYER_ORDER` for the target layer, applies mutex resolution,
+drops empty sections, and joins the rest. Replaces the three bespoke
+``format_*`` assemblers that used to live in :mod:`.formatting`.
+
+The critique layer keeps its own assembler (see ``critique.py``) because
+its sections share cross-cutting state (``anomalies``, ``near_miss``).
+L3 keeps its multi-hole template (``current_plan``, ``l2_summary``,
+``rendered_prompt``, ``pipeline_section``) and only the intelligence
+block flows through this registry.
+"""
+
+from __future__ import annotations
+
+import enum
+from collections import Counter
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, Any
+
+from promptpotter.application.optimization.nodes.formatting import (
+    assess_candidate_diversity,
+    build_candidate_comparison,
+    build_trajectory_report,
+    format_escalation_report,
+    format_runtime_failure_line,
+    format_search_memory_block,
+    summarize_warning_inventory,
+)
+
+if TYPE_CHECKING:
+    from promptpotter.domain.analysis import FailureAnalysis
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+
+
+class Layer(enum.StrEnum):
+    """Optimizer layer that consumes an inbox."""
+
+    L1 = "L1"
+    L2 = "L2"
+
+
+class Retention(enum.StrEnum):
+    """How a field's source value survives across rounds (docs-only)."""
+
+    MEMORY = "memory"  # opt_sp.memory.* — persisted on OptSearchPoint
+    OPT_SP = "opt_sp"  # opt_sp.<top-level> — persisted on OptSearchPoint
+    TRANSIENT = "transient"  # computed per-round, not stored
+    CONFIG = "config"  # pipeline_schema / precomputed static text
+    SEARCH_MEMORY = "search_memory"  # cross-campaign aggregate
+
+
+_L1_SM_KEYS = frozenset({"failure_clusters", "dead_queries", "top_axes", "top_values"})
+_L2_SM_KEYS = frozenset(
+    {
+        "axis_rankings",
+        "bottleneck_distribution",
+        "failure_group_insights",
+        "persistent_failures",
+        "volatile_queries",
+    }
+)
+_L1_SM_LABELS: dict[str, str] = {
+    "failure_clusters": "Common failure patterns",
+    "dead_queries": "Dead queries (never hit)",
+    "top_axes": "High-impact axes",
+    "top_values": "Best-performing values",
+}
+_L2_SM_LABELS: dict[str, str] = {
+    "axis_rankings": "Axis impact rankings",
+    "bottleneck_distribution": "Bottleneck distribution",
+    "failure_group_insights": "Failure group x axis",
+    "persistent_failures": "Persistent failures",
+    "volatile_queries": "Volatile queries (oscillating)",
+}
+
+
+@dataclass
+class InboxCtx:
+    """Bag of optional inputs — each :class:`InboxField.source` reads what it needs.
+
+    Fields are optional because different layers need different subsets.
+    When a field's source returns ``None``/empty, :func:`assemble_inbox`
+    skips that section.
+    """
+
+    opt_sp: OptSearchPoint
+    pipeline_schema: PipelineSchema | None = None
+    search_memory: Any | None = None  # SearchMemory — typed Any to avoid circular import
+    round_num: int = 0
+
+    # L1-only extras
+    is_probe_round: bool = False
+    failure_analysis: FailureAnalysis | None = None
+    pipeline_schema_text: str = ""
+
+    # L2-only extras
+    rounds: list[Any] | None = None
+    candidate_scores: list[dict] | None = None
+    escalation_check_result: dict | None = None
+    pipeline_params: dict | None = None
+
+
+@dataclass(frozen=True)
+class InboxField:
+    """Declarative spec for one piece of optimizer-prompt intelligence."""
+
+    name: str
+    layers: frozenset[Layer]
+    source: Callable[[InboxCtx], Any]
+    render: Callable[[Any, InboxCtx, Layer], str]
+    retention: Retention
+    docstring: str
+    # Per-layer mutex: fields sharing a (layer, group) pick the highest priority.
+    mutex: dict[Layer, tuple[str, int]] = field(default_factory=dict)
+
+
+# ---------------------------------------------------------------------------
+# Source helpers — closures over InboxCtx.
+# ---------------------------------------------------------------------------
+
+
+def _src_memory(attr: str) -> Callable[[InboxCtx], Any]:
+    def _read(ctx: InboxCtx) -> Any:
+        return getattr(ctx.opt_sp.memory, attr) or None
+
+    return _read
+
+
+def _src_task_context(ctx: InboxCtx) -> Any:
+    tc = ctx.opt_sp.task_context
+    return tc if tc else None
+
+
+def _src_plan(ctx: InboxCtx) -> str | None:
+    return ctx.opt_sp.plan or None
+
+
+def _src_pipeline_schema_text(ctx: InboxCtx) -> str | None:
+    return ctx.pipeline_schema_text or None
+
+
+def _src_failure_analysis(ctx: InboxCtx) -> FailureAnalysis | None:
+    fa = ctx.failure_analysis
+    return fa if fa and fa.patterns else None
+
+
+def _src_escalation_probe(ctx: InboxCtx) -> list[dict] | None:
+    """Probe-round per-query warning block — fires only when probe AND journal present."""
+    if not ctx.is_probe_round:
+        return None
+    journal = ctx.opt_sp.memory.escalation_journal
+    return journal or None
+
+
+def _src_escalation_alert(ctx: InboxCtx) -> list[dict] | None:
+    """Non-probe aggregated alert — suppressed by an active l2_directive."""
+    if ctx.is_probe_round:
+        return None
+    if ctx.opt_sp.memory.l2_directive:
+        return None
+    journal = ctx.opt_sp.memory.escalation_journal
+    return journal or None
+
+
+def _src_l1_search_memory(ctx: InboxCtx) -> dict[str, str] | None:
+    if ctx.search_memory is None:
+        return None
+    return ctx.search_memory.digest(_L1_SM_KEYS)
+
+
+def _src_l2_search_memory(ctx: InboxCtx) -> dict[str, str] | None:
+    if ctx.search_memory is None:
+        return None
+    return ctx.search_memory.digest(_L2_SM_KEYS, include_correlations=True)
+
+
+def _src_escalation_section(ctx: InboxCtx) -> str | None:
+    """L2 escalation report — from escalation_check_result + journal."""
+    if not ctx.escalation_check_result:
+        return None
+    text = format_escalation_report(
+        ctx.escalation_check_result,
+        ctx.opt_sp.memory.escalation_journal or None,
+        ctx.pipeline_params,
+        pipeline_schema=ctx.pipeline_schema,
+    )
+    return text or None
+
+
+def _src_warning_inventory_l2(ctx: InboxCtx) -> dict | None:
+    """L2 fallback: per-query warning inventory when no escalation section."""
+    if _src_escalation_section(ctx):
+        return None
+    return ctx.opt_sp.memory.warning_inventory or None
+
+
+def _src_trajectory(ctx: InboxCtx) -> Any:
+    if not ctx.rounds:
+        return None
+    return build_trajectory_report(ctx.rounds)
+
+
+def _src_candidate_comparison(ctx: InboxCtx) -> str | None:
+    if not ctx.candidate_scores:
+        return None
+    return build_candidate_comparison(ctx.candidate_scores)
+
+
+def _src_diversity_alert(ctx: InboxCtx) -> str | None:
+    if not ctx.rounds:
+        return None
+    return assess_candidate_diversity(ctx.rounds)
+
+
+def _src_validation_failures(ctx: InboxCtx) -> list[dict] | None:
+    vfs: list[dict] = []
+    for cs in ctx.candidate_scores or []:
+        vfs.extend(cs.get("validation_failures") or [])
+    return vfs or None
+
+
+def _src_runtime_failures(ctx: InboxCtx) -> list[dict] | None:
+    rfs = [rf.to_dict() for rf in ctx.opt_sp.memory.runtime_failures]
+    return rfs or None
+
+
+# ---------------------------------------------------------------------------
+# Render helpers — closures receive (value, ctx, layer) and return str.
+# ---------------------------------------------------------------------------
+
+
+def _r_identity(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+    return str(v) if v else ""
+
+
+def _r_task_context(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+    lines = "\n".join(f"  {k}: {val}" for k, val in v.items() if val)
+    return f"CONTEXT:\n{lines}" if lines else ""
+
+
+def _r_plan(v: str, _ctx: InboxCtx, _layer: Layer) -> str:
+    return f"PLAN:\n{v}" if v else ""
+
+
+def _r_thinking_styles(v: list[str], _ctx: InboxCtx, _layer: Layer) -> str:
+    if not v:
+        return ""
+    styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(v))
+    return f"THINKING STYLES:\n{styles}"
+
+
+def _r_labeled(label: str) -> Callable[[Any, InboxCtx, Layer], str]:
+    def _render(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+        return f"{label}\n{v}" if v else ""
+
+    return _render
+
+
+def _r_failure_analysis(fa: FailureAnalysis, _ctx: InboxCtx, _layer: Layer) -> str:
+    if not fa or not fa.patterns:
+        return ""
+    lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
+    for i, pat in enumerate(fa.patterns[:3], 1):
+        lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
+        if pat.example_queries:
+            examples = ", ".join(f'"{q}"' for q in pat.example_queries[:2])
+            lines.append(f"     Examples: {examples}")
+        sig = {
+            k: v for k, v in pat.signals.items() if k not in ("error", "degraded", "total_time_ms")
+        }
+        if sig:
+            sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
+            lines.append(f"     Signals: {sig_str}")
+    lines.append("IMPROVEMENT DIRECTIONS:")
+    for i, pat in enumerate(fa.patterns[:3], 1):
+        lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
+    return "\n".join(lines)
+
+
+def _r_escalation_probe(journal: list[dict], ctx: InboxCtx, _layer: Layer) -> str:
+    lines = [
+        "PROBE ROUND: queries have recurring pipeline warnings. "
+        "Generate candidates that address pipeline robustness."
+    ]
+    warning_inventory = ctx.opt_sp.memory.warning_inventory or None
+    if warning_inventory:
+        inv = summarize_warning_inventory(warning_inventory)
+        if inv:
+            lines.extend(["", inv])
+        step_counts: Counter[str] = Counter()
+        for entry in warning_inventory.values():
+            for wtype in entry.get("warnings", {}):
+                step_counts[wtype.split(":", 1)[0]] += 1
+        if step_counts:
+            dom_step, dom_count = step_counts.most_common(1)[0]
+            lines.append(f"\nDominant step: {dom_step} ({dom_count} warnings)")
+            tried = [ej for ej in journal if ej.get("problem_step") == dom_step][-3:]
+            if tried:
+                lines.append(f"Previous attempts at {dom_step}:")
+                lines.extend(
+                    f"  - {ej.get('degraded_rate', 0):.0%} degraded, {ej.get('warning_types', {})}"
+                    for ej in tried
+                )
+    return "\n".join(lines)
+
+
+def _r_escalation_alert(journal: list[dict], _ctx: InboxCtx, _layer: Layer) -> str:
+    latest = journal[-1]
+    alert = [
+        f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
+        f"degrade at {latest.get('problem_step', 'unknown')}. "
+        "Address pipeline instability."
+    ]
+    if len(journal) > 1:
+        alert.append(f"{len(journal)} prior attempts unresolved.")
+    if latest.get("warning_types"):
+        alert.append(f"Warnings: {latest['warning_types']}")
+    return "\n".join(alert)
+
+
+def _r_search_memory_l1(v: dict[str, str], _ctx: InboxCtx, _layer: Layer) -> str:
+    # Uses format_search_memory_block's "HISTORICAL INTELLIGENCE:" default header.
+    return format_search_memory_block(v, _L1_SM_LABELS)
+
+
+def _r_search_memory_l2(v: dict[str, str], _ctx: InboxCtx, _layer: Layer) -> str:
+    return format_search_memory_block(v, _L2_SM_LABELS)
+
+
+def _r_escalation_section(v: str, _ctx: InboxCtx, _layer: Layer) -> str:
+    # format_escalation_report returns text ending in "\n" already — preserve.
+    return v
+
+
+def _r_warning_inventory_l2(v: dict, _ctx: InboxCtx, _layer: Layer) -> str:
+    text = summarize_warning_inventory(v)
+    return (text + "\n") if text else ""
+
+
+def _r_trajectory(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+    lines = [f"CAMPAIGN TRAJECTORY:\n  {v.text}"]
+    if v.classification != "healthy":
+        lines.append(
+            f"TRAJECTORY DIAGNOSIS: [{v.classification.upper()}] "
+            f"{v.description}\n  Recommended: {v.recommended_action}"
+        )
+    return "\n\n".join(lines)
+
+
+def _r_validation_failures(v: list[dict], _ctx: InboxCtx, _layer: Layer) -> str:
+    lines = ["L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):"]
+    for vf in v:
+        allowed = vf.get("allowed") or []
+        allowed_str = ", ".join(allowed[:5]) + (
+            f" (+{len(allowed) - 5} more)" if len(allowed) > 5 else ""
+        )
+        lines.append(
+            f"  ⚠ axis={vf.get('axis')} proposed={vf.get('value')!r} reason={vf.get('reason')}"
+        )
+        lines.append(f"    allowed: [{allowed_str}]")
+    lines.append(
+        "  ↳ Required L2 action: produce a directive that names the disallowed "
+        "value(s) explicitly and instructs L1 to choose only from the allowed "
+        'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
+        'propose any other value such as gpt-4o." Self-healing depends on the '
+        "directive being explicit."
+    )
+    return "\n".join(lines)
+
+
+def _r_runtime_failures_l2(v: list[dict], ctx: InboxCtx, _layer: Layer) -> str:
+    rfs_new = [rf for rf in v if rf.get("first_seen_round", 0) == ctx.round_num]
+    rfs_acc = [rf for rf in v if rf.get("first_seen_round", 0) != ctx.round_num]
+    lines = [
+        "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
+        "  (candidates ran but produced high warning rates; L2 must adjust "
+        "its own strategy — directive, task_context, optimizer_params — to "
+        "steer L1 away from the failing config region)",
+    ]
+    if rfs_new:
+        lines.append("")
+        lines.append("NEW (this round):")
+        for rf in rfs_new:
+            lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
+    if rfs_acc:
+        lines.append("")
+        lines.append(
+            f"ACCUMULATED (surviving from earlier rounds, {len(rfs_acc)} patterns — "
+            "L2's prior strategy adjustments did NOT reduce these):"
+        )
+        for rf in rfs_acc:
+            lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
+    lines.append("")
+    lines.append(
+        "  ↳ Required L2 action: this is L2 self-healing, not L1 correction. "
+        "Update your OWN outputs — tighten the directive to name the failing "
+        "config range, refine task_context with the discovered constraint, or "
+        "adjust optimizer_params (creativity, n_variants) to narrow L1's search "
+        "around the safe region. Do NOT just parrot 'don't use X' to L1 — "
+        'restructure the search. Example directive: "Reasoning models on this '
+        "task need max_tokens ≥ 2000 to emit a final answer; propose variants "
+        'only within that range." '
+        "If ACCUMULATED entries persist across multiple L2 attempts, L3 will "
+        "replan the pipeline itself next."
+    )
+    return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Registry — one authoritative catalogue.
+# ---------------------------------------------------------------------------
+
+
+INBOX: tuple[InboxField, ...] = (
+    # L1-only fields (section order preserved from legacy format_context_sections)
+    InboxField(
+        name="pipeline_schema_text",
+        layers=frozenset({Layer.L1}),
+        source=_src_pipeline_schema_text,
+        render=_r_identity,
+        retention=Retention.CONFIG,
+        docstring="Precomputed pipeline node/param catalogue — teaches L1 what it may tune.",
+    ),
+    InboxField(
+        name="failure_analysis",
+        layers=frozenset({Layer.L1}),
+        source=_src_failure_analysis,
+        render=_r_failure_analysis,
+        retention=Retention.TRANSIENT,
+        docstring="Top-3 clustered failure patterns with example queries.",
+    ),
+    InboxField(
+        name="search_memory_l1",
+        layers=frozenset({Layer.L1}),
+        source=_src_l1_search_memory,
+        render=_r_search_memory_l1,
+        retention=Retention.SEARCH_MEMORY,
+        docstring="Cross-campaign digest: failure clusters, dead queries, top axes / values.",
+    ),
+    InboxField(
+        name="task_context",
+        layers=frozenset({Layer.L1}),
+        source=_src_task_context,
+        render=_r_task_context,
+        retention=Retention.OPT_SP,
+        docstring="Structured domain context (read-only from L1's view; L2 edits).",
+    ),
+    InboxField(
+        name="escalation_probe",
+        layers=frozenset({Layer.L1}),
+        source=_src_escalation_probe,
+        render=_r_escalation_probe,
+        retention=Retention.MEMORY,
+        docstring="Probe-round per-query warning dump — fires only when L2 requests a probe.",
+    ),
+    InboxField(
+        name="escalation_alert",
+        layers=frozenset({Layer.L1}),
+        source=_src_escalation_alert,
+        render=_r_escalation_alert,
+        retention=Retention.MEMORY,
+        docstring="Non-probe aggregated escalation alert — suppressed by an active l2_directive.",
+    ),
+    # Mutex pair on L1: directive wins over critique when both populated.
+    InboxField(
+        name="l2_directive",
+        layers=frozenset({Layer.L1, Layer.L2}),
+        source=_src_memory("l2_directive"),
+        render=_r_labeled(""),  # placeholder; overridden per-layer below
+        retention=Retention.MEMORY,
+        docstring="L2's one-round guidance window; clears on improvement.",
+        mutex={Layer.L1: ("guidance", 2)},
+    ),
+    InboxField(
+        name="critique_text",
+        layers=frozenset({Layer.L1, Layer.L2}),
+        source=_src_memory("critique_text"),
+        render=_r_labeled(""),  # placeholder; overridden per-layer below
+        retention=Retention.MEMORY,
+        docstring="Latest critique output; L2 digests into a directive before L1 sees it.",
+        mutex={Layer.L1: ("guidance", 1)},
+    ),
+    InboxField(
+        name="thinking_styles",
+        layers=frozenset({Layer.L1}),
+        source=_src_memory("thinking_styles"),
+        render=_r_thinking_styles,
+        retention=Retention.MEMORY,
+        docstring="3 sampled thinking styles for L1 meta-prompt injection.",
+    ),
+    InboxField(
+        name="plan",
+        layers=frozenset({Layer.L1}),
+        source=_src_plan,
+        render=_r_plan,
+        retention=Retention.OPT_SP,
+        docstring="L3's strategic plan (read-only from L1's view).",
+    ),
+    # L2-only fields (section order preserved from legacy format_l2_intelligence)
+    InboxField(
+        name="escalation_section",
+        layers=frozenset({Layer.L2}),
+        source=_src_escalation_section,
+        render=_r_escalation_section,
+        retention=Retention.TRANSIENT,
+        docstring="Aggregated pipeline stability report — composed from escalation_check_result.",
+    ),
+    InboxField(
+        name="warning_inventory",
+        layers=frozenset({Layer.L2}),
+        source=_src_warning_inventory_l2,
+        render=_r_warning_inventory_l2,
+        retention=Retention.MEMORY,
+        docstring="Per-query warning breakdown — L2 fallback when no escalation section.",
+    ),
+    InboxField(
+        name="trajectory",
+        layers=frozenset({Layer.L2}),
+        source=_src_trajectory,
+        render=_r_trajectory,
+        retention=Retention.TRANSIENT,
+        docstring="Campaign-wide accuracy trajectory + classification (healthy/plateau/...).",
+    ),
+    InboxField(
+        name="candidate_comparison",
+        layers=frozenset({Layer.L2}),
+        source=_src_candidate_comparison,
+        render=lambda v, _c, _l: f"LAST ROUND CANDIDATES:\n  {v}" if v else "",
+        retention=Retention.TRANSIENT,
+        docstring="Per-candidate accuracy diff for the last round.",
+    ),
+    InboxField(
+        name="diversity_alert",
+        layers=frozenset({Layer.L2}),
+        source=_src_diversity_alert,
+        render=lambda v, _c, _l: f"DIVERSITY ALERT:\n  {v}" if v else "",
+        retention=Retention.TRANSIENT,
+        docstring="Mode-collapse detection across recent rounds.",
+    ),
+    InboxField(
+        name="validation_failures",
+        layers=frozenset({Layer.L2}),
+        source=_src_validation_failures,
+        render=_r_validation_failures,
+        retention=Retention.TRANSIENT,
+        docstring="L1 parse-time invariant violations — Rail 1 self-healing input.",
+    ),
+    InboxField(
+        name="runtime_failures",
+        layers=frozenset({Layer.L2}),
+        source=_src_runtime_failures,
+        render=_r_runtime_failures_l2,
+        retention=Retention.MEMORY,
+        docstring="Mid-eval degradation records — Rail 2 self-healing input for L2.",
+    ),
+    InboxField(
+        name="search_memory_l2",
+        layers=frozenset({Layer.L2}),
+        source=_src_l2_search_memory,
+        render=_r_search_memory_l2,
+        retention=Retention.SEARCH_MEMORY,
+        docstring="Cross-campaign strategic digest: axis rankings, bottlenecks, correlations.",
+    ),
+)
+
+
+# ---------------------------------------------------------------------------
+# Per-layer order and per-layer label overrides for mutex-winning fields.
+# ---------------------------------------------------------------------------
+
+
+LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
+    Layer.L1: (
+        "pipeline_schema_text",
+        "failure_analysis",
+        "search_memory_l1",
+        "task_context",
+        "escalation_probe",
+        "escalation_alert",
+        "l2_directive",
+        "critique_text",
+        "thinking_styles",
+        "plan",
+    ),
+    Layer.L2: (
+        "escalation_section",
+        "warning_inventory",
+        "critique_text",
+        "l2_directive",
+        "trajectory",
+        "candidate_comparison",
+        "diversity_alert",
+        "validation_failures",
+        "runtime_failures",
+        "search_memory_l2",
+    ),
+}
+
+
+_LABEL_BY_LAYER: dict[tuple[Layer, str], str] = {
+    (Layer.L1, "l2_directive"): "DIRECTIVE:",
+    (Layer.L1, "critique_text"): "CRITIQUE:",
+    (Layer.L2, "critique_text"): "CRITIQUE:",
+    (Layer.L2, "l2_directive"): "PREVIOUS DIRECTIVE:",
+}
+
+
+def _by_name() -> dict[str, InboxField]:
+    return {f.name: f for f in INBOX}
+
+
+def _render_one(f: InboxField, raw: Any, ctx: InboxCtx, layer: Layer) -> str:
+    """Dispatch rendering — for labeled fields, use the per-layer label override."""
+    label = _LABEL_BY_LAYER.get((layer, f.name))
+    if label is not None:
+        # Labeled scalar text — same shape as _r_labeled.
+        return f"{label}\n{raw}" if raw else ""
+    return f.render(raw, ctx, layer)
+
+
+def _resolve_mutex(layer: Layer, raws: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the highest-priority populated field per (layer, mutex_group)."""
+    by_name = _by_name()
+    groups: dict[str, list[tuple[int, str]]] = {}
+    for fname, raw in raws.items():
+        if not raw:
+            continue
+        mutex = by_name[fname].mutex.get(layer)
+        if mutex is None:
+            continue
+        group, pri = mutex
+        groups.setdefault(group, []).append((pri, fname))
+
+    drop: set[str] = set()
+    for members in groups.values():
+        if len(members) < 2:
+            continue
+        members.sort(reverse=True)  # highest priority first
+        for _pri, fname in members[1:]:
+            drop.add(fname)
+
+    return {k: v for k, v in raws.items() if k not in drop}
+
+
+def assemble_inbox(layer: Layer, ctx: InboxCtx) -> str:
+    """Walk the registry for *layer*, resolve mutex, render, join.
+
+    Returns an empty string when no section produces content.
+    """
+    by_name = _by_name()
+    order = LAYER_ORDER[layer]
+
+    # Source every field in order; drop those whose source returned empty.
+    raws: dict[str, Any] = {}
+    for fname in order:
+        f = by_name[fname]
+        if layer not in f.layers:
+            continue
+        raw = f.source(ctx)
+        if raw:
+            raws[fname] = raw
+
+    raws = _resolve_mutex(layer, raws)
+
+    # Render in layer order, drop empty section strings.
+    sections: list[str] = []
+    for fname in order:
+        if fname not in raws:
+            continue
+        f = by_name[fname]
+        text = _render_one(f, raws[fname], ctx, layer)
+        if text:
+            sections.append(text)
+
+    return "\n\n".join(sections)
+
+
+# ---------------------------------------------------------------------------
+# Docs helper — emits the per-layer rows for information-flow.md.
+# ---------------------------------------------------------------------------
+
+
+def registry_rows_for_docs() -> list[dict[str, str]]:
+    """One row per (field, layer) — feeds the table in information-flow.md."""
+    rows: list[dict[str, str]] = []
+    for fname in LAYER_ORDER[Layer.L1] + LAYER_ORDER[Layer.L2]:
+        f = _by_name()[fname]
+        for layer in (Layer.L1, Layer.L2):
+            if fname not in LAYER_ORDER[layer]:
+                continue
+            label = _LABEL_BY_LAYER.get((layer, fname), "")
+            mutex = f.mutex.get(layer)
+            rows.append(
+                {
+                    "field": fname,
+                    "layer": str(layer),
+                    "label": label,
+                    "retention": str(f.retention),
+                    "mutex": (f"{mutex[0]} (pri {mutex[1]})" if mutex else ""),
+                    "docstring": f.docstring,
+                }
+            )
+    return rows
+
+
+__all__ = [
+    "INBOX",
+    "LAYER_ORDER",
+    "InboxCtx",
+    "InboxField",
+    "Layer",
+    "Retention",
+    "assemble_inbox",
+    "registry_rows_for_docs",
+]

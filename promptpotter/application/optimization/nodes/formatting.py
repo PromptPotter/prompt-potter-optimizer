@@ -3,16 +3,13 @@
 from __future__ import annotations
 
 import json
-from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
-    from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
     "TrajectoryReport",
@@ -22,9 +19,7 @@ __all__ = [
     "build_trajectory_report",
     "candidate_summaries",
     "extract_runtime_failure_fields",
-    "format_context_sections",
     "format_escalation_report",
-    "format_l2_intelligence",
     "format_pipeline_section",
     "format_runtime_failure_line",
     "format_runtime_failures_for_l3",
@@ -122,249 +117,6 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
         "Do NOT propose a plan that re-enters the same failure mode."
     )
     return "\n".join(lines)
-
-
-def format_context_sections(
-    *,
-    task_context: TaskDecomposition | None = None,
-    critique_text: str = "",
-    l2_directive: str = "",
-    thinking_styles: list[str] | None = None,
-    plan: str = "",
-    warning_inventory: dict | None = None,
-    escalation_journal: list[dict] | None = None,
-    is_probe_round: bool = False,
-    failure_analysis: FailureAnalysis | None = None,
-    search_memory_digest: dict | None = None,
-    pipeline_schema_text: str = "",
-) -> str:
-    """Build the L1 intelligence bundle — escalation, critique, directives, plan."""
-    sections: list[str] = []
-
-    if pipeline_schema_text:
-        sections.append(pipeline_schema_text)
-
-    if failure_analysis and failure_analysis.patterns:
-        fa = failure_analysis
-        fa_lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
-        for i, pat in enumerate(fa.patterns[:3], 1):
-            fa_lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
-            if pat.example_queries:
-                examples = ", ".join(f'"{q}"' for q in pat.example_queries[:2])
-                fa_lines.append(f"     Examples: {examples}")
-            sig = {
-                k: v
-                for k, v in pat.signals.items()
-                if k not in ("error", "degraded", "total_time_ms")
-            }
-            if sig:
-                sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
-                fa_lines.append(f"     Signals: {sig_str}")
-        fa_lines.append("IMPROVEMENT DIRECTIONS:")
-        for i, pat in enumerate(fa.patterns[:3], 1):
-            fa_lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
-        sections.append("\n".join(fa_lines))
-
-    hi = format_search_memory_block(
-        search_memory_digest,
-        {
-            "failure_clusters": "Common failure patterns",
-            "dead_queries": "Dead queries (never hit)",
-            "top_axes": "High-impact axes",
-            "top_values": "Best-performing values",
-        },
-    )
-    if hi:
-        sections.append(hi)
-
-    if task_context:
-        tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
-        if tc_lines:
-            sections.append(f"CONTEXT:\n{tc_lines}")
-
-    # Probe rounds show per-query warnings; non-probe skips when l2_directive absorbed it.
-    if escalation_journal and is_probe_round:
-        lines = [
-            "PROBE ROUND: queries have recurring pipeline warnings. "
-            "Generate candidates that address pipeline robustness."
-        ]
-        if warning_inventory:
-            inv = summarize_warning_inventory(warning_inventory)
-            if inv:
-                lines.extend(["", inv])
-            step_counts: Counter[str] = Counter()
-            for entry in warning_inventory.values():
-                for wtype in entry.get("warnings", {}):
-                    step_counts[wtype.split(":", 1)[0]] += 1
-            if step_counts:
-                dom_step, dom_count = step_counts.most_common(1)[0]
-                lines.append(f"\nDominant step: {dom_step} ({dom_count} warnings)")
-                tried = [ej for ej in escalation_journal if ej.get("problem_step") == dom_step][-3:]
-                if tried:
-                    lines.append(f"Previous attempts at {dom_step}:")
-                    lines.extend(
-                        f"  - {ej.get('degraded_rate', 0):.0%} degraded, {ej.get('warning_types', {})}"
-                        for ej in tried
-                    )
-        sections.append("\n".join(lines))
-    elif escalation_journal and not l2_directive:
-        latest = escalation_journal[-1]
-        alert = [
-            f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
-            f"degrade at {latest.get('problem_step', 'unknown')}. "
-            "Address pipeline instability."
-        ]
-        if len(escalation_journal) > 1:
-            alert.append(f"{len(escalation_journal)} prior attempts unresolved.")
-        if latest.get("warning_types"):
-            alert.append(f"Warnings: {latest['warning_types']}")
-        sections.append("\n".join(alert))
-
-    # Directive/critique mutual exclusion: L2 digests critique into a directive,
-    # so when both are present the directive already absorbs the critique signal.
-    if l2_directive:
-        sections.append(f"DIRECTIVE:\n{l2_directive}")
-    elif critique_text:
-        sections.append(f"CRITIQUE:\n{critique_text}")
-
-    if thinking_styles:
-        styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(thinking_styles))
-        sections.append(f"THINKING STYLES:\n{styles}")
-
-    if plan:
-        sections.append(f"PLAN:\n{plan}")
-
-    return "\n\n".join(sections)
-
-
-def format_l2_intelligence(
-    *,
-    escalation_section: str = "",
-    warning_inventory: dict | None = None,
-    critique_text: str = "",
-    l2_directive: str = "",
-    search_memory_digest: dict | None = None,
-    trajectory: TrajectoryReport | None = None,
-    candidate_comparison: str | None = None,
-    diversity_alert: str | None = None,
-    validation_failures: list[dict] | None = None,
-    runtime_failures: list[dict] | None = None,
-    current_round_num: int = 0,
-) -> str:
-    """Build the L2 refine_strategy intelligence bundle (self-healing signals + trajectory)."""
-    sections: list[str] = []
-
-    # Escalation OR per-query warnings — never both; escalation section already
-    # aggregates warning counts, L2 is strategic not per-query.
-    esc = escalation_section
-    if not esc and warning_inventory:
-        warning_text = summarize_warning_inventory(warning_inventory)
-        if warning_text:
-            esc = warning_text + "\n"
-    if esc:
-        sections.append(esc)
-
-    if critique_text:
-        sections.append("CRITIQUE:\n" + critique_text)
-
-    if l2_directive:
-        sections.append("PREVIOUS DIRECTIVE:\n" + l2_directive)
-
-    if trajectory:
-        sections.append(f"CAMPAIGN TRAJECTORY:\n  {trajectory.text}")
-        if trajectory.classification != "healthy":
-            sections.append(
-                f"TRAJECTORY DIAGNOSIS: [{trajectory.classification.upper()}] "
-                f"{trajectory.description}\n  Recommended: {trajectory.recommended_action}"
-            )
-
-    if candidate_comparison:
-        sections.append(f"LAST ROUND CANDIDATES:\n  {candidate_comparison}")
-
-    if diversity_alert:
-        sections.append(f"DIVERSITY ALERT:\n  {diversity_alert}")
-
-    vfs = validation_failures or []
-    if vfs:
-        lines = [
-            "L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):",
-        ]
-        for vf in vfs:
-            allowed = vf.get("allowed") or []
-            allowed_str = ", ".join(allowed[:5]) + (
-                f" (+{len(allowed) - 5} more)" if len(allowed) > 5 else ""
-            )
-            lines.append(
-                f"  ⚠ axis={vf.get('axis')} proposed={vf.get('value')!r} reason={vf.get('reason')}"
-            )
-            lines.append(f"    allowed: [{allowed_str}]")
-        lines.append(
-            "  ↳ Required L2 action: produce a directive that names the disallowed "
-            "value(s) explicitly and instructs L1 to choose only from the allowed "
-            'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
-            'propose any other value such as gpt-4o." Self-healing depends on the '
-            "directive being explicit."
-        )
-        sections.append("\n".join(lines))
-
-    # Runtime failures heal L2 itself (not L1). Partition the single outer-memory
-    # list by first_seen_round: NEW = this round, ACCUMULATED = earlier rounds.
-    rfs = runtime_failures or []
-    if rfs:
-        rfs_new = [rf for rf in rfs if rf.get("first_seen_round", 0) == current_round_num]
-        rfs_acc = [rf for rf in rfs if rf.get("first_seen_round", 0) != current_round_num]
-        lines = [
-            "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
-            "  (candidates ran but produced high warning rates; L2 must adjust "
-            "its own strategy — directive, task_context, optimizer_params — to "
-            "steer L1 away from the failing config region)",
-        ]
-
-        if rfs_new:
-            lines.append("")
-            lines.append("NEW (this round):")
-            for rf in rfs_new:
-                lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
-
-        if rfs_acc:
-            lines.append("")
-            lines.append(
-                f"ACCUMULATED (surviving from earlier rounds, {len(rfs_acc)} patterns — "
-                "L2's prior strategy adjustments did NOT reduce these):"
-            )
-            for rf in rfs_acc:
-                lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
-
-        lines.append("")
-        lines.append(
-            "  ↳ Required L2 action: this is L2 self-healing, not L1 correction. "
-            "Update your OWN outputs — tighten the directive to name the failing "
-            "config range, refine task_context with the discovered constraint, or "
-            "adjust optimizer_params (creativity, n_variants) to narrow L1's search "
-            "around the safe region. Do NOT just parrot 'don't use X' to L1 — "
-            'restructure the search. Example directive: "Reasoning models on this '
-            "task need max_tokens ≥ 2000 to emit a final answer; propose variants "
-            'only within that range." '
-            "If ACCUMULATED entries persist across multiple L2 attempts, L3 will "
-            "replan the pipeline itself next."
-        )
-        sections.append("\n".join(lines))
-
-    # Historical intelligence from SearchMemory
-    hi = format_search_memory_block(
-        search_memory_digest,
-        {
-            "axis_rankings": "Axis impact rankings",
-            "bottleneck_distribution": "Bottleneck distribution",
-            "failure_group_insights": "Failure group x axis",
-            "persistent_failures": "Persistent failures",
-            "volatile_queries": "Volatile queries (oscillating)",
-        },
-    )
-    if hi:
-        sections.append(hi)
-
-    return "\n\n".join(sections)
 
 
 @dataclass

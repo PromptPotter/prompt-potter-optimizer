@@ -50,7 +50,7 @@ accumulates a Bernoulli sequence of hits across configs.
 - `query_tractability()` → all queries with hit rate and variance.
 - `query_degradation_rate(query)` / `query_degradation_count(query)` → degradation stats consumed per-sample by the stale-data protocol.
 
-Digest-internal (private): `_discriminating_queries(min_variance)`, `_persistent_failures(min_streak)` — composed by `to_critique_digest()` / `to_strategic_digest()`; not part of the external contract.
+Digest-internal (private): `_discriminating_queries(min_variance)`, `_persistent_failures(min_streak)` — composed by `digest()`; not part of the external contract.
 
 ### Failure Modes
 
@@ -62,23 +62,38 @@ Per-query failure tracking: which pipeline step terminated processing
 - `failure_clusters(n)` → queries grouped by dominant failure mode, with
   counts and example queries
 
-## 2. Composition of the Three Digest Methods
+## 2. Composition of the Unified `digest()` Method
 
-The cross-consumer matrix — which source method feeds which digest, and
-which digest each LLM node reads — lives in
-[`information-flow.md § SearchMemory (cross-campaign)`](information-flow.md#searchmemory-cross-campaign).
-This section documents the **composition**: which public and private
-accessors each digest aggregates. Consumers call only `to_l1_digest()`,
-`to_critique_digest()`, `to_strategic_digest()`; everything else is
-private to `search_memory.py` and not part of the external contract.
+All consumers call one method: `SearchMemory.digest(keys, *, include_correlations=False, include_clusters=False)`. The caller passes a `frozenset` of keys — each layer owns its own key selector. The same computation backs every consumer; only the key subset (and the two boolean flags) differ.
 
-| Digest | Public accessors | Private accessors | Sample prompt line |
-|--------|------------------|-------------------|---------------------|
-| `to_l1_digest()` | `failure_clusters(3)`, `dead_queries()`, `axis_rankings()[:3]`, `top_k_values()` | — | `Common failure patterns: web_search (45%)` |
-| `to_critique_digest()` | `failure_clusters(3)`, `axis_rankings()[:3]` | `_discriminating_queries()`, `_persistent_failures(3)`, `_exhausted_axes()`, `_axis_value_trend()` | `5 intractable (never hit); 3 chronic` |
-| `to_strategic_digest()` | `failure_clusters` (opt), `axis_rankings()[:5]`, `bottleneck_distribution()` | `_persistent_failures()`, `_parameter_failure_correlation()` | `Axis impact rankings: web_search.max_sites (effect=0.082)` |
+The cross-consumer matrix — which key each LLM node asks for — lives in
+[`information-flow.md § L1 / L2 inbox`](information-flow.md#l1-l2-inbox-from-registry).
+This section documents the composition: which public and private
+accessors each key aggregates.
 
-All three digests render through `format_search_memory_block()` for a
+| Key (frozenset member) | Public accessors | Private accessors | Consumed by |
+|------------------------|------------------|-------------------|-------------|
+| `failure_clusters` | `failure_clusters(3)` | — | L1, Critique (no counts), L3 via `include_clusters=True` |
+| `dead_queries` | `dead_queries(include_always_hit=False)` | — | L1 |
+| `top_axes`, `top_values` | `axis_rankings()[:3]`, `top_k_values(...)` | — | L1 |
+| `discriminating_queries` | — | `discriminating()` | Critique |
+| `tractability` | — | `persistent_failures(3)` | Critique |
+| `exhausted_axes` | — | `_exhausted_axes()` | Critique |
+| `value_trends` | — | `_axis_value_trend()` | Critique |
+| `improvement_attribution` | — | `_format_recent_attributions()` | Critique |
+| `axis_rankings` | `axis_rankings()[:5]` | — | L2, L3 |
+| `bottleneck_distribution` | `bottleneck_distribution()` | — | L2, L3 |
+| `persistent_failures` | — | `persistent_failures(3)` | L2, L3 |
+| `failure_group_insights` | — | `_parameter_failure_correlation()` (via `include_correlations=True`) | L2 |
+| `volatile_queries` | — | `flips(limit=50)` (via `include_correlations=True`) | L2 |
+
+Callers (selected):
+- L1 — `digest(frozenset({"failure_clusters", "dead_queries", "top_axes", "top_values"}))`
+- Critique — `digest(frozenset({"discriminating_queries", "failure_clusters", "tractability", "exhausted_axes", "value_trends", "improvement_attribution"}))`
+- L2 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_group_insights", "persistent_failures", "volatile_queries"}), include_correlations=True)`
+- L3 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_clusters", "persistent_failures"}), include_clusters=True)`
+
+The result is a `dict[str, str]` rendered through `format_search_memory_block()` for a
 consistent "HISTORICAL INTELLIGENCE" block shape.[^blockfmt] The
 critique agent additionally receives `round_history` — per-round
 accuracy / composite / pipeline_params / degraded-count dicts built
@@ -121,16 +136,16 @@ not to total history.
 
 SearchMemory exposes **granular data accessors** returning structured
 data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`).
-It never produces LLM-ready text. Three digest methods —
-`to_l1_digest()`, `to_critique_digest()`, `to_strategic_digest()` —
-compose a tailored subset for each consumer. Accessors used only by a
-digest (`_discriminating_queries`, `_persistent_failures`,
+It never produces LLM-ready text. A single digest method —
+`digest(keys, *, include_correlations=False, include_clusters=False)` —
+composes a caller-chosen subset of keys for each consumer. Accessors
+used only by a digest (`_discriminating_queries`, `_persistent_failures`,
 `_exhausted_axes`, `_axis_value_trend`,
 `_parameter_failure_correlation`, `_query_flip_history`,
 `_format_recent_attributions`, `_record_query_flips`,
 `_recompute_failure_group_correlations`) are module-private — consumers
-call only the three `to_*_digest` methods and a handful of public
-aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`,
+call only `digest()` and a handful of public aggregate accessors
+(`axis_rankings`, `top_k_values`, `failure_clusters`,
 `bottleneck_distribution`, `query_tractability`, `dead_queries`,
 `query_degradation_*`). This keeps SearchMemory from growing into a
 god object that knows about every prompt template.
@@ -153,7 +168,7 @@ memoized on the instance and the three caches
 Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three severity levels:
 
 - **Zero-signal** (always-hit or always-miss with ≥ `min_observations` samples) → `dead_queries(min_observations=N)` drives the zero-signal sample filter (see next section). Physically removed from the active dataset.
-- **Chronically failing** (recent streak) → `_persistent_failures(min_streak)` surfaces these inside `to_critique_digest()` / `to_strategic_digest()`, flagging them to L2.
+- **Chronically failing** (recent streak) → `_persistent_failures(min_streak)` surfaces these via the `tractability` / `persistent_failures` keys of `digest()`, flagging them to Critique and L2/L3.
 - **Intermittent** (variable) → kept in eval set. High discrimination value.
 
 ### Zero-Signal Sample Filtering

@@ -65,7 +65,7 @@ class CritiqueAgent:
     async def run(self, ctx: RoundSnapshot) -> dict:
         """Build critique from pipeline stats + LLM analysis."""
         sections = _assemble_critique_sections(ctx)
-        _compile_vars = {"stat_sections": sections}
+        _compile_vars = {"inbox": sections}
         _template = load_optimizer_prompt("critique")
         prompt = _template.compile_prompt(**_compile_vars)
         logger.info(
