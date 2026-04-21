@@ -32,7 +32,6 @@ associated accuracies across all historical runs.[^ingest]
 - `axis_rankings()` → all axes ranked by effect size (mean pairwise
   |delta| across value means)
 - `top_k_values(axis)` → best-performing values for an axis
-- `axis_impact(axis)` → effect size + consistency for one axis
 
 Classification: axes with >= 70% of pairwise deltas above noise threshold
 (0.02) are "consistently_impactful"; >= 30% are "sometimes_impactful";
@@ -47,12 +46,11 @@ Per-query hit/miss tracking across all evaluations. Every query
 accumulates a Bernoulli sequence of hits across configs.
 
 **Accessors:**
-- `discriminating_queries(min_variance)` → queries whose outcome varies
-  across configurations (high variance = informative for comparison)
-- `dead_queries(min_observations=N, include_always_hit=..., include_always_miss=...)` → zero-signal queries (always-hit and/or always-miss) with a minimum-observations confidence gate. Powers the zero-signal sample filter (§ Zero-Signal Sample Filtering)
-- `query_tractability()` → all queries with hit rate and variance
-- `query_degradation_rate(query)` → fraction of evaluations with pipeline
-  warnings
+- `dead_queries(min_observations=N, include_always_hit=..., include_always_miss=...)` → zero-signal queries (always-hit and/or always-miss) with a minimum-observations confidence gate. Powers the zero-signal sample filter (§ Zero-Signal Sample Filtering).
+- `query_tractability()` → all queries with hit rate and variance.
+- `query_degradation_rate(query)` / `query_degradation_count(query)` → degradation stats consumed per-sample by the stale-data protocol.
+
+Digest-internal (private): `_discriminating_queries(min_variance)`, `_persistent_failures(min_streak)` — composed by `to_critique_digest()` / `to_strategic_digest()`; not part of the external contract.
 
 ### Failure Modes
 
@@ -103,13 +101,15 @@ Built inline in `round_execution.py`.[^crit] Passed as
 reader of raw eval results, AND receives SearchMemory intelligence to
 frame its analysis.
 
+All signals below are composed inside `to_critique_digest()`; the underlined accessors are private to `search_memory.py`.
+
 | Signal | Source accessor | Prompt text |
 |--------|----------------|-------------|
-| Discriminating queries | `discriminating_queries()` | "12 queries vary across configs" |
+| Discriminating queries | `_discriminating_queries()` | "12 queries vary across configs" |
 | Failure clusters | `failure_clusters(3)` | "web_search (45%); token_matching (30%)" |
-| Tractability profiles | `persistent_failures(3)` | "5 intractable (never hit); 3 chronic" |
-| Axis exhaustion | `exhausted_axes()` | "web_search.max_sites (5 values tested, effect=0.008)" |
-| Value trends | `axis_value_trend()` | "web_search.max_sites: increasing" |
+| Tractability profiles | `_persistent_failures(3)` | "5 intractable (never hit); 3 chronic" |
+| Axis exhaustion | `_exhausted_axes()` | "web_search.max_sites (5 values tested, effect=0.008)" |
+| Value trends | `_axis_value_trend()` | "web_search.max_sites: increasing" |
 
 The critique agent also receives `round_history` — a list of
 per-round dicts with accuracy, composite, pipeline_params, degraded
@@ -154,12 +154,30 @@ not to total history.
 
 SearchMemory exposes **granular data accessors** returning structured
 data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`).
-It never produces LLM-ready text. Each consumer (scan_advisor, L1,
-L2, critique) composes and formats its own digest from the accessors
-it needs. This is a deliberate constraint: it keeps SearchMemory from
-growing into a god object that knows about every prompt template, and
-lets new consumers add tailored context without changing the shared
-state.
+It never produces LLM-ready text. Three digest methods —
+`to_l1_digest()`, `to_critique_digest()`, `to_strategic_digest()` —
+compose a tailored subset for each consumer. Accessors used only by a
+digest (`_discriminating_queries`, `_persistent_failures`,
+`_exhausted_axes`, `_axis_value_trend`,
+`_parameter_failure_correlation`, `_query_flip_history`,
+`_format_recent_attributions`, `_record_query_flips`,
+`_recompute_failure_group_correlations`) are module-private — consumers
+call only the three `to_*_digest` methods and a handful of public
+aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`,
+`bottleneck_distribution`, `query_tractability`, `dead_queries`,
+`query_degradation_*`). This keeps SearchMemory from growing into a
+god object that knows about every prompt template.
+
+### Per-Refresh Cache
+
+`_build_query_records()`, `_compute_axis_impact()`, and
+`failure_clusters()` are pure functions of the ingested state — they
+change only when `refresh()` folds in new dataset runs. Each is
+memoized on the instance and the three caches
+(`_cache_query_records`, `_cache_axis_impacts`,
+`_cache_failure_clusters`) are cleared at the end of `refresh()` when
+`added > 0`. One digest round previously recomputed these derived views
+3–4× each; caching collapses that to one computation per refresh cycle.
 
 ## 5. Foundation: Two-Tier Sample Intelligence
 
@@ -168,7 +186,7 @@ state.
 Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three severity levels:
 
 - **Zero-signal** (always-hit or always-miss with ≥ `min_observations` samples) → `dead_queries(min_observations=N)` drives the zero-signal sample filter (see next section). Physically removed from the active dataset.
-- **Chronically failing** (recent streak) → `persistent_failures(min_streak)` deprioritizes. Flagged to L2.
+- **Chronically failing** (recent streak) → `_persistent_failures(min_streak)` surfaces these inside `to_critique_digest()` / `to_strategic_digest()`, flagging them to L2.
 - **Intermittent** (variable) → kept in eval set. High discrimination value.
 
 ### Zero-Signal Sample Filtering
@@ -215,11 +233,21 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 Meta-reasoning injected into L2 Refine only:
 
 - **Round trajectory** — `build_round_trajectory()`: accuracy trend, stall count, direction. Built from `state.rounds`.
-- **Failure group × axis** — `parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
+- **Failure group × axis** — `_parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
 - **Candidate comparison** — `build_candidate_comparison()`: how all candidates performed, preventing L2 from repeating tested approaches.
 
 ## 6. Status
 
-All core items implemented: failure streak triage + CI gating, round trajectory, failure group × axis, candidate comparison, critique tractability/exhaustion/trends, L3 intelligence.
+All core items implemented: failure streak triage, round trajectory, failure group × axis, candidate comparison, critique tractability/exhaustion/trends, L3 intelligence.
 
-**Planned:** Diminishing returns detector, candidate diversity monitor, query improvement attribution, cross-candidate failure diff, failure group refresh during optimization.
+## 7. Future Work
+
+Items below have been sketched but not built. Listed here so the current-state tables above stay honest.
+
+| Item | Tier | Target |
+|------|------|--------|
+| **Diminishing returns detector** | Both | Critique (anomaly flag) + L2 (strategic context) |
+| **Candidate diversity monitor** | Strategic | L2 — detect mode collapse in candidate generation |
+| **Query improvement attribution** | Both | Critique (this-round) + L2 (cross-round patterns) |
+| **Cross-candidate failure diff** | Every-round | Critique — missed opportunities from non-winner candidates |
+| **Failure group refresh in loop** | Strategic | L2 — periodic recomputation during optimization |
