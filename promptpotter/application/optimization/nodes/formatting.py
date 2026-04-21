@@ -56,11 +56,16 @@ def format_pipeline_section(
     return "\n".join(lines) + "\n"
 
 
-def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str]) -> str:
+def format_search_memory_block(
+    sm_digest: dict | None,
+    key_labels: dict[str, str],
+    *,
+    header: str = "HISTORICAL INTELLIGENCE:",
+) -> str:
     """Build HISTORICAL INTELLIGENCE block from search memory digest dict."""
     if not sm_digest:
         return ""
-    lines = ["HISTORICAL INTELLIGENCE:"]
+    lines = [header]
     for key, label in key_labels.items():
         val = sm_digest.get(key)
         if val:

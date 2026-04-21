@@ -28,6 +28,16 @@ __all__ = [
 ]
 
 
+CRITIQUE_SM_LABELS = {
+    "discriminating_queries": "Discriminating queries",
+    "failure_clusters": "Failure clusters",
+    "tractability": "Query tractability",
+    "exhausted_axes": "Exhausted axes (DO NOT suggest these)",
+    "value_trends": "Value trends",
+    "improvement_attribution": "WHAT WORKED",
+}
+
+
 @dataclass
 class RoundSnapshot:
     """Bundles current-round results + round history for critique diagnostics."""
@@ -53,6 +63,7 @@ class RoundSnapshot:
     near_miss_ratio: float = 0.3
 
     search_memory_digest: dict | None = None
+    round_analysis: dict[str, str] = field(default_factory=dict)
 
     runtime_failures: list[dict] = field(default_factory=list)
 
@@ -67,31 +78,23 @@ class RoundSnapshot:
         round_num: int,
         search_memory_digest: dict | None = None,
     ) -> RoundSnapshot:
-        """Build snapshot; enriches search_memory_digest with diff + trajectory."""
+        """Build snapshot; round-local analysis (trajectory, cross-candidate diff) lives on its own field, not mutated onto the SearchMemory digest."""
         from promptpotter.application.optimization.nodes.formatting import (
             build_cross_candidate_diff,
             build_trajectory_report,
         )
 
-        sm_ctx = search_memory_digest
+        round_analysis: dict[str, str] = {}
         diff = build_cross_candidate_diff(
             cast(list[dict], scoring_result.winner_results),
             cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
             scoring_result.candidate_scores,
         )
+        if diff:
+            round_analysis["cross_candidate_diff"] = diff
         trajectory = build_trajectory_report(state.rounds)
-        traj_str = (
-            f"{trajectory.classification}: {trajectory.description}"
-            if trajectory and trajectory.classification != "healthy"
-            else None
-        )
-        if diff or traj_str:
-            if sm_ctx is None:
-                sm_ctx = {}
-            if diff:
-                sm_ctx["cross_candidate_diff"] = diff
-            if traj_str:
-                sm_ctx["trajectory"] = traj_str
+        if trajectory and trajectory.classification != "healthy":
+            round_analysis["trajectory"] = f"{trajectory.classification}: {trajectory.description}"
 
         return cls(
             results=scoring_result.winner_results,
@@ -118,7 +121,8 @@ class RoundSnapshot:
             pipeline_schema=schema,
             degradation_threshold=config.optimization.critique_degradation_threshold,
             near_miss_ratio=config.optimization.critique_near_miss_ratio,
-            search_memory_digest=sm_ctx,
+            search_memory_digest=search_memory_digest,
+            round_analysis=round_analysis,
             runtime_failures=[
                 {
                     "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[
@@ -513,28 +517,28 @@ def assemble_critique_sections(ctx: RoundSnapshot) -> str:
         )
         sections.insert(1, anomaly_block)
 
-    sm_digest = ctx.search_memory_digest
-    if sm_digest:
-        sm_lines = ["## HISTORICAL INTELLIGENCE"]
-        if sm_digest.get("discriminating_queries"):
-            sm_lines.append(f"  Discriminating queries: {sm_digest['discriminating_queries']}")
-        if sm_digest.get("failure_clusters"):
-            sm_lines.append(f"  Failure clusters: {sm_digest['failure_clusters']}")
-        if sm_digest.get("tractability"):
-            sm_lines.append(f"  Query tractability: {sm_digest['tractability']}")
-        if sm_digest.get("exhausted_axes"):
-            sm_lines.append(
-                f"  Exhausted axes (DO NOT suggest these): {sm_digest['exhausted_axes']}"
+    from promptpotter.application.optimization.nodes.formatting import (
+        format_search_memory_block,
+    )
+
+    hi = format_search_memory_block(
+        ctx.search_memory_digest,
+        CRITIQUE_SM_LABELS,
+        header="## HISTORICAL INTELLIGENCE",
+    )
+    if hi:
+        sections.append(hi)
+
+    if ctx.round_analysis:
+        ra_lines = ["## THIS ROUND"]
+        if ctx.round_analysis.get("trajectory"):
+            ra_lines.append(f"  [TRAJECTORY] {ctx.round_analysis['trajectory']}")
+        if ctx.round_analysis.get("cross_candidate_diff"):
+            ra_lines.append(
+                f"  MISSED OPPORTUNITIES:\n{ctx.round_analysis['cross_candidate_diff']}"
             )
-        if sm_digest.get("value_trends"):
-            sm_lines.append(f"  Value trends: {sm_digest['value_trends']}")
-        if sm_digest.get("trajectory"):
-            sm_lines.append(f"  [TRAJECTORY] {sm_digest['trajectory']}")
-        if sm_digest.get("improvement_attribution"):
-            sm_lines.append(f"  WHAT WORKED:\n{sm_digest['improvement_attribution']}")
-        if sm_digest.get("cross_candidate_diff"):
-            sm_lines.append(f"  MISSED OPPORTUNITIES:\n{sm_digest['cross_candidate_diff']}")
-        sections.append("\n".join(sm_lines))
+        if len(ra_lines) > 1:
+            sections.append("\n".join(ra_lines))
 
     if ctx.pipeline_schema:
         cap_lines: list[str] = []
