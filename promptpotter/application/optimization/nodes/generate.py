@@ -30,18 +30,7 @@ __all__ = ["build_l1_output_schema", "l1_generate", "validate_overrides"]
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Construct the JSON schema L1 must conform to.
-
-    The schema declares the top-level ``variants`` array and, for each
-    active pipeline node, the shape of its ``pipeline_params_override``
-    sub-object. Any param with declared ``param_allowed_values`` becomes a
-    JSON-schema ``enum`` — the LLM is physically unable to emit an out-of-
-    range value (e.g. ``reasoning_effort="minimal"``).
-
-    Prompt string fields and task-context keys are declared as free strings.
-    Unknown node-level params stay unconstrained; only enum axes are
-    tightened. Non-strict mode so optional fields may be omitted by L1.
-    """
+    """Construct the JSON schema L1 must conform to (enums tighten param_allowed_values)."""
     node_properties: dict[str, dict] = {}
     for node in pipeline_schema.nodes:
         if not node.param_keys:
@@ -98,17 +87,7 @@ def validate_overrides(
     node_overrides: dict[str, dict],
     pipeline_schema: PipelineSchema,
 ) -> list[ValidationFailure]:
-    """Walk node-scoped pipeline_params overrides against user-declared allowed sets.
-
-    Two sources of truth:
-      * ``model`` axis → ``PipelineSchema.available_models``
-      * any param declared in ``PipelineNode.param_allowed_values`` (e.g.
-        ``reasoning_effort``, ``response_format``) → that list
-
-    Failures attach to the candidate's OptSearchPoint memory, triggering
-    the synthetic-0 early exit in ``score_search_point()``. See
-    ``docs/architecture/optimization.md``.
-    """
+    """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0."""
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
     allowed_models_set = set(allowed_models)
@@ -226,16 +205,7 @@ async def l1_generate(
     obs_campaign_id: str = "",
     round_num: int = 0,
 ) -> list[dict]:
-    """Generate candidate pipeline-param variants via LLM meta-prompt.
-
-    All optimizer context (critique, thinking_styles, task_context, plan,
-    escalation_journal, warning_inventory, l2_directive) is read from the
-    ``OptSearchPoint`` — no need to pass them individually.
-
-    Returns:
-        List of candidate dicts (prompt field dumps with
-        ``__pipeline_params_override__``).
-    """
+    """Generate candidate variants via LLM meta-prompt; context read from opt_sp."""
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
@@ -313,10 +283,7 @@ async def l1_generate(
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]
 
-        # Validation of node_overrides against allowed-value sets is deferred
-        # to _parse_candidates in score.py — same wire dict, one producer of
-        # truth, no __validation_failures__ round-trip. See
-        # docs/architecture/optimization.md.
+        # Override validation is deferred to _parse_candidates — one producer of truth.
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
             **prompt_changes,

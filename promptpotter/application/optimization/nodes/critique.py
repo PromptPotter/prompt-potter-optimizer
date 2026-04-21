@@ -1,10 +1,4 @@
-"""Critique agent — LLM analysis of a round's results.
-
-``CritiqueAgent`` reads a ``RoundSnapshot``, builds the stat-rich prompt
-body via ``assemble_critique_sections``, calls the critique LLM, and
-parses the 6-field response. All payload assembly (section builders,
-helpers, dataclass) lives in ``critique_payload``.
-"""
+"""Critique agent — LLM analysis of a round's results."""
 
 from __future__ import annotations
 
@@ -34,12 +28,7 @@ __all__ = [
 
 
 class CritiqueAgent:
-    """Analyzes scoring results via pipeline-aware critique stats.
-
-    Returns a 6-field dict (positive_critique, negative_critique,
-    priority_fix, suggested_axes, failure_highlights, summary) fed
-    to both L1 Generate and L2 Refine Context.
-    """
+    """Analyzes scoring results; returns 6-field critique dict consumed by L1/L2."""
 
     def __init__(
         self,
@@ -50,11 +39,7 @@ class CritiqueAgent:
         self.model = model
 
     async def run(self, ctx: RoundSnapshot) -> dict:
-        """Build critique from pipeline stats + LLM analysis.
-
-        Returns dict with keys: positive_critique, negative_critique,
-        priority_fix, suggested_axes, failure_highlights, summary.
-        """
+        """Build critique from pipeline stats + LLM analysis."""
         sections = assemble_critique_sections(ctx)
         _compile_vars = {"stat_sections": sections}
         _template = load_optimizer_prompt("critique")
@@ -105,12 +90,7 @@ def _parse_critique(content: str) -> dict:
 
 
 def format_critique_for_prompt(critique: dict) -> str:
-    """Format critique dict into compact text for injection into L1/L2 prompts.
-
-    Emits only the actionable fields: summary, priority_fix, suggested_axes,
-    and failure_highlights. Diagnostic detail (positive/negative_critique) stays
-    internal to critique — ``summary`` already distills it.
-    """
+    """Critique dict → compact text for L1/L2 (summary + priority_fix + axes + highlights)."""
     parts = []
     if critique.get("summary"):
         parts.append(critique["summary"])

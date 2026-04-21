@@ -1,17 +1,4 @@
-"""Optimizer pipeline — schema loader, LLM call primitive, and prompt preparation.
-
-``get_optimizer_schema()`` loads the optimizer pipeline declaration
-(``optimizer_pipeline.json``) as a ``PipelineSchema`` — the same model
-used for target pipelines.
-
-``llm_call()`` is a thin config-driven wrapper over ``LLMClientBase.chat()``
-that reads defaults from a node's config dict and allows runtime overrides.
-Every optimizer pipeline node uses this instead of calling ``chat()`` directly.
-
-Prompt preparation: loading optimizer meta-prompt templates (Langfuse or
-local JSON), decomposing monolithic prompts into 8 canonical fields via LLM,
-and decomposing task descriptions into structured TaskDecomposition.
-"""
+"""Optimizer pipeline — schema loader, llm_call primitive, and prompt preparation."""
 
 from __future__ import annotations
 
@@ -98,22 +85,7 @@ async def llm_call(
     json_schema: dict | None = None,
     **overrides,
 ) -> LLMResponse:
-    """Execute an LLM call with config defaults and runtime overrides.
-
-    Provide ``node`` to auto-load config from ``optimizer_pipeline.json``,
-    or ``config`` to pass a config dict directly.  At least one is required.
-
-    Precedence: ``_LLM_DEFAULTS < config < overrides``.
-
-    ``json_schema``: optional JSON Schema dict (OpenAI/Groq structured-
-    output format). When supplied, the call runs with
-    ``output_format='json_schema'`` regardless of node config — the caller
-    is asserting the provider must honor it. No graceful fallback.
-
-    If a :class:`RoundRecorder` is active (via :func:`set_round_recorder`),
-    the call is traced: messages, config, response, and optional
-    ``trace_meta`` (template_name, variables) are recorded as an action.
-    """
+    """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides."""
     if config is None:
         if node:
             schema_node = get_optimizer_schema().get_node(node)
@@ -194,12 +166,7 @@ _LANGFUSE_CACHE_TTL = 300  # seconds
 
 
 def _try_langfuse(name: str) -> PromptTemplate | None:
-    """Fetch from Langfuse prompt registry by *production* label.
-
-    Returns ``None`` on any failure (credentials missing, network error,
-    prompt not found).  Langfuse SDK caches internally for
-    ``_LANGFUSE_CACHE_TTL`` seconds.
-    """
+    """Fetch prompt from Langfuse 'production' label (None on any failure)."""
     try:
         from promptpotter.config.settings import settings
 
@@ -228,27 +195,13 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Load an optimizer prompt template as a PromptTemplate.
-
-    Resolution order:
-    1. Langfuse prompt registry (by ``production`` label, SDK-cached)
-    2. Local JSON default in ``promptpotter/services/optimizer/prompts/{name}.json``
-    """
+    """Load optimizer prompt: Langfuse production → local JSON fallback."""
     lf_prompt = _try_langfuse(name)
     return lf_prompt or _load_local(name)
 
 
 def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
-    """Push all local JSON defaults to the Langfuse prompt registry.
-
-    For each JSON file, creates a new prompt version with:
-    - ``prompt`` = assembled template text (``render()``) for Langfuse UI display
-    - ``config`` = full PromptTemplate dict (for reconstruction on fetch)
-    - ``labels`` = ``[label]``
-    - ``tags`` = ``["optimizer", "meta-prompt"]``
-
-    Returns ``{name: success_bool}`` mapping.
-    """
+    """Push local JSON prompt defaults to Langfuse; returns {name: success}."""
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
@@ -294,19 +247,7 @@ async def decompose_prompt_fields(
     llm_client: LLMClientBase,
     model: str | None = None,
 ) -> dict:
-    """LLM-assisted restructuring of user context into Layer 1 fields.
-
-    Args:
-        context_input: Either a string (raw context) or a dict of partial
-            Layer 1 fields.
-        llm_client: LLM client implementing LLMClientBase.
-        model: Model identifier (uses client default if None).
-
-    Returns:
-        Dict of structured Layer 1 field values and a ``task_context`` sub-dict
-        with domain fields (domain, pipeline_purpose, data_characteristics,
-        optimization_goals, key_challenges).
-    """
+    """LLM-restructure raw context → Layer 1 prompt fields + task_context sub-dict."""
     if isinstance(context_input, dict):
         user_content = (
             "The user has provided partial Layer 1 fields for a prompt. "
@@ -350,7 +291,6 @@ async def decompose_prompt_fields(
     ):
         result.setdefault(key, "")
 
-    # Ensure task_context sub-dict exists with domain fields
     tc = result.setdefault("task_context", {})
     for key in (
         "domain",
@@ -412,37 +352,18 @@ async def decompose_prompt_fields_cached(
     rp_hash: str = "",
     force: bool = False,
 ) -> tuple[dict, bool]:
-    """LLM restructure with alias-aware disk caching.
-
-    Checks *alias_hashes* against the restructure cache before calling the LLM.
-    On miss, saves under *rp_hash* (caller-provided) so the key is guaranteed
-    to be in the alias set on subsequent lookups.
-
-    Returns:
-        ``(layer1_fields, was_cached)`` tuple.
-    """
+    """Disk-cached decompose_prompt_fields; returns (layer1_fields, was_cached)."""
     can_cache = bool(store_base_dir and backend_id)
 
-    # --- cache lookup ---
     if can_cache and not force and alias_hashes:
         assert store_base_dir is not None
-        cached = load_cached_decomposition(
-            store_base_dir,
-            backend_id,
-            alias_hashes,
-        )
+        cached = load_cached_decomposition(store_base_dir, backend_id, alias_hashes)
         if cached is not None:
             logger.debug("decompose_prompt_fields_cached: hit (alias group)")
             return cached, True
 
-    # --- cache miss: call LLM ---
-    layer1_fields = await decompose_prompt_fields(
-        context_input,
-        llm_client,
-        model=model,
-    )
+    layer1_fields = await decompose_prompt_fields(context_input, llm_client, model=model)
 
-    # --- save to cache ---
     if can_cache:
         assert store_base_dir is not None
         save_key = rp_hash
@@ -453,12 +374,7 @@ async def decompose_prompt_fields_cached(
                 else json.dumps(context_input, sort_keys=True)
             )
             save_key = hashlib.sha256(instruction.encode()).hexdigest()[:HASH_TRUNCATE]
-        save_decomposition_cache(
-            store_base_dir,
-            backend_id,
-            save_key,
-            layer1_fields,
-        )
+        save_decomposition_cache(store_base_dir, backend_id, save_key, layer1_fields)
 
     return layer1_fields, False
 
@@ -484,24 +400,13 @@ async def decompose_task_context(
     store_base_dir: Path | None = None,
     backend_id: str = "",
 ) -> TaskContextResult:
-    """Decompose a task description into structured domain context fields via LLM.
-
-    Calls ``decompose_prompt_fields_cached()`` and extracts the ``task_context``
-    sub-dict.
-
-    Returns:
-        TaskContextResult with task_context dict, optional consultation text,
-        and cache-hit flag.
-    """
+    """Decompose task description → TaskDecomposition (disk-cached)."""
     if not task_description:
         return TaskContextResult(
             task_context=TaskDecomposition(), consultation=None, was_cached=False
         )
 
-    # Content-hash for caching
-    rp_hash = hashlib.sha256(
-        f"task_ctx:{task_description}".encode(),
-    ).hexdigest()[:16]
+    rp_hash = hashlib.sha256(f"task_ctx:{task_description}".encode()).hexdigest()[:16]
 
     result, was_cached = await decompose_prompt_fields_cached(
         task_description,

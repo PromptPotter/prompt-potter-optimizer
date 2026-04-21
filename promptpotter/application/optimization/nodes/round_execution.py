@@ -1,8 +1,4 @@
-"""Round execution — generate, evaluate, select winner, update state.
-
-Handles individual round mechanics for the feedback cycle, including
-adaptive eval set sampling.
-"""
+"""Round execution — generate, evaluate, select winner, update state."""
 
 from __future__ import annotations
 
@@ -82,8 +78,7 @@ async def _generate_or_load_candidates(
     search_memory: Any = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
-    # Resolve L2 meta-param overrides from OptSearchPoint.optimizer_params
-    # Cap n_variants to 3× config to prevent L2 from blowing up eval budget
+    # Cap n_variants at 3× config so L2 can't blow up eval budget.
     opt = config.optimization
     model = config.optimizer_llm.model
     opt_params = state.opt_sp.optimizer_params
@@ -240,18 +235,18 @@ async def _score_and_select(
         current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
     )
 
-    # For probe rounds, subset the baseline's prior results to the same
-    # query set the probe is evaluating — otherwise we'd compare subset
-    # accuracy against full-set baseline and every probe round would look
-    # like a regression. Apples-to-apples.
-    if state.probe_next_round and state.current_results:
+    # Probe rounds: subset baseline to probe's query set; else every probe looks like a regression.
+    _baseline_acc = state.current_accuracy
+    _baseline_comp = state.current_composite
+    _baseline_results = state.current_results
+    if state.probe_next_round and state.current_results and session.pipeline_schema:
         from typing import cast
 
         from promptpotter.domain.scoring import QueryResult
 
         _probe_queries = {d.get("query") for d in scoring_dataset}
         _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
-        if _subset and session.pipeline_schema:
+        if _subset:
             _subset_scores = compute_composite_score(
                 cast(list[QueryResult], _subset),
                 session.pipeline_schema,
@@ -260,14 +255,6 @@ async def _score_and_select(
             _baseline_acc = _subset_scores["accuracy"]
             _baseline_comp = _subset_scores.get("composite", _baseline_acc)
             _baseline_results = _subset
-        else:
-            _baseline_acc = state.current_accuracy
-            _baseline_comp = state.current_composite
-            _baseline_results = state.current_results
-    else:
-        _baseline_acc = state.current_accuracy
-        _baseline_comp = state.current_composite
-        _baseline_results = state.current_results
 
     current_best = {
         "accuracy": _baseline_acc,
@@ -388,11 +375,9 @@ async def execute_round(
         degradation_checks=degradation_checks,
     )
 
-    # Update state with critique + thinking styles from eval output
     state.opt_sp.memory.critique_text = scoring_result.critique_text
     state.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
 
-    # Compute failure analysis for next round's L1 context (Wave 1c)
     if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
@@ -423,20 +408,13 @@ async def execute_round(
         evaluators=scoring_result.winner_evaluators,
     )
 
-    # Update per-query warning inventory from ALL candidate results
-    # (not just winner — aborted candidates carry the pipeline warnings)
+    # Warning inventory spans ALL candidate results — aborted candidates carry warnings.
     _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
         update_query_tracker(state.opt_sp.memory.warning_inventory, _all_results)
 
-    # Mirror per-candidate RuntimeFailures onto the outer OptSearchPoint memory.
-    # This is the L2-heals/L3-escalates self-healing rail: individual losing
-    # candidates attach their runtime failures to their own memory in
-    # _score_candidates, and here we accumulate them on the outer opt_sp so
-    # L2 sees both this-round and accumulated evidence, and L3 gets the full
-    # trail when L2's strategy adjustments can't reduce the pattern. Deduped
-    # by (source, dominant_warning, observed_config) so recurring patterns
-    # don't bloat the list.
+    # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by source/warning/config)
+    # so L2 sees accumulated evidence across rounds; L3 replans when L2 can't reduce.
     from promptpotter.domain.analysis import RuntimeFailure
 
     def _rf_key(rf_dict: dict) -> tuple:
@@ -499,15 +477,12 @@ def update_round_state(
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
     state.rounds.append(rr)
-    # Sync winner prompt fields to OptSearchPoint (source of truth)
-    winner_fields = rr.prompt_fields  # dict of prompt fields
     for f in PROMPT_STRING_FIELDS:
-        setattr(state.opt_sp, f, winner_fields.get(f, ""))
-    # Rebuild JobSearchPoint from opt_sp and update current/best tracking
+        setattr(state.opt_sp, f, rr.prompt_fields.get(f, ""))
     assert state.current_sp is not None
     _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
-    new_sp = state.opt_sp.to_job_search_point(
-        base_pipeline_params=_pp,
-        schema=schema,
+    state.update_current(
+        rr,
+        state.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
+        round_num,
     )
-    state.update_current(rr, new_sp, round_num)

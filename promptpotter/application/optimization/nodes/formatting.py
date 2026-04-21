@@ -1,8 +1,4 @@
-"""Shared prompt formatting helpers for the optimizer pipeline.
-
-Pure string formatting — no I/O, no LLM calls. Used by
-l1_optimizer (L1 generate) for prompt assembly.
-"""
+"""Shared prompt formatting helpers for the optimizer pipeline."""
 
 from __future__ import annotations
 
@@ -23,6 +19,7 @@ __all__ = [
     "build_candidate_comparison",
     "build_trajectory_report",
     "candidate_summaries",
+    "extract_runtime_failure_fields",
     "format_context_sections",
     "format_escalation_report",
     "format_l2_intelligence",
@@ -37,11 +34,7 @@ def format_pipeline_section(
     pipeline_params: dict | None,
     pipeline_schema: PipelineSchema | None,
 ) -> str:
-    """Build the pipeline parameters section for L2/L3 LLM prompts.
-
-    Returns an empty string when no schema is available, which causes the
-    pipeline_params instructions to be omitted from the prompt.
-    """
+    """Build the pipeline parameters section for L2/L3 LLM prompts."""
     if not pipeline_schema:
         return ""
     param_keys = pipeline_schema.node_param_keys()
@@ -73,7 +66,7 @@ def format_search_memory_block(sm_digest: dict | None, key_labels: dict[str, str
     return "\n".join(lines) if len(lines) > 1 else ""
 
 
-def _runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
+def extract_runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
     """Parse the common (rate_pct, dominant, cfg_str, n_evaluated) tuple from an RF dict."""
     rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
     dominant = rf.get("dominant_warning", "unknown")
@@ -84,15 +77,7 @@ def _runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
 
 
 def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
-    """Render the accumulated RuntimeFailure trail for L3 ``modify_plan``.
-
-    This is the L2→L3 escalation signal on the runtime-failures rail:
-    every entry in ``runtime_failures`` is a pattern that L2 has already
-    seen (and tried to self-heal around) across prior rounds, yet the
-    pattern survived. L3's job is to replan — change pipeline_params,
-    node composition, or strategy plan — so L1/L2 stop re-entering the
-    same failure region.
-    """
+    """Render the accumulated RuntimeFailure trail for L3 modify_plan (L2 self-heal exhausted)."""
     if not runtime_failures:
         return ""
 
@@ -102,7 +87,7 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
         "",
     ]
     for rf in runtime_failures:
-        rate_pct, dominant, cfg_str, n = _runtime_failure_fields(rf)
+        rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
         lines.append(f"  ⚠ {dominant} — {rate_pct}% degradation on {n} queries")
         lines.append(f"    observed_config: {cfg_str}")
 
@@ -134,11 +119,9 @@ def format_context_sections(
     """Build the L1 intelligence bundle — escalation, critique, directives, plan."""
     sections: list[str] = []
 
-    # Pipeline schema — valid nodes and parameters
     if pipeline_schema_text:
         sections.append(pipeline_schema_text)
 
-    # Failure analysis (Wave 1c)
     if failure_analysis and failure_analysis.patterns:
         fa = failure_analysis
         fa_lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
@@ -160,7 +143,6 @@ def format_context_sections(
             fa_lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
         sections.append("\n".join(fa_lines))
 
-    # Historical intelligence from SearchMemory (Wave 3c)
     hi = format_search_memory_block(
         search_memory_digest,
         {
@@ -173,16 +155,12 @@ def format_context_sections(
     if hi:
         sections.append(hi)
 
-    # Task context
     if task_context:
         tc_lines = "\n".join(f"  {k}: {v}" for k, v in task_context.items() if v)
         if tc_lines:
             sections.append(f"CONTEXT:\n{tc_lines}")
 
-    # Escalation / probe — unified from escalation_journal.
-    # Probe rounds always show (per-query warning detail IS the actionable data).
-    # Non-probe: skip when l2_directive present — directive already absorbed
-    # escalation data via L2 (no raw+digest double-exposure).
+    # Probe rounds show per-query warnings; non-probe skips when l2_directive absorbed it.
     if escalation_journal:
         if is_probe_round:
             probe_lines = [
@@ -264,20 +242,11 @@ def format_l2_intelligence(
     runtime_failures: list[dict] | None = None,
     runtime_failures_accumulated: list[dict] | None = None,
 ) -> str:
-    """Build the L2 refine_strategy intelligence bundle.
-
-    ``validation_failures`` and ``runtime_failures`` are the self-healing
-    signals — L2 synthesises directives (to teach L1 the disallowed values)
-    and adjusts its own strategy when runtime failures persist across
-    rounds. See ``docs/architecture/optimization.md`` "Self-healing
-    optimization" for the full rationale.
-    """
+    """Build the L2 refine_strategy intelligence bundle (self-healing signals + trajectory)."""
     sections: list[str] = []
 
-    # Escalation OR per-query warnings — never both. The escalation
-    # stability report already contains aggregate warning counts; appending
-    # per-query breakdown is redundant. L2's job is strategic (meta-settings,
-    # directive), not per-query targeting — that's for probe rounds (L1).
+    # Escalation OR per-query warnings — never both; escalation section already
+    # aggregates warning counts, L2 is strategic not per-query.
     esc = escalation_section
     if not esc and warning_inventory:
         warning_text = summarize_warning_inventory(warning_inventory)
@@ -329,14 +298,8 @@ def format_l2_intelligence(
         )
         sections.append("\n".join(lines))
 
-    # Runtime failures — candidates that ran but produced high degradation
-    # rates from runtime issues (e.g. max_tokens too low for a reasoning
-    # model, prompt exceeds context window). Rendered in two partitions
-    # so L2 sees *new this round* separately from *accumulated across rounds*.
-    # The accumulated list is the real self-healing signal: if items there
-    # survived L2's prior strategy adjustments, L2's last angle didn't work
-    # and it must try a different one. (Runtime failures heal L2 itself,
-    # not L1 — unlike validation_failures which L2 teaches L1 to avoid.)
+    # Runtime failures heal L2 itself (not L1); accumulated entries surviving
+    # across rounds mean L2's prior angle didn't work.
     rfs_new = runtime_failures or []
     rfs_acc = runtime_failures_accumulated or []
     if rfs_new or rfs_acc:
@@ -348,7 +311,7 @@ def format_l2_intelligence(
         ]
 
         def _render_rf(rf: dict) -> list[str]:
-            rate_pct, dominant, cfg_str, n = _runtime_failure_fields(rf)
+            rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
             changes = rf.get("candidate_changes") or ""
             prefix = f"  ⚠ {changes[:60]}" if changes else "  ⚠"
             head = f"{prefix} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
@@ -403,7 +366,7 @@ def format_l2_intelligence(
 
 @dataclass
 class TrajectoryReport:
-    """Unified campaign-trajectory view. ``classification`` ∈ healthy/plateau/oscillating/ceiling."""
+    """Campaign trajectory; classification ∈ healthy/plateau/oscillating/ceiling."""
 
     text: str
     classification: str
@@ -514,7 +477,6 @@ def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None
             total_candidates += 1
             if not override:
                 continue
-            # Count which axes are being varied
             for node_name, node_params in override.items():
                 if isinstance(node_params, dict):
                     for param in node_params:
@@ -595,7 +557,7 @@ def build_cross_candidate_diff(
     if not winner_misses:
         return None
 
-    missed_by: dict[str, list[str]] = {}  # {query: [candidate descriptions]}
+    missed_by: dict[str, list[str]] = {}
     for cand_id, results in all_candidate_results.items():
         desc = cand_id
         for cs in candidate_scores:
@@ -611,7 +573,6 @@ def build_cross_candidate_diff(
     if not missed_by:
         return None
 
-    # Format top missed opportunities
     sorted_missed = sorted(missed_by.items(), key=lambda x: -len(x[1]))
     parts = []
     for q, candidates in sorted_missed[:5]:
@@ -641,14 +602,8 @@ def candidate_summaries(candidates: list[dict]) -> list[dict]:
     return summaries
 
 
-# ---------------------------------------------------------------------------
-# Warning inventory helpers
-# ---------------------------------------------------------------------------
-
-
 def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
     """Group queries by warning type with per-query hit/miss stats."""
-    # Collect queries that have any warnings
     by_warning: dict[str, list[tuple[str, dict]]] = {}
     for query, entry in tracker.items():
         for wtype, _count in entry.get("warnings", {}).items():
@@ -657,17 +612,10 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
     if not by_warning:
         return ""
 
-    max_rounds = max(
-        (e.get("rounds_seen", 0) for e in tracker.values()),
-        default=0,
-    )
+    max_rounds = max((e.get("rounds_seen", 0) for e in tracker.values()), default=0)
     lines = [f"## RECURRING PIPELINE WARNINGS (across {max_rounds} rounds)"]
-    for wtype, entries in sorted(
-        by_warning.items(),
-        key=lambda x: -len(x[1]),
-    ):
+    for wtype, entries in sorted(by_warning.items(), key=lambda x: -len(x[1])):
         lines.append(f"  {wtype} — {len(entries)} queries affected:")
-        # Sort by warning frequency descending
         for query, entry in sorted(
             entries,
             key=lambda x: -x[1]["warnings"].get(wtype, 0),
@@ -680,7 +628,7 @@ def summarize_warning_inventory(tracker: dict[str, dict]) -> str:
 
 
 def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
-    """Return ``(warned_count, top_warning_type)`` from the warning inventory."""
+    """Return (warned_count, top_warning_type) from the warning inventory."""
     if not tracker:
         return 0, ""
     warned_count = sum(1 for e in tracker.values() if e.get("warnings"))
@@ -698,12 +646,7 @@ def format_escalation_report(
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Build the escalation diagnostics section for L2 prompts.
-
-    Returns an empty string when no escalation context is available.
-    When present, the section shows a data-driven stability map of tried
-    configs so the LLM can figure out what to change.
-    """
+    """Build the escalation diagnostics section for L2 prompts (empty if no context)."""
     if not escalation_check_result:
         return ""
 

@@ -1,10 +1,4 @@
-"""Critique prompt payload — ``RoundSnapshot`` + stat-section builders.
-
-Pure data + computation: builds the stat-rich prompt body the critique
-LLM consumes. No LLM calls, no I/O. The agent in ``critique`` calls
-``assemble_critique_sections(snapshot)`` and feeds the result to the
-critique template.
-"""
+"""Critique prompt payload — RoundSnapshot + stat-section builders."""
 
 from __future__ import annotations
 
@@ -36,7 +30,7 @@ __all__ = [
 
 @dataclass
 class RoundSnapshot:
-    """Bundles current-round results and round history for diagnostic analysis."""
+    """Bundles current-round results + round history for critique diagnostics."""
 
     results: list[QueryResult]
     accuracy: float
@@ -73,11 +67,7 @@ class RoundSnapshot:
         round_num: int,
         search_memory_digest: dict | None = None,
     ) -> RoundSnapshot:
-        """Build from loop state, scoring result, and config.
-
-        Computes cross-candidate diff and trajectory classification,
-        enriching the search_memory_digest dict in-place.
-        """
+        """Build snapshot; enriches search_memory_digest with diff + trajectory."""
         from promptpotter.application.optimization.nodes.formatting import (
             build_cross_candidate_diff,
             build_trajectory_report,
@@ -183,11 +173,7 @@ def update_query_tracker(
     tracker: dict[str, dict],
     results: list[QueryResult],
 ) -> None:
-    """Merge current round's results into the per-query warning inventory.
-
-    Mutates *tracker* in-place. For each query, increments ``rounds_seen``,
-    ``hits``/``misses``, warning type counts, and updates ``last_terminated_at``.
-    """
+    """Merge results into the per-query warning inventory (mutates tracker)."""
     for r in results:
         query = r.get("query", "")
         if not query:
@@ -215,11 +201,6 @@ def update_query_tracker(
             entry["warnings"][wtype] = entry["warnings"].get(wtype, 0) + 1
 
 
-# ---------------------------------------------------------------------------
-# Stat-section builders — pure, no I/O
-# ---------------------------------------------------------------------------
-
-
 def _summary_section(ctx: RoundSnapshot) -> str:
     total = len(ctx.results)
     return (
@@ -237,7 +218,7 @@ def _pipeline_health_section(
     *,
     degradation_threshold: float = 0.4,
 ) -> str:
-    """Termination distribution, degradation rate, timing, error rate."""
+    """Termination distribution + degradation rate + error rate."""
     total = len(results)
     if total == 0:
         return ""
@@ -279,7 +260,7 @@ def _rank_analysis_section(
     *,
     near_miss_ratio: float = 0.3,
 ) -> tuple[str, set[str]]:
-    """Rank buckets, top-k recall, and near-miss patterns."""
+    """Rank buckets + top-k recall + near-miss patterns."""
     rank_map: dict[int, int | None] = {}
     for i, r in enumerate(results):
         if not is_error_result(r):
@@ -293,18 +274,8 @@ def _rank_analysis_section(
         rank = rank_map.get(i)
         if rank == 1:
             rank_buckets["1"] += 1
-        elif rank is not None and rank <= 5:
-            rank_buckets["2-5"] += 1
-            near_misses.append(
-                {
-                    "query": r["query"][:80],
-                    "ground_truth": r.get("ground_truth", "")[:60],
-                    "rank": rank,
-                    "predicted": r.get("predicted", "?")[:60],
-                }
-            )
         elif rank is not None and rank <= 10:
-            rank_buckets["6-10"] += 1
+            rank_buckets["2-5" if rank <= 5 else "6-10"] += 1
             near_misses.append(
                 {
                     "query": r["query"][:80],
@@ -355,7 +326,7 @@ def _round_evolution_section(
     round_history: list[dict],
     anomalies: list[str],
 ) -> str:
-    """Accuracy trajectory and inter-round param changes."""
+    """Accuracy trajectory + inter-round param changes."""
     if not round_history:
         return ""
 
@@ -397,7 +368,7 @@ def _round_evolution_section(
 
 
 def _query_category_section(results: list[QueryResult]) -> str:
-    """Failures grouped by termination step (counts only)."""
+    """Failures grouped by termination step."""
     step_counts: Counter[str] = Counter()
     for r in results:
         if r.get("hit") or is_error_result(r):
@@ -421,7 +392,7 @@ def _failure_details_section(
     near_miss_queries: set[str] | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
-    """Per-query failure breakdown; skips queries already shown as near misses."""
+    """Per-query failure breakdown (skips near-miss queries shown above)."""
     failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if near_miss_queries:
         failures = [r for r in failures if r.get("query", "") not in near_miss_queries]
@@ -455,7 +426,7 @@ def _failure_details_section(
 
 
 def _success_details_section(results: list[QueryResult]) -> str:
-    """Per-query success count + brief samples."""
+    """Success count + brief samples."""
     successes = [r for r in results if r.get("hit")]
     if not successes:
         return ""
@@ -470,19 +441,17 @@ def _success_details_section(results: list[QueryResult]) -> str:
     return "\n".join(lines)
 
 
-def _runtime_failures_section(entries: list[dict]) -> str:
-    """Render per-candidate RuntimeFailures as a hard-constraint section.
+_RF_CFG_AXES = ("model", "temperature", "max_tokens", "reasoning_effort")
 
-    Groups by dominant_warning, names the offending config axes, and
-    instructs the critique LLM to steer suggested_axes away from them.
-    """
+
+def _runtime_failures_section(entries: list[dict]) -> str:
+    """Per-candidate RuntimeFailures as a hard-constraint section."""
     if not entries:
         return ""
     by_warning: dict[str, list[dict]] = {}
     for e in entries:
         by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
     lines = ["## RUNTIME FAILURES THIS ROUND (Rail 2 — treat as hard constraints)"]
-    _cfg_axes = ("model", "temperature", "max_tokens", "reasoning_effort")
     for dom in sorted(by_warning):
         lines.append(f"  {dom}:")
         for e in by_warning[dom]:
@@ -490,7 +459,7 @@ def _runtime_failures_section(entries: list[dict]) -> str:
             dc = e.get("degraded_count", 0)
             tot = e.get("total_evaluated", 0)
             cfg = e.get("observed_config") or {}
-            cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _cfg_axes if k in cfg)
+            cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _RF_CFG_AXES if k in cfg)
             lines.append(
                 f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
             )

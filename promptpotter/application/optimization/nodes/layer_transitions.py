@@ -61,10 +61,7 @@ async def _run_llm_transition(
     model: str | None,
     temperature: float,
 ) -> tuple[dict, str]:
-    """Shared L2/L3 plumbing: load template → compile → llm_call → parse JSON.
-
-    Returns ``(parsed_response, compiled_prompt)``.
-    """
+    """Shared L2/L3 plumbing: template → compile → llm_call → JSON; returns (parsed, prompt)."""
     template = load_optimizer_prompt(template_name)
     prompt = template.compile_prompt(**compile_vars)
     response = await llm_call(
@@ -135,10 +132,7 @@ def _parse_l3_response(
     prompt: str,
     current_pipeline_params: dict | None,
 ) -> TransitionResult:
-    """Parse L3 LLM response into a TransitionResult.
-
-    Merges any nested ``pipeline_params`` deltas into the current params.
-    """
+    """Parse L3 LLM response; merges nested pipeline_params deltas."""
     new_plan = result.get("plan", opt_sp.plan)
     rationale = result.get("rationale", "L3 modify_plan transition")
 
@@ -183,13 +177,7 @@ async def refine_strategy(
     rounds: list | None = None,
     candidate_scores: list[dict] | None = None,
 ) -> TransitionResult:
-    """LLM-driven L2 adjustment: tune parameters, context, and pipeline params.
-
-    Analyzes critique findings and recommends changes to ``parameters``
-    (creativity, n_variants, variant_strategy), ``context`` (domain grounding
-    text), and optionally ``pipeline_params`` when a pipeline schema is
-    available.
-    """
+    """L2 refine_strategy: tune optimizer_params + task_context + pipeline_params."""
     escalation_section = format_escalation_report(
         escalation_check_result,
         opt_sp.memory.escalation_journal or None,
@@ -199,19 +187,13 @@ async def refine_strategy(
 
     task_context_section = ""
     if opt_sp.task_context:
-        # Filter raw_description — already digested into structured fields
         tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
         task_context_section = (
             "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
             + json.dumps(tc_display, indent=2)
         )
 
-    # Aggregate parse-time validation failures AND runtime failures across
-    # the prior round's candidates. Self-healing: L2 sees these and produces
-    # a directive that names the disallowed values/ranges so L1 doesn't
-    # propose them again. validation_failures are the parse-time rail
-    # (synthetic-0, never ran the backend); runtime_failures are the
-    # mid-eval rail (ran, degraded, eliminated).
+    # Self-healing aggregate — validation (parse-time rail) + runtime (mid-eval rail).
     validation_failures: list[dict] = []
     runtime_failures: list[dict] = []
     for cs in candidate_scores or []:
@@ -222,11 +204,7 @@ async def refine_strategy(
             rf_with_label["candidate_changes"] = cs.get("changes_description", "")
             runtime_failures.append(rf_with_label)
 
-    # Accumulated runtime_failures from outer memory — patterns that survived
-    # across earlier rounds despite L2's prior strategy adjustments. This is
-    # the signal that tells L2 "your last angle didn't work; try a different
-    # one," and when the list keeps growing across L2 rounds it's also the
-    # justification for L3 escalation (which reads the same list).
+    # Accumulated runtime_failures — patterns surviving L2's prior adjustments (justifies L3).
     runtime_failures_accumulated = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
 
     intelligence_sections = format_l2_intelligence(
@@ -275,12 +253,7 @@ async def modify_plan(
     pipeline_schema: PipelineSchema | None = None,
     search_memory: SearchMemory | None = None,
 ) -> TransitionResult:
-    """LLM-driven L3 adjustment: suggest a new strategic plan.
-
-    Analyzes why L2 context/parameter adjustments didn't help and proposes
-    a fundamentally different optimization strategy via ``OptSearchPoint.plan``,
-    and optionally new pipeline_params when a pipeline schema is available.
-    """
+    """L3 modify_plan: propose new strategic plan + optional pipeline_params changes."""
     l2_summary = "\n".join(
         f"  L2 round {rd.get('l2_round', '?')}: "
         f"params={rd.get('parameters', {})}, "
@@ -288,9 +261,7 @@ async def modify_plan(
         for rd in l2_history[-3:]
     )
 
-    # Runtime failure trail — everything L2 has seen but couldn't reduce.
-    # Empty string when the list is empty, so the template placeholder
-    # collapses cleanly.
+    # Runtime failure trail — patterns L2 couldn't reduce (empty string collapses template).
     runtime_failures_section = format_runtime_failures_for_l3(
         [rf.to_dict() for rf in opt_sp.memory.runtime_failures]
     )

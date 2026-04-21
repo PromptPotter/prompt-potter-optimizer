@@ -1,16 +1,4 @@
-"""Degradation check + L1→L2→L3 escalation orchestration.
-
-Two concerns live here:
-
-1. ``DegradationCheck`` — per-query check that can fire mid-evaluation
-   and abort remaining queries/candidates.  Duck-types with
-   ``EliminationCheck`` in ``search/failure_groups.py``.
-2. ``escalate_l2`` — state-machine that decides whether a stall triggers
-   L2 refine_strategy, L3 modify_plan, counter reset, or stop.
-
-Pure data types (``EscalationSignal``, ``EscalationTarget``) live in
-``promptpotter.domain.analysis``.
-"""
+"""Degradation check + L1→L2→L3 escalation orchestration."""
 
 from __future__ import annotations
 
@@ -43,11 +31,7 @@ __all__ = [
 ]
 
 
-# Warnings whose first occurrence is already conclusive evidence that the
-# candidate's config is deterministically broken for this dataset — no point
-# spending more queries to confirm. Currently: reasoning models (e.g.
-# gpt-oss-120b) whose hidden reasoning trace eats the entire max_tokens budget
-# and leaves empty visible content. Hardcoded invariant, not a tunable.
+# Warnings that are deterministic — one occurrence ends the candidate (no retry).
 FATAL_WARNINGS: frozenset[str] = frozenset(
     {
         "llm_only:empty_content_reasoning_fallback",
@@ -55,32 +39,8 @@ FATAL_WARNINGS: frozenset[str] = frozenset(
 )
 
 
-# ---------------------------------------------------------------------------
-# Degradation check (mid-eval abort)
-# ---------------------------------------------------------------------------
-
-
 class DegradationCheck:
-    """Eliminates a candidate when its warnings look terminal.
-
-    Two paths, in order:
-
-    1. **Fatal fast-path.** If the newest query carries any warning in
-       ``FATAL_WARNINGS`` (e.g. ``llm_only:empty_content_reasoning_fallback``),
-       fire immediately — bypass ``min_queries`` and ``threshold``. These
-       codes are deterministic for the whole config, so one occurrence is
-       conclusive and the remaining queries would just waste backend calls.
-    2. **Rate-based.** Otherwise, once at least ``min_queries`` results
-       are in, fire when the degraded fraction meets ``threshold``.
-
-    Target is ``ELIMINATE_CANDIDATE`` — the check attributes the failure
-    to the specific candidate that produced it, and the per-candidate
-    absorption path in ``score._score_candidates`` synthesises a
-    ``RuntimeFailure`` from ``check_result`` and attaches it to that
-    candidate's ``OptSearchPoint.memory.runtime_failures``. The winner
-    is never penalised for a losing candidate's runtime issues; L2 sees
-    the evidence via the candidate_scores self-healing rail next round.
-    """
+    """Eliminates a candidate when warnings look terminal (fatal fast-path + rate-based)."""
 
     name = "degradation"
 
@@ -95,10 +55,7 @@ class DegradationCheck:
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None:
-        # Fast-path: a single fatal warning on the newest query ends the
-        # candidate immediately. Scanning only results_so_far[-1] is enough
-        # because this method runs after every query — an earlier fatal
-        # would already have fired.
+        # Fast-path: a single fatal warning on the newest query ends the candidate.
         if results_so_far:
             latest_warnings = extract_warning_types(results_so_far[-1])
             fatal_hit = next((w for w in latest_warnings if w in FATAL_WARNINGS), None)
@@ -150,16 +107,7 @@ class DegradationCheck:
 
 
 class EmptyOutputCheck:
-    """Eliminates a candidate whose LLM consistently returns empty predictions.
-
-    Catches candidates whose prompt blew the max_tokens budget mid-reasoning
-    and returned 0 chars — visible to the scorer as ``predicted == ""`` and
-    ``score == 0``, but indistinguishable from a legitimate wrong answer
-    without this check. Conforms to the same protocol as ``DegradationCheck``
-    and ``EliminationCheck``; uses ``ELIMINATE_CANDIDATE`` so the per-candidate
-    absorption logic in ``score._score_candidates`` skips it without aborting
-    the round.
-    """
+    """Eliminates candidates whose LLM consistently returns empty predictions."""
 
     name = "empty_output"
 
@@ -205,18 +153,13 @@ def build_degradation_checks(config: CampaignConfig) -> list[Any]:
     return checks
 
 
-# ---------------------------------------------------------------------------
-# Backend-warning one-shot (after repeated degradation resets)
-# ---------------------------------------------------------------------------
-
-
 def _maybe_emit_backend_warning(
     state: LoopState,
     config: CampaignConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
-    """Emit a one-shot backend advisory once degradation resets pile up."""
+    """One-shot backend advisory when degradation resets exceed threshold."""
     mem = state.opt_sp.memory
     threshold = config.optimization.backend_warning_threshold
     if mem.backend_warning_emitted or threshold <= 0:
@@ -248,11 +191,6 @@ def _maybe_emit_backend_warning(
     logger.warning("Backend warning at round %d (%d resets, steps: %s)", round_num, count, steps)
 
 
-# ---------------------------------------------------------------------------
-# L2/L3 transition execution (shared scaffolding)
-# ---------------------------------------------------------------------------
-
-
 async def _run_layer_transition(
     phase: CampaignPhase,
     state: LoopState,
@@ -267,7 +205,7 @@ async def _run_layer_transition(
     call: Callable[[], Awaitable[Any]],
     exit_payload: Callable[[Any], dict[str, Any]],
 ) -> Any:
-    """Run an L2/L3 transition: emit enter → observed call → apply → emit exit."""
+    """L2/L3 transition: emit enter → observed call → apply → emit exit."""
     from promptpotter.infrastructure.tracing import observed_node
 
     emit_phase(on_phase, phase, "enter", round=round_num, **enter_payload)
@@ -307,7 +245,7 @@ async def _do_l2_transition(
     obs_campaign_id: str = "",
     escalation_check_result: dict | None = None,
 ) -> Any:
-    """Perform L2 refine_strategy transition. Updates state in-place."""
+    """L2 refine_strategy transition; mutates state in-place."""
     from promptpotter.application.optimization.nodes import layer_transitions
     from promptpotter.application.optimization.nodes.formatting import warning_summary
     from promptpotter.application.optimization.nodes.layer_transitions import TransitionAction
@@ -409,7 +347,7 @@ async def _do_l3_transition(
     obs: ObservabilityBridge | None = None,
     obs_campaign_id: str = "",
 ) -> Any:
-    """Perform L3 modify_plan transition. Updates state in-place."""
+    """L3 modify_plan transition; mutates state in-place."""
     from promptpotter.application.optimization.nodes import layer_transitions
     from promptpotter.infrastructure.llm import client as _llm_client
 
@@ -471,11 +409,6 @@ async def _do_l3_transition(
     return transition
 
 
-# ---------------------------------------------------------------------------
-# Escalation state machine
-# ---------------------------------------------------------------------------
-
-
 async def _exhaust_or_reset(
     state: LoopState,
     config: CampaignConfig,
@@ -492,7 +425,7 @@ async def _exhaust_or_reset(
     obs_campaign_id: str,
     escalation_check_result: dict | None,
 ) -> StopReason | None:
-    """Either exhaust patience (return stop) or reset counters + run L2."""
+    """Exhaust patience (return stop) OR reset counters + run L2."""
     if not from_degradation:
         logger.debug("%s patience exhausted (%d stalls) at round %d", layer, stall_count, round_num)
         return stop_reason
@@ -532,13 +465,7 @@ async def escalate_l2(
     from_degradation: bool = False,
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
-    """Handle L1→L2 escalation and optionally L2→L3.
-
-    Returns a ``StopReason`` if the cycle should stop, or ``None`` to
-    continue.  When ``from_degradation`` is True, L2/L3 patience
-    exhaustion resets counters instead of stopping — the degradation
-    investigation loop continues.
-    """
+    """L1→L2 (and optional L2→L3) escalation; from_degradation resets counters instead of stopping."""
     from promptpotter.application.campaign.decisions import record_decision
     from promptpotter.application.optimization.nodes.round_execution import PauseForReviewError
     from promptpotter.application.optimization.phases import StopReason
@@ -548,10 +475,7 @@ async def escalate_l2(
     esc.l2.record_outcome(state.best_composite)
 
     l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
-    # Record the L2 gate decision before the branch. ``entry_round`` points
-    # to the round whose rescored best_composite is L2's stall baseline —
-    # -1 if L2 has never fired. ``outcome`` is the flow-determining bool
-    # (True = L2 fires this round; False = patience-deferred / exhausted).
+    # entry_round = round whose rescored best_composite is the stall baseline (-1 = never fired).
     entry_round_l2 = esc.l2.round if esc.l2.round > 0 else -1
     record_decision(
         state.pending_decisions,
@@ -590,7 +514,6 @@ async def escalate_l2(
                 return StopReason.USER_STOPPED
         return None
 
-    # L2 stalled, L3 disabled → exhaust or reset
     if not opt.enable_l3:
         return await _exhaust_or_reset(
             state,
@@ -608,7 +531,6 @@ async def escalate_l2(
             escalation_check_result=escalation_check_result,
         )
 
-    # L2 stalled, L3 enabled — track L3 stall
     esc.l3.record_outcome(state.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
     entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
@@ -640,7 +562,6 @@ async def escalate_l2(
         )
         return None
 
-    # L3 exhausted → exhaust or reset
     return await _exhaust_or_reset(
         state,
         config,
