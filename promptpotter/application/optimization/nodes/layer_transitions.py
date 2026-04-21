@@ -194,15 +194,16 @@ async def refine_strategy(
         )
 
     # Self-healing aggregate — validation (parse-time rail) + runtime (mid-eval rail).
+    # Runtime labels live in a parallel list so the RuntimeFailure dicts stay pure.
     validation_failures: list[dict] = []
     runtime_failures: list[dict] = []
+    runtime_failure_labels: list[str] = []
     for cs in candidate_scores or []:
-        for vf in cs.get("validation_failures") or []:
-            validation_failures.append(vf)
+        validation_failures.extend(cs.get("validation_failures") or [])
+        label = cs.get("changes_description", "")
         for rf in cs.get("runtime_failures") or []:
-            rf_with_label = dict(rf)
-            rf_with_label["candidate_changes"] = cs.get("changes_description", "")
-            runtime_failures.append(rf_with_label)
+            runtime_failures.append(rf)
+            runtime_failure_labels.append(label)
 
     # Accumulated runtime_failures — patterns surviving L2's prior adjustments (justifies L3).
     runtime_failures_accumulated = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
@@ -224,6 +225,7 @@ async def refine_strategy(
         diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
         validation_failures=validation_failures or None,
         runtime_failures=runtime_failures or None,
+        runtime_failure_labels=runtime_failure_labels or None,
         runtime_failures_accumulated=runtime_failures_accumulated,
     )
 

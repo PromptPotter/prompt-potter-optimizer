@@ -233,6 +233,7 @@ def format_l2_intelligence(
     diversity_alert: str | None = None,
     validation_failures: list[dict] | None = None,
     runtime_failures: list[dict] | None = None,
+    runtime_failure_labels: list[str] | None = None,
     runtime_failures_accumulated: list[dict] | None = None,
 ) -> str:
     """Build the L2 refine_strategy intelligence bundle (self-healing signals + trajectory)."""
@@ -303,18 +304,18 @@ def format_l2_intelligence(
             "steer L1 away from the failing config region)",
         ]
 
-        def _render_rf(rf: dict) -> list[str]:
+        def _render_rf(rf: dict, label: str = "") -> list[str]:
             rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
-            changes = rf.get("candidate_changes") or ""
-            prefix = f"  ⚠ {changes[:60]}" if changes else "  ⚠"
+            prefix = f"  ⚠ {label[:60]}" if label else "  ⚠"
             head = f"{prefix} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
             return [head, f"    observed_config: {cfg_str}"]
 
         if rfs_new:
             lines.append("")
             lines.append("NEW (this round):")
-            for rf in rfs_new:
-                lines.extend(_render_rf(rf))
+            labels_new = runtime_failure_labels or []
+            for i, rf in enumerate(rfs_new):
+                lines.extend(_render_rf(rf, labels_new[i] if i < len(labels_new) else ""))
 
         if rfs_acc:
             lines.append("")
