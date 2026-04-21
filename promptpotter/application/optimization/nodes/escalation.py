@@ -4,14 +4,19 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from collections.abc import Awaitable, Callable
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.nodes.critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.layer_transitions import (
+    L2RefineStrategy,
+    L3ModifyPlan,
+    LayerTransition,
+)
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
-from promptpotter.infrastructure.tracing.events import L2Applied, L3Applied
+from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -191,24 +196,36 @@ def _maybe_emit_backend_warning(
     logger.warning("Backend warning at round %d (%d resets, steps: %s)", round_num, count, steps)
 
 
-async def _run_layer_transition(
-    phase: CampaignPhase,
+async def _do_layer_transition(
+    transition: LayerTransition,
     state: LoopState,
-    schema: Any,
+    config: CampaignConfig,
+    pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
     obs: ObservabilityBridge | None,
     obs_campaign_id: str,
-    observed_name: str,
+    run_kwargs: dict[str, Any],
     enter_payload: dict[str, Any],
-    call: Callable[[], Awaitable[Any]],
-    exit_payload: Callable[[Any], dict[str, Any]],
+    exit_payload_fn: Callable[[Any], dict[str, Any]],
+    temperature: float,
 ) -> Any:
-    """L2/L3 transition: emit enter → observed call → apply → emit exit."""
+    """Unified L2/L3 orchestrator: emit enter → call → adopt → emit LayerApplied → side-effects → emit exit.
+
+    Layer-specific prep (run_kwargs, enter/exit payloads, temperature) is
+    passed in by the thin L2/L3 callers below. Layer-specific state tail
+    lives on ``transition.apply_side_effects`` (called after adopt).
+    """
+    from promptpotter.infrastructure.llm import client as _llm_client
     from promptpotter.infrastructure.tracing import observed_node
 
-    emit_phase(on_phase, phase, "enter", round=round_num, **enter_payload)
+    assert state.current_sp is not None
+    client = _llm_client.get_llm_client()
+    current_pp = state.current_sp.pipeline_params
+    observed_name = f"{transition.template_name}_r{round_num}"
+
+    emit_phase(on_phase, transition.phase, "enter", round=round_num, **enter_payload)
     async with observed_node(
         observed_name,
         "llm/meta",
@@ -216,23 +233,33 @@ async def _run_layer_transition(
         campaign_id=obs_campaign_id,
         round_num=round_num,
     ):
-        transition = await call()
+        result = await transition.run(
+            state.opt_sp,
+            client,
+            model=config.optimizer_llm.model,
+            temperature=temperature,
+            pipeline_params=current_pp,
+            pipeline_schema=pipeline_schema,
+            search_memory=state.search_memory,
+            **run_kwargs,
+        )
     state.adopt_transition(
-        transition.opt_search_point,
-        transition.pipeline_params,
-        schema=schema,
+        result.opt_search_point,
+        result.pipeline_params,
+        schema=pipeline_schema,
     )
     if obs is not None:
-        event_cls: type = L2Applied if phase == CampaignPhase.REFINE_STRATEGY else L3Applied
-        with graceful(f"{event_cls.__name__} emit failed"):
+        with graceful(f"LayerApplied({transition.layer}) emit failed"):
             obs.emit_write_point(
-                event_cls,
+                LayerApplied,
+                layer=transition.layer,
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
-                changes_description=transition.opt_search_point.changes_description or "",
+                changes_description=result.opt_search_point.changes_description or "",
             )
-    emit_phase(on_phase, phase, "exit", round=round_num, **exit_payload(transition))
-    return transition
+    transition.apply_side_effects(state, result, round_num)
+    emit_phase(on_phase, transition.phase, "exit", round=round_num, **exit_payload_fn(result))
+    return result
 
 
 async def _do_l2_transition(
@@ -245,18 +272,12 @@ async def _do_l2_transition(
     obs_campaign_id: str = "",
     escalation_check_result: dict | None = None,
 ) -> Any:
-    """L2 refine_strategy transition; mutates state in-place."""
-    from promptpotter.application.optimization.nodes import layer_transitions
+    """L2 refine_strategy thin wrapper — builds args, delegates to ``_do_layer_transition``."""
     from promptpotter.application.optimization.nodes.formatting import warning_summary
-    from promptpotter.application.optimization.nodes.layer_transitions import TransitionAction
-    from promptpotter.infrastructure.llm import client as _llm_client
 
-    assert state.current_sp is not None
-    current_pp = state.current_sp.pipeline_params
-    client = _llm_client.get_llm_client()
     last_candidates = state.rounds[-1].candidate_scores if state.rounds else []
 
-    enter = {
+    enter_payload = {
         "l2_round": state.escalation.l2.round,
         "l1_stall_count": state.escalation.l1_stall_count,
         "current_params": state.opt_sp.optimizer_params,
@@ -264,78 +285,40 @@ async def _do_l2_transition(
         "best_accuracy": state.best_accuracy,
     }
 
-    async def _call() -> Any:
-        return await layer_transitions.refine_strategy(
-            state.opt_sp,
-            client,
-            model=config.optimizer_llm.model,
-            temperature=config.optimization.l2_temperature,
-            pipeline_params=current_pp,
-            pipeline_schema=pipeline_schema,
-            escalation_check_result=escalation_check_result,
-            search_memory=state.search_memory,
-            rounds=state.rounds,
-            candidate_scores=last_candidates,
-        )
-
-    def _exit(transition: Any) -> dict[str, Any]:
+    def _exit(result: Any) -> dict[str, Any]:
         warned_count, top_warning = warning_summary(state.opt_sp.memory.warning_inventory)
         return {
             "l2_round": state.escalation.l2.round,
-            "param_changes_count": len(transition.opt_search_point.optimizer_params),
-            "task_context_changed": transition.task_context is not None,
-            "changes_description": transition.opt_search_point.changes_description or "",
-            "pipeline_params_changed": transition.pipeline_params is not None,
-            "pipeline_params": transition.pipeline_params,
-            "action": transition.action,
+            "param_changes_count": len(result.opt_search_point.optimizer_params),
+            "task_context_changed": result.task_context is not None,
+            "changes_description": result.opt_search_point.changes_description or "",
+            "pipeline_params_changed": result.pipeline_params is not None,
+            "pipeline_params": result.pipeline_params,
+            "action": result.action,
             "warned_queries": warned_count,
             "top_warning": top_warning,
-            "l2_prompt": transition.debug_prompt,
-            "l2_response": transition.debug_response,
+            "l2_prompt": result.debug_prompt,
+            "l2_response": result.debug_response,
         }
 
-    transition = await _run_layer_transition(
-        CampaignPhase.REFINE_STRATEGY,
+    return await _do_layer_transition(
+        L2RefineStrategy(),
         state,
+        config,
         pipeline_schema,
         round_num,
         on_phase,
         obs=obs,
         obs_campaign_id=obs_campaign_id,
-        observed_name=f"l2_refine_r{round_num}",
-        enter_payload=enter,
-        call=_call,
-        exit_payload=_exit,
-    )
-
-    if transition.task_context:
-        state.opt_sp.task_context = transition.task_context
-    state.opt_sp.memory.l2_directive = transition.l2_directive
-    state.escalation.l2.record_entry(state.best_accuracy, state.best_composite)
-    from promptpotter.application.campaign.decisions import record_decision
-
-    is_probe = transition.action == TransitionAction.PROBE
-    record_decision(
-        state.pending_decisions,
-        "probe_round_commitment",
-        {
-            "round_num": round_num,
-            "l2_round": state.escalation.l2.round,
+        run_kwargs={
+            "rounds": state.rounds,
+            "candidate_scores": last_candidates,
+            "escalation_check_result": escalation_check_result,
         },
-        is_probe,
-        data={
-            "action": str(transition.action),
-            "l2_directive_preview": (transition.l2_directive or "")[:200],
-            "changes_description": transition.opt_search_point.changes_description or "",
-        },
+        enter_payload=enter_payload,
+        exit_payload_fn=_exit,
+        temperature=config.optimization.l2_temperature,
     )
-    if is_probe:
-        state.probe_next_round = True
-        logger.debug("L2 requested probe — next round uses warned queries")
-    logger.debug(
-        "L2 refine_strategy at round %d (l2_round=%d)", round_num, state.escalation.l2.round
-    )
-    return transition
 
 
 async def _do_l3_transition(
@@ -347,14 +330,7 @@ async def _do_l3_transition(
     obs: ObservabilityBridge | None = None,
     obs_campaign_id: str = "",
 ) -> Any:
-    """L3 modify_plan transition; mutates state in-place."""
-    from promptpotter.application.optimization.nodes import layer_transitions
-    from promptpotter.infrastructure.llm import client as _llm_client
-
-    assert state.current_sp is not None
-    current_pp = state.current_sp.pipeline_params
-    client = _llm_client.get_llm_client()
-
+    """L3 modify_plan thin wrapper — builds args, delegates to ``_do_layer_transition``."""
     l2_history = [
         {
             "l2_round": state.escalation.l2.round,
@@ -363,50 +339,34 @@ async def _do_l3_transition(
         }
     ]
 
-    enter = {
+    enter_payload = {
         "l3_round": state.escalation.l3.round,
         "l2_stall_count": state.escalation.l2.stall_count,
         "current_plan_preview": str(state.opt_sp.plan)[:120],
     }
 
-    async def _call() -> Any:
-        return await layer_transitions.modify_plan(
-            state.opt_sp,
-            l2_history,
-            client,
-            model=config.optimizer_llm.model,
-            temperature=config.optimization.l3_temperature,
-            pipeline_params=current_pp,
-            pipeline_schema=pipeline_schema,
-            search_memory=state.search_memory,
-        )
-
-    def _exit(transition: Any) -> dict[str, Any]:
+    def _exit(result: Any) -> dict[str, Any]:
         return {
             "l3_round": state.escalation.l3.round,
-            "new_plan_preview": str(transition.opt_search_point.plan)[:120],
-            "changes_description": transition.opt_search_point.changes_description or "",
-            "pipeline_params_changed": transition.pipeline_params is not None,
+            "new_plan_preview": str(result.opt_search_point.plan)[:120],
+            "changes_description": result.opt_search_point.changes_description or "",
+            "pipeline_params_changed": result.pipeline_params is not None,
         }
 
-    transition = await _run_layer_transition(
-        CampaignPhase.MODIFY_PLAN,
+    return await _do_layer_transition(
+        L3ModifyPlan(),
         state,
+        config,
         pipeline_schema,
         round_num,
         on_phase,
         obs=obs,
         obs_campaign_id=obs_campaign_id,
-        observed_name=f"l3_modify_plan_r{round_num}",
-        enter_payload=enter,
-        call=_call,
-        exit_payload=_exit,
+        run_kwargs={"l2_history": l2_history},
+        enter_payload=enter_payload,
+        exit_payload_fn=_exit,
+        temperature=config.optimization.l3_temperature,
     )
-
-    state.escalation.l3.record_entry(state.best_accuracy, state.best_composite)
-    state.escalation.reset_for_l3(state.best_accuracy, state.best_composite)
-    logger.debug("L3 modify_plan at round %d (l3_round=%d)", round_num, state.escalation.l3.round)
-    return transition
 
 
 async def _exhaust_or_reset(

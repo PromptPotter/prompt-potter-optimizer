@@ -23,7 +23,7 @@ exactly which Langfuse SDK calls each event triggers.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, Union
+from typing import Any, Literal, Union
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,18 +135,10 @@ class CritiqueWritten:
 
 
 @dataclass(frozen=True, slots=True)
-class L2Applied:
-    """L2 ``refine_strategy`` transition applied to the loop state."""
+class LayerApplied:
+    """L2 (``refine_strategy``) or L3 (``modify_plan``) transition applied to the loop state."""
 
-    campaign_id: str
-    round_num: int
-    changes_description: str
-
-
-@dataclass(frozen=True, slots=True)
-class L3Applied:
-    """L3 ``modify_plan`` transition applied to the loop state."""
-
+    layer: Literal["L2", "L3"]
     campaign_id: str
     round_num: int
     changes_description: str
@@ -224,8 +216,7 @@ OptimizationEvent = Union[
     CandidateScored,
     RoundWinnerChosen,
     CritiqueWritten,
-    L2Applied,
-    L3Applied,
+    LayerApplied,
 ]
 
 

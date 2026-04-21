@@ -26,6 +26,8 @@ __all__ = [
     "format_escalation_report",
     "format_l2_intelligence",
     "format_pipeline_section",
+    "format_runtime_failure_line",
+    "format_runtime_failures_for_l3",
     "format_search_memory_block",
     "summarize_warning_inventory",
     "warning_summary",
@@ -83,6 +85,21 @@ def extract_runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
     return rate_pct, dominant, cfg_str, rf.get("total_evaluated", 0)
 
 
+def format_runtime_failure_line(rf: dict, label: str = "") -> list[str]:
+    """Render one runtime-failure dict as a 2-line warning block.
+
+    L2 passes a candidate ``label`` (shown as the prefix, with dominant
+    warning type appended); L3 passes none (dominant is the prefix). Shared
+    verb ("degraded") and shared ``extract_runtime_failure_fields`` parser.
+    """
+    rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
+    if label:
+        head = f"  ⚠ {label[:60]} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
+    else:
+        head = f"  ⚠ {dominant} — {rate_pct}% degraded on {n} queries"
+    return [head, f"    observed_config: {cfg_str}"]
+
+
 def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
     """Render the accumulated RuntimeFailure trail for L3 modify_plan (L2 self-heal exhausted)."""
     if not runtime_failures:
@@ -94,9 +111,7 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
         "",
     ]
     for rf in runtime_failures:
-        rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
-        lines.append(f"  ⚠ {dominant} — {rate_pct}% degradation on {n} queries")
-        lines.append(f"    observed_config: {cfg_str}")
+        lines.extend(format_runtime_failure_line(rf))
 
     lines.append("")
     lines.append(
@@ -304,18 +319,14 @@ def format_l2_intelligence(
             "steer L1 away from the failing config region)",
         ]
 
-        def _render_rf(rf: dict, label: str = "") -> list[str]:
-            rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
-            prefix = f"  ⚠ {label[:60]}" if label else "  ⚠"
-            head = f"{prefix} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
-            return [head, f"    observed_config: {cfg_str}"]
-
         if rfs_new:
             lines.append("")
             lines.append("NEW (this round):")
             labels_new = runtime_failure_labels or []
             for i, rf in enumerate(rfs_new):
-                lines.extend(_render_rf(rf, labels_new[i] if i < len(labels_new) else ""))
+                lines.extend(
+                    format_runtime_failure_line(rf, labels_new[i] if i < len(labels_new) else "")
+                )
 
         if rfs_acc:
             lines.append("")
@@ -324,7 +335,7 @@ def format_l2_intelligence(
                 "L2's prior strategy adjustments did NOT reduce these):"
             )
             for rf in rfs_acc:
-                lines.extend(_render_rf(rf))
+                lines.extend(format_runtime_failure_line(rf))
 
         lines.append("")
         lines.append(

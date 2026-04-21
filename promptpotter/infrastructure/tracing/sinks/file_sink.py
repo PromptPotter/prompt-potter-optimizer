@@ -23,8 +23,7 @@ from promptpotter.infrastructure.tracing.events import (
     DatasetRegistered,
     DatasetRun,
     Event,
-    L2Applied,
-    L3Applied,
+    LayerApplied,
     NodeEnd,
     NodeStart,
     PromptVersion,
@@ -208,8 +207,7 @@ class FileSink(EventSink):
         CandidateScored: "_on_write_point",
         RoundWinnerChosen: "_on_write_point",
         CritiqueWritten: "_on_write_point",
-        L2Applied: "_on_write_point",
-        L3Applied: "_on_write_point",
+        LayerApplied: "_on_layer_applied",
     }
 
     # Fields per event class forwarded into the events.jsonl payload. Keep
@@ -222,8 +220,6 @@ class FileSink(EventSink):
             ("winner_candidate_id", "winner_accuracy", "improved"),
         ),
         CritiqueWritten: ("critique_written", ("critique_text",)),
-        L2Applied: ("l2_applied", ("changes_description",)),
-        L3Applied: ("l3_applied", ("changes_description",)),
     }
 
     def _on_write_point(self, event: Any) -> None:
@@ -237,6 +233,22 @@ class FileSink(EventSink):
             **{f: getattr(event, f) for f in fields},
         }
         self._log_event(payload)
+
+    def _on_layer_applied(self, event: LayerApplied) -> None:
+        """Append an ``l2_applied`` / ``l3_applied`` mirror to events.jsonl.
+
+        Event-name string (``l2_applied`` / ``l3_applied``) is preserved on
+        disk — downstream consumers key on that string, not the dataclass.
+        """
+        self._log_event(
+            {
+                "event": f"{event.layer.lower()}_applied",
+                "trace_id": self._campaign_traces.get(event.campaign_id, ""),
+                "campaign_id": event.campaign_id,
+                "round": event.round_num,
+                "changes_description": event.changes_description,
+            }
+        )
 
     # --- Optimization topology (A) handlers ---
 

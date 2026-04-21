@@ -57,6 +57,15 @@ SESSION_ARTIFACTS = {
 }
 
 
+# L2/L3 transition phase → dashboard layer label. Keep in sync with
+# ``LayerTransition.phase`` / ``.layer`` in
+# ``application/optimization/nodes/layer_transitions.py``.
+_PHASE_TO_LAYER: dict[str, str] = {
+    CampaignPhase.REFINE_STRATEGY: "L2",
+    CampaignPhase.MODIFY_PLAN: "L3",
+}
+
+
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
     """Append a timestamped user note to ``journal.md`` (notebook ↔ Claude narrative channel)."""
     ts = datetime.now(UTC).isoformat(timespec="seconds")
@@ -338,10 +347,8 @@ class CampaignPersistenceEmitter:
                 "warning_types": data.get("warning_types"),
                 "ts": datetime.now(UTC).isoformat(),
             }
-        elif phase == CampaignPhase.REFINE_STRATEGY:
-            s["layer"] = "L2"
-        elif phase == CampaignPhase.MODIFY_PLAN:
-            s["layer"] = "L3"
+        elif phase in _PHASE_TO_LAYER:
+            s["layer"] = _PHASE_TO_LAYER[phase]
 
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
         self._persist()

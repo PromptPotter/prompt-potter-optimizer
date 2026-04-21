@@ -21,6 +21,15 @@ logger = logging.getLogger(__name__)
 __all__ = ["RoundRecorder"]
 
 
+# L2/L3 transition action types → filename suffix. Keep in sync with the
+# ``template_name`` on ``LayerTransition`` subclasses in
+# ``application/optimization/nodes/layer_transitions.py``.
+_LAYER_ACTION_SUFFIX: dict[str, str] = {
+    "l2_refine_strategy": "_l2",
+    "l3_modify_plan": "_l3",
+}
+
+
 class RoundRecorder:
     """Accumulates actions within a round, writes ``round_NNN.json`` on flush."""
 
@@ -46,7 +55,7 @@ class RoundRecorder:
     def add_action(self, action: dict[str, Any]) -> None:
         """Append an action to the current round's trace."""
         action.setdefault("timestamp", datetime.now(UTC).isoformat())
-        if action.get("type") in ("l2_refine_strategy", "l3_modify_plan"):
+        if action.get("type") in _LAYER_ACTION_SUFFIX:
             self._has_escalation = True
         self._actions.append(action)
 
@@ -66,11 +75,9 @@ class RoundRecorder:
         suffix = ""
         if self._has_escalation:
             for a in self._actions:
-                if a.get("type") == "l2_refine_strategy":
-                    suffix = "_l2"
-                    break
-                if a.get("type") == "l3_modify_plan":
-                    suffix = "_l3"
+                mapped = _LAYER_ACTION_SUFFIX.get(a.get("type", ""))
+                if mapped:
+                    suffix = mapped
                     break
 
         filename = f"round_{self._current_round:03d}{suffix}.json"
