@@ -205,6 +205,11 @@ async def _run_query_loop(
                         pipeline_params=search_point.pipeline_params,
                     )
                     cached_r = cast(QueryResult, recovered)
+                # Overlay current-run sample_id — archived traces may predate
+                # the field; display should always show the current ID.
+                sid = qd.get("sample_id")
+                if sid is not None:
+                    cached_r["sample_id"] = sid
                 results.append(cached_r)
                 if on_result is not None:
                     on_result(cached_r, i, len(dataset))
@@ -259,7 +264,12 @@ async def _run_query_loop(
                         len(dataset) - i - 1,
                     )
                     results.extend(
-                        _error_result(rq["query"], rq.get("ground_truth", ""), abort_reason)
+                        _error_result(
+                            rq["query"],
+                            rq.get("ground_truth", ""),
+                            abort_reason,
+                            sample_id=rq.get("sample_id"),
+                        )
                         for rq in dataset[i + 1 :]
                     )
                     return QueryLoopResult(results, completed=False, stop_reason=abort_reason)

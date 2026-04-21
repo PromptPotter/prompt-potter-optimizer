@@ -56,6 +56,7 @@ CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pyt
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.
 - **Commit messages**: keep under 800 characters total. Terse bullets, not prose.
+- **Sample IDs**: `sample_id: int` is optional on each sample (`QueryResult.sample_id`). It's an **internal positional index** assigned by the loader over the final merged list — not a canonical upstream ID. BBEH assigns sequential ints over its flattened 23-task mini list; display shows `#NNN` in the per-query line when present.
 
 ## Architecture
 

@@ -383,10 +383,12 @@ def _fmt_query_result(
     indent = prefix if prefix else ""
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
+    sid = r.get("sample_id")
+    sid_col = f"#{sid:03d}" if sid is not None else "    "
     if err:
-        return f"{indent}{time_col} {tag} {step} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
+        return f"{indent}{time_col} {sid_col} {tag} {step} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
-    line = f"{indent}{time_col} {tag} {step} -> {pred!r} gt:{gt!r} q:{q!r}"
+    line = f"{indent}{time_col} {sid_col} {tag} {step} -> {pred!r} gt:{gt!r} q:{q!r}"
 
     _ann_indent = " " * len(indent) if indent else "      "
 

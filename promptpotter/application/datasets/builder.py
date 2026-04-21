@@ -265,8 +265,11 @@ def load_aime_2025(
 def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
     """Load BBEH mini (460 examples, 23 tasks) from HuggingFace.
 
-    Returns ``[{"query": str, "ground_truth": str, "task": str}]``. The task
-    field lets downstream per-task filtering split into 23 campaigns.
+    Returns ``[{"sample_id": int, "query": str, "ground_truth": str, "task": str}]``.
+    ``sample_id`` is our internal positional index into the merged mini list —
+    BBEH ships as 23 task bins with no native per-sample ID, so we assign
+    sequential ints after flattening. The task field lets downstream
+    per-task filtering split into 23 campaigns.
     """
     try:
         from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
@@ -288,6 +291,11 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
                 "task": row["task"],
             }
         )
+
+    # Assign internal positional IDs over the merged list, pre-downsample
+    # — surviving items keep their canonical index, not a re-numbering.
+    for i, item in enumerate(items):
+        item["sample_id"] = i
 
     if sample_size > 0 and len(items) > sample_size:
         items = random.Random(seed).sample(items, sample_size)

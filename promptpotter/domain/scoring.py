@@ -48,6 +48,9 @@ class QueryResult(TypedDict):
     predicted: str
     hit: NotRequired[bool]
     score: NotRequired[float]
+    # Optional internal positional index assigned by the dataset loader
+    # (e.g. BBEH enumerate over merged mini list). Not a canonical upstream ID.
+    sample_id: NotRequired[int]
     error: str | None
     pipeline_data: PipelineData | None
 

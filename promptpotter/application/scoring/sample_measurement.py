@@ -118,20 +118,28 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 )
 
 
-def _error_result(query: str, ground_truth: str, error_msg: str) -> QueryResult:
+def _error_result(
+    query: str,
+    ground_truth: str,
+    error_msg: str,
+    sample_id: int | None = None,
+) -> QueryResult:
     """Build a standard error result dict.
 
     Error rows intentionally carry no ``hit``/``score`` — those fields are
     owned exclusively by ``rescore_results``, which skips error rows. The
     display formatter renders these via the ``error`` branch.
     """
-    return {
+    result: QueryResult = {
         "query": query,
         "predicted": "ERROR",
         "ground_truth": ground_truth,
         "error": error_msg or "unknown error",
         "pipeline_data": None,
     }
+    if sample_id is not None:
+        result["sample_id"] = sample_id
+    return result
 
 
 def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
@@ -150,6 +158,7 @@ async def measure_sample(
     """Measure one sample: run query through pipeline, score against ground truth."""
     query = query_data["query"]
     ground_truth = query_data["ground_truth"]
+    sample_id = query_data.get("sample_id")
 
     pipeline_schema = env.pipeline_schema
     if pipeline_schema is None:
@@ -170,6 +179,7 @@ async def measure_sample(
                 ground_truth,
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
                 " — pipeline internal failure for this query.",
+                sample_id=sample_id,
             )
         gt_rank = next(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
@@ -201,6 +211,8 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
+        if sample_id is not None:
+            result["sample_id"] = sample_id
         # Populate per-query evaluator values. Sits inside pipeline_data so
         # the existing per-query scoring formula compiler flattens it into
         # the formula namespace (``evaluators.retrieval_shortfall`` etc.).
@@ -221,13 +233,13 @@ async def measure_sample(
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg)
+        return _error_result(query, ground_truth, error_msg, sample_id=sample_id)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg)
+        return _error_result(query, ground_truth, error_msg, sample_id=sample_id)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
-        return _error_result(query, ground_truth, str(exc))
+        return _error_result(query, ground_truth, str(exc), sample_id=sample_id)

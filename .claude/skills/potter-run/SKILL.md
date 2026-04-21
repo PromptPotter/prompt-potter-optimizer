@@ -50,6 +50,8 @@ Persistent configs decide behavior — the skill does not carry a parallel defau
 
 Read these. Don't recommend parameter tweaks unless the user asks. Don't classify data volume ("minimal"/"substantial") or propose leaderboard picks unbidden.
 
+**Reading per-query display lines:** when the dataset loader assigns `sample_id` (BBEH today), each line carries a `#NNN` column right after the time — e.g. `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'`. Use the ID to refer to specific samples across runs.
+
 ## Phase 0: Audit (silent)
 
 1. Read `datasets/{name}/dataset.md` + `campaign.json` + `pipeline.json` (+ BBEH notebook).
