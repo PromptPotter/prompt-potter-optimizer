@@ -1,12 +1,4 @@
-"""File sink — per-cycle Langfuse shadow, events.jsonl, prompts, MLflow (SDK).
-
-Writes a Langfuse-compatible JSON shadow plus the ``events.jsonl`` navigation
-log under ``campaigns/{cycle_id}/`` for the active campaign. MLflow is
-opt-in: when ``settings.MLFLOW_ENABLED`` is true the sink logs each round as
-an MLflow run via the Python SDK, rooted at ``library/mlruns/``. Writes
-arriving without a bound cycle (out-of-campaign ``file_only()`` callers)
-fall back to a shared ``library/obs/`` pool.
-"""
+"""Per-cycle Langfuse shadow + events.jsonl + prompts + (opt-in) MLflow under campaigns/{cycle_id}/."""
 
 from __future__ import annotations
 
@@ -69,13 +61,9 @@ class FileSink(EventSink):
         self._cycle_id: str | None = None
         self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
-        # Per-RoundStart obs_id so nested node observations can set it as
-        # parentObservationId, and RoundEnd can update the same JSON file
-        # rather than creating a second observation per round.
-        # Keyed by (campaign_id, round_num); value is (trace_id, obs_id).
+        # (campaign_id, round_num) → (trace_id, obs_id) — so NodeStart children set parentObservationId.
         self._round_obs_ids: dict[tuple[str, int], tuple[str, str]] = {}
-        # Per-NodeStart obs_id so NodeEnd can update the same JSON file.
-        # Keyed by (campaign_id, round_num, node_id).
+        # (campaign_id, round_num, node_id) → (trace_id, obs_id) — so NodeEnd updates the same file.
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
 
     @property
@@ -204,9 +192,7 @@ class FileSink(EventSink):
             mlflow.log_metrics(metrics)
             mlflow.set_tags(tags)
 
-    # --- Event dispatch ---
-    # Topology B (QueryEvalStart / QueryNodeSpan / QueryEvalEnd) is
-    # Langfuse-only — the file sink has no analogue for backfill replay.
+    # --- Event dispatch (Topology B is Langfuse-only; no file analogue) ---
 
     _HANDLERS: ClassVar[dict[type[Event], str]] = {
         DatasetRegistered: "_on_dataset_registered",
@@ -218,78 +204,37 @@ class FileSink(EventSink):
         RoundEnd: "_on_round_end",
         PromptVersion: "_on_prompt_version",
         CampaignEnd: "_on_campaign_end",
-        CandidateCreated: "_on_candidate_created",
-        CandidateScored: "_on_candidate_scored",
-        RoundWinnerChosen: "_on_round_winner_chosen",
-        CritiqueWritten: "_on_critique_written",
-        L2Applied: "_on_l2_applied",
-        L3Applied: "_on_l3_applied",
+        CandidateCreated: "_on_write_point",
+        CandidateScored: "_on_write_point",
+        RoundWinnerChosen: "_on_write_point",
+        CritiqueWritten: "_on_write_point",
+        L2Applied: "_on_write_point",
+        L3Applied: "_on_write_point",
     }
 
-    # --- Write-point wrappers (route to shared _on_write_point) ---
-
-    def _on_candidate_created(self, event: CandidateCreated) -> None:
-        self._on_write_point(
-            "candidate_created",
-            event,
-            extra={"candidate_idx": event.candidate_idx, "candidate_id": event.candidate_id},
-        )
-
-    def _on_candidate_scored(self, event: CandidateScored) -> None:
-        self._on_write_point(
-            "candidate_scored",
-            event,
-            extra={"candidate_idx": event.candidate_idx, "report": event.report},
-        )
-
-    def _on_round_winner_chosen(self, event: RoundWinnerChosen) -> None:
-        self._on_write_point(
+    # Fields per event class forwarded into the events.jsonl payload. Keep
+    # in sync with the event dataclass fields that should be mirrored.
+    _WRITE_POINT_FIELDS: ClassVar[dict[type, tuple[str, tuple[str, ...]]]] = {
+        CandidateCreated: ("candidate_created", ("candidate_idx", "candidate_id")),
+        CandidateScored: ("candidate_scored", ("candidate_idx", "report")),
+        RoundWinnerChosen: (
             "round_winner_chosen",
-            event,
-            extra={
-                "winner_candidate_id": event.winner_candidate_id,
-                "winner_accuracy": event.winner_accuracy,
-                "improved": event.improved,
-            },
-        )
+            ("winner_candidate_id", "winner_accuracy", "improved"),
+        ),
+        CritiqueWritten: ("critique_written", ("critique_text",)),
+        L2Applied: ("l2_applied", ("changes_description",)),
+        L3Applied: ("l3_applied", ("changes_description",)),
+    }
 
-    def _on_critique_written(self, event: CritiqueWritten) -> None:
-        self._on_write_point(
-            "critique_written",
-            event,
-            extra={"critique_text": event.critique_text},
-        )
-
-    def _on_l2_applied(self, event: L2Applied) -> None:
-        self._on_write_point(
-            "l2_applied",
-            event,
-            extra={"changes_description": event.changes_description},
-        )
-
-    def _on_l3_applied(self, event: L3Applied) -> None:
-        self._on_write_point(
-            "l3_applied",
-            event,
-            extra={"changes_description": event.changes_description},
-        )
-
-    # --- Fork-addressable write-point handler (shared) ---
-
-    def _on_write_point(self, event_name: str, event: Any, extra: dict[str, Any]) -> None:
-        """Append a mid-round observability event to events.jsonl.
-
-        events.jsonl is a pure observability mirror — metadata only, no
-        OptSearchPoint snapshots. Resume reads
-        ``campaigns/{cycle_id}/trials/trial_NNNN.json``.
-        """
-        trace_id = self._campaign_traces.get(event.campaign_id, "")
+    def _on_write_point(self, event: Any) -> None:
+        """Append a mid-round observability event to events.jsonl (pure mirror — not used for resume)."""
+        event_name, fields = self._WRITE_POINT_FIELDS[type(event)]
         payload = {
             "event": event_name,
-            "trace_id": trace_id,
+            "trace_id": self._campaign_traces.get(event.campaign_id, ""),
             "campaign_id": event.campaign_id,
             "round": event.round_num,
-            **extra,
+            **{f: getattr(event, f) for f in fields},
         }
         self._log_event(payload)
 

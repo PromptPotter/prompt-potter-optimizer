@@ -1,17 +1,4 @@
-"""Langfuse sink — owns ALL Langfuse id mappings, persisted across resume.
-
-Handles both trace topologies:
-- **Topology A** (live optimization) — CampaignStart/Round*/Node*/PromptVersion/
-  DatasetRun/CampaignEnd → one trace per campaign, rounds nested.
-- **Topology B** (per-query eval, backfill replay) — QueryEvalStart/
-  QueryNodeSpan/QueryEvalEnd → one trace per query linked to dataset items.
-
-The five id maps (campaign→trace, (campaign,round)→round_obs,
-(campaign,round,node)→node_obs, (dataset,query)→item, campaign→session) are
-persisted to ``campaigns/{cycle_id}/langfuse/state.json`` after every
-mutation. This is the fix for the resume bug where the in-memory trace map
-was lost and post-resume events attached to nothing.
-"""
+"""Langfuse sink owning all id mappings, persisted to campaigns/{cycle_id}/langfuse/state.json across resume."""
 
 from __future__ import annotations
 

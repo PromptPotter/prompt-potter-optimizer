@@ -573,16 +573,13 @@ async def l1_score(
         decisions=decisions,
     )
 
+    aborted_ids = {
+        cs["candidate_id"]
+        for cs in candidate_scores
+        if cs.get("escalation_aborted") and not cs.get("elimination_stopped")
+    }
     evaluated_candidates = [
-        c
-        for c in osp_candidates
-        if c.id in all_candidate_results
-        and not any(
-            cs.get("escalation_aborted")
-            and not cs.get("elimination_stopped")
-            and cs["candidate_id"] == c.id
-            for cs in candidate_scores
-        )
+        c for c in osp_candidates if c.id in all_candidate_results and c.id not in aborted_ids
     ]
     winner_entry = _select_round_winner(
         evaluated_candidates,

@@ -359,6 +359,15 @@ class CampaignPersistenceEmitter:
         # guards at the callsite.
         return
 
+    def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
+        """Refresh dashboard candidate/query labels; reset per-candidate counter on switch."""
+        s = self._state
+        candidate_label = f"C{ci + 1}/{ct}"
+        if s["candidate"] != candidate_label:
+            self._rc.candidate_hits = 0
+            s["candidate"] = candidate_label
+        s["query"] = f"{qi + 1}/{qt}"
+
     def on_sample_started(
         self,
         ci: int,
@@ -368,12 +377,7 @@ class CampaignPersistenceEmitter:
         query_text: str,
     ) -> None:
         s = self._state
-
-        candidate_label = f"C{ci + 1}/{ct}"
-        if s["candidate"] != candidate_label:
-            self._rc.candidate_hits = 0
-            s["candidate"] = candidate_label
-        s["query"] = f"{qi + 1}/{qt}"
+        self._update_sample_markers(ci, ct, qi, qt)
 
         self._query_start = time.monotonic()
         s["query_in_flight"] = True
@@ -391,12 +395,7 @@ class CampaignPersistenceEmitter:
     ) -> None:
         s = self._state
         rc = self._rc
-
-        candidate_label = f"C{ci + 1}/{ct}"
-        if s["candidate"] != candidate_label:
-            rc.candidate_hits = 0
-            s["candidate"] = candidate_label
-        s["query"] = f"{qi + 1}/{qt}"
+        self._update_sample_markers(ci, ct, qi, qt)
 
         pd = result.get("pipeline_data") or {}
         query_time = float(pd.get("total_time", 0.0) or 0.0)

@@ -266,6 +266,22 @@ class CampaignStore(EntityStore):
 
         self._rebuild_trial_index(backend_id, cycle_id, survivors)
 
+    @staticmethod
+    def _trial_summary(trial: dict[str, Any]) -> dict[str, Any]:
+        """Projection of a trial detail into the index.json::trials shape."""
+        round_num = trial.get("round", 0)
+        return {
+            "trial_id": trial.get("trial_id", f"round_{round_num}"),
+            "round": round_num,
+            "label": trial.get("label", ""),
+            "prompt_fields_id": trial.get("prompt_fields_id", ""),
+            "accuracy": trial.get("accuracy", 0.0),
+            "hits": trial.get("hits", 0),
+            "total": trial.get("total", 0),
+            "improved": trial.get("improved", False),
+            "created_at": trial.get("created_at", ""),
+        }
+
     def _rebuild_trial_index(
         self,
         backend_id: str,
@@ -277,34 +293,13 @@ class CampaignStore(EntityStore):
         campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
-        rebuilt: list[dict[str, Any]] = []
-        best_acc = 0.0
-        best_trial_id: str | None = None
-        for p in sorted(survivors):
-            trial = read_json(p)
-            round_num = trial.get("round", 0)
-            trial_id = trial.get("trial_id", f"round_{round_num}")
-            rebuilt.append(
-                {
-                    "trial_id": trial_id,
-                    "round": round_num,
-                    "label": trial.get("label", ""),
-                    "prompt_fields_id": trial.get("prompt_fields_id", ""),
-                    "accuracy": trial.get("accuracy", 0.0),
-                    "hits": trial.get("hits", 0),
-                    "total": trial.get("total", 0),
-                    "improved": trial.get("improved", False),
-                    "created_at": trial.get("created_at", ""),
-                }
-            )
-            if trial.get("accuracy", 0.0) > best_acc:
-                best_acc = trial["accuracy"]
-                best_trial_id = trial_id
+        rebuilt = [self._trial_summary(read_json(p)) for p in sorted(survivors)]
+        best = max(rebuilt, key=lambda s: s["accuracy"], default=None)
 
         data["trials"] = rebuilt
         data["n_trials"] = len(rebuilt)
-        data["best_accuracy"] = best_acc
-        data["best_trial_id"] = best_trial_id
+        data["best_accuracy"] = best["accuracy"] if best else 0.0
+        data["best_trial_id"] = best["trial_id"] if best else None
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(campaign_path, data)
 
@@ -458,19 +453,8 @@ class CampaignStore(EntityStore):
         campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
-        summary = {
-            "trial_id": trial_id,
-            "round": round_num,
-            "label": trial.get("label", ""),
-            "prompt_fields_id": trial.get("prompt_fields_id", ""),
-            "accuracy": trial.get("accuracy", 0.0),
-            "hits": trial.get("hits", 0),
-            "total": trial.get("total", 0),
-            "improved": trial.get("improved", False),
-            "created_at": trial.get("created_at", ""),
-        }
         data["trials"] = [t for t in data["trials"] if t.get("round") != round_num]
-        data["trials"].append(summary)
+        data["trials"].append(self._trial_summary(trial))
         data["n_trials"] = len(data["trials"])
 
         if trial["accuracy"] > data.get("best_accuracy", 0.0):

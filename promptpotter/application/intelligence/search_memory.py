@@ -228,10 +228,6 @@ class SearchMemory:
         exhausted.sort(key=lambda a: a.effect_size)
         return exhausted
 
-    def values_tested_count(self, axis: str) -> int:
-        """Return how many distinct values have been tested for *axis*."""
-        return len(self._axis_values.get(axis, {}))
-
     def axis_value_trend(self, axis: str) -> str:
         """Return one of: ``increasing``, ``decreasing``, ``peaked``, ``flat``, ``non_numeric``."""
         values = self._axis_values.get(axis, {})
@@ -308,27 +304,6 @@ class SearchMemory:
                 )
                 count += 1
         return count
-
-    def query_flip_history(self, query: str | None = None, limit: int = 20) -> list[dict]:
-        """Return recent query hit/miss flips, optionally filtered by query."""
-        flips = self._query_flips
-        if query:
-            flips = [f for f in flips if f["query"] == query]
-        return flips[-limit:]
-
-    def format_recent_attributions(self, limit: int = 5) -> str | None:
-        """Format recent positive flips (miss→hit) for injection into critique."""
-        positive = [f for f in self._query_flips if f["new_hit"] and not f["old_hit"]]
-        if not positive:
-            return None
-        recent = positive[-limit:]
-        parts = []
-        for f in recent:
-            parts.append(
-                f"  Round {f['round']}: {f['query'][:50]} started hitting "
-                f"after: {f['changes_description']}"
-            )
-        return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
 
     def recompute_failure_group_correlations(self) -> bool:
         """Recompute failure-group × axis deltas from current hits/axis values. Returns True on change."""
@@ -420,7 +395,7 @@ class SearchMemory:
         exhausted = self.exhausted_axes()
         if exhausted:
             ctx["exhausted_axes"] = "; ".join(
-                f"{a.axis} ({self.values_tested_count(a.axis)} values tested, "
+                f"{a.axis} ({len(self._axis_values.get(a.axis, {}))} values tested, "
                 f"effect={a.effect_size:.3f})"
                 for a in exhausted[:5]
             )
@@ -434,9 +409,17 @@ class SearchMemory:
         if trend_parts:
             ctx["value_trends"] = "; ".join(trend_parts)
 
-        attributions = self.format_recent_attributions(limit=3)
-        if attributions:
-            ctx["improvement_attribution"] = attributions
+        positive = [f for f in self._query_flips if f["new_hit"] and not f["old_hit"]]
+        if positive:
+            recent = positive[-3:]
+            parts = [
+                f"  Round {f['round']}: {f['query'][:50]} started hitting "
+                f"after: {f['changes_description']}"
+                for f in recent
+            ]
+            ctx["improvement_attribution"] = (
+                f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
+            )
 
         return ctx or None
 
@@ -485,7 +468,7 @@ class SearchMemory:
             if fg_lines:
                 ctx["failure_group_insights"] = "; ".join(fg_lines)
 
-            flips = self.query_flip_history(limit=50)
+            flips = self._query_flips[-50:]
             if flips:
                 flip_counts = Counter(f["query"] for f in flips)
                 volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]

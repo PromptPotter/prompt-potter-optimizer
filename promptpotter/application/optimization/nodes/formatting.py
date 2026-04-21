@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -17,6 +18,7 @@ __all__ = [
     "TrajectoryReport",
     "assess_candidate_diversity",
     "build_candidate_comparison",
+    "build_cross_candidate_diff",
     "build_trajectory_report",
     "candidate_summaries",
     "extract_runtime_failure_fields",
@@ -161,56 +163,42 @@ def format_context_sections(
             sections.append(f"CONTEXT:\n{tc_lines}")
 
     # Probe rounds show per-query warnings; non-probe skips when l2_directive absorbed it.
-    if escalation_journal:
-        if is_probe_round:
-            probe_lines = [
-                "PROBE ROUND: These queries have recurring pipeline warnings. "
-                "Generate candidates that specifically address pipeline "
-                "robustness for the affected steps.",
-            ]
-            if warning_inventory:
-                inv_text = summarize_warning_inventory(warning_inventory)
-                if inv_text:
-                    probe_lines.append("")
-                    probe_lines.append(inv_text)
-                step_counts: dict[str, int] = {}
-                for entry in warning_inventory.values():
-                    for wtype in entry.get("warnings", {}):
-                        step = wtype.split(":")[0] if ":" in wtype else wtype
-                        step_counts[step] = step_counts.get(step, 0) + 1
-                if step_counts:
-                    dominant_step = max(step_counts, key=step_counts.get)  # type: ignore[arg-type]
-                    probe_lines.append(
-                        f"\nDominant problem step: {dominant_step} "
-                        f"({step_counts[dominant_step]} warning occurrences)"
+    if escalation_journal and is_probe_round:
+        lines = [
+            "PROBE ROUND: queries have recurring pipeline warnings. "
+            "Generate candidates that address pipeline robustness."
+        ]
+        if warning_inventory:
+            inv = summarize_warning_inventory(warning_inventory)
+            if inv:
+                lines.extend(["", inv])
+            step_counts: Counter[str] = Counter()
+            for entry in warning_inventory.values():
+                for wtype in entry.get("warnings", {}):
+                    step_counts[wtype.split(":", 1)[0]] += 1
+            if step_counts:
+                dom_step, dom_count = step_counts.most_common(1)[0]
+                lines.append(f"\nDominant step: {dom_step} ({dom_count} warnings)")
+                tried = [ej for ej in escalation_journal if ej.get("problem_step") == dom_step][-3:]
+                if tried:
+                    lines.append(f"Previous attempts at {dom_step}:")
+                    lines.extend(
+                        f"  - {ej.get('degraded_rate', 0):.0%} degraded, {ej.get('warning_types', {})}"
+                        for ej in tried
                     )
-                    tried = [
-                        ej for ej in escalation_journal if ej.get("problem_step") == dominant_step
-                    ]
-                    if tried:
-                        probe_lines.append(f"Previous attempts targeting {dominant_step}:")
-                        for ej in tried[-3:]:
-                            wt = ej.get("warning_types", {})
-                            probe_lines.append(
-                                f"  - degraded_rate={ej.get('degraded_rate', 0):.0%}, warnings={wt}"
-                            )
-            sections.append("\n".join(probe_lines))
-        elif not l2_directive:
-            latest = escalation_journal[-1]
-            rate = latest.get("degraded_rate", 0)
-            problem_step = latest.get("problem_step", "unknown")
-            alert_lines = [
-                f"PIPELINE ISSUE: {rate:.0%} of queries degrade at the {problem_step} step.",
-                "Address pipeline instability in your candidates.",
-            ]
-            if len(escalation_journal) > 1:
-                alert_lines.append(
-                    f"Previous {len(escalation_journal)} attempts have not resolved the issue.",
-                )
-            wtypes = latest.get("warning_types", {})
-            if wtypes:
-                alert_lines.append(f"Warning breakdown: {wtypes}")
-            sections.append("\n".join(alert_lines))
+        sections.append("\n".join(lines))
+    elif escalation_journal and not l2_directive:
+        latest = escalation_journal[-1]
+        alert = [
+            f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
+            f"degrade at {latest.get('problem_step', 'unknown')}. "
+            "Address pipeline instability."
+        ]
+        if len(escalation_journal) > 1:
+            alert.append(f"{len(escalation_journal)} prior attempts unresolved.")
+        if latest.get("warning_types"):
+            alert.append(f"Warnings: {latest['warning_types']}")
+        sections.append("\n".join(alert))
 
     if l2_directive:
         sections.append(f"DIRECTIVE:\n{l2_directive}")

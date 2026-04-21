@@ -135,6 +135,156 @@ def load_baseline_prompt(
     )
 
 
+def _load_static_pipeline_schema(dataset_name: str, project_root: Path) -> PipelineSchema | None:
+    """Load schema from datasets/{name}/pipeline.json, or None if missing/unparseable."""
+    import json
+
+    from promptpotter.application.pipeline_discovery import parse_pipeline_response
+
+    cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
+    if not cfg_path.exists():
+        return None
+    try:
+        schema = parse_pipeline_response(json.loads(cfg_path.read_text(encoding="utf-8")))
+        logger.info("Static pipeline schema loaded: %s v%s", schema.name, schema.version)
+        return schema
+    except Exception as exc:
+        logger.warning("Failed to parse static pipeline.json: %s", exc)
+        return None
+
+
+async def _fetch_pipeline_schema(
+    client: BackendClient, status: Callable[[str], None]
+) -> PipelineSchema | None:
+    """Fetch schema via backend GET /pipeline, or None on failure."""
+    from promptpotter.application.pipeline_discovery import parse_pipeline_response
+
+    try:
+        schema = parse_pipeline_response(await client.fetch_pipeline())
+        logger.info("Pipeline schema loaded: %s v%s", schema.name, schema.version)
+        status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
+        return schema
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.info("Could not fetch pipeline schema: %s", exc)
+        status("Pipeline: unavailable")
+        return None
+
+
+def _check_active_pointer(tenant_id: str, take_over: bool, status: Callable[[str], None]) -> None:
+    """Guardrail against tenant drift; take_over=True clears the pointer."""
+    from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
+    from promptpotter.shared.errors import ActiveSessionMismatchError
+
+    active_tid, active_sid, _ = read_active_pointer()
+    if not active_tid or active_tid == tenant_id:
+        return
+    if not take_over:
+        raise ActiveSessionMismatchError(
+            active_tenant_id=active_tid,
+            active_session_id=active_sid,
+            requested_tenant_id=tenant_id,
+        )
+    # Take-over: clear the pointer. The smoke tool / notebook is sessionless
+    # by design (M9 gap), so writing a partial pointer would be a lie that
+    # downstream load_session() turns into an ugly "not found" error.
+    clear_active_pointer()
+    status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
+
+
+def _hydrate_dataset(base: SessionEnv, dataset_name: str, status: Callable[[str], None]) -> None:
+    """Load items from DatasetStore; auto-populate from DATASET_LOADERS registry if empty."""
+    ds = base.store.backends.load_dataset(dataset_name)
+    if not (ds and ds.get("items")):
+        from promptpotter.application.datasets.builder import DATASET_LOADERS
+
+        if dataset_name in DATASET_LOADERS:
+            status(f"Loading dataset '{dataset_name}' from registry ...")
+            loader_items = DATASET_LOADERS[dataset_name]()
+            base.store.backends.save_dataset(dataset_name, loader_items)
+            ds = {"items": loader_items}
+            logger.info("Auto-loaded dataset %r: %d items", dataset_name, len(loader_items))
+
+    if not (ds and ds.get("items")):
+        status(f"Dataset '{dataset_name}' not available")
+        raise ValueError(
+            f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
+            f"Add a loader to DATASET_LOADERS in dataset_builder.py."
+        )
+
+    items = ds["items"]
+    base.queries = [item for item in items if item.get("query") and item.get("ground_truth")]
+    base.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
+    logger.info(
+        "Loaded dataset %r from store: %d items, %d session terms",
+        dataset_name,
+        len(items),
+        len(base.index_terms),
+    )
+    status(f"Dataset: {dataset_name} ({len(items)} queries)")
+
+
+async def _hydrate_experiment(
+    base: SessionEnv,
+    backend_id: str,
+    experiment_id: str,
+    client: BackendClient,
+    backend_url: str,
+    status: Callable[[str], None],
+) -> None:
+    """Load experiment extract from store; auto-sync from backend on stale or missing data."""
+    extract = base.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    has_traces = bool(extract and extract.get("runs") and extract["runs"][0].get("traces"))
+
+    if not extract or not has_traces:
+        reason = "No stored experiment data" if not extract else "Stored data has no traces"
+        logger.info("%s — syncing from %s ...", reason, backend_url)
+        status(f"Syncing experiment {experiment_id} ...")
+        try:
+            extract = await client.sync_experiment(
+                base.store, backend_id, experiment_id, include_traces=True
+            )
+            base.synced = True
+            status("Sync complete")
+        except (KeyboardInterrupt, asyncio.CancelledError):
+            raise
+        except Exception as exc:
+            logger.warning("Auto-sync failed: %s", exc)
+            status(f"Sync failed: {exc}")
+
+    if not extract:
+        logger.warning(
+            "No experiment data available. "
+            "Downstream calls will fail until data is synced or datasets are loaded."
+        )
+        status("WARNING: No experiment data available")
+        return
+
+    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS
+
+    schema_key = base.pipeline_schema.name.lower() if base.pipeline_schema else ""
+    extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
+    if extractor:
+        queries, index_terms = extractor(extract)
+    else:
+        runs = extract.get("runs", [])
+        queries = []
+        gt_set: set[str] = set()
+        for er in runs[0].get("evaluation_results", []) if runs else []:
+            q, gt = er.get("query", ""), er.get("ground_truth", "")
+            if q and gt:
+                queries.append({"query": q, "ground_truth": gt})
+                gt_set.add(gt)
+        index_terms = sorted(gt_set)
+
+    exp_name = extract.get("experiment", {}).get("name", experiment_id)
+    status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
+    base.queries = queries
+    base.experiment_extract = extract
+    base.index_terms = index_terms
+
+
 async def init_services(
     backend_url: str = DEFAULT_BACKEND_URL,
     backend_id: str = "",
@@ -146,92 +296,38 @@ async def init_services(
     tenant_id: str = "default",
 ) -> SessionEnv:
     """Init store, client, pipeline schema, eval data. Refuses tenant drift unless take_over=True."""
-    from promptpotter.application.pipeline_discovery import parse_pipeline_response
-    from promptpotter.infrastructure.store import (
-        clear_active_pointer,
-        read_active_pointer,
-    )
-    from promptpotter.shared.errors import ActiveSessionMismatchError
 
-    def _status(msg: str) -> None:
+    def status(msg: str) -> None:
         if on_status:
             on_status(msg)
 
     if not backend_id:
         backend_id = dataset_name or DEFAULT_BACKEND_ID
-
     if project_root is None:
         # campaign/campaign_setup.py → services → promptpotter → repo_root
         project_root = Path(__file__).resolve().parent.parent.parent.parent
 
     store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
-
-    # Guardrail: refuse to drift to a different tenant silently.
-    active_tid, active_sid, _active_cid = read_active_pointer()
-    if active_tid and active_tid != tenant_id:
-        if not take_over:
-            raise ActiveSessionMismatchError(
-                active_tenant_id=active_tid,
-                active_session_id=active_sid,
-                requested_tenant_id=tenant_id,
-            )
-        # Take-over: clear the pointer. The smoke tool / notebook is sessionless
-        # by design (M9 gap), so writing a partial pointer would be a lie that
-        # downstream ``load_session()`` turns into an ugly "not found" error.
-        # Clearing leaves the workspace in "no active session" state, which
-        # a CLI ``init`` then correctly recovers from.
-        clear_active_pointer()
-        _status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
+    _check_active_pointer(tenant_id, take_over, status)
 
     pipeline_schema: PipelineSchema | None = None
     if dataset_name:
-        import json
-
-        cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
-        if cfg_path.exists():
-            try:
-                pipeline_schema = parse_pipeline_response(
-                    json.loads(cfg_path.read_text(encoding="utf-8"))
-                )
-                logger.info(
-                    "Static pipeline schema loaded: %s v%s",
-                    pipeline_schema.name,
-                    pipeline_schema.version,
-                )
-            except Exception as exc:
-                logger.warning("Failed to parse static pipeline.json: %s", exc)
-    if pipeline_schema:
-        _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+        pipeline_schema = _load_static_pipeline_schema(dataset_name, project_root)
+        if pipeline_schema:
+            status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
 
     client = BackendClient(backend_url)
-    _status(f"Backend: {backend_url}")
+    status(f"Backend: {backend_url}")
 
     if not pipeline_schema:
-        try:
-            pipeline_resp = await client.fetch_pipeline()
-            pipeline_schema = parse_pipeline_response(pipeline_resp)
-            logger.info(
-                "Pipeline schema loaded: %s v%s",
-                pipeline_schema.name,
-                pipeline_schema.version,
-            )
-            _status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.info("Could not fetch pipeline schema: %s", exc)
-            _status("Pipeline: unavailable")
+        pipeline_schema = await _fetch_pipeline_schema(client, status)
 
-    # Register backend connection
     if not store.backends.get(backend_id):
-        backend_name = pipeline_schema.name if pipeline_schema else "Unknown"
-        backend_type = "backend" if pipeline_schema else "unknown"
-
         store.backends.register(
             BackendConnection(
                 id=backend_id,
-                name=backend_name,
-                backend_type=backend_type,
+                name=pipeline_schema.name if pipeline_schema else "Unknown",
+                backend_type="backend" if pipeline_schema else "unknown",
                 base_url=backend_url,
             )
         )
@@ -248,106 +344,10 @@ async def init_services(
         project_root=str(store.base_dir),
     )
 
-    # --- Dataset store path (preferred when available) ---
     if dataset_name:
-        ds = store.backends.load_dataset(dataset_name)
-
-        # Auto-load from DATASET_LOADERS registry when store is empty
-        if not (ds and ds.get("items")):
-            from promptpotter.application.datasets.builder import DATASET_LOADERS
-
-            if dataset_name in DATASET_LOADERS:
-                _status(f"Loading dataset '{dataset_name}' from registry ...")
-                loader_items = DATASET_LOADERS[dataset_name]()
-                store.backends.save_dataset(dataset_name, loader_items)
-                ds = {"items": loader_items}
-                logger.info("Auto-loaded dataset %r: %d items", dataset_name, len(loader_items))
-
-        if ds and ds.get("items"):
-            items = ds["items"]
-            index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
-            logger.info(
-                "Loaded dataset %r from store: %d items, %d session terms",
-                dataset_name,
-                len(items),
-                len(index_terms),
-            )
-            _status(f"Dataset: {dataset_name} ({len(items)} queries)")
-            base.queries = [
-                item for item in items if item.get("query") and item.get("ground_truth")
-            ]
-            base.index_terms = index_terms
-            return base
-        _status(f"Dataset '{dataset_name}' not available")
-        raise ValueError(
-            f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
-            f"Add a loader to DATASET_LOADERS in dataset_builder.py."
-        )
-
-    # --- Experiment sync path (when no dataset_name — via experiment traces) ---
-    experiment_extract = store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
-
-    # Detect stale sync data: data exists but has no traces
-    _has_traces = bool(
-        experiment_extract
-        and experiment_extract.get("runs")
-        and experiment_extract["runs"][0].get("traces")
-    )
-
-    synced = False
-    if not experiment_extract or not _has_traces:
-        reason = (
-            "No stored experiment data" if not experiment_extract else "Stored data has no traces"
-        )
-        logger.info("%s — syncing from %s ...", reason, backend_url)
-        _status(f"Syncing experiment {experiment_id} ...")
-        try:
-            experiment_extract = await client.sync_experiment(
-                store,
-                backend_id,
-                experiment_id,
-                include_traces=True,
-            )
-            synced = True
-            _status("Sync complete")
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.warning("Auto-sync failed: %s", exc)
-            _status(f"Sync failed: {exc}")
-
-    base.synced = synced
-
-    if not experiment_extract:
-        logger.warning(
-            "No experiment data available. "
-            "Downstream calls will fail until data is synced or datasets are loaded."
-        )
-        _status("WARNING: No experiment data available")
-        return base
-
-    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS
-
-    schema_key = pipeline_schema.name.lower() if pipeline_schema else ""
-    extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
-    if extractor:
-        queries, index_terms = extractor(experiment_extract)
+        _hydrate_dataset(base, dataset_name, status)
     else:
-        runs = experiment_extract.get("runs", [])
-        queries = []
-        gt_set: set[str] = set()
-        for er in runs[0].get("evaluation_results", []) if runs else []:
-            q, gt = er.get("query", ""), er.get("ground_truth", "")
-            if q and gt:
-                queries.append({"query": q, "ground_truth": gt})
-                gt_set.add(gt)
-        index_terms = sorted(gt_set)
-    exp_name = experiment_extract.get("experiment", {}).get("name", experiment_id)
-    _status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
-
-    base.queries = queries
-    base.experiment_extract = experiment_extract
-    base.index_terms = index_terms
+        await _hydrate_experiment(base, backend_id, experiment_id, client, backend_url, status)
     return base
 
 
