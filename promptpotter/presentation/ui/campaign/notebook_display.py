@@ -20,7 +20,7 @@ from promptpotter.infrastructure.persistence.session_emitter import (
 )
 from promptpotter.shared.errors import is_error_result
 
-from .notebook_phase import _CycleDisplayState, _dispatch_phase
+from .notebook_phase import _dispatch_phase
 from .notebook_primitives import (
     DIM,
     GREEN,
@@ -38,6 +38,7 @@ from .notebook_primitives import (
     build_candidate_summary,
     fmt_candidate_header,
 )
+from .notebook_sp_diff import _CycleDisplayState
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult

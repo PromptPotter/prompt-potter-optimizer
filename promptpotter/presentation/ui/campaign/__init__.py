@@ -22,7 +22,7 @@ from .campaigns import (
 )
 
 # -- Display ------------------------------------------------------------------
-from .notebook_phase import (
+from .notebook_analytics import (
     show_campaign_summary,
     show_flip_tracking,
     show_lineage_chain,

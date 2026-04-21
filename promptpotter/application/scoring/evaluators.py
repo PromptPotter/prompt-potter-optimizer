@@ -1,20 +1,22 @@
-"""Capability Evaluators — first-class scoring signals with a single registry.
+"""Capability Evaluators — registry, adaptors, materializers.
 
 One ``Evaluator`` type holds a named scoring signal. Each evaluator has a
 ``scope`` (``per_query`` | ``per_round``), an ``applies(schema)`` predicate,
-and a single ``compute`` callable. Three framework adaptors wrap the same
-underlying ``compute`` so callers can hand an evaluator to DSPy, pydantic-evals,
-or Langfuse without re-implementing the signal.
+and a single ``compute`` callable (imported from ``evaluator_computes``).
+Three framework adaptors wrap the same underlying ``compute`` so callers
+can hand an evaluator to DSPy, pydantic-evals, or Langfuse without
+re-implementing the signal.
 
-The registry below is the single source of truth for what evaluators exist.
-``materialize_round_values()`` and ``materialize_query_values()`` are the only
-functions callers invoke directly — they evaluate the registry against a
-schema + results, handling node-type namespacing for evaluators that bind to
-a specific ``PipelineNode.node_type``.
+The registry in this module is the single source of truth for what
+evaluators exist. ``materialize_round_values()`` and
+``materialize_query_values()`` are the only functions callers invoke
+directly — they evaluate the registry against a schema + results, handling
+node-type namespacing for evaluators that bind to a specific
+``PipelineNode.node_type``.
 
 Adding a new evaluator:
-    1. Write a ``_compute_*`` function (takes keyword args).
-    2. Append an ``Evaluator(...)`` entry to ``_REGISTRY``.
+    1. Write a ``compute_*`` function in ``evaluator_computes``.
+    2. Append an ``Evaluator(...)`` entry to ``_REGISTRY`` below.
     3. Reference it by name in a per-round or per-query scoring formula.
 
 Composite is not special — it is whatever the per-round formula evaluates to.
@@ -26,7 +28,21 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.shared.errors import is_error_result
+from promptpotter.application.scoring.evaluator_computes import (
+    LATENCY_BUDGET_MS,
+    compute_accuracy,
+    compute_cache_hit_rate,
+    compute_candidate_recall,
+    compute_degraded_rate,
+    compute_error_rate,
+    compute_latency_norm,
+    compute_mean_retrieval_shortfall,
+    compute_pipeline_compactness,
+    compute_retrieval_shortfall_per_query,
+    compute_runtime_failure_rate,
+    compute_source_recall,
+    has_limit_node,
+)
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
@@ -35,11 +51,6 @@ if TYPE_CHECKING:
 
 Scope = Literal["per_query", "per_round"]
 DataType = Literal["NUMERIC", "BOOLEAN"]
-
-# Latency budget for the ``latency_norm`` evaluator. Mean latency ≥ this
-# contributes 0; ≤ 0 contributes 1.0. Kept here so the composite math that
-# used to live in ``metrics.py`` has one home.
-LATENCY_BUDGET_MS = 10_000.0
 
 
 __all__ = [
@@ -140,204 +151,6 @@ class Evaluator:
 
 
 # ---------------------------------------------------------------------------
-# Compute functions — pure, keyword-only, no side effects.
-# ---------------------------------------------------------------------------
-
-
-def _compute_accuracy(*, results: list[QueryResult], **_: Any) -> float:
-    if not results:
-        return 0.0
-    return sum(r.get("score", 0.0) for r in results) / len(results)
-
-
-def _compute_error_rate(*, results: list[QueryResult], **_: Any) -> float:
-    if not results:
-        return 0.0
-    return sum(1 for r in results if is_error_result(r)) / len(results)
-
-
-def _is_degraded(result: Any) -> bool:
-    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
-
-
-def _compute_degraded_rate(*, results: list[QueryResult], **_: Any) -> float:
-    if not results:
-        return 0.0
-    return sum(1 for r in results if _is_degraded(r)) / len(results)
-
-
-def _compute_runtime_failure_rate(
-    *, results: list[QueryResult], opt_sp: Any = None, **_: Any
-) -> float:
-    if not results or opt_sp is None or not hasattr(opt_sp, "memory"):
-        return 0.0
-    count = len(getattr(opt_sp.memory, "runtime_failures", []) or [])
-    return min(count / len(results), 1.0)
-
-
-def _compute_latency_norm(*, results: list[QueryResult], **_: Any) -> float:
-    latencies: list[float] = []
-    for r in results:
-        pd = r.get("pipeline_data") or {}
-        t = pd.get("total_time")
-        if t is None:
-            continue
-        try:
-            latencies.append(float(t))
-        except (TypeError, ValueError):
-            continue
-    if not latencies:
-        return 1.0
-    mean_ms = sum(latencies) / len(latencies)
-    return max(0.0, 1.0 - mean_ms / LATENCY_BUDGET_MS)
-
-
-def _extract_candidate_label(c: Any) -> str:
-    if isinstance(c, dict):
-        return str(c.get("candidate", c))
-    return c[0] if isinstance(c, (list, tuple)) else str(c)
-
-
-def _compute_recall(
-    *,
-    results: list[QueryResult],
-    node: PipelineNode,
-    candidate_key: str,
-    **_: Any,
-) -> float:
-    """Fraction of non-error queries (for which *node* ran) where GT is in the
-    node's output candidate list. Shared between source_recall and
-    candidate_recall."""
-
-    def _step_ran(r: QueryResult) -> bool:
-        pd = r.get("pipeline_data") or {}
-        if pd.get("terminated_at") == node.name:
-            return True
-        return (pd.get("step_timings") or {}).get(node.name) is not None
-
-    scoped = [r for r in results if _step_ran(r) and not is_error_result(r)]
-    if not scoped:
-        return 0.0
-    found = 0
-    for r in scoped:
-        pd = r.get("pipeline_data") or {}
-        raw = pd.get(candidate_key)
-        candidates: list = list(raw) if isinstance(raw, list) else []
-        gt = r.get("ground_truth", "")
-        if any(_extract_candidate_label(c) == gt for c in candidates):
-            found += 1
-    return found / len(scoped)
-
-
-def _compute_source_recall(**kwargs: Any) -> float:
-    return _compute_recall(candidate_key="candidate_ranking", **kwargs)
-
-
-def _compute_candidate_recall(**kwargs: Any) -> float:
-    return _compute_recall(candidate_key="final_ranking", **kwargs)
-
-
-def _compute_cache_hit_rate(*, results: list[QueryResult], node: PipelineNode, **_: Any) -> float:
-    if not results:
-        return 0.0
-    cache_hits = non_error = 0
-    for r in results:
-        if is_error_result(r):
-            continue
-        non_error += 1
-        pd = r.get("pipeline_data") or {}
-        if (pd.get("step_timings") or {}).get(node.name) is not None:
-            cache_hits += 1
-    return cache_hits / non_error if non_error else 0.0
-
-
-# ---------------------------------------------------------------------------
-# New evaluators — retrieval_shortfall, mean_retrieval_shortfall, pipeline_compactness.
-# ---------------------------------------------------------------------------
-
-
-_LIMIT_KEY_SUFFIXES = ("max_sites", "num_results", "max_token_candidates", "max_tokens")
-
-
-def _limit_nodes(schema: PipelineSchema) -> list[tuple[PipelineNode, str, int]]:
-    """Return ``(node, limit_key, target)`` for each node whose current_config
-    carries a numeric ``max_*``/``num_*`` key — the target size of its output list.
-    """
-    out: list[tuple[PipelineNode, str, int]] = []
-    for node in schema.nodes:
-        cfg = node.current_config or {}
-        for key in cfg:
-            if not any(key == s or key.endswith(s) for s in _LIMIT_KEY_SUFFIXES):
-                continue
-            target = cfg.get(key)
-            if not isinstance(target, int) or target <= 0:
-                continue
-            out.append((node, key, target))
-            break
-    return out
-
-
-def _retrieval_shortfall_for_result(result: QueryResult, schema: PipelineSchema) -> float | None:
-    """Per-query min(observed / target, 1.0) across all limit-bearing nodes.
-
-    Returns None when no limit-bearing node has a list-valued output on this
-    result; lets the per-round aggregator skip queries with nothing to measure.
-    """
-    pd = result.get("pipeline_data") or {}
-    ratios: list[float] = []
-    for node, _key, target in _limit_nodes(schema):
-        for mapping in node.observation_mappings:
-            val = pd.get(mapping.pipeline_key)
-            if isinstance(val, list):
-                ratios.append(min(len(val) / target, 1.0))
-                break
-    if not ratios:
-        return None
-    return sum(ratios) / len(ratios)
-
-
-def _compute_retrieval_shortfall_per_query(
-    *, result: QueryResult, schema: PipelineSchema | None = None, **_: Any
-) -> float:
-    if schema is None:
-        return 1.0
-    v = _retrieval_shortfall_for_result(result, schema)
-    return 1.0 if v is None else v
-
-
-def _compute_mean_retrieval_shortfall(
-    *, results: list[QueryResult], schema: PipelineSchema, **_: Any
-) -> float:
-    values: list[float] = []
-    for r in results:
-        v = _retrieval_shortfall_for_result(r, schema)
-        if v is not None:
-            values.append(v)
-    if not values:
-        return 1.0
-    return sum(values) / len(values)
-
-
-def _compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
-    """Return ``1 - (active_steps - 1) / (max(active_steps, 1) - 1)``.
-
-    Smaller pipelines score higher (more compact). For a single-node pipeline
-    compactness is 1.0. The cycle-wide baseline used to live in a comment in
-    the plan; in practice we anchor to the schema itself (``len(active_steps)``
-    vs. 1), which keeps the signal meaningful across datasets with very
-    different pipeline depth.
-    """
-    n = len(schema.active_steps)
-    if n <= 1:
-        return 1.0
-    # Anchor at 12 node pipelines as the worst case — tuned to produce a
-    # graceful slope for real pipelines (2-6 nodes). Cycle-wide calibration
-    # can replace this anchor when a campaign accumulates multi-pipeline data.
-    worst = 12
-    return max(0.0, 1.0 - (n - 1) / (worst - 1))
-
-
-# ---------------------------------------------------------------------------
 # Registry — single source of truth.
 # ---------------------------------------------------------------------------
 
@@ -349,35 +162,31 @@ def _has_node_type(node_type: str) -> Callable[[PipelineSchema], bool]:
     return _check
 
 
-def _has_limit_node(schema: PipelineSchema) -> bool:
-    return bool(_limit_nodes(schema))
-
-
 _REGISTRY: list[Evaluator] = [
     # --- Core per-round signals (always apply) ---
     Evaluator(
         name="accuracy",
         description="Mean per-query score across the round's result set.",
         scope="per_round",
-        compute=_compute_accuracy,
+        compute=compute_accuracy,
     ),
     Evaluator(
         name="error_rate",
         description="Fraction of queries that errored (ERROR predicted or exception).",
         scope="per_round",
-        compute=_compute_error_rate,
+        compute=compute_error_rate,
     ),
     Evaluator(
         name="degraded_rate",
         description="Fraction of queries that completed with pipeline degradation warnings.",
         scope="per_round",
-        compute=_compute_degraded_rate,
+        compute=compute_degraded_rate,
     ),
     Evaluator(
         name="runtime_failure_rate",
         description="Runtime failure count on OptSP memory, normalized by total queries.",
         scope="per_round",
-        compute=_compute_runtime_failure_rate,
+        compute=compute_runtime_failure_rate,
     ),
     Evaluator(
         name="latency_norm",
@@ -385,14 +194,14 @@ _REGISTRY: list[Evaluator] = [
             "Mean latency normalized against LATENCY_BUDGET_MS (1.0 = instant, 0.0 = ≥ budget)."
         ),
         scope="per_round",
-        compute=_compute_latency_norm,
+        compute=compute_latency_norm,
     ),
     # --- Node-type-bound per-round signals (namespaced when multiple nodes share a type) ---
     Evaluator(
         name="source_recall",
         description="Fraction of queries where GT appears in a candidate_source node's output.",
         scope="per_round",
-        compute=_compute_source_recall,
+        compute=compute_source_recall,
         node_type="candidate_source",
         applies=_has_node_type("candidate_source"),
     ),
@@ -400,7 +209,7 @@ _REGISTRY: list[Evaluator] = [
         name="candidate_recall",
         description="Fraction of queries where GT appears in a ranker node's final_ranking.",
         scope="per_round",
-        compute=_compute_candidate_recall,
+        compute=compute_candidate_recall,
         node_type="ranker",
         applies=_has_node_type("ranker"),
     ),
@@ -408,7 +217,7 @@ _REGISTRY: list[Evaluator] = [
         name="cache_hit_rate",
         description="Fraction of queries resolved by a cache node (non-null timing).",
         scope="per_round",
-        compute=_compute_cache_hit_rate,
+        compute=compute_cache_hit_rate,
         node_type="cache",
         applies=_has_node_type("cache"),
     ),
@@ -420,15 +229,15 @@ _REGISTRY: list[Evaluator] = [
             "on list-valued outputs. 1.0 = target met or exceeded."
         ),
         scope="per_query",
-        compute=_compute_retrieval_shortfall_per_query,
-        applies=_has_limit_node,
+        compute=compute_retrieval_shortfall_per_query,
+        applies=has_limit_node,
     ),
     Evaluator(
         name="mean_retrieval_shortfall",
         description="Mean of retrieval_shortfall across the round's results.",
         scope="per_round",
-        compute=_compute_mean_retrieval_shortfall,
-        applies=_has_limit_node,
+        compute=compute_mean_retrieval_shortfall,
+        applies=has_limit_node,
     ),
     Evaluator(
         name="pipeline_compactness",
@@ -436,7 +245,7 @@ _REGISTRY: list[Evaluator] = [
             "1 - (active_steps - 1) / 11 — shorter pipelines score higher (single-node = 1.0)."
         ),
         scope="per_round",
-        compute=_compute_pipeline_compactness,
+        compute=compute_pipeline_compactness,
     ),
 ]
 

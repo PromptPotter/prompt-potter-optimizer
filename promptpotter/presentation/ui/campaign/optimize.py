@@ -19,7 +19,7 @@ from promptpotter.shared.statistics import (
     wilson_ci,
 )
 
-from .notebook_phase import show_progress
+from .notebook_analytics import show_progress
 from .notebook_primitives import (
     BOLD,
     CYAN,
