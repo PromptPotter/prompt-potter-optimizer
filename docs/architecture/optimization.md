@@ -158,7 +158,7 @@ Per-query diagnostics are derived from `PipelineSchema.nodes` via `NODE_TYPE_MET
 
 | Section | Source |
 |---------|--------|
-| **Evaluation summary** | `CritiqueContext` + `LoopState` |
+| **Evaluation summary** | `CritiqueContext` + `Cycle` |
 | **Anomaly flags** | Computed inline from health/rank/evolution |
 | **Pipeline health** | `winner_results.pipeline_data` |
 | **Rank analysis** | `winner_results` + `candidate_keys` from schema |
@@ -270,7 +270,7 @@ Some candidates are valid at parse time — every parameter is in the allowed ra
 
 `DegradationCheck` in `application/optimization/nodes/escalation.py` fires mid-evaluation when `degraded_rate >= threshold`. Its target is `EscalationTarget.ELIMINATE_CANDIDATE` — the failure is attributed to the **single candidate that produced it**, not the round. `_score_candidates` in `application/optimization/nodes/score.py` synthesises a `RuntimeFailure` (source, dominant_warning, warning_types histogram, degraded_rate/count, observed_config snapshot of the offending node) from the check result and attaches it to that candidate's `OptSearchPoint.memory.runtime_failures`, includes it in the candidate's score report, and continues with the next candidate. The round winner is unaffected by a losing candidate's runtime issues.
 
-**Outer-memory mirror.** After the round completes, `round_execution.execute_round` walks `candidate_scores` and appends every new `RuntimeFailure` to `state.opt_sp.memory.runtime_failures` on the **outer** OptSearchPoint — deduped by `(source, dominant_warning, observed_config)` so recurring patterns don't bloat the list. `LoopState.apply_transition` deep-copies `memory` across L2/L3 transitions, so the cumulative trail follows the optimizer forward automatically. `clear_volatile()` does **not** clear this list — it represents discovered runtime constraints, not one-round guidance.
+**Outer-memory mirror.** After the round completes, `round_execution.execute_round` walks `candidate_scores` and appends every new `RuntimeFailure` to `cycle.opt_sp.memory.runtime_failures` on the **outer** OptSearchPoint — deduped by `(source, dominant_warning, observed_config)` so recurring patterns don't bloat the list. `Cycle.apply_transition` deep-copies `memory` across L2/L3 transitions, so the cumulative trail follows the optimizer forward automatically. `clear_volatile()` does **not** clear this list — it represents discovered runtime constraints, not one-round guidance.
 
 **L2 heals itself.** L2 `refine_strategy` receives two partitions of the runtime failures for next round's L2 prompt: `NEW (this round)` pulled from `candidate_scores[*].runtime_failures`, and `ACCUMULATED (surviving from earlier rounds despite L2 adjustment)` pulled from `opt_sp.memory.runtime_failures`. The `ACCUMULATED` section is the real signal — if items there survived L2's prior strategy adjustments, L2's last angle didn't work and it must try a different one. L2's job is **not** to parrot "don't use X" to L1 (that's rail 1's pattern) — it must update its own outputs: tighten the directive to name the failing config range, refine `task_context` with the discovered constraint, or adjust `optimizer_params` (`creativity`, `n_variants`) to narrow L1's search around the safe region.
 
@@ -463,13 +463,13 @@ campaign_config = {
 
 ### The only snapshot source is `trials/trial_NNNN.json`
 
-Each completed round writes `campaigns/{cycle_id}/trials/trial_{round:04d}.json` via `CampaignStore.add_trial`. That file already carries the full serialized `OptSearchPoint` (`opt_search_point` key), so resume rehydrates the exact optimizer state via `LoopState.restore_from_trial` — no separate write-ahead log. `events.jsonl` is a pure observability mirror parallel to Langfuse; nothing reads it for state reconstruction.
+Each completed round writes `campaigns/{cycle_id}/trials/trial_{round:04d}.json` via `CampaignStore.add_trial`. That file already carries the full serialized `OptSearchPoint` (`opt_search_point` key), so resume rehydrates the exact optimizer state via `Cycle.restore_from_trial` — no separate write-ahead log. `events.jsonl` is a pure observability mirror parallel to Langfuse; nothing reads it for state reconstruction.
 
 ### What `--from N` does
 
 1. `optimize --from N` requires an active cycle on the session (run `optimize` at least once first).
 2. `CampaignStore.rewind_to_round(backend_id, cycle_id, N)` moves `trials/trial_{M:04d}.json` and `candidates/round_{M:04d}.json` for every `M > N` into `campaigns/{cycle_id}/archived/resumed_at_<ts>/{trials,candidates}/`, then rebuilds the in-memory trial index (`trials`, `n_trials`, `best_accuracy`, `best_trial_id`) from the surviving files.
-3. `resume_or_create` opens the same cycle and returns `resumed_from_round = N + 1`. The runner loads `trial_N` via `LoopState.restore_from_trial` and begins round `N + 1` with that state as the baseline.
+3. `resume_or_create` opens the same cycle and returns `resumed_from_round = N + 1`. The runner loads `trial_N` via `Cycle.restore_from_trial` and begins round `N + 1` with that state as the baseline.
 4. The dashboard's `rounds_completed` / `best_round` are clamped so the UI does not show phantom rounds from the archived trajectory.
 5. `dataset_runs/` is unchanged — content-addressed per-query results replay automatically for any unchanged `(prompt_hash, query)` pair.
 
@@ -532,7 +532,7 @@ Five kinds are recorded today; the first four are divergence-gated, the fifth is
 | `l3_escalation_trigger` | Patience gate on the stall count since L3's last entry. Same shape as L2. | Yes. |
 | `probe_round_commitment` | Projection of L2's LLM-output `action` field. | No. Probe is determined by L2's LLM output, which is invariant under pure scorer swap and can't be replayed without re-calling the LLM. Recording still matters: the `data` archive (directive preview, warned-query summary) lets meta-optimization attribute downstream divergences. |
 
-Escalation decisions fire after `execute_round` has already built the round's result, so they accumulate on `LoopState.pending_decisions` and flush into the next trial's `decisions` list before `add_trial`. The replayer reads the gate's `round_num` from `inputs_ref`, finds the relevant prior trials, and reconstructs the gate state — it doesn't care that the record landed in a later trial than the round it refers to.
+Escalation decisions fire after `execute_round` has already built the round's result, so they accumulate on `Cycle.pending_decisions` and flush into the next trial's `decisions` list before `add_trial`. The replayer reads the gate's `round_num` from `inputs_ref`, finds the relevant prior trials, and reconstructs the gate state — it doesn't care that the record landed in a later trial than the round it refers to.
 
 ### Fork commits to the new policy
 

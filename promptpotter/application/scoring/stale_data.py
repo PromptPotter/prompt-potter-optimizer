@@ -16,6 +16,7 @@ from promptpotter.application.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -65,6 +66,7 @@ async def execute_stale_data_protocol(
     session: Session,
     *,
     pipeline_params: dict | None = None,
+    search_memory: SearchMemory | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -95,9 +97,7 @@ async def execute_stale_data_protocol(
             trigger_count = cfg.get("rerun_trigger_count", 3)
             # Historical count through last SearchMemory refresh (previous round).
             # The current observation bumps the effective count by 1.
-            historical = (
-                session.search_memory.query_degradation_count(query) if session.search_memory else 0
-            )
+            historical = search_memory.query_degradation_count(query) if search_memory else 0
             effective_count = historical + 1
             if effective_count < trigger_count:
                 return {
@@ -136,8 +136,8 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
-            if session.search_memory:
-                deg_rate = session.search_memory.query_degradation_rate(query)
+            if search_memory:
+                deg_rate = search_memory.query_degradation_rate(query)
                 if deg_rate >= min_deg_rate:
                     result = {**cached_result, "cached": True, "switched_out": True}
                     return result, "sampleswitch"

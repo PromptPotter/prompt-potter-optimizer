@@ -265,7 +265,7 @@ class CampaignPersistenceEmitter:
 
         Reads prior ``dashboard.json`` (if present) to carry UI counters
         across resumes — optimizer resume is a separate concern
-        via ``LoopState.restore_from_trial``.
+        via ``Cycle.restore_from_trial``.
 
         On a mid-cycle rewind (``--from N``), ``resumed_from_round`` is the
         round the runner will execute next; dashboard counters that outran
@@ -323,11 +323,11 @@ class CampaignPersistenceEmitter:
 
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "exit":
-            loop_state = data["state"]
+            cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
             s["cycle_id"] = loop_env.cycle_id
-            s["baseline"] = loop_state.current_accuracy
+            s["baseline"] = cycle.current_accuracy
             self._patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self._patience_max}"
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":

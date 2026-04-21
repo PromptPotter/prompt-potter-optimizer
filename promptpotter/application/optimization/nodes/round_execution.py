@@ -7,7 +7,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.config import CampaignConfig
-from promptpotter.application.optimization.loop_state import LoopState
+from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.critique import (
     CritiqueAgent,
     format_critique_for_prompt,
@@ -67,7 +67,7 @@ class PauseForReviewError(Exception):
 
 async def _generate_or_load_candidates(
     round_num: int,
-    state: LoopState,
+    cycle: Cycle,
     session: Session,
     config: CampaignConfig,
     on_phase=None,
@@ -80,25 +80,25 @@ async def _generate_or_load_candidates(
     # Cap n_variants at 3× config so L2 can't blow up eval budget.
     opt = config.optimization
     model = config.optimizer_llm.model
-    opt_params = state.opt_sp.optimizer_params
+    opt_params = cycle.opt_sp.optimizer_params
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
     _creativity = opt_params.get("creativity", opt.creativity)
-    prompt_preview = state.opt_sp.render()[:120]
+    prompt_preview = cycle.opt_sp.render()[:120]
 
-    assert state.current_sp is not None
+    assert cycle.current_sp is not None
     emit_phase(
         on_phase,
         CampaignPhase.L1_GENERATE,
         "enter",
         round=round_num,
-        current_accuracy=state.current_accuracy,
+        current_accuracy=cycle.current_accuracy,
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
         creativity=_creativity,
         model=model or "(default)",
-        has_critique=bool(state.opt_sp.memory.critique_text),
-        pipeline_params=state.current_sp.pipeline_params,
-        parent_prompt_fields={k: v for k, v in state.opt_sp.prompt_field_dict().items() if v},
+        has_critique=bool(cycle.opt_sp.memory.critique_text),
+        pipeline_params=cycle.current_sp.pipeline_params,
+        parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
 
     if session.campaign_store and session.cycle_id:
@@ -138,14 +138,14 @@ async def _generate_or_load_candidates(
         round_num=round_num,
     ):
         candidates = await l1_generate(
-            state.opt_sp,
-            state.current_accuracy,
-            state.current_results,
+            cycle.opt_sp,
+            cycle.current_accuracy,
+            cycle.current_results,
             _n_variants,
             _creativity,
             client,
             model=model,
-            is_probe_round=state.probe_next_round,
+            is_probe_round=cycle.probe_next_round,
             search_memory=search_memory,
             pipeline_schema=session.pipeline_schema,
             obs=obs,
@@ -178,7 +178,7 @@ async def _generate_or_load_candidates(
 async def _run_critique(
     scoring_result: L1ScoringResult,
     round_num: int,
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     schema: PipelineSchema | None,
 ) -> str:
@@ -200,13 +200,13 @@ async def _run_critique(
         }
     )
     cctx = RoundSnapshot.from_round_state(
-        state,
+        cycle,
         scoring_result,
         config,
         schema,
         round_num=round_num,
         search_memory_digest=(
-            state.search_memory.digest(_CRITIQUE_SM_KEYS) if state.search_memory else None
+            cycle.search_memory.digest(_CRITIQUE_SM_KEYS) if cycle.search_memory else None
         ),
     )
     result = await agent.run(cctx)
@@ -216,7 +216,7 @@ async def _run_critique(
 async def _score_and_select(
     candidates: list[dict],
     round_num: int,
-    state: LoopState,
+    cycle: Cycle,
     session: Session,
     scoring_dataset: list[Sample],
     config: CampaignConfig,
@@ -235,22 +235,22 @@ async def _score_and_select(
         round=round_num,
         n_candidates=len(candidates),
         n_queries=len(scoring_dataset),
-        current_best_accuracy=state.current_accuracy,
+        current_best_accuracy=cycle.current_accuracy,
         improvement_threshold=opt.improvement_threshold,
-        current_pipeline_params=state.current_sp.pipeline_params if state.current_sp else None,
+        current_pipeline_params=cycle.current_sp.pipeline_params if cycle.current_sp else None,
     )
 
     # Probe rounds: subset baseline to probe's query set; else every probe looks like a regression.
-    _baseline_acc = state.current_accuracy
-    _baseline_comp = state.current_composite
-    _baseline_results = state.current_results
-    if state.probe_next_round and state.current_results and session.pipeline_schema:
+    _baseline_acc = cycle.current_accuracy
+    _baseline_comp = cycle.current_composite
+    _baseline_results = cycle.current_results
+    if cycle.probe_next_round and cycle.current_results and session.pipeline_schema:
         from typing import cast
 
         from promptpotter.domain.scoring import QueryResult
 
         _probe_queries = {s.query for s in scoring_dataset}
-        _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
+        _subset = [r for r in cycle.current_results if r.get("query") in _probe_queries]
         if _subset:
             _subset_scores = compute_composite_score(
                 cast(list[QueryResult], _subset),
@@ -264,7 +264,7 @@ async def _score_and_select(
     current_best = {
         "accuracy": _baseline_acc,
         "composite": _baseline_comp,
-        "prompt_fields": state.opt_sp.prompt_field_dict(),
+        "prompt_fields": cycle.opt_sp.prompt_field_dict(),
         "results": _baseline_results,
         "label": f"round_{round_num}" if round_num > 0 else "baseline",
     }
@@ -277,13 +277,13 @@ async def _score_and_select(
         campaign_id=session.obs_campaign_id,
         round_num=round_num,
     ):
-        assert state.current_sp is not None
+        assert cycle.current_sp is not None
         scoring_result = await l1_score(
             candidates,
             scoring_dataset,
             current_best,
             session,
-            pipeline_params=state.current_sp.pipeline_params,
+            pipeline_params=cycle.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
@@ -291,6 +291,7 @@ async def _score_and_select(
             elimination_alpha=opt.elimination_alpha,
             obs_campaign_id=session.obs_campaign_id,
             round_num=round_num,
+            search_memory=cycle.search_memory,
         )
 
         if obs and scoring_result.candidate_scores:
@@ -306,7 +307,7 @@ async def _score_and_select(
                 )
 
         scoring_result.critique_text = await _run_critique(
-            scoring_result, round_num, state, config, session.pipeline_schema
+            scoring_result, round_num, cycle, config, session.pipeline_schema
         )
         scoring_result.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed + round_num + 1)
         if obs and scoring_result.critique_text:
@@ -336,7 +337,7 @@ async def _score_and_select(
 
 async def execute_round(
     round_num: int,
-    state: LoopState,
+    cycle: Cycle,
     session: Session,
     scoring_dataset: list[Sample],
     config: CampaignConfig,
@@ -352,7 +353,7 @@ async def execute_round(
 
     candidates = await _generate_or_load_candidates(
         round_num,
-        state,
+        cycle,
         session,
         config,
         callbacks.on_phase,
@@ -367,7 +368,7 @@ async def execute_round(
     scoring_result = await _score_and_select(
         candidates,
         round_num,
-        state,
+        cycle,
         session,
         scoring_dataset,
         config,
@@ -376,18 +377,18 @@ async def execute_round(
         degradation_checks=degradation_checks,
     )
 
-    state.opt_sp.memory.critique_text = scoring_result.critique_text
-    state.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
+    cycle.opt_sp.memory.critique_text = scoring_result.critique_text
+    cycle.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
 
     if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
-        state.opt_sp.memory.failure_analysis = compile_failure_analysis(
+        cycle.opt_sp.memory.failure_analysis = compile_failure_analysis(
             scoring_result.winner_results,
             session.pipeline_schema,
         )
     else:
-        state.opt_sp.memory.failure_analysis = None
+        cycle.opt_sp.memory.failure_analysis = None
 
     round_result = RoundResult(
         round=round_num,
@@ -412,7 +413,7 @@ async def execute_round(
     # Warning inventory spans ALL candidate results — aborted candidates carry warnings.
     _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
-        update_query_tracker(state.opt_sp.memory.warning_inventory, _all_results)
+        update_query_tracker(cycle.opt_sp.memory.warning_inventory, _all_results)
 
     # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by source/warning/config)
     # so L2 sees accumulated evidence across rounds; L3 replans when L2 can't reduce.
@@ -426,14 +427,14 @@ async def execute_round(
             tuple(sorted(cfg.items())),
         )
 
-    existing_keys = {_rf_key(rf.to_dict()) for rf in state.opt_sp.memory.runtime_failures}
+    existing_keys = {_rf_key(rf.to_dict()) for rf in cycle.opt_sp.memory.runtime_failures}
     for cs in scoring_result.candidate_scores:
         for rf_dict in cs.get("runtime_failures") or []:
             k = _rf_key(rf_dict)
             if k in existing_keys:
                 continue
             existing_keys.add(k)
-            state.opt_sp.memory.runtime_failures.append(RuntimeFailure(**rf_dict))
+            cycle.opt_sp.memory.runtime_failures.append(RuntimeFailure(**rf_dict))
 
     if obs:
         with graceful("RoundEnd emit failed"):
@@ -470,17 +471,17 @@ async def execute_round(
 
 
 def update_round_state(
-    state: LoopState,
+    cycle: Cycle,
     rr: RoundResult,
     round_num: int,
     *,
     schema: PipelineSchema | None = None,
 ) -> None:
-    """Apply round result to loop state (shared by escalation + normal paths)."""
+    """Apply round result to cycle state (shared by escalation + normal paths)."""
     from promptpotter.domain.opt_search_point import RoundSummary
 
-    state.rounds.append(rr)
-    state.opt_sp.memory.round_history.append(
+    cycle.rounds.append(rr)
+    cycle.opt_sp.memory.round_history.append(
         RoundSummary(
             round=rr.round,
             accuracy=rr.accuracy,
@@ -492,11 +493,11 @@ def update_round_state(
         )
     )
     for f in PROMPT_STRING_FIELDS:
-        setattr(state.opt_sp, f, rr.prompt_fields.get(f, ""))
-    assert state.current_sp is not None
-    _pp = rr.pipeline_params if rr.pipeline_params is not None else state.current_sp.pipeline_params
-    state.update_current(
+        setattr(cycle.opt_sp, f, rr.prompt_fields.get(f, ""))
+    assert cycle.current_sp is not None
+    _pp = rr.pipeline_params if rr.pipeline_params is not None else cycle.current_sp.pipeline_params
+    cycle.update_current(
         rr,
-        state.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
+        cycle.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
         round_num,
     )

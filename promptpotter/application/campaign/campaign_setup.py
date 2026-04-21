@@ -28,8 +28,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.data import CampaignBaseline
     from promptpotter.application.intelligence.sample_index import SampleIndex
-    from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
@@ -97,7 +96,6 @@ class Session:
     max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
     sample_index: SampleIndex | None = None
-    search_memory: SearchMemory | None = None
     source: str = ""
     stop_check: Callable[[], bool] | None = None
 
@@ -511,14 +509,14 @@ async def init_optimization_loop(
     experiment_id: str,
     session: Session,
     started_at: str,
-) -> LoopState:
-    """Build LoopState + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
+) -> Cycle:
+    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
     from promptpotter.application.campaign.bootstrap import bootstrap_cycle
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
     from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
@@ -548,13 +546,15 @@ async def init_optimization_loop(
     baseline_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
-    state = LoopState.from_baseline(
+    cycle = Cycle.start(
         baseline_osp,
         baseline.baseline_acc,
         task_context=task_context,
         schema=session.pipeline_schema,
         baseline_results=baseline.baseline_results,
         round_scorer=baseline_round_scorer,
+        session=session,
+        config=config,
     )
 
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
@@ -600,11 +600,11 @@ async def init_optimization_loop(
             resolved_cycle_id,
             resumed_from_round,
             session,
-            state,
+            cycle,
             skip_divergence_check=no_divergence_check,
         )
     else:
-        state.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
+        cycle.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()
@@ -617,9 +617,7 @@ async def init_optimization_loop(
         scorer_id=session.scorer_id,
         scorer_formula=session.scorer_formula,
     )
-    state.search_memory = search_memory
-    if search_memory:
-        session.search_memory = search_memory
+    cycle.search_memory = search_memory
 
     session.campaign_store = campaign_store
     if resolved_cycle_id:
@@ -633,16 +631,16 @@ async def init_optimization_loop(
         cb.on_phase,
         CampaignPhase.INIT,
         "exit",
-        state=state,
+        state=cycle,
         env=session,
         config=config,
         dataset=dataset,
     )
-    return state
+    return cycle
 
 
 def finalize_optimization_run(
-    state: LoopState,
+    cycle: Cycle,
     session: Session,
     emitter: CampaignPersistenceEmitter | None,
     stop_reason: StopReason,
@@ -655,25 +653,25 @@ def finalize_optimization_run(
             session.cycle_id,
             status=_campaign_status_for(stop_reason),
             stop_reason=stop_reason,
-            best_accuracy=state.best_accuracy,
-            best_round=state.best_round,
-            n_rounds=len(state.rounds),
+            best_accuracy=cycle.best_accuracy,
+            best_round=cycle.best_round,
+            n_rounds=len(cycle.rounds),
             finished_at=finished_at,
         )
     obs: ObservabilityBridge | None = session.obs
     if obs:
         obs.end_campaign(
             session.obs_campaign_id,
-            best_accuracy=state.best_accuracy,
-            n_rounds=len(state.rounds),
+            best_accuracy=cycle.best_accuracy,
+            n_rounds=len(cycle.rounds),
             stop_reason=stop_reason,
-            best_round=state.best_round,
+            best_round=cycle.best_round,
         )
     if emitter:
         emitter.finalize(
-            n_rounds=len(state.rounds),
-            best_accuracy=state.best_accuracy,
-            best_round=state.best_round,
+            n_rounds=len(cycle.rounds),
+            best_accuracy=cycle.best_accuracy,
+            best_round=cycle.best_round,
             stop_reason=stop_reason,
             cycle_id=session.cycle_id,
         )

@@ -72,7 +72,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from types import SimpleNamespace
 
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult, RunResult
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
@@ -94,7 +94,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     # Simulate a single round lifecycle.  The emitter only reads a handful of
     # fields off the ``env`` payload (cycle_id, scoring_dataset, obs,
     # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
-    init_state = LoopState(current_accuracy=0.5)
+    init_state = Cycle(current_accuracy=0.5)
     init_env = SimpleNamespace(
         cycle_id="cycle_test_001",
         scoring_dataset=[],

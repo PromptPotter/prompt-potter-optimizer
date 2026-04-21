@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
 __all__ = [
@@ -252,7 +252,7 @@ def resume_with_divergence_check(
     cycle_id: str,
     resumed_from_round: int,
     session: Session,
-    state: LoopState,
+    cycle: Cycle,
     *,
     skip_divergence_check: bool,
 ) -> None:
@@ -278,7 +278,7 @@ def resume_with_divergence_check(
                 session.scorer_formula,
             )
 
-    baseline_results_rescored = list(state.current_results or [])
+    baseline_results_rescored = list(cycle.current_results or [])
     rescore_results(
         baseline_results_rescored,
         session.scorer,
@@ -323,4 +323,4 @@ def resume_with_divergence_check(
             )
 
     if prior:
-        state.restore_from_trial(prior[-1])
+        cycle.restore_from_trial(prior[-1])

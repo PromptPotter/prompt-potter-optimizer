@@ -24,7 +24,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
 
@@ -71,7 +71,7 @@ class RoundSnapshot:
     @classmethod
     def from_round_state(
         cls,
-        state: LoopState,
+        cycle: Cycle,
         scoring_result: L1ScoringResult,
         config: CampaignConfig,
         schema: PipelineSchema | None,
@@ -88,7 +88,7 @@ class RoundSnapshot:
         )
         if diff:
             round_analysis["cross_candidate_diff"] = diff
-        trajectory = build_trajectory_report(state.rounds)
+        trajectory = build_trajectory_report(cycle.rounds)
         if trajectory and trajectory.classification != "healthy":
             round_analysis["trajectory"] = f"{trajectory.classification}: {trajectory.description}"
 
@@ -106,13 +106,13 @@ class RoundSnapshot:
                     "degraded": getattr(r, "degraded_queries", 0),
                     "n_candidates": len(r.candidate_scores),
                 }
-                for r in state.rounds
+                for r in cycle.rounds
             ],
             current_round=round_num,
-            l1_stall_count=state.escalation.l1_stall_count,
-            best_accuracy=state.best_accuracy,
-            best_round=state.best_round,
-            pipeline_params=(state.current_sp.pipeline_params if state.current_sp else None),
+            l1_stall_count=cycle.escalation.l1_stall_count,
+            best_accuracy=cycle.best_accuracy,
+            best_round=cycle.best_round,
+            pipeline_params=(cycle.current_sp.pipeline_params if cycle.current_sp else None),
             candidate_keys=candidate_keys_from_schema(schema),
             pipeline_schema=schema,
             degradation_threshold=config.optimization.critique_degradation_threshold,

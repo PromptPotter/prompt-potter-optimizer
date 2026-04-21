@@ -36,6 +36,7 @@ from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.analysis import EscalationSignal
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -162,6 +163,7 @@ async def _run_query_loop(
     degradation_checks: list | None,
     candidate_idx: int,
     n_total_candidates: int,
+    search_memory: SearchMemory | None,
 ) -> QueryLoopResult:
     """Evaluate dataset samples, reusing prior results where available."""
     results: list[QueryResult] = []
@@ -211,6 +213,7 @@ async def _run_query_loop(
                         cast(dict[str, Any], cached_r),
                         session,
                         pipeline_params=search_point.pipeline_params,
+                        search_memory=search_memory,
                     )
                     cached_r = cast(QueryResult, recovered)
                 # Overlay current-run sample_id — archived traces may predate
@@ -246,6 +249,7 @@ async def _run_query_loop(
                     cast(dict[str, Any], result),
                     session,
                     pipeline_params=search_point.pipeline_params,
+                    search_memory=search_memory,
                 )
                 result = cast(QueryResult, stale_result)
 
@@ -306,6 +310,7 @@ async def score_search_point(
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
+    search_memory: SearchMemory | None = None,
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
     """Evaluate a search point via backend with chain-addressed caching.
 
@@ -367,6 +372,7 @@ async def score_search_point(
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
+        search_memory=search_memory,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal

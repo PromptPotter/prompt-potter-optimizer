@@ -19,6 +19,7 @@ from promptpotter.domain.scoring import QueryResult
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.intelligence.search_memory import SearchMemory
 
 
 __all__ = ["L1ScoringResult", "l1_score"]
@@ -64,6 +65,7 @@ async def l1_score(
     elimination_alpha: float = 0.2,
     obs_campaign_id: str = "",
     round_num: int = 0,
+    search_memory: SearchMemory | None = None,
 ) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
     cb = dict(current_best)
@@ -89,6 +91,7 @@ async def l1_score(
         obs_campaign_id=obs_campaign_id,
         round_num=round_num,
         decisions=decisions,
+        search_memory=search_memory,
     )
 
     aborted_ids = {

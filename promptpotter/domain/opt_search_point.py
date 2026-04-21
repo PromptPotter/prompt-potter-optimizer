@@ -47,7 +47,7 @@ class RoundSummary(BaseModel):
     ``build_trajectory_report`` (needs ``.accuracy``) and
     ``assess_candidate_diversity`` (needs ``.candidate_scores`` with each
     entry's ``pipeline_params_override``). Drops raw per-query results and
-    per-candidate results, which remain on the transient ``LoopState.rounds``
+    per-candidate results, which remain on the transient ``Cycle.rounds``
     list.
     """
 
@@ -235,7 +235,7 @@ class OptimizationMemory(BaseModel):
         "``build_trajectory_report`` (accuracy) and "
         "``assess_candidate_diversity`` (candidate_scores). Full "
         "``RoundResult`` objects with raw query results stay transient on "
-        "``LoopState.rounds``; this persisted mirror survives trial "
+        "``Cycle.rounds``; this persisted mirror survives trial "
         "checkpoints.",
     )
 
@@ -362,7 +362,7 @@ class OptSearchPoint(PromptTemplate):
         Sets parent_id to this instance's id. Generates a new id/timestamp.
         Copies prompt decomposition + L2/L3 state. ``memory`` is *not*
         copied — children start fresh and only inherit accumulated memory
-        when L2/L3 transitions adopt them via ``LoopState.apply_transition``.
+        when L2/L3 transitions adopt them via ``Cycle.apply_transition``.
         """
         data: dict[str, Any] = {}
         # Copy prompt decomposition fields

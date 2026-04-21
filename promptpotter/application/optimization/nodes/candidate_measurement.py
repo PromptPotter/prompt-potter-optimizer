@@ -20,6 +20,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.intelligence.search_memory import SearchMemory
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +300,7 @@ async def score_candidates(
     obs_campaign_id: str = "",
     round_num: int = 0,
     decisions: list[dict] | None = None,
+    search_memory: SearchMemory | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each candidate; dispatch over three exit paths (validation/cache/scored)."""
     from promptpotter.application.optimization.elimination import EliminationCheck
@@ -365,6 +367,7 @@ async def score_candidates(
             degradation_checks=all_checks or None,
             candidate_idx=idx,
             n_total_candidates=n_candidates,
+            search_memory=search_memory,
         )
         all_candidate_results[osp_c.id] = results
 

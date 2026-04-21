@@ -21,7 +21,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.phases import StopReason
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -179,13 +179,13 @@ def build_degradation_checks(config: CampaignConfig) -> list[Any]:
 
 
 def _maybe_emit_backend_warning(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
     """One-shot backend advisory when degradation resets exceed threshold."""
-    mem = state.opt_sp.memory
+    mem = cycle.opt_sp.memory
     threshold = config.optimization.backend_warning_threshold
     if mem.backend_warning_emitted or threshold <= 0:
         return
@@ -218,7 +218,7 @@ def _maybe_emit_backend_warning(
 
 async def _do_layer_transition(
     transition: LayerTransition,
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
     round_num: int,
@@ -240,9 +240,9 @@ async def _do_layer_transition(
     from promptpotter.infrastructure.llm import client as _llm_client
     from promptpotter.infrastructure.tracing import observed_node
 
-    assert state.current_sp is not None
+    assert cycle.current_sp is not None
     client = _llm_client.get_llm_client()
-    current_pp = state.current_sp.pipeline_params
+    current_pp = cycle.current_sp.pipeline_params
     observed_name = f"{transition.template_name}_r{round_num}"
 
     emit_phase(on_phase, transition.phase, "enter", round=round_num, **enter_payload)
@@ -254,16 +254,16 @@ async def _do_layer_transition(
         round_num=round_num,
     ):
         result = await transition.run(
-            state.opt_sp,
+            cycle.opt_sp,
             client,
             model=config.optimizer_llm.model,
             temperature=temperature,
             pipeline_params=current_pp,
             pipeline_schema=pipeline_schema,
-            search_memory=state.search_memory,
+            search_memory=cycle.search_memory,
             **run_kwargs,
         )
-    state.adopt_transition(
+    cycle.adopt_transition(
         result.opt_search_point,
         result.pipeline_params,
         schema=pipeline_schema,
@@ -277,13 +277,13 @@ async def _do_layer_transition(
                 round_num=round_num,
                 changes_description=result.opt_search_point.changes_description or "",
             )
-    transition.apply_side_effects(state, result, round_num)
+    transition.apply_side_effects(cycle, result, round_num)
     emit_phase(on_phase, transition.phase, "exit", round=round_num, **exit_payload_fn(result))
     return result
 
 
 async def _do_l2_transition(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
     round_num: int,
@@ -295,20 +295,20 @@ async def _do_l2_transition(
     """L2 refine_strategy thin wrapper — builds args, delegates to ``_do_layer_transition``."""
     from promptpotter.application.optimization.nodes.formatting import warning_summary
 
-    last_candidates = state.rounds[-1].candidate_scores if state.rounds else []
+    last_candidates = cycle.rounds[-1].candidate_scores if cycle.rounds else []
 
     enter_payload = {
-        "l2_round": state.escalation.l2.round,
-        "l1_stall_count": state.escalation.l1_stall_count,
-        "current_params": state.opt_sp.optimizer_params,
-        "current_accuracy": state.current_accuracy,
-        "best_accuracy": state.best_accuracy,
+        "l2_round": cycle.escalation.l2.round,
+        "l1_stall_count": cycle.escalation.l1_stall_count,
+        "current_params": cycle.opt_sp.optimizer_params,
+        "current_accuracy": cycle.current_accuracy,
+        "best_accuracy": cycle.best_accuracy,
     }
 
     def _exit(result: Any) -> dict[str, Any]:
-        warned_count, top_warning = warning_summary(state.opt_sp.memory.warning_inventory)
+        warned_count, top_warning = warning_summary(cycle.opt_sp.memory.warning_inventory)
         return {
-            "l2_round": state.escalation.l2.round,
+            "l2_round": cycle.escalation.l2.round,
             "param_changes_count": len(result.opt_search_point.optimizer_params),
             "task_context_changed": result.task_context is not None,
             "changes_description": result.opt_search_point.changes_description or "",
@@ -323,7 +323,7 @@ async def _do_l2_transition(
 
     return await _do_layer_transition(
         L2RefineStrategy(),
-        state,
+        cycle,
         config,
         pipeline_schema,
         round_num,
@@ -342,7 +342,7 @@ async def _do_l2_transition(
 
 
 async def _do_l3_transition(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
     round_num: int,
@@ -353,21 +353,21 @@ async def _do_l3_transition(
     """L3 modify_plan thin wrapper — builds args, delegates to ``_do_layer_transition``."""
     l2_history = [
         {
-            "l2_round": state.escalation.l2.round,
-            "optimizer_params": state.opt_sp.optimizer_params,
-            "accuracy_change": state.best_composite - state.escalation.l3.best_composite_at_entry,
+            "l2_round": cycle.escalation.l2.round,
+            "optimizer_params": cycle.opt_sp.optimizer_params,
+            "accuracy_change": cycle.best_composite - cycle.escalation.l3.best_composite_at_entry,
         }
     ]
 
     enter_payload = {
-        "l3_round": state.escalation.l3.round,
-        "l2_stall_count": state.escalation.l2.stall_count,
-        "current_plan_preview": str(state.opt_sp.plan)[:120],
+        "l3_round": cycle.escalation.l3.round,
+        "l2_stall_count": cycle.escalation.l2.stall_count,
+        "current_plan_preview": str(cycle.opt_sp.plan)[:120],
     }
 
     def _exit(result: Any) -> dict[str, Any]:
         return {
-            "l3_round": state.escalation.l3.round,
+            "l3_round": cycle.escalation.l3.round,
             "new_plan_preview": str(result.opt_search_point.plan)[:120],
             "changes_description": result.opt_search_point.changes_description or "",
             "pipeline_params_changed": result.pipeline_params is not None,
@@ -375,7 +375,7 @@ async def _do_l3_transition(
 
     return await _do_layer_transition(
         L3ModifyPlan(),
-        state,
+        cycle,
         config,
         pipeline_schema,
         round_num,
@@ -390,7 +390,7 @@ async def _do_l3_transition(
 
 
 async def _exhaust_or_reset(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
     round_num: int,
@@ -413,15 +413,15 @@ async def _exhaust_or_reset(
     logger.debug(
         "%s patience exhausted during degradation — resetting at round %d", layer, round_num
     )
-    state.escalation.l2.stall_count = 0
-    state.escalation.l2.round = 0
+    cycle.escalation.l2.stall_count = 0
+    cycle.escalation.l2.round = 0
     if reset_l3:
-        state.escalation.l3.stall_count = 0
-        state.escalation.l3.round = 0
-    state.opt_sp.memory.degradation_reset_count += 1
-    _maybe_emit_backend_warning(state, config, round_num, on_phase)
+        cycle.escalation.l3.stall_count = 0
+        cycle.escalation.l3.round = 0
+    cycle.opt_sp.memory.degradation_reset_count += 1
+    _maybe_emit_backend_warning(cycle, config, round_num, on_phase)
     await _do_l2_transition(
-        state,
+        cycle,
         config,
         pipeline_schema,
         round_num,
@@ -434,7 +434,7 @@ async def _exhaust_or_reset(
 
 
 async def escalate_l2(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
     round_num: int,
@@ -451,14 +451,14 @@ async def escalate_l2(
     from promptpotter.application.optimization.phases import StopReason
 
     opt = config.optimization
-    esc = state.escalation
-    esc.l2.record_outcome(state.best_composite)
+    esc = cycle.escalation
+    esc.l2.record_outcome(cycle.best_composite)
 
     l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
     # entry_round = round whose rescored best_composite is the stall baseline (-1 = never fired).
     entry_round_l2 = esc.l2.round if esc.l2.round > 0 else -1
     record_decision(
-        state.pending_decisions,
+        cycle.pending_decisions,
         "l2_escalation_trigger",
         {
             "round_num": round_num,
@@ -471,13 +471,13 @@ async def escalate_l2(
             "l2_round": esc.l2.round,
             "stall_count": esc.l2.stall_count,
             "best_composite_at_entry": esc.l2.best_composite_at_entry,
-            "best_composite_this_round": state.best_composite,
-            "best_accuracy": state.best_accuracy,
+            "best_composite_this_round": cycle.best_composite,
+            "best_accuracy": cycle.best_accuracy,
         },
     )
     if not l2_stalled:
         await _do_l2_transition(
-            state,
+            cycle,
             config,
             pipeline_schema,
             round_num,
@@ -496,7 +496,7 @@ async def escalate_l2(
 
     if not opt.enable_l3:
         return await _exhaust_or_reset(
-            state,
+            cycle,
             config,
             pipeline_schema,
             round_num,
@@ -511,11 +511,11 @@ async def escalate_l2(
             escalation_check_result=escalation_check_result,
         )
 
-    esc.l3.record_outcome(state.best_composite)
+    esc.l3.record_outcome(cycle.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
     entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
     record_decision(
-        state.pending_decisions,
+        cycle.pending_decisions,
         "l3_escalation_trigger",
         {
             "round_num": round_num,
@@ -527,12 +527,12 @@ async def escalate_l2(
             "l3_round": esc.l3.round,
             "stall_count": esc.l3.stall_count,
             "best_composite_at_entry": esc.l3.best_composite_at_entry,
-            "best_composite_this_round": state.best_composite,
+            "best_composite_this_round": cycle.best_composite,
         },
     )
     if not l3_exhausted:
         await _do_l3_transition(
-            state,
+            cycle,
             config,
             pipeline_schema,
             round_num,
@@ -543,7 +543,7 @@ async def escalate_l2(
         return None
 
     return await _exhaust_or_reset(
-        state,
+        cycle,
         config,
         pipeline_schema,
         round_num,

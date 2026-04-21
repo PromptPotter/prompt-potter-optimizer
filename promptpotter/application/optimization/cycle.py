@@ -1,4 +1,4 @@
-"""Optimization loop state — pure optimizer progress tracking.
+"""Optimization cycle state — pure optimizer progress tracking.
 
 Mutable state threaded through the feedback cycle round loop.  All
 infrastructure handles (stores, scoring env, cycle id, dataset samples)
@@ -15,10 +15,13 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
 
-__all__ = ["EscalationState", "LayerCounter", "LoopState"]
+__all__ = ["Cycle", "EscalationState", "LayerCounter"]
 
 
 @dataclass
@@ -75,17 +78,21 @@ class EscalationState:
 
 
 @dataclass
-class LoopState:
+class Cycle:
     """Mutable state threaded through the feedback cycle round loop.
 
     Pure optimizer progress — infrastructure handles live on ``Session``.
     Per-candidate/round optimizer memory (critique_text, l2_directive,
     task_context, escalation_journal, warning_inventory, failure_analysis,
     round_history, ...) lives on ``opt_sp`` (and its ``memory`` sub-object).
-    What remains on ``LoopState`` is purely *orchestration* state: the heavy
+    What remains on ``Cycle`` is purely *orchestration* state: the heavy
     full ``RoundResult`` buffer, current/best tracking caches, escalation
     counters, the probe flag, and the pending-decisions queue.
     """
+
+    # ---- back-refs ----
+    session: Session = None  # type: ignore[assignment]
+    config: CampaignConfig = None  # type: ignore[assignment]
 
     rounds: list[RoundResult] = field(default_factory=list)
     current_sp: JobSearchPoint | None = None
@@ -100,7 +107,7 @@ class LoopState:
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
     probe_next_round: bool = False
-    search_memory: Any = None
+    search_memory: SearchMemory | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
 
     # Decision records recorded by escalation that fires AFTER execute_round
@@ -114,7 +121,7 @@ class LoopState:
     # -- Construction / restore ------------------------------------------------
 
     @classmethod
-    def from_baseline(
+    def start(
         cls,
         baseline_osp: OptSearchPoint,
         baseline_accuracy: float,
@@ -123,8 +130,10 @@ class LoopState:
         schema: PipelineSchema | None,
         baseline_results: list[dict] | None = None,
         round_scorer: Any = None,
-    ) -> LoopState:
-        """Construct a fresh LoopState from an evaluated baseline.
+        session: Session,
+        config: CampaignConfig,
+    ) -> Cycle:
+        """Construct a fresh Cycle from an evaluated baseline.
 
         Composite is derived from ``baseline_results`` when a schema is
         present; otherwise falls back to ``baseline_accuracy``. Pass
@@ -152,7 +161,7 @@ class LoopState:
             base_pipeline_params=schema.to_pipeline_params() if schema else None,
             schema=schema,
         )
-        return cls(
+        cycle = cls(
             current_sp=sp,
             current_accuracy=baseline_accuracy,
             current_composite=composite,
@@ -162,6 +171,9 @@ class LoopState:
             best_sp=sp,
             opt_sp=opt_sp,
         )
+        cycle.session = session
+        cycle.config = config
+        return cycle
 
     def restore_from_trial(self, trial: dict[str, Any]) -> None:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""

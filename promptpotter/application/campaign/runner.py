@@ -16,7 +16,7 @@ from promptpotter.application.campaign.campaign_setup import (
 )
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
-from promptpotter.application.optimization.loop_state import LoopState
+from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.escalation import (
     EscalationTarget,
     build_escalation_entry,
@@ -48,7 +48,7 @@ __all__ = ["run_optimization"]
 
 
 async def _handle_escalation_signal(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     session: Session,
     round_result: RoundResult,
@@ -73,16 +73,16 @@ async def _handle_escalation_signal(
         signal.target in (EscalationTarget.L2, EscalationTarget.L3)
         and config.optimization.enable_l2
     ):
-        state.opt_sp.memory.append_escalation(
+        cycle.opt_sp.memory.append_escalation(
             build_escalation_entry(
                 round_num,
                 esc_check_result,
-                state.current_sp.pipeline_params if state.current_sp else None,
+                cycle.current_sp.pipeline_params if cycle.current_sp else None,
             )
         )
         try:
             stop = await escalate_l2(
-                state,
+                cycle,
                 config,
                 session.pipeline_schema,
                 round_num,
@@ -113,7 +113,7 @@ async def _handle_escalation_signal(
     emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
 
 
-def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str, Any]:
+def _trial_entry(cycle: Cycle, rr: RoundResult, round_num: int) -> dict[str, Any]:
     """Checkpoint dict for ``campaign_store.add_trial`` — self-contained for divergence replay."""
     return {
         "trial_id": f"round_{round_num}",
@@ -131,13 +131,13 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
         "candidate_scores": list(rr.candidate_scores),
         "decisions": list(rr.decisions),
         "evaluators": dict(rr.evaluators),
-        **state.escalation.to_checkpoint_dict(),
-        "opt_search_point": state.opt_sp.model_dump(),
+        **cycle.escalation.to_checkpoint_dict(),
+        "opt_search_point": cycle.opt_sp.model_dump(),
     }
 
 
 def _maybe_apply_zero_signal_filter(
-    state: LoopState,
+    cycle: Cycle,
     config: CampaignConfig,
     session: Session,
     round_num: int,
@@ -150,7 +150,7 @@ def _maybe_apply_zero_signal_filter(
     dataset_name = session.dataset_name
     if not dataset_name:
         return
-    memory = state.search_memory
+    memory = cycle.search_memory
     if memory is None or session.store is None:
         return
 
@@ -184,7 +184,7 @@ def _maybe_apply_zero_signal_filter(
 
 
 async def _post_round(
-    state: LoopState,
+    cycle: Cycle,
     round_result: RoundResult,
     round_num: int,
     config: CampaignConfig,
@@ -193,24 +193,24 @@ async def _post_round(
     cb: RunListener,
 ) -> None:
     """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
-    state.escalation.l1_stall_count = (
-        0 if round_result.improved else state.escalation.l1_stall_count + 1
+    cycle.escalation.l1_stall_count = (
+        0 if round_result.improved else cycle.escalation.l1_stall_count + 1
     )
     if round_result.improved:
-        state.opt_sp.memory.clear_volatile()
+        cycle.opt_sp.memory.clear_volatile()
 
-    cb.on_round_complete(round_result, state.escalation.l1_stall_count)
+    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
-    if state.pending_decisions:
-        round_result.decisions.extend(state.pending_decisions)
-        state.pending_decisions.clear()
+    if cycle.pending_decisions:
+        round_result.decisions.extend(cycle.pending_decisions)
+        cycle.pending_decisions.clear()
 
     if session.campaign_store and session.cycle_id:
         with graceful("Round checkpoint failed"):
             session.campaign_store.add_trial(
                 session.backend_id,
                 session.cycle_id,
-                _trial_entry(state, round_result, round_num),
+                _trial_entry(cycle, round_result, round_num),
             )
 
     _rr = get_round_recorder()
@@ -223,17 +223,17 @@ async def _post_round(
     if _ctrl == "stop":
         raise StopLoop(StopReason.USER_STOPPED)
 
-    if state.search_memory:
-        state.search_memory.on_round_complete(state, session, config, round_num, dataset)
-        _maybe_apply_zero_signal_filter(state, config, session, round_num, dataset, cb)
+    if cycle.search_memory:
+        cycle.search_memory.on_round_complete(cycle, session, config, round_num, dataset)
+        _maybe_apply_zero_signal_filter(cycle, config, session, round_num, dataset, cb)
 
-    if state.current_accuracy >= 1.0:
+    if cycle.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)
-    if state.escalation.l1_stall_count >= config.optimization.l1_patience:
+    if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
         if not config.optimization.enable_l2:
             raise StopLoop(StopReason.PATIENCE)
         stop = await escalate_l2(
-            state,
+            cycle,
             config,
             session.pipeline_schema,
             round_num,
@@ -244,11 +244,11 @@ async def _post_round(
         )
         if stop:
             raise StopLoop(stop)
-        state.escalation.l1_stall_count = 0
+        cycle.escalation.l1_stall_count = 0
 
 
 async def _run_round_loop(
-    state: LoopState,
+    cycle: Cycle,
     dataset: list[Sample],
     config: CampaignConfig,
     session: Session,
@@ -263,10 +263,10 @@ async def _run_round_loop(
 
     try:
         while clean_rounds < max_rounds and round_num < hard_cap:
-            is_probe = state.probe_next_round
+            is_probe = cycle.probe_next_round
             if is_probe:
                 warned = {
-                    q for q, e in state.opt_sp.memory.warning_inventory.items() if e.get("warnings")
+                    q for q, e in cycle.opt_sp.memory.warning_inventory.items() if e.get("warnings")
                 }
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
@@ -278,8 +278,8 @@ async def _run_round_loop(
                 round_num,
                 clean_rounds,
                 max_rounds,
-                state.current_accuracy,
-                state.escalation.l1_stall_count,
+                cycle.current_accuracy,
+                cycle.escalation.l1_stall_count,
                 opt.l1_patience,
                 ", PROBE" if is_probe else "",
             )
@@ -290,24 +290,24 @@ async def _run_round_loop(
 
             round_result = await execute_round(
                 round_num,
-                state,
+                cycle,
                 session,
                 round_eval_data,
                 config,
                 cb,
                 degradation_checks=round_checks,
-                search_memory=state.search_memory,
+                search_memory=cycle.search_memory,
             )
-            update_round_state(state, round_result, round_num, schema=session.pipeline_schema)
+            update_round_state(cycle, round_result, round_num, schema=session.pipeline_schema)
 
-            if state.search_memory and len(state.rounds) >= 2:
-                state.search_memory.record_flips_from_rounds(state.rounds, round_num)
+            if cycle.search_memory and len(cycle.rounds) >= 2:
+                cycle.search_memory.record_flips_from_rounds(cycle.rounds, round_num)
 
             if is_probe:
-                state.probe_next_round = False
+                cycle.probe_next_round = False
                 if opt.enable_l2:
                     stop = await escalate_l2(
-                        state,
+                        cycle,
                         config,
                         session.pipeline_schema,
                         round_num,
@@ -323,11 +323,11 @@ async def _run_round_loop(
                 continue
 
             if round_result.escalation_signal:
-                await _handle_escalation_signal(state, config, session, round_result, round_num, cb)
+                await _handle_escalation_signal(cycle, config, session, round_result, round_num, cb)
                 round_num += 1
                 continue
 
-            await _post_round(state, round_result, round_num, config, session, dataset, cb)
+            await _post_round(cycle, round_result, round_num, config, session, dataset, cb)
             round_num += 1
             clean_rounds += 1
 
@@ -343,7 +343,7 @@ async def _run_round_loop(
             else StopReason.PAUSED_FOR_REVIEW
         )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.warning("Optimization interrupted at round %d.", len(state.rounds))
+        logger.warning("Optimization interrupted at round %d.", len(cycle.rounds))
         return StopReason.INTERRUPTED
 
 
@@ -410,7 +410,7 @@ async def run_optimization(
 
     cb = RunListener(display=display, control=control)
 
-    state = await init_optimization_loop(
+    cycle = await init_optimization_loop(
         baseline,
         dataset,
         campaign_config,
@@ -446,19 +446,19 @@ async def run_optimization(
         )
     cb.emitter = emitter
 
-    stop_reason = await _run_round_loop(state, dataset, campaign_config, session, cb)
+    stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    langfuse_trace_id = finalize_optimization_run(state, session, emitter, stop_reason, finished_at)
+    langfuse_trace_id = finalize_optimization_run(cycle, session, emitter, stop_reason, finished_at)
 
     run_result = RunResult(
-        rounds=state.rounds,
-        n_rounds=len(state.rounds),
-        best_accuracy=state.best_accuracy,
-        best_round=state.best_round,
+        rounds=cycle.rounds,
+        n_rounds=len(cycle.rounds),
+        best_accuracy=cycle.best_accuracy,
+        best_round=cycle.best_round,
         baseline_accuracy=baseline.baseline_acc,
-        winner_prompt_fields=state.opt_sp.prompt_field_dict() if state.best_sp else {},
-        winner_pipeline_params=state.best_sp.pipeline_params if state.best_sp else None,
+        winner_prompt_fields=cycle.opt_sp.prompt_field_dict() if cycle.best_sp else {},
+        winner_pipeline_params=cycle.best_sp.pipeline_params if cycle.best_sp else None,
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,

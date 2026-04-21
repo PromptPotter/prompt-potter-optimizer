@@ -34,7 +34,7 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
@@ -155,12 +155,10 @@ class LayerTransition(ABC):
         """Convert raw LLM JSON response into a ``TransitionResult``."""
 
     @abstractmethod
-    def apply_side_effects(
-        self, state: LoopState, result: TransitionResult, round_num: int
-    ) -> None:
-        """Mutate ``LoopState`` post-transition (record escalation entry, reset counters, ...).
+    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+        """Mutate ``Cycle`` post-transition (record escalation entry, reset counters, ...).
 
-        Called by the escalation orchestrator after ``state.adopt_transition``
+        Called by the escalation orchestrator after ``cycle.adopt_transition``
         has applied the result's OptSearchPoint + pipeline_params. Runs the
         layer-specific tail (L2: l2_directive, probe-round decision; L3:
         record_entry + reset_for_l3).
@@ -251,23 +249,21 @@ class L2RefineStrategy(LayerTransition):
             debug_response=raw,
         )
 
-    def apply_side_effects(
-        self, state: LoopState, result: TransitionResult, round_num: int
-    ) -> None:
+    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         from promptpotter.application.campaign.decisions import record_decision
 
         if result.task_context:
-            state.opt_sp.task_context = result.task_context
-        state.opt_sp.memory.l2_directive = result.l2_directive
-        state.escalation.l2.record_entry(state.best_accuracy, state.best_composite)
+            cycle.opt_sp.task_context = result.task_context
+        cycle.opt_sp.memory.l2_directive = result.l2_directive
+        cycle.escalation.l2.record_entry(cycle.best_accuracy, cycle.best_composite)
 
         is_probe = result.action == TransitionAction.PROBE
         record_decision(
-            state.pending_decisions,
+            cycle.pending_decisions,
             "probe_round_commitment",
             {
                 "round_num": round_num,
-                "l2_round": state.escalation.l2.round,
+                "l2_round": cycle.escalation.l2.round,
             },
             is_probe,
             data={
@@ -277,10 +273,10 @@ class L2RefineStrategy(LayerTransition):
             },
         )
         if is_probe:
-            state.probe_next_round = True
+            cycle.probe_next_round = True
             logger.debug("L2 requested probe — next round uses warned queries")
         logger.debug(
-            "L2 refine_strategy at round %d (l2_round=%d)", round_num, state.escalation.l2.round
+            "L2 refine_strategy at round %d (l2_round=%d)", round_num, cycle.escalation.l2.round
         )
 
 
@@ -380,13 +376,11 @@ class L3ModifyPlan(LayerTransition):
             debug_response=raw,
         )
 
-    def apply_side_effects(
-        self, state: LoopState, result: TransitionResult, round_num: int
-    ) -> None:
-        state.escalation.l3.record_entry(state.best_accuracy, state.best_composite)
-        state.escalation.reset_for_l3(state.best_accuracy, state.best_composite)
+    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+        cycle.escalation.l3.record_entry(cycle.best_accuracy, cycle.best_composite)
+        cycle.escalation.reset_for_l3(cycle.best_accuracy, cycle.best_composite)
         logger.debug(
-            "L3 modify_plan at round %d (l3_round=%d)", round_num, state.escalation.l3.round
+            "L3 modify_plan at round %d (l3_round=%d)", round_num, cycle.escalation.l3.round
         )
 
 

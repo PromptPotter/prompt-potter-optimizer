@@ -85,15 +85,15 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
 
 
 def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
-    loop_state = d["state"]
+    cycle = d["state"]
     session = d["env"]
-    state.baseline_accuracy = loop_state.current_accuracy
+    state.baseline_accuracy = cycle.current_accuracy
 
     # Mix prompt fields from the loaded baseline into the Start column so
     # the SP diff shows what the loop is actually starting from (not just
     # schema pipeline params). Otherwise any candidate that overrides a
     # prompt field would render as a diff against "-".
-    prompt_fields = loop_state.opt_sp.prompt_field_dict()
+    prompt_fields = cycle.opt_sp.prompt_field_dict()
     for field_name, value in prompt_fields.items():
         if value:
             state.original_sp_flat[field_name] = str(value)
@@ -102,10 +102,10 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     samples = len(session.scoring_dataset)
     obs = "ON" if session.obs else "OFF"
     print(
-        f"  {GREEN}✓{RESET} Initialized  baseline={loop_state.current_accuracy:.1%}  "
+        f"  {GREEN}✓{RESET} Initialized  baseline={cycle.current_accuracy:.1%}  "
         f"cycle={cycle_id}  samples={samples}  obs={obs}"
     )
-    crit = loop_state.opt_sp.memory.critique_text
+    crit = cycle.opt_sp.memory.critique_text
     if crit:
         preview = crit.replace("\n", " ").strip()
         if len(preview) > 80:
@@ -114,9 +114,9 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     resumed = session.resumed_from_round
     if resumed > 0:
         state_parts = []
-        critique_chars = len(loop_state.opt_sp.memory.critique_text)
-        task_context_keys = len(loop_state.opt_sp.task_context)
-        l2_round = loop_state.escalation.l2.round
+        critique_chars = len(cycle.opt_sp.memory.critique_text)
+        task_context_keys = len(cycle.opt_sp.task_context)
+        l2_round = cycle.escalation.l2.round
         if critique_chars:
             state_parts.append(f"critique={critique_chars} chars")
         if task_context_keys:
