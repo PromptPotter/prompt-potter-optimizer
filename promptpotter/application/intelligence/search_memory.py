@@ -1,7 +1,9 @@
-"""SearchMemory — cross-campaign intelligence materialized view.
+"""SearchMemory — interaction layer over the cross-campaign index.
 
-A persistent, incrementally-updated statistical index over ALL historical
-search points and their evaluation results.
+SearchMemory is the **digest + derived-view façade** that L1/L2/L3 prompts
+consume. The per-sample index storage (hits, failure modes, degradation
+counts, flips) lives in :class:`SampleIndex`; SearchMemory composes it
+and retains only the axis-side aggregate state + digest builders.
 
 Public surface — consumers import only these:
     * ``to_l1_digest()`` / ``to_critique_digest()`` / ``to_strategic_digest()``
@@ -11,12 +13,9 @@ Public surface — consumers import only these:
     * ``failure_clusters()`` / ``bottleneck_distribution()`` / ``query_tractability()``
     * ``refresh()`` / ``ensure_for()`` / ``save()`` / ``load()``
 
-Everything else on the class is a private helper to the digest builders.
-
-Persisted to disk at ``library/search_memory.json`` (tenant-global, single
-file — `dataset_runs/` is also tenant-global, so per-backend partitioning
-would conflate sources). Updated lazily via ``refresh()`` which loads only
-new dataset runs since the last watermark.
+Persistence is split:
+    * ``library/search_memory.json`` — axis-side state (this class)
+    * ``library/sample_index.json`` — per-sample state (``SampleIndex``)
 """
 
 from __future__ import annotations
@@ -28,7 +27,11 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.shared.errors import is_error_result
+from promptpotter.application.intelligence.sample_index import (
+    FailureCluster,
+    QueryRecord,
+    SampleIndex,
+)
 from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
@@ -53,55 +56,23 @@ class AxisImpact:
     """Parameter impact summary for one search space dimension."""
 
     axis: str
-    effect_size: float  # mean |accuracy delta| when this axis changes
-    consistency: float  # fraction of comparisons where |delta| > noise
-    classification: str  # "consistently_impactful" | "sometimes_impactful" | "dead"
+    effect_size: float
+    consistency: float
+    classification: str
     top_values: list[ValueRecord] = field(default_factory=list)
     sample_count: int = 0
 
 
-@dataclass
-class QueryRecord:
-    """Per-query pattern summary across evaluations."""
-
-    query: str
-    hit_rate: float
-    n_measurements: int
-    variance: float  # hit/miss variance across configs
-    dominant_failure_mode: str = ""  # most common terminated_at
-
-
-@dataclass
-class FailureCluster:
-    """Queries grouped by shared failure reason."""
-
-    failure_mode: str
-    query_count: int
-    fraction: float
-    example_queries: list[str] = field(default_factory=list)
-
-
 class SearchMemory:
-    """Materialized view over all historical evaluation data."""
+    """Materialized view over historical evaluation data (axis side)."""
 
-    def __init__(self) -> None:
-        self._watermark: set[str] = set()
+    def __init__(self, sample_index: SampleIndex | None = None) -> None:
+        self.sample_index: SampleIndex = sample_index or SampleIndex()
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
-        self._query_hits: dict[str, list[bool]] = defaultdict(list)
-        self._query_failure_modes: dict[str, list[str]] = defaultdict(list)
-        self._query_degradation_counts: dict[str, int] = defaultdict(int)
-        self._bottleneck_counts: dict[str, int] = defaultdict(int)
-        self._total_failures: int = 0
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
-        self._query_flips: list[dict[str, Any]] = []
-        # Per-refresh caches — cleared in refresh() when new runs ingest.
-        # Digest builders call the same derived views 3-4x per round; caching
-        # collapses that to one computation per refresh cycle.
-        self._cache_query_records: list[QueryRecord] | None = None
         self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
-        self._cache_failure_clusters: list[FailureCluster] | None = None
 
     # --- Parameter Impact ---
 
@@ -132,11 +103,11 @@ class SearchMemory:
         records.sort(key=lambda r: -r.mean_accuracy)
         return records[:k]
 
-    # --- Query Patterns ---
+    # --- Query Patterns (delegated to SampleIndex) ---
 
     def query_tractability(self) -> list[QueryRecord]:
-        """Return all queries with their tractability profiles."""
-        return self._build_query_records()
+        """Return all samples with their tractability profiles."""
+        return self.sample_index.records()
 
     def dead_queries(
         self,
@@ -145,88 +116,40 @@ class SearchMemory:
         include_always_hit: bool = True,
         include_always_miss: bool = True,
     ) -> list[QueryRecord]:
-        """Return zero-signal queries — always-hit and/or always-miss.
+        """Return zero-signal samples — always-hit and/or always-miss."""
+        return self.sample_index.dead(
+            min_observations=min_observations,
+            include_always_hit=include_always_hit,
+            include_always_miss=include_always_miss,
+        )
 
-        Requires at least ``min_observations`` Bernoulli samples for a query
-        to be eligible; without this floor a single observation would mark
-        every query as "dead" on a fresh campaign.
-        """
-        out: list[QueryRecord] = []
-        for q in self._build_query_records():
-            if len(self._query_hits.get(q.query, [])) < min_observations:
-                continue
-            if (include_always_miss and q.hit_rate == 0.0) or (
-                include_always_hit and q.hit_rate == 1.0
-            ):
-                out.append(q)
-        return out
-
-    # --- Degradation ---
+    # --- Degradation (delegated to SampleIndex, bridged via query→id lookup) ---
 
     def query_degradation_rate(self, query: str) -> float:
         """Return fraction of evaluations where *query* was degraded."""
-        n_measurements = len(self._query_hits.get(query, []))
-        if n_measurements == 0:
+        sid = self.sample_index.id_for_query(query)
+        if sid is None:
             return 0.0
-        return self._query_degradation_counts.get(query, 0) / n_measurements
+        return self.sample_index.degradation_rate(sid)
 
     def query_degradation_count(self, query: str) -> int:
         """Return total number of past evaluations where *query* was degraded."""
-        return self._query_degradation_counts.get(query, 0)
+        sid = self.sample_index.id_for_query(query)
+        if sid is None:
+            return 0
+        return self.sample_index.degradation_count(sid)
 
     # --- Failure Modes ---
 
     def bottleneck_distribution(self) -> dict[str, float]:
         """Return {terminated_at_step: fraction_of_failures}."""
-        if self._total_failures == 0:
-            return {}
-        return {
-            step: count / self._total_failures
-            for step, count in sorted(
-                self._bottleneck_counts.items(),
-                key=lambda x: -x[1],
-            )
-        }
+        return self.sample_index.bottleneck_distribution()
 
     def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
-        """Return queries grouped by dominant failure mode."""
-        if self._cache_failure_clusters is None:
-            mode_queries: dict[str, list[str]] = defaultdict(list)
-            for query, modes in self._query_failure_modes.items():
-                if modes:
-                    dominant = Counter(modes).most_common(1)[0][0]
-                    mode_queries[dominant].append(query)
+        """Return samples grouped by dominant failure mode."""
+        return self.sample_index.failure_clusters(max_clusters)
 
-            total = sum(len(qs) for qs in mode_queries.values())
-            clusters = []
-            for mode, queries in sorted(mode_queries.items(), key=lambda x: -len(x[1])):
-                clusters.append(
-                    FailureCluster(
-                        failure_mode=mode,
-                        query_count=len(queries),
-                        fraction=len(queries) / total if total else 0.0,
-                        example_queries=queries[:3],
-                    )
-                )
-            self._cache_failure_clusters = clusters
-        return self._cache_failure_clusters[:max_clusters]
-
-    # --- Digest-internal helpers (private) ---
-
-    def _discriminating_queries(self, min_variance: float = 0.1) -> list[QueryRecord]:
-        """Queries whose outcome varies across configurations."""
-        return [q for q in self._build_query_records() if q.variance >= min_variance]
-
-    def _persistent_failures(self, min_streak: int = 3) -> list[QueryRecord]:
-        """Intractable (hit_rate == 0) + chronic (failed last ``min_streak``) queries."""
-        records = [
-            r
-            for r in self._build_query_records()
-            if len(self._query_hits.get(r.query, [])) >= min_streak
-            and not any(self._query_hits[r.query][-min_streak:])
-        ]
-        records.sort(key=lambda r: r.hit_rate)  # intractable first
-        return records
+    # --- Digest-internal helpers ---
 
     def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
         """Axes thoroughly tested with negligible effect — further exploration wastes budget."""
@@ -287,50 +210,10 @@ class SearchMemory:
             return {}
         return self._axis_failure_group_deltas.get(axis, {})
 
-    def _record_query_flips(
-        self,
-        round_num: int,
-        changes_description: str,
-        prev_results: list[dict],
-        new_results: list[dict],
-    ) -> int:
-        """Record hit/miss flips between rounds; return the count."""
-        prev_hits: dict[str, bool] = {}
-        for r in prev_results:
-            q = r.get("query", "")
-            if q:
-                prev_hits[q] = bool(r.get("hit"))
-
-        count = 0
-        for r in new_results:
-            q = r.get("query", "")
-            if not q or q not in prev_hits:
-                continue
-            new_hit = bool(r.get("hit"))
-            old_hit = prev_hits[q]
-            if new_hit != old_hit:
-                self._query_flips.append(
-                    {
-                        "query": q,
-                        "round": round_num,
-                        "changes_description": changes_description[:80],
-                        "old_hit": old_hit,
-                        "new_hit": new_hit,
-                    }
-                )
-                count += 1
-        return count
-
-    def _query_flip_history(self, query: str | None = None, limit: int = 20) -> list[dict]:
-        """Recent query hit/miss flips, optionally filtered by query."""
-        flips = self._query_flips
-        if query:
-            flips = [f for f in flips if f["query"] == query]
-        return flips[-limit:]
-
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
         """Format recent positive flips (miss→hit) for injection into critique."""
-        positive = [f for f in self._query_flips if f["new_hit"] and not f["old_hit"]]
+        flips = self.sample_index.all_flips()
+        positive = [f for f in flips if f["new_hit"] and not f["old_hit"]]
         if not positive:
             return None
         recent = positive[-limit:]
@@ -343,22 +226,28 @@ class SearchMemory:
         return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
 
     def _recompute_failure_group_correlations(self) -> bool:
-        """Recompute failure-group × axis deltas from current hits/axis values. Returns True on change."""
-        clusters = self.failure_clusters(5)
+        """Recompute failure-group × axis deltas from current hits/axis values."""
+        clusters = self.sample_index.failure_clusters(5)
         if not clusters:
             return False
 
-        groups: dict[str, set[str]] = {}
+        # Build groups: failure_mode → set of sample_ids with that dominant mode.
+        groups: dict[str, set[int]] = {}
         for cluster in clusters:
             mode = cluster.failure_mode
-            group_queries: set[str] = set()
-            for query, modes in self._query_failure_modes.items():
-                if modes:
-                    dominant = Counter(modes).most_common(1)[0][0]
-                    if dominant == mode:
-                        group_queries.add(query)
-            if group_queries:
-                groups[mode] = group_queries
+            group_sids: set[int] = set()
+            for q in cluster.example_queries:
+                sid = self.sample_index.id_for_query(q)
+                if sid is not None:
+                    group_sids.add(sid)
+            # The cluster.example_queries only holds 3 samples; we need the full
+            # list. Recompute by scanning _failure_modes for dominant mode match.
+            for sid in list(self.sample_index._samples.keys()):
+                modes = self.sample_index.failure_modes(sid)
+                if modes and Counter(modes).most_common(1)[0][0] == mode:
+                    group_sids.add(sid)
+            if group_sids:
+                groups[mode] = group_sids
 
         if not groups:
             return False
@@ -367,18 +256,17 @@ class SearchMemory:
         for axis, values in self._axis_values.items():
             if len(values) < 2:
                 continue
-            for group_name, group_queries in groups.items():
+            for group_name, group_sids in groups.items():
                 group_hit_rate = 0.0
-                for q in group_queries:
-                    hits = self._query_hits.get(q, [])
+                for sid in group_sids:
+                    hits = self.sample_index.hits(sid)
                     if hits:
                         group_hit_rate += sum(hits) / len(hits)
-                if group_queries:
-                    group_hit_rate /= len(group_queries)
+                if group_sids:
+                    group_hit_rate /= len(group_sids)
 
                 impact = self._compute_axis_impact(axis, values)
                 if impact and impact.effect_size > NOISE_THRESHOLD:
-                    # Weight effect by group difficulty: large effect on hard groups ranks higher.
                     correlation = impact.effect_size * (1 - group_hit_rate)
                     if correlation > 0.005:
                         new_deltas.setdefault(axis, {})[group_name] = round(correlation, 4)
@@ -394,11 +282,11 @@ class SearchMemory:
         """SearchMemory context dict for the L1 generation prompt."""
         ctx: dict[str, str] = {}
 
-        clusters = self.failure_clusters(3)
+        clusters = self.sample_index.failure_clusters(3)
         if clusters:
             ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
 
-        dead = self.dead_queries(include_always_hit=False)
+        dead = self.sample_index.dead(include_always_hit=False)
         if dead:
             ctx["dead_queries"] = f"{len(dead)} queries never hit"
 
@@ -417,15 +305,15 @@ class SearchMemory:
         """SearchMemory context dict for the critique agent."""
         ctx: dict[str, str] = {}
 
-        disc = self._discriminating_queries()
+        disc = self.sample_index.discriminating()
         if disc:
             ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
 
-        fc = self.failure_clusters(3)
+        fc = self.sample_index.failure_clusters(3)
         if fc:
             ctx["failure_clusters"] = _fmt_clusters(fc, with_counts=False)
 
-        persistent = self._persistent_failures(min_streak=3)
+        persistent = self.sample_index.persistent_failures(min_streak=3)
         if persistent:
             ctx["tractability"] = _fmt_persistent_failures(persistent)
 
@@ -458,11 +346,7 @@ class SearchMemory:
         include_correlations: bool = False,
         include_clusters: bool = False,
     ) -> dict[str, str] | None:
-        """SearchMemory context dict for L2/L3 strategic prompts.
-
-        ``include_correlations`` adds failure-group × axis and volatile queries (L2).
-        ``include_clusters`` adds failure clusters with counts (L3).
-        """
+        """SearchMemory context dict for L2/L3 strategic prompts."""
         ctx: dict[str, str] = {}
 
         rankings = self.axis_rankings()[:5]
@@ -475,12 +359,12 @@ class SearchMemory:
                 f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
             )
 
-        persistent = self._persistent_failures(min_streak=3)
+        persistent = self.sample_index.persistent_failures(min_streak=3)
         if persistent:
             ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
 
         if include_clusters:
-            clusters = self.failure_clusters(3)
+            clusters = self.sample_index.failure_clusters(3)
             if clusters:
                 ctx["failure_clusters"] = _fmt_clusters(clusters, with_counts=True)
 
@@ -497,7 +381,7 @@ class SearchMemory:
             if fg_lines:
                 ctx["failure_group_insights"] = "; ".join(fg_lines)
 
-            flips = self._query_flip_history(limit=50)
+            flips = self.sample_index.flips(limit=50)
             if flips:
                 flip_counts = Counter(f["query"] for f in flips)
                 volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
@@ -518,33 +402,25 @@ class SearchMemory:
         scorer_id: str = "none",
         scorer_formula: str | None = None,
     ) -> bool:
-        """Incrementally update from new dataset runs; returns True if anything was added.
-
-        When *scorer* is given, each run's items are rescored under
-        *scorer_id* before ingest — historical ``hit`` values on disk are
-        a stale view; the active policy re-derives them and writes into
-        the per-item ``scored`` audit map. Without a scorer, persisted
-        values are used as-is (tests, legacy callers).
-        """
+        """Incrementally update from new dataset runs; returns True if anything was added."""
         added = 0
-        for run_id, detail in store.dataset_runs.load_since(backend_id, self._watermark):
+        for run_id, detail in store.dataset_runs.load_since(
+            backend_id, self.sample_index._watermark
+        ):
             if scorer is not None:
                 items = detail.get("dataset_run_items") or []
                 rescore_results(items, scorer, scorer_id, scorer_formula)
             self._ingest_run(detail)
-            self._watermark.add(run_id)
+            self.sample_index.ingest_run(detail)
+            self.sample_index.mark_watermark(run_id)
             added += 1
         if not added:
             return False
-        # Ingested new data — invalidate derived views so the next digest
-        # rebuilds them once from the updated state.
-        self._cache_query_records = None
         self._cache_axis_impacts = {}
-        self._cache_failure_clusters = None
         logger.debug(
             "SearchMemory refreshed: %d new runs (total watermark: %d)",
             added,
-            len(self._watermark),
+            len(self.sample_index._watermark),
         )
         return True
 
@@ -554,7 +430,7 @@ class SearchMemory:
         env: Any,
         config: Any,
         round_num: int,
-        full_dataset: list[dict[str, Any]],
+        full_dataset: list[Any],
     ) -> None:
         """Per-round hook: refresh, persist, recompute correlations, adapt the scoring dataset."""
         from promptpotter.application.intelligence.scoring_set_adaptation import (
@@ -589,8 +465,8 @@ class SearchMemory:
                     round_num,
                 )
             self.save(Path(store.base_dir) / "library" / "search_memory.json")
+            self.sample_index.save(Path(store.base_dir) / "library" / "sample_index.json")
 
-        # Adaptive scoring-set swap (needs 3+ rounds of history)
         if round_num < 2:
             return
         hist = [r.results for r in state.rounds if r.results]
@@ -618,21 +494,16 @@ class SearchMemory:
             if curr_round.candidate_scores
             else ""
         )
-        flips = self._record_query_flips(round_num, desc, prev_round.results, curr_round.results)
+        flips = self.sample_index.record_flips(
+            round_num, desc, prev_round.results, curr_round.results
+        )
         if flips:
             logger.debug("Round %d: %d query flips recorded", round_num, flips)
 
     def save(self, path: Path) -> None:
         data = {
-            "watermark": sorted(self._watermark),
             "axis_values": {axis: dict(vals.items()) for axis, vals in self._axis_values.items()},
-            "query_hits": dict(self._query_hits),
-            "query_failure_modes": dict(self._query_failure_modes),
-            "bottleneck_counts": dict(self._bottleneck_counts),
-            "total_failures": self._total_failures,
-            "query_degradation_counts": dict(self._query_degradation_counts),
             "axis_failure_group_deltas": self._axis_failure_group_deltas,
-            "query_flips": self._query_flips,
         }
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(data, indent=2), encoding="utf-8")
@@ -649,8 +520,9 @@ class SearchMemory:
         """Load + refresh; returns ``None`` when ``store`` or ``backend_id`` is missing."""
         if not (store and backend_id):
             return None
-        path = Path(store.base_dir) / "library" / "search_memory.json"
-        mem = cls.load(path)
+        base = Path(store.base_dir) / "library"
+        sample_index = SampleIndex.load(base / "sample_index.json")
+        mem = cls.load(base / "search_memory.json", sample_index=sample_index)
         if mem.refresh(
             store,
             backend_id,
@@ -658,12 +530,13 @@ class SearchMemory:
             scorer_id=scorer_id,
             scorer_formula=scorer_formula,
         ):
-            mem.save(path)
+            mem.save(base / "search_memory.json")
+            mem.sample_index.save(base / "sample_index.json")
         return mem
 
     @classmethod
-    def load(cls, path: Path) -> SearchMemory:
-        mem = cls()
+    def load(cls, path: Path, sample_index: SampleIndex | None = None) -> SearchMemory:
+        mem = cls(sample_index=sample_index)
         if not path.exists():
             return mem
         try:
@@ -672,27 +545,18 @@ class SearchMemory:
             logger.warning("Failed to load SearchMemory from %s — starting fresh", path)
             return mem
 
-        mem._watermark = set(data.get("watermark", []))
         for axis, vals in data.get("axis_values", {}).items():
             for v, accs in vals.items():
                 mem._axis_values[axis][v] = accs
-        for q, hits in data.get("query_hits", {}).items():
-            mem._query_hits[q] = hits
-        for q, modes in data.get("query_failure_modes", {}).items():
-            mem._query_failure_modes[q] = modes
-        mem._bottleneck_counts = defaultdict(int, data.get("bottleneck_counts", {}))
-        mem._total_failures = data.get("total_failures", 0)
-        mem._query_degradation_counts = defaultdict(int, data.get("query_degradation_counts", {}))
         mem._axis_failure_group_deltas = data.get("axis_failure_group_deltas", {})
-        mem._query_flips = data.get("query_flips", [])
         return mem
 
     # --- Internals ---
 
     def _ingest_run(self, detail: dict[str, Any]) -> None:
+        """Ingest axis-side state from a dataset_runs/ entry."""
         accuracy = detail.get("scores", {}).get("accuracy", 0.0)
         pipeline_params = detail.get("pipeline_params") or {}
-        items = detail.get("dataset_run_items", [])
 
         for node_name, node_config in pipeline_params.items():
             if isinstance(node_config, dict):
@@ -701,23 +565,6 @@ class SearchMemory:
                     self._axis_values[axis][_value_preview(value)].append(accuracy)
             else:
                 self._axis_values[node_name][_value_preview(node_config)].append(accuracy)
-
-        for item in items:
-            query = item.get("query", "")
-            if not query:
-                continue
-            hit = bool(item.get("hit"))
-            self._query_hits[query].append(hit)
-
-            pd = item.get("pipeline_data") or {}
-            if (pd.get("diagnostics") or {}).get("warnings"):
-                self._query_degradation_counts[query] += 1
-
-            if not hit and not is_error_result(item):
-                terminated = pd.get("terminated_at", "unknown")
-                self._query_failure_modes[query].append(terminated)
-                self._bottleneck_counts[terminated] += 1
-                self._total_failures += 1
 
     def _compute_axis_impact(
         self,
@@ -774,31 +621,6 @@ class SearchMemory:
         )
         self._cache_axis_impacts[axis] = impact
         return impact
-
-    def _dominant_failure_mode(self, query: str) -> str:
-        modes = self._query_failure_modes.get(query, [])
-        return Counter(modes).most_common(1)[0][0] if modes else ""
-
-    def _build_query_records(self) -> list[QueryRecord]:
-        if self._cache_query_records is not None:
-            return self._cache_query_records
-        records = []
-        for query, hits in sorted(self._query_hits.items()):
-            if not hits:
-                continue
-            hit_rate = sum(hits) / len(hits)
-            variance = hit_rate * (1 - hit_rate)
-            records.append(
-                QueryRecord(
-                    query=query,
-                    hit_rate=round(hit_rate, 4),
-                    n_measurements=len(hits),
-                    variance=round(variance, 4),
-                    dominant_failure_mode=self._dominant_failure_mode(query),
-                )
-            )
-        self._cache_query_records = records
-        return records
 
 
 def _value_preview(value: Any) -> str:

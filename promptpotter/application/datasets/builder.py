@@ -1,6 +1,8 @@
-"""Ground-truth loaders (Excel, HuggingFace, traces) and train/test splitter.
+"""Ground-truth loaders (Excel, HuggingFace) and train/test splitter.
 
-Each loader returns ``[{"query": str, "ground_truth": str, ...}]``.
+Each loader returns ``list[Sample]`` — the canonical per-sample domain
+object. Legacy dicts are no longer returned; conversion happens at load
+time via ``Sample.from_dict`` for any on-disk data predating pass 2.
 """
 
 from __future__ import annotations
@@ -15,12 +17,12 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.datasets.trace_dataset import load_potter_traces
+from promptpotter.domain.sample import Sample
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +33,11 @@ __all__ = [
     "load_aime_2025",
     "load_bbeh",
     "load_dataset",
-    "load_dataset_from_traces",
     "load_excel_ground_truth",
     "load_gsm8k",
     "load_potter_traces",
     "sample_dataset",
+    "samples_from_dicts",
     "split_train_test",
 ]
 
@@ -49,15 +51,24 @@ SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
 }
 
 
+def samples_from_dicts(items: list[dict]) -> list[Sample]:
+    """Convert a list of dicts (e.g. from on-disk JSON) into Samples.
+
+    Assigns positional ``id`` to items lacking one (legacy migration);
+    ``sample_id`` is accepted as ``id``. Extra keys are ignored.
+    """
+    return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
+
+
 def load_excel_ground_truth(
     path: str | Path,
     sheet_column_map: dict[str, dict[str, str]] = SHEET_COLUMN_MAP,
 ) -> list[dict]:
-    """Read sheets from an Excel file, normalize columns, return unified list.
+    """Read sheets from an Excel file; returns internal staging dicts.
 
-    Returns:
-        List of ``{"query": str, "ground_truth": str, "source_sheet": str}``.
-        Rows where query or ground_truth is empty/NaN are dropped.
+    Staging format carries ``source_sheet`` for downstream partitioning in
+    ``split_train_test`` and is not Sample-shaped yet — ids are assigned at
+    split time so the global positional index is stable across train/test.
     """
     try:
         import openpyxl
@@ -76,7 +87,6 @@ def load_excel_ground_truth(
             continue
 
         ws = wb[sheet_name]
-        # Build header index from first row
         header_row = next(ws.iter_rows(min_row=1, max_row=1, values_only=True))
         headers = [str(h).strip() if h else "" for h in header_row]
 
@@ -125,22 +135,20 @@ def split_train_test(
     data: list[dict],
     test_fraction: float = 0.2,
     seed: int = 42,
-) -> tuple[list[dict], dict[str, list[dict]]]:
-    """Split ground-truth data into train + per-domain test sets.
+) -> tuple[list[Sample], dict[str, list[Sample]]]:
+    """Split ground-truth dicts into train + per-domain test Samples.
 
-    Logic:
-    - Separate rows by source_sheet: "Processes" vs ("Material" + "Sheet1")
-    - From each group, draw ``test_fraction`` into the test set
-    - Remaining rows from both groups -> combined train set
-
-    Returns:
-        ``(train_data, {"test_processes": [...], "test_material": [...]})``.
+    Stable ``id`` assignment: ids are assigned sequentially across the
+    full input list (post-sort, pre-shuffle) so a sample keeps the same
+    id regardless of which split it lands in.
     """
-    rng = random.Random(seed)
+    # Assign ids across the full input list so splits share a stable id space.
+    enumerated = [{**row, "id": i} for i, row in enumerate(data)]
 
+    rng = random.Random(seed)
     _proc_sheets = {"Processes", "Processing"}
-    processes = [r for r in data if r["source_sheet"] in _proc_sheets]
-    material = [r for r in data if r["source_sheet"] not in _proc_sheets]
+    processes = [r for r in enumerated if r["source_sheet"] in _proc_sheets]
+    material = [r for r in enumerated if r["source_sheet"] not in _proc_sheets]
 
     def _split(items: list[dict]) -> tuple[list[dict], list[dict]]:
         shuffled = items[:]
@@ -151,9 +159,8 @@ def split_train_test(
     train_proc, test_proc = _split(processes) if processes else ([], [])
     train_mat, test_mat = _split(material) if material else ([], [])
 
-    train = train_proc + train_mat
+    train_dicts = train_proc + train_mat
 
-    # Warn on duplicate queries across test sets
     test_queries_proc = {r["query"] for r in test_proc}
     test_queries_mat = {r["query"] for r in test_mat}
     overlap = test_queries_proc & test_queries_mat
@@ -164,22 +171,26 @@ def split_train_test(
             list(overlap)[:5],
         )
 
+    train = [Sample.from_dict(d) for d in train_dicts]
+    test_sets = {
+        "test_processes": [Sample.from_dict(d) for d in test_proc],
+        "test_material": [Sample.from_dict(d) for d in test_mat],
+    }
+
     logger.info(
         "Split: %d train, %d test_processes, %d test_material",
         len(train),
-        len(test_proc),
-        len(test_mat),
+        len(test_sets["test_processes"]),
+        len(test_sets["test_material"]),
     )
-    return train, {"test_processes": test_proc, "test_material": test_mat}
+    return train, test_sets
 
 
-def sample_dataset(dataset: list[dict], sample_size: int) -> list[dict]:
-    """Top-``sample_size`` slice of eval queries.
+def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
+    """Top-``sample_size`` slice of eval samples.
 
     Datasets are already shuffled at creation (train/test split, HF load),
     so the loop-time slice is the deterministic prefix — no second RNG.
-    This makes partial prior runs (which walk natural order) bridge
-    cleanly into the next baseline on the same slice.
     """
     if sample_size <= 0:
         raise ValueError(f"sp_budget_ttest must be > 0, got {sample_size}")
@@ -193,12 +204,8 @@ def load_gsm8k(
     split: str = "train",
     sample_size: int = 0,
     seed: int = 42,
-) -> list[dict]:
-    """Load GSM8K from HuggingFace and return DatasetStore-format items.
-
-    Returns:
-        List of ``{"query": str, "ground_truth": str}`` dicts.
-        ``ground_truth`` is the ``#### N`` answer line only.
+) -> list[Sample]:
+    """Load GSM8K from HuggingFace.
 
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
@@ -211,29 +218,24 @@ def load_gsm8k(
         ) from None
 
     ds = load_dataset("openai/gsm8k", "main", split=split)
-    items: list[dict] = []
-    for row in ds:
-        # Extract just the "#### N" answer line from the full solution
+    samples: list[Sample] = []
+    for i, row in enumerate(ds):
         m = _GSM8K_ANSWER_RE.search(row["answer"])
         gt = f"#### {m.group(1)}" if m else row["answer"].strip()
-        items.append({"query": row["question"], "ground_truth": gt})
+        samples.append(Sample(id=i, query=row["question"], ground_truth=gt))
 
-    if sample_size > 0 and len(items) > sample_size:
-        items = random.Random(seed).sample(items, sample_size)
+    if sample_size > 0 and len(samples) > sample_size:
+        samples = random.Random(seed).sample(samples, sample_size)
 
-    logger.info("Loaded GSM8K %s: %d items", split, len(items))
-    return items
+    logger.info("Loaded GSM8K %s: %d items", split, len(samples))
+    return samples
 
 
 def load_aime_2025(
     sample_size: int = 0,
     seed: int = 42,
-) -> list[dict]:
-    """Load AIME 2025 from HuggingFace and return DatasetStore-format items.
-
-    Returns:
-        List of ``{"query": str, "ground_truth": str}`` dicts.
-        ``ground_truth`` is the integer answer as a string.
+) -> list[Sample]:
+    """Load AIME 2025 from HuggingFace.
 
     Requires the ``datasets`` library: ``pip install -e ".[benchmarks]"``.
     """
@@ -246,15 +248,16 @@ def load_aime_2025(
         ) from None
 
     ds = load_dataset("MathArena/aime_2025", split="train")
-    items: list[dict] = []
-    for row in ds:
-        items.append({"query": row["problem"], "ground_truth": str(row["answer"])})
+    samples: list[Sample] = [
+        Sample(id=i, query=row["problem"], ground_truth=str(row["answer"]))
+        for i, row in enumerate(ds)
+    ]
 
-    if sample_size > 0 and len(items) > sample_size:
-        items = random.Random(seed).sample(items, sample_size)
+    if sample_size > 0 and len(samples) > sample_size:
+        samples = random.Random(seed).sample(samples, sample_size)
 
-    logger.info("Loaded AIME 2025: %d items", len(items))
-    return items
+    logger.info("Loaded AIME 2025: %d items", len(samples))
+    return samples
 
 
 # ---------------------------------------------------------------------------
@@ -262,14 +265,12 @@ def load_aime_2025(
 # ---------------------------------------------------------------------------
 
 
-def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
+def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[Sample]:
     """Load BBEH mini (460 examples, 23 tasks) from HuggingFace.
 
-    Returns ``[{"sample_id": int, "query": str, "ground_truth": str, "task": str}]``.
-    ``sample_id`` is our internal positional index into the merged mini list —
-    BBEH ships as 23 task bins with no native per-sample ID, so we assign
-    sequential ints after flattening. The task field lets downstream
-    per-task filtering split into 23 campaigns.
+    BBEH ships as 23 task bins with no native per-sample ID; we assign
+    sequential ``Sample.id`` after flattening. The per-task metadata is
+    dropped (no consumers after pass 2).
     """
     try:
         from datasets import load_dataset  # type: ignore[import-not-found,import-untyped]
@@ -280,42 +281,40 @@ def load_bbeh(sample_size: int = 0, seed: int = 42) -> list[dict]:
         ) from None
 
     ds = load_dataset("BBEH/bbeh", split="train")
-    items: list[dict] = []
+    samples: list[Sample] = []
     for row in ds:
         if not row.get("mini"):
             continue
-        items.append(
-            {
-                "query": row["input"],
-                "ground_truth": row["target"],
-                "task": row["task"],
-            }
+        samples.append(
+            Sample(
+                id=len(samples),
+                query=row["input"],
+                ground_truth=row["target"],
+            )
         )
 
-    # Assign internal positional IDs over the merged list, pre-downsample
-    # — surviving items keep their canonical index, not a re-numbering.
-    for i, item in enumerate(items):
-        item["sample_id"] = i
+    if sample_size > 0 and len(samples) > sample_size:
+        samples = random.Random(seed).sample(samples, sample_size)
 
-    if sample_size > 0 and len(items) > sample_size:
-        items = random.Random(seed).sample(items, sample_size)
-
-    logger.info(
-        "Loaded BBEH mini: %d items across %d tasks", len(items), len({i["task"] for i in items})
-    )
-    return items
+    logger.info("Loaded BBEH mini: %d items", len(samples))
+    return samples
 
 
-DATASET_LOADERS: dict[str, Callable[..., list[dict]]] = {
+DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
     "gsm8k": load_gsm8k,
     "aime_2025": load_aime_2025,
     "bbeh": load_bbeh,
-    "potter_traces": load_potter_traces,
 }
-"""Map dataset name → loader function. Register new datasets here."""
+"""Map dataset name → loader function. Register new datasets here.
+
+``load_potter_traces`` is a specialized meta-optimization replay loader
+whose rows carry extra fields (round_context, score_delta, …) beyond
+Sample's schema. It is available via direct import but not routed
+through the Sample-typed registry.
+"""
 
 
-def load_dataset(name: str, **kwargs: Any) -> list[dict]:
+def load_dataset(name: str, **kwargs: Any) -> list[Sample]:
     """Load a dataset by name from the registry.
 
     Raises :class:`KeyError` for unknown dataset names.
@@ -362,169 +361,3 @@ def build_dataset_run_data(
     if experiment_id:
         data["experiment_id"] = experiment_id
     return data
-
-
-# ---------------------------------------------------------------------------
-# Trace-based dataset extraction (from synced backend experiments)
-# ---------------------------------------------------------------------------
-
-
-def _generic_resolve_gt(experiment_extract: dict) -> dict[str, str]:
-    """Build ``{query: ground_truth}`` from evaluation_results (generic fallback)."""
-    gt_map: dict[str, str] = {}
-    runs = experiment_extract.get("runs", [])
-    if not runs:
-        return gt_map
-    for er in runs[0].get("evaluation_results", []):
-        q = er.get("query", "")
-        gt = er.get("ground_truth", "")
-        if q and gt:
-            gt_map[q] = gt
-    return gt_map
-
-
-def _extract_dataset_from_traces(
-    experiment_extract: dict,
-    schema: PipelineSchema,
-    backend_name: str | None = None,
-) -> list:
-    """Build dataset from Langfuse-style traces in synced experiment data.
-
-    Each trace in ``runs[0].traces[]`` carries named observations with
-    pipeline step outputs.  Ground truth is resolved via a registered
-    connector resolver (or generic query-string matching as fallback).
-
-    Observation extraction is driven by the schema's ``obs_extraction_map()``.
-
-    Returns:
-        List of dataset dicts (may be empty).
-    """
-    from promptpotter.config.extractors import TRACE_GT_RESOLVERS
-
-    resolver = TRACE_GT_RESOLVERS.get((backend_name or "").lower())
-
-    # Pre-build generic fallback map if no connector resolver
-    generic_gt = _generic_resolve_gt(experiment_extract) if not resolver else {}
-
-    runs = experiment_extract.get("runs", [])
-    if not runs:
-        return []
-
-    traces = runs[0].get("traces", [])
-    if not traces:
-        return []
-
-    dataset = []
-    for trace in traces:
-        query = (trace.get("input") or {}).get("query", "")
-        if not query:
-            continue
-
-        ground_truth = resolver(experiment_extract, query) if resolver else generic_gt.get(query)
-        if not ground_truth:
-            continue
-
-        # Build pipeline_data from observations using declarative mapping
-        pipeline_data: dict = {}
-        llm_provider: str | None = None
-
-        _obs_map = schema.obs_extraction_map()
-
-        for obs in trace.get("observations", []):
-            name = obs.get("name", "")
-            output = obs.get("output")
-            if not name or not output:
-                continue
-
-            for field in _obs_map.get(name, []):
-                if field.output_field is None:
-                    pipeline_data[field.pipeline_key] = output
-                else:
-                    val = output.get(field.output_field)
-                    if val is not None:
-                        pipeline_data[field.pipeline_key] = val
-
-                if field.is_llm and not llm_provider:
-                    llm_provider = (obs.get("metadata") or {}).get("model")
-
-        # Gate: required pipeline key must be present
-        if not pipeline_data.get(schema.required_pipeline_key()):
-            continue
-
-        if llm_provider:
-            pipeline_data["llm_provider"] = llm_provider
-
-        # Total time from trace scores (latency_ms → seconds)
-        for score in trace.get("scores", []):
-            if score.get("name") == "latency_ms" and score.get("value"):
-                pipeline_data["total_time"] = score["value"] / 1000.0
-                break
-
-        dataset.append(
-            {
-                "query": query,
-                "ground_truth": ground_truth,
-                "pipeline_data": pipeline_data,
-                "status": "success",
-            }
-        )
-
-    return dataset
-
-
-def load_dataset_from_traces(
-    store: Stores,
-    backend_id: str,
-    experiment_id: str,
-    sample_size: int = 0,
-    schema: PipelineSchema | None = None,
-) -> list:
-    """Load per-query data from synced experiments or stored replays.
-
-    Priority:
-        1. Langfuse-style traces from ``runs[0].traces[]``
-        2. Stored replay executions
-        3. Empty list if neither found
-    """
-    experiment_extract = store.backends.load_sync(
-        backend_id,
-        f"experiments/{experiment_id}.json",
-    )
-
-    if experiment_extract:
-        if schema is None:
-            from promptpotter.domain.pipeline_schema import PipelineSchema
-
-            schema = PipelineSchema()
-        backend = store.backends.get(backend_id)
-        backend_name = backend.name if backend else None
-        dataset = _extract_dataset_from_traces(
-            experiment_extract, schema=schema, backend_name=backend_name
-        )
-        if dataset:
-            if sample_size > 0 and len(dataset) > sample_size:
-                rng = random.Random(42)
-                dataset = rng.sample(dataset, sample_size)
-            return dataset
-
-    executions = store.backends.list_executions(backend_id)
-    for ex_summary in executions:
-        if ex_summary.get("experiment_id") == experiment_id:
-            execution = store.backends.load_execution(
-                backend_id,
-                ex_summary["execution_id"],
-            )
-            if execution and schema is not None:
-                req_key = schema.required_pipeline_key()
-                dataset = [
-                    r.model_dump()
-                    for r in execution.results
-                    if r.status == "success" and r.pipeline_data and r.pipeline_data.get(req_key)
-                ]
-                if dataset:
-                    if sample_size > 0 and len(dataset) > sample_size:
-                        rng = random.Random(42)
-                        dataset = rng.sample(dataset, sample_size)
-                    return dataset
-
-    return []

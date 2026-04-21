@@ -41,6 +41,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -212,7 +213,7 @@ async def _score_and_select(
     round_num: int,
     state: LoopState,
     env: LoopEnv,
-    scoring_dataset: list[dict],
+    scoring_dataset: list[Sample],
     config: CampaignConfig,
     session: SessionEnv,
     callbacks: RunListener,
@@ -244,7 +245,7 @@ async def _score_and_select(
 
         from promptpotter.domain.scoring import QueryResult
 
-        _probe_queries = {d.get("query") for d in scoring_dataset}
+        _probe_queries = {s.query for s in scoring_dataset}
         _subset = [r for r in state.current_results if r.get("query") in _probe_queries]
         if _subset:
             _subset_scores = compute_composite_score(
@@ -334,7 +335,7 @@ async def execute_round(
     round_num: int,
     state: LoopState,
     env: LoopEnv,
-    scoring_dataset: list[dict],
+    scoring_dataset: list[Sample],
     config: CampaignConfig,
     session: SessionEnv,
     callbacks: RunListener,

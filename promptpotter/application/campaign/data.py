@@ -15,6 +15,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.campaign.campaign_setup import SessionEnv, load_baseline_prompt
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.sample import Sample
 from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
@@ -189,7 +190,7 @@ async def _run_baseline_scoring(
 
 async def prepare_scoring_context(
     experiment_extract: dict | None,
-    train_data: list[dict] | None,
+    train_data: list[Sample] | None,
     campaign_config: CampaignConfig | None = None,
     *,
     pipeline_params: dict | None = None,
@@ -197,7 +198,7 @@ async def prepare_scoring_context(
     svc: Any = None,
     listener: Any | None = None,
     obs: Any | None = None,
-) -> tuple[OptSearchPoint, list[dict], list, list]:
+) -> tuple[OptSearchPoint, list[Sample], list, list]:
     """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
 
     Baseline evaluates the loaded prompt on the **same t-test slice that L1
@@ -260,9 +261,9 @@ async def prepare_scoring_context(
 class DatasetSummary:
     """Return from ``prepare_datasets()``."""
 
-    train_data: list[dict] | None
+    train_data: list[Sample] | None
     index_terms: list[str]
-    splits: dict[str, list[dict]]
+    splits: dict[str, list[Sample]]
     n_unique_queries: int
 
 
@@ -276,6 +277,7 @@ def prepare_datasets(
     from promptpotter.application.datasets.builder import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,
+        samples_from_dicts,
         split_train_test,
     )
 
@@ -291,18 +293,19 @@ def prepare_datasets(
             for name, items in test_sets.items():
                 store.backends.save_dataset(name, items, source_file=excel_path.name)
 
-    splits: dict[str, list[dict]] = {}
+    splits: dict[str, list[Sample]] = {}
     for name in ("train", "test_processes", "test_material"):
         ds = store.backends.load_dataset(name)
-        splits[name] = ds["items"] if ds and ds.get("items") else []
+        raw_items = ds["items"] if ds and ds.get("items") else []
+        splits[name] = samples_from_dicts(raw_items)
 
     train_data = splits["train"] or None
     index_terms = build_all_index_terms(store)
 
     all_queries: set[str] = set()
-    for items in splits.values():
-        for item in items:
-            q = item.get("query", "").strip()
+    for samples in splits.values():
+        for s in samples:
+            q = s.query.strip()
             if q:
                 all_queries.add(q)
 

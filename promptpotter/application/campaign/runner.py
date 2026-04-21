@@ -38,6 +38,7 @@ from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 from promptpotter.shared.errors import graceful
@@ -144,7 +145,7 @@ def _maybe_apply_zero_signal_filter(
     config: CampaignConfig,
     session: SessionEnv,
     round_num: int,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     cb: RunListener,
 ) -> None:
     """Prune always-hit/always-miss queries from the active dataset at round boundaries."""
@@ -169,7 +170,7 @@ def _maybe_apply_zero_signal_filter(
         if excluded:
             excluded_queries = {e["query"] for e in excluded}
             env.scoring_dataset[:] = [
-                d for d in env.scoring_dataset if d.get("query", "") not in excluded_queries
+                s for s in env.scoring_dataset if s.query not in excluded_queries
             ]
             always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
             always_hit = len(excluded) - always_miss
@@ -193,7 +194,7 @@ async def _post_round(
     round_num: int,
     config: CampaignConfig,
     session: SessionEnv,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     cb: RunListener,
 ) -> None:
     """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
@@ -255,7 +256,7 @@ async def _post_round(
 async def _run_round_loop(
     state: LoopState,
     env: LoopEnv,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     config: CampaignConfig,
     session: SessionEnv,
     cb: RunListener,
@@ -274,7 +275,7 @@ async def _run_round_loop(
                 warned = {
                     q for q, e in state.opt_sp.memory.warning_inventory.items() if e.get("warnings")
                 }
-                round_eval_data = [d for d in dataset if d.get("query") in warned]
+                round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:
                 round_eval_data, round_checks = env.scoring_dataset, env.degradation_checks
@@ -358,7 +359,7 @@ async def _run_round_loop(
 
 
 async def run_optimization(
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
     baseline: CampaignBaseline,

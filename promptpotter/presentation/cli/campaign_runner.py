@@ -100,7 +100,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = list(campaign_config.exclude_nodes)
 
-    train_data: list[dict] = []
+    train_data: list = []
     if args.excel_path:
         ds_result = prepare_datasets(session.store, args.excel_path)
         train_data = ds_result.train_data or []

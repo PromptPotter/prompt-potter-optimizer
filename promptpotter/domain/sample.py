@@ -1,0 +1,70 @@
+"""Sample — the canonical per-sample domain object.
+
+Sample is the data-side peer to SearchPoint. It owns a stable cross-campaign
+``id``, the input strings (``query``, ``ground_truth``), and accumulating
+cross-campaign metadata (``escalation_count``, ``run_ids``). Measurement
+values (predicted/hit/score/pipeline_data) live in ``library/dataset_runs/``
+and the per-sample aggregate stats live in ``SampleIndex`` — accessed via
+the methods below, never duplicated as fields on the Sample itself.
+
+Mutable (unlike frozen ``JobSearchPoint``) because ``escalation_count`` and
+``run_ids`` accumulate over the campaign lifecycle.
+"""
+
+from __future__ import annotations
+
+from typing import TYPE_CHECKING
+
+from pydantic import BaseModel, Field
+
+if TYPE_CHECKING:
+    from promptpotter.application.intelligence.sample_index import SampleIndex
+
+
+class Sample(BaseModel):
+    """Canonical per-sample handle + metadata + trace coordinates."""
+
+    model_config = {"extra": "ignore"}
+
+    # Primary identity + inputs — owned directly.
+    id: int
+    query: str
+    ground_truth: str
+
+    # Cross-campaign metadata — accumulates via SampleIndex.on_measurement.
+    escalation_count: int = 0
+    run_ids: list[str] = Field(default_factory=list)
+
+    @classmethod
+    def from_dict(cls, data: dict, fallback_id: int | None = None) -> Sample:
+        """Construct from a plain dict, tolerating legacy shapes.
+
+        - Legacy ``sample_id`` key is accepted as ``id``.
+        - If no id is present, falls back to ``fallback_id`` (positional).
+        Extra keys (``task``, ``source_sheet``, etc.) are ignored.
+        """
+        if "id" not in data and "sample_id" in data:
+            data = {**data, "id": data["sample_id"]}
+        if "id" not in data and fallback_id is not None:
+            data = {**data, "id": fallback_id}
+        return cls(**data)
+
+    # --- Cross-campaign signal accessors (resolve through SampleIndex) ---
+    #
+    # Retrieve-from-archive accessors (``latest_measurement`` /
+    # ``all_measurements`` / ``pipeline_data_for``) live on the archive
+    # reader, not here — they need store access which SampleIndex itself
+    # does not hold. Use ``DatasetRunStore`` directly when trace content
+    # is required.
+
+    def hits(self, index: SampleIndex) -> list[bool]:
+        """Hit/miss history across all measurements touching this sample."""
+        return index.hits(self.id)
+
+    def failure_modes(self, index: SampleIndex) -> list[str]:
+        """Failure mode (``terminated_at``) history for this sample."""
+        return index.failure_modes(self.id)
+
+    def degradation_count(self, index: SampleIndex) -> int:
+        """Number of measurements that produced degradation warnings."""
+        return index.degradation_count(self.id)

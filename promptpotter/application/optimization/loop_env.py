@@ -13,10 +13,11 @@ infrastructure handle a single dedicated home.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
@@ -40,6 +41,6 @@ class LoopEnv:
     campaign_store: CampaignStore | None = None
     cycle_id: str | None = None
     obs_campaign_id: str = ""
-    scoring_dataset: list[dict[str, Any]] = field(default_factory=list)
+    scoring_dataset: list[Sample] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0

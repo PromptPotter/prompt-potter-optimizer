@@ -158,8 +158,11 @@ class ObservabilityBridge:
     def langfuse_sink(self) -> LangfuseSink | None:
         return self._langfuse
 
-    def register_dataset(self, dataset_name: str, dataset: list[dict]) -> dict[str, str]:
-        """Emit ``DatasetRegistered`` and return ``{query: file_item_id}``."""
+    def register_dataset(self, dataset_name: str, dataset: list) -> dict[str, str]:
+        """Emit ``DatasetRegistered`` and return ``{query: file_item_id}``.
+
+        Accepts ``list[Sample]`` or legacy ``list[dict]``.
+        """
         if not self._enabled:
             return {}
         import hashlib
@@ -168,8 +171,12 @@ class ObservabilityBridge:
         seen: set[str] = set()
         items: list[tuple[str, str]] = []
         for entry in dataset:
-            query = entry.get("query", "")
-            ground_truth = entry.get("ground_truth", "")
+            if hasattr(entry, "query"):
+                query = entry.query
+                ground_truth = entry.ground_truth
+            else:
+                query = entry.get("query", "")
+                ground_truth = entry.get("ground_truth", "")
             if not query or query in seen:
                 continue
             seen.add(query)
@@ -189,7 +196,7 @@ class ObservabilityBridge:
         *,
         config_snapshot: dict[str, Any],
         baseline_accuracy: float,
-        dataset: list[dict[str, Any]],
+        dataset: list,
         obs_campaign_id: str,
         langfuse_session_id: str | None,
     ) -> ObservabilityBridge | None:

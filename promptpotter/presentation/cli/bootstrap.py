@@ -97,7 +97,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
 
 async def prepare_scoring_context(
     session: SessionEnv,
-    train_data: list[dict] | None,
+    train_data: list | None,
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,
     listener: Any | None = None,

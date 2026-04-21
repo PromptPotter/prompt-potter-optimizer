@@ -41,16 +41,17 @@ class QueryResult(TypedDict):
     authoritative ``scored`` audit map (``{scorer_id: {score, hit, formula}}``
     — one entry per scorer the trace has been evaluated under). They are
     ``NotRequired`` because a freshly measured trace has not yet been scored.
+
+    ``sample_id`` is the foreign key back to ``Sample.id`` — canonical,
+    assigned at dataset creation, stable across campaigns.
     """
 
+    sample_id: int
     query: str
     ground_truth: str
     predicted: str
     hit: NotRequired[bool]
     score: NotRequired[float]
-    # Optional internal positional index assigned by the dataset loader
-    # (e.g. BBEH enumerate over merged mini list). Not a canonical upstream ID.
-    sample_id: NotRequired[int]
     error: str | None
     pipeline_data: PipelineData | None
 
@@ -109,6 +110,7 @@ class QueryRunner(Protocol):
 
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.sample_index import SampleIndex
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store import Stores
@@ -141,6 +143,7 @@ class ScoringEnv:
     # Stale data load protocol — optimizer pipeline node sequence
     stale_data_load_protocol: list[str] | None = None
     search_memory: SearchMemory | None = None
+    sample_index: SampleIndex | None = None
     # Tag recorded alongside every score this scorer produces — forms the
     # key into the per-trace ``scored`` multi-scorer map. Derived from
     # ``campaign.json::scoring.id`` (or auto-hashed from the formula).

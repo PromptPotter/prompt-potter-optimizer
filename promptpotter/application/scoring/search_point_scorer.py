@@ -36,6 +36,7 @@ from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import EscalationSignal
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -151,9 +152,10 @@ def _build_scoring_error_signal(
 
 async def _run_query_loop(
     search_point: JobSearchPoint,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     ctx: ScoringEnv,
     *,
+    run_id: str,
     prior_results: dict[str, QueryResult],
     on_result: Callable[[QueryResult, int, int], None] | None,
     on_start: Callable[[str, int, int], None] | None,
@@ -161,7 +163,7 @@ async def _run_query_loop(
     candidate_idx: int,
     n_total_candidates: int,
 ) -> QueryLoopResult:
-    """Evaluate dataset queries, reusing prior results where available."""
+    """Evaluate dataset samples, reusing prior results where available."""
     results: list[QueryResult] = []
     consecutive_errors = 0
 
@@ -177,13 +179,18 @@ async def _run_query_loop(
             None,
         )
 
+    def _fire_on_measurement(result: QueryResult) -> None:
+        """Auto-trigger: synchronous SampleIndex update after each measurement."""
+        if ctx.sample_index is not None:
+            ctx.sample_index.on_measurement(result, run_id)
+
     try:
-        for i, qd in enumerate(dataset):
+        for i, sample in enumerate(dataset):
             if ctx.stop_check and ctx.stop_check():
                 logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
                 return QueryLoopResult(results, completed=False, stop_reason="graceful")
 
-            query = qd["query"]
+            query = sample.query
 
             if on_start is not None:
                 on_start(query, i, len(dataset))
@@ -199,7 +206,7 @@ async def _run_query_loop(
                 if _is_degraded(cached_r) and ctx.stale_data_load_protocol:
                     recovered, _step = await _execute_stale_data_protocol(
                         ctx.stale_data_load_protocol,
-                        qd,
+                        sample,
                         cast(dict[str, Any], cached_r),
                         ctx,
                         pipeline_params=search_point.pipeline_params,
@@ -207,10 +214,9 @@ async def _run_query_loop(
                     cached_r = cast(QueryResult, recovered)
                 # Overlay current-run sample_id — archived traces may predate
                 # the field; display should always show the current ID.
-                sid = qd.get("sample_id")
-                if sid is not None:
-                    cached_r["sample_id"] = sid
+                cached_r["sample_id"] = sample.id
                 results.append(cached_r)
+                _fire_on_measurement(cached_r)
                 if on_result is not None:
                     on_result(cached_r, i, len(dataset))
                 # Elimination must see cached rows too — otherwise a candidate
@@ -227,7 +233,7 @@ async def _run_query_loop(
 
             # Miss → backend call.
             result = await measure_sample(
-                qd,
+                sample,
                 ctx,
                 pipeline_params=search_point.pipeline_params,
             )
@@ -235,7 +241,7 @@ async def _run_query_loop(
             if _is_degraded(result) and ctx.stale_data_load_protocol:
                 stale_result, _step = await _execute_stale_data_protocol(
                     ctx.stale_data_load_protocol,
-                    qd,
+                    sample,
                     cast(dict[str, Any], result),
                     ctx,
                     pipeline_params=search_point.pipeline_params,
@@ -243,6 +249,7 @@ async def _run_query_loop(
                 result = cast(QueryResult, stale_result)
 
             results.append(result)
+            _fire_on_measurement(result)
 
             # Consecutive-error abort policy.
             if is_error_result(result):
@@ -263,15 +270,7 @@ async def _run_query_loop(
                         i + 1,
                         len(dataset) - i - 1,
                     )
-                    results.extend(
-                        _error_result(
-                            rq["query"],
-                            rq.get("ground_truth", ""),
-                            abort_reason,
-                            sample_id=rq.get("sample_id"),
-                        )
-                        for rq in dataset[i + 1 :]
-                    )
+                    results.extend(_error_result(rq, abort_reason) for rq in dataset[i + 1 :])
                     return QueryLoopResult(results, completed=False, stop_reason=abort_reason)
             else:
                 consecutive_errors = 0
@@ -296,7 +295,7 @@ async def _run_query_loop(
 
 async def score_search_point(
     search_point: JobSearchPoint,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     ctx: ScoringEnv,
     *,
     label: str = "Eval",
@@ -351,10 +350,16 @@ async def score_search_point(
         )
         store.dataset_runs.save(backend_id, run_id, run_data)
 
+    # Ensure Samples are registered on the SampleIndex before the auto-trigger
+    # fires — on_measurement updates Sample.run_ids by id lookup.
+    if ctx.sample_index is not None:
+        ctx.sample_index.register_many(dataset)
+
     batch = await _run_query_loop(
         search_point,
         dataset,
         ctx,
+        run_id=run_id,
         prior_results=prior_results,
         on_result=on_result,
         on_start=on_start,

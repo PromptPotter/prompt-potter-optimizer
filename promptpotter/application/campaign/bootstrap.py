@@ -27,7 +27,7 @@ def bootstrap_cycle(
     session: Any,
     baseline_render: str,
     baseline_accuracy: float,
-    dataset: list[dict[str, Any]],
+    dataset: list,
     active_steps: list[str],
     cycle_id_override: str | None,
     *,

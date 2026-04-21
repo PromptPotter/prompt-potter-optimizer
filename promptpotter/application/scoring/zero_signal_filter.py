@@ -31,15 +31,14 @@ def apply_zero_signal_exclusions(
     store: Stores,
     dataset_name: str,
     memory: SearchMemory,
-    active_dataset: list[dict[str, Any]],
+    active_dataset: list,
     min_observations: int,
     campaign_id: str = "",
 ) -> list[dict[str, Any]]:
-    """Prune zero-signal queries from the active dataset and persist.
+    """Prune zero-signal samples from the active dataset and persist.
 
-    Returns the list of excluded query records (possibly empty). The
-    in-memory ``active_dataset`` list is mutated in place so the next
-    round's loop iterates the smaller set.
+    ``active_dataset`` is ``list[Sample]``; the list is mutated in place
+    so the next round's loop iterates the smaller set.
 
     The caller is responsible for surfacing the result to the UI
     (``RunListener.on_phase`` or similar).
@@ -48,7 +47,7 @@ def apply_zero_signal_exclusions(
     if not dead:
         return []
 
-    active_queries = {d.get("query", "") for d in active_dataset}
+    active_queries = {s.query for s in active_dataset}
     new_exclusions = [d for d in dead if d.query in active_queries]
     if not new_exclusions:
         return []
@@ -72,7 +71,7 @@ def apply_zero_signal_exclusions(
         return []
 
     excluded_set = {e["query"] for e in exclusion_payload}
-    active_dataset[:] = [d for d in active_dataset if d.get("query", "") not in excluded_set]
+    active_dataset[:] = [s for s in active_dataset if s.query not in excluded_set]
 
     logger.info(
         "Zero-signal filter excluded %d samples from dataset %r (min_observations=%d, campaign=%s)",

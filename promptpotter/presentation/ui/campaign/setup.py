@@ -311,11 +311,11 @@ async def show_backend_status(client) -> dict:
 
 async def prepare_scoring_context(
     session: SessionEnv,
-    train_data: list[dict] | None,
+    train_data: list | None,
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,
     listener: Any | None = None,
-) -> tuple[OptSearchPoint, list[dict], list, list]:
+) -> tuple[OptSearchPoint, list, list, list]:
     """Load baseline prompt, set dataset, run baseline on full dataset.
 
     Delegates to shared orchestration with notebook display.  A tqdm
@@ -400,7 +400,7 @@ def prepare_datasets(
     excel_path: str | Path | None = None,
     *,
     force: bool = False,
-) -> tuple[list[dict] | None, list[str]]:
+) -> tuple[list | None, list[str]]:
     """Load/create datasets, build session terms, and display summary.
 
     Thin display wrapper around

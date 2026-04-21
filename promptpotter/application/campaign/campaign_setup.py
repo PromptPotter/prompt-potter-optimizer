@@ -17,13 +17,12 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
-    from typing import Any
-
     from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.data import CampaignBaseline
@@ -384,7 +383,7 @@ def _campaign_status_for(stop_reason: StopReason) -> str:
 
 async def init_optimization_loop(
     baseline: CampaignBaseline,
-    dataset: list[dict[str, Any]],
+    dataset: list[Sample],
     config: CampaignConfig,
     *,
     cb: RunListener,

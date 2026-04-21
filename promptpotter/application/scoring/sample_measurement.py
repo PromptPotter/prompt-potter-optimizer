@@ -1,16 +1,15 @@
-"""Sample measurement — single-query pipeline execution and scoring.
+"""Sample measurement — single-sample pipeline execution and scoring.
 
-Measures one sample at a time via the backend query endpoint.
+Measures one Sample at a time via the backend query endpoint.
 Dataset-level scoring and prior-result matching live in
 ``search_point_scorer``.
 
 Prompt interpolation
 --------------------
 Prompt templates can contain ``{{variable}}`` placeholders filled at
-eval time from ``query_data`` fields.  Syntax uses double-brace
+measurement time from the Sample's fields.  Syntax uses double-brace
 ``{{name}}`` — same convention as ``PromptTemplate.compile_prompt()``.
-Available variables come from the dataset item dict; ``ground_truth``
-is always excluded to prevent data leakage.
+``ground_truth`` is always excluded to prevent data leakage.
 """
 
 from __future__ import annotations
@@ -22,6 +21,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
@@ -70,7 +70,7 @@ def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
         if key in safe_vars:
             text = text.replace("{{" + key + "}}", str(safe_vars[key]))
         else:
-            logger.debug("Template variable {{%s}} not in query_data — left as-is", key)
+            logger.debug("Template variable {{%s}} not in sample fields — left as-is", key)
     return text
 
 
@@ -78,14 +78,7 @@ def interpolate_pipeline_params(
     pipeline_params: dict[str, Any],
     query_data: dict[str, Any],
 ) -> dict[str, Any]:
-    """Return a shallow copy of *pipeline_params* with prompts interpolated.
-
-    Walks every node config dict.  If a node has a ``"prompt"`` key whose
-    value contains ``{{...}}`` tokens, those tokens are replaced from
-    *query_data*.  Other keys are untouched.
-
-    The original dict is never mutated.
-    """
+    """Return a shallow copy of *pipeline_params* with prompts interpolated."""
     has_templates = False
     for v in pipeline_params.values():
         if isinstance(v, dict) and "prompt" in v:
@@ -95,7 +88,7 @@ def interpolate_pipeline_params(
                 break
 
     if not has_templates:
-        return pipeline_params  # fast path — no copy needed
+        return pipeline_params
 
     out = dict(pipeline_params)
     for node_name, node_cfg in out.items():
@@ -119,27 +112,22 @@ _INFRA_KEYS: frozenset[str] = frozenset(
 
 
 def _error_result(
-    query: str,
-    ground_truth: str,
+    sample: Sample,
     error_msg: str,
-    sample_id: int | None = None,
 ) -> QueryResult:
     """Build a standard error result dict.
 
     Error rows intentionally carry no ``hit``/``score`` — those fields are
-    owned exclusively by ``rescore_results``, which skips error rows. The
-    display formatter renders these via the ``error`` branch.
+    owned exclusively by ``rescore_results``, which skips error rows.
     """
-    result: QueryResult = {
-        "query": query,
-        "predicted": "ERROR",
-        "ground_truth": ground_truth,
-        "error": error_msg or "unknown error",
-        "pipeline_data": None,
-    }
-    if sample_id is not None:
-        result["sample_id"] = sample_id
-    return result
+    return QueryResult(
+        sample_id=sample.id,
+        query=sample.query,
+        ground_truth=sample.ground_truth,
+        predicted="ERROR",
+        error=error_msg or "unknown error",
+        pipeline_data=None,
+    )
 
 
 def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
@@ -151,14 +139,13 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
 
 
 async def measure_sample(
-    query_data: dict,
+    sample: Sample,
     env: ScoringEnv,
     pipeline_params: dict | None = None,
 ) -> QueryResult:
-    """Measure one sample: run query through pipeline, score against ground truth."""
-    query = query_data["query"]
-    ground_truth = query_data["ground_truth"]
-    sample_id = query_data.get("sample_id")
+    """Measure one Sample: run query through pipeline, score against ground truth."""
+    query = sample.query
+    ground_truth = sample.ground_truth
 
     pipeline_schema = env.pipeline_schema
     if pipeline_schema is None:
@@ -167,7 +154,7 @@ async def measure_sample(
         pipeline_schema = PipelineSchema()
 
     try:
-        wire_params = interpolate_pipeline_params(pipeline_params or {}, query_data)
+        wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
         resp = await env.backend_client.run_query(query, pipeline_params=wire_params)
         data = resp.get("data", {})
 
@@ -175,19 +162,16 @@ async def measure_sample(
         predicted = ranked[0].get("candidate", NO_RESULT) if ranked else NO_RESULT
         if predicted == "ERROR":
             return _error_result(
-                query,
-                ground_truth,
+                sample,
                 f"[{ErrorCategory.PIPELINE}] Backend returned ERROR as candidate"
                 " — pipeline internal failure for this query.",
-                sample_id=sample_id,
             )
         gt_rank = next(
             (i + 1 for i, c in enumerate(ranked) if c.get("candidate") == ground_truth),
             None,
         )
 
-        # Project wire response → pipeline_data.  Keys: per-schema observation
-        # outputs + infrastructure keys.
+        # Project wire response → pipeline_data.
         pd: dict = {"final_ranking": ranked}
         for key in pipeline_schema.observation_keys | _INFRA_KEYS:
             val = data.get(key)
@@ -203,6 +187,7 @@ async def measure_sample(
             pd["terminated_at"] = terminated_at
 
         result: dict = {
+            "sample_id": sample.id,
             "query": query,
             "predicted": predicted,
             "ground_truth": ground_truth,
@@ -211,11 +196,7 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
-        if sample_id is not None:
-            result["sample_id"] = sample_id
-        # Populate per-query evaluator values. Sits inside pipeline_data so
-        # the existing per-query scoring formula compiler flattens it into
-        # the formula namespace (``evaluators.retrieval_shortfall`` etc.).
+        # Populate per-query evaluator values.
         from promptpotter.application.scoring.evaluators import materialize_query_values
 
         query_evaluators = materialize_query_values(pipeline_schema, result)  # type: ignore[arg-type]
@@ -233,13 +214,13 @@ async def measure_sample(
     except httpx.HTTPStatusError as exc:
         error_msg = _classify_http_error(exc)
         logger.warning("measure_sample for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg, sample_id=sample_id)
+        return _error_result(sample, error_msg)
     except (httpx.ConnectError, httpx.TimeoutException) as exc:
         error_msg = f"[{ErrorCategory.CONNECTION}] {exc} — Backend may be down or unreachable."
         logger.warning("measure_sample CONNECTION for %s: %s", query[:60], error_msg)
-        return _error_result(query, ground_truth, error_msg, sample_id=sample_id)
+        return _error_result(sample, error_msg)
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
         logger.warning("measure_sample failed for %s: %s", query[:60], exc)
-        return _error_result(query, ground_truth, str(exc), sample_id=sample_id)
+        return _error_result(sample, str(exc))

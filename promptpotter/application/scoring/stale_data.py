@@ -15,6 +15,7 @@ from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.application.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import ScoringEnv
 
 logger = logging.getLogger(__name__)
@@ -59,7 +60,7 @@ def compare_rerun(cached_result: Mapping[str, Any], rerun_result: Mapping[str, A
 
 async def execute_stale_data_protocol(
     protocol_steps: list[str],
-    query_data: dict,
+    sample: Sample,
     cached_result: dict[str, Any],
     env: ScoringEnv,
     *,
@@ -84,7 +85,7 @@ async def execute_stale_data_protocol(
     node = get_optimizer_schema().get_node("l1_score")
     assert node is not None, "l1_score node missing from optimizer schema"
     cfg = node.current_config
-    query = query_data["query"]
+    query = sample.query
     result = cached_result
 
     for step in protocol_steps:
@@ -107,7 +108,7 @@ async def execute_stale_data_protocol(
                     "degraded_obs_threshold": trigger_count,
                 }, "below_threshold"
 
-            result = dict(await measure_sample(query_data, env, pipeline_params=pipeline_params))
+            result = dict(await measure_sample(sample, env, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
             result["rerun_comparison"] = compare_rerun(cached_result, result)
             if not is_degraded(result):
@@ -122,7 +123,7 @@ async def execute_stale_data_protocol(
             probe_params = (
                 env.pipeline_schema.to_pipeline_params() if env.pipeline_schema is not None else {}
             )
-            result = dict(await measure_sample(query_data, env, pipeline_params=probe_params))
+            result = dict(await measure_sample(sample, env, pipeline_params=probe_params))
             result["samplescan_resolved"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,

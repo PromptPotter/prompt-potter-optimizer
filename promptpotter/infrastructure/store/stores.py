@@ -285,17 +285,24 @@ class BackendStore:
     def save_dataset(
         self,
         name: str,
-        items: list[dict],
+        items: list,
         *,
         source_file: str = "",
     ) -> Path:
-        """Write a named dataset to disk."""
+        """Write a named dataset to disk.
+
+        ``items`` may be ``list[Sample]`` or ``list[dict]``; Samples are
+        serialized via ``model_dump()``.
+        """
+        from promptpotter.domain.sample import Sample
+
+        serialized = [item.model_dump() if isinstance(item, Sample) else item for item in items]
         data: dict[str, Any] = {
             "name": name,
             "created_at": datetime.now(UTC).isoformat(),
             "source_file": source_file,
-            "row_count": len(items),
-            "items": items,
+            "row_count": len(serialized),
+            "items": serialized,
         }
         path = self._dataset_cache_path(name)
         write_json(path, data)

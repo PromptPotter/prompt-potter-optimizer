@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+from typing import Any
 
 # SHA256 truncated to 24 hex chars (96 bits) — sufficient for content-addressed
 # deduplication across campaigns.  Birthday-bound collision probability stays
@@ -15,6 +16,13 @@ import json
 HASH_TRUNCATE = 24
 
 __all__ = ["HASH_TRUNCATE", "content_hash"]
+
+
+def _qg_pair(d: Any) -> tuple[str, str]:
+    """Extract (query, ground_truth) from a Sample or legacy dict."""
+    if hasattr(d, "query"):
+        return d.query, d.ground_truth
+    return d.get("query", ""), d.get("ground_truth", "")
 
 
 def content_hash(
@@ -31,7 +39,7 @@ def content_hash(
     ``pipeline_params`` is included when non-empty so that different
     pipeline configurations produce distinct hashes.
     """
-    pairs = sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset)
+    pairs = sorted(_qg_pair(d) for d in dataset)
     blob_dict: dict = {
         "prompt": rendered_prompt,
         "pairs": pairs,

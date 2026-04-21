@@ -10,18 +10,23 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from promptpotter.application.intelligence.sample_index import SampleIndex
 from promptpotter.application.intelligence.search_memory import SearchMemory
 from promptpotter.application.scoring.zero_signal_filter import (
     apply_zero_signal_exclusions,
 )
+from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
 
 
 def _seed_memory(hits: dict[str, list[bool]]) -> SearchMemory:
-    mem = SearchMemory()
-    for q, seq in hits.items():
-        mem._query_hits[q] = list(seq)
-    return mem
+    """Seed a SearchMemory (via SampleIndex) with synthetic hit histories."""
+    idx = SampleIndex()
+    for i, (query, seq) in enumerate(hits.items()):
+        sample = Sample(id=i, query=query, ground_truth=f"gt_{i}")
+        idx.register(sample)
+        idx._hits[i] = list(seq)
+    return SearchMemory(sample_index=idx)
 
 
 def test_dead_queries_respects_min_observations() -> None:
@@ -74,12 +79,12 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
 
 def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) -> None:
     store = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
-    items = [
-        {"query": "always_miss", "ground_truth": "X"},
-        {"query": "always_hit", "ground_truth": "Y"},
-        {"query": "varies", "ground_truth": "Z"},
+    samples = [
+        Sample(id=0, query="always_miss", ground_truth="X"),
+        Sample(id=1, query="always_hit", ground_truth="Y"),
+        Sample(id=2, query="varies", ground_truth="Z"),
     ]
-    store.backends.save_dataset("train", items)
+    store.backends.save_dataset("train", samples)
 
     memory = _seed_memory(
         {
@@ -88,7 +93,7 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
             "varies": [True, False, True, False, True],
         }
     )
-    active = list(items)
+    active = list(samples)
 
     excluded = apply_zero_signal_exclusions(
         store=store,
@@ -101,7 +106,7 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
 
     assert {e["query"] for e in excluded} == {"always_miss", "always_hit"}
     # In-memory list was mutated in place.
-    assert [d["query"] for d in active] == ["varies"]
+    assert [s.query for s in active] == ["varies"]
     # Disk mirrors the same decision.
     data = store.backends.load_dataset("train")
     assert data is not None

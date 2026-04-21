@@ -16,6 +16,13 @@ if TYPE_CHECKING:
 __all__ = ["TUNING_KEYS", "cycle_config_identity", "cycle_hash_suffix"]
 
 
+def _qg_pair(d: Any) -> tuple[str, str]:
+    """Extract (query, ground_truth) from a Sample or legacy dict."""
+    if hasattr(d, "query"):
+        return d.query, d.ground_truth
+    return d.get("query", ""), d.get("ground_truth", "")
+
+
 # Tuning keys — excluded from cycle identity in experiment mode.
 #
 # These control *how* the optimizer runs, not *what problem* it solves.
@@ -46,7 +53,7 @@ TUNING_KEYS = frozenset(
 def cycle_config_identity(
     config: CampaignConfig,
     baseline_rendered: str,
-    dataset: list[dict],
+    dataset: list,
     active_steps: list[str],
     *,
     strict: bool = False,
@@ -77,7 +84,7 @@ def cycle_config_identity(
         "degradation_threshold": opt.degradation_threshold,
         "active_steps": list(active_steps),
         "baseline_rendered": baseline_rendered,
-        "dataset_pairs": sorted((d.get("query", ""), d.get("ground_truth", "")) for d in dataset),
+        "dataset_pairs": sorted(_qg_pair(d) for d in dataset),
     }
     if not strict:
         for k in TUNING_KEYS:
@@ -90,7 +97,7 @@ def cycle_config_identity(
 def cycle_hash_suffix(
     config: CampaignConfig,
     baseline_rendered: str,
-    dataset: list[dict],
+    dataset: list,
     active_steps: list[str],
     *,
     strict: bool = False,
