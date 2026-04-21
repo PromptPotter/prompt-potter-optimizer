@@ -401,6 +401,7 @@ async def init_optimization_loop(
     started_at: str,
 ) -> tuple[LoopState, LoopEnv]:
     """Build LoopState + LoopEnv: baseline, cycle resume, obs, scoring env, search memory."""
+    from promptpotter.application.campaign.bootstrap import bootstrap_cycle
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset
@@ -411,7 +412,6 @@ async def init_optimization_loop(
     from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.domain.scoring import ScoringEnv
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing import ObservabilityBridge
     from promptpotter.shared.scoring import compile_round_scorer
 
@@ -448,7 +448,7 @@ async def init_optimization_loop(
     )
 
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-    campaign_store, resolved_cycle_id, resumed_from_round = CampaignStore.bootstrap_cycle(
+    campaign_store, resolved_cycle_id, resumed_from_round = bootstrap_cycle(
         config,
         session,
         baseline_osp.render(),
