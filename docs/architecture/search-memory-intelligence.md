@@ -62,61 +62,30 @@ Per-query failure tracking: which pipeline step terminated processing
 - `failure_clusters(n)` → queries grouped by dominant failure mode, with
   counts and example queries
 
-## 2. What Is Injected into LLM Prompts Today
+## 2. Composition of the Three Digest Methods
 
-### L1 Generate (meta-prompt)
+The cross-consumer matrix — which source method feeds which digest, and
+which digest each LLM node reads — lives in
+[`information-flow.md § SearchMemory (cross-campaign)`](information-flow.md#searchmemory-cross-campaign).
+This section documents the **composition**: which public and private
+accessors each digest aggregates. Consumers call only `to_l1_digest()`,
+`to_critique_digest()`, `to_strategic_digest()`; everything else is
+private to `search_memory.py` and not part of the external contract.
 
-Built by `SearchMemory.to_l1_digest()` then rendered through
-`format_search_memory_block()`.[^l1fmt] Injected as a "HISTORICAL
-INTELLIGENCE" section in the L1 meta-prompt via
-`format_context_sections()`.
+| Digest | Public accessors | Private accessors | Sample prompt line |
+|--------|------------------|-------------------|---------------------|
+| `to_l1_digest()` | `failure_clusters(3)`, `dead_queries()`, `axis_rankings()[:3]`, `top_k_values()` | — | `Common failure patterns: web_search (45%)` |
+| `to_critique_digest()` | `failure_clusters(3)`, `axis_rankings()[:3]` | `_discriminating_queries()`, `_persistent_failures(3)`, `_exhausted_axes()`, `_axis_value_trend()` | `5 intractable (never hit); 3 chronic` |
+| `to_strategic_digest()` | `failure_clusters` (opt), `axis_rankings()[:5]`, `bottleneck_distribution()` | `_persistent_failures()`, `_parameter_failure_correlation()` | `Axis impact rankings: web_search.max_sites (effect=0.082)` |
 
-| Signal | Source accessor | Prompt text |
-|--------|----------------|-------------|
-| Failure patterns | `failure_clusters(3)` | "Common failure patterns: web_search (45%), token_matching (30%)" |
-| Dead queries | `dead_queries()` | "Dead queries (never hit): 12 queries" |
-| High-impact axes | `axis_rankings()[:3]` | "High-impact axes: web_search.max_sites (effect=0.082, consistently_impactful)" |
-| Best values | `top_k_values(top_axis, 3)` | "Best-performing values: 7 (acc=72.0%), 5 (acc=68.0%)" |
+All three digests render through `format_search_memory_block()` for a
+consistent "HISTORICAL INTELLIGENCE" block shape.[^blockfmt] The
+critique agent additionally receives `round_history` — per-round
+accuracy / composite / pipeline_params / degraded-count dicts built
+inline in `round_execution.py`.[^crit]
 
-[^l1fmt]: `promptpotter/application/intelligence/search_memory.py:SearchMemory.to_l1_digest()` + `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
-
-### L2 Refine (intelligence bundle)
-
-Built by `SearchMemory.to_strategic_digest()` then rendered through
-`format_search_memory_block()`.[^l2fmt] Injected via
-`format_l2_intelligence()`.
-
-| Signal | Source accessor | Prompt text |
-|--------|----------------|-------------|
-| Axis rankings | `axis_rankings()[:5]` | "Axis impact rankings: ..." |
-| Bottleneck distribution | `bottleneck_distribution()` | "Bottleneck distribution: web_search: 45%, token_matching: 30%" |
-
-[^l2fmt]: `promptpotter/application/intelligence/search_memory.py:SearchMemory.to_strategic_digest()` + `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
-
-### Critique Agent (Every-Round Intelligence Hub)
-
-Built inline in `round_execution.py`.[^crit] Passed as
-`search_memory_digest` on `CritiqueContext`. Critique is the
-**every-round intelligence hub** — it runs every round, is the sole
-reader of raw eval results, AND receives SearchMemory intelligence to
-frame its analysis.
-
-All signals below are composed inside `to_critique_digest()`; the underlined accessors are private to `search_memory.py`.
-
-| Signal | Source accessor | Prompt text |
-|--------|----------------|-------------|
-| Discriminating queries | `_discriminating_queries()` | "12 queries vary across configs" |
-| Failure clusters | `failure_clusters(3)` | "web_search (45%); token_matching (30%)" |
-| Tractability profiles | `_persistent_failures(3)` | "5 intractable (never hit); 3 chronic" |
-| Axis exhaustion | `_exhausted_axes()` | "web_search.max_sites (5 values tested, effect=0.008)" |
-| Value trends | `_axis_value_trend()` | "web_search.max_sites: increasing" |
-
-The critique agent also receives `round_history` — a list of
-per-round dicts with accuracy, composite, pipeline_params, degraded
-count, and candidate count.[^rh]
-
-[^crit]: `promptpotter/application/optimization/nodes/round_execution.py`.
-[^rh]: `round_execution.py` — built from `state.rounds`.
+[^blockfmt]: `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
+[^crit]: `promptpotter/application/optimization/nodes/round_execution.py` — builds `round_history` from `state.rounds`.
 
 ## 3. Three Tiers of Intelligence
 

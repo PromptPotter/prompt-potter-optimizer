@@ -267,6 +267,7 @@ def _handle_scored_candidate(
     elim_check: Any,
     idx: int,
     n_candidates: int,
+    round_num: int,
 ) -> tuple[dict, EscalationSignal | None]:
     """Build report for a scored candidate; attach RuntimeFailure on elimination (Rail 2)."""
     elimination_stopped = (
@@ -280,6 +281,7 @@ def _handle_scored_candidate(
         elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
 
     new_rf: RuntimeFailure | None = None
+    candidate_label = osp_c.changes_description or ""
     if elimination_stopped and signal is not None and signal.check_name == "degradation":
         cr = signal.check_result
         dominant = cr.get("dominant_warning", "unknown:unknown")
@@ -293,6 +295,8 @@ def _handle_scored_candidate(
             degraded_count=int(cr.get("degraded_count", 0)),
             total_evaluated=int(cr.get("total_evaluated", len(results))),
             observed_config=dict(observed_node_cfg),
+            first_seen_round=round_num,
+            candidate_label=candidate_label,
         )
     elif scoring_error_abort and signal is not None:
         cr = signal.check_result
@@ -306,6 +310,8 @@ def _handle_scored_candidate(
             degraded_count=degraded_count,
             total_evaluated=total_evaluated,
             observed_config=dict(merged_pp_i or {}),
+            first_seen_round=round_num,
+            candidate_label=candidate_label,
         )
     if new_rf is not None:
         osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
@@ -506,6 +512,7 @@ async def _score_candidates(
             elim_check,
             idx,
             n_candidates,
+            round_num,
         )
         if (
             signal is not None

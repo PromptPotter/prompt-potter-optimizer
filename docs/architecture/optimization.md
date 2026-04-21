@@ -3,60 +3,30 @@
 ```
 ┌─ ONE ROUND ────────────────────────────────────────────────────────────┐
 │                                                                        │
-│  L1 GENERATE (LLM)                                                     │
-│    in:  critique OR l2_directive (mutual exclusion),                   │
-│         task_context, thinking_styles, plan,                          │
-│         escalation_journal + warning_inventory (probe rounds only),   │
-│         failure_analysis (clustered failure patterns + signals),      │
-│         search_memory (failure clusters, top axes, dead queries)      │
-│    out: N candidate OptSearchPoints (prompt + pipeline_params)         │
+│  L1 GENERATE (LLM) — N candidate OptSearchPoints                       │
 │         ↓                                                              │
-│  L1 EVALUATE                                                           │
-│    ┌─ Backend /matches ──── per candidate × per query ──────────────┐  │
-│    │  in:  query + pipeline_params (per-node overrides)             │  │
-│    │  out: ranked_candidates + diagnostics.warnings                 │  │
-│    │                                                                │  │
-│    │  Stale data protocol (cached degraded queries):                │  │
-│    │    rerun → samplescan → sampleswitch (3-step ladder)           │  │
-│    │                                                                │  │
-│    │  DegradationCheck (per-query):                                 │  │
-│    │    degraded_rate >= 0.4? → ABORT + EscalationSignal            │  │
-│    └────────────────────────────────────────────────────────────────┘  │
-│    Winner selection: best accuracy >= baseline + threshold             │
+│  L1 EVALUATE — Backend /matches per candidate × per query              │
+│    ├─ Stale data protocol: rerun → samplescan → sampleswitch           │
+│    ├─ DegradationCheck: degraded_rate ≥ 0.4? → ABORT + EscalationSignal│
+│    └─ Winner: best accuracy ≥ baseline + threshold                     │
 │         ↓                                                              │
-│    ┌─ CRITIQUE (LLM) — every-round intelligence hub ───────────────┐  │
-│    │  in:  pipeline_health, rank_analysis, round_evolution,        │  │
-│    │       query_categories, failure_details, successes,           │  │
-│    │       search_memory (failure clusters, discriminating queries, │  │
-│    │         tractability profiles, axis exhaustion, value trends)  │  │
-│    │                                                                │  │
-│    │  out: { summary, priority_fix, suggested_axes,                │  │
-│    │         failure_highlights, positive/negative_critique }       │  │
-│    │  (compact form via format_critique_for_prompt: summary,       │  │
-│    │   priority_fix, axes, highlights — internal fields omitted)   │  │
-│    └────────────────────────────────────────────────────────────────┘  │
+│  CRITIQUE (LLM) — every-round intelligence hub                         │
 │         ↓                                                              │
-│  Compact critique → next L1 Generate (or L2 Refine on escalation)     │
+│  Compact critique → next L1 Generate (or L2 Refine on escalation)      │
 │                                                                        │
-│  ── ESCALATION (if degradation detected) ──────────────────────────── │
+│  ── ESCALATION (if degradation detected) ───────────────────────────── │
 │                                                                        │
 │  L2 REFINE CONTEXT (LLM) — escalation-only meta-controller             │
-│    in:  critique, prev l2_directive, escalation report                 │
-│         (OR warning_inventory when no report), task_context,           │
-│         pipeline schema param keys,                                    │
-│         round trajectory, failure group × axis insights,              │
-│         candidate comparison summary                                   │
-│    out: updated task_context + meta-settings (creativity,              │
-│         n_variants, sp_budget_ttest)                                  │
-│    L2 does NOT set pipeline_params — that's L1's job.                  │
+│    (updates task_context + meta-settings; does NOT set pipeline_params)│
 │                                                                        │
-│  L3 MODIFY PLAN (LLM) — if L2 stalls                                  │
-│    in:  current plan, L2 history, rendered prompt, pipeline section,   │
-│         search_memory (axis rankings, bottleneck dist, failure         │
-│         clusters, persistent failures)                                 │
-│    out: new strategic plan                                             │
+│  L3 MODIFY PLAN (LLM) — if L2 stalls — new strategic plan              │
 └────────────────────────────────────────────────────────────────────────┘
 ```
+
+What each node reads and writes (inputs, outputs, mutual-exclusion rules)
+lives in [`information-flow.md`](information-flow.md) — one page, one
+canonical view. This file owns the execution order; that file owns the
+data.
 
 ## Responsibility Matrix
 

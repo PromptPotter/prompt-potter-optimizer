@@ -143,6 +143,14 @@ class RuntimeFailure:
     degraded_count: int
     total_evaluated: int
     observed_config: dict[str, Any]  # snapshot of the offending node's config
+    # Round in which this failure was first observed. Used by
+    # ``format_l2_intelligence`` to partition NEW (current round) vs
+    # ACCUMULATED (surviving earlier rounds) from a single list.
+    first_seen_round: int = 0
+    # changes_description of the candidate that first produced this failure.
+    # Propagated forward through the outer-memory mirror so ACCUMULATED rows
+    # still identify which prompt variant introduced the pattern.
+    candidate_label: str = ""
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)

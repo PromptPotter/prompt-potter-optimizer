@@ -334,6 +334,7 @@ async def _do_l2_transition(
             "rounds": state.rounds,
             "candidate_scores": last_candidates,
             "escalation_check_result": escalation_check_result,
+            "round_num": round_num,
         },
         enter_payload=enter_payload,
         exit_payload_fn=_exit,

@@ -220,10 +220,11 @@ def format_context_sections(
             alert.append(f"Warnings: {latest['warning_types']}")
         sections.append("\n".join(alert))
 
+    # Directive/critique mutual exclusion: L2 digests critique into a directive,
+    # so when both are present the directive already absorbs the critique signal.
     if l2_directive:
         sections.append(f"DIRECTIVE:\n{l2_directive}")
-
-    if critique_text:
+    elif critique_text:
         sections.append(f"CRITIQUE:\n{critique_text}")
 
     if thinking_styles:
@@ -248,8 +249,7 @@ def format_l2_intelligence(
     diversity_alert: str | None = None,
     validation_failures: list[dict] | None = None,
     runtime_failures: list[dict] | None = None,
-    runtime_failure_labels: list[str] | None = None,
-    runtime_failures_accumulated: list[dict] | None = None,
+    current_round_num: int = 0,
 ) -> str:
     """Build the L2 refine_strategy intelligence bundle (self-healing signals + trajectory)."""
     sections: list[str] = []
@@ -307,11 +307,12 @@ def format_l2_intelligence(
         )
         sections.append("\n".join(lines))
 
-    # Runtime failures heal L2 itself (not L1); accumulated entries surviving
-    # across rounds mean L2's prior angle didn't work.
-    rfs_new = runtime_failures or []
-    rfs_acc = runtime_failures_accumulated or []
-    if rfs_new or rfs_acc:
+    # Runtime failures heal L2 itself (not L1). Partition the single outer-memory
+    # list by first_seen_round: NEW = this round, ACCUMULATED = earlier rounds.
+    rfs = runtime_failures or []
+    if rfs:
+        rfs_new = [rf for rf in rfs if rf.get("first_seen_round", 0) == current_round_num]
+        rfs_acc = [rf for rf in rfs if rf.get("first_seen_round", 0) != current_round_num]
         lines = [
             "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
             "  (candidates ran but produced high warning rates; L2 must adjust "
@@ -322,11 +323,8 @@ def format_l2_intelligence(
         if rfs_new:
             lines.append("")
             lines.append("NEW (this round):")
-            labels_new = runtime_failure_labels or []
-            for i, rf in enumerate(rfs_new):
-                lines.extend(
-                    format_runtime_failure_line(rf, labels_new[i] if i < len(labels_new) else "")
-                )
+            for rf in rfs_new:
+                lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
 
         if rfs_acc:
             lines.append("")
@@ -335,7 +333,7 @@ def format_l2_intelligence(
                 "L2's prior strategy adjustments did NOT reduce these):"
             )
             for rf in rfs_acc:
-                lines.extend(format_runtime_failure_line(rf))
+                lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
 
         lines.append("")
         lines.append(

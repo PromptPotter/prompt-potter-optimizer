@@ -182,6 +182,7 @@ class L2RefineStrategy(LayerTransition):
         escalation_check_result = ctx.get("escalation_check_result")
         rounds = ctx.get("rounds")
         candidate_scores = ctx.get("candidate_scores")
+        current_round_num = int(ctx.get("round_num", 0))
 
         escalation_section = format_escalation_report(
             escalation_check_result,
@@ -200,22 +201,16 @@ class L2RefineStrategy(LayerTransition):
                 + json.dumps(tc_display, indent=2)
             )
 
-        # Self-healing aggregate — validation (parse-time rail) + runtime (mid-eval rail).
-        # Runtime labels live in a parallel list so the RuntimeFailure dicts stay pure.
+        # Validation failures (parse-time rail) still arrive per-round via candidate_scores
+        # — they're synthetic-0'd and not mirrored to outer memory.
         validation_failures: list[dict] = []
-        runtime_failures: list[dict] = []
-        runtime_failure_labels: list[str] = []
         for cs in candidate_scores or []:
             validation_failures.extend(cs.get("validation_failures") or [])
-            label = cs.get("changes_description", "")
-            for rf in cs.get("runtime_failures") or []:
-                runtime_failures.append(rf)
-                runtime_failure_labels.append(label)
 
-        # Accumulated runtime_failures — patterns surviving L2's prior adjustments (justifies L3).
-        runtime_failures_accumulated = [
-            rf.to_dict() for rf in opt_sp.memory.runtime_failures
-        ] or None
+        # Runtime failures (mid-eval rail) are mirrored onto outer memory in
+        # execute_round BEFORE L2 fires; one list, partitioned at format time
+        # by first_seen_round.
+        runtime_failures = [rf.to_dict() for rf in opt_sp.memory.runtime_failures] or None
 
         intelligence_sections = format_l2_intelligence(
             escalation_section=escalation_section,
@@ -233,9 +228,8 @@ class L2RefineStrategy(LayerTransition):
             ),
             diversity_alert=assess_candidate_diversity(rounds) if rounds else None,
             validation_failures=validation_failures or None,
-            runtime_failures=runtime_failures or None,
-            runtime_failure_labels=runtime_failure_labels or None,
-            runtime_failures_accumulated=runtime_failures_accumulated,
+            runtime_failures=runtime_failures,
+            current_round_num=current_round_num,
         )
 
         return {
