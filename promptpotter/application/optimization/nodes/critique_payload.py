@@ -16,6 +16,10 @@ from collections.abc import Mapping
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.optimization.nodes.formatting import (
+    build_cross_candidate_diff,
+    build_trajectory_report,
+)
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
@@ -76,11 +80,6 @@ class RoundSnapshot:
         search_memory_digest: dict | None = None,
     ) -> RoundSnapshot:
         """Build snapshot; round-local analysis (trajectory, cross-candidate diff) lives on its own field, not mutated onto the SearchMemory digest."""
-        from promptpotter.application.optimization.nodes.formatting import (
-            build_cross_candidate_diff,
-            build_trajectory_report,
-        )
-
         round_analysis: dict[str, str] = {}
         diff = build_cross_candidate_diff(
             cast(list[dict], scoring_result.winner_results),

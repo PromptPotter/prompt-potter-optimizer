@@ -19,6 +19,7 @@ from promptpotter.application.optimization.nodes.critique_payload import (
     RoundSnapshot,
     get_candidates,
 )
+from promptpotter.application.optimization.nodes.formatting import format_search_memory_block
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.shared.errors import is_error_result
@@ -93,23 +94,16 @@ def _parse_critique(content: str) -> dict:
     """Parse LLM critique response into the 6-field dict."""
     try:
         result = json.loads(content)
-        return {
-            "positive_critique": result.get("positive_critique", ""),
-            "negative_critique": result.get("negative_critique", ""),
-            "priority_fix": result.get("priority_fix", ""),
-            "suggested_axes": result.get("suggested_axes", []),
-            "failure_highlights": result.get("failure_highlights", []),
-            "summary": result.get("summary", content),
-        }
     except (json.JSONDecodeError, TypeError):
-        return {
-            "positive_critique": "",
-            "negative_critique": "",
-            "priority_fix": "",
-            "suggested_axes": [],
-            "failure_highlights": [],
-            "summary": content,
-        }
+        result = {}
+    return {
+        "positive_critique": result.get("positive_critique", ""),
+        "negative_critique": result.get("negative_critique", ""),
+        "priority_fix": result.get("priority_fix", ""),
+        "suggested_axes": result.get("suggested_axes", []),
+        "failure_highlights": result.get("failure_highlights", []),
+        "summary": result.get("summary", content),
+    }
 
 
 def format_critique_for_prompt(critique: dict) -> str:
@@ -131,13 +125,12 @@ def format_critique_for_prompt(critique: dict) -> str:
 
 def sample_thinking_styles(n: int = 3, seed: int | None = None) -> list[str]:
     """Sample thinking styles from the variant library for meta-prompt injection."""
-    lib = load_variant_library()
-    styles = lib.get("prompt_fields", {}).get("thinking_style", [])
-    styles = [s for s in styles if s and s.strip()]
-    if not styles:
-        return []
-    rng = random.Random(seed)
-    return rng.sample(styles, min(n, len(styles)))
+    styles = [
+        s
+        for s in load_variant_library().get("prompt_fields", {}).get("thinking_style", [])
+        if s and s.strip()
+    ]
+    return random.Random(seed).sample(styles, min(n, len(styles))) if styles else []
 
 
 # ---------------------------------------------------------------------------
@@ -205,10 +198,11 @@ def _rank_analysis_section(
     near_miss_ratio: float = 0.3,
 ) -> tuple[str, set[str]]:
     """Rank buckets + top-k recall + near-miss patterns."""
-    rank_map: dict[int, int | None] = {}
-    for i, r in enumerate(results):
-        if not is_error_result(r):
-            rank_map[i] = find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
+    rank_map: dict[int, int | None] = {
+        i: find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
+        for i, r in enumerate(results)
+        if not is_error_result(r)
+    }
 
     rank_buckets = {"1": 0, "2-5": 0, "6-10": 0, "11-20": 0, "not_found": 0}
     near_misses: list[dict] = []
@@ -454,10 +448,6 @@ def _assemble_critique_sections(ctx: RoundSnapshot) -> str:
         )
         sections.insert(1, anomaly_block)
 
-    from promptpotter.application.optimization.nodes.formatting import (
-        format_search_memory_block,
-    )
-
     hi = format_search_memory_block(
         ctx.search_memory_digest,
         _CRITIQUE_SM_LABELS,
@@ -467,28 +457,23 @@ def _assemble_critique_sections(ctx: RoundSnapshot) -> str:
         sections.append(hi)
 
     if ctx.round_analysis:
-        ra_lines = ["## THIS ROUND"]
-        if ctx.round_analysis.get("trajectory"):
-            ra_lines.append(f"  [TRAJECTORY] {ctx.round_analysis['trajectory']}")
-        if ctx.round_analysis.get("cross_candidate_diff"):
-            ra_lines.append(
-                f"  MISSED OPPORTUNITIES:\n{ctx.round_analysis['cross_candidate_diff']}"
-            )
-        if len(ra_lines) > 1:
-            sections.append("\n".join(ra_lines))
+        ra_parts: list[str] = []
+        if traj := ctx.round_analysis.get("trajectory"):
+            ra_parts.append(f"  [TRAJECTORY] {traj}")
+        if diff := ctx.round_analysis.get("cross_candidate_diff"):
+            ra_parts.append(f"  MISSED OPPORTUNITIES:\n{diff}")
+        if ra_parts:
+            sections.append("## THIS ROUND\n" + "\n".join(ra_parts))
 
     if ctx.pipeline_schema:
-        cap_lines: list[str] = []
-        for node in ctx.pipeline_schema.nodes:
-            if (
-                node.output_schema
-                and node.output_schema.fields
-                and "output_schema" in node.param_keys
-            ):
-                cap_lines.append(
-                    f"  {node.name} has mutable output_schema"
-                    f" (current fields: {', '.join(node.output_schema.fields)})"
-                )
+        cap_lines = [
+            f"  {node.name} has mutable output_schema"
+            f" (current fields: {', '.join(node.output_schema.fields)})"
+            for node in ctx.pipeline_schema.nodes
+            if node.output_schema
+            and node.output_schema.fields
+            and "output_schema" in node.param_keys
+        ]
         if cap_lines:
             sections.append(
                 "## AVAILABLE SCHEMA MUTATIONS\n"

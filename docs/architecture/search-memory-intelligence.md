@@ -118,17 +118,15 @@ count, and candidate count.[^rh]
 [^crit]: `promptpotter/application/optimization/nodes/round_execution.py`.
 [^rh]: `round_execution.py` — built from `state.rounds`.
 
-## 3. Design Principle: L1 Stays Clean
+## 3. Three Tiers of Intelligence
 
-L1 focuses on generating diverse candidates. Critique is the every-round hub (raw eval + SearchMemory). L2 fires on escalation only (trajectory, candidate comparison, failure group × axis). Deterministic code handles per-query triage.
-
-**Three-tier intelligence architecture:**
+L1 focuses on generating diverse candidates. Everything else is one of three tiers, each with a distinct owner, trigger, and signal type. This is the single framing used throughout the rest of this doc and the rest of the codebase.
 
 | Tier | Handled by | Fires when | What | Example |
 |------|-----------|------------|------|---------|
-| **Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | Zero-signal sample filtering (§ below) |
-| **Every-round** | Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
-| **Strategic** | L2 Refine (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
+| **Tier 1 — Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | Zero-signal sample filtering (§ 5) |
+| **Tier 2 — Every-round critique hub** | Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
+| **Tier 3 — Strategic** | L2 Refine + L3 Plan (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
 
 L1 continues to receive: critique text, scan context, failure analysis
 patterns, and SearchMemory summaries (failure clusters, top axes, dead
@@ -179,9 +177,9 @@ memoized on the instance and the three caches
 `added > 0`. One digest round previously recomputed these derived views
 3–4× each; caching collapses that to one computation per refresh cycle.
 
-## 5. Foundation: Two-Tier Sample Intelligence
+## 5. How the Tiers Operate on Sample Data
 
-### Tier 1 — Deterministic Sample Triage (Code)
+### Tier 1 in action — Deterministic Sample Triage (Code)
 
 Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three severity levels:
 
@@ -228,7 +226,7 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 
 **Why it's not a fallback.** The filter is *not* a "default value when the real one fails" — it's deterministic dataset shrinking driven entirely by observed data. Zero backend calls. No retry. No hidden recovery.
 
-### Tier 2 — L2 Strategic Intelligence (LLM)
+### Tier 3 in action — L2 Strategic Intelligence (LLM)
 
 Meta-reasoning injected into L2 Refine only:
 

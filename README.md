@@ -19,6 +19,8 @@ At its core, PromptPotter just collects a lot of datapoints. Every evaluation is
 - **Statistical early-stopping** — sequential elimination via paired Wilcoxon signed-rank test stops inferior candidates after ~6 queries instead of running the full eval set. Real cost is well below `n_variants × eval_size`.
 - **Cross-run learning** — every evaluation flows into a shared `SearchMemory` store: parameter impact, axis exhaustion, query tractability, failure-group correlations. The optimizer carries what it learned across runs.
 - **Auto-injected scoring** — define your scoring formula once in `campaign.json`. It compiles into every eval path automatically. No glue code.
+- **Scoring as policy, not data** — per-trace `scorer_id` ledger + rescore-on-load; resume replays recorded decisions against rescored inputs and halts on first divergence. `promptpotter fork` re-roots with `parent_cycle_id`. [`optimization.md`](docs/architecture/optimization.md#data-vs-scoring-policy)
+- **Symmetric mid-output tail lookup** — one answer-extraction primitive (same regex on prediction and ground truth, last match wins) backs `\boxed{…}`, `**…**`, and GSM8K `#### N`. Prose-wrapped answers score cleanly without per-dataset parsers.
 - **IDE-native operation** — drive a full optimization campaign from the terminal via the `/potter-run` Claude Code skill. No notebook required.
 
 For a head-to-head comparison with other prompt-optimization frameworks, see [`docs/research/README.md`](docs/research/README.md). For the self-healing architecture in detail, see [`docs/architecture/optimization.md`](docs/architecture/optimization.md).

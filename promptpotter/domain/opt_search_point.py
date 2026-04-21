@@ -70,9 +70,11 @@ class PromptTemplate(SearchPoint):
         """Assemble prompt decomposition fields into a prompt string.
 
         Skips empty fields. Sections separated by double newlines.
-        Few-shot examples formatted as Input/Output pairs.
+        Few-shot examples formatted as Input/Output pairs. Subclasses
+        may override ``_field_value()`` to transform specific fields
+        at render time without duplicating this loop.
         """
-        parts = [v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))]
+        parts = [v for f in PROMPT_STRING_FIELDS if (v := self._field_value(f))]
         block = self._render_few_shot_block()
         if block:
             parts.append(block)
@@ -81,6 +83,15 @@ class PromptTemplate(SearchPoint):
         return "\n\n".join(parts)
 
     # -- Rendering helpers -------------------------------------------------
+
+    def _field_value(self, name: str) -> str:
+        """Return the value to render for a decomposition field.
+
+        Subclass override point — used by ``OptSearchPoint`` to splice
+        ``task_context.upstream_context`` / ``downstream_context`` around
+        ``problem_description`` without re-implementing the full render loop.
+        """
+        return getattr(self, name)
 
     def _render_few_shot_block(self) -> str:
         """Format few-shot examples into a text block (empty string if none)."""
@@ -247,31 +258,17 @@ class OptSearchPoint(PromptTemplate):
     # -- Optimization memory -----------------------------------------------
     memory: OptimizationMemory = Field(default_factory=lambda: OptimizationMemory())
 
-    # -- Render with pipeline context --------------------------------------
+    # -- Render seam: splice task context around problem_description ------
 
-    def render(self) -> str:
-        """Render with upstream/downstream context injected around problem_description."""
+    def _field_value(self, name: str) -> str:
+        """Wrap ``problem_description`` with ``task_context`` up/downstream context."""
+        v = getattr(self, name)
+        if name != "problem_description" or not v:
+            return v
         tc = self.task_context
-        upstream = tc.upstream_context
-        downstream = tc.downstream_context
-        if not upstream and not downstream:
-            return super().render()
-
-        # Build parts without mutating self — compose problem_description inline
-        parts: list[str] = []
-        for f in PROMPT_STRING_FIELDS:
-            v = getattr(self, f)
-            if not v:
-                continue
-            if f == "problem_description":
-                v = "\n\n".join(p for p in (upstream, v, downstream) if p)
-            parts.append(v)
-        block = self._render_few_shot_block()
-        if block:
-            parts.append(block)
-        if self.plan:
-            parts.append(self.plan)
-        return "\n\n".join(parts)
+        if not (tc.upstream_context or tc.downstream_context):
+            return v
+        return "\n\n".join(p for p in (tc.upstream_context, v, tc.downstream_context) if p)
 
     # -- Projection to target layer ----------------------------------------
 

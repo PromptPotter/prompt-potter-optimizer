@@ -1,11 +1,21 @@
 # Observability Audit Table (C2 fixture)
 
+> **Status banner — 2026-04-21.** This doc is a **design spec**, not a
+> description of current code. `events.py` already ships the 18 event
+> dataclasses, but the `LangfuseSink` consolidation prescribed here
+> (collapsing the 12 `_cloud_*` wrappers on `ObsLogger` into sink-side
+> dispatch + persisting the id map to
+> `campaigns/{cycle_id}/langfuse/state.json`) has **not** been executed.
+> Treat this file as the target architecture for the next tracing
+> refactor. Sentences phrased in present tense ("the sink does X",
+> "the bridge owns Y") are aspirational.
+
 Built before any refactor code lands. Documents every Langfuse-touching call
 site in the codebase — `(layer, object_type, parent, metadata, file output)`
 — so the post-refactor `LangfuseSink` and `FileSink` can be tested against a
 fixture rather than a hope.
 
-**Status:** complete. Use this table to construct the test fixture in
+**Audit status:** complete. Use this table to construct the test fixture in
 `tests/test_tracing_parity.py` once the new sinks land.
 
 ---
