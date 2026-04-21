@@ -198,33 +198,16 @@ class OptimizationMemory(BaseModel):
         """
         self.l2_directive = ""
 
-    def record_escalation_event(
-        self,
-        round_num: int,
-        check_result: dict[str, Any],
-        current_pipeline_params: dict | None,
-    ) -> None:
-        """Append a degradation escalation entry to the journal.
+    def append_escalation(self, entry: dict[str, Any]) -> None:
+        """Append a journal entry; fill the previous entry's pending outcome.
 
-        Also fills the outcome of the previous entry if pending.
+        Pure memory operation — the caller shapes the dict (see
+        ``application/optimization/nodes/escalation.py::build_escalation_entry``).
         """
         journal = self.escalation_journal
         if journal and journal[-1]["outcome_degraded_rate"] is None:
-            journal[-1]["outcome_degraded_rate"] = check_result.get("degraded_rate", 0)
-
-        dominant = check_result.get("dominant_warning", "unknown:unknown")
-        problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-        step_cfg = (current_pipeline_params or {}).get(problem_step, {})
-        journal.append(
-            {
-                "round": round_num,
-                "degraded_rate": check_result.get("degraded_rate", 0),
-                "problem_step": problem_step,
-                "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-                "warning_types": check_result.get("warning_types", {}),
-                "outcome_degraded_rate": None,
-            }
-        )
+            journal[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
+        journal.append(entry)
 
 
 class OptSearchPoint(PromptTemplate):

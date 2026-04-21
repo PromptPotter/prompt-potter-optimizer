@@ -32,8 +32,33 @@ __all__ = [
     "DegradationCheck",
     "EmptyOutputCheck",
     "build_degradation_checks",
+    "build_escalation_entry",
     "escalate_l2",
 ]
+
+
+def build_escalation_entry(
+    round_num: int,
+    check_result: dict[str, Any],
+    current_pipeline_params: dict | None,
+) -> dict[str, Any]:
+    """Shape a journal entry from a DegradationCheck result + live pipeline params.
+
+    Parses ``dominant_warning`` ("step:code") to pick the problem step and
+    snapshots that step's config. Pure function — hand the result to
+    ``OptimizationMemory.append_escalation``.
+    """
+    dominant = check_result.get("dominant_warning", "unknown:unknown")
+    problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
+    step_cfg = (current_pipeline_params or {}).get(problem_step, {})
+    return {
+        "round": round_num,
+        "degraded_rate": check_result.get("degraded_rate", 0),
+        "problem_step": problem_step,
+        "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
+        "warning_types": check_result.get("warning_types", {}),
+        "outcome_degraded_rate": None,
+    }
 
 
 # Warnings that are deterministic — one occurrence ends the candidate (no retry).

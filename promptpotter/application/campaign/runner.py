@@ -20,6 +20,7 @@ from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.escalation import (
     EscalationTarget,
+    build_escalation_entry,
     escalate_l2,
 )
 from promptpotter.application.optimization.nodes.round_execution import (
@@ -73,10 +74,12 @@ async def _handle_escalation_signal(
         signal.target in (EscalationTarget.L2, EscalationTarget.L3)
         and config.optimization.enable_l2
     ):
-        state.opt_sp.memory.record_escalation_event(
-            round_num,
-            esc_check_result,
-            state.current_sp.pipeline_params if state.current_sp else None,
+        state.opt_sp.memory.append_escalation(
+            build_escalation_entry(
+                round_num,
+                esc_check_result,
+                state.current_sp.pipeline_params if state.current_sp else None,
+            )
         )
         try:
             obs = env.scoring_ctx.obs if env.scoring_ctx else None
