@@ -19,7 +19,6 @@ import json
 import logging
 import sys
 from pathlib import Path
-from typing import Any
 
 # Windows consoles default to cp1252 which can't print Unicode symbols.
 if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
@@ -187,31 +186,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _wire_display_baseline(display: Any, fresh: float) -> None:
-    """Rewire display baseline fields after post-construction baseline re-run.
-
-    Covers both ``CliDisplay`` (baseline_acc / original_baseline / best_acc)
-    and ``NotebookDisplay`` (state.baseline_accuracy), which both cache
-    baseline into multiple fields at construction and otherwise only advance
-    them on improvement.
-    """
-    if display is None:
-        return
-    current = getattr(display, "baseline_acc", None)
-    if current == fresh and getattr(display, "original_baseline", fresh) == fresh:
-        state = getattr(display, "state", None)
-        if state is None or getattr(state, "baseline_accuracy", fresh) == fresh:
-            return
-    display.baseline_acc = fresh
-    if hasattr(display, "original_baseline"):
-        display.original_baseline = fresh
-    if getattr(display, "best_acc", 0.0) < fresh:
-        display.best_acc = fresh
-    state = getattr(display, "state", None)
-    if state is not None and hasattr(state, "baseline_accuracy"):
-        state.baseline_accuracy = fresh
-
-
 def _build_live_display(
     args: argparse.Namespace,
     *,
@@ -356,10 +330,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     baseline = extract_campaign_baseline(campaign_rounds)
     # Display was built with ``pre_baseline_acc`` from resume state (0.0 on
     # first run or when prior kill happened before baseline finished). The
-    # re-run above produced the fresh value — rewire it now so per-candidate
+    # re-run above produced the fresh value — push it in now so per-candidate
     # deltas, round headers, and best-tracking render against the actual
     # baseline instead of 0 %.
-    _wire_display_baseline(display, baseline.baseline_acc)
+    display.set_baseline(baseline.baseline_acc)
     state_path = campaign_dir / "dashboard.json"
     from promptpotter.shared.errors import ResumeDivergenceError
 

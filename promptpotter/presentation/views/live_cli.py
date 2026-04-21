@@ -80,6 +80,19 @@ class CliDisplay:
         self._current_cand_idx: int = -1
         self._in_baseline: bool = False
 
+    def set_baseline(self, fresh: float) -> None:
+        """Post-baseline rewire — replace the pre-baseline placeholder.
+
+        Called after BASELINE produces a real accuracy; the display was
+        constructed earlier (so per-query output reaches the terminal).
+        ``baseline_acc`` and ``original_baseline`` take the fresh value;
+        ``best_acc`` advances only if it's behind (never demote).
+        """
+        self.baseline_acc = fresh
+        self.original_baseline = fresh
+        if self.best_acc < fresh:
+            self.best_acc = fresh
+
     # ------------------------------------------------------------------
     # Internals
     # ------------------------------------------------------------------

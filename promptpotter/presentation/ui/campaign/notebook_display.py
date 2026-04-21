@@ -69,6 +69,15 @@ class NotebookDisplay:
         # Resolved lazily each call so auto-mint during the run is picked up.
         self._store = store
 
+    def set_baseline(self, fresh: float) -> None:
+        """Post-baseline rewire — mirrors ``CliDisplay.set_baseline``.
+
+        The notebook caches baseline in two fields (``self.baseline_acc``
+        and ``state.baseline_accuracy``); both need the fresh value.
+        """
+        self.baseline_acc = fresh
+        self.state.baseline_accuracy = fresh
+
     def _resolve_session_dir(self) -> Path:
         """Return the active session directory. Raises if no pointer set."""
         from promptpotter.infrastructure.store import read_active_pointer
