@@ -1,13 +1,4 @@
-"""Campaign configuration — CampaignConfig Pydantic model, pipeline setup, LLM factory.
-
-``CampaignConfig`` is the single source of user-authored knobs — nested
-Pydantic sub-models with ``extra='forbid'`` so typos in persisted
-``campaign.json`` files surface as ``ValidationError`` instead of silent
-drops.  Runtime context (``session_id``, ``project_root``, ``pipeline_schema``,
-``pipeline_params``) lives on ``SessionEnv``; loop infrastructure on
-``LoopEnv``.  The three objects are cleanly separated — services take
-whichever two they need.
-"""
+"""Campaign configuration — CampaignConfig Pydantic model, pipeline setup, LLM factory."""
 
 from __future__ import annotations
 
@@ -38,8 +29,6 @@ __all__ = [
 
 
 class OptimizationConfig(BaseModel):
-    """Optimization loop parameters (``campaign_config.optimization``)."""
-
     model_config = ConfigDict(extra="forbid")
 
     # L1 loop control
@@ -92,8 +81,6 @@ class OptimizationConfig(BaseModel):
 
 
 class OptimizerLLMConfig(BaseModel):
-    """LLM provider settings (``campaign_config.optimizer_llm``)."""
-
     model_config = ConfigDict(extra="forbid")
 
     provider: str = Field("groq")
@@ -103,16 +90,7 @@ class OptimizerLLMConfig(BaseModel):
 
 
 class CampaignConfig(BaseModel):
-    """Top-level user-authored campaign configuration.
-
-    Persisted as ``datasets/{name}/campaign.json``.  Three nested
-    sub-models plus top-level scalars.  ``extra='forbid'`` rejects unknown
-    keys — typos at any level raise ``ValidationError`` rather than being
-    silently dropped.
-
-    Runtime-derived state (``pipeline_params``, ``backend_id``, etc.)
-    does NOT live here — it lives on ``SessionEnv``.
-    """
+    """Top-level user-authored campaign configuration (``datasets/{name}/campaign.json``)."""
 
     model_config = ConfigDict(extra="forbid")
 
@@ -130,11 +108,7 @@ class CampaignConfig(BaseModel):
 
 
 def load_campaign_config(raw: dict | CampaignConfig | None) -> CampaignConfig:
-    """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``.
-
-    Raises ``pydantic.ValidationError`` on unknown top-level or nested keys —
-    typos surface here, not three layers deep in a service call.
-    """
+    """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``."""
     if raw is None:
         return CampaignConfig()
     if isinstance(raw, CampaignConfig):
@@ -142,15 +116,8 @@ def load_campaign_config(raw: dict | CampaignConfig | None) -> CampaignConfig:
     return CampaignConfig.model_validate(raw)
 
 
-# ---------------------------------------------------------------------------
-# Preflight (pure — no I/O, no mutation)
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class PreflightMetrics:
-    """Computed display metrics for the preflight walkthrough."""
-
     eff_queries: int
     queries_label: str
     pipeline_label: str
@@ -208,11 +175,7 @@ def compute_preflight_metrics(
     *,
     exclude_nodes: list[str] | None = None,
 ) -> PreflightMetrics:
-    """Derive display-ready metrics from ``CampaignConfig`` + ``SessionEnv``.
-
-    Pure — does not mutate inputs.  ``session`` supplies the active
-    ``pipeline_schema`` so preflight can report on the filtered node set.
-    """
+    """Derive display-ready metrics from ``CampaignConfig`` + ``SessionEnv``. Pure."""
     sp_budget = config.sp_budget_ttest
     eff_queries = min(sp_budget, dataset_size) if dataset_size > 0 else sp_budget
     queries_label = f"{eff_queries} of {dataset_size}"
@@ -244,30 +207,13 @@ def compute_preflight_metrics(
     )
 
 
-# ---------------------------------------------------------------------------
-# Pipeline configuration (derives pipeline_params onto *session*)
-# ---------------------------------------------------------------------------
-
-
 def configure_and_apply_pipeline(
     session: SessionEnv,
     campaign_config: CampaignConfig,
     *,
     log: Callable[[str], None] = logger.info,
 ) -> dict:
-    """Build pipeline identity, apply filtered schema to *session*, log summary.
-
-    Uses ``session.pipeline_schema`` (from ``GET /pipeline``) as the source
-    of truth for node names, falling back to ``session.experiment_extract``
-    only when the schema is unavailable.  Reads ``exclude_nodes`` and
-    ``pipeline_overrides`` from *campaign_config*.
-
-    Sets ``session.pipeline_schema`` (filtered with overrides baked in) and
-    ``session.pipeline_params`` as the canonical derived state.  Does NOT
-    mutate *campaign_config* — user input stays user input.
-
-    Returns the same ``pipeline_params`` dict for convenience.
-    """
+    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
     from promptpotter.application.datasets.prompt_store import (
         has_dataset_prompts,
         load_node_prompt,

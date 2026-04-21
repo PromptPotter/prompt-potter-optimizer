@@ -1,9 +1,4 @@
-"""Canonical factory for a fresh campaign session state.
-
-Lives in the application layer so both CLI (``cmd_init``) and the
-orchestrator's auto-mint branch (``run_optimization``) can build identical
-initial state without either entry-point importing the other.
-"""
+"""Factory for a fresh campaign session state — shared by CLI init and the orchestrator."""
 
 from __future__ import annotations
 
@@ -26,7 +21,6 @@ def new_session_state(
     pipeline_params: dict,
     active_steps: list[str],
 ) -> dict[str, Any]:
-    """Fresh session state — phase='init', empty baseline/results slots."""
     return {
         "phase": "init",
         "init_params": init_params,
@@ -51,20 +45,7 @@ def auto_mint_session(
     dataset_size: int = 0,
     experiment_id: str | None = None,
 ) -> tuple[str, str]:
-    """Mint a session+cycle pair when the caller has no session_id yet.
-
-    Used by the optimize path (``run_optimization`` when called outside
-    CLI ``init``). Mints a fresh ``session_id`` (``s_<8 hex>``), pairs it
-    with the deterministic ``cycle_id = "cycle_" + cycle_hash``, writes
-    ``sessions/{session_id}/session.json`` and an empty
-    ``campaigns/{cycle_id}/index.json``, and claims the active-session
-    pointer so follow-up commands find both without ``--session <id>``.
-
-    Returns ``(session_id, cycle_id)``.
-
-    ``cycle_hash`` is the 12-hex content-addressed suffix (no ``cycle_``
-    prefix) — callers compute it via ``cycle_hash_suffix``.
-    """
+    """Mint (session_id, cycle_id) + write session + claim active pointer when called outside CLI init."""
     from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
     from promptpotter.infrastructure.store.base import validate_path_component
 
@@ -91,8 +72,6 @@ def auto_mint_session(
     sessions.create(session_id, state)
     sessions.ensure_narrative_files(session_id)
 
-    # Pre-create the campaign index with parent_session_id; the optimizer
-    # round loop fills in trials/config/baseline as it runs.
     session.store.campaigns.create(
         session.backend_id,
         cycle_id,
