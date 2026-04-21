@@ -22,8 +22,8 @@ from promptpotter.application.optimization.nodes.formatting import (
     format_search_memory_block,
 )
 from promptpotter.application.optimization.nodes.inbox_registry import (
-    InboxCtx,
     Layer,
+    OptimizerStateView,
     assemble_inbox,
 )
 from promptpotter.application.optimization.phases import CampaignPhase
@@ -186,12 +186,11 @@ class L2RefineStrategy(LayerTransition):
                 + json.dumps(tc_display, indent=2)
             )
 
-        inbox_ctx = InboxCtx(
+        inbox_ctx = OptimizerStateView(
             opt_sp=opt_sp,
             pipeline_schema=ctx.get("pipeline_schema"),
             search_memory=ctx.get("search_memory"),
             round_num=int(ctx.get("round_num", 0)),
-            rounds=ctx.get("rounds"),
             candidate_scores=ctx.get("candidate_scores"),
             escalation_check_result=ctx.get("escalation_check_result"),
             pipeline_params=ctx.get("pipeline_params"),
@@ -400,7 +399,6 @@ async def refine_strategy(
     pipeline_schema: PipelineSchema | None = None,
     escalation_check_result: dict | None = None,
     search_memory: SearchMemory | None = None,
-    rounds: list | None = None,
     candidate_scores: list[dict] | None = None,
 ) -> TransitionResult:
     """L2 refine_strategy shim — delegates to ``L2RefineStrategy().run(...)``."""
@@ -413,7 +411,6 @@ async def refine_strategy(
         pipeline_schema=pipeline_schema,
         search_memory=search_memory,
         escalation_check_result=escalation_check_result,
-        rounds=rounds,
         candidate_scores=candidate_scores,
     )
 

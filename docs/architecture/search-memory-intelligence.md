@@ -100,7 +100,7 @@ accuracy / composite / pipeline_params / degraded-count dicts built
 inline in `round_execution.py`.[^crit]
 
 [^blockfmt]: `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
-[^crit]: `promptpotter/application/optimization/nodes/round_execution.py` — builds `round_history` from `state.rounds`.
+[^crit]: `promptpotter/application/optimization/nodes/critique_payload.py` — the critique agent's `round_history` payload is built from `state.rounds`; the same field name on `opt_sp.memory.round_history` (persisted summaries) is a distinct, narrower record.
 
 ## 3. Three Tiers of Intelligence
 
@@ -214,7 +214,7 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 
 Meta-reasoning injected into L2 Refine only:
 
-- **Round trajectory** — `build_round_trajectory()`: accuracy trend, stall count, direction. Built from `state.rounds`.
+- **Round trajectory** — `build_trajectory_report()`: accuracy trend, stall count, direction. Built from `opt_sp.memory.round_history` (compact per-round summaries that ride with the checkpointed `OptSearchPoint`).
 - **Failure group × axis** — `_parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
 - **Candidate comparison** — `build_candidate_comparison()`: how all candidates performed, preventing L2 from repeating tested approaches.
 

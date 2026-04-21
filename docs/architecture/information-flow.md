@@ -11,13 +11,31 @@ that used to live in `formatting.py`.
 ## How to read
 
 - **Source** — where the raw value lives. `opt_sp.memory.*` survives
-  across rounds; `LoopState.*` is transient within a cycle; `ctx.*` is
-  a per-round computed value; `SearchMemory` is the cross-campaign
-  aggregate.
+  across rounds (carried through `OptSearchPoint.derive_candidate` +
+  `LoopState.adopt_transition` via `memory.model_copy(deep=True)`);
+  `ctx.*` is a per-round computed value carried only on the
+  `OptimizerStateView`; `SearchMemory` is the cross-campaign aggregate.
+  `LoopState` no longer carries per-round optimizer *content* — only
+  the heavy transient `RoundResult` buffer plus orchestration caches
+  (current/best, escalation counters, probe flag, pending decisions).
 - **Retention** — `memory` (checkpointed on `OptSearchPoint.memory`),
   `opt_sp` (checkpointed on `OptSearchPoint` top-level), `transient`
   (computed per-round, not stored), `config` (immutable in-cycle),
   `search_memory` (cross-campaign).
+
+## State ownership
+
+Three state concepts, flat hierarchy:
+
+| Concept | What it holds | Lifetime | Persisted |
+|---------|---------------|----------|-----------|
+| `OptSearchPoint` (opt_sp) | prompt fields + `task_context` + `plan`; `opt_sp.memory` carries `critique_text`, `l2_directive`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `runtime_failures`, `validation_failures`, `failure_analysis`, `round_history`, … | per-cycle, mutable | `campaigns/{cycle_id}/trial_NNNN.json` |
+| `SearchMemory` | cross-cycle aggregates (axis impact, sample_index, failure clusters) | cross-cycle, watermarked | `library/search_memory.json` + `library/sample_index.json` |
+| `LoopEnv` + narrowed `LoopState` | infra handles (store, scoring_ctx, pipeline_schema) on `LoopEnv`; orchestration state (full `RoundResult` buffer, best/current cache, escalation counters, probe flag, pending decisions) on `LoopState` | per-session | reconstructed on resume from opt_sp + trial JSON |
+
+Every L1/L2 prompt reads this triad through a single view:
+`OptimizerStateView` (defined in `inbox_registry.py`). Writes land on
+the natural owner; reads route through one catalogue.
 - **L1 / L2** — section label shown in that layer's prompt, or `—`
   when the field is not consumed by that layer.
 - **Mutex** — ``(group, priority)``; fields sharing a group produce
@@ -31,7 +49,7 @@ Rows with `—` in a layer column are skipped when rendering that layer.
 | Field | Source | Retention | L1 | L2 | Mutex |
 |-------|--------|-----------|----|----|-------|
 | `pipeline_schema_text` | precomputed in `l1_generate` | config | _(raw — no header)_ | — | |
-| `failure_analysis` | `LoopState.failure_analysis` | transient | `FAILURE ANALYSIS ...` | — | |
+| `failure_analysis` | `opt_sp.memory.failure_analysis` | memory | `FAILURE ANALYSIS ...` | — | |
 | `search_memory_l1` | `SearchMemory.digest({failure_clusters, dead_queries, top_axes, top_values})` | search_memory | `HISTORICAL INTELLIGENCE:` | — | |
 | `task_context` | `opt_sp.task_context` | opt_sp | `CONTEXT:` | — | |
 | `escalation_probe` | `opt_sp.memory.escalation_journal` (probe-round only) | memory | _probe-round block_ | — | |
@@ -42,9 +60,9 @@ Rows with `—` in a layer column are skipped when rendering that layer.
 | `plan` | `opt_sp.plan` | opt_sp | `PLAN:` | — | |
 | `escalation_section` | `ctx.escalation_check_result` + `opt_sp.memory.escalation_journal` | transient | — | `PIPELINE STABILITY REPORT ...` | |
 | `warning_inventory` | `opt_sp.memory.warning_inventory` (L2 fallback when no escalation) | memory | — | `## RECURRING PIPELINE WARNINGS ...` | |
-| `trajectory` | `build_trajectory_report(LoopState.rounds)` | transient | — | `CAMPAIGN TRAJECTORY:` | |
+| `trajectory` | `build_trajectory_report(opt_sp.memory.round_history)` | memory | — | `CAMPAIGN TRAJECTORY:` | |
 | `candidate_comparison` | `build_candidate_comparison(candidate_scores)` | transient | — | `LAST ROUND CANDIDATES:` | |
-| `diversity_alert` | `assess_candidate_diversity(LoopState.rounds)` | transient | — | `DIVERSITY ALERT:` | |
+| `diversity_alert` | `assess_candidate_diversity(opt_sp.memory.round_history)` | memory | — | `DIVERSITY ALERT:` | |
 | `validation_failures` | `candidate_scores[*].validation_failures` | transient | — | `L1 VALIDATION FAILURES ...` | |
 | `runtime_failures` | `opt_sp.memory.runtime_failures` | memory | — | `RUNTIME FAILURES — L2 SELF-HEALING ...` | |
 | `search_memory_l2` | `SearchMemory.digest({axis_rankings, bottleneck_distribution, failure_group_insights, persistent_failures, volatile_queries}, include_correlations=True)` | search_memory | — | `HISTORICAL INTELLIGENCE:` | |
@@ -101,7 +119,7 @@ four non-inbox holes for context anchoring:
 | Hole | Source |
 |------|--------|
 | `{{current_plan}}` | `opt_sp.plan` |
-| `{{l2_summary}}` | last 3 `LoopState.rounds` via `l2_history` |
+| `{{l2_summary}}` | last 3 rounds via `l2_history` (built from `LoopState.rounds` in `escalation.py`) |
 | `{{rendered_prompt}}` | `opt_sp.render()` |
 | `{{pipeline_section}}` | `format_pipeline_section(pipeline_params, schema)` |
 | `{{runtime_failures_section}}` | `format_runtime_failures_for_l3(opt_sp.memory.runtime_failures)` |

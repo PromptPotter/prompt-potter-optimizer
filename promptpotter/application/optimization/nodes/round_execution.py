@@ -148,7 +148,6 @@ async def _generate_or_load_candidates(
             client,
             model=model,
             is_probe_round=state.probe_next_round,
-            failure_analysis=state.failure_analysis,
             search_memory=search_memory,
             pipeline_schema=session.pipeline_schema,
             obs=obs,
@@ -390,12 +389,12 @@ async def execute_round(
     if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
-        state.failure_analysis = compile_failure_analysis(
+        state.opt_sp.memory.failure_analysis = compile_failure_analysis(
             scoring_result.winner_results,
             session.pipeline_schema,
         )
     else:
-        state.failure_analysis = None
+        state.opt_sp.memory.failure_analysis = None
 
     round_result = RoundResult(
         round=round_num,
@@ -485,7 +484,20 @@ def update_round_state(
     schema: PipelineSchema | None = None,
 ) -> None:
     """Apply round result to loop state (shared by escalation + normal paths)."""
+    from promptpotter.domain.opt_search_point import RoundSummary
+
     state.rounds.append(rr)
+    state.opt_sp.memory.round_history.append(
+        RoundSummary(
+            round=rr.round,
+            accuracy=rr.accuracy,
+            composite=rr.composite,
+            improved=rr.improved,
+            degraded_queries=rr.degraded_queries,
+            pipeline_params=rr.pipeline_params,
+            candidate_scores=list(rr.candidate_scores),
+        )
+    )
     for f in PROMPT_STRING_FIELDS:
         setattr(state.opt_sp, f, rr.prompt_fields.get(f, ""))
     assert state.current_sp is not None

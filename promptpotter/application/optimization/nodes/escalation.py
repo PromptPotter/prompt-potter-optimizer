@@ -331,7 +331,6 @@ async def _do_l2_transition(
         obs=obs,
         obs_campaign_id=obs_campaign_id,
         run_kwargs={
-            "rounds": state.rounds,
             "candidate_scores": last_candidates,
             "escalation_check_result": escalation_check_result,
             "round_num": round_num,

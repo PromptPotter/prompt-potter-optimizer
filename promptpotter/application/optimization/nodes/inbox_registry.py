@@ -4,7 +4,7 @@ Every L1/L2 prompt receives an ``{{inbox}}`` block assembled from the
 fields declared here. Each :class:`InboxField` owns:
 
     * which layer(s) consume it,
-    * how to source its raw value from an :class:`InboxCtx`,
+    * how to source its raw value from an :class:`OptimizerStateView`,
     * how to render that value into a section string,
     * the section label/header shown in each consuming layer,
     * optional mutex membership for mutually-exclusive pairs (e.g.
@@ -14,6 +14,15 @@ fields declared here. Each :class:`InboxField` owns:
 :data:`LAYER_ORDER` for the target layer, applies mutex resolution,
 drops empty sections, and joins the rest. Replaces the three bespoke
 ``format_*`` assemblers that used to live in :mod:`.formatting`.
+
+:class:`OptimizerStateView` is the **single read-side view** over the
+full optimizer state. It bundles references into the three state
+concepts — ``opt_sp`` (per-cycle, checkpointed), ``search_memory``
+(cross-cycle aggregate) and ``env`` (infra via ``pipeline_schema``) —
+plus a handful of transient per-call inputs. Every ``InboxField.source``
+takes one and reads what it needs. Sibling: ``SearchMemory`` owns
+cross-campaign aggregates; the view stitches opt_sp + search_memory
+together for each prompt assembly.
 
 The critique layer keeps its own assembler (see ``critique.py``) because
 its sections share cross-cutting state (``anomalies``, ``near_miss``).
@@ -89,12 +98,22 @@ _L2_SM_LABELS: dict[str, str] = {
 
 
 @dataclass
-class InboxCtx:
-    """Bag of optional inputs — each :class:`InboxField.source` reads what it needs.
+class OptimizerStateView:
+    """Single read-side view over the full optimizer state.
 
-    Fields are optional because different layers need different subsets.
-    When a field's source returns ``None``/empty, :func:`assemble_inbox`
-    skips that section.
+    Three state concepts are referenced here — :attr:`opt_sp`
+    (per-cycle mutable state: prompt decomposition, plan, task_context,
+    and ``opt_sp.memory`` carrying critique_text / l2_directive /
+    escalation_journal / runtime_failures / round_history /
+    failure_analysis / warning_inventory / thinking_styles),
+    :attr:`search_memory` (cross-cycle aggregate), and the infra-side
+    :attr:`pipeline_schema` — together with a handful of transient
+    per-call inputs that have no persistent home (``escalation_check_result``,
+    ``candidate_scores``, ``pipeline_params``, ``pipeline_schema_text``).
+
+    Every :class:`InboxField.source` takes one of these and reads only
+    what it needs; empty/``None`` values are skipped by
+    :func:`assemble_inbox`.
     """
 
     opt_sp: OptSearchPoint
@@ -104,11 +123,9 @@ class InboxCtx:
 
     # L1-only extras
     is_probe_round: bool = False
-    failure_analysis: FailureAnalysis | None = None
     pipeline_schema_text: str = ""
 
     # L2-only extras
-    rounds: list[Any] | None = None
     candidate_scores: list[dict] | None = None
     escalation_check_result: dict | None = None
     pipeline_params: dict | None = None
@@ -120,8 +137,8 @@ class InboxField:
 
     name: str
     layers: frozenset[Layer]
-    source: Callable[[InboxCtx], Any]
-    render: Callable[[Any, InboxCtx, Layer], str]
+    source: Callable[[OptimizerStateView], Any]
+    render: Callable[[Any, OptimizerStateView, Layer], str]
     retention: Retention
     docstring: str
     # Per-layer mutex: fields sharing a (layer, group) pick the highest priority.
@@ -129,36 +146,36 @@ class InboxField:
 
 
 # ---------------------------------------------------------------------------
-# Source helpers — closures over InboxCtx.
+# Source helpers — closures over OptimizerStateView.
 # ---------------------------------------------------------------------------
 
 
-def _src_memory(attr: str) -> Callable[[InboxCtx], Any]:
-    def _read(ctx: InboxCtx) -> Any:
+def _src_memory(attr: str) -> Callable[[OptimizerStateView], Any]:
+    def _read(ctx: OptimizerStateView) -> Any:
         return getattr(ctx.opt_sp.memory, attr) or None
 
     return _read
 
 
-def _src_task_context(ctx: InboxCtx) -> Any:
+def _src_task_context(ctx: OptimizerStateView) -> Any:
     tc = ctx.opt_sp.task_context
     return tc if tc else None
 
 
-def _src_plan(ctx: InboxCtx) -> str | None:
+def _src_plan(ctx: OptimizerStateView) -> str | None:
     return ctx.opt_sp.plan or None
 
 
-def _src_pipeline_schema_text(ctx: InboxCtx) -> str | None:
+def _src_pipeline_schema_text(ctx: OptimizerStateView) -> str | None:
     return ctx.pipeline_schema_text or None
 
 
-def _src_failure_analysis(ctx: InboxCtx) -> FailureAnalysis | None:
-    fa = ctx.failure_analysis
+def _src_failure_analysis(ctx: OptimizerStateView) -> FailureAnalysis | None:
+    fa = ctx.opt_sp.memory.failure_analysis
     return fa if fa and fa.patterns else None
 
 
-def _src_escalation_probe(ctx: InboxCtx) -> list[dict] | None:
+def _src_escalation_probe(ctx: OptimizerStateView) -> list[dict] | None:
     """Probe-round per-query warning block — fires only when probe AND journal present."""
     if not ctx.is_probe_round:
         return None
@@ -166,7 +183,7 @@ def _src_escalation_probe(ctx: InboxCtx) -> list[dict] | None:
     return journal or None
 
 
-def _src_escalation_alert(ctx: InboxCtx) -> list[dict] | None:
+def _src_escalation_alert(ctx: OptimizerStateView) -> list[dict] | None:
     """Non-probe aggregated alert — suppressed by an active l2_directive."""
     if ctx.is_probe_round:
         return None
@@ -176,19 +193,19 @@ def _src_escalation_alert(ctx: InboxCtx) -> list[dict] | None:
     return journal or None
 
 
-def _src_l1_search_memory(ctx: InboxCtx) -> dict[str, str] | None:
+def _src_l1_search_memory(ctx: OptimizerStateView) -> dict[str, str] | None:
     if ctx.search_memory is None:
         return None
     return ctx.search_memory.digest(_L1_SM_KEYS)
 
 
-def _src_l2_search_memory(ctx: InboxCtx) -> dict[str, str] | None:
+def _src_l2_search_memory(ctx: OptimizerStateView) -> dict[str, str] | None:
     if ctx.search_memory is None:
         return None
     return ctx.search_memory.digest(_L2_SM_KEYS, include_correlations=True)
 
 
-def _src_escalation_section(ctx: InboxCtx) -> str | None:
+def _src_escalation_section(ctx: OptimizerStateView) -> str | None:
     """L2 escalation report — from escalation_check_result + journal."""
     if not ctx.escalation_check_result:
         return None
@@ -201,39 +218,41 @@ def _src_escalation_section(ctx: InboxCtx) -> str | None:
     return text or None
 
 
-def _src_warning_inventory_l2(ctx: InboxCtx) -> dict | None:
+def _src_warning_inventory_l2(ctx: OptimizerStateView) -> dict | None:
     """L2 fallback: per-query warning inventory when no escalation section."""
     if _src_escalation_section(ctx):
         return None
     return ctx.opt_sp.memory.warning_inventory or None
 
 
-def _src_trajectory(ctx: InboxCtx) -> Any:
-    if not ctx.rounds:
+def _src_trajectory(ctx: OptimizerStateView) -> Any:
+    history = ctx.opt_sp.memory.round_history
+    if not history:
         return None
-    return build_trajectory_report(ctx.rounds)
+    return build_trajectory_report(history)
 
 
-def _src_candidate_comparison(ctx: InboxCtx) -> str | None:
+def _src_candidate_comparison(ctx: OptimizerStateView) -> str | None:
     if not ctx.candidate_scores:
         return None
     return build_candidate_comparison(ctx.candidate_scores)
 
 
-def _src_diversity_alert(ctx: InboxCtx) -> str | None:
-    if not ctx.rounds:
+def _src_diversity_alert(ctx: OptimizerStateView) -> str | None:
+    history = ctx.opt_sp.memory.round_history
+    if not history:
         return None
-    return assess_candidate_diversity(ctx.rounds)
+    return assess_candidate_diversity(history)
 
 
-def _src_validation_failures(ctx: InboxCtx) -> list[dict] | None:
+def _src_validation_failures(ctx: OptimizerStateView) -> list[dict] | None:
     vfs: list[dict] = []
     for cs in ctx.candidate_scores or []:
         vfs.extend(cs.get("validation_failures") or [])
     return vfs or None
 
 
-def _src_runtime_failures(ctx: InboxCtx) -> list[dict] | None:
+def _src_runtime_failures(ctx: OptimizerStateView) -> list[dict] | None:
     rfs = [rf.to_dict() for rf in ctx.opt_sp.memory.runtime_failures]
     return rfs or None
 
@@ -243,34 +262,34 @@ def _src_runtime_failures(ctx: InboxCtx) -> list[dict] | None:
 # ---------------------------------------------------------------------------
 
 
-def _r_identity(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_identity(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
     return str(v) if v else ""
 
 
-def _r_task_context(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_task_context(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
     lines = "\n".join(f"  {k}: {val}" for k, val in v.items() if val)
     return f"CONTEXT:\n{lines}" if lines else ""
 
 
-def _r_plan(v: str, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_plan(v: str, _ctx: OptimizerStateView, _layer: Layer) -> str:
     return f"PLAN:\n{v}" if v else ""
 
 
-def _r_thinking_styles(v: list[str], _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_thinking_styles(v: list[str], _ctx: OptimizerStateView, _layer: Layer) -> str:
     if not v:
         return ""
     styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(v))
     return f"THINKING STYLES:\n{styles}"
 
 
-def _r_labeled(label: str) -> Callable[[Any, InboxCtx, Layer], str]:
-    def _render(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_labeled(label: str) -> Callable[[Any, OptimizerStateView, Layer], str]:
+    def _render(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
         return f"{label}\n{v}" if v else ""
 
     return _render
 
 
-def _r_failure_analysis(fa: FailureAnalysis, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_failure_analysis(fa: FailureAnalysis, _ctx: OptimizerStateView, _layer: Layer) -> str:
     if not fa or not fa.patterns:
         return ""
     lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
@@ -291,7 +310,7 @@ def _r_failure_analysis(fa: FailureAnalysis, _ctx: InboxCtx, _layer: Layer) -> s
     return "\n".join(lines)
 
 
-def _r_escalation_probe(journal: list[dict], ctx: InboxCtx, _layer: Layer) -> str:
+def _r_escalation_probe(journal: list[dict], ctx: OptimizerStateView, _layer: Layer) -> str:
     lines = [
         "PROBE ROUND: queries have recurring pipeline warnings. "
         "Generate candidates that address pipeline robustness."
@@ -318,7 +337,7 @@ def _r_escalation_probe(journal: list[dict], ctx: InboxCtx, _layer: Layer) -> st
     return "\n".join(lines)
 
 
-def _r_escalation_alert(journal: list[dict], _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_escalation_alert(journal: list[dict], _ctx: OptimizerStateView, _layer: Layer) -> str:
     latest = journal[-1]
     alert = [
         f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
@@ -332,26 +351,26 @@ def _r_escalation_alert(journal: list[dict], _ctx: InboxCtx, _layer: Layer) -> s
     return "\n".join(alert)
 
 
-def _r_search_memory_l1(v: dict[str, str], _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_search_memory_l1(v: dict[str, str], _ctx: OptimizerStateView, _layer: Layer) -> str:
     # Uses format_search_memory_block's "HISTORICAL INTELLIGENCE:" default header.
     return format_search_memory_block(v, _L1_SM_LABELS)
 
 
-def _r_search_memory_l2(v: dict[str, str], _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_search_memory_l2(v: dict[str, str], _ctx: OptimizerStateView, _layer: Layer) -> str:
     return format_search_memory_block(v, _L2_SM_LABELS)
 
 
-def _r_escalation_section(v: str, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_escalation_section(v: str, _ctx: OptimizerStateView, _layer: Layer) -> str:
     # format_escalation_report returns text ending in "\n" already — preserve.
     return v
 
 
-def _r_warning_inventory_l2(v: dict, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_warning_inventory_l2(v: dict, _ctx: OptimizerStateView, _layer: Layer) -> str:
     text = summarize_warning_inventory(v)
     return (text + "\n") if text else ""
 
 
-def _r_trajectory(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_trajectory(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
     lines = [f"CAMPAIGN TRAJECTORY:\n  {v.text}"]
     if v.classification != "healthy":
         lines.append(
@@ -361,7 +380,7 @@ def _r_trajectory(v: Any, _ctx: InboxCtx, _layer: Layer) -> str:
     return "\n\n".join(lines)
 
 
-def _r_validation_failures(v: list[dict], _ctx: InboxCtx, _layer: Layer) -> str:
+def _r_validation_failures(v: list[dict], _ctx: OptimizerStateView, _layer: Layer) -> str:
     lines = ["L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):"]
     for vf in v:
         allowed = vf.get("allowed") or []
@@ -382,7 +401,7 @@ def _r_validation_failures(v: list[dict], _ctx: InboxCtx, _layer: Layer) -> str:
     return "\n".join(lines)
 
 
-def _r_runtime_failures_l2(v: list[dict], ctx: InboxCtx, _layer: Layer) -> str:
+def _r_runtime_failures_l2(v: list[dict], ctx: OptimizerStateView, _layer: Layer) -> str:
     rfs_new = [rf for rf in v if rf.get("first_seen_round", 0) == ctx.round_num]
     rfs_acc = [rf for rf in v if rf.get("first_seen_round", 0) != ctx.round_num]
     lines = [
@@ -623,7 +642,7 @@ def _by_name() -> dict[str, InboxField]:
     return {f.name: f for f in INBOX}
 
 
-def _render_one(f: InboxField, raw: Any, ctx: InboxCtx, layer: Layer) -> str:
+def _render_one(f: InboxField, raw: Any, ctx: OptimizerStateView, layer: Layer) -> str:
     """Dispatch rendering — for labeled fields, use the per-layer label override."""
     label = _LABEL_BY_LAYER.get((layer, f.name))
     if label is not None:
@@ -656,7 +675,7 @@ def _resolve_mutex(layer: Layer, raws: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in raws.items() if k not in drop}
 
 
-def assemble_inbox(layer: Layer, ctx: InboxCtx) -> str:
+def assemble_inbox(layer: Layer, ctx: OptimizerStateView) -> str:
     """Walk the registry for *layer*, resolve mutex, render, join.
 
     Returns an empty string when no section produces content.
@@ -720,9 +739,9 @@ def registry_rows_for_docs() -> list[dict[str, str]]:
 __all__ = [
     "INBOX",
     "LAYER_ORDER",
-    "InboxCtx",
     "InboxField",
     "Layer",
+    "OptimizerStateView",
     "Retention",
     "assemble_inbox",
     "registry_rows_for_docs",

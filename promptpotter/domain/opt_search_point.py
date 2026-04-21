@@ -21,9 +21,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, Self
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
+from promptpotter.domain.analysis import FailureAnalysis, RuntimeFailure, ValidationFailure
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
@@ -38,6 +38,28 @@ class FewShotExample(BaseModel):
     input: str
     output: str
     explanation: str | None = None
+
+
+class RoundSummary(BaseModel):
+    """Compact per-round record persisted on ``OptimizationMemory.round_history``.
+
+    Mirrors the trajectory-relevant fields of ``RoundResult`` — enough for
+    ``build_trajectory_report`` (needs ``.accuracy``) and
+    ``assess_candidate_diversity`` (needs ``.candidate_scores`` with each
+    entry's ``pipeline_params_override``). Drops raw per-query results and
+    per-candidate results, which remain on the transient ``LoopState.rounds``
+    list.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    round: int
+    accuracy: float
+    composite: float = 0.0
+    improved: bool = False
+    degraded_queries: int = 0
+    pipeline_params: dict | None = None
+    candidate_scores: list[dict] = Field(default_factory=list)
 
 
 class PromptTemplate(SearchPoint):
@@ -199,6 +221,22 @@ class OptimizationMemory(BaseModel):
         "self-healing evidence so the next round's directive names the "
         "disallowed value range. Attached per candidate, so a losing "
         "candidate's runtime issues never disrupt the round winner.",
+    )
+    failure_analysis: FailureAnalysis | None = Field(
+        default=None,
+        description="Latest round's clustered failure analysis over the "
+        "winner's results. Consumed by L1 as an inbox section; replaced "
+        "each round. Lives on memory so L2/L3 derive_candidate + "
+        "adopt_transition carry it forward via model_copy(deep=True).",
+    )
+    round_history: list[RoundSummary] = Field(
+        default_factory=list,
+        description="Compact per-round trajectory ledger. Sufficient for "
+        "``build_trajectory_report`` (accuracy) and "
+        "``assess_candidate_diversity`` (candidate_scores). Full "
+        "``RoundResult`` objects with raw query results stay transient on "
+        "``LoopState.rounds``; this persisted mirror survives trial "
+        "checkpoints.",
     )
 
     def clear_volatile(self) -> None:

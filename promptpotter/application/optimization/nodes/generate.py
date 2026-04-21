@@ -6,8 +6,8 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.nodes.inbox_registry import (
-    InboxCtx,
     Layer,
+    OptimizerStateView,
     assemble_inbox,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
@@ -26,7 +26,6 @@ from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -203,7 +202,6 @@ async def l1_generate(
     llm_client: LLMClientBase,
     model: str | None = None,
     is_probe_round: bool = False,
-    failure_analysis: FailureAnalysis | None = None,
     search_memory: SearchMemory | None = None,
     pipeline_schema: PipelineSchema | None = None,
     obs: ObservabilityBridge | None = None,
@@ -216,13 +214,12 @@ async def l1_generate(
 
     schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
 
-    inbox_ctx = InboxCtx(
+    inbox_ctx = OptimizerStateView(
         opt_sp=opt_sp,
         pipeline_schema=pipeline_schema,
         search_memory=search_memory,
         round_num=round_num,
         is_probe_round=is_probe_round,
-        failure_analysis=failure_analysis,
         pipeline_schema_text=schema_text,
     )
 

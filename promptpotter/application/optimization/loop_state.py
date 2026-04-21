@@ -15,7 +15,6 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
-    from promptpotter.domain.analysis import FailureAnalysis
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
 
@@ -80,8 +79,12 @@ class LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
     Pure optimizer progress — infrastructure handles live on ``LoopEnv``.
-    Optimizer-level state (critique, thinking_styles, task_context,
-    escalation_journal, warning_inventory) lives on ``opt_sp``.
+    Per-candidate/round optimizer memory (critique_text, l2_directive,
+    task_context, escalation_journal, warning_inventory, failure_analysis,
+    round_history, ...) lives on ``opt_sp`` (and its ``memory`` sub-object).
+    What remains on ``LoopState`` is purely *orchestration* state: the heavy
+    full ``RoundResult`` buffer, current/best tracking caches, escalation
+    counters, the probe flag, and the pending-decisions queue.
     """
 
     rounds: list[RoundResult] = field(default_factory=list)
@@ -97,7 +100,6 @@ class LoopState:
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
     probe_next_round: bool = False
-    failure_analysis: FailureAnalysis | None = None
     search_memory: Any = None
     escalation: EscalationState = field(default_factory=EscalationState)
 
