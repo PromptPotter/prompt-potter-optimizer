@@ -86,7 +86,7 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
 
 def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
     loop_state = d["state"]
-    loop_env = d["env"]
+    session = d["env"]
     state.baseline_accuracy = loop_state.current_accuracy
 
     # Mix prompt fields from the loaded baseline into the Start column so
@@ -98,9 +98,9 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         if value:
             state.original_sp_flat[field_name] = str(value)
 
-    cycle_id = (loop_env.cycle_id or "?")[:12]
-    samples = len(loop_env.scoring_dataset)
-    obs = "ON" if (loop_env.scoring_ctx and loop_env.scoring_ctx.obs) else "OFF"
+    cycle_id = (session.cycle_id or "?")[:12]
+    samples = len(session.scoring_dataset)
+    obs = "ON" if session.obs else "OFF"
     print(
         f"  {GREEN}✓{RESET} Initialized  baseline={loop_state.current_accuracy:.1%}  "
         f"cycle={cycle_id}  samples={samples}  obs={obs}"
@@ -111,7 +111,7 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         if len(preview) > 80:
             preview = preview[:77] + "..."
         print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
-    resumed = loop_env.resumed_from_round
+    resumed = session.resumed_from_round
     if resumed > 0:
         state_parts = []
         critique_chars = len(loop_state.opt_sp.memory.critique_text)

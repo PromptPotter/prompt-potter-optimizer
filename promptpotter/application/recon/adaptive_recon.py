@@ -15,6 +15,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal, TypedDict
 
+from promptpotter.application.campaign.campaign_setup import Session
 from promptpotter.application.recon._constants import (
     DEFAULT_DIAGNOSTIC_QUERIES,
     DIAGNOSTIC_HIT_RATIO,
@@ -24,14 +25,12 @@ from promptpotter.application.recon._constants import (
 from promptpotter.application.recon.failure_groups import preview as _preview
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import min_sample_size
 
 if TYPE_CHECKING:
     import pandas as pd
 
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
@@ -154,7 +153,7 @@ def build_axis_profiles(
 
 def make_scoring_fn(
     dataset: list,
-    ctx: ScoringEnv,
+    session: Session,
     get_params: Callable[[], dict],
     on_result: Callable | None = None,
 ) -> Callable:
@@ -164,12 +163,12 @@ def make_scoring_fn(
         _base_pp = pp or get_params()
         sp = opt.to_job_search_point(
             base_pipeline_params=_base_pp,
-            schema=ctx.pipeline_schema,
+            schema=session.pipeline_schema,
         )
         results, scores, cached, _ = await score_search_point(
             sp,
             dataset,
-            ctx,
+            session,
             label="scan",
             on_result=on_result,
         )
@@ -501,7 +500,7 @@ async def run_adaptive_recon(
     baseline_opt: OptSearchPoint,
     variant_library: dict,
     dataset: list,
-    session: SessionEnv,
+    session: Session,
     axis_profiles: list[dict],
     max_rounds: int = 3,
     stop_threshold: float = 0.0,
@@ -542,8 +541,6 @@ async def run_adaptive_recon(
 
     # Unpack session
     backend_client = session.backend_client
-    store = session.store
-    backend_id = session.backend_id
     pipeline_schema = pipeline_schema or session.pipeline_schema
 
     _cb = progress_cb or (lambda _e: None)
@@ -569,18 +566,14 @@ async def run_adaptive_recon(
 
     from promptpotter.shared.scoring import compile_scorer
 
-    _scan_ctx = ScoringEnv(
-        backend_client=backend_client,
-        store=store,
-        backend_id=backend_id,
-        pipeline_schema=pipeline_schema,
-        source="run_adaptive_recon",
-        experiment_id=experiment_id,
-        scorer=compile_scorer(scoring_formula),
-    )
+    # Populate the session's scoring block for this adaptive recon pass.
+    session.pipeline_schema = pipeline_schema
+    session.source = "run_adaptive_recon"
+    session.experiment_id = experiment_id
+    session.scorer = compile_scorer(scoring_formula)
     _score_opt = make_scoring_fn(
         dataset,
-        _scan_ctx,
+        session,
         get_params=lambda: current_params,
     )
 
@@ -748,9 +741,9 @@ async def run_adaptive_recon(
     log_df = pd.DataFrame(log_rows)
 
     # Persist search results to plan
-    if store and backend_id and plan_id:
-        store.recon_plans.update(
-            backend_id,
+    if session.store and session.backend_id and plan_id:
+        session.store.recon_plans.update(
+            session.backend_id,
             plan_id,
             {
                 "status": "search_complete",

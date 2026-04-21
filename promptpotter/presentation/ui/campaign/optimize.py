@@ -33,7 +33,7 @@ from .notebook_primitives import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -71,7 +71,7 @@ def show_feedback_preflight(
     dataset: list,
     campaign_config: CampaignConfig,
     *,
-    session: SessionEnv | None = None,
+    session: Session | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> None:
     """Display a rich pre-flight walkthrough for the feedback cycle.
@@ -99,7 +99,7 @@ def show_feedback_preflight(
 
 def _print_preflight_sections(
     config: CampaignConfig,
-    session: SessionEnv | None,
+    session: Session | None,
     bl: dict,
     dataset: list,
     *,
@@ -223,7 +223,7 @@ async def run_optimization_notebook(
     *,
     langfuse_session_id: str | None = None,
     experiment_id: str | None = None,
-    session: SessionEnv | None = None,
+    session: Session | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
 ) -> tuple[list, RunResult | None]:
@@ -237,7 +237,7 @@ async def run_optimization_notebook(
     """
     from .notebook_display import NotebookDisplay
 
-    assert session is not None, "session (SessionEnv) required for optimization"
+    assert session is not None, "session (Session) required for optimization"
     store = session.store
     backend_id = session.backend_id
 

@@ -19,7 +19,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.domain.scoring import ScoringEnv
+    from promptpotter.application.campaign.campaign_setup import Session
 
 logger = logging.getLogger(__name__)
 
@@ -290,7 +290,7 @@ async def score_candidates(
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
     dataset: list,
-    ctx: ScoringEnv,
+    session: Session,
     *,
     degradation_checks: list | None = None,
     callbacks: RunListener,
@@ -308,7 +308,7 @@ async def score_candidates(
     candidate_scores: list[dict] = []
     escalation_signal: EscalationSignal | None = None
     n_candidates = len(osp_candidates)
-    obs = ctx.obs
+    obs = session.obs
 
     elim_check = EliminationCheck(
         n_min=elimination_n_min,
@@ -342,7 +342,7 @@ async def score_candidates(
 
         sp = osp_c.to_job_search_point(
             base_pipeline_params=merged_pp[idx],
-            schema=ctx.pipeline_schema,
+            schema=session.pipeline_schema,
         )
 
         all_checks = list(degradation_checks or [])
@@ -358,7 +358,7 @@ async def score_candidates(
         results, scores, was_cached, signal = await score_search_point(
             sp,
             dataset,
-            ctx,
+            session,
             label=f"candidate_{idx}",
             on_result=_on_result,
             on_start=_on_start,

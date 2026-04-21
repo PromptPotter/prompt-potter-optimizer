@@ -18,7 +18,7 @@ from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.domain.scoring import ScoringEnv
+    from promptpotter.application.campaign.campaign_setup import Session
 
 
 __all__ = ["L1ScoringResult", "l1_score"]
@@ -54,7 +54,7 @@ async def l1_score(
     candidates: list[dict],
     dataset: list,
     current_best: dict[str, Any],
-    ctx: ScoringEnv,
+    session: Session,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
@@ -73,7 +73,7 @@ async def l1_score(
     osp_candidates, merged_pp, overrides = parse_candidates(
         candidates,
         pipeline_params,
-        ctx.pipeline_schema,
+        session.pipeline_schema,
     )
     decisions: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_candidates(
@@ -81,7 +81,7 @@ async def l1_score(
         merged_pp,
         overrides,
         dataset,
-        ctx,
+        session,
         degradation_checks=degradation_checks,
         callbacks=callbacks,
         elimination_n_min=elimination_n_min,
@@ -104,8 +104,8 @@ async def l1_score(
         all_candidate_results,
         cb,
         improvement_threshold,
-        pipeline_schema=ctx.pipeline_schema,
-        round_scorer=ctx.round_scorer,
+        pipeline_schema=session.pipeline_schema,
+        round_scorer=session.round_scorer,
     )
 
     from promptpotter.application.campaign.decisions import record_decision

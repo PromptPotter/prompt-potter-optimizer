@@ -21,25 +21,29 @@ from promptpotter.domain.sample import Sample
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.shared.scoring import RoundScorer, Scorer
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.data import CampaignBaseline
-    from promptpotter.application.optimization.loop_env import LoopEnv
+    from promptpotter.application.intelligence.sample_index import SampleIndex
+    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.loop_state import LoopState
+    from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.persistence.session_emitter import (
         CampaignPersistenceEmitter,
     )
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "SessionEnv",
+    "Session",
     "finalize_optimization_run",
     "init_optimization_loop",
     "init_services",
@@ -49,9 +53,15 @@ __all__ = [
 
 
 @dataclass
-class SessionEnv:
-    """Session-scoped identity + infrastructure + runtime-derived state. ``project_root`` is the tenant base dir."""
+class Session:
+    """Session-scoped identity + wire-up + loop-cycle infra + scoring.
 
+    Absorbs the old ``SessionEnv`` + ``LoopEnv`` + ``ScoringEnv`` triad into a
+    single object threaded through the optimization loop. ``project_root`` is
+    the tenant base dir.
+    """
+
+    # ---- identity (from SessionEnv) ----
     store: Stores
     backend_id: str
     experiment_id: str
@@ -67,6 +77,104 @@ class SessionEnv:
     cycle_id: str = ""
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
+
+    # ---- loop-cycle infra (from LoopEnv) ----
+    campaign_store: CampaignStore | None = None
+    obs_campaign_id: str = ""
+    scoring_dataset: list[Sample] = field(default_factory=list)
+    degradation_checks: list[DegradationCheck] = field(default_factory=list)
+    resumed_from_round: int = 0
+
+    # ---- scoring (from ScoringEnv) ----
+    obs: ObservabilityBridge | None = None
+    # Compiled per-dataset scorer. Required by the scoring path but populated
+    # after bootstrap (Session is built before the active campaign config's
+    # scoring block is compiled).
+    scorer: Scorer | None = None
+    scorer_id: str = "none"
+    scorer_formula: str | None = None
+    round_scorer: RoundScorer | None = None
+    max_consecutive_errors: int = 3
+    stale_data_load_protocol: list[str] | None = None
+    sample_index: SampleIndex | None = None
+    search_memory: SearchMemory | None = None
+    source: str = ""
+    stop_check: Callable[[], bool] | None = None
+
+    @classmethod
+    def for_loop(
+        cls,
+        base: Session,
+        *,
+        obs: ObservabilityBridge | None,
+        experiment_id: str,
+        cycle_id: str | None,
+        max_consecutive_errors: int,
+        stale_data_load_protocol: list[str] | None,
+        scoring_formula: str | None,
+        scoring_round_formula: str | None = None,
+        scorer_id: str | None = None,
+        source: str = "optimization_loop",
+    ) -> Session:
+        """Populate a ``Session`` in place with the scoring block for an optimization-loop run.
+
+        Owns the derived ``experiment_id`` fallback (short cycle-id prefix
+        when not explicitly set) and the scoring-formula compilation so the
+        caller just hands over raw config. Mutates *base* (attaches scorer +
+        derived fields) and returns it for chaining.
+        """
+        from promptpotter.shared.scoring import (
+            auto_scorer_id,
+            compile_round_scorer,
+            compile_scorer,
+        )
+
+        derived_experiment_id = experiment_id or (
+            cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
+        )
+        round_scorer = (
+            compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
+        )
+        base.experiment_id = derived_experiment_id
+        base.obs = obs
+        base.source = source
+        base.max_consecutive_errors = max_consecutive_errors
+        base.stale_data_load_protocol = stale_data_load_protocol
+        base.scorer = compile_scorer(scoring_formula)
+        base.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
+        base.scorer_formula = scoring_formula
+        base.round_scorer = round_scorer
+        return base
+
+    @classmethod
+    def for_baseline(
+        cls,
+        base: Session,
+        *,
+        obs: ObservabilityBridge | None,
+        scoring_formula: str | None,
+        scoring_round_formula: str | None = None,
+        scorer_id: str | None = None,
+    ) -> Session:
+        """Populate *base* with baseline scoring block (phase 0 of ``optimize``).
+
+        Thin delegation to ``for_loop`` — keeps one source of truth for the
+        scorer-trio compilation. Baseline runs before ``cycle_id`` is bound
+        and on a small scoring set, so it doesn't carry the loop's
+        cycle-derived ``experiment_id`` or stale-data protocol.
+        """
+        return cls.for_loop(
+            base,
+            obs=obs,
+            experiment_id="",
+            cycle_id=None,
+            max_consecutive_errors=3,
+            stale_data_load_protocol=None,
+            scoring_formula=scoring_formula,
+            scoring_round_formula=scoring_round_formula,
+            scorer_id=scorer_id,
+            source="baseline",
+        )
 
 
 def load_baseline_prompt(
@@ -192,7 +300,7 @@ def _check_active_pointer(tenant_id: str, take_over: bool, status: Callable[[str
     status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
 
-def _hydrate_dataset(base: SessionEnv, dataset_name: str, status: Callable[[str], None]) -> None:
+def _hydrate_dataset(base: Session, dataset_name: str, status: Callable[[str], None]) -> None:
     """Load items from DatasetStore; auto-populate from DATASET_LOADERS registry if empty."""
     from promptpotter.application.datasets.builder import samples_from_dicts
 
@@ -228,7 +336,7 @@ def _hydrate_dataset(base: SessionEnv, dataset_name: str, status: Callable[[str]
 
 
 async def _hydrate_experiment(
-    base: SessionEnv,
+    base: Session,
     backend_id: str,
     experiment_id: str,
     client: BackendClient,
@@ -298,7 +406,7 @@ async def init_services(
     on_status: Callable[[str], None] | None = None,
     take_over: bool = False,
     tenant_id: str = "default",
-) -> SessionEnv:
+) -> Session:
     """Init store, client, pipeline schema, eval data. Refuses tenant drift unless take_over=True."""
 
     def status(msg: str) -> None:
@@ -336,7 +444,7 @@ async def init_services(
             )
         )
 
-    base = SessionEnv(
+    base = Session(
         store=store,
         backend_id=backend_id,
         experiment_id=experiment_id,
@@ -401,21 +509,19 @@ async def init_optimization_loop(
     cycle_id: str | None,
     resume_from_round_override: int | None,
     experiment_id: str,
-    session: SessionEnv,
+    session: Session,
     started_at: str,
-) -> tuple[LoopState, LoopEnv]:
-    """Build LoopState + LoopEnv: baseline, cycle resume, obs, scoring env, search memory."""
+) -> LoopState:
+    """Build LoopState + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
     from promptpotter.application.campaign.bootstrap import bootstrap_cycle
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.application.optimization.loop_env import LoopEnv
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.nodes.critique import sample_thinking_styles
     from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
-    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.infrastructure.tracing import ObservabilityBridge
     from promptpotter.shared.scoring import compile_round_scorer
 
@@ -475,14 +581,11 @@ async def init_optimization_loop(
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
 
-    scoring_ctx = ScoringEnv.for_loop(
-        session.backend_client,
-        session.store,
-        session.backend_id,
-        session.pipeline_schema,
-        obs,
-        experiment_id,
-        resolved_cycle_id,
+    Session.for_loop(
+        session,
+        obs=obs,
+        experiment_id=experiment_id,
+        cycle_id=resolved_cycle_id,
         max_consecutive_errors=opt.max_consecutive_errors,
         stale_data_load_protocol=opt.stale_data_load_protocol,
         scoring_formula=scoring_formula,
@@ -496,7 +599,7 @@ async def init_optimization_loop(
             session.backend_id,
             resolved_cycle_id,
             resumed_from_round,
-            scoring_ctx,
+            session,
             state,
             skip_divergence_check=no_divergence_check,
         )
@@ -510,49 +613,46 @@ async def init_optimization_loop(
     search_memory = SearchMemory.ensure_for(
         session.store,
         session.backend_id,
-        scorer=scoring_ctx.scorer,
-        scorer_id=scoring_ctx.scorer_id,
-        scorer_formula=scoring_ctx.scorer_formula,
+        scorer=session.scorer,
+        scorer_id=session.scorer_id,
+        scorer_formula=session.scorer_formula,
     )
     state.search_memory = search_memory
     if search_memory:
-        scoring_ctx.search_memory = search_memory
+        session.search_memory = search_memory
 
-    env = LoopEnv(
-        scoring_ctx=scoring_ctx,
-        campaign_store=campaign_store,
-        cycle_id=resolved_cycle_id,
-        obs_campaign_id=obs_campaign_id,
-        scoring_dataset=sample_dataset(dataset, config.sp_budget_ttest),
-        degradation_checks=build_degradation_checks(config),
-        resumed_from_round=resumed_from_round,
-    )
+    session.campaign_store = campaign_store
+    if resolved_cycle_id:
+        session.cycle_id = resolved_cycle_id
+    session.obs_campaign_id = obs_campaign_id
+    session.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
+    session.degradation_checks = build_degradation_checks(config)
+    session.resumed_from_round = resumed_from_round
 
     emit_phase(
         cb.on_phase,
         CampaignPhase.INIT,
         "exit",
         state=state,
-        env=env,
+        env=session,
         config=config,
         dataset=dataset,
     )
-    return state, env
+    return state
 
 
 def finalize_optimization_run(
     state: LoopState,
-    env: LoopEnv,
-    session: SessionEnv,
+    session: Session,
     emitter: CampaignPersistenceEmitter | None,
     stop_reason: StopReason,
     finished_at: str,
 ) -> str | None:
     """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
-    if env.campaign_store and env.cycle_id:
-        env.campaign_store.mark_finished(
+    if session.campaign_store and session.cycle_id:
+        session.campaign_store.mark_finished(
             session.backend_id,
-            env.cycle_id,
+            session.cycle_id,
             status=_campaign_status_for(stop_reason),
             stop_reason=stop_reason,
             best_accuracy=state.best_accuracy,
@@ -560,10 +660,10 @@ def finalize_optimization_run(
             n_rounds=len(state.rounds),
             finished_at=finished_at,
         )
-    obs: ObservabilityBridge | None = env.scoring_ctx.obs if env.scoring_ctx else None
+    obs: ObservabilityBridge | None = session.obs
     if obs:
         obs.end_campaign(
-            env.obs_campaign_id,
+            session.obs_campaign_id,
             best_accuracy=state.best_accuracy,
             n_rounds=len(state.rounds),
             stop_reason=stop_reason,
@@ -575,8 +675,8 @@ def finalize_optimization_run(
             best_accuracy=state.best_accuracy,
             best_round=state.best_round,
             stop_reason=stop_reason,
-            cycle_id=env.cycle_id,
+            cycle_id=session.cycle_id,
         )
     if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW) or obs is None:
         return None
-    return obs.get_langfuse_trace_id(env.obs_campaign_id)
+    return obs.get_langfuse_trace_id(session.obs_campaign_id)

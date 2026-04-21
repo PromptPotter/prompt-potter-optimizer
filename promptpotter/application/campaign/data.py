@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.campaign_setup import SessionEnv, load_baseline_prompt
+from promptpotter.application.campaign.campaign_setup import Session, load_baseline_prompt
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
@@ -86,7 +86,7 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
 async def _run_baseline_scoring(
     baseline: OptSearchPoint,
     dataset: list,
-    session: SessionEnv,
+    session: Session,
     pipeline_params: dict | None = None,
     listener: Any | None = None,
     obs: Any | None = None,
@@ -98,12 +98,9 @@ async def _run_baseline_scoring(
     """Score the baseline prompt and build initial campaign_rounds list."""
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.application.scoring.search_point_scorer import score_search_point
-    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.shared.errors import graceful
 
     backend_client = session.backend_client
-    store = session.store
-    backend_id = session.backend_id
     index_terms = session.index_terms
 
     if not dataset:
@@ -130,14 +127,16 @@ async def _run_baseline_scoring(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    # Go through ScoringEnv.for_baseline so the trace's ``scored`` audit
-    # map is keyed by the active scorer_id, matching the loop's bookkeeping.
-    ctx = ScoringEnv.for_baseline(
-        backend_client,
-        store,
-        backend_id,
-        pipeline_schema,
-        obs,
+    # Populate the session's scoring block via for_baseline so the trace's
+    # ``scored`` audit map is keyed by the active scorer_id, matching the
+    # loop's bookkeeping. Overwrites session.scorer / source temporarily —
+    # the loop rebuilds these via for_loop before round 1.
+    prior_schema = session.pipeline_schema
+    if pipeline_schema is not None:
+        session.pipeline_schema = pipeline_schema
+    Session.for_baseline(
+        session,
+        obs=obs,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
@@ -164,7 +163,7 @@ async def _run_baseline_scoring(
         baseline_results, scores, _cached, _ = await score_search_point(
             sp,
             dataset,
-            ctx,
+            session,
             label="Baseline",
             on_result=on_result_cb,
             on_start=on_start_cb,
@@ -172,6 +171,8 @@ async def _run_baseline_scoring(
     finally:
         if listener is not None:
             emit_phase(listener.on_phase, CampaignPhase.BASELINE, "exit", round=0)
+        # Restore any pipeline_schema we temporarily overwrote.
+        session.pipeline_schema = prior_schema
 
     campaign_rounds = [
         {

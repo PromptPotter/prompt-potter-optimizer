@@ -20,7 +20,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 if TYPE_CHECKING:
     import pandas as pd
 
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
@@ -46,7 +46,7 @@ async def decompose_recon_baseline(
     llm_model: str,
     *,
     pipeline_params: dict | None = None,
-    session: SessionEnv | None = None,
+    session: Session | None = None,
     recon_variants: dict | None = None,
     force_restructure: bool = False,
     pipeline_schema: PipelineSchema | None = None,

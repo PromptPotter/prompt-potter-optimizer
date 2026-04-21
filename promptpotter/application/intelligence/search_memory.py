@@ -477,7 +477,7 @@ class SearchMemory:
     def on_round_complete(
         self,
         state: Any,
-        env: Any,
+        session: Any,
         config: Any,
         round_num: int,
         full_dataset: list[Any],
@@ -488,12 +488,11 @@ class SearchMemory:
         )
         from promptpotter.application.scoring.metrics import compile_query_difficulty
 
-        backend_id = env.scoring_ctx.backend_id if env.scoring_ctx else ""
-        store = env.scoring_ctx.store if env.scoring_ctx else None
-        sc = env.scoring_ctx
-        scorer = sc.scorer if sc else None
-        scorer_id = sc.scorer_id if sc else "none"
-        scorer_formula = sc.scorer_formula if sc else None
+        backend_id = session.backend_id
+        store = session.store
+        scorer = session.scorer
+        scorer_id = session.scorer_id
+        scorer_formula = session.scorer_formula
         if (
             store
             and backend_id
@@ -523,8 +522,8 @@ class SearchMemory:
         if len(hist) < 3:
             return
         qd = compile_query_difficulty(hist)
-        env.scoring_dataset, adapt_info = adapt_scoring_set(
-            env.scoring_dataset,
+        session.scoring_dataset, adapt_info = adapt_scoring_set(
+            session.scoring_dataset,
             qd,
             full_dataset,
             seed=config.optimization.seed + round_num,

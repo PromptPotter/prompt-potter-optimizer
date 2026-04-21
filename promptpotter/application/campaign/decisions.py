@@ -7,8 +7,8 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.optimization.loop_state import LoopState
-    from promptpotter.domain.scoring import ScoringEnv
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
 __all__ = [
@@ -251,7 +251,7 @@ def resume_with_divergence_check(
     backend_id: str,
     cycle_id: str,
     resumed_from_round: int,
-    scoring_ctx: ScoringEnv,
+    session: Session,
     state: LoopState,
     *,
     skip_divergence_check: bool,
@@ -261,28 +261,29 @@ def resume_with_divergence_check(
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.scoring import rescore_results
 
+    assert session.scorer is not None, "session.scorer required for divergence replay"
     prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)
     for t in prior:
         rescore_results(
             list(t.get("results") or []),
-            scoring_ctx.scorer,
-            scoring_ctx.scorer_id,
-            scoring_ctx.scorer_formula,
+            session.scorer,
+            session.scorer_id,
+            session.scorer_formula,
         )
         for items in (t.get("all_candidate_results") or {}).values():
             rescore_results(
                 list(items or []),
-                scoring_ctx.scorer,
-                scoring_ctx.scorer_id,
-                scoring_ctx.scorer_formula,
+                session.scorer,
+                session.scorer_id,
+                session.scorer_formula,
             )
 
     baseline_results_rescored = list(state.current_results or [])
     rescore_results(
         baseline_results_rescored,
-        scoring_ctx.scorer,
-        scoring_ctx.scorer_id,
-        scoring_ctx.scorer_formula,
+        session.scorer,
+        session.scorer_id,
+        session.scorer_formula,
     )
 
     if not skip_divergence_check:
@@ -303,8 +304,8 @@ def resume_with_divergence_check(
                     "current_outcome": div.current_outcome,
                     "inputs_ref": dict(div.inputs_ref),
                 },
-                "scorer_id": scoring_ctx.scorer_id,
-                "scorer_formula": scoring_ctx.scorer_formula,
+                "scorer_id": session.scorer_id,
+                "scorer_formula": session.scorer_formula,
             }
             write_json(
                 campaign_store.campaign_dir(cycle_id) / "fork_hint.json",
@@ -316,7 +317,7 @@ def resume_with_divergence_check(
                 recorded_outcome=div.recorded_outcome,
                 current_outcome=div.current_outcome,
                 diagnostics={
-                    "scorer_id": scoring_ctx.scorer_id,
+                    "scorer_id": session.scorer_id,
                     "fork_hint": "run `python -m promptpotter fork` to branch here",
                 },
             )

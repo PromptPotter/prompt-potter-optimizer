@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.campaign_setup import (
-    SessionEnv,
+    Session,
 )
 from promptpotter.application.campaign.campaign_setup import (
     init_services as _init_services,
@@ -64,7 +64,7 @@ __all__ = [
 async def decompose_task_context(
     task_description: str,
     campaign_config: CampaignConfig,
-    session: SessionEnv,
+    session: Session,
     *,
     llm_client: LLMClientBase | None = None,
     model: str | None = None,
@@ -151,7 +151,7 @@ def dev_reload() -> None:
             importlib.reload(sys.modules[mod])
 
 
-async def show_pipeline_snapshot(session: SessionEnv) -> dict:
+async def show_pipeline_snapshot(session: Session) -> dict:
     """Fetch and display full pipeline config from backend.
 
     Prints: pipeline name/version, node list, resolved schemas/prompts,
@@ -188,7 +188,7 @@ async def show_pipeline_snapshot(session: SessionEnv) -> dict:
     return config
 
 
-def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> dict:
+def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
     """Build pipeline_params from live pipeline schema and campaign_config.
 
     Delegates to shared orchestration and adds display-specific tags.
@@ -213,7 +213,7 @@ async def init_services(
     experiment_id: str = "1_production_historical",
     dataset_name: str | None = None,
     take_over: bool = False,
-) -> SessionEnv:
+) -> Session:
     """Initialize store, client, and load experiment data.
 
     All evaluation goes through :class:`BackendClient` against a running
@@ -310,7 +310,7 @@ async def show_backend_status(client) -> dict:
 
 
 async def prepare_scoring_context(
-    session: SessionEnv,
+    session: Session,
     train_data: list | None,
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,

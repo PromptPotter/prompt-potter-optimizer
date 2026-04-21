@@ -2,7 +2,7 @@
 
 Mutable state threaded through the feedback cycle round loop.  All
 infrastructure handles (stores, scoring env, cycle id, dataset samples)
-live on ``LoopEnv`` instead — this module stays layer-clean.
+live on ``Session`` instead — this module stays layer-clean.
 """
 
 from __future__ import annotations
@@ -78,7 +78,7 @@ class EscalationState:
 class LoopState:
     """Mutable state threaded through the feedback cycle round loop.
 
-    Pure optimizer progress — infrastructure handles live on ``LoopEnv``.
+    Pure optimizer progress — infrastructure handles live on ``Session``.
     Per-candidate/round optimizer memory (critique_text, l2_directive,
     task_context, escalation_journal, warning_inventory, failure_analysis,
     round_history, ...) lives on ``opt_sp`` (and its ``memory`` sub-object).

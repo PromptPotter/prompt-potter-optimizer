@@ -1,18 +1,17 @@
-"""Scoring models — query results and the infrastructure bundle.
+"""Scoring models — query-result types and the backend runner protocol.
 
 ``QueryResult`` / ``QueryResultFull`` define the per-query measurement schema.
-``ScoringEnv`` bundles infrastructure for dataset scoring calls. Ground-truth
-comparison is owned by the compiled ``Scorer`` callable (from
+``QueryRunner`` is the async backend-connector protocol. Scoring infrastructure
+(``backend_client``, ``store``, ``scorer`` / ``round_scorer`` / ``scorer_id`` /
+``scorer_formula``, ``obs``, ``sample_index``, ``search_memory``, stale-data
+protocol) lives on :class:`~promptpotter.application.campaign.campaign_setup.Session`.
+Ground-truth comparison is owned by the compiled ``Scorer`` callable (from
 ``shared/scoring.py``) — there is no separate comparator class.
 """
 
 from __future__ import annotations
 
-from collections.abc import Callable
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, NotRequired, Protocol, TypedDict, runtime_checkable
-
-from promptpotter.shared.scoring import RoundScorer, Scorer
+from typing import Any, NotRequired, Protocol, TypedDict, runtime_checkable
 
 # ---------------------------------------------------------------------------
 # Per-query result types
@@ -107,138 +106,3 @@ class QueryRunner(Protocol):
     async def init_session(self, terms: list[str]) -> dict[str, Any]: ...
 
     async def aclose(self) -> None: ...
-
-
-if TYPE_CHECKING:
-    from promptpotter.application.intelligence.sample_index import SampleIndex
-    from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.infrastructure.store import Stores
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
-
-
-@dataclass
-class ScoringEnv:
-    """Infrastructure bundle shared across scoring and measurement calls.
-
-    Pure infrastructure — does NOT carry search-space dimensions
-    (pipeline_params).  Those live on the SearchPoint passed alongside.
-    Per-candidate state (candidate_idx, degradation_checks) is passed
-    explicitly to score_search_point(), not stored here.
-    """
-
-    backend_client: QueryRunner
-    # Per-dataset scoring formula (compiled callable from shared/scoring.py).
-    # Required — ``rescore_results`` is the sole writer of ``hit``/``score``
-    # on results, so a live scorer must be threaded through every path that
-    # measures or loads traces.
-    scorer: Scorer
-    store: Stores | None = None
-    backend_id: str = ""
-    pipeline_schema: PipelineSchema | None = None
-    obs: ObservabilityBridge | None = None
-    source: str = ""
-    experiment_id: str = ""
-    max_consecutive_errors: int = 3
-    # Stale data load protocol — optimizer pipeline node sequence
-    stale_data_load_protocol: list[str] | None = None
-    search_memory: SearchMemory | None = None
-    sample_index: SampleIndex | None = None
-    # Tag recorded alongside every score this scorer produces — forms the
-    # key into the per-trace ``scored`` multi-scorer map. Derived from
-    # ``campaign.json::scoring.id`` (or auto-hashed from the formula).
-    scorer_id: str = "none"
-    scorer_formula: str | None = None
-    # Per-round scoring formula (composite). None = default formula.
-    round_scorer: RoundScorer | None = None
-    # Graceful-stop hook: scorer checks between queries; caller owns the flag source.
-    stop_check: Callable[[], bool] | None = None
-
-    @classmethod
-    def for_loop(
-        cls,
-        backend_client: QueryRunner,
-        store: Stores | None,
-        backend_id: str,
-        pipeline_schema: PipelineSchema | None,
-        obs: ObservabilityBridge | None,
-        experiment_id: str,
-        cycle_id: str | None,
-        *,
-        max_consecutive_errors: int,
-        stale_data_load_protocol: list[str] | None,
-        scoring_formula: str | None,
-        scoring_round_formula: str | None = None,
-        scorer_id: str | None = None,
-        source: str = "optimization_loop",
-    ) -> ScoringEnv:
-        """Build a ScoringEnv for an optimization-loop run.
-
-        Owns the derived ``experiment_id`` fallback (short cycle-id prefix
-        when not explicitly set) and the scoring-formula compilation so the
-        caller just hands over raw config.
-        """
-        from promptpotter.shared.scoring import (
-            auto_scorer_id,
-            compile_round_scorer,
-            compile_scorer,
-        )
-
-        derived_experiment_id = experiment_id or (
-            cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
-        )
-        round_scorer = (
-            compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
-        )
-        return cls(
-            backend_client=backend_client,
-            store=store,
-            backend_id=backend_id,
-            pipeline_schema=pipeline_schema,
-            obs=obs,
-            source=source,
-            experiment_id=derived_experiment_id,
-            max_consecutive_errors=max_consecutive_errors,
-            stale_data_load_protocol=stale_data_load_protocol,
-            scorer=compile_scorer(scoring_formula),
-            scorer_id=scorer_id or auto_scorer_id(scoring_formula),
-            scorer_formula=scoring_formula,
-            round_scorer=round_scorer,
-        )
-
-    @classmethod
-    def for_baseline(
-        cls,
-        backend_client: QueryRunner,
-        store: Stores | None,
-        backend_id: str,
-        pipeline_schema: PipelineSchema | None,
-        obs: ObservabilityBridge | None,
-        *,
-        scoring_formula: str | None,
-        scoring_round_formula: str | None = None,
-        scorer_id: str | None = None,
-    ) -> ScoringEnv:
-        """Build a ScoringEnv for baseline scoring (phase 0 of ``optimize``).
-
-        Thin delegation to ``for_loop`` — keeps one source of truth for the
-        scorer-trio compilation. The three hard-defaults below are the only
-        baseline-specific divergences (baseline runs before ``cycle_id`` is
-        bound and on a small scoring set, so it doesn't carry the loop's
-        cycle-derived ``experiment_id`` or stale-data protocol).
-        """
-        return cls.for_loop(
-            backend_client,
-            store,
-            backend_id,
-            pipeline_schema,
-            obs,
-            experiment_id="",
-            cycle_id=None,
-            max_consecutive_errors=3,
-            stale_data_load_protocol=None,
-            scoring_formula=scoring_formula,
-            scoring_round_formula=scoring_round_formula,
-            scorer_id=scorer_id,
-            source="baseline",
-        )

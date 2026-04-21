@@ -15,8 +15,8 @@ from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.application.scoring.sample_measurement import measure_sample
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import ScoringEnv
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +62,7 @@ async def execute_stale_data_protocol(
     protocol_steps: list[str],
     sample: Sample,
     cached_result: dict[str, Any],
-    env: ScoringEnv,
+    session: Session,
     *,
     pipeline_params: dict | None = None,
 ) -> tuple[dict[str, Any], str]:
@@ -89,14 +89,14 @@ async def execute_stale_data_protocol(
     result = cached_result
 
     for step in protocol_steps:
-        if env.stop_check and env.stop_check():
+        if session.stop_check and session.stop_check():
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
             # Historical count through last SearchMemory refresh (previous round).
             # The current observation bumps the effective count by 1.
             historical = (
-                env.search_memory.query_degradation_count(query) if env.search_memory else 0
+                session.search_memory.query_degradation_count(query) if session.search_memory else 0
             )
             effective_count = historical + 1
             if effective_count < trigger_count:
@@ -108,7 +108,7 @@ async def execute_stale_data_protocol(
                     "degraded_obs_threshold": trigger_count,
                 }, "below_threshold"
 
-            result = dict(await measure_sample(sample, env, pipeline_params=pipeline_params))
+            result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
             result["retry_of_degraded"] = True
             result["rerun_comparison"] = compare_rerun(cached_result, result)
             if not is_degraded(result):
@@ -121,9 +121,11 @@ async def execute_stale_data_protocol(
             # pipeline_params=None would erase `steps` and make the backend
             # run its full default pipeline — probe must stay inside the schema.
             probe_params = (
-                env.pipeline_schema.to_pipeline_params() if env.pipeline_schema is not None else {}
+                session.pipeline_schema.to_pipeline_params()
+                if session.pipeline_schema is not None
+                else {}
             )
-            result = dict(await measure_sample(sample, env, pipeline_params=probe_params))
+            result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
             result["samplescan_resolved"] = True
             result["samplescan_config"] = {
                 "n_candidates": n_candidates,
@@ -134,8 +136,8 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
-            if env.search_memory:
-                deg_rate = env.search_memory.query_degradation_rate(query)
+            if session.search_memory:
+                deg_rate = session.search_memory.query_degradation_rate(query)
                 if deg_rate >= min_deg_rate:
                     result = {**cached_result, "cached": True, "switched_out": True}
                     return result, "sampleswitch"

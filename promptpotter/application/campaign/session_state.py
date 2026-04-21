@@ -6,7 +6,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
 
 logger = logging.getLogger(__name__)
@@ -36,7 +36,7 @@ def new_session_state(
 
 
 def auto_mint_session(
-    session: SessionEnv,
+    session: Session,
     campaign_config: CampaignConfig,
     *,
     cycle_hash: str,

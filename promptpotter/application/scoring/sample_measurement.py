@@ -27,7 +27,7 @@ from promptpotter.shared.constants import NO_RESULT
 from promptpotter.shared.errors import ErrorCategory
 
 if TYPE_CHECKING:
-    from promptpotter.domain.scoring import ScoringEnv
+    from promptpotter.application.campaign.campaign_setup import Session
 
 logger = logging.getLogger(__name__)
 
@@ -140,14 +140,14 @@ def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
 
 async def measure_sample(
     sample: Sample,
-    env: ScoringEnv,
+    session: Session,
     pipeline_params: dict | None = None,
 ) -> QueryResult:
     """Measure one Sample: run query through pipeline, score against ground truth."""
     query = sample.query
     ground_truth = sample.ground_truth
 
-    pipeline_schema = env.pipeline_schema
+    pipeline_schema = session.pipeline_schema
     if pipeline_schema is None:
         from promptpotter.domain.pipeline_schema import PipelineSchema
 
@@ -155,7 +155,7 @@ async def measure_sample(
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
-        resp = await env.backend_client.run_query(query, pipeline_params=wire_params)
+        resp = await session.backend_client.run_query(query, pipeline_params=wire_params)
         data = resp.get("data", {})
 
         ranked = data.get("final_ranking", [])
@@ -204,11 +204,12 @@ async def measure_sample(
             pd["evaluators"] = query_evaluators
         from promptpotter.shared.scoring import rescore_results
 
+        assert session.scorer is not None, "session.scorer required for measurement"
         rescore_results(
             [result],  # type: ignore[list-item]
-            env.scorer,
-            env.scorer_id,
-            env.scorer_formula,
+            session.scorer,
+            session.scorer_id,
+            session.scorer_formula,
         )
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:

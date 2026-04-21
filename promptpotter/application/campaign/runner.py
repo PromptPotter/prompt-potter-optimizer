@@ -10,13 +10,12 @@ from typing import Any
 
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.campaign_setup import (
-    SessionEnv,
+    Session,
     finalize_optimization_run,
     init_optimization_loop,
 )
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
-from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.escalation import (
     EscalationTarget,
@@ -50,9 +49,8 @@ __all__ = ["run_optimization"]
 
 async def _handle_escalation_signal(
     state: LoopState,
-    env: LoopEnv,
     config: CampaignConfig,
-    session: SessionEnv,
+    session: Session,
     round_result: RoundResult,
     round_num: int,
     cb: RunListener,
@@ -83,7 +81,6 @@ async def _handle_escalation_signal(
             )
         )
         try:
-            obs = env.scoring_ctx.obs if env.scoring_ctx else None
             stop = await escalate_l2(
                 state,
                 config,
@@ -91,8 +88,8 @@ async def _handle_escalation_signal(
                 round_num,
                 cb.on_phase,
                 on_checkpoint=cb.on_checkpoint,
-                obs=obs,
-                obs_campaign_id=env.obs_campaign_id,
+                obs=session.obs,
+                obs_campaign_id=session.obs_campaign_id,
                 from_degradation=True,
                 escalation_check_result=esc_check_result,
             )
@@ -107,10 +104,10 @@ async def _handle_escalation_signal(
     elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
         raise StopLoop(StopReason.ABORT)
 
-    if env.campaign_store and env.cycle_id:
-        env.campaign_store.delete_round_candidates(
+    if session.campaign_store and session.cycle_id:
+        session.campaign_store.delete_round_candidates(
             session.backend_id,
-            env.cycle_id,
+            session.cycle_id,
             round_num + 1,
         )
     emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
@@ -141,9 +138,8 @@ def _trial_entry(state: LoopState, rr: RoundResult, round_num: int) -> dict[str,
 
 def _maybe_apply_zero_signal_filter(
     state: LoopState,
-    env: LoopEnv,
     config: CampaignConfig,
-    session: SessionEnv,
+    session: Session,
     round_num: int,
     dataset: list[Sample],
     cb: RunListener,
@@ -155,22 +151,22 @@ def _maybe_apply_zero_signal_filter(
     if not dataset_name:
         return
     memory = state.search_memory
-    if memory is None or env.scoring_ctx is None or env.scoring_ctx.store is None:
+    if memory is None or session.store is None:
         return
 
     with graceful("Zero-signal filter failed"):
         excluded = apply_zero_signal_exclusions(
-            store=env.scoring_ctx.store,
+            store=session.store,
             dataset_name=dataset_name,
             memory=memory,
             active_dataset=dataset,
             min_observations=config.optimization.zero_signal_filter_min_observations,
-            campaign_id=env.cycle_id or "",
+            campaign_id=session.cycle_id or "",
         )
         if excluded:
             excluded_queries = {e["query"] for e in excluded}
-            env.scoring_dataset[:] = [
-                s for s in env.scoring_dataset if s.query not in excluded_queries
+            session.scoring_dataset[:] = [
+                s for s in session.scoring_dataset if s.query not in excluded_queries
             ]
             always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
             always_hit = len(excluded) - always_miss
@@ -189,11 +185,10 @@ def _maybe_apply_zero_signal_filter(
 
 async def _post_round(
     state: LoopState,
-    env: LoopEnv,
     round_result: RoundResult,
     round_num: int,
     config: CampaignConfig,
-    session: SessionEnv,
+    session: Session,
     dataset: list[Sample],
     cb: RunListener,
 ) -> None:
@@ -210,11 +205,11 @@ async def _post_round(
         round_result.decisions.extend(state.pending_decisions)
         state.pending_decisions.clear()
 
-    if env.campaign_store and env.cycle_id:
+    if session.campaign_store and session.cycle_id:
         with graceful("Round checkpoint failed"):
-            env.campaign_store.add_trial(
+            session.campaign_store.add_trial(
                 session.backend_id,
-                env.cycle_id,
+                session.cycle_id,
                 _trial_entry(state, round_result, round_num),
             )
 
@@ -229,15 +224,14 @@ async def _post_round(
         raise StopLoop(StopReason.USER_STOPPED)
 
     if state.search_memory:
-        state.search_memory.on_round_complete(state, env, config, round_num, dataset)
-        _maybe_apply_zero_signal_filter(state, env, config, session, round_num, dataset, cb)
+        state.search_memory.on_round_complete(state, session, config, round_num, dataset)
+        _maybe_apply_zero_signal_filter(state, config, session, round_num, dataset, cb)
 
     if state.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)
     if state.escalation.l1_stall_count >= config.optimization.l1_patience:
         if not config.optimization.enable_l2:
             raise StopLoop(StopReason.PATIENCE)
-        obs = env.scoring_ctx.obs if env.scoring_ctx else None
         stop = await escalate_l2(
             state,
             config,
@@ -245,8 +239,8 @@ async def _post_round(
             round_num,
             cb.on_phase,
             on_checkpoint=cb.on_checkpoint,
-            obs=obs,
-            obs_campaign_id=env.obs_campaign_id,
+            obs=session.obs,
+            obs_campaign_id=session.obs_campaign_id,
         )
         if stop:
             raise StopLoop(stop)
@@ -255,17 +249,16 @@ async def _post_round(
 
 async def _run_round_loop(
     state: LoopState,
-    env: LoopEnv,
     dataset: list[Sample],
     config: CampaignConfig,
-    session: SessionEnv,
+    session: Session,
     cb: RunListener,
 ) -> StopReason:
     """Execute the round loop: generate → score → escalate → stop."""
     opt = config.optimization
     hard_cap = opt.hard_cap
-    round_num = env.resumed_from_round
-    clean_rounds = env.resumed_from_round
+    round_num = session.resumed_from_round
+    clean_rounds = session.resumed_from_round
     max_rounds = opt.max_rounds or 999
 
     try:
@@ -278,7 +271,7 @@ async def _run_round_loop(
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:
-                round_eval_data, round_checks = env.scoring_dataset, env.degradation_checks
+                round_eval_data, round_checks = session.scoring_dataset, session.degradation_checks
 
             logger.debug(
                 "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
@@ -298,10 +291,9 @@ async def _run_round_loop(
             round_result = await execute_round(
                 round_num,
                 state,
-                env,
+                session,
                 round_eval_data,
                 config,
-                session,
                 cb,
                 degradation_checks=round_checks,
                 search_memory=state.search_memory,
@@ -314,7 +306,6 @@ async def _run_round_loop(
             if is_probe:
                 state.probe_next_round = False
                 if opt.enable_l2:
-                    obs = env.scoring_ctx.obs if env.scoring_ctx else None
                     stop = await escalate_l2(
                         state,
                         config,
@@ -322,8 +313,8 @@ async def _run_round_loop(
                         round_num,
                         cb.on_phase,
                         on_checkpoint=cb.on_checkpoint,
-                        obs=obs,
-                        obs_campaign_id=env.obs_campaign_id,
+                        obs=session.obs,
+                        obs_campaign_id=session.obs_campaign_id,
                     )
                     if stop:
                         raise StopLoop(stop)
@@ -332,13 +323,11 @@ async def _run_round_loop(
                 continue
 
             if round_result.escalation_signal:
-                await _handle_escalation_signal(
-                    state, env, config, session, round_result, round_num, cb
-                )
+                await _handle_escalation_signal(state, config, session, round_result, round_num, cb)
                 round_num += 1
                 continue
 
-            await _post_round(state, env, round_result, round_num, config, session, dataset, cb)
+            await _post_round(state, round_result, round_num, config, session, dataset, cb)
             round_num += 1
             clean_rounds += 1
 
@@ -363,7 +352,7 @@ async def run_optimization(
     campaign_config: CampaignConfig,
     *,
     baseline: CampaignBaseline,
-    session: SessionEnv,
+    session: Session,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
@@ -421,7 +410,7 @@ async def run_optimization(
 
     cb = RunListener(display=display, control=control)
 
-    state, env = await init_optimization_loop(
+    state = await init_optimization_loop(
         baseline,
         dataset,
         campaign_config,
@@ -443,7 +432,7 @@ async def run_optimization(
         opt = campaign_config.optimization
         emitter = CampaignPersistenceEmitter.for_session(
             baseline.baseline_acc,
-            env.cycle_id,
+            session.cycle_id,
             project_root=session.project_root,
             session_id=session.session_id,
             max_rounds=opt.max_rounds or 999,
@@ -453,16 +442,14 @@ async def run_optimization(
             n_variants=opt.n_variants,
             sp_budget_ttest=campaign_config.sp_budget_ttest,
             pause_before_scoring=opt.pause_before_scoring,
-            resumed_from_round=env.resumed_from_round,
+            resumed_from_round=session.resumed_from_round,
         )
     cb.emitter = emitter
 
-    stop_reason = await _run_round_loop(state, env, dataset, campaign_config, session, cb)
+    stop_reason = await _run_round_loop(state, dataset, campaign_config, session, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    langfuse_trace_id = finalize_optimization_run(
-        state, env, session, emitter, stop_reason, finished_at
-    )
+    langfuse_trace_id = finalize_optimization_run(state, session, emitter, stop_reason, finished_at)
 
     run_result = RunResult(
         rounds=state.rounds,
@@ -476,9 +463,9 @@ async def run_optimization(
         started_at=started_at,
         finished_at=finished_at,
         langfuse_trace_id=langfuse_trace_id,
-        cycle_id=env.cycle_id,
+        cycle_id=session.cycle_id,
         session_id=session_id or None,
-        resumed_from_round=env.resumed_from_round,
+        resumed_from_round=session.resumed_from_round,
     )
     if emitter:
         emitter.write_result(run_result)

@@ -69,8 +69,9 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:
     """Emitter lifecycle must produce all CAMPAIGN_ARTIFACTS in the campaign
     dir and ensure all SESSION_ARTIFACTS in the session dir."""
+    from types import SimpleNamespace
+
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.optimization.loop_env import LoopEnv
     from promptpotter.application.optimization.loop_state import LoopState
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult, RunResult
@@ -90,9 +91,17 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         pause_before_scoring=False,
     )
 
-    # Simulate a single round lifecycle
+    # Simulate a single round lifecycle.  The emitter only reads a handful of
+    # fields off the ``env`` payload (cycle_id, scoring_dataset, obs,
+    # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
     init_state = LoopState(current_accuracy=0.5)
-    init_env = LoopEnv(cycle_id="cycle_test_001")
+    init_env = SimpleNamespace(
+        cycle_id="cycle_test_001",
+        scoring_dataset=[],
+        obs=None,
+        resumed_from_round=0,
+        pipeline_schema=None,
+    )
     emitter.on_phase(
         PhaseEvent(
             phase="init",

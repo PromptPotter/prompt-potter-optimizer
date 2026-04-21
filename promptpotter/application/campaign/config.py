@@ -10,7 +10,7 @@ from typing import TYPE_CHECKING
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -170,12 +170,12 @@ def run_preflight_checks(config: CampaignConfig, dataset: list) -> list[Prefligh
 
 def compute_preflight_metrics(
     config: CampaignConfig,
-    session: SessionEnv | None,
+    session: Session | None,
     dataset_size: int,
     *,
     exclude_nodes: list[str] | None = None,
 ) -> PreflightMetrics:
-    """Derive display-ready metrics from ``CampaignConfig`` + ``SessionEnv``. Pure."""
+    """Derive display-ready metrics from ``CampaignConfig`` + ``Session``. Pure."""
     sp_budget = config.sp_budget_ttest
     eff_queries = min(sp_budget, dataset_size) if dataset_size > 0 else sp_budget
     queries_label = f"{eff_queries} of {dataset_size}"
@@ -208,7 +208,7 @@ def compute_preflight_metrics(
 
 
 def configure_and_apply_pipeline(
-    session: SessionEnv,
+    session: Session,
     campaign_config: CampaignConfig,
     *,
     log: Callable[[str], None] = logger.info,

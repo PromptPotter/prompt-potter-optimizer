@@ -67,7 +67,7 @@ def cycle_config_identity(
     mode hashes every parameter for publication reproducibility.
 
     ``active_steps`` is passed explicitly — keeps ``domain/`` free of
-    imports from ``application/`` (``SessionEnv`` owns the pipeline schema).
+    imports from ``application/`` (``Session`` owns the pipeline schema).
     """
     opt = config.optimization
     payload_dict: dict[str, Any] = {

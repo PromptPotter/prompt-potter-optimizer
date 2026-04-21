@@ -19,7 +19,7 @@ from promptpotter.config.settings import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
 
 logger = logging.getLogger("promptpotter.presentation.cli")
@@ -44,7 +44,7 @@ def _status_sink(msg: str) -> None:
 
 
 def log_startup_summary(
-    session: SessionEnv,
+    session: Session,
     pipeline_params: dict | None,
     dataset_len: int,
     backend_url: str,
@@ -68,7 +68,7 @@ async def init_services_cli(
     dataset_name: str | None = None,
     take_over: bool = False,
     tenant_id: str = "default",
-) -> SessionEnv:
+) -> Session:
     """Initialize services (logging + service init) for a CLI command."""
     from promptpotter.application.campaign.campaign_setup import init_services
     from promptpotter.config.logging import setup_logging
@@ -87,7 +87,7 @@ async def init_services_cli(
     )
 
 
-def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> dict:
+def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
     """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
@@ -96,7 +96,7 @@ def configure_pipeline(session: SessionEnv, campaign_config: CampaignConfig) -> 
 
 
 async def prepare_scoring_context(
-    session: SessionEnv,
+    session: Session,
     train_data: list | None,
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,
@@ -120,7 +120,7 @@ async def prepare_scoring_context(
     return baseline, dataset, campaign_rounds, baseline_results
 
 
-def load_cli_baseline(session: SessionEnv):
+def load_cli_baseline(session: Session):
     """Shared baseline-prompt load used by ``scan`` and ``show-scan``."""
     from promptpotter.application.campaign.campaign_setup import load_baseline_prompt
 

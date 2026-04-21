@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.config import CampaignConfig
-from promptpotter.application.optimization.loop_env import LoopEnv
 from promptpotter.application.optimization.loop_state import LoopState
 from promptpotter.application.optimization.nodes.critique import (
     CritiqueAgent,
@@ -37,7 +36,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -69,9 +68,8 @@ class PauseForReviewError(Exception):
 async def _generate_or_load_candidates(
     round_num: int,
     state: LoopState,
-    env: LoopEnv,
+    session: Session,
     config: CampaignConfig,
-    session: SessionEnv,
     on_phase=None,
     n_eval_queries: int = 0,
     *,
@@ -103,10 +101,10 @@ async def _generate_or_load_candidates(
         parent_prompt_fields={k: v for k, v in state.opt_sp.prompt_field_dict().items() if v},
     )
 
-    if env.campaign_store and env.cycle_id:
-        persisted = env.campaign_store.load_round_candidates(
+    if session.campaign_store and session.cycle_id:
+        persisted = session.campaign_store.load_round_candidates(
             session.backend_id,
-            env.cycle_id,
+            session.cycle_id,
             round_num,
         )
         if persisted is not None:
@@ -136,7 +134,7 @@ async def _generate_or_load_candidates(
         f"l1_generate_r{round_num}",
         "llm/meta",
         obs=obs,
-        campaign_id=env.obs_campaign_id,
+        campaign_id=session.obs_campaign_id,
         round_num=round_num,
     ):
         candidates = await l1_generate(
@@ -151,14 +149,14 @@ async def _generate_or_load_candidates(
             search_memory=search_memory,
             pipeline_schema=session.pipeline_schema,
             obs=obs,
-            obs_campaign_id=env.obs_campaign_id,
+            obs_campaign_id=session.obs_campaign_id,
             round_num=round_num,
         )
 
-    if env.campaign_store and env.cycle_id:
-        env.campaign_store.save_round_candidates(
+    if session.campaign_store and session.cycle_id:
+        session.campaign_store.save_round_candidates(
             session.backend_id,
-            env.cycle_id,
+            session.cycle_id,
             round_num,
             candidates,
         )
@@ -219,10 +217,9 @@ async def _score_and_select(
     candidates: list[dict],
     round_num: int,
     state: LoopState,
-    env: LoopEnv,
+    session: Session,
     scoring_dataset: list[Sample],
     config: CampaignConfig,
-    session: SessionEnv,
     callbacks: RunListener,
     obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
@@ -258,7 +255,7 @@ async def _score_and_select(
             _subset_scores = compute_composite_score(
                 cast(list[QueryResult], _subset),
                 session.pipeline_schema,
-                round_scorer=env.scoring_ctx.round_scorer if env.scoring_ctx else None,
+                round_scorer=session.round_scorer,
             )
             _baseline_acc = _subset_scores["accuracy"]
             _baseline_comp = _subset_scores.get("composite", _baseline_acc)
@@ -277,23 +274,22 @@ async def _score_and_select(
         "scoring",
         obs=obs,
         obs_type="span",
-        campaign_id=env.obs_campaign_id,
+        campaign_id=session.obs_campaign_id,
         round_num=round_num,
     ):
-        assert env.scoring_ctx is not None
         assert state.current_sp is not None
         scoring_result = await l1_score(
             candidates,
             scoring_dataset,
             current_best,
-            env.scoring_ctx,
+            session,
             pipeline_params=state.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             elimination_n_min=opt.elimination_n_min,
             elimination_alpha=opt.elimination_alpha,
-            obs_campaign_id=env.obs_campaign_id,
+            obs_campaign_id=session.obs_campaign_id,
             round_num=round_num,
         )
 
@@ -302,7 +298,7 @@ async def _score_and_select(
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
-                    campaign_id=env.obs_campaign_id,
+                    campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     winner_candidate_id=winner_id,
                     winner_accuracy=scoring_result.winner_accuracy,
@@ -317,7 +313,7 @@ async def _score_and_select(
             with graceful("CritiqueWritten emit failed"):
                 obs.emit_write_point(
                     CritiqueWritten,
-                    campaign_id=env.obs_campaign_id,
+                    campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     critique_text=scoring_result.critique_text,
                 )
@@ -341,26 +337,24 @@ async def _score_and_select(
 async def execute_round(
     round_num: int,
     state: LoopState,
-    env: LoopEnv,
+    session: Session,
     scoring_dataset: list[Sample],
     config: CampaignConfig,
-    session: SessionEnv,
     callbacks: RunListener,
     degradation_checks: list[DegradationCheck] | None = None,
     search_memory: Any = None,
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
-    obs = env.scoring_ctx.obs if env.scoring_ctx else None
+    obs = session.obs
     if obs:
         with graceful("RoundStart emit failed"):
-            obs.emit(RoundStart(campaign_id=env.obs_campaign_id, round_num=round_num))
+            obs.emit(RoundStart(campaign_id=session.obs_campaign_id, round_num=round_num))
 
     candidates = await _generate_or_load_candidates(
         round_num,
         state,
-        env,
-        config,
         session,
+        config,
         callbacks.on_phase,
         n_eval_queries=len(scoring_dataset),
         obs=obs,
@@ -374,10 +368,9 @@ async def execute_round(
         candidates,
         round_num,
         state,
-        env,
+        session,
         scoring_dataset,
         config,
-        session,
         callbacks,
         obs=obs,
         degradation_checks=degradation_checks,
@@ -446,7 +439,7 @@ async def execute_round(
         with graceful("RoundEnd emit failed"):
             obs.emit(
                 RoundEnd(
-                    campaign_id=env.obs_campaign_id,
+                    campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     accuracy=scoring_result.winner_accuracy,
                     hits=scoring_result.hits,
@@ -464,7 +457,7 @@ async def execute_round(
             w_osp = scoring_result.winner_osp
             obs.emit(
                 PromptVersion(
-                    campaign_id=env.obs_campaign_id,
+                    campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     prompt_fields_id=w_osp.id,
                     rendered_prompt=w_osp.render(),

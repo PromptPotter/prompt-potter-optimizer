@@ -18,7 +18,7 @@ from promptpotter.application.campaign.utils import (
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store import Stores
@@ -213,7 +213,7 @@ def load_stored_campaign_config(
 
 
 def load_and_apply_experiment(
-    session: SessionEnv,
+    session: Session,
     campaign_config: CampaignConfig,
     experiment_id: str,
     pipeline_params: dict | None = None,
@@ -247,7 +247,7 @@ def show_experiment_dashboard(
     dataset: list | None = None,
     pipeline_params: dict | None = None,
     baseline_prompt_fields: dict | None = None,
-    session: SessionEnv | None = None,
+    session: Session | None = None,
 ) -> dict:
     """Unified experiment dashboard — overview or detail by experiment ID.
 

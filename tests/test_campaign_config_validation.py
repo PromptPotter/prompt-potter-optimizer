@@ -42,7 +42,7 @@ def test_unknown_optimizer_llm_key_rejected() -> None:
 
 
 def test_legacy_pipeline_params_is_rejected() -> None:
-    """Runtime ``pipeline_params`` lives on ``SessionEnv``; it must not appear
+    """Runtime ``pipeline_params`` lives on ``Session``; it must not appear
     in user-authored campaign config and Pydantic raises if it does."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"dataset_name": "x", "pipeline_params": {"steps": ["a"]}})

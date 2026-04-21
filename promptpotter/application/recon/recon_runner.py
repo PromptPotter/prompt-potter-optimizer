@@ -13,6 +13,7 @@ import random
 from collections.abc import Callable
 from typing import TYPE_CHECKING
 
+from promptpotter.application.campaign.campaign_setup import Session
 from promptpotter.application.recon.adaptive_recon import (
     ReconEvent,
     build_axis_profiles,
@@ -20,7 +21,6 @@ from promptpotter.application.recon.adaptive_recon import (
 from promptpotter.application.recon.failure_groups import preview as _preview
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.scoring import ScoringEnv
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import most_common_error_category
@@ -29,7 +29,6 @@ from promptpotter.shared.statistics import wilson_ci
 if TYPE_CHECKING:
     import pandas as pd
 
-    from promptpotter.application.campaign.campaign_setup import SessionEnv
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 logger = logging.getLogger(__name__)
@@ -39,7 +38,7 @@ async def run_recon(
     baseline: JobSearchPoint,
     recon_variants: dict[str, list | dict],
     dataset: list,
-    session: SessionEnv,
+    session: Session,
     *,
     baseline_opt: OptSearchPoint | None = None,
     sample_size: int = 0,
@@ -62,7 +61,7 @@ async def run_recon(
             - Prompt fields: ``{"thinking_style": ["a", "b"]}`` (list → prompt)
             - Pipeline params: ``{"web_search": {"max_sites": [3, 5]}}`` (dict → node)
         dataset: Full evaluation dataset.
-        session: SessionEnv bundling backend_client, store, backend_id.
+        session: Session bundling backend_client, store, backend_id.
         baseline_opt: OptSearchPoint for prompt-field perturbation. Required
             when recon_variants contains prompt_field axes.
         sample_size: If >0, subsample dataset to this many queries
@@ -77,9 +76,6 @@ async def run_recon(
     import pandas as pd
 
     # Unpack session
-    backend_client = session.backend_client
-    store = session.store
-    backend_id = session.backend_id
     pipeline_schema = pipeline_schema or session.pipeline_schema
 
     _cb = progress_cb or (lambda _e: None)
@@ -88,18 +84,14 @@ async def run_recon(
     if sample_size > 0 and sample_size < len(dataset):
         dataset = random.Random(42).sample(dataset, sample_size)
 
-    # Build ScoringEnv once for all scan evaluations
+    # Populate the session's scoring block for this recon pass.
     from promptpotter.shared.scoring import compile_scorer
 
-    scan_ctx = ScoringEnv(
-        backend_client=backend_client,
-        store=store,
-        backend_id=backend_id,
-        pipeline_schema=pipeline_schema,
-        source="run_recon",
-        experiment_id=experiment_id,
-        scorer=compile_scorer(scoring_formula),
-    )
+    scan_session = session
+    scan_session.pipeline_schema = pipeline_schema
+    scan_session.source = "run_recon"
+    scan_session.experiment_id = experiment_id
+    scan_session.scorer = compile_scorer(scoring_formula)
 
     # Resolve active prompt node — only if the prompt node is in active steps
     _prompt_node = ""
@@ -171,7 +163,7 @@ async def run_recon(
     baseline_results, baseline_scores, baseline_cached, _ = await score_search_point(
         baseline,
         dataset,
-        scan_ctx,
+        scan_session,
         label="scan",
         on_result=on_result,
     )
@@ -304,7 +296,7 @@ async def run_recon(
             results, scores, cached, _ = await score_search_point(
                 perturbed,
                 dataset,
-                scan_ctx,
+                scan_session,
                 label="scan",
                 on_result=on_result,
             )
