@@ -116,6 +116,11 @@ class Cycle:
     # ``decisions`` list by the round loop before ``campaign_store.add_trial``.
     pending_decisions: list[dict] = field(default_factory=list)
 
+    # Adaptive sample-prefix swap log. One dict per round where evolve_prefix()
+    # produced a non-trivial outcome (see runner._maybe_evolve_adaptive_prefix).
+    # Persisted via Cycle.checkpoint and restored by Cycle.restore_from_trial.
+    prefix_events: list[dict] = field(default_factory=list)
+
     state_version: int = 1
 
     # -- Construction / restore ------------------------------------------------
@@ -179,6 +184,7 @@ class Cycle:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
         self.escalation = EscalationState.from_checkpoint_dict(trial)
+        self.prefix_events = list(trial.get("prefix_events", []))
 
     def adopt_transition(
         self,
@@ -287,4 +293,5 @@ class Cycle:
             "evaluators": dict(rr.evaluators),
             **self.escalation.to_checkpoint_dict(),
             "opt_search_point": self.opt_sp.model_dump(),
+            "prefix_events": list(self.prefix_events),
         }

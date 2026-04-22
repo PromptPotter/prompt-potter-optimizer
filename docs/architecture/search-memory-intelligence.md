@@ -210,6 +210,12 @@ Per-query failure streak detection via `_query_hits` Bernoulli sequences. Three 
 
 **Why it's not a fallback.** The filter is *not* a "default value when the real one fails" — it's deterministic dataset shrinking driven entirely by observed data. Zero backend calls. No retry. No hidden recovery.
 
+### Adaptive sample prefix (Rasch + KG)
+
+Sibling round-boundary mutation. The zero-signal filter answers "is this sample dead across the campaign?" and writes to the on-disk dataset. The adaptive sample prefix answers "given everything we've measured, which samples should the *next round* score to maximize information gain about the best candidate?" and writes only to the in-memory `session.scoring_dataset[:]` slice — the on-disk dataset is untouched.
+
+Both run from `runner.py::_post_round`, in this order: zero-signal filter first (it may shrink the active dataset), then adaptive prefix (it picks a slice from what survives). Full mechanics in [`optimization.md § Adaptive sample prefix`](optimization.md).
+
 ### Tier 3 in action — L2 Strategic Intelligence (LLM)
 
 Meta-reasoning injected into L2 Refine only:

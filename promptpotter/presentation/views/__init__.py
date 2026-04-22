@@ -9,6 +9,7 @@ per concept.
 
 from __future__ import annotations
 
+from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .dashboard import render_dashboard, render_status
 from .formatting import generate_supplemental, render_pipeline_overrides, render_table
 from .rounds import (
@@ -19,7 +20,9 @@ from .rounds import (
 )
 
 __all__ = [
+    "collect_prefix_events",
     "generate_supplemental",
+    "render_adaptive_prefix",
     "render_campaign_summary",
     "render_dashboard",
     "render_flip_tracking",

@@ -16,6 +16,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "AdaptivePrefixConfig",
     "CampaignConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
@@ -26,6 +27,44 @@ __all__ = [
     "load_campaign_config",
     "run_preflight_checks",
 ]
+
+
+class AdaptivePrefixConfig(BaseModel):
+    """Round-level adaptive sample-prefix selection (Rasch + KG).
+
+    Off by default — when ``enabled`` is false the prefix is the static
+    ``sample_dataset(dataset, sp_budget_ttest)`` it has always been. When
+    on, ``AdaptivePrefix.evolve()`` runs after each round, refits Rasch on
+    accumulated observations, and swaps low-info samples (narrow CI on
+    δ_s) for high-KG samples not currently in the prefix.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(False, description="Master off-switch — false = today's behavior.")
+    swap_out_delta_se: float = Field(
+        0.25,
+        description="Swap-out threshold: SE on δ_s below which a sample is 'understood' "
+        "(corresponds to ~95% CI width of 1.0 in logits).",
+    )
+    swap_in_kg_threshold: float = Field(
+        0.01,
+        description="Swap-in threshold: minimum sample KG to be eligible.",
+    )
+    max_swaps_per_round: int = Field(3, description="Cap on prefix churn per round.")
+    min_prefix_size: int | None = Field(
+        None,
+        description="Floor on prefix size (None → derive from elimination_n_min).",
+    )
+    cold_start_prior_sigma: float = Field(
+        1.5,
+        description="Sigma on theta prior when no observations yet — tight prior pulls "
+        "cold-start candidates toward kernel-weighted neighbors.",
+    )
+    kernel_lineage_weight: float = Field(0.3)
+    kernel_param_weight: float = Field(0.5)
+    kernel_prompt_weight: float = Field(0.2)
+    kernel_lineage_decay: float = Field(0.5)
 
 
 class OptimizationConfig(BaseModel):
@@ -78,6 +117,9 @@ class OptimizationConfig(BaseModel):
     # HITL + reproducibility
     pause_before_scoring: bool = Field(False)
     strict_cycle_identity: bool = Field(False)
+
+    # Adaptive sample-prefix selection (Rasch + KG)
+    adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)
 
 
 class OptimizerLLMConfig(BaseModel):

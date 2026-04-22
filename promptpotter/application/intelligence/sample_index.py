@@ -53,6 +53,22 @@ class FailureCluster:
     example_queries: list[str] = field(default_factory=list)
 
 
+@dataclass
+class HardnessRecord:
+    """Per-sample hardness summary derived from a fitted Rasch posterior.
+
+    ``delta`` is sample difficulty in logits (higher = harder). ``ci_width``
+    is the 95% credible interval; "confirmed-hard" means high delta with
+    narrow CI, "suspected-hard" means high delta with wide CI.
+    """
+
+    sample_id: int
+    query: str
+    delta: float
+    ci_width: float
+    n_observations: int
+
+
 class SampleIndex:
     """Per-sample state keyed by ``sample.id: int``.
 
@@ -258,6 +274,32 @@ class SampleIndex:
     def discriminating(self, min_variance: float = 0.1) -> list[QueryRecord]:
         """Samples whose outcome varies across configurations."""
         return [r for r in self.records() if r.variance >= min_variance]
+
+    def hardness_records(self, posterior: Any) -> list[HardnessRecord]:
+        """Samples sorted by Rasch posterior δ_s, hardest first.
+
+        ``posterior`` is a ``RaschPosterior`` (typed as ``Any`` here to
+        keep the intelligence-layer import direction one-way). Confirmed
+        hards have narrow ``ci_width``; suspected hards have wide ``ci_width``.
+        """
+        from promptpotter.application.intelligence.rasch import confidence_interval_width
+
+        out: list[HardnessRecord] = []
+        for sid, delta in posterior.delta.items():
+            se = posterior.delta_se.get(sid, 0.0)
+            sample = self._samples.get(sid)
+            query = sample.query if sample else ""
+            out.append(
+                HardnessRecord(
+                    sample_id=sid,
+                    query=query,
+                    delta=float(delta),
+                    ci_width=float(confidence_interval_width(se)),
+                    n_observations=int(posterior.n_obs_per_sample.get(sid, 0)),
+                )
+            )
+        out.sort(key=lambda r: -r.delta)
+        return out
 
     def persistent_failures(self, min_streak: int = 3) -> list[QueryRecord]:
         """Intractable (hit_rate == 0) + chronic (failed last ``min_streak``) samples."""

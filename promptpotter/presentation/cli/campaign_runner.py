@@ -394,6 +394,8 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     """Show campaign results, optionally save winner."""
     from promptpotter.application.campaign.utils import save_campaign_winner
     from promptpotter.presentation.views import (
+        collect_prefix_events,
+        render_adaptive_prefix,
         render_campaign_summary,
         render_flip_tracking,
         render_lineage,
@@ -427,6 +429,10 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     lineage = render_lineage(campaign_rounds)
     if lineage:
         human_parts.append(lineage)
+
+    prefix_events = collect_prefix_events(campaign_rounds)
+    if prefix_events:
+        human_parts.append(render_adaptive_prefix(prefix_events))
 
     if args.save:
         save_campaign_winner(

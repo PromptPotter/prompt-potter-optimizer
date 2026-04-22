@@ -112,6 +112,49 @@ async def _handle_escalation_signal(
     emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
 
 
+def _maybe_evolve_adaptive_prefix(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    round_num: int,
+    dataset: list[Sample],
+    cb: RunListener,
+) -> None:
+    """Round-end Rasch + KG swap of the active scoring prefix."""
+    ap_cfg = config.optimization.adaptive_prefix
+    if not ap_cfg.enabled:
+        return
+    if not cycle.rounds:
+        return
+
+    from promptpotter.application.intelligence.adaptive_prefix import (
+        build_prefix_event,
+        evolve_prefix,
+    )
+
+    with graceful("AdaptivePrefix evolve failed"):
+        result = evolve_prefix(
+            full_dataset=dataset,
+            current_prefix=session.scoring_dataset,
+            rounds=cycle.rounds,
+            config=ap_cfg,
+            elimination_n_min=config.optimization.elimination_n_min,
+        )
+        if result.swapped_in or result.swapped_out:
+            session.scoring_dataset[:] = result.new_prefix
+            event = build_prefix_event(round_num=round_num, result=result)
+            cycle.prefix_events.append(event)
+            emit_phase(
+                cb.on_phase,
+                "adaptive_prefix",
+                "evolved",
+                round=round_num,
+                swapped_out=event["swapped_out"],
+                swapped_in=event["swapped_in"],
+                new_prefix_size=event["new_prefix_size"],
+            )
+
+
 def _maybe_apply_zero_signal_filter(
     cycle: Cycle,
     config: CampaignConfig,
@@ -201,6 +244,8 @@ async def _post_round(
     if cycle.search_memory:
         cycle.search_memory.on_round_complete(cycle, session, config, round_num, dataset)
         _maybe_apply_zero_signal_filter(cycle, config, session, round_num, dataset, cb)
+
+    _maybe_evolve_adaptive_prefix(cycle, config, session, round_num, dataset, cb)
 
     if cycle.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)

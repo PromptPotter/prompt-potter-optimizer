@@ -381,7 +381,47 @@ Each round samples 2-3 styles from the variant library (`promptpotter/config/pro
 
 Cross-campaign intelligence loaded at cycle init, refreshed before each round. Each consumer receives a tailored subset via builder functions. See [`search-memory-intelligence.md`](search-memory-intelligence.md) for the full design, consumer matrix, and two-tier intelligence architecture.
 
-**Round-boundary dataset mutation — zero-signal filter.** Immediately after `SearchMemory.on_round_complete()`, `campaign/runner.py::_maybe_apply_zero_signal_filter` runs. When enabled (`CampaignConfig.optimization.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are physically moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. This is the **only** sanctioned round-boundary mutation of the active dataset; all other intelligence tiers are read-only signals into LLM prompts. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
+**Round-boundary dataset mutations — two sanctioned writers.** Two mechanisms (and only these two) may mutate the dataset / scoring slice between rounds; everything else is read-only signal into prompts.
+
+1. **Zero-signal filter** — `runner.py::_maybe_apply_zero_signal_filter` runs immediately after `SearchMemory.on_round_complete()`. When enabled (`CampaignConfig.optimization.zero_signal_filter_enabled`), queries with variance 0 across ≥ `zero_signal_filter_min_observations` samples are moved into the dataset's `excluded` sidelist and dropped from the in-memory active list. See [`search-memory-intelligence.md § Zero-Signal Sample Filtering`](search-memory-intelligence.md).
+2. **Adaptive sample prefix** — `runner.py::_maybe_evolve_adaptive_prefix` runs immediately after the zero-signal filter. When enabled (`CampaignConfig.optimization.adaptive_prefix.enabled`), Rasch + Knowledge Gradient swaps low-info samples in the active scoring slice for high-information ones. Mutates `session.scoring_dataset[:]` only; never the dataset on disk. See § Adaptive sample prefix below.
+
+## Adaptive sample prefix — Rasch + Knowledge Gradient
+
+`session.scoring_dataset` is the per-round slice every candidate is scored on. By default it's the deterministic prefix `dataset[:sp_budget_ttest]`, fixed at session init and unchanged across the whole campaign. That serves the Wilcoxon early-abort (which needs paired observations across candidates within a round) but spends budget on samples that turn out to carry no signal — every candidate hits them, or every candidate misses them, or our posterior on their behavior tightened many rounds ago.
+
+The adaptive-prefix mechanism (`application/intelligence/adaptive_prefix.py`, off by default) lets the prefix evolve at the round boundary: between rounds, refit a Rasch model on every accumulated `(candidate, sample, hit)` triple, then swap K low-info samples out for K high-information ones. The slice stays shared within a round — Wilcoxon's pairing invariant is intact — and only changes between rounds.
+
+### Rasch + KG, not heuristics
+
+Rasch (`application/intelligence/rasch.py`) is the joint logistic-IRT model `P(hit_{c,s} = 1) = σ(θ_c − δ_s)`: candidate ability × sample difficulty. Joint MAP via alternating Newton on the sparse observation matrix; Laplace standard errors for posterior CIs. Anchored to `mean(θ) == 0` for identifiability. The fit gives a first-class **sample-difficulty parameter** (`δ_s`, surfaces directly as the hardness leaderboard) and a first-class **candidate-ability parameter** (`θ_c`).
+
+Knowledge Gradient is the one-step Bayesian acquisition function: how much would measuring `(c, s)` shift our point estimate of the best candidate? Closed-form for Bernoulli observations under Laplace.
+
+All swap decisions reduce to **float thresholds on these statistical quantities**:
+- `swap_out_delta_se` — SE on `δ_s` below which the sample is "understood" (default 0.25 logits ≈ 95% CI width 1.0).
+- `swap_in_kg_threshold` — minimum `KG(s)` to be swap-in eligible (default 0.01).
+- `max_swaps_per_round` — cap on prefix churn per round (default 3).
+- `min_prefix_size` — floor on prefix size; never drops below `elimination_n_min` (defaults to 4).
+
+### Relationship to Wilcoxon
+
+`EliminationCheck` is created **fresh inside `score_candidates()` per round** — Wilcoxon priors are per-round-internal, not cross-round. Adaptive prefix changes the slice between rounds, but within any given round all candidates score the same prefix so the paired-test invariant holds. The two mechanisms run at different cadences answering different questions:
+
+| Mechanism | Cadence | Question | Statistical tool |
+|---|---|---|---|
+| `EliminationCheck` (Wilcoxon) | Mid-evaluation, every query after `n_min` | Is this in-progress candidate decisively worse than the round's completed priors? | Paired signed-rank, Holm-Bonferroni |
+| `evolve_prefix` (Rasch + KG) | Once per round, between rounds | Which samples should the next round score to maximize information gain about the best candidate? | MAP fit + closed-form one-step KG |
+
+The Wilcoxon gate stays untouched. A future iteration could replace it with a Rasch-posterior elimination (`P(θ_c < θ_winner | data) > 0.95`); out of scope today.
+
+### Persistence and display
+
+Each evolved round appends a compact event dict to `cycle.prefix_events` — `{round, swapped_in, swapped_out, reason, rasch: {n_candidates, n_samples, iterations, converged}, hardness_top: [...]}`. The list is persisted in every trial JSON via `Cycle.checkpoint`, restored on resume via `Cycle.restore_from_trial`. The shared renderer `presentation/views/adaptive_prefix.py::render_adaptive_prefix` consumes this list — used by `cmd_results` (CLI) and available to the notebook.
+
+### Hardness as a derived view
+
+`SampleIndex.hardness_records(posterior)` walks `posterior.delta` and returns samples sorted by `δ_s` descending, with `ci_width = 2 × 1.96 × delta_se`. Confirmed-hard = high δ + narrow CI. Suspected-hard = high δ + wide CI (KG will surface those as swap-in candidates). No separate code path; just a view over the fitted model.
 
 ## Stale Data Load Protocol
 
@@ -410,6 +450,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 | `modify_plan` | L3 escalation |
 | `escalation` | `EscalationCheck` fires mid-eval |
 | `zero_signal_filter` | Dataset sweep removed always-hit/always-miss queries |
+| `adaptive_prefix` | Round-end Rasch+KG swap of low-info ↔ high-info samples in the scoring slice |
 
 Each event: `phase`, `event` ("enter"/"exit"), `round`, `data` (dict), `timestamp` (ISO 8601). See `RunListener` for the callback interface.
 
