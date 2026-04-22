@@ -68,6 +68,10 @@ class RoundSnapshot:
 
     runtime_failures: list[dict] = field(default_factory=list)
 
+    # Size (chars) of the current-best prompt — surfaced to the critique so
+    # it can flag bloat drift and prompt L1 to compress on the next round.
+    current_prompt_chars: int = 0
+
     @classmethod
     def from_round_state(
         cls,
@@ -129,6 +133,7 @@ class RoundSnapshot:
                 for cs in scoring_result.candidate_scores
                 for rf in (cs.get("runtime_failures") or [])
             ],
+            current_prompt_chars=len(cycle.opt_sp.render()),
         )
 
 

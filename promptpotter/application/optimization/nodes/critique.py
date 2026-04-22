@@ -138,15 +138,26 @@ def sample_thinking_styles(n: int = 3, seed: int | None = None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+_PROMPT_BLOAT_CHARS = 3000
+
+
 def _summary_section(ctx: RoundSnapshot) -> str:
     total = len(ctx.results)
-    return (
-        f"## SCORING SUMMARY\n"
+    lines = [
+        "## SCORING SUMMARY",
         f"Accuracy: {ctx.accuracy:.1%} | Composite: {ctx.composite:.4f} | "
-        f"Degraded: {ctx.degraded_queries}/{total}\n"
+        f"Degraded: {ctx.degraded_queries}/{total}",
         f"Round {ctx.current_round} | L1 stall count: {ctx.l1_stall_count} | "
-        f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})"
-    )
+        f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
+    ]
+    if ctx.current_prompt_chars:
+        bloat = (
+            " — prompt is bloated; favour compression in priority_fix"
+            if ctx.current_prompt_chars > _PROMPT_BLOAT_CHARS
+            else ""
+        )
+        lines.append(f"Current prompt size: {ctx.current_prompt_chars} chars{bloat}")
+    return "\n".join(lines)
 
 
 def _pipeline_health_section(

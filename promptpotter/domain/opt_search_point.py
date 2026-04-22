@@ -177,8 +177,18 @@ class OptimizationMemory(BaseModel):
     improvement.
     """
 
-    critique_text: str = ""
-    thinking_styles: list[str] = Field(default_factory=list)
+    critique_text: str = Field(
+        default="",
+        description="Latest critique summary fed to L1 when no l2_directive "
+        "is active. One-round window — cleared by clear_volatile() on "
+        "improvement, same lifecycle as l2_directive.",
+    )
+    thinking_styles: list[str] = Field(
+        default_factory=list,
+        description="3 thinking styles sampled at each round's critique phase "
+        "for injection into the L1 meta-prompt. One-round window — cleared by "
+        "clear_volatile() on improvement.",
+    )
     escalation_journal: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Cross-round degradation investigation memory.",
@@ -238,10 +248,20 @@ class OptimizationMemory(BaseModel):
     def clear_volatile(self) -> None:
         """Drop one-round windows after an improving round.
 
-        Currently only ``l2_directive`` (L2's guidance is meant to steer
-        the next round only — once L1 succeeded, the directive is stale).
+        All three fields share the same lifecycle: they are produced to
+        steer *the next round only*, and once L1 succeeded the basis for
+        that guidance is stale.
+
+        * ``l2_directive``   — L2's action guidance for L1.
+        * ``critique_text``  — the prior round's critique summary; mutex
+          with ``l2_directive`` on L1, so a stale critique would otherwise
+          bleed into the next L1 meta-prompt whenever L2 did not fire.
+        * ``thinking_styles`` — 3 samples drawn at each round's critique
+          phase; tied to the same steering window.
         """
         self.l2_directive = ""
+        self.critique_text = ""
+        self.thinking_styles = []
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
         """Append a journal entry; fill the previous entry's pending outcome.
