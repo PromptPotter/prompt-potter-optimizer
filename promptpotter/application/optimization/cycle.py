@@ -212,3 +212,79 @@ class Cycle:
             self.best_accuracy = self.current_accuracy
             self.best_round = round_num
             self.best_sp = self.current_sp
+
+    # -- Write API -------------------------------------------------------------
+
+    def record_round(self, rr: RoundResult, round_num: int) -> None:
+        """Append a RoundResult and propagate to memory + current/best tracking.
+
+        Invariants enforced: ``rounds`` gets the RoundResult; ``opt_sp.memory
+        .round_history`` gets a matching RoundSummary; ``opt_sp``'s prompt
+        fields are synced to the winner's; ``current_sp`` / ``current_*`` and
+        monotone ``best_*`` are updated via :meth:`update_current`.
+        """
+        from promptpotter.domain.opt_search_point import RoundSummary
+        from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+
+        schema = self.session.pipeline_schema if self.session is not None else None
+        self.rounds.append(rr)
+        self.opt_sp.memory.round_history.append(
+            RoundSummary(
+                round=rr.round,
+                accuracy=rr.accuracy,
+                composite=rr.composite,
+                improved=rr.improved,
+                degraded_queries=rr.degraded_queries,
+                pipeline_params=rr.pipeline_params,
+                candidate_scores=list(rr.candidate_scores),
+            )
+        )
+        for f in PROMPT_STRING_FIELDS:
+            setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
+        assert self.current_sp is not None
+        _pp = (
+            rr.pipeline_params
+            if rr.pipeline_params is not None
+            else self.current_sp.pipeline_params
+        )
+        self.update_current(
+            rr,
+            self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
+            round_num,
+        )
+
+    def record_decision(self, d: dict) -> None:
+        """Queue a decision produced outside the normal round flow (escalation/probe)."""
+        self.pending_decisions.append(d)
+
+    def flush_decisions(self) -> list[dict]:
+        """Drain queued decisions (used before checkpointing a round)."""
+        out = list(self.pending_decisions)
+        self.pending_decisions.clear()
+        return out
+
+    def set_probe(self, flag: bool) -> None:
+        """Mark whether the next round is a probe."""
+        self.probe_next_round = flag
+
+    def checkpoint(self, rr: RoundResult, round_num: int) -> dict[str, Any]:
+        """Build the trial dict for ``campaign_store.add_trial`` — self-contained replay."""
+        return {
+            "trial_id": f"round_{round_num}",
+            "round": round_num,
+            "label": rr.label,
+            "accuracy": rr.accuracy,
+            "composite": rr.composite,
+            "hits": rr.hits,
+            "total": rr.total,
+            "improved": rr.improved,
+            "prompt_fields": rr.prompt_fields,
+            "results": rr.results,
+            "all_candidate_results": dict(rr.all_candidate_results),
+            "candidates_scored": rr.candidates_scored,
+            "candidate_scores": list(rr.candidate_scores),
+            "decisions": list(rr.decisions),
+            "evaluators": dict(rr.evaluators),
+            **self.escalation.to_checkpoint_dict(),
+            "opt_search_point": self.opt_sp.model_dump(),
+        }

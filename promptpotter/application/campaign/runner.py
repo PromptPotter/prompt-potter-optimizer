@@ -25,7 +25,6 @@ from promptpotter.application.optimization.nodes.escalation import (
 from promptpotter.application.optimization.nodes.round_execution import (
     PauseForReviewError,
     execute_round,
-    update_round_state,
 )
 from promptpotter.application.optimization.phases import (
     CampaignPhase,
@@ -113,29 +112,6 @@ async def _handle_escalation_signal(
     emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
 
 
-def _trial_entry(cycle: Cycle, rr: RoundResult, round_num: int) -> dict[str, Any]:
-    """Checkpoint dict for ``campaign_store.add_trial`` — self-contained for divergence replay."""
-    return {
-        "trial_id": f"round_{round_num}",
-        "round": round_num,
-        "label": rr.label,
-        "accuracy": rr.accuracy,
-        "composite": rr.composite,
-        "hits": rr.hits,
-        "total": rr.total,
-        "improved": rr.improved,
-        "prompt_fields": rr.prompt_fields,
-        "results": rr.results,
-        "all_candidate_results": dict(rr.all_candidate_results),
-        "candidates_scored": rr.candidates_scored,
-        "candidate_scores": list(rr.candidate_scores),
-        "decisions": list(rr.decisions),
-        "evaluators": dict(rr.evaluators),
-        **cycle.escalation.to_checkpoint_dict(),
-        "opt_search_point": cycle.opt_sp.model_dump(),
-    }
-
-
 def _maybe_apply_zero_signal_filter(
     cycle: Cycle,
     config: CampaignConfig,
@@ -202,15 +178,14 @@ async def _post_round(
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
     if cycle.pending_decisions:
-        round_result.decisions.extend(cycle.pending_decisions)
-        cycle.pending_decisions.clear()
+        round_result.decisions.extend(cycle.flush_decisions())
 
     if session.campaign_store and session.cycle_id:
         with graceful("Round checkpoint failed"):
             session.campaign_store.add_trial(
                 session.backend_id,
                 session.cycle_id,
-                _trial_entry(cycle, round_result, round_num),
+                cycle.checkpoint(round_result, round_num),
             )
 
     _rr = get_round_recorder()
@@ -295,13 +270,13 @@ async def _run_round_loop(
                 cb,
                 degradation_checks=round_checks,
             )
-            update_round_state(cycle, round_result, round_num, schema=session.pipeline_schema)
+            cycle.record_round(round_result, round_num)
 
             if cycle.search_memory and len(cycle.rounds) >= 2:
                 cycle.search_memory.record_flips_from_rounds(cycle.rounds, round_num)
 
             if is_probe:
-                cycle.probe_next_round = False
+                cycle.set_probe(False)
                 if opt.enable_l2:
                     stop = await escalate_l2(
                         cycle,

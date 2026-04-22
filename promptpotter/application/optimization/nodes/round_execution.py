@@ -37,13 +37,12 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PauseForReviewError", "execute_round", "update_round_state"]
+__all__ = ["PauseForReviewError", "execute_round"]
 
 
 class PauseForReviewError(Exception):
@@ -448,36 +447,3 @@ async def execute_round(
             )
 
     return round_result
-
-
-def update_round_state(
-    cycle: Cycle,
-    rr: RoundResult,
-    round_num: int,
-    *,
-    schema: PipelineSchema | None = None,
-) -> None:
-    """Apply round result to cycle state (shared by escalation + normal paths)."""
-    from promptpotter.domain.opt_search_point import RoundSummary
-
-    cycle.rounds.append(rr)
-    cycle.opt_sp.memory.round_history.append(
-        RoundSummary(
-            round=rr.round,
-            accuracy=rr.accuracy,
-            composite=rr.composite,
-            improved=rr.improved,
-            degraded_queries=rr.degraded_queries,
-            pipeline_params=rr.pipeline_params,
-            candidate_scores=list(rr.candidate_scores),
-        )
-    )
-    for f in PROMPT_STRING_FIELDS:
-        setattr(cycle.opt_sp, f, rr.prompt_fields.get(f, ""))
-    assert cycle.current_sp is not None
-    _pp = rr.pipeline_params if rr.pipeline_params is not None else cycle.current_sp.pipeline_params
-    cycle.update_current(
-        rr,
-        cycle.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
-        round_num,
-    )
