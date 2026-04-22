@@ -60,9 +60,6 @@ Rows with `—` in a layer column are skipped when rendering that layer.
 | `plan` | `opt_sp.plan` | opt_sp | `PLAN:` | — | |
 | `escalation_section` | `ctx.escalation_check_result` + `opt_sp.memory.escalation_journal` | transient | — | `PIPELINE STABILITY REPORT ...` | |
 | `warning_inventory` | `opt_sp.memory.warning_inventory` (L2 fallback when no escalation) | memory | — | `## RECURRING PIPELINE WARNINGS ...` | |
-| `trajectory` | `build_trajectory_report(opt_sp.memory.round_history)` | memory | — | `CAMPAIGN TRAJECTORY:` | |
-| `candidate_comparison` | `build_candidate_comparison(candidate_scores)` | transient | — | `LAST ROUND CANDIDATES:` | |
-| `diversity_alert` | `assess_candidate_diversity(opt_sp.memory.round_history)` | memory | — | `DIVERSITY ALERT:` | |
 | `validation_failures` | `candidate_scores[*].validation_failures` | transient | — | `L1 VALIDATION FAILURES ...` | |
 | `runtime_failures` | `opt_sp.memory.runtime_failures` | memory | — | `RUNTIME FAILURES — L2 SELF-HEALING ...` | |
 | `search_memory_l2` | `SearchMemory.digest({axis_rankings, bottleneck_distribution, failure_group_insights, persistent_failures, volatile_queries}, include_correlations=True)` | search_memory | — | `HISTORICAL INTELLIGENCE:` | |

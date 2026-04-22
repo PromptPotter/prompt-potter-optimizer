@@ -39,9 +39,6 @@ from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.nodes.formatting import (
-    assess_candidate_diversity,
-    build_candidate_comparison,
-    build_trajectory_report,
     format_escalation_report,
     format_runtime_failure_line,
     format_search_memory_block,
@@ -205,26 +202,6 @@ def _src_warning_inventory_l2(cycle: Cycle, t: InboxTransients) -> dict | None:
     return cycle.opt_sp.memory.warning_inventory or None
 
 
-def _src_trajectory(cycle: Cycle, _t: InboxTransients) -> Any:
-    history = cycle.opt_sp.memory.round_history
-    if not history:
-        return None
-    return build_trajectory_report(history)
-
-
-def _src_candidate_comparison(_cycle: Cycle, t: InboxTransients) -> str | None:
-    if not t.candidate_scores:
-        return None
-    return build_candidate_comparison(t.candidate_scores)
-
-
-def _src_diversity_alert(cycle: Cycle, _t: InboxTransients) -> str | None:
-    history = cycle.opt_sp.memory.round_history
-    if not history:
-        return None
-    return assess_candidate_diversity(history)
-
-
 def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | None:
     vfs: list[dict] = []
     for cs in t.candidate_scores or []:
@@ -358,16 +335,6 @@ def _r_escalation_section(v: str, _cycle: Cycle, _t: InboxTransients, _layer: La
 def _r_warning_inventory_l2(v: dict, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     text = summarize_warning_inventory(v)
     return (text + "\n") if text else ""
-
-
-def _r_trajectory(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
-    lines = [f"CAMPAIGN TRAJECTORY:\n  {v.text}"]
-    if v.classification != "healthy":
-        lines.append(
-            f"TRAJECTORY DIAGNOSIS: [{v.classification.upper()}] "
-            f"{v.description}\n  Recommended: {v.recommended_action}"
-        )
-    return "\n\n".join(lines)
 
 
 def _r_validation_failures(v: list[dict], _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
@@ -537,30 +504,6 @@ INBOX: tuple[InboxField, ...] = (
         docstring="Per-query warning breakdown — L2 fallback when no escalation section.",
     ),
     InboxField(
-        name="trajectory",
-        layers=frozenset({Layer.L2}),
-        source=_src_trajectory,
-        render=_r_trajectory,
-        retention=Retention.TRANSIENT,
-        docstring="Campaign-wide accuracy trajectory + classification (healthy/plateau/...).",
-    ),
-    InboxField(
-        name="candidate_comparison",
-        layers=frozenset({Layer.L2}),
-        source=_src_candidate_comparison,
-        render=lambda v, _c, _t, _l: f"LAST ROUND CANDIDATES:\n  {v}" if v else "",
-        retention=Retention.TRANSIENT,
-        docstring="Per-candidate accuracy diff for the last round.",
-    ),
-    InboxField(
-        name="diversity_alert",
-        layers=frozenset({Layer.L2}),
-        source=_src_diversity_alert,
-        render=lambda v, _c, _t, _l: f"DIVERSITY ALERT:\n  {v}" if v else "",
-        retention=Retention.TRANSIENT,
-        docstring="Mode-collapse detection across recent rounds.",
-    ),
-    InboxField(
         name="validation_failures",
         layers=frozenset({Layer.L2}),
         source=_src_validation_failures,
@@ -610,9 +553,6 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
         "warning_inventory",
         "critique_text",
         "l2_directive",
-        "trajectory",
-        "candidate_comparison",
-        "diversity_alert",
         "validation_failures",
         "runtime_failures",
         "search_memory_l2",

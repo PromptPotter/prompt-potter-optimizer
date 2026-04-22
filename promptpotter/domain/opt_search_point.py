@@ -44,11 +44,9 @@ class RoundSummary(BaseModel):
     """Compact per-round record persisted on ``OptimizationMemory.round_history``.
 
     Mirrors the trajectory-relevant fields of ``RoundResult`` — enough for
-    ``build_trajectory_report`` (needs ``.accuracy``) and
-    ``assess_candidate_diversity`` (needs ``.candidate_scores`` with each
-    entry's ``pipeline_params_override``). Drops raw per-query results and
-    per-candidate results, which remain on the transient ``Cycle.rounds``
-    list.
+    ``build_trajectory_report`` (needs ``.accuracy``). Drops raw per-query
+    results and per-candidate results, which remain on the transient
+    ``Cycle.rounds`` list.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
@@ -232,11 +230,9 @@ class OptimizationMemory(BaseModel):
     round_history: list[RoundSummary] = Field(
         default_factory=list,
         description="Compact per-round trajectory ledger. Sufficient for "
-        "``build_trajectory_report`` (accuracy) and "
-        "``assess_candidate_diversity`` (candidate_scores). Full "
-        "``RoundResult`` objects with raw query results stay transient on "
-        "``Cycle.rounds``; this persisted mirror survives trial "
-        "checkpoints.",
+        "``build_trajectory_report`` (accuracy). Full ``RoundResult`` "
+        "objects with raw query results stay transient on ``Cycle.rounds``; "
+        "this persisted mirror survives trial checkpoints.",
     )
 
     def clear_volatile(self) -> None:

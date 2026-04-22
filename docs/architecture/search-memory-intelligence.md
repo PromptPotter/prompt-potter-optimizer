@@ -220,13 +220,13 @@ Both run from `runner.py::_post_round`, in this order: zero-signal filter first 
 
 Meta-reasoning injected into L2 Refine only:
 
-- **Round trajectory** — `build_trajectory_report()`: accuracy trend, stall count, direction. Built from `opt_sp.memory.round_history` (compact per-round summaries that ride with the checkpointed `OptSearchPoint`).
 - **Failure group × axis** — `_parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
-- **Candidate comparison** — `build_candidate_comparison()`: how all candidates performed, preventing L2 from repeating tested approaches.
+
+Note — round trajectory and per-candidate comparison used to be surfaced to L2 directly via the inbox registry. That was a residual skip connection: critique already distills both (`_round_evolution_section`, `## THIS ROUND / MISSED OPPORTUNITIES`) and re-injecting the raw forms into L2 duplicated signal `critique_text` already carries. L2 now reads those through `critique_text` only.
 
 ## 6. Status
 
-All core items implemented: failure streak triage, round trajectory, failure group × axis, candidate comparison, critique tractability/exhaustion/trends, L3 intelligence.
+All core items implemented: failure streak triage, round trajectory (via critique), failure group × axis, candidate comparison (via critique), critique tractability/exhaustion/trends, L3 intelligence.
 
 ## 7. Future Work
 

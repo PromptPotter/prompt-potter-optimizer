@@ -13,8 +13,6 @@ if TYPE_CHECKING:
 
 __all__ = [
     "TrajectoryReport",
-    "assess_candidate_diversity",
-    "build_candidate_comparison",
     "build_cross_candidate_diff",
     "build_trajectory_report",
     "candidate_summaries",
@@ -215,78 +213,6 @@ def build_trajectory_report(rounds: list[Any]) -> TrajectoryReport | None:
         description=description,
         recommended_action=action,
     )
-
-
-def assess_candidate_diversity(rounds: list[Any], window: int = 5) -> str | None:
-    """Detect mode collapse — same axes dominating across recent rounds. Returns None when healthy."""
-    if not rounds or len(rounds) < 3:
-        return None
-
-    recent = rounds[-window:]
-    axis_counts: dict[str, int] = {}
-    total_candidates = 0
-
-    for r in recent:
-        for cs in r.candidate_scores:
-            override = cs.get("pipeline_params_override") or {}
-            total_candidates += 1
-            if not override:
-                continue
-            for node_name, node_params in override.items():
-                if isinstance(node_params, dict):
-                    for param in node_params:
-                        axis_counts[f"{node_name}.{param}"] = (
-                            axis_counts.get(f"{node_name}.{param}", 0) + 1
-                        )
-                else:
-                    axis_counts[node_name] = axis_counts.get(node_name, 0) + 1
-
-    if total_candidates < 6 or not axis_counts:
-        return None
-
-    sorted_axes = sorted(axis_counts.items(), key=lambda x: -x[1])
-    top_axis, top_count = sorted_axes[0]
-    concentration = top_count / total_candidates
-
-    if concentration > 0.6:
-        other_axes = len([a for a, c in sorted_axes if c >= 2])
-        return (
-            f"Low diversity: {top_axis} varied in {concentration:.0%} of "
-            f"{total_candidates} candidates across {len(recent)} rounds "
-            f"({other_axes} other axes explored). "
-            "Consider directing L1 toward different axes."
-        )
-
-    if len(sorted_axes) >= 2:
-        top2_count = sorted_axes[0][1] + sorted_axes[1][1]
-        top2_concentration = top2_count / total_candidates
-        if top2_concentration > 0.75:
-            return (
-                f"Narrow exploration: {sorted_axes[0][0]} and {sorted_axes[1][0]} "
-                f"dominate ({top2_concentration:.0%} of {total_candidates} candidates). "
-                "Consider broadening to other axes."
-            )
-
-    return None
-
-
-def build_candidate_comparison(candidate_scores: list[dict]) -> str | None:
-    """Compact per-candidate summary (accuracy, description, delta from winner) for L2."""
-    if not candidate_scores or len(candidate_scores) < 2:
-        return None
-
-    sorted_candidates = sorted(candidate_scores, key=lambda c: -c.get("accuracy", 0))
-    winner_acc = sorted_candidates[0].get("accuracy", 0)
-
-    parts = []
-    for c in sorted_candidates:
-        acc = c.get("accuracy", 0)
-        delta = acc - winner_acc
-        desc = c.get("changes_description", "no description")[:80]
-        delta_str = f" ({delta:+.1%})" if delta != 0 else " (winner)"
-        parts.append(f"{acc:.1%}{delta_str}: {desc}")
-
-    return " | ".join(parts)
 
 
 def build_cross_candidate_diff(
