@@ -210,6 +210,100 @@ def test_build_prefix_event_and_collector_roundtrip() -> None:
     assert render_adaptive_prefix([]) == ""
 
 
+def test_runner_wiring_mutates_scoring_dataset_and_records_event(monkeypatch) -> None:
+    """End-to-end-ish: prove _maybe_evolve_adaptive_prefix actually rewires the slice.
+
+    Stubs evolve_prefix so this test stays focused on the runner wiring (Rasch
+    correctness is covered by other tests in this file). Confirms three things
+    the feature MUST do per round when enabled and a swap is produced:
+      1. session.scoring_dataset is mutated in place to the new prefix.
+      2. cycle.prefix_events gets a serialized event dict appended.
+      3. cb.on_phase fires with phase='adaptive_prefix', event='evolved'.
+    """
+    from types import SimpleNamespace
+
+    from promptpotter.application.campaign import runner as runner_mod
+    from promptpotter.application.campaign.config import (
+        AdaptivePrefixConfig,
+        CampaignConfig,
+        OptimizationConfig,
+    )
+    from promptpotter.application.intelligence.adaptive_prefix import EvolveResult
+    from promptpotter.application.optimization.cycle import Cycle
+
+    s_in_old = [Sample(id=1, query="q1", ground_truth="g")]
+    s_in_new = [Sample(id=99, query="q99", ground_truth="g")]
+    full = s_in_old + s_in_new
+
+    cycle = Cycle(rounds=[_make_round(0, {"c1": [{"sample_id": 1, "hit": True}]})])
+    session = SimpleNamespace(scoring_dataset=list(s_in_old))
+
+    fake_result = EvolveResult(
+        new_prefix=list(s_in_new),
+        swapped_out=list(s_in_old),
+        swapped_in=list(s_in_new),
+        rasch=None,
+        reason="swapped",
+    )
+    monkeypatch.setattr(
+        "promptpotter.application.intelligence.adaptive_prefix.evolve_prefix",
+        lambda **kw: fake_result,
+    )
+
+    captured: list[tuple] = []
+    cb = SimpleNamespace(on_phase=lambda ev: captured.append((ev.phase, ev.event, ev.data)))
+
+    config = CampaignConfig(
+        optimization=OptimizationConfig(
+            adaptive_prefix=AdaptivePrefixConfig(enabled=True),
+        ),
+    )
+
+    runner_mod._maybe_evolve_adaptive_prefix(
+        cycle,
+        config,
+        session,  # type: ignore[arg-type]
+        round_num=2,
+        dataset=full,
+        cb=cb,  # type: ignore[arg-type]
+    )
+
+    assert [s.id for s in session.scoring_dataset] == [99]
+    assert len(cycle.prefix_events) == 1
+    event = cycle.prefix_events[0]
+    assert event["round"] == 2
+    assert event["swapped_out"] == [1]
+    assert event["swapped_in"] == [99]
+    assert any(p == "adaptive_prefix" and e == "evolved" for p, e, _ in captured)
+
+
+def test_cycle_checkpoint_roundtrips_prefix_events() -> None:
+    """Cycle.checkpoint persists prefix_events; restore_from_trial reads them back."""
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+
+    cycle = Cycle()
+    cycle.opt_sp = OptSearchPoint()
+    cycle.prefix_events = [{"round": 1, "swapped_in": [42], "swapped_out": [3], "reason": "x"}]
+    rr = RoundResult(
+        round=1,
+        label="R1",
+        accuracy=0.5,
+        hits=0,
+        total=0,
+        improved=False,
+        prompt_fields={},
+        candidates_scored=0,
+    )
+    trial = cycle.checkpoint(rr, round_num=1)
+    assert trial["prefix_events"] == cycle.prefix_events
+
+    fresh = Cycle()
+    fresh.restore_from_trial(trial)
+    assert fresh.prefix_events == cycle.prefix_events
+
+
 @pytest.mark.parametrize("enabled", [True, False])
 def test_evolve_prefix_does_not_mutate_inputs(enabled: bool) -> None:
     samples = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(6)]
