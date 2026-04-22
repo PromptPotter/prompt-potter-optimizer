@@ -107,8 +107,76 @@ __all__ = ["measure_sample"]
 
 # Wire-response keys always kept on pipeline_data, regardless of pipeline schema.
 _INFRA_KEYS: frozenset[str] = frozenset(
-    {"step_timings", "llm_provider", "total_time", "pipeline_params", "diagnostics"}
+    {
+        "step_timings",
+        "step_tokens",
+        "llm_provider",
+        "total_time",
+        "pipeline_params",
+        "diagnostics",
+    }
 )
+
+
+def _compute_step_tokens(
+    resp_data: dict[str, Any],
+    pipeline_schema: Any,
+    wire_params: dict[str, Any],
+) -> dict[str, dict[str, int | bool]]:
+    """Collect per-LLM-node token counts from the backend response.
+
+    Seeds from ``resp_data["step_tokens"]`` when the backend provides it
+    (marks each entry ``estimated=False``). For any LLM node still missing
+    a count, falls back to a chars/4 heuristic over the interpolated prompt
+    and the node's observed output text (marks ``estimated=True``).
+
+    Returns an empty dict when the schema carries no LLM nodes.
+    """
+    out: dict[str, dict[str, int | bool]] = {}
+
+    raw = resp_data.get("step_tokens")
+    if isinstance(raw, dict):
+        for node_name, entry in raw.items():
+            if isinstance(entry, dict):
+                out[node_name] = {
+                    "input": int(entry.get("input", 0)),
+                    "output": int(entry.get("output", 0)),
+                    "estimated": False,
+                }
+
+    for node in pipeline_schema.nodes:
+        if not node.is_llm or node.name in out:
+            continue
+
+        node_cfg = wire_params.get(node.name) or {}
+        in_text = node_cfg.get("prompt", "") if isinstance(node_cfg, dict) else ""
+
+        out_text_parts: list[str] = []
+        for mapping in node.observation_mappings:
+            if not mapping.is_llm:
+                continue
+            pipeline_val = resp_data.get(mapping.pipeline_key)
+            if pipeline_val is None:
+                continue
+            field = mapping.output_field
+            if field and isinstance(pipeline_val, dict):
+                picked = pipeline_val.get(field, "")
+                out_text_parts.append(str(picked))
+            elif field and isinstance(pipeline_val, list):
+                for item in pipeline_val:
+                    if isinstance(item, dict) and field in item:
+                        out_text_parts.append(str(item[field]))
+            else:
+                out_text_parts.append(str(pipeline_val))
+        out_text = " ".join(out_text_parts)
+
+        out[node.name] = {
+            "input": len(in_text) // 4,
+            "output": len(out_text) // 4,
+            "estimated": True,
+        }
+
+    return out
 
 
 def _error_result(
@@ -185,6 +253,10 @@ async def measure_sample(
                     terminated_at = node.name
         if terminated_at is not None:
             pd["terminated_at"] = terminated_at
+
+        step_tokens = _compute_step_tokens(data, pipeline_schema, wire_params)
+        if step_tokens:
+            pd["step_tokens"] = step_tokens
 
         result: dict = {
             "sample_id": sample.id,

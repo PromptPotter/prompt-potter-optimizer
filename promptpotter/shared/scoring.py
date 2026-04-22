@@ -143,6 +143,36 @@ def _exact_match(predicted: str, ground_truth: str) -> float:
     return 1.0 if p == g else 0.0
 
 
+def _relu(x: float) -> float:
+    """ReLU activation: ``max(0, x)``."""
+    return max(0.0, float(x))
+
+
+def _hockeystick(x: float, threshold: float, slope: float = 1.0) -> float:
+    """Hockey-stick penalty: 0 below *threshold*, linear above with *slope*."""
+    return max(0.0, (float(x) - float(threshold)) * float(slope))
+
+
+def _sigmoid(x: float) -> float:
+    """Logistic sigmoid — numerically safe for large |x|."""
+    x = float(x)
+    if x >= 0:
+        z = math.exp(-x)
+        return 1.0 / (1.0 + z)
+    z = math.exp(x)
+    return z / (1.0 + z)
+
+
+def _smoothstep(x: float, edge0: float, edge1: float) -> float:
+    """Smoothstep Hermite interpolation clamped to [0, 1]."""
+    e0 = float(edge0)
+    e1 = float(edge1)
+    if e1 == e0:
+        return 0.0 if float(x) < e0 else 1.0
+    t = max(0.0, min(1.0, (float(x) - e0) / (e1 - e0)))
+    return t * t * (3 - 2 * t)
+
+
 def _extract_gsm8k_display(text: str) -> str:
     """Return the extracted GSM8K answer as a short string."""
     n = _extract_gsm8k_number(text or "")
@@ -169,6 +199,11 @@ SCORING_FUNCTIONS: dict[str, Callable] = {
     "gsm8k_match": _gsm8k_match,
     "aime_match": _aime_match,
     "exact_match": _exact_match,
+    # Activation / shaping helpers — useful for token-length penalties etc.
+    "relu": _relu,
+    "hockeystick": _hockeystick,
+    "sigmoid": _sigmoid,
+    "smoothstep": _smoothstep,
 }
 """All scoring helpers available in formulas. Add new ones here."""
 
@@ -210,12 +245,27 @@ _SAFE_BUILTINS = {
         "round": round,
         "log": math.log,
         "sqrt": math.sqrt,
+        "exp": math.exp,
+        "pow": pow,
     }
 }
 
 
 def _build_namespace(result: dict) -> dict:
     """Build eval namespace from a QueryResult dict."""
+    pd = result.get("pipeline_data") or {}
+
+    # Cross-LLM-node token sums from pipeline_data.step_tokens.
+    # Per-node breakdown is still reachable via ``step_tokens.<node>.<key>``
+    # through the SimpleNamespace flattening below.
+    step_tokens = pd.get("step_tokens") or {}
+    input_tokens = 0
+    output_tokens = 0
+    for entry in step_tokens.values():
+        if isinstance(entry, dict):
+            input_tokens += int(entry.get("input", 0) or 0)
+            output_tokens += int(entry.get("output", 0) or 0)
+
     ns: dict = {
         "hit": int(result.get("hit", False)),
         "ground_truth_rank": result.get("ground_truth_rank"),
@@ -223,11 +273,12 @@ def _build_namespace(result: dict) -> dict:
         "error": result.get("error"),
         "predicted": result.get("predicted", ""),
         "ground_truth": result.get("ground_truth", ""),
+        "input_tokens": input_tokens,
+        "output_tokens": output_tokens,
         **SCORING_FUNCTIONS,
     }
 
     # Flatten pipeline_data nodes into SimpleNamespace objects
-    pd = result.get("pipeline_data") or {}
     for key, val in pd.items():
         if isinstance(val, dict):
             ns[key] = SimpleNamespace(**val)

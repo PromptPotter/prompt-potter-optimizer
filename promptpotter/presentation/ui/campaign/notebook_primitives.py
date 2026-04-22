@@ -380,15 +380,38 @@ def _fmt_query_result(
     cache_marker = "\U0001f4d6" if cached else ""
     step = f"{step}{cache_marker}"
 
+    # Per-LLM-node token column: `[tag] in=N out=M` groups in pipeline order.
+    # Values are prefixed with `~` when the entry is a chars/4 estimate rather
+    # than a provider-exact count.
+    step_tokens = pd.get("step_tokens") or {}
+    tok_col = ""
+    if step_tokens:
+        groups = []
+        for node_name, entry in step_tokens.items():
+            tag_name = _DISPLAY_TAGS.get(node_name, node_name[:4])
+            mark = "~" if entry.get("estimated") else ""
+            groups.append(
+                f"[{tag_name}] in={mark}{entry.get('input', 0)} out={mark}{entry.get('output', 0)}"
+            )
+        tok_col = " " + " ".join(groups)
+        # Dedup: single-LLM pipeline, no cache marker, step tag identical to
+        # the token group's tag → drop standalone step tag.
+        if len(step_tokens) == 1 and not cached:
+            only_node = next(iter(step_tokens))
+            only_tag = _DISPLAY_TAGS.get(only_node, only_node[:4])
+            if step == f"[{only_tag}]":
+                step = ""
+
     indent = prefix if prefix else ""
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
     sid = r.get("sample_id")
     sid_col = f"#{sid:03d}" if sid is not None else "    "
+    step_block = f" {step}" if step else ""
     if err:
-        return f"{indent}{time_col} {sid_col} {tag} {step} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
+        return f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} ERR:{str(err)[:40]!r} gt:{gt!r} q:{q!r}"
 
-    line = f"{indent}{time_col} {sid_col} {tag} {step} -> {pred!r} gt:{gt!r} q:{q!r}"
+    line = f"{indent}{time_col} {sid_col} {tag}{step_block}{tok_col} -> {pred!r} gt:{gt!r} q:{q!r}"
 
     _ann_indent = " " * len(indent) if indent else "      "
 

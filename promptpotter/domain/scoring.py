@@ -25,6 +25,10 @@ class PipelineData(TypedDict, total=False):
     total_time: float
     terminated_at: str
     step_timings: dict[str, Any]
+    # Per-LLM-node token counts: {node_name: {"input": N, "output": M, "estimated": bool}}.
+    # ``estimated`` is True when counts came from a chars/4 fallback rather than
+    # the provider's usage object via the backend.
+    step_tokens: dict[str, dict[str, int | bool]]
     llm_provider: str
     pipeline_params: dict[str, Any]
     diagnostics: dict[str, Any]
