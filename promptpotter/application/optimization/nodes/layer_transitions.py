@@ -66,42 +66,6 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-# Hard size budgets on L2 / L3 string outputs — enforced at the producer.
-# l2_directive is the field that ends up re-injected into the next L1
-# meta-prompt; keeping it tight is the main lever here.
-L2_OUTPUT_SCHEMA: dict = {
-    "name": "l2_refine_strategy",
-    "strict": False,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "optimizer_params": {"type": "object"},
-            "task_context": {"type": "object"},
-            "action": {"type": "string", "enum": ["continue", "probe"]},
-            "directive": {"type": "string", "maxLength": 500},
-            "rationale": {"type": "string", "maxLength": 300},
-        },
-        "required": ["directive"],
-        "additionalProperties": False,
-    },
-}
-
-L3_OUTPUT_SCHEMA: dict = {
-    "name": "l3_modify_plan",
-    "strict": False,
-    "schema": {
-        "type": "object",
-        "properties": {
-            "plan": {"type": "string", "maxLength": 800},
-            "pipeline_params": {"type": "object"},
-            "rationale": {"type": "string", "maxLength": 300},
-        },
-        "required": ["plan"],
-        "additionalProperties": False,
-    },
-}
-
-
 async def _run_llm_transition(
     *,
     template_name: str,
@@ -109,7 +73,6 @@ async def _run_llm_transition(
     llm_client: LLMClientBase,
     model: str | None,
     temperature: float,
-    json_schema: dict | None = None,
 ) -> tuple[dict, str]:
     """Shared L2/L3 plumbing: template → compile → llm_call → JSON; returns (parsed, prompt)."""
     template = load_optimizer_prompt(template_name)
@@ -120,7 +83,6 @@ async def _run_llm_transition(
         node=template_name,
         model=model,
         temperature=temperature,
-        json_schema=json_schema,
         trace_meta={
             "template_name": template_name,
             "template_fields": template.prompt_field_dict(),
@@ -143,7 +105,6 @@ class LayerTransition(ABC):
     template_name: ClassVar[str]
     default_temperature: ClassVar[float]
     phase: ClassVar[CampaignPhase]
-    output_schema: ClassVar[dict | None] = None
 
     async def run(
         self,
@@ -166,7 +127,6 @@ class LayerTransition(ABC):
             llm_client=llm_client,
             model=model,
             temperature=self.default_temperature if temperature is None else temperature,
-            json_schema=self.output_schema,
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
@@ -203,7 +163,6 @@ class L2RefineStrategy(LayerTransition):
     template_name: ClassVar[str] = "l2_refine_strategy"
     default_temperature: ClassVar[float] = 0.3
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
-    output_schema: ClassVar[dict | None] = L2_OUTPUT_SCHEMA
 
     def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
         opt_sp = cycle.opt_sp
@@ -318,7 +277,6 @@ class L3ModifyPlan(LayerTransition):
     template_name: ClassVar[str] = "l3_modify_plan"
     default_temperature: ClassVar[float] = 0.5
     phase: ClassVar[CampaignPhase] = CampaignPhase.MODIFY_PLAN
-    output_schema: ClassVar[dict | None] = L3_OUTPUT_SCHEMA
 
     def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
         opt_sp = cycle.opt_sp

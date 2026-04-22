@@ -1,6 +1,6 @@
 """Tests for the enum-aware L1 candidate flow.
 
-Covers two seams added to stop the optimizer from proposing invalid
+Covers three seams added to stop the optimizer from proposing invalid
 provider-side param values (the original `reasoning_effort="minimal"`
 case that produced backend 502s):
 
@@ -8,18 +8,15 @@ case that produced backend 502s):
    ``PipelineNode``.
 2. ``validate_overrides`` attaches a ``ValidationFailure`` when a
    candidate's node override has an out-of-range value (Rail 1).
-
-Historical note: a third test asserted the L1 response JSON schema
-re-emitted the enum list inline. That duplication was removed as part of
-the L1 meta-prompt TPM-budget shrinkage — ``validate_overrides`` is now
-the single producer of truth. Enforcement still happens at parse time
-via the same ValidationFailure rail; the schema just no longer carries
-the same list twice.
+3. ``build_l1_output_schema`` emits a JSON-schema ``enum`` for
+   constrained axes so structured output physically blocks bad values
+   at the provider boundary.
 """
 
 from __future__ import annotations
 
 from promptpotter.application.optimization.nodes.generate import (
+    build_l1_output_schema,
     validate_overrides,
 )
 from promptpotter.application.pipeline_discovery import parse_pipeline_response
@@ -107,3 +104,24 @@ def test_validate_overrides_still_rejects_bad_model():
     assert len(failures) == 1
     assert failures[0].axis == "llm_only.model"
     assert failures[0].reason == "not_in_available_models"
+
+
+def test_build_l1_output_schema_emits_enum_for_constrained_params():
+    schema = _bbeh_schema()
+    out = build_l1_output_schema(schema)
+    # Structural: top-level variants array with enum-constrained leaf
+    variant_props = out["schema"]["properties"]["variants"]["items"]["properties"]
+    override_props = variant_props["pipeline_params_override"]["properties"]
+    llm_props = override_props["llm_only"]["properties"]
+    assert llm_props["reasoning_effort"] == {
+        "type": "string",
+        "enum": ["none", "default", "low", "medium", "high"],
+    }
+    assert llm_props["response_format"] == {"type": "string", "enum": ["text", "json"]}
+    # Free params stay unconstrained (no enum)
+    assert "enum" not in llm_props["temperature"]
+    # Required includes variant_name + changes_description
+    assert variant_props["variant_name"] == {"type": "string"}
+    assert "variant_name" in variant_props  # sanity
+    # Schema is non-strict (optional fields allowed)
+    assert out["strict"] is False

@@ -246,17 +246,8 @@ def _r_identity(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> st
     return str(v) if v else ""
 
 
-_TASK_CONTEXT_SKIP = frozenset({"raw_description", "upstream_context", "downstream_context"})
-
-
 def _r_task_context(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
-    # Drop raw_description (duplicates the dataset task_description.md) and
-    # upstream/downstream_context (already spliced into ``rendered_prompt``
-    # by ``OptSearchPoint._field_value``). Leaking them here would double-
-    # count the same text into the L1 meta-prompt.
-    lines = "\n".join(
-        f"  {k}: {val}" for k, val in v.items() if val and k not in _TASK_CONTEXT_SKIP
-    )
+    lines = "\n".join(f"  {k}: {val}" for k, val in v.items() if val)
     return f"CONTEXT:\n{lines}" if lines else ""
 
 
@@ -284,17 +275,20 @@ def _r_failure_analysis(
     if not fa or not fa.patterns:
         return ""
     lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
-    for i, pat in enumerate(fa.patterns[:2], 1):
+    for i, pat in enumerate(fa.patterns[:3], 1):
         lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
         if pat.example_queries:
-            ex = pat.example_queries[0][:60]
-            lines.append(f'     Example: "{ex}"')
+            examples = ", ".join(f'"{q}"' for q in pat.example_queries[:2])
+            lines.append(f"     Examples: {examples}")
         sig = {
             k: v for k, v in pat.signals.items() if k not in ("error", "degraded", "total_time_ms")
         }
         if sig:
-            sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:2])
+            sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:4])
             lines.append(f"     Signals: {sig_str}")
+    lines.append("IMPROVEMENT DIRECTIONS:")
+    for i, pat in enumerate(fa.patterns[:3], 1):
+        lines.append(f"  {i}. Address {pat.name} ({pat.fraction:.0%} of failures)")
     return "\n".join(lines)
 
 

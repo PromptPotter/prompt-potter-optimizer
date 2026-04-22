@@ -316,20 +316,23 @@ class SearchMemory:
             if value and (want is None or key in want):
                 ctx[key] = value
 
-        # Failure clusters — strategic layers see top-3 (with counts); L1 and
-        # critique see top-2 to keep the inbox tight, same pair all round.
+        # Failure clusters — format depends on whether cluster-rich layers asked.
         need_clusters = want is None or "failure_clusters" in want
         if need_clusters and include_clusters:
             c3 = self.sample_index.failure_clusters(3)
             if c3:
                 emit("failure_clusters", _fmt_clusters(c3, with_counts=True))
         elif need_clusters:
-            c2 = self.sample_index.failure_clusters(2)
-            if c2:
+            # Non-strategic callers: same top-3 clusters, different count-formatting
+            # preserved per historical behavior (critique: no counts; L1: with counts).
+            c3 = self.sample_index.failure_clusters(3)
+            if c3:
                 if want is not None and "dead_queries" in want:
-                    emit("failure_clusters", _fmt_clusters(c2, with_counts=True))
+                    # L1 shape: include counts
+                    emit("failure_clusters", _fmt_clusters(c3, with_counts=True))
                 else:
-                    emit("failure_clusters", _fmt_clusters(c2, with_counts=False))
+                    # Critique shape: no counts
+                    emit("failure_clusters", _fmt_clusters(c3, with_counts=False))
 
         # Dead queries (L1 only)
         if want is None or "dead_queries" in want:
@@ -375,13 +378,12 @@ class SearchMemory:
             if attributions:
                 emit("improvement_attribution", attributions)
 
-        # L1 axis digest (top-3 rankings + top-2 values on the winner — kept
-        # tight; L2/L3 get the fuller picture via `axis_rankings` below)
+        # L1 axis digest (top-3 rankings + top values on the winner)
         if want is None or "top_axes" in want or "top_values" in want:
             rankings3 = self.axis_rankings()[:3]
             if rankings3:
                 emit("top_axes", _fmt_axis_rankings(rankings3))
-                top_vals = self.top_k_values(rankings3[0].axis, k=2)
+                top_vals = self.top_k_values(rankings3[0].axis, k=3)
                 if top_vals:
                     emit(
                         "top_values",

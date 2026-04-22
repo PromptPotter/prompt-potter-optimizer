@@ -106,24 +106,3 @@ def test_to_job_search_point_includes_few_shot_block():
     sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
     assert "few_shot_block" in sp.prompt_fields
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
-
-
-def test_clear_volatile_drops_full_steering_window():
-    """All three steering fields share one lifecycle — they clear together.
-
-    Regression guard for the R2 L1 meta-prompt TPM blow-up: if
-    ``critique_text`` / ``thinking_styles`` stop being cleared on
-    improvement, they bleed into the next round's L1 inbox (mutex'd
-    against ``l2_directive`` in the L1 layer but still rendered when
-    L2 did not fire), pushing requests over provider TPM caps.
-    """
-    osp = OptSearchPoint(instruction="Rank.")
-    osp.memory.l2_directive = "steer away from temperature=1.0"
-    osp.memory.critique_text = "rank-1 recall is the bottleneck"
-    osp.memory.thinking_styles = ["decompose", "compare", "verify"]
-
-    osp.memory.clear_volatile()
-
-    assert osp.memory.l2_directive == ""
-    assert osp.memory.critique_text == ""
-    assert osp.memory.thinking_styles == []

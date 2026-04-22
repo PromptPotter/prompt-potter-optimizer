@@ -36,7 +36,7 @@
       "type": "agent",
       "config": {
         "temperature": 0.3,
-        "max_tokens": 800,
+        "max_tokens": 4096,
         "agent_class": "CritiqueAgent",
         "positive_threshold": 0.7
       }
@@ -45,7 +45,7 @@
       "type": "llm/meta",
       "config": {
         "temperature": 0.3,
-        "max_tokens": 600,
+        "max_tokens": 2048,
         "output_format": "json",
         "prompt_family": "l2_refine_strategy",
         "context_sources": ["critique", "task_context", "l2_directive"],
@@ -56,7 +56,7 @@
       "type": "llm/meta",
       "config": {
         "temperature": 0.5,
-        "max_tokens": 800,
+        "max_tokens": 2048,
         "output_format": "json",
         "prompt_family": "l3_modify_plan",
         "context_sources": ["critique", "task_context", "plan", "escalation_journal"],
