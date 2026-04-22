@@ -138,18 +138,12 @@ async def _generate_or_load_candidates(
         round_num=round_num,
     ):
         candidates = await l1_generate(
-            cycle.opt_sp,
-            cycle.current_accuracy,
-            cycle.current_results,
-            _n_variants,
-            _creativity,
-            client,
+            cycle,
+            n_variants=_n_variants,
+            creativity=_creativity,
+            llm_client=client,
             model=model,
-            is_probe_round=cycle.probe_next_round,
-            search_memory=search_memory,
-            pipeline_schema=session.pipeline_schema,
             obs=obs,
-            obs_campaign_id=session.obs_campaign_id,
             round_num=round_num,
         )
 

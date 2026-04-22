@@ -23,7 +23,6 @@ from promptpotter.application.optimization.nodes.formatting import (
 )
 from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
-    OptimizerStateView,
     assemble_inbox,
 )
 from promptpotter.application.optimization.phases import CampaignPhase
@@ -33,9 +32,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -46,8 +43,6 @@ __all__ = [
     "LayerTransition",
     "TransitionAction",
     "TransitionResult",
-    "modify_plan",
-    "refine_strategy",
 ]
 
 
@@ -113,21 +108,17 @@ class LayerTransition(ABC):
 
     async def run(
         self,
-        opt_sp: OptSearchPoint,
+        cycle: Cycle,
         llm_client: LLMClientBase,
         *,
         model: str | None = None,
         temperature: float | None = None,
         pipeline_params: dict | None = None,
-        pipeline_schema: PipelineSchema | None = None,
-        search_memory: SearchMemory | None = None,
         **ctx: Any,
     ) -> TransitionResult:
         compile_vars = self.assemble_intelligence(
-            opt_sp,
+            cycle,
             pipeline_params=pipeline_params,
-            pipeline_schema=pipeline_schema,
-            search_memory=search_memory,
             **ctx,
         )
         raw, prompt = await _run_llm_transition(
@@ -137,10 +128,10 @@ class LayerTransition(ABC):
             model=model,
             temperature=self.default_temperature if temperature is None else temperature,
         )
-        return self.build_result(raw, opt_sp, prompt, pipeline_params=pipeline_params)
+        return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
     @abstractmethod
-    def assemble_intelligence(self, opt_sp: OptSearchPoint, **ctx: Any) -> dict:
+    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
         """Build the compile-vars dict for the layer's prompt template."""
 
     @abstractmethod
@@ -173,7 +164,8 @@ class L2RefineStrategy(LayerTransition):
     default_temperature: ClassVar[float] = 0.3
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
 
-    def assemble_intelligence(self, opt_sp: OptSearchPoint, **ctx: Any) -> dict:
+    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
+        opt_sp = cycle.opt_sp
         task_context_section = ""
         if opt_sp.task_context:
             tc_display = {
@@ -184,16 +176,14 @@ class L2RefineStrategy(LayerTransition):
                 + json.dumps(tc_display, indent=2)
             )
 
-        inbox_ctx = OptimizerStateView(
-            opt_sp=opt_sp,
-            pipeline_schema=ctx.get("pipeline_schema"),
-            search_memory=ctx.get("search_memory"),
+        inbox = assemble_inbox(
+            Layer.L2,
+            cycle,
             round_num=int(ctx.get("round_num", 0)),
             candidate_scores=ctx.get("candidate_scores"),
             escalation_check_result=ctx.get("escalation_check_result"),
             pipeline_params=ctx.get("pipeline_params"),
         )
-        inbox = assemble_inbox(Layer.L2, inbox_ctx)
 
         return {
             "current_params": json.dumps(opt_sp.optimizer_params),
@@ -288,10 +278,11 @@ class L3ModifyPlan(LayerTransition):
     default_temperature: ClassVar[float] = 0.5
     phase: ClassVar[CampaignPhase] = CampaignPhase.MODIFY_PLAN
 
-    def assemble_intelligence(self, opt_sp: OptSearchPoint, **ctx: Any) -> dict:
+    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
+        opt_sp = cycle.opt_sp
         pipeline_params = ctx.get("pipeline_params")
-        pipeline_schema = ctx.get("pipeline_schema")
-        search_memory = ctx.get("search_memory")
+        pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
+        search_memory = cycle.search_memory
         l2_history = ctx.get("l2_history") or []
 
         l2_summary = "\n".join(
@@ -382,51 +373,3 @@ class L3ModifyPlan(LayerTransition):
         logger.debug(
             "L3 modify_plan at round %d (l3_round=%d)", round_num, cycle.escalation.l3.round
         )
-
-
-async def refine_strategy(
-    opt_sp: OptSearchPoint,
-    llm_client: LLMClientBase,
-    model: str | None = None,
-    temperature: float = 0.3,
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    escalation_check_result: dict | None = None,
-    search_memory: SearchMemory | None = None,
-    candidate_scores: list[dict] | None = None,
-) -> TransitionResult:
-    """L2 refine_strategy shim — delegates to ``L2RefineStrategy().run(...)``."""
-    return await L2RefineStrategy().run(
-        opt_sp,
-        llm_client,
-        model=model,
-        temperature=temperature,
-        pipeline_params=pipeline_params,
-        pipeline_schema=pipeline_schema,
-        search_memory=search_memory,
-        escalation_check_result=escalation_check_result,
-        candidate_scores=candidate_scores,
-    )
-
-
-async def modify_plan(
-    opt_sp: OptSearchPoint,
-    l2_history: list[dict],
-    llm_client: LLMClientBase,
-    model: str | None = None,
-    temperature: float = 0.5,
-    pipeline_params: dict | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-    search_memory: SearchMemory | None = None,
-) -> TransitionResult:
-    """L3 modify_plan shim — delegates to ``L3ModifyPlan().run(...)``."""
-    return await L3ModifyPlan().run(
-        opt_sp,
-        llm_client,
-        model=model,
-        temperature=temperature,
-        pipeline_params=pipeline_params,
-        pipeline_schema=pipeline_schema,
-        search_memory=search_memory,
-        l2_history=l2_history,
-    )

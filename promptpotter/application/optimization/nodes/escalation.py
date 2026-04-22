@@ -254,13 +254,11 @@ async def _do_layer_transition(
         round_num=round_num,
     ):
         result = await transition.run(
-            cycle.opt_sp,
+            cycle,
             client,
             model=config.optimizer_llm.model,
             temperature=temperature,
             pipeline_params=current_pp,
-            pipeline_schema=pipeline_schema,
-            search_memory=cycle.search_memory,
             **run_kwargs,
         )
     cycle.adopt_transition(

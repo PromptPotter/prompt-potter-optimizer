@@ -7,12 +7,10 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
-    OptimizerStateView,
     assemble_inbox,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.analysis import ValidationFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
 from promptpotter.infrastructure.tracing.events import CandidateCreated
@@ -25,7 +23,7 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -194,41 +192,35 @@ def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
 
 
 async def l1_generate(
-    opt_sp: OptSearchPoint,
-    current_accuracy: float,
-    current_results: list[dict],
+    cycle: Cycle,
+    *,
     n_variants: int,
     creativity: float,
     llm_client: LLMClientBase,
     model: str | None = None,
-    is_probe_round: bool = False,
-    search_memory: SearchMemory | None = None,
-    pipeline_schema: PipelineSchema | None = None,
     obs: ObservabilityBridge | None = None,
-    obs_campaign_id: str = "",
     round_num: int = 0,
 ) -> list[dict]:
-    """Generate candidate variants via LLM meta-prompt; context read from opt_sp."""
+    """Generate candidate variants via LLM meta-prompt; context read from cycle."""
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
+    opt_sp = cycle.opt_sp
+    pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
     schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
-
-    inbox_ctx = OptimizerStateView(
-        opt_sp=opt_sp,
-        pipeline_schema=pipeline_schema,
-        search_memory=search_memory,
-        round_num=round_num,
-        is_probe_round=is_probe_round,
-        pipeline_schema_text=schema_text,
-    )
+    obs_campaign_id = cycle.session.obs_campaign_id if cycle.session is not None else ""
 
     _compile_vars = {
         "n_variants": str(n_variants),
-        "accuracy_pct": f"{current_accuracy:.1%}",
-        "n_queries": str(len(current_results)),
+        "accuracy_pct": f"{cycle.current_accuracy:.1%}",
+        "n_queries": str(len(cycle.current_results)),
         "rendered_prompt": opt_sp.render(),
-        "inbox": assemble_inbox(Layer.L1, inbox_ctx),
+        "inbox": assemble_inbox(
+            Layer.L1,
+            cycle,
+            round_num=round_num,
+            pipeline_schema_text=schema_text,
+        ),
     }
     _template = load_optimizer_prompt("meta_scan_aware")
     meta_prompt = _template.compile_prompt(**_compile_vars)

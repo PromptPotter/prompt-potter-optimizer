@@ -4,7 +4,8 @@ Every L1/L2 prompt receives an ``{{inbox}}`` block assembled from the
 fields declared here. Each :class:`InboxField` owns:
 
     * which layer(s) consume it,
-    * how to source its raw value from an :class:`OptimizerStateView`,
+    * how to source its raw value from a :class:`Cycle` (+ per-call
+      :class:`InboxTransients`),
     * how to render that value into a section string,
     * the section label/header shown in each consuming layer,
     * optional mutex membership for mutually-exclusive pairs (e.g.
@@ -12,17 +13,15 @@ fields declared here. Each :class:`InboxField` owns:
 
 :func:`assemble_inbox` is the one function callers need. It walks
 :data:`LAYER_ORDER` for the target layer, applies mutex resolution,
-drops empty sections, and joins the rest. Replaces the three bespoke
-``format_*`` assemblers that used to live in :mod:`.formatting`.
+drops empty sections, and joins the rest.
 
-:class:`OptimizerStateView` is the **single read-side view** over the
-full optimizer state. It bundles references into the three state
-concepts — ``opt_sp`` (per-cycle, checkpointed), ``search_memory``
-(cross-cycle aggregate) and ``env`` (infra via ``pipeline_schema``) —
-plus a handful of transient per-call inputs. Every ``InboxField.source``
-takes one and reads what it needs. Sibling: ``SearchMemory`` owns
-cross-campaign aggregates; the view stitches opt_sp + search_memory
-together for each prompt assembly.
+:class:`Cycle` (from ``application/optimization/cycle.py``) is the read
+view — it holds ``opt_sp`` (per-cycle mutable state + ``memory``),
+``search_memory`` (cross-cycle aggregate), and ``session`` (infra,
+including ``pipeline_schema``). :class:`InboxTransients` carries the
+per-call inputs that have no persistent home
+(``pipeline_schema_text``, ``candidate_scores``,
+``escalation_check_result``, ``pipeline_params``, ``round_num``).
 
 The critique layer keeps its own assembler (see ``critique.py``) because
 its sections share cross-cutting state (``anomalies``, ``near_miss``).
@@ -50,9 +49,8 @@ from promptpotter.application.optimization.nodes.formatting import (
 )
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.analysis import FailureAnalysis
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 class Layer(enum.StrEnum):
@@ -97,35 +95,16 @@ _L2_SM_LABELS: dict[str, str] = {
 }
 
 
-@dataclass
-class OptimizerStateView:
-    """Single read-side view over the full optimizer state.
+@dataclass(frozen=True)
+class InboxTransients:
+    """Per-assembly inputs that have no persistent home on :class:`Cycle`.
 
-    Three state concepts are referenced here — :attr:`opt_sp`
-    (per-cycle mutable state: prompt decomposition, plan, task_context,
-    and ``opt_sp.memory`` carrying critique_text / l2_directive /
-    escalation_journal / runtime_failures / round_history /
-    failure_analysis / warning_inventory / thinking_styles),
-    :attr:`search_memory` (cross-cycle aggregate), and the infra-side
-    :attr:`pipeline_schema` — together with a handful of transient
-    per-call inputs that have no persistent home (``escalation_check_result``,
-    ``candidate_scores``, ``pipeline_params``, ``pipeline_schema_text``).
-
-    Every :class:`InboxField.source` takes one of these and reads only
-    what it needs; empty/``None`` values are skipped by
-    :func:`assemble_inbox`.
+    Built once by :func:`assemble_inbox` from its kwargs and threaded into
+    every source / render closure alongside the cycle.
     """
 
-    opt_sp: OptSearchPoint
-    pipeline_schema: PipelineSchema | None = None
-    search_memory: Any | None = None  # SearchMemory — typed Any to avoid circular import
     round_num: int = 0
-
-    # L1-only extras
-    is_probe_round: bool = False
     pipeline_schema_text: str = ""
-
-    # L2-only extras
     candidate_scores: list[dict] | None = None
     escalation_check_result: dict | None = None
     pipeline_params: dict | None = None
@@ -137,8 +116,8 @@ class InboxField:
 
     name: str
     layers: frozenset[Layer]
-    source: Callable[[OptimizerStateView], Any]
-    render: Callable[[Any, OptimizerStateView, Layer], str]
+    source: Callable[[Cycle, InboxTransients], Any]
+    render: Callable[[Any, Cycle, InboxTransients, Layer], str]
     retention: Retention
     docstring: str
     # Per-layer mutex: fields sharing a (layer, group) pick the highest priority.
@@ -146,150 +125,153 @@ class InboxField:
 
 
 # ---------------------------------------------------------------------------
-# Source helpers — closures over OptimizerStateView.
+# Source helpers — closures over (Cycle, InboxTransients).
 # ---------------------------------------------------------------------------
 
 
-def _src_memory(attr: str) -> Callable[[OptimizerStateView], Any]:
-    def _read(ctx: OptimizerStateView) -> Any:
-        return getattr(ctx.opt_sp.memory, attr) or None
+def _src_memory(attr: str) -> Callable[[Cycle, InboxTransients], Any]:
+    def _read(cycle: Cycle, _t: InboxTransients) -> Any:
+        return getattr(cycle.opt_sp.memory, attr) or None
 
     return _read
 
 
-def _src_task_context(ctx: OptimizerStateView) -> Any:
-    tc = ctx.opt_sp.task_context
+def _src_task_context(cycle: Cycle, _t: InboxTransients) -> Any:
+    tc = cycle.opt_sp.task_context
     return tc if tc else None
 
 
-def _src_plan(ctx: OptimizerStateView) -> str | None:
-    return ctx.opt_sp.plan or None
+def _src_plan(cycle: Cycle, _t: InboxTransients) -> str | None:
+    return cycle.opt_sp.plan or None
 
 
-def _src_pipeline_schema_text(ctx: OptimizerStateView) -> str | None:
-    return ctx.pipeline_schema_text or None
+def _src_pipeline_schema_text(_cycle: Cycle, t: InboxTransients) -> str | None:
+    return t.pipeline_schema_text or None
 
 
-def _src_failure_analysis(ctx: OptimizerStateView) -> FailureAnalysis | None:
-    fa = ctx.opt_sp.memory.failure_analysis
+def _src_failure_analysis(cycle: Cycle, _t: InboxTransients) -> FailureAnalysis | None:
+    fa = cycle.opt_sp.memory.failure_analysis
     return fa if fa and fa.patterns else None
 
 
-def _src_escalation_probe(ctx: OptimizerStateView) -> list[dict] | None:
+def _src_escalation_probe(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
     """Probe-round per-query warning block — fires only when probe AND journal present."""
-    if not ctx.is_probe_round:
+    if not cycle.probe_next_round:
         return None
-    journal = ctx.opt_sp.memory.escalation_journal
+    journal = cycle.opt_sp.memory.escalation_journal
     return journal or None
 
 
-def _src_escalation_alert(ctx: OptimizerStateView) -> list[dict] | None:
+def _src_escalation_alert(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
     """Non-probe aggregated alert — suppressed by an active l2_directive."""
-    if ctx.is_probe_round:
+    if cycle.probe_next_round:
         return None
-    if ctx.opt_sp.memory.l2_directive:
+    if cycle.opt_sp.memory.l2_directive:
         return None
-    journal = ctx.opt_sp.memory.escalation_journal
+    journal = cycle.opt_sp.memory.escalation_journal
     return journal or None
 
 
-def _src_l1_search_memory(ctx: OptimizerStateView) -> dict[str, str] | None:
-    if ctx.search_memory is None:
+def _src_l1_search_memory(cycle: Cycle, _t: InboxTransients) -> dict[str, str] | None:
+    if cycle.search_memory is None:
         return None
-    return ctx.search_memory.digest(_L1_SM_KEYS)
+    return cycle.search_memory.digest(_L1_SM_KEYS)
 
 
-def _src_l2_search_memory(ctx: OptimizerStateView) -> dict[str, str] | None:
-    if ctx.search_memory is None:
+def _src_l2_search_memory(cycle: Cycle, _t: InboxTransients) -> dict[str, str] | None:
+    if cycle.search_memory is None:
         return None
-    return ctx.search_memory.digest(_L2_SM_KEYS, include_correlations=True)
+    return cycle.search_memory.digest(_L2_SM_KEYS, include_correlations=True)
 
 
-def _src_escalation_section(ctx: OptimizerStateView) -> str | None:
+def _src_escalation_section(cycle: Cycle, t: InboxTransients) -> str | None:
     """L2 escalation report — from escalation_check_result + journal."""
-    if not ctx.escalation_check_result:
+    if not t.escalation_check_result:
         return None
+    schema = cycle.session.pipeline_schema if cycle.session is not None else None
     text = format_escalation_report(
-        ctx.escalation_check_result,
-        ctx.opt_sp.memory.escalation_journal or None,
-        ctx.pipeline_params,
-        pipeline_schema=ctx.pipeline_schema,
+        t.escalation_check_result,
+        cycle.opt_sp.memory.escalation_journal or None,
+        t.pipeline_params,
+        pipeline_schema=schema,
     )
     return text or None
 
 
-def _src_warning_inventory_l2(ctx: OptimizerStateView) -> dict | None:
+def _src_warning_inventory_l2(cycle: Cycle, t: InboxTransients) -> dict | None:
     """L2 fallback: per-query warning inventory when no escalation section."""
-    if _src_escalation_section(ctx):
+    if _src_escalation_section(cycle, t):
         return None
-    return ctx.opt_sp.memory.warning_inventory or None
+    return cycle.opt_sp.memory.warning_inventory or None
 
 
-def _src_trajectory(ctx: OptimizerStateView) -> Any:
-    history = ctx.opt_sp.memory.round_history
+def _src_trajectory(cycle: Cycle, _t: InboxTransients) -> Any:
+    history = cycle.opt_sp.memory.round_history
     if not history:
         return None
     return build_trajectory_report(history)
 
 
-def _src_candidate_comparison(ctx: OptimizerStateView) -> str | None:
-    if not ctx.candidate_scores:
+def _src_candidate_comparison(_cycle: Cycle, t: InboxTransients) -> str | None:
+    if not t.candidate_scores:
         return None
-    return build_candidate_comparison(ctx.candidate_scores)
+    return build_candidate_comparison(t.candidate_scores)
 
 
-def _src_diversity_alert(ctx: OptimizerStateView) -> str | None:
-    history = ctx.opt_sp.memory.round_history
+def _src_diversity_alert(cycle: Cycle, _t: InboxTransients) -> str | None:
+    history = cycle.opt_sp.memory.round_history
     if not history:
         return None
     return assess_candidate_diversity(history)
 
 
-def _src_validation_failures(ctx: OptimizerStateView) -> list[dict] | None:
+def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | None:
     vfs: list[dict] = []
-    for cs in ctx.candidate_scores or []:
+    for cs in t.candidate_scores or []:
         vfs.extend(cs.get("validation_failures") or [])
     return vfs or None
 
 
-def _src_runtime_failures(ctx: OptimizerStateView) -> list[dict] | None:
-    rfs = [rf.to_dict() for rf in ctx.opt_sp.memory.runtime_failures]
+def _src_runtime_failures(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
+    rfs = [rf.to_dict() for rf in cycle.opt_sp.memory.runtime_failures]
     return rfs or None
 
 
 # ---------------------------------------------------------------------------
-# Render helpers — closures receive (value, ctx, layer) and return str.
+# Render helpers — closures receive (value, cycle, t, layer) and return str.
 # ---------------------------------------------------------------------------
 
 
-def _r_identity(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_identity(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     return str(v) if v else ""
 
 
-def _r_task_context(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_task_context(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     lines = "\n".join(f"  {k}: {val}" for k, val in v.items() if val)
     return f"CONTEXT:\n{lines}" if lines else ""
 
 
-def _r_plan(v: str, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_plan(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     return f"PLAN:\n{v}" if v else ""
 
 
-def _r_thinking_styles(v: list[str], _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_thinking_styles(v: list[str], _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     if not v:
         return ""
     styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(v))
     return f"THINKING STYLES:\n{styles}"
 
 
-def _r_labeled(label: str) -> Callable[[Any, OptimizerStateView, Layer], str]:
-    def _render(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_labeled(label: str) -> Callable[[Any, Cycle, InboxTransients, Layer], str]:
+    def _render(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
         return f"{label}\n{v}" if v else ""
 
     return _render
 
 
-def _r_failure_analysis(fa: FailureAnalysis, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_failure_analysis(
+    fa: FailureAnalysis, _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
     if not fa or not fa.patterns:
         return ""
     lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
@@ -310,12 +292,14 @@ def _r_failure_analysis(fa: FailureAnalysis, _ctx: OptimizerStateView, _layer: L
     return "\n".join(lines)
 
 
-def _r_escalation_probe(journal: list[dict], ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_escalation_probe(
+    journal: list[dict], cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
     lines = [
         "PROBE ROUND: queries have recurring pipeline warnings. "
         "Generate candidates that address pipeline robustness."
     ]
-    warning_inventory = ctx.opt_sp.memory.warning_inventory or None
+    warning_inventory = cycle.opt_sp.memory.warning_inventory or None
     if warning_inventory:
         inv = summarize_warning_inventory(warning_inventory)
         if inv:
@@ -337,7 +321,9 @@ def _r_escalation_probe(journal: list[dict], ctx: OptimizerStateView, _layer: La
     return "\n".join(lines)
 
 
-def _r_escalation_alert(journal: list[dict], _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_escalation_alert(
+    journal: list[dict], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
     latest = journal[-1]
     alert = [
         f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
@@ -351,26 +337,30 @@ def _r_escalation_alert(journal: list[dict], _ctx: OptimizerStateView, _layer: L
     return "\n".join(alert)
 
 
-def _r_search_memory_l1(v: dict[str, str], _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_search_memory_l1(
+    v: dict[str, str], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
     # Uses format_search_memory_block's "HISTORICAL INTELLIGENCE:" default header.
     return format_search_memory_block(v, _L1_SM_LABELS)
 
 
-def _r_search_memory_l2(v: dict[str, str], _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_search_memory_l2(
+    v: dict[str, str], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
     return format_search_memory_block(v, _L2_SM_LABELS)
 
 
-def _r_escalation_section(v: str, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_escalation_section(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     # format_escalation_report returns text ending in "\n" already — preserve.
     return v
 
 
-def _r_warning_inventory_l2(v: dict, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_warning_inventory_l2(v: dict, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     text = summarize_warning_inventory(v)
     return (text + "\n") if text else ""
 
 
-def _r_trajectory(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_trajectory(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     lines = [f"CAMPAIGN TRAJECTORY:\n  {v.text}"]
     if v.classification != "healthy":
         lines.append(
@@ -380,7 +370,7 @@ def _r_trajectory(v: Any, _ctx: OptimizerStateView, _layer: Layer) -> str:
     return "\n\n".join(lines)
 
 
-def _r_validation_failures(v: list[dict], _ctx: OptimizerStateView, _layer: Layer) -> str:
+def _r_validation_failures(v: list[dict], _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     lines = ["L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):"]
     for vf in v:
         allowed = vf.get("allowed") or []
@@ -401,9 +391,9 @@ def _r_validation_failures(v: list[dict], _ctx: OptimizerStateView, _layer: Laye
     return "\n".join(lines)
 
 
-def _r_runtime_failures_l2(v: list[dict], ctx: OptimizerStateView, _layer: Layer) -> str:
-    rfs_new = [rf for rf in v if rf.get("first_seen_round", 0) == ctx.round_num]
-    rfs_acc = [rf for rf in v if rf.get("first_seen_round", 0) != ctx.round_num]
+def _r_runtime_failures_l2(v: list[dict], _cycle: Cycle, t: InboxTransients, _layer: Layer) -> str:
+    rfs_new = [rf for rf in v if rf.get("first_seen_round", 0) == t.round_num]
+    rfs_acc = [rf for rf in v if rf.get("first_seen_round", 0) != t.round_num]
     lines = [
         "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
         "  (candidates ran but produced high warning rates; L2 must adjust "
@@ -558,7 +548,7 @@ INBOX: tuple[InboxField, ...] = (
         name="candidate_comparison",
         layers=frozenset({Layer.L2}),
         source=_src_candidate_comparison,
-        render=lambda v, _c, _l: f"LAST ROUND CANDIDATES:\n  {v}" if v else "",
+        render=lambda v, _c, _t, _l: f"LAST ROUND CANDIDATES:\n  {v}" if v else "",
         retention=Retention.TRANSIENT,
         docstring="Per-candidate accuracy diff for the last round.",
     ),
@@ -566,7 +556,7 @@ INBOX: tuple[InboxField, ...] = (
         name="diversity_alert",
         layers=frozenset({Layer.L2}),
         source=_src_diversity_alert,
-        render=lambda v, _c, _l: f"DIVERSITY ALERT:\n  {v}" if v else "",
+        render=lambda v, _c, _t, _l: f"DIVERSITY ALERT:\n  {v}" if v else "",
         retention=Retention.TRANSIENT,
         docstring="Mode-collapse detection across recent rounds.",
     ),
@@ -642,13 +632,13 @@ def _by_name() -> dict[str, InboxField]:
     return {f.name: f for f in INBOX}
 
 
-def _render_one(f: InboxField, raw: Any, ctx: OptimizerStateView, layer: Layer) -> str:
+def _render_one(f: InboxField, raw: Any, cycle: Cycle, t: InboxTransients, layer: Layer) -> str:
     """Dispatch rendering — for labeled fields, use the per-layer label override."""
     label = _LABEL_BY_LAYER.get((layer, f.name))
     if label is not None:
         # Labeled scalar text — same shape as _r_labeled.
         return f"{label}\n{raw}" if raw else ""
-    return f.render(raw, ctx, layer)
+    return f.render(raw, cycle, t, layer)
 
 
 def _resolve_mutex(layer: Layer, raws: dict[str, Any]) -> dict[str, Any]:
@@ -675,11 +665,32 @@ def _resolve_mutex(layer: Layer, raws: dict[str, Any]) -> dict[str, Any]:
     return {k: v for k, v in raws.items() if k not in drop}
 
 
-def assemble_inbox(layer: Layer, ctx: OptimizerStateView) -> str:
+def assemble_inbox(
+    layer: Layer,
+    cycle: Cycle,
+    *,
+    round_num: int = 0,
+    pipeline_schema_text: str = "",
+    candidate_scores: list[dict] | None = None,
+    escalation_check_result: dict | None = None,
+    pipeline_params: dict | None = None,
+) -> str:
     """Walk the registry for *layer*, resolve mutex, render, join.
+
+    Reads persistent state from *cycle* (``cycle.opt_sp``,
+    ``cycle.search_memory``, ``cycle.probe_next_round``,
+    ``cycle.session.pipeline_schema``). Transient per-call inputs are passed
+    as kwargs and bundled into :class:`InboxTransients` internally.
 
     Returns an empty string when no section produces content.
     """
+    t = InboxTransients(
+        round_num=round_num,
+        pipeline_schema_text=pipeline_schema_text,
+        candidate_scores=candidate_scores,
+        escalation_check_result=escalation_check_result,
+        pipeline_params=pipeline_params,
+    )
     by_name = _by_name()
     order = LAYER_ORDER[layer]
 
@@ -689,7 +700,7 @@ def assemble_inbox(layer: Layer, ctx: OptimizerStateView) -> str:
         f = by_name[fname]
         if layer not in f.layers:
             continue
-        raw = f.source(ctx)
+        raw = f.source(cycle, t)
         if raw:
             raws[fname] = raw
 
@@ -701,7 +712,7 @@ def assemble_inbox(layer: Layer, ctx: OptimizerStateView) -> str:
         if fname not in raws:
             continue
         f = by_name[fname]
-        text = _render_one(f, raws[fname], ctx, layer)
+        text = _render_one(f, raws[fname], cycle, t, layer)
         if text:
             sections.append(text)
 
@@ -740,8 +751,8 @@ __all__ = [
     "INBOX",
     "LAYER_ORDER",
     "InboxField",
+    "InboxTransients",
     "Layer",
-    "OptimizerStateView",
     "Retention",
     "assemble_inbox",
     "registry_rows_for_docs",
