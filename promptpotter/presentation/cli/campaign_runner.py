@@ -554,11 +554,17 @@ COMMANDS = {
 
 
 def main() -> None:
+    from promptpotter.shared.errors import RequestTooLargeError
+
     parser = build_parser()
     args = parser.parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
 
-    result = asyncio.run(COMMANDS[args.command](args))
+    try:
+        result = asyncio.run(COMMANDS[args.command](args))
+    except RequestTooLargeError as exc:
+        print(f"Error: {exc}", file=sys.stderr)
+        sys.exit(1)
     if result is None:
         return
     if args.json_output or result.human is None:

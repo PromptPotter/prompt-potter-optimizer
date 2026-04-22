@@ -2,16 +2,20 @@
 LLM client abstraction layer.
 
 Provides a unified interface via ``OpenAICompatibleClient`` (Groq default,
-OpenAI, Anthropic). Chat completions, JSON mode, token tracking, and
-exponential backoff for transient 503/429 errors. ``get_llm_client(provider)``
+OpenAI, Anthropic). Chat completions, JSON mode, token tracking. Retry and
+``Retry-After`` honoring are delegated to the provider SDKs (``max_retries``
+kwarg on ``AsyncOpenAI`` / ``AsyncAnthropic``). ``get_llm_client(provider)``
 returns a configured singleton.
+
+Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
+settings — see :mod:`promptpotter.infrastructure.llm.rate_limiter`.
 """
 
-import asyncio
 import logging
+import re
 from abc import ABC, abstractmethod
-from collections.abc import Awaitable, Callable
-from typing import TYPE_CHECKING, Any, Literal, TypeVar
+from collections.abc import Callable
+from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -19,6 +23,8 @@ if TYPE_CHECKING:
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
+from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, estimate_tokens
+from promptpotter.shared.errors import RequestTooLargeError
 from promptpotter.shared.llm_parsing import try_parse_json
 
 # Provider defaults
@@ -27,14 +33,7 @@ GROQ_MAX_RETRIES: int = 3
 GROQ_TIMEOUT: float = 60.0
 GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
-# App-level retry (beyond SDK's own retry)
-LLM_RETRY_STATUSES: frozenset[int] = frozenset({429, 502, 503})
-LLM_MAX_APP_RETRIES: int = 3
-LLM_BASE_DELAY: float = 1.0  # seconds
-
 logger = logging.getLogger(__name__)
-
-T = TypeVar("T")
 
 __all__ = [
     "AnthropicClient",
@@ -45,9 +44,50 @@ __all__ = [
 ]
 
 
-def _backoff_delay(attempt: int) -> float:
-    """Exponential backoff delay (seconds) for 0-indexed attempt N."""
-    return LLM_BASE_DELAY * (2**attempt)
+def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:
+    """Extract ``(limit, requested)`` from a Groq-style ``"Limit X, Requested Y"`` body."""
+    m = re.search(r"Limit\s+(\d+),\s*Requested\s+(\d+)", err_str)
+    if not m:
+        return None
+    return int(m.group(1)), int(m.group(2))
+
+
+def _parse_int_header(headers: Any, key: str) -> int | None:
+    """Read ``key`` from a headers mapping and coerce to int, else ``None``."""
+    if headers is None:
+        return None
+    val = headers.get(key) if hasattr(headers, "get") else None
+    if val is None:
+        return None
+    try:
+        return int(val)
+    except (TypeError, ValueError):
+        return None
+
+
+def _discover_tier_caps(headers: Any) -> tuple[int | None, int | None]:
+    """Extract ``(rpm, tpm)`` from standard OpenAI/Groq rate-limit headers."""
+    rpm = _parse_int_header(headers, "x-ratelimit-limit-requests")
+    tpm = _parse_int_header(headers, "x-ratelimit-limit-tokens")
+    return rpm, tpm
+
+
+def _raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
+    """Translate a terminal 413/429 "Requested > Limit" into ``RequestTooLargeError``."""
+    status = getattr(exc, "status_code", None)
+    if status not in (413, 429):
+        return
+    parsed = _parse_tpm_overflow(str(exc))
+    if parsed is None:
+        return
+    limit, requested = parsed
+    if requested <= limit:
+        return
+    raise RequestTooLargeError(
+        provider_name=provider_name,
+        limit=limit,
+        requested=requested,
+    ) from exc
 
 
 def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
@@ -120,46 +160,6 @@ class LLMClientBase(ABC):
         """
         ...
 
-    async def _retry_send(
-        self,
-        send: Callable[[], Awaitable[T]],
-        provider_name: str,
-    ) -> T:
-        """Run ``send()`` with exponential backoff on transient (5xx / 429 / connection) failures.
-
-        Re-raises non-retryable exceptions (4xx other than 429, unknown errors)
-        so the caller can apply provider-specific handling. Subclasses with
-        special 4xx logic (e.g. JSON-validate repair) implement their own loop
-        on top of ``_backoff_delay`` / ``_repair_json_validate_failure``.
-        """
-        last_exc: Exception | None = None
-        for attempt in range(LLM_MAX_APP_RETRIES + 1):
-            try:
-                return await send()
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception as exc:
-                status = getattr(exc, "status_code", None)
-                is_connection = "Connection" in type(exc).__name__
-                if status not in LLM_RETRY_STATUSES and not is_connection:
-                    raise
-                if attempt >= LLM_MAX_APP_RETRIES:
-                    raise
-                last_exc = exc
-                delay = _backoff_delay(attempt)
-                logger.warning(
-                    "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
-                    provider_name,
-                    attempt + 1,
-                    LLM_MAX_APP_RETRIES + 1,
-                    status,
-                    delay,
-                    exc,
-                )
-                await asyncio.sleep(delay)
-        assert last_exc is not None
-        raise last_exc
-
 
 class OpenAICompatibleClient(LLMClientBase):
     """Client for any OpenAI-compatible API (OpenAI, Groq, etc.)."""
@@ -172,6 +172,7 @@ class OpenAICompatibleClient(LLMClientBase):
         timeout: float | None = None,
         default_model: str | None = None,
         provider_name: str = "openai",
+        rate_limiter: RateLimiter | None = None,
     ):
         self._api_key = api_key
         self._base_url = base_url
@@ -179,6 +180,7 @@ class OpenAICompatibleClient(LLMClientBase):
         self._timeout = timeout
         self._default_model = default_model or settings.LLM_MODEL
         self._provider_name = provider_name
+        self._rate_limiter = rate_limiter
         self._client: AsyncOpenAI | None = None
 
     def _ensure_client(self) -> "AsyncOpenAI":
@@ -234,76 +236,56 @@ class OpenAICompatibleClient(LLMClientBase):
 
         request_params.update(kwargs)
 
-        # App-level retry: 5xx / 429 / connection retry via _retry_send;
-        # 4xx (404 model-not-found, 400 json_validate_failed) handled here
-        # because they require provider-specific transformations.
-        last_exc: Exception | None = None
-        for attempt in range(LLM_MAX_APP_RETRIES + 1):
-            try:
-                response = await client.chat.completions.create(**request_params)
-                break
-            except (KeyboardInterrupt, asyncio.CancelledError):
-                raise
-            except Exception as exc:
-                status = getattr(exc, "status_code", None)
-                if status == 404:
-                    model_name = request_params.get("model", "unknown")
-                    raise ValueError(
-                        f"Model '{model_name}' not found on {self._provider_name}. "
-                        f"Update campaign_config['optimizer_llm']['model'] or "
-                        f"set EXPERIMENT_ID = None to use current config."
-                    ) from exc
-
-                # Groq JSON mode quirk: 400 json_validate_failed → try repair, else retry
-                is_json_validate_failed = status == 400 and "json_validate_failed" in str(exc)
-                if is_json_validate_failed:
-                    repaired = _repair_json_validate_failure(str(exc))
-                    if repaired is not None:
-                        fg_text, parsed = repaired
-                        logger.info(
-                            "%s: salvaged failed_generation via JSON repair",
-                            self._provider_name,
-                        )
-                        return LLMResponse(
-                            content=fg_text,
-                            model=request_params.get("model", ""),
-                            usage={"prompt_tokens": 0, "completion_tokens": 0},
-                            parsed=parsed,
-                        )
-                    # Repair miss — treat as retryable
-                    last_exc = exc
-                    if attempt >= LLM_MAX_APP_RETRIES:
-                        raise
-                    delay = _backoff_delay(attempt)
-                    logger.info(
-                        "%s JSON validation failed (attempt %d/%d), retrying in %.1fs",
-                        self._provider_name,
-                        attempt + 1,
-                        LLM_MAX_APP_RETRIES + 1,
-                        delay,
-                    )
-                    await asyncio.sleep(delay)
-                    continue
-
-                is_connection = "Connection" in type(exc).__name__
-                if status not in LLM_RETRY_STATUSES and not is_connection:
-                    raise
-                last_exc = exc
-                if attempt >= LLM_MAX_APP_RETRIES:
-                    raise
-                delay = _backoff_delay(attempt)
-                logger.warning(
-                    "%s request failed (attempt %d/%d, status=%s), retrying in %.1fs: %s",
-                    self._provider_name,
-                    attempt + 1,
-                    LLM_MAX_APP_RETRIES + 1,
-                    status,
-                    delay,
-                    exc,
+        # Proactive tier check + throttle. If the configured TPM cap can never
+        # fit this request, fail fast before any network call. Otherwise block
+        # until sending it stays within the rolling-window budget.
+        estimated = estimate_tokens(messages, max_tokens)
+        if self._rate_limiter is not None:
+            if self._rate_limiter.tpm is not None and estimated > self._rate_limiter.tpm:
+                raise RequestTooLargeError(
+                    provider_name=self._provider_name,
+                    limit=self._rate_limiter.tpm,
+                    requested=estimated,
                 )
-                await asyncio.sleep(delay)
-        else:
-            raise last_exc  # type: ignore[misc]
+            await self._rate_limiter.acquire(estimated)
+
+        # SDK's own ``max_retries`` handles 408/409/429/5xx + Retry-After.
+        # We only intercept for: terminal request-too-large (413/429 with
+        # Requested > Limit), 404 model-not-found, and Groq's 400
+        # json_validate_failed quirk. Use ``with_raw_response`` so we can
+        # self-tune the limiter from ``x-ratelimit-limit-*`` headers.
+        try:
+            raw = await client.chat.completions.with_raw_response.create(**request_params)
+            response = raw.parse()
+        except Exception as exc:
+            _raise_if_request_too_large(exc, self._provider_name)
+            status = getattr(exc, "status_code", None)
+            if status == 404:
+                model_name = request_params.get("model", "unknown")
+                raise ValueError(
+                    f"Model '{model_name}' not found on {self._provider_name}. "
+                    f"Update campaign_config['optimizer_llm']['model'] or "
+                    f"set EXPERIMENT_ID = None to use current config."
+                ) from exc
+            if status == 400 and "json_validate_failed" in str(exc):
+                repaired = _repair_json_validate_failure(str(exc))
+                if repaired is not None:
+                    fg_text, parsed = repaired
+                    logger.info(
+                        "%s: salvaged failed_generation via JSON repair",
+                        self._provider_name,
+                    )
+                    return LLMResponse(
+                        content=fg_text,
+                        model=request_params.get("model", ""),
+                        usage={"prompt_tokens": 0, "completion_tokens": 0},
+                        parsed=parsed,
+                    )
+            raise
+
+        if self._rate_limiter is not None:
+            discovered_rpm, discovered_tpm = _discover_tier_caps(raw.headers)
+            self._rate_limiter.apply_discovered(discovered_rpm, discovered_tpm)
 
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
@@ -315,6 +297,8 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
         usage = response.usage
+        if self._rate_limiter is not None and usage is not None:
+            self._rate_limiter.record_actual(estimated, usage.total_tokens)
         return LLMResponse(
             content=content,
             model=response.model,
@@ -331,8 +315,13 @@ class OpenAICompatibleClient(LLMClientBase):
 class AnthropicClient(LLMClientBase):
     """Anthropic API client."""
 
-    def __init__(self, api_key: str | None = None):
+    def __init__(
+        self,
+        api_key: str | None = None,
+        rate_limiter: RateLimiter | None = None,
+    ):
         self._api_key = api_key or settings.ANTHROPIC_API_KEY
+        self._rate_limiter = rate_limiter
         self._client = None
 
     def _ensure_client(self):
@@ -385,10 +374,25 @@ class AnthropicClient(LLMClientBase):
         if system_message:
             request_params["system"] = system_message
 
-        async def _send():
-            return await client.messages.create(**request_params)
+        estimated = estimate_tokens(messages, max_tokens)
+        if self._rate_limiter is not None:
+            if self._rate_limiter.tpm is not None and estimated > self._rate_limiter.tpm:
+                raise RequestTooLargeError(
+                    provider_name="Anthropic",
+                    limit=self._rate_limiter.tpm,
+                    requested=estimated,
+                )
+            await self._rate_limiter.acquire(estimated)
 
-        response = await self._retry_send(_send, "Anthropic")
+        raw = await client.messages.with_raw_response.create(**request_params)
+        response = raw.parse()
+
+        total = response.usage.input_tokens + response.usage.output_tokens
+        if self._rate_limiter is not None:
+            self._rate_limiter.record_actual(estimated, total)
+            rpm = _parse_int_header(raw.headers, "anthropic-ratelimit-requests-limit")
+            tpm = _parse_int_header(raw.headers, "anthropic-ratelimit-tokens-limit")
+            self._rate_limiter.apply_discovered(rpm, tpm)
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = (
@@ -401,7 +405,7 @@ class AnthropicClient(LLMClientBase):
             usage={
                 "prompt_tokens": response.usage.input_tokens,
                 "completion_tokens": response.usage.output_tokens,
-                "total_tokens": (response.usage.input_tokens + response.usage.output_tokens),
+                "total_tokens": total,
             },
             finish_reason=response.stop_reason,
             parsed=parsed,
@@ -417,6 +421,17 @@ _PLACEHOLDER_KEYS = {
 }
 
 
+def _build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
+    """Build a limiter. Configured caps pin; unconfigured slots self-tune from
+    ``x-ratelimit-limit-*`` response headers on the first successful call."""
+    return RateLimiter(
+        rpm=rpm,
+        tpm=tpm,
+        rpm_pinned=rpm is not None,
+        tpm_pinned=tpm is not None,
+    )
+
+
 def _make_groq_client() -> OpenAICompatibleClient:
     return OpenAICompatibleClient(
         api_key=settings.GROQ_API_KEY,
@@ -424,6 +439,7 @@ def _make_groq_client() -> OpenAICompatibleClient:
         max_retries=GROQ_MAX_RETRIES,
         timeout=GROQ_TIMEOUT,
         provider_name="Groq",
+        rate_limiter=_build_rate_limiter(settings.GROQ_RPM, settings.GROQ_TPM),
     )
 
 
@@ -432,6 +448,13 @@ def _make_openai_client() -> OpenAICompatibleClient:
         api_key=settings.OPENAI_API_KEY,
         max_retries=OPENAI_MAX_RETRIES,
         provider_name="OpenAI",
+        rate_limiter=_build_rate_limiter(settings.OPENAI_RPM, settings.OPENAI_TPM),
+    )
+
+
+def _make_anthropic_client() -> "AnthropicClient":
+    return AnthropicClient(
+        rate_limiter=_build_rate_limiter(settings.ANTHROPIC_RPM, settings.ANTHROPIC_TPM),
     )
 
 
@@ -475,7 +498,7 @@ def _make_mock_client() -> LLMClientBase:
 
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
     "groq": _make_groq_client,
-    "anthropic": AnthropicClient,
+    "anthropic": _make_anthropic_client,
     "openai": _make_openai_client,
     "mock": _make_mock_client,
 }

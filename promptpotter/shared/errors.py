@@ -57,6 +57,36 @@ class ActiveSessionMismatchError(RuntimeError):
         )
 
 
+class RequestTooLargeError(RuntimeError):
+    """Raised when a single LLM request exceeds the provider's per-minute token cap.
+
+    Terminal — retrying will not help. Caller (CLI/notebook) should surface the
+    message to the user without a traceback.
+    """
+
+    def __init__(
+        self,
+        *,
+        provider_name: str,
+        limit: int,
+        requested: int,
+    ) -> None:
+        self.provider_name = provider_name
+        self.limit = limit
+        self.requested = requested
+        super().__init__(
+            f"{provider_name}: single request exceeds tier TPM cap "
+            f"(limit={limit}, requested={requested}). Retrying will not help — "
+            f"the request alone is larger than the per-minute token allowance.\n"
+            f"Reduce the L1 meta-prompt (biggest levers first):\n"
+            f"  - CampaignConfig.optimization.max_failures: 15 -> 5\n"
+            f"  - CampaignConfig.optimization.n_variants: 5 -> 3\n"
+            f"  - CampaignConfig.optimization.enable_critique: false for early rounds\n"
+            f"  - shorten datasets/<name>/task_description.md\n"
+            f"Or upgrade your provider tier."
+        )
+
+
 class ResumeDivergenceError(RuntimeError):
     """Raised when a resumed campaign diverges from the recorded trajectory.
 

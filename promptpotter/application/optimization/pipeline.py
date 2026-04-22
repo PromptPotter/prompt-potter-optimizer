@@ -21,6 +21,7 @@ if TYPE_CHECKING:
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm.client import LLMClientBase, LLMResponse
+from promptpotter.infrastructure.llm.token_usage import TokenUsage, emit_token_usage
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
     validate_path_component,
@@ -112,11 +113,23 @@ async def llm_call(
         json_schema=json_schema,
     )
 
+    duration_s = round(time.monotonic() - _t0, 2)
+
+    # Token-usage chokepoint — sinks handle threshold warnings, will handle
+    # per-query display + composite-score penalty + cost tracking later.
+    emit_token_usage(
+        TokenUsage(
+            node=node or "llm_call",
+            kind="optimizer",
+            input_tokens=response.usage.get("prompt_tokens", 0),
+            output_tokens=response.usage.get("completion_tokens", 0),
+            duration_s=duration_s,
+        )
+    )
+
     # Trace to round recorder if active
     _recorder = _recorder_var.get()
     if _recorder is not None:
-        duration_s = round(time.monotonic() - _t0, 2)
-
         # Parse JSON responses into structured objects (not escaped strings)
         response_data: dict | str
         try:

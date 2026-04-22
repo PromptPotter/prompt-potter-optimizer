@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -403,7 +404,7 @@ async def execute_round(
         return (
             rf_dict.get("source", ""),
             rf_dict.get("dominant_warning", ""),
-            tuple(sorted(cfg.items())),
+            json.dumps(cfg, sort_keys=True, default=str),
         )
 
     existing_keys = {_rf_key(rf.to_dict()) for rf in cycle.opt_sp.memory.runtime_failures}
