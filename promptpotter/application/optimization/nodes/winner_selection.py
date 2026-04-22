@@ -64,7 +64,7 @@ def select_round_winner(
         "prompt_fields": best_ps,
         "accuracy": best_acc,
         "composite": best_composite,
-        "hits": sum(1 for r in best_results if r["hit"]),
+        "hits": sum(1 for r in best_results if r.get("hit")),
         "total": len(best_results),
         "results": best_results,
         "candidates_scored": len(candidates),

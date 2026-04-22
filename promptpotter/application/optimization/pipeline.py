@@ -29,6 +29,7 @@ from promptpotter.infrastructure.store.base import (
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.llm_parsing import extract_parsed_json
+from promptpotter.shared.rate_limit import parse_retry_after, wait_with_countdown
 
 logger = logging.getLogger(__name__)
 
@@ -104,14 +105,34 @@ async def llm_call(
         "json_schema" if json_schema else merged["output_format"],
     )
 
-    response = await llm_client.chat(
-        messages=messages,
-        model=merged.get("model"),
-        temperature=merged["temperature"],
-        max_tokens=merged.get("max_tokens"),
-        output_format=effective_output_format,
-        json_schema=json_schema,
-    )
+    # 429 retry loop: SDK's built-in max_retries gives up on long Retry-After
+    # (e.g. Groq TPD hitting 11-minute windows). We honor whatever the server
+    # advertises — no cap — and show a live countdown. Ctrl+C interrupts.
+    while True:
+        try:
+            response = await llm_client.chat(
+                messages=messages,
+                model=merged.get("model"),
+                temperature=merged["temperature"],
+                max_tokens=merged.get("max_tokens"),
+                output_format=effective_output_format,
+                json_schema=json_schema,
+            )
+            break
+        except Exception as exc:
+            if getattr(exc, "status_code", None) != 429:
+                raise
+            resp = getattr(exc, "response", None)
+            headers = getattr(resp, "headers", None) if resp is not None else None
+            wait = parse_retry_after(headers, str(exc))
+            if wait is None or wait <= 0:
+                raise
+            logger.warning(
+                "Rate limit hit on %s; waiting %.1fs before retry",
+                node or "llm_call",
+                wait,
+            )
+            await wait_with_countdown(wait + 1.0, node or "optimizer")
 
     duration_s = round(time.monotonic() - _t0, 2)
 
