@@ -3,10 +3,9 @@
 from __future__ import annotations
 
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.application.campaign.callbacks import RunListener
-from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.critique import (
     CritiqueAgent,
@@ -36,7 +35,6 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
     from promptpotter.application.optimization.nodes.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -68,15 +66,14 @@ class PauseForReviewError(Exception):
 async def _generate_or_load_candidates(
     round_num: int,
     cycle: Cycle,
-    session: Session,
-    config: CampaignConfig,
     on_phase=None,
     n_eval_queries: int = 0,
     *,
     obs: ObservabilityBridge | None = None,
-    search_memory: Any = None,
 ) -> list[dict]:
     """Load persisted candidates or generate fresh ones via LLM."""
+    session = cycle.session
+    config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up eval budget.
     opt = config.optimization
     model = config.optimizer_llm.model
@@ -173,10 +170,9 @@ async def _run_critique(
     scoring_result: L1ScoringResult,
     round_num: int,
     cycle: Cycle,
-    config: CampaignConfig,
-    schema: PipelineSchema | None,
 ) -> str:
     """Run critique analysis on evaluation results. Returns formatted critique text."""
+    config = cycle.config
     if not config.optimization.enable_critique or not scoring_result.winner_results:
         return ""
 
@@ -197,7 +193,7 @@ async def _run_critique(
         cycle,
         scoring_result,
         config,
-        schema,
+        cycle.session.pipeline_schema,
         round_num=round_num,
         search_memory_digest=(
             cycle.search_memory.digest(_CRITIQUE_SM_KEYS) if cycle.search_memory else None
@@ -211,9 +207,7 @@ async def _score_and_select(
     candidates: list[dict],
     round_num: int,
     cycle: Cycle,
-    session: Session,
     scoring_dataset: list[Sample],
-    config: CampaignConfig,
     callbacks: RunListener,
     obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
@@ -221,6 +215,8 @@ async def _score_and_select(
     """Evaluate candidates, run critique, select winner."""
     from promptpotter.application.optimization.nodes.score import l1_score
 
+    session = cycle.session
+    config = cycle.config
     opt = config.optimization
     emit_phase(
         callbacks.on_phase,
@@ -273,19 +269,17 @@ async def _score_and_select(
     ):
         assert cycle.current_sp is not None
         scoring_result = await l1_score(
+            cycle,
             candidates,
             scoring_dataset,
             current_best,
-            session,
             pipeline_params=cycle.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             elimination_n_min=opt.elimination_n_min,
             elimination_alpha=opt.elimination_alpha,
-            obs_campaign_id=session.obs_campaign_id,
             round_num=round_num,
-            search_memory=cycle.search_memory,
         )
 
         if obs and scoring_result.candidate_scores:
@@ -300,9 +294,7 @@ async def _score_and_select(
                     improved=scoring_result.improved,
                 )
 
-        scoring_result.critique_text = await _run_critique(
-            scoring_result, round_num, cycle, config, session.pipeline_schema
-        )
+        scoring_result.critique_text = await _run_critique(scoring_result, round_num, cycle)
         scoring_result.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed + round_num + 1)
         if obs and scoring_result.critique_text:
             with graceful("CritiqueWritten emit failed"):
@@ -330,16 +322,15 @@ async def _score_and_select(
 
 
 async def execute_round(
-    round_num: int,
     cycle: Cycle,
-    session: Session,
+    round_num: int,
     scoring_dataset: list[Sample],
-    config: CampaignConfig,
     callbacks: RunListener,
     degradation_checks: list[DegradationCheck] | None = None,
-    search_memory: Any = None,
 ) -> RoundResult:
     """Execute one optimization round: generate → evaluate → select winner → obs log."""
+    session = cycle.session
+    config = cycle.config
     obs = session.obs
     if obs:
         with graceful("RoundStart emit failed"):
@@ -348,12 +339,9 @@ async def execute_round(
     candidates = await _generate_or_load_candidates(
         round_num,
         cycle,
-        session,
-        config,
         callbacks.on_phase,
         n_eval_queries=len(scoring_dataset),
         obs=obs,
-        search_memory=search_memory,
     )
 
     if config.optimization.pause_before_scoring:
@@ -363,9 +351,7 @@ async def execute_round(
         candidates,
         round_num,
         cycle,
-        session,
         scoring_dataset,
-        config,
         callbacks,
         obs=obs,
         degradation_checks=degradation_checks,

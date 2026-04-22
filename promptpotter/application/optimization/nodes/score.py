@@ -18,8 +18,7 @@ from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.optimization.cycle import Cycle
 
 
 __all__ = ["L1ScoringResult", "l1_score"]
@@ -52,10 +51,10 @@ class L1ScoringResult(BaseModel):
 
 
 async def l1_score(
+    cycle: Cycle,
     candidates: list[dict],
     dataset: list,
     current_best: dict[str, Any],
-    session: Session,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
@@ -63,11 +62,10 @@ async def l1_score(
     degradation_checks: list | None = None,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
-    obs_campaign_id: str = "",
     round_num: int = 0,
-    search_memory: SearchMemory | None = None,
 ) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
+    session = cycle.session
     cb = dict(current_best)
     if isinstance(cb.get("prompt_fields"), dict):
         cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
@@ -79,19 +77,17 @@ async def l1_score(
     )
     decisions: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_candidates(
+        cycle,
         osp_candidates,
         merged_pp,
         overrides,
         dataset,
-        session,
         degradation_checks=degradation_checks,
         callbacks=callbacks,
         elimination_n_min=elimination_n_min,
         elimination_alpha=elimination_alpha,
-        obs_campaign_id=obs_campaign_id,
         round_num=round_num,
         decisions=decisions,
-        search_memory=search_memory,
     )
 
     aborted_ids = {

@@ -19,8 +19,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.optimization.cycle import Cycle
 
 logger = logging.getLogger(__name__)
 
@@ -287,24 +286,26 @@ def _record_elimination_cut(
 
 
 async def score_candidates(
+    cycle: Cycle,
     osp_candidates: list[OptSearchPoint],
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
     dataset: list,
-    session: Session,
     *,
     degradation_checks: list | None = None,
     callbacks: RunListener,
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
-    obs_campaign_id: str = "",
     round_num: int = 0,
     decisions: list[dict] | None = None,
-    search_memory: SearchMemory | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each candidate; dispatch over three exit paths (validation/cache/scored)."""
     from promptpotter.application.optimization.elimination import EliminationCheck
     from promptpotter.application.scoring.search_point_scorer import score_search_point
+
+    session = cycle.session
+    search_memory = cycle.search_memory
+    obs_campaign_id = session.obs_campaign_id
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []

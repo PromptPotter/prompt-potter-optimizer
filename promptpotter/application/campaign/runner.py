@@ -289,14 +289,11 @@ async def _run_round_loop(
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
-                round_num,
                 cycle,
-                session,
+                round_num,
                 round_eval_data,
-                config,
                 cb,
                 degradation_checks=round_checks,
-                search_memory=cycle.search_memory,
             )
             update_round_state(cycle, round_result, round_num, schema=session.pipeline_schema)
 
