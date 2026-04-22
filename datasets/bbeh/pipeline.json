@@ -10,11 +10,10 @@
       "type": "generation",
       "runtime": "backend",
       "node_role": "ranker",
-      "description": "Direct LLM generation on the TermNorm backend. Dataset-side override bumps max_tokens for reasoning models and pins reasoning_effort.",
+      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — the provider's own output ceiling applies so TPM reservations don't blow the per-minute bucket and real truncations surface to self-healing.",
       "config": {
         "model": "openai/gpt-oss-120b",
         "temperature": 0.0,
-        "max_tokens": 32000,
         "reasoning_effort": "medium"
       },
       "prompt_meta": {

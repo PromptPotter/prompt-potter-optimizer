@@ -261,7 +261,7 @@
       "config": {
         "model": "openai/gpt-oss-120b",
         "temperature": 0.0,
-        "max_tokens": 4000,
+        "max_tokens": null,
         "sample_size": 20,
         "debug_output_limit": 20,
         "relevance_weight_core": 0.7,
@@ -317,7 +317,7 @@
       "config": {
         "model": "openai/gpt-oss-120b",
         "temperature": 0.0,
-        "max_tokens": 300,
+        "max_tokens": null,
         "accept_threshold": 0.75,
         "correction_top_n": 10
       },
