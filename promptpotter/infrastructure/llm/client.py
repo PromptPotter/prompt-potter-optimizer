@@ -134,7 +134,7 @@ class LLMClientBase(ABC):
         messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1000,
+        max_tokens: int | None = None,
         output_format: Literal["text", "json", "json_schema"] = "text",
         json_schema: dict | None = None,
         **kwargs,
@@ -145,7 +145,8 @@ class LLMClientBase(ABC):
             messages: List of message dicts with 'role' and 'content'.
             model: Model identifier (uses default if not specified).
             temperature: Sampling temperature (0.0 = deterministic).
-            max_tokens: Maximum response tokens.
+            max_tokens: Maximum response tokens. ``None`` = no cap (provider
+                default — typically the model's output ceiling).
             output_format: "text", "json" (plain JSON mode), or "json_schema"
                 (structured output with the provided ``json_schema``). When
                 "json_schema" is selected, ``json_schema`` MUST be supplied
@@ -207,7 +208,7 @@ class OpenAICompatibleClient(LLMClientBase):
         messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1000,
+        max_tokens: int | None = None,
         output_format: Literal["text", "json", "json_schema"] = "text",
         json_schema: dict | None = None,
         **kwargs,
@@ -218,8 +219,9 @@ class OpenAICompatibleClient(LLMClientBase):
             "model": model or self._default_model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": max_tokens,
         }
+        if max_tokens is not None:
+            request_params["max_tokens"] = max_tokens
         if output_format == "json":
             request_params["response_format"] = {"type": "json_object"}
         elif output_format == "json_schema":
@@ -342,7 +344,7 @@ class AnthropicClient(LLMClientBase):
         messages: list[dict[str, str]],
         model: str | None = None,
         temperature: float = 0.0,
-        max_tokens: int = 1000,
+        max_tokens: int | None = None,
         output_format: Literal["text", "json", "json_schema"] = "text",
         json_schema: dict | None = None,
         **kwargs,
@@ -365,10 +367,17 @@ class AnthropicClient(LLMClientBase):
 
         model_name = model or settings.LLM_MODEL
 
+        # Anthropic's API requires max_tokens. When the caller passes None
+        # (project-wide default = uncapped), we still have to send a value.
+        # 8192 is the per-request ceiling on most Claude models — enough
+        # headroom for any realistic optimizer output; boundary-local only,
+        # not a project default.
+        anthropic_max_tokens = max_tokens if max_tokens is not None else 8192
+
         request_params: dict[str, Any] = {
             "model": model_name,
             "messages": anthropic_messages,
-            "max_tokens": max_tokens,
+            "max_tokens": anthropic_max_tokens,
             "temperature": temperature,
         }
         if system_message:

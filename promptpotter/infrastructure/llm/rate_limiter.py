@@ -17,10 +17,15 @@ from collections import deque
 from dataclasses import dataclass, field
 
 
-def estimate_tokens(messages: list[dict[str, str]], max_output: int) -> int:
-    """Rough prompt + output token estimate (~4 chars/token)."""
+def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
+    """Rough prompt + output token estimate (~4 chars/token).
+
+    When ``max_output`` is ``None`` (no caller-side cap), only the input
+    side is counted. The TPM pre-check loses its output reservation, but
+    the provider's own 429 still surfaces if the actual response overshoots.
+    """
     char_count = sum(len(m.get("content", "")) for m in messages)
-    return char_count // 4 + max_output
+    return char_count // 4 + (max_output or 0)
 
 
 @dataclass

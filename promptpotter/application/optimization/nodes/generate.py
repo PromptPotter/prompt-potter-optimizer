@@ -10,7 +10,6 @@ from promptpotter.application.optimization.nodes.inbox_registry import (
     assemble_inbox,
 )
 from promptpotter.application.optimization.pipeline import (
-    get_optimizer_schema,
     llm_call,
     load_optimizer_prompt,
 )
@@ -132,8 +131,6 @@ def validate_overrides(
     return failures
 
 
-_META_PROMPT_TOKEN_WARN = 6000  # chars/4 heuristic; Groq free-tier TPM sits near 8000
-
 # Known inbox section headers — ordered by probability of being the culprit,
 # so the breakdown log highlights bloat sources in descending order.
 _INBOX_SECTION_HEADERS: tuple[str, ...] = (
@@ -175,71 +172,30 @@ def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
     return out
 
 
-def _log_meta_prompt_budget(
-    meta_prompt: str, compile_vars: dict, round_num: int, max_tokens: int
-) -> None:
-    """Log L1 meta-prompt size + per-section breakdown when over budget.
+def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
+    """Log L1 meta-prompt input-side breakdown (informational).
 
-    Output-only; never mutates the prompt. Projection matches
-    ``rate_limiter.estimate_tokens`` (``input_chars // 4 + max_tokens``)
-    so the warning fires when the *full* request is about to trip TPM,
-    not just when the prompt alone is bulky. When projected tokens
-    exceed the warn threshold, we log at WARNING level with a section-
-    by-section breakdown so the bloat source is visible in the operator
-    output — no need to re-instrument after a TPM crash.
+    Input-side visibility for dedup work. Output budgeting is the provider's
+    job now — no artificial max_tokens cap, no projected-request-tokens
+    heuristic. Top inbox sections surface where bytes live.
     """
     total_chars = len(meta_prompt)
     rendered = str(compile_vars.get("rendered_prompt", ""))
     inbox = str(compile_vars.get("inbox", ""))
     skeleton_chars = total_chars - len(rendered) - len(inbox)
     est_input_tokens = total_chars // 4
-    est_request_tokens = est_input_tokens + max_tokens
-
-    if est_request_tokens <= _META_PROMPT_TOKEN_WARN:
-        logger.info(
-            "L1 meta-prompt R%d: %d chars input (~%d tokens) + max_tokens %d = "
-            "~%d request tokens | rendered_prompt=%d inbox=%d skeleton=%d",
-            round_num,
-            total_chars,
-            est_input_tokens,
-            max_tokens,
-            est_request_tokens,
-            len(rendered),
-            len(inbox),
-            skeleton_chars,
-        )
-        return
-
     inbox_sections = _split_inbox_sections(inbox)
     section_summary = " | ".join(f"{head}={size}" for head, size in inbox_sections[:6])
-    rendered_head = rendered[:400].replace("\n", " ⏎ ")
-    top_head = ""
-    if inbox_sections:
-        top_name, _ = inbox_sections[0]
-        top_content = next(
-            (p for p in inbox.split("\n\n") if p.startswith(top_name)),
-            "",
-        )
-        top_head = top_content[:400].replace("\n", " ⏎ ")
-    logger.warning(
-        "L1 meta-prompt R%d projected ~%d request tokens (input %d + max_tokens %d) > %d — "
-        "approaching provider TPM cap.\n"
-        "  totals: total=%d rendered_prompt=%d inbox=%d skeleton=%d\n"
-        "  inbox top sections: %s\n"
-        "  rendered_prompt head: %s\n"
-        "  top inbox section head: %s",
+    logger.info(
+        "L1 meta-prompt R%d: %d chars (~%d input tokens) | "
+        "rendered_prompt=%d inbox=%d skeleton=%d | inbox sections: %s",
         round_num,
-        est_request_tokens,
-        est_input_tokens,
-        max_tokens,
-        _META_PROMPT_TOKEN_WARN,
         total_chars,
+        est_input_tokens,
         len(rendered),
         len(inbox),
         skeleton_chars,
         section_summary,
-        rendered_head,
-        top_head,
     )
 
 
@@ -340,11 +296,7 @@ async def l1_generate(
     _template = load_optimizer_prompt("meta_scan_aware")
     meta_prompt = _template.compile_prompt(**_compile_vars)
 
-    l1_node = get_optimizer_schema().get_node("l1_generate")
-    l1_max_tokens = (
-        int(l1_node.current_config.get("max_tokens", 1000)) if l1_node is not None else 1000
-    )
-    _log_meta_prompt_budget(meta_prompt, _compile_vars, round_num, l1_max_tokens)
+    _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
 

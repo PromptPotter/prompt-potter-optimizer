@@ -56,7 +56,7 @@ def get_optimizer_schema() -> PipelineSchema:
     )
 
 
-_LLM_DEFAULTS = {"temperature": 0.0, "max_tokens": 1000, "output_format": "text"}
+_LLM_DEFAULTS = {"temperature": 0.0, "output_format": "text"}
 
 # -- Round recorder (per-task context, not a module global) ----------------
 
@@ -108,7 +108,7 @@ async def llm_call(
         messages=messages,
         model=merged.get("model"),
         temperature=merged["temperature"],
-        max_tokens=merged["max_tokens"],
+        max_tokens=merged.get("max_tokens"),
         output_format=effective_output_format,
         json_schema=json_schema,
     )
@@ -142,7 +142,7 @@ async def llm_call(
             "config": {
                 "model": merged.get("model"),
                 "temperature": merged["temperature"],
-                "max_tokens": merged["max_tokens"],
+                "max_tokens": merged.get("max_tokens"),
             },
             "response": response_data,
             "usage": response.usage,
