@@ -15,7 +15,6 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
 from promptpotter.infrastructure.tracing.events import CandidateCreated
 from promptpotter.shared.constants import (
-    PROMPT_STRING_FIELDS,
     TASK_CONTEXT_OVERRIDES,
     classify_axis,
 )
@@ -31,36 +30,56 @@ logger = logging.getLogger(__name__)
 __all__ = ["build_l1_output_schema", "l1_generate", "validate_overrides"]
 
 
+# Per-field size budgets on the optimized target prompt. These feed into
+# build_l1_output_schema() and cap how large any single prompt field can
+# grow across rounds. Totals ≈ 3600 chars ≈ 900 tokens — comfortably
+# below any tier TPM envelope even when embedded in the L1 meta-prompt
+# each round.
+_PROMPT_FIELD_SCHEMA: dict[str, dict] = {
+    "persona": {"type": "string", "maxLength": 200},
+    "task_intent": {"type": "string", "maxLength": 400},
+    "problem_description": {"type": "string", "maxLength": 1200},
+    "instruction": {"type": "string", "maxLength": 800},
+    "thinking_style": {"type": "string", "maxLength": 400},
+    "answer_format": {"type": "string", "maxLength": 600},
+}
+
+
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Construct the JSON schema L1 must conform to (enums tighten param_allowed_values)."""
+    """Construct the JSON schema L1 must conform to.
+
+    Allowed-value enforcement deliberately lives in ``validate_overrides``
+    (Python-side, one producer of truth) rather than being duplicated inline
+    as ``enum`` arrays in this schema: the pipeline_schema_text block the
+    LLM already sees spells out the allowed values, so re-emitting them in
+    the response schema just inflates the request for no additional safety.
+
+    Prompt-field ``maxLength`` budgets keep the optimized target prompt
+    from monotonically growing across rounds — the L1 meta-prompt embeds
+    the current-best prompt in full, so unbounded prompt-field growth
+    would eventually push every L1 call over provider TPM caps.
+    """
     node_properties: dict[str, dict] = {}
     for node in pipeline_schema.nodes:
         if not node.param_keys:
             continue
-        param_props: dict[str, dict] = {}
-        for param in sorted(node.param_keys):
-            allowed = node.param_allowed_values.get(param)
-            if allowed:
-                param_props[param] = {"type": "string", "enum": list(allowed)}
-            else:
-                param_props[param] = {}  # any JSON value permitted
         node_properties[node.name] = {
             "type": "object",
-            "properties": param_props,
+            "properties": {p: {} for p in sorted(node.param_keys)},
             "additionalProperties": False,
         }
 
     override_properties: dict[str, dict] = {
-        **{field: {"type": "string"} for field in PROMPT_STRING_FIELDS},
-        **{field: {"type": "string"} for field in TASK_CONTEXT_OVERRIDES},
+        **dict(_PROMPT_FIELD_SCHEMA),
+        **{field: {"type": "string", "maxLength": 400} for field in TASK_CONTEXT_OVERRIDES},
         **node_properties,
     }
 
     variant_item = {
         "type": "object",
         "properties": {
-            "variant_name": {"type": "string"},
-            "changes_description": {"type": "string"},
+            "variant_name": {"type": "string", "maxLength": 60},
+            "changes_description": {"type": "string", "maxLength": 200},
             "pipeline_params_override": {
                 "type": "object",
                 "properties": override_properties,
@@ -128,61 +147,161 @@ def validate_overrides(
     return failures
 
 
+_META_PROMPT_TOKEN_WARN = 6000  # chars/4 heuristic; Groq TPM caps sit near 8000
+
+# Known inbox section headers — ordered by probability of being the culprit,
+# so the breakdown log highlights bloat sources in descending order.
+_INBOX_SECTION_HEADERS: tuple[str, ...] = (
+    "VALID PIPELINE NODES AND PARAMETERS",
+    "FAILURE ANALYSIS",
+    "HISTORICAL INTELLIGENCE:",
+    "CONTEXT:",
+    "PROBE ROUND",
+    "PIPELINE ISSUE:",
+    "DIRECTIVE:",
+    "CRITIQUE:",
+    "THINKING STYLES:",
+    "PLAN:",
+    "OUTPUT SCHEMA MUTATIONS",
+    "AVAILABLE MODELS",
+)
+
+
+def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
+    """Best-effort per-section size breakdown of the rendered inbox string.
+
+    Sections are separated by ``\\n\\n`` and tagged by which known header
+    line they start with (or ``<unknown>``). Returns a list ordered by size
+    descending, newest first on ties, so the log surfaces the bloat source.
+    """
+    if not inbox:
+        return []
+    parts = inbox.split("\n\n")
+    out: list[tuple[str, int]] = []
+    for part in parts:
+        if not part:
+            continue
+        head = next(
+            (h for h in _INBOX_SECTION_HEADERS if part.startswith(h)),
+            "<unknown>",
+        )
+        out.append((head, len(part)))
+    out.sort(key=lambda x: -x[1])
+    return out
+
+
+def _log_meta_prompt_budget(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
+    """Log L1 meta-prompt size + per-section breakdown when over budget.
+
+    Output-only; never mutates the prompt. When projected tokens exceed
+    the warn threshold, we log at WARNING level with a section-by-section
+    breakdown so the bloat source is visible in the operator output — no
+    need to re-instrument after a TPM crash.
+    """
+    total_chars = len(meta_prompt)
+    est_tokens = total_chars // 4
+    rendered = str(compile_vars.get("rendered_prompt", ""))
+    inbox = str(compile_vars.get("inbox", ""))
+    skeleton_chars = total_chars - len(rendered) - len(inbox)
+
+    if est_tokens <= _META_PROMPT_TOKEN_WARN:
+        logger.info(
+            "L1 meta-prompt R%d size: %d chars (~%d tokens) | "
+            "rendered_prompt=%d inbox=%d skeleton=%d",
+            round_num,
+            total_chars,
+            est_tokens,
+            len(rendered),
+            len(inbox),
+            skeleton_chars,
+        )
+        return
+
+    inbox_sections = _split_inbox_sections(inbox)
+    section_summary = " | ".join(f"{head}={size}" for head, size in inbox_sections[:6])
+    rendered_head = rendered[:400].replace("\n", " ⏎ ")
+    top_head = ""
+    if inbox_sections:
+        top_name, _ = inbox_sections[0]
+        top_content = next(
+            (p for p in inbox.split("\n\n") if p.startswith(top_name)),
+            "",
+        )
+        top_head = top_content[:400].replace("\n", " ⏎ ")
+    logger.warning(
+        "L1 meta-prompt R%d projected ~%d tokens > %d — approaching provider TPM cap.\n"
+        "  totals: total=%d rendered_prompt=%d inbox=%d skeleton=%d\n"
+        "  inbox top sections: %s\n"
+        "  rendered_prompt head: %s\n"
+        "  top inbox section head: %s",
+        round_num,
+        est_tokens,
+        _META_PROMPT_TOKEN_WARN,
+        total_chars,
+        len(rendered),
+        len(inbox),
+        skeleton_chars,
+        section_summary,
+        rendered_head,
+        top_head,
+    )
+
+
+_ENUM_RENDER_CAP = 8
+
+
 def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
-    """Build pipeline schema description for L1 LLM context."""
+    """Build pipeline schema description for L1 LLM context.
+
+    Rendering rules (kept tight because this block lives on every L1 call):
+    * Enums cap at ``_ENUM_RENDER_CAP`` values, then ``(+N more)``.
+    * Output-schema mutation syntax is printed once globally, not per node.
+    * Node-level mechanics/description text comes from the pipeline JSON
+      — no hardcoded backend-specific commentary here.
+    """
     lines: list[str] = []
     npk = pipeline_schema.node_param_keys()
-    if npk:
+    if not npk:
+        return ""
+
+    lines.append(
+        "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):"
+    )
+    for node_name, params in npk.items():
+        node = pipeline_schema.get_node(node_name)
+        descs = node.param_descriptions if node else {}
+        enums = node.param_allowed_values if node else {}
+        if not params:
+            lines.append(f"  {node_name}: (no tunable params)")
+            continue
+        param_parts: list[str] = []
+        for p in sorted(params):
+            desc = descs.get(p)
+            allowed = enums.get(p)
+            suffix_bits: list[str] = []
+            if desc:
+                suffix_bits.append(desc)
+            if allowed:
+                shown = list(allowed)[:_ENUM_RENDER_CAP]
+                extra = len(allowed) - len(shown)
+                suffix = "one of: " + ", ".join(shown)
+                if extra > 0:
+                    suffix += f" (+{extra} more)"
+                suffix_bits.append(suffix)
+            param_parts.append(f"{p} ({'; '.join(suffix_bits)})" if suffix_bits else p)
+        lines.append(f"  {node_name}: {', '.join(param_parts)}")
+
+    mutable = [n for n in pipeline_schema.nodes if n.output_schema and n.output_schema.fields]
+    if mutable:
+        lines.append("")
         lines.append(
-            "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):"
+            "OUTPUT SCHEMA MUTATIONS — use as output_schema param: "
+            '["+", name, type, is_array, desc] / ["-", name] / '
+            '["~", old, new, type, is_array, desc]'
         )
-        for node_name, params in npk.items():
-            node = pipeline_schema.get_node(node_name)
-            descs = node.param_descriptions if node else {}
-            enums = node.param_allowed_values if node else {}
-            if params:
-                param_parts = []
-                for p in sorted(params):
-                    desc = descs.get(p)
-                    allowed = enums.get(p)
-                    suffix_bits: list[str] = []
-                    if desc:
-                        suffix_bits.append(desc)
-                    if allowed:
-                        suffix_bits.append("one of: " + ", ".join(allowed))
-                    param_parts.append(f"{p} ({'; '.join(suffix_bits)})" if suffix_bits else p)
-                lines.append(f"  {node_name}: {', '.join(param_parts)}")
-            else:
-                lines.append(f"  {node_name}: (no tunable params)")
-
-        for node in pipeline_schema.nodes:
-            if node.output_schema and node.output_schema.fields:
-                os = node.output_schema
-                lines.append(f"\n  CURRENT OUTPUT SCHEMA for {node.name}:")
-                lines.append(f"    Fields: {', '.join(os.fields)}")
-                for fname, fdesc in os.field_descriptions.items():
-                    lines.append(f"      {fname}: {fdesc}")
-                lines.append("    MUTATION SYNTAX (use as output_schema param):")
-                lines.append('      Add:     ["+", "field_name", "array", true, "description"]')
-                lines.append('      Remove:  ["-", "field_name"]')
-                lines.append(
-                    '      Replace: ["~", "old_name", "new_name", "array", true, "description"]'
-                )
-                lines.append(
-                    f'    Example: {{"{node.name}": {{"output_schema": '
-                    f'[["+", "domain_terms", "array", true, '
-                    f'"Domain-specific database entry names"]]}}}}'
-                )
-
-        if pipeline_schema.get_node("token_matching"):
-            lines.append("\n  HOW TOKEN MATCHING USES ENTITY PROFILES:")
-            lines.append("    ALL entity profile field values are tokenized ([a-zA-Z0-9]+)")
-            lines.append("    and matched against database entry tokens.")
-            lines.append("    Score = shared_tokens / term_tokens.")
-            lines.append("    Adding fields that produce tokens matching database entries")
-            lines.append(
-                "    DIRECTLY improves retrieval. Removing noisy fields reduces false matches."
-            )
+        for node in mutable:
+            assert node.output_schema is not None
+            lines.append(f"  {node.name}: {', '.join(node.output_schema.fields)}")
 
     text = "\n".join(lines)
     if pipeline_schema.available_models:
@@ -224,6 +343,7 @@ async def l1_generate(
     }
     _template = load_optimizer_prompt("meta_scan_aware")
     meta_prompt = _template.compile_prompt(**_compile_vars)
+    _log_meta_prompt_budget(meta_prompt, _compile_vars, round_num)
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
 

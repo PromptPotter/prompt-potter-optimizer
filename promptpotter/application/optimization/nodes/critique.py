@@ -51,6 +51,36 @@ _CRITIQUE_SM_LABELS = {
 _RF_CFG_AXES = ("model", "temperature", "max_tokens", "reasoning_effort")
 
 
+# Hard size budgets on the LLM-produced critique — enforced at the producer
+# (schema + template + max_tokens) rather than post-hoc truncated downstream.
+# Rough total: 400 + 200 + 300 + 400 + 3*140 + 4*40 ≈ 1880 chars ≈ 470 tokens.
+CRITIQUE_OUTPUT_SCHEMA: dict = {
+    "name": "critique",
+    "strict": False,
+    "schema": {
+        "type": "object",
+        "properties": {
+            "positive_critique": {"type": "string", "maxLength": 300},
+            "negative_critique": {"type": "string", "maxLength": 400},
+            "priority_fix": {"type": "string", "maxLength": 200},
+            "suggested_axes": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 40},
+                "maxItems": 4,
+            },
+            "failure_highlights": {
+                "type": "array",
+                "items": {"type": "string", "maxLength": 140},
+                "maxItems": 3,
+            },
+            "summary": {"type": "string", "maxLength": 400},
+        },
+        "required": ["summary"],
+        "additionalProperties": False,
+    },
+}
+
+
 class CritiqueAgent:
     """Analyzes scoring results; returns 6-field critique dict consumed by L1/L2."""
 
@@ -80,6 +110,7 @@ class CritiqueAgent:
             messages=[{"role": "user", "content": prompt}],
             node="critique",
             model=self.model,
+            json_schema=CRITIQUE_OUTPUT_SCHEMA,
             trace_meta={
                 "template_name": "critique",
                 "template_fields": _template.prompt_field_dict(),
@@ -138,15 +169,26 @@ def sample_thinking_styles(n: int = 3, seed: int | None = None) -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+_PROMPT_BLOAT_CHARS = 3000
+
+
 def _summary_section(ctx: RoundSnapshot) -> str:
     total = len(ctx.results)
-    return (
-        f"## SCORING SUMMARY\n"
+    lines = [
+        "## SCORING SUMMARY",
         f"Accuracy: {ctx.accuracy:.1%} | Composite: {ctx.composite:.4f} | "
-        f"Degraded: {ctx.degraded_queries}/{total}\n"
+        f"Degraded: {ctx.degraded_queries}/{total}",
         f"Round {ctx.current_round} | L1 stall count: {ctx.l1_stall_count} | "
-        f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})"
-    )
+        f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
+    ]
+    if ctx.current_prompt_chars:
+        bloat = (
+            " — prompt is bloated; favour compression in priority_fix"
+            if ctx.current_prompt_chars > _PROMPT_BLOAT_CHARS
+            else ""
+        )
+        lines.append(f"Current prompt size: {ctx.current_prompt_chars} chars{bloat}")
+    return "\n".join(lines)
 
 
 def _pipeline_health_section(
