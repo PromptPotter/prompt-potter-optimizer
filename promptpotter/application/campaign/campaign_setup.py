@@ -645,6 +645,7 @@ def finalize_optimization_run(
     emitter: CampaignPersistenceEmitter | None,
     stop_reason: StopReason,
     finished_at: str,
+    campaign_config: CampaignConfig,
 ) -> str | None:
     """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
     if session.campaign_store and session.cycle_id:
@@ -668,6 +669,11 @@ def finalize_optimization_run(
             best_round=cycle.best_round,
         )
     if emitter:
+        emitter.write_hard_samples(
+            cycle.rounds,
+            config=campaign_config.optimization.hard_sample_sorter,
+            cycle_id=session.cycle_id,
+        )
         emitter.finalize(
             n_rounds=len(cycle.rounds),
             best_accuracy=cycle.best_accuracy,

@@ -18,6 +18,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "AdaptivePrefixConfig",
     "CampaignConfig",
+    "HardSampleSorterConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
     "PreflightWarning",
@@ -65,6 +66,34 @@ class AdaptivePrefixConfig(BaseModel):
     kernel_param_weight: float = Field(0.5)
     kernel_prompt_weight: float = Field(0.2)
     kernel_lineage_decay: float = Field(0.5)
+
+
+class HardSampleSorterConfig(BaseModel):
+    """Hard-sample-sorter artifact at campaign finalize.
+
+    Independent of ``AdaptivePrefixConfig`` — even when adaptive-prefix is
+    off, the sorter fits its own Rasch posterior on accumulated observations
+    and emits ``hard_samples.json`` (θ_c-ranked candidates × δ_s-ranked
+    samples × hit/miss/unmeasured). Capped to top-K on disk; the full matrix
+    is recomputable on demand via ``build_hard_samples_artifact(rounds,
+    top_k_candidates=None, top_k_samples=None)``.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    enabled: bool = Field(
+        True,
+        description="Master switch — on by default. Off writes a stub artifact.",
+    )
+    top_k_candidates: int = Field(
+        40,
+        description="Cap on persisted candidate axis (θ_c desc). None in the builder "
+        "signature disables capping for on-demand full retrieval.",
+    )
+    top_k_samples: int = Field(
+        40,
+        description="Cap on persisted sample axis (δ_s desc).",
+    )
 
 
 class OptimizationConfig(BaseModel):
@@ -120,6 +149,9 @@ class OptimizationConfig(BaseModel):
 
     # Adaptive sample-prefix selection (Rasch + KG)
     adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)
+
+    # Hard-sample-sorter artifact at finalize
+    hard_sample_sorter: HardSampleSorterConfig = Field(default_factory=HardSampleSorterConfig)
 
 
 class OptimizerLLMConfig(BaseModel):

@@ -28,6 +28,7 @@ from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.config import HardSampleSorterConfig
     from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult, RunResult
 
@@ -48,6 +49,7 @@ CAMPAIGN_ARTIFACTS = {
     "output.log",  # per-query audit log
     "log.md",  # round-by-round markdown summary
     "optimize_result.json",  # final RunResult snapshot
+    "hard_samples.json",  # hard-sample-sorter artifact (top-K candidate×sample view)
 }
 
 # Per-session artifacts — produced under ``sessions/{session_id}/``.
@@ -656,6 +658,35 @@ class CampaignPersistenceEmitter:
     def write_result(self, result: RunResult) -> None:
         """Persist the final ``RunResult`` as ``optimize_result.json``."""
         write_json(self.result_path, result.model_dump(), default=str)
+
+    def write_hard_samples(
+        self,
+        rounds: list[RoundResult],
+        *,
+        config: HardSampleSorterConfig,
+        cycle_id: str | None = None,
+    ) -> None:
+        """Persist ``hard_samples.json`` — the hard-sample-sorter artifact.
+
+        When ``config.enabled`` is false, writes a parseable stub so
+        ``CAMPAIGN_ARTIFACTS`` parity holds without a special-case read path.
+        """
+        from promptpotter.application.intelligence.hard_sample_sorter import (
+            build_hard_samples_artifact,
+            empty_artifact,
+        )
+
+        path = self.campaign_dir / "hard_samples.json"
+        if not config.enabled:
+            write_json(path, empty_artifact(cycle_id=cycle_id, disabled=True))
+            return
+        artifact = build_hard_samples_artifact(
+            rounds,
+            cycle_id=cycle_id,
+            top_k_candidates=config.top_k_candidates,
+            top_k_samples=config.top_k_samples,
+        )
+        write_json(path, artifact)
 
     # -- Internal --------------------------------------------------------------
 

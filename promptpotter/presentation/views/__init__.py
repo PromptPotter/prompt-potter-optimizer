@@ -12,6 +12,7 @@ from __future__ import annotations
 from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .dashboard import render_dashboard, render_status
 from .formatting import generate_supplemental, render_pipeline_overrides, render_table
+from .hard_sample_heatmap import render_hard_sample_heatmap
 from .rounds import (
     render_campaign_summary,
     render_flip_tracking,
@@ -26,6 +27,7 @@ __all__ = [
     "render_campaign_summary",
     "render_dashboard",
     "render_flip_tracking",
+    "render_hard_sample_heatmap",
     "render_lineage",
     "render_pipeline_overrides",
     "render_progress",

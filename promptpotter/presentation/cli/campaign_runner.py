@@ -386,6 +386,7 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
         render_adaptive_prefix,
         render_campaign_summary,
         render_flip_tracking,
+        render_hard_sample_heatmap,
         render_lineage,
         render_progress,
     )
@@ -421,6 +422,17 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     prefix_events = collect_prefix_events(campaign_rounds)
     if prefix_events:
         human_parts.append(render_adaptive_prefix(prefix_events))
+
+    hard_samples_path = session.store.campaigns.campaign_dir(cycle_id) / "hard_samples.json"
+    if hard_samples_path.exists():
+        try:
+            heatmap = render_hard_sample_heatmap(
+                json.loads(hard_samples_path.read_text(encoding="utf-8"))
+            )
+        except (OSError, json.JSONDecodeError):
+            heatmap = ""
+        if heatmap:
+            human_parts.append(heatmap)
 
     if args.save:
         save_campaign_winner(

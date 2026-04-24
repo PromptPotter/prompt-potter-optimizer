@@ -468,7 +468,9 @@ async def run_optimization(
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    langfuse_trace_id = finalize_optimization_run(cycle, session, emitter, stop_reason, finished_at)
+    langfuse_trace_id = finalize_optimization_run(
+        cycle, session, emitter, stop_reason, finished_at, campaign_config
+    )
 
     run_result = RunResult(
         rounds=cycle.rounds,
