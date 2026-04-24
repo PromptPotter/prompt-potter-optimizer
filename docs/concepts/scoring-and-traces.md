@@ -1,6 +1,6 @@
-# Scoring Policy
+# Scoring and Traces
 
-Traces and scores are separate concerns. Understanding the split is important whenever you edit a scoring formula, resume a campaign, or try to compare runs across policy changes.
+Traces and scores are separate concerns. Understanding the split matters whenever you edit a scoring formula, resume a campaign, or try to compare runs across policy changes.
 
 ---
 
@@ -18,11 +18,11 @@ Cycle identity reflects this split. A cycle is hashed from its pipeline, prompts
 
 ### Rescore-on-load
 
-The separation is enforced at one seam: whenever a trace crosses from disk into memory, it gets rescored under the currently active scorer. Fresh samples, cache hits, trial reloads, cross-campaign memory ingest — all four paths go through the same rescoring step. The `hit` and `score` fields you read at runtime are always the current policy's view, even if the trace was captured under an older one.
+The separation is enforced at one seam: whenever a trace crosses from disk into memory, it gets rescored under the currently active scorer. Fresh samples, cache hits, trial reloads, cross-campaign memory ingest — all four paths go through the same rescoring step. The hit and score fields you read at runtime are always the current policy's view, even if the trace was captured under an older one.
 
 ---
 
-## Decision-replay and fork
+## Decision replay and fork
 
 ### Decisions are pure functions of scored results
 
@@ -36,22 +36,11 @@ At the first divergence, the campaign stops. The halt exists to prevent silent d
 
 Every decision record splits into two halves:
 
-- **Flow-determining half** — `kind`, `inputs_ref`, `outcome`. This is what divergence detection looks at. `inputs_ref` stores pointers and invariants only: candidate IDs, round numbers, and gate parameters that do not depend on the active scorer. Anything that is a function of scored numbers is derived on replay from the rescored trial, never stored, because a persisted value computed under the old scorer would manufacture false divergences.
-
-- **Archival half** — `data`. Carries everything that matters for meta-analysis but has no business in a gate: full LLM outputs, diagnostic context (p-values, stall counts, the recorded threshold under the old scorer). Replay never reads `data`. A rescore that wiggles numeric inputs but leaves the gate intact does not flip the archival payload — the split is what lets a "noisy rescore that doesn't change the flow" pass silently.
-
-### Recorded decision kinds
-
-Five kinds are recorded today; the first four are divergence-gated, the fifth is archive-only.
-
-| Kind | Gate | Divergence-gated? |
-|------|------|------|
-| `round_winner` | Which candidate's rescored mean score beats the round baseline | Yes |
-| `elimination_cut` | Wilcoxon signed-rank with Holm-Bonferroni correction | Yes |
-| `l2_escalation_trigger` | Patience gate on the rolling stall count since L2's last entry | Yes for patience-triggered L2; not for degradation-triggered L2 |
-| `l3_escalation_trigger` | Patience gate on the stall count since L3's last entry | Yes |
-| `probe_round_commitment` | Projection of L2's LLM-output action field | No — probe is determined by L2's LLM output, invariant under pure scorer swap |
+- **Flow-determining half** — what the divergence check reads. Stores pointers and invariants only: candidate identifiers, round numbers, and gate parameters that do not depend on the active scorer. Anything that is a function of scored numbers is derived on replay from the rescored trial, never stored, because a persisted value computed under the old scorer would manufacture false divergences.
+- **Archival half** — everything that matters for meta-analysis but has no business in a gate: full LLM outputs, diagnostic context, the recorded threshold under the old scorer. Replay never reads this half. A rescore that wiggles numeric inputs but leaves the gate intact does not flip the archival payload — the split is what lets a "noisy rescore that doesn't change the flow" pass silently.
 
 ### Fork commits to the new policy
 
 If the user wants the new scoring policy to continue, `fork` mints a new cycle rooted at the divergence point with a pointer back to its parent. Trials up to the divergence round are copied into the new tree; the shared trace data stays in place. The old cycle is left untouched. From the fork point forward, the new cycle makes its decisions under the current scorer; the old cycle remains the record of what happened under the original one.
+
+See [../operations/rewind-and-fork.md](../operations/rewind-and-fork.md) for how to run fork and the mechanical differences from rewind.

@@ -14,6 +14,7 @@ Per-query annotations render in this order, with a **mutual-exclusion rule**:
 
 The fatal-warning suppression of `↩ …` is load-bearing: when a fatal warning fires, the candidate is dead on that query, so a counter reading "1/3 toward rerun" would falsely suggest more data is coming.
 
+---
 
 Canonical visualization patterns that every PromptPotter entry point (notebook, CLI, API, webapp) should render identically. One pattern, learned once.
 
@@ -44,7 +45,7 @@ The first line is a structural fact about the candidate's configuration. The sec
 | Notebook | Implemented | `promptpotter/presentation/ui/campaign/display_callbacks.py` |
 | CLI | Adopt for `show-status` / `show-results` | `promptpotter/presentation/cli/` |
 | API | Return the `⚠ / ↳` pair as a structured pair in JSON so frontends render identically | `promptpotter/presentation/api/` |
-| Webapp | M10+ | — |
+| Webapp | Planned | — |
 
 When adding a new self-healing mechanism, escalation check, or any other finding the optimizer surfaces to the user, use this convention rather than inventing a new format.
 

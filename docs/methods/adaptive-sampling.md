@@ -1,0 +1,106 @@
+# Methods: Adaptive Sampling
+
+Two sibling round-boundary mutations govern which samples the optimizer scores next round. The zero-signal filter prunes dead queries from the dataset on disk. The adaptive prefix swaps low-information samples for higher-information ones in the in-memory scoring slice only. Both run at the end of each round, in that order.
+
+---
+
+## Rasch + Knowledge Gradient
+
+Rasch (`promptpotter/application/intelligence/rasch.py`) is the joint logistic-IRT model
+
+```
+P(hit_{c,s} = 1) = σ(θ_c − δ_s)
+```
+
+— candidate ability × sample difficulty. Joint MAP via alternating Newton on the sparse observation matrix; Laplace standard errors for posterior CIs. Anchored to `mean(θ) == 0` for identifiability. The fit gives a first-class **sample-difficulty parameter** (`δ_s`, surfaces directly as the hardness leaderboard) and a first-class **candidate-ability parameter** (`θ_c`).
+
+Knowledge Gradient is the one-step Bayesian acquisition function: how much would measuring `(c, s)` shift our point estimate of the best candidate? Closed-form for Bernoulli observations under Laplace.
+
+All swap decisions reduce to **float thresholds on these statistical quantities**:
+
+- `swap_out_delta_se` — SE on `δ_s` below which the sample is "understood" (default 0.25 logits ≈ 95% CI width 1.0).
+- `swap_in_kg_threshold` — minimum `KG(s)` to be swap-in eligible (default 0.01).
+- `max_swaps_per_round` — cap on prefix churn per round (default 3).
+- `min_prefix_size` — floor on prefix size; never drops below `elimination_n_min` (defaults to 4).
+
+### Relationship to Wilcoxon
+
+`EliminationCheck` is created **fresh inside `score_candidates()` per round** — Wilcoxon priors are per-round-internal, not cross-round. Adaptive prefix changes the slice between rounds, but within any given round all candidates score the same prefix so the paired-test invariant holds. The two mechanisms run at different cadences answering different questions:
+
+| Mechanism | Cadence | Question | Statistical tool |
+|---|---|---|---|
+| `EliminationCheck` (Wilcoxon) | Mid-evaluation, every query after `n_min` | Is this in-progress candidate decisively worse than the round's completed priors? | Paired signed-rank, Holm-Bonferroni |
+| `evolve_prefix` (Rasch + KG) | Once per round, between rounds | Which samples should the next round score to maximize information gain about the best candidate? | MAP fit + closed-form one-step KG |
+
+The Wilcoxon gate stays untouched. A future iteration could replace it with a Rasch-posterior elimination (`P(θ_c < θ_winner | data) > 0.95`); out of scope today.
+
+---
+
+## Deterministic sample triage
+
+Per-query failure streak detection. Three severity levels:
+
+- **Zero-signal** (always-hit or always-miss with enough observations) → drives the zero-signal sample filter. Physically removed from the active dataset.
+- **Chronically failing** (recent streak) → surfaced to Critique and L2/L3 as persistent failures.
+- **Intermittent** (variable) → kept in the scoring set. High discrimination value.
+
+---
+
+## Zero-signal sample filtering
+
+Applied at round boundaries. When enabled, queries with exactly 0 variance across enough observations are moved into the dataset's excluded list.
+
+**Criteria.** A query is zero-signal when:
+
+1. It has enough observations (default 5) — prevents premature exclusion on a fresh campaign.
+2. Hit rate is exactly 0.0 or 1.0 — variance is zero. Always-hit and always-miss are treated symmetrically.
+
+**Persistence — "exchange from the default set".** Excluded queries are **physically moved** inside `{tenant_id}/library/backends/{backend_id}/datasets/{name}.json` from `items` into an `excluded` sidelist. The sidelist entry captures the full original item plus metadata (reason, hit rate, observations, campaign ID, timestamp). A fresh campaign launched tomorrow sees the shrunken `items` list — not transient state, actually pruned. Recovery moves entries back.
+
+```json
+{
+  "name": "train",
+  "items": [...],
+  "excluded": [
+    {
+      "item": {"query": "...", "ground_truth": "..."},
+      "reason": "zero_signal",
+      "hit_rate": 0.0,
+      "observations": 7,
+      "campaign_id": "cyc_...",
+      "excluded_at": "2026-04-14T..."
+    }
+  ]
+}
+```
+
+**In-round effect.** The filter also mutates the in-memory active dataset so the *current* run's next round immediately sees the smaller set, not just future runs.
+
+**Config.** Two `CampaignConfig.optimization` fields:
+
+- `zero_signal_filter_enabled: bool = True` — master switch (on by default).
+- `zero_signal_filter_min_observations: int = 5` — confidence gate.
+
+**Known limitations.** This first implementation drops excluded queries outright rather than tiering them (no probation, rotate-back-in, or cold storage). There is no guard preventing the active dataset from shrinking below the scoring budget.
+
+---
+
+## Adaptive sample prefix (Rasch + KG)
+
+Sibling round-boundary mutation. The zero-signal filter answers "is this sample dead across the campaign?" and writes to the on-disk dataset. The adaptive sample prefix answers "given everything measured, which samples should the *next round* score to maximize information gain?" and writes only to the in-memory scoring slice — the on-disk dataset is untouched.
+
+Both run at the end of each round, in this order: zero-signal filter first (it may shrink the active dataset), then adaptive prefix (it picks a slice from what survives).
+
+### Persistence
+
+Each evolved round appends a compact event: `{round, swapped_in, swapped_out, reason, rasch: {n_candidates, n_samples, iterations, converged}, hardness_top: [...]}`. Persisted in every trial and restored on resume. The shared renderer consumes this list for both CLI and notebook.
+
+---
+
+## L2 strategic intelligence
+
+Meta-reasoning injected into L2 Refine only:
+
+- **Failure group × axis** — cross-tabulates failure clusters with per-axis accuracy deltas. Produced after a sensitivity scan via failure group sensitivity analysis.
+
+Note — round trajectory and per-candidate comparison used to be surfaced to L2 directly. That was a residual skip connection: L1 critique already distills both and re-injecting the raw forms into L2 duplicated signal the critique already carries. L2 now reads those through L1 critique text only.

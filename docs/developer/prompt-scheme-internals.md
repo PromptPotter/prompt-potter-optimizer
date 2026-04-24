@@ -1,13 +1,10 @@
-# Prompt Decomposition Scheme
+# Prompt Scheme Internals
 
-PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization.
+PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization. Conceptual overview in [../concepts/prompts-and-candidates.md](../concepts/prompts-and-candidates.md); this page covers the implementation.
 
-Decomposing the prompt into 8 named fields (persona, task intent, instruction, etc.) makes each axis independently tunable: the optimizer can vary `thinking_style` without touching `answer_format`, measure which fields matter, and learn which are worth spending search budget on.
+The same decomposition applies recursively: the optimizer's own meta-prompts — the templates driving L1, L2, L3, and the critique step — are themselves `PromptTemplate` instances with the same 8 fields. A future outer-loop PromptPotter can optimize the optimizer's prompts using the same machinery.
 
-The same decomposition applies recursively: the optimizer's own meta-prompts — the templates driving L1, L2, L3, and Critique — are themselves `PromptTemplate` instances with the same 8 fields. A future outer-loop PromptPotter can optimize the optimizer's prompts using the same machinery.
-
-
-## Rendering Pipeline
+## Rendering pipeline
 
 ```
 ┌─ PROMPT_STRING_FIELDS (6) ───────────────┐
@@ -28,18 +25,18 @@ The same decomposition applies recursively: the optimizer's own meta-prompts —
 └──────────────────────────────────────────┘
 ```
 
-## SearchPoint Hierarchy
+## SearchPoint hierarchy
 
 ```
 SearchPoint (abstract)
-    ├── JobSearchPoint      — target pipeline configuration (frozen)
-    └── PromptTemplate      — 8-field prompt scheme (render/compile)
-            └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
+├── JobSearchPoint      — target pipeline configuration (frozen)
+└── PromptTemplate      — 8-field prompt scheme (render/compile)
+        └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
 ```
 
-**Prompt alias groups** link the original monolithic prompt to its decomposed form so historical evaluations stay discoverable across both. Per-query results from prior `dataset_runs/` are reused when a new searchpoint's `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
+**Prompt alias groups** link the original monolithic prompt to its decomposed form so historical evaluations stay discoverable across both. Per-query results from prior `dataset_runs/` are reused when a new `SearchPoint`'s `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
 
-## Two Parameter Namespaces
+## Two parameter namespaces
 
 **Prompt scheme fields** — the 8 fields below — render into a single prompt string. **Pipeline node parameters** are a separate namespace: nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both namespaces).
 
@@ -47,7 +44,7 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 
 ---
 
-## Field Registry
+## Field registry
 
 | # | Field | Layer | Variants? | Purpose |
 |---|-------|-------|-----------|---------|
@@ -62,11 +59,11 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 
 Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
 
-Dynamic field mutation (L2-driven add/remove) is a future optimization direction — see [optimization.md § Dynamic Field Set](optimization.md#dynamic-field-set-design-vision).
+Dynamic field mutation (L2-driven add/remove) is a future direction — see [../concepts/three-layer-loop.md § The dynamic field set](../concepts/three-layer-loop.md).
 
 ---
 
-## Two Prompt Stores
+## Two prompt stores
 
 PromptPotter keeps two independent prompt stores, each answering a different question.
 
@@ -107,11 +104,11 @@ Add alt starting points by dropping more files in the same directory (`zero_shot
 | `instruction` | — | Always LLM-generated |
 | `few_shot_examples` | — | Not in variant library |
 
-Prompt field axes are dropped automatically when the pipeline has no LLM node with a prompt template. In practice, prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.
+Prompt field axes are dropped automatically when the pipeline has no LLM node with a prompt template. In practice, prompt fields are inactive when the only LLM node is excluded from the pipeline.
 
 ---
 
-## Field Usage by Prompt Type
+## Field usage by prompt type
 
 In optimizer prompts, `problem_description` carries analytical evidence (scoring stats, scan data, critique, escalation). `instruction` carries task directives. `plan` carries L3's strategic framework.
 
@@ -134,38 +131,32 @@ Each optimizer prompt template receives a single `inbox` hole holding the assemb
 
 ---
 
-## Optimizer Meta-Prompts
+## Optimizer meta-prompts
 
 The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt file under `promptpotter/application/optimization/prompts/` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
 
-Every L1/L2/l1_critique/L3 template receives a single `inbox` hole holding
-the intelligence block assembled by
-`inbox_registry.assemble_inbox()` (or, for l1_critique, by its own
-`_assemble_l1_critique_sections`). L3 keeps additional context holes for
-anchoring (current plan, L2 history, rendered prompt, pipeline
-snapshot). See
-[`information-flow.md`](information-flow.md) for the per-field table.
+Every L1 / L2 / critique / L3 template receives a single `inbox` hole holding the intelligence block assembled by `inbox_registry.assemble_inbox()` (or, for critique, by its own `_assemble_l1_critique_sections`).
 
 | Template file | Consumer | Compile variables |
 |---|---|---|
-| `meta_scan_aware.json` | `l1_generate()` — `nodes/generate.py` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `inbox` |
-| `l1_critique.json` | `L1CritiqueAgent.run()` — `nodes/l1_critique.py` | `inbox` |
-| `l2_refine_strategy.json` | `refine_strategy()` — `nodes/layer_transitions.py` | `current_params`, `task_context_section`, `inbox` |
-| `l3_modify_plan.json` | `modify_plan()` — `nodes/layer_transitions.py` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `inbox` |
-| `restructure.json` | `decompose_prompt_fields()` — `pipeline.py` | `consultation_instruction` |
+| `meta_scan_aware.json` | `l1_generate()` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `inbox` |
+| `l1_critique.json` | `L1CritiqueAgent.run()` | `inbox` |
+| `l2_refine_strategy.json` | L2 refine transition | `current_params`, `task_context_section`, `inbox` |
+| `l3_modify_plan.json` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `inbox` |
+| `restructure.json` | `decompose_prompt_fields()` | `consultation_instruction` |
 
-Loader: `load_optimizer_prompt()` at `application/optimization/pipeline.py:218`. The returned `PromptTemplate` is defined at `domain/opt_search_point.py:56` — `prompt_field_dict()` emits the 6 string fields plus `few_shot_examples` for observability tracing.
+Loader and symbol paths: see [code-map.md](code-map.md).
 
 ---
 
-## Projection to Target Pipeline
+## Projection to target pipeline
 
 Three transformations bridge optimizer state to the wire:
 
 | Step | Function | Input → Output |
 |------|----------|----------------|
-| 1 | `render()` | 6 prompt fields → single string |
-| 2 | `to_job_search_point()` | OptSearchPoint → frozen `JobSearchPoint` with prompt in `pipeline_params[prompt_node]["prompt"]` |
-| 3 | `run_match()` | `pipeline_params` dict → backend `node_config` wire payload |
+| 1 | `PromptTemplate.render()` | 6 prompt fields → single string |
+| 2 | `OptSearchPoint.to_job_search_point()` | `OptSearchPoint` → frozen `JobSearchPoint` with prompt in `pipeline_params[prompt_node]["prompt"]` |
+| 3 | `BackendClient.run_match()` | `pipeline_params` dict → backend `node_config` wire payload |
 
 `to_job_search_point()` also carries `prompt_fields` (the decomposed dict) on the `JobSearchPoint` for variant derivation without round-tripping through `OptSearchPoint`.
