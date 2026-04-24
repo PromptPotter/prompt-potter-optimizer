@@ -168,6 +168,7 @@ Full spec: [`m11-plus-backlog.md`](m11-plus-backlog.md)
 | Web scrape ablation | Quality vs cost/latency tradeoff |
 | Public service deployment | Auth, rate limiting, multi-tenancy |
 | Non-prompt targets | Scoring functions, fuzzy matchers, retrieval queries, GA settings |
+| Hard-sample sorter | Standalone capability — expose δ_s leaderboard + candidate×sample heatmap as a product surface. Spec: [`hard-sample-sorter.md`](hard-sample-sorter.md). Phase 1 (data primitive + spec) shipped; phase 2 (CLI/notebook ASCII heatmap) and phase 3 (webapp heatmap under M10 track) unscheduled. |
 | Evolutionary operators | GA/DE population-based search |
 | MCP server mode | Expose tools to Claude Code |
 | Self-optimization | PromptPotter optimizes its own meta-prompts recursively |

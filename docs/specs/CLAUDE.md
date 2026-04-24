@@ -12,6 +12,7 @@
 | M10: Publication Benchmarks, Ablation Studies, Webapp Read-Only | [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md) | `docs/research/benchmarks.md`, `datasets/hotpotqa/`, `datasets/gsm8k/`, `promptpotter/application/datasets/builder.py`, `promptpotter/main.py` |
 | M11: Multi-Connector, Competitor Comparison, Webapp Phase 2 | [`m11-multi-connector.md`](m11-multi-connector.md) | `promptpotter/infrastructure/backend/client.py`, `webapp/` (M10 output) |
 | M11+: Backlog | [`m11-plus-backlog.md`](m11-plus-backlog.md) | (opportunistic; no pre-reading) |
+| Hard-Sample Sorter (capability spec; unscheduled) | [`hard-sample-sorter.md`](hard-sample-sorter.md) | `promptpotter/application/intelligence/{hard_sample_sorter,adaptive_prefix,rasch}.py`, `docs/methods/exploration-exploitation.md` |
 Archived in git history: M0-M7, M8 (campaign intelligence), old M9 (publication/config/webapp combined and multi-connector). Material relevant to M11 has been inlined in `m11-multi-connector.md`.
 
 Cross-repo: Proper Step Loop spec (eval security gate + backend pipeline refactor) lives in the backend repo at `docs/spec/proper-step-loop.md`.
