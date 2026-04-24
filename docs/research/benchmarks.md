@@ -1,7 +1,5 @@
 # Benchmark Methodology
 
-> Deep background & AI knowledge base: [`benchmarks-ii.md`](benchmarks-ii.md).
-
 ## Priority (2026-04-12)
 
 1. **BBEH (primary)** — the M10 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).
@@ -12,7 +10,7 @@ The legacy "HotPotQA + GSM8K + AIME" framing below pre-dates the saturation find
 
 ## Datasets
 
-### BBEH (Big-Bench Extra Hard) -- Primary
+### BBEH (Big-Bench Extra Hard) — Primary
 
 Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a harder variant probing similar reasoning capabilities. Best general-purpose models score ~24%, reasoning-specialized ~54%. Ample headroom for prompt optimization to matter.
 
@@ -28,7 +26,20 @@ Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a 
 
 **Head-to-head infrastructure:** [`bbeh-comparison/`](bbeh-comparison/) contains Colab notebooks (`bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) running CAPO, GEPA, MIPROv2, and BootstrapFewShot against the identical `gpt-oss-120b` model and identical 10/task train + 10/task test split (seed=42). PromptPotter runs via its own CLI producing the same JSON output schema. This is the M10 primary benchmark.
 
-### HotPotQA -- Secondary (saturation probe pending)
+#### Reading BBEH results
+
+The 23 BBEH tasks are **not strictly ordered by difficulty**. They are categorized by the cognitive domain / skill type they test. Numbering is organizational, not a ladder from easiest to hardest.
+
+Task clusters:
+
+1. **Linguistic & Semantic** — synonyms, antonyms, word analogies. Baseline difficulty; modern models usually handle these with high accuracy.
+2. **Logical & Mathematical Reasoning** — boolean logic, arithmetic, sequence completion. Moderate; difficulty spikes with larger numbers or longer logic chains.
+3. **Commonsense & World Knowledge** — physical trajectories, social situations. High for small models — requires world modeling, not just text prediction.
+4. **Algorithmic & Symbolic** — shuffled-object tracking (the "shell game"), complex grid navigation. Highest difficulty; biggest gap between standard and reasoning-specialized models.
+
+Raw benchmark data sometimes shows higher-numbered tasks scoring lower, but that's usually a coincidence of how tasks were added to the repository — not a designed difficulty ramp. BBEH difficulty is largely a function of model *scale*; a task a small model scores 0% on can jump to 90% once the model crosses a size threshold. When interpreting per-task BBEH results, group by cluster — the algorithmic/symbolic cluster is where reasoning-model gains are largest and where prompt-level interventions have the most headroom.
+
+### HotPotQA — Secondary (saturation probe pending)
 
 Multi-hop question answering over Wikipedia paragraphs. Requires reasoning across multiple documents to produce a short answer.
 
@@ -43,7 +54,35 @@ Multi-hop question answering over Wikipedia paragraphs. Requires reasoning acros
 
 Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M10 Wave 1.**
 
-### GSM8K, AIME 2025 -- Saturated, cited only
+#### HotPotQA SOTA reference
+
+**Distractor setting** — Beam Retrieval (single model):
+
+| Metric | Score |
+|---|---|
+| Answer EM | 72.69 |
+| Answer F1 | 85.04 |
+| Supporting-fact EM | 66.25 |
+| Supporting-fact F1 | 90.09 |
+| Joint EM | 50.53 |
+| Joint F1 | 77.54 |
+
+**Fullwiki setting** — AISO (single model):
+
+| Metric | Score |
+|---|---|
+| Answer EM | 67.46 |
+| Answer F1 | 80.52 |
+| Supporting-fact EM | 61.17 |
+| Supporting-fact F1 | 86.02 |
+| Joint EM | 44.87 |
+| Joint F1 | 72.00 |
+
+Source: HotpotQA homepage leaderboard.
+
+**`gpt-oss-120b` expectations.** No published HotpotQA-specific score found. Model-card general-reasoning signals — GPQA Diamond 80.1, MMLU 90.0, SWE-Bench Verified 62.4, Codeforces Elo 2463 (high reasoning) — suggest a strong baseline. HotPotQA is retrieval-heavy and multi-hop, so actual performance depends on whether supporting documents are provided and what retrieval stack is used. Headroom under `gpt-oss-120b` almost certainly exists in the fullwiki / retrieval-coupled setting; in the distractor setting headroom will be tighter because the hard work (retrieval) is already done.
+
+### GSM8K, AIME 2025 — Saturated, cited only
 
 Both effectively saturated at `gpt-oss-120b` (2026-04-12). Cited in literature tables for context; no new runs planned. **GSM8K** — 1,319 grade-school math problems, [Cobbe et al., 2021](https://github.com/openai/grade-school-math), used by MIPROv2 / Promptomatix / adv-CoT. **AIME 2025** — 30 competition math problems, [MathArena/aime_2025](https://huggingface.co/datasets/MathArena/aime_2025), used by GEPA.
 
@@ -57,19 +96,19 @@ Both effectively saturated at `gpt-oss-120b` (2026-04-12). Cited in literature t
 
 ## Evaluation Protocol
 
-### Sample Sizing for Tuning vs. Final Numbers
+### Sample sizing for tuning vs. final numbers
 
 Meta-prompt evaluation and ablation tuning use **50–100 sample** runs to keep the bootstrap cost bounded — a single 100-sample × 5-variant × 10-round campaign is already ~5,000 backend evaluations, and tuning sweeps multiply that by the number of meta-prompt variants under test. Final headline numbers in published tables use **200+ sample** runs for tighter CIs. The split is intentional: tuning is high-iteration, low-fidelity; final reporting is low-iteration, high-fidelity. Don't mix the two — small-sample tuning numbers should never appear in the main results table.
 
-### Controlled Variables
+### Controlled variables
 
 All methods evaluated under identical conditions:
 
 | Variable | Value |
 |----------|-------|
-| Model | <!-- TODO: e.g. Llama-3-8B or GPT-4o-mini --> |
+| Model | gpt-oss-120b (primary) |
 | Temperature | 0.0 (deterministic) |
-| Max tokens | <!-- TODO: dataset-specific --> |
+| Max tokens | Dataset-specific |
 | Dataset split | Fixed per dataset (see above) |
 | Eval sample | Full test/validation set for final numbers; `sample_size=200` during optimization |
 | Seeds | n=3 independent optimization runs per method |
@@ -92,17 +131,18 @@ All methods evaluated under identical conditions:
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
 | MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
 | GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
-| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 (arXiv ID TODO) |
-| adv-CoT | Adversarial generator-discriminator for reasoning (cited) | [adv-CoT, 2025](https://www.mdpi.com/) |
+| Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 |
+| adv-CoT | Adversarial generator-discriminator for reasoning (cited) | adv-CoT, 2025 |
 | PromptWizard | Critique-guided prompt optimization (cited) | [Microsoft, 2024](https://arxiv.org/abs/2405.18369) |
 | PromptPotter (L1 only) | L1 generate + evaluate, no L2/L3 | This work |
 | PromptPotter (L1+L2) | L1 + L2 context refinement | This work |
 | PromptPotter (full) | L1 + L2 + L3 replanning | This work |
 
+---
 
 ## Results
 
-### Main Results -- BBEH Mini (Primary)
+### Main Results — BBEH Mini (Primary)
 
 **Model:** gpt-oss-120b via Groq | **Split:** 10/task train, 10/task test, seed=42 | **Scoring:** Exact match, macro-average across 23 tasks
 
@@ -142,22 +182,10 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 | GSM8K EM | PromptWizard | — | [Agarwal et al., 2024](https://arxiv.org/abs/2405.18369) |
 | AIME 2025 EM | GEPA | — | [GEPA, 2025](https://arxiv.org/abs/2507.19457) |
 
+---
+
 ## Infrastructure Notes
 
 Wall-clock numbers in this document rely on prior-result reuse from `dataset_runs/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
-## Reference Papers
-
-**Positioning.** PromptPotter's core loop is a direct descendant of **PromptWizard** (Microsoft, 2024) — critique-guided generation with mutate/score/refine cycles. Where PromptWizard stops at a single-prompt optimizer, PromptPotter absorbs the strongest idea from each subsequent line of work and lifts them onto a pipeline-aware substrate: **MIPROv2**'s joint instruction-and-demo search becomes our 8-field decomposition + per-node `pipeline_params`; **GEPA**'s reflective trajectory feedback becomes our L2 directive bridge; **Promptomatix**'s cost-aware objectives become our `sp_budget_ttest` + sequential elimination; **adv-CoT**'s adversarial refinement maps onto our L3 replan escalation. The goal is not to out-benchmark DSPy on its own turf — it's to overshadow PromptWizard by being what PromptWizard would have been if it had shipped after 2025's ideas landed.
-
-| Paper | Affiliation | Year | Datasets | Key Result |
-|-------|-------------|------|----------|------------|
-| PromptWizard | Microsoft Research | 2024 | GSM8K, others | **PromptPotter's direct ancestor** — critique-guided mutate/score/refine loop. PromptPotter extends it with pipeline-awareness, L2/L3 escalation, and cross-run SearchMemory. |
-| MIPROv2 | Stanford NLP (DSPy) | 2024 | GSM8K, HotPotQA | Up to 13% accuracy gains on Llama-3-8B; Bayesian optimization over instructions + demos |
-| GEPA | Stanford NLP (DSPy) | 2025 | HotPotQA, AIME, IFBench, HoVer | +12% over MIPROv2 on AIME-2025; reflective prompt evolution |
-| CAPO | AutoML Freiburg (DSPy) | 2025 | GSM8K, others | Evolutionary prompt optimization; paired t-test racing |
-| Promptomatix | Salesforce AI Research | 2025 | GSM8K, SQuAD_2, CommonGen, AG News, XSum | Cost-aware optimization; competitive performance with reduced compute |
-| adv-CoT | — | 2025 | 12 datasets (commonsense + arithmetic) | +4.44% on GPT-3.5-turbo, +1.08% on GPT-4o-mini; adversarial refinement |
-| PromptPotter | Independent | 2025 | TermNorm, AIME 2025, BBEH | Critique-guided L1→L2→L3 loop; pipeline-aware optimization |
-
-**When to use what.** *DSPy / MIPROv2* — you need a full programming framework for compound LLM systems and are willing to learn it. *GEPA* — you want state-of-the-art optimization quality in very few rollouts and are already inside DSPy. *Promptomatix* — you care most about optimizer cost. *PromptWizard* — you want a simple, cost-efficient single-prompt optimizer. *PromptPotter* — you have a multi-node pipeline (prompts + node params), you need cross-run learning, and you want the critique-guided quality of PromptWizard without being locked to a single LLM call.
+See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for competitor positioning and the AutoML racing lineage.

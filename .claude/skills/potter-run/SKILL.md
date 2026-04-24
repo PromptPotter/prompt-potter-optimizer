@@ -120,7 +120,7 @@ NEXT:     {continue L1 / escalate to L2 / etc.}
 
 **Incremental persistence.** Every query lands in `library/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
-Escalation model: `reference/optimization-layers.md`, `docs/architecture/optimization.md`.
+Escalation model: `reference/optimization-layers.md`, `docs/concepts/three-layer-loop.md`, `docs/concepts/self-healing.md`.
 
 ## Phase 5: Results
 
@@ -145,4 +145,4 @@ Escalation model: `reference/optimization-layers.md`, `docs/architecture/optimiz
 - `reference/benchmark-datasets.md` — readiness + cost model
 - `reference/optimization-layers.md` — L1/L2/L3 escalation
 - `reference/troubleshooting.md` — stop-reason recovery
-- `docs/architecture/optimization.md`, `docs/cli-workflow.md`
+- `docs/concepts/three-layer-loop.md`, `docs/concepts/self-healing.md`, `docs/operations/cli-reference.md`

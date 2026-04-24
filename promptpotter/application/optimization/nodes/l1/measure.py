@@ -1,4 +1,4 @@
-"""Candidate measurement — dispatches each candidate over three exit paths (validation-skip / cache-hit / scored). See ``docs/architecture/optimization.md`` for the self-healing contract."""
+"""Candidate measurement — dispatches each candidate over three exit paths (validation-skip / cache-hit / scored). See ``docs/developer/self-healing-internals.md`` for the self-healing contract."""
 
 from __future__ import annotations
 

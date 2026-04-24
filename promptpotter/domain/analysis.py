@@ -105,7 +105,7 @@ class ValidationFailure:
     Recorded as a property of the OptSearchPoint (in
     ``OptimizationMemory.validation_failures``). Drives the synthetic-0
     early exit in ``score_search_point()`` — see
-    ``docs/architecture/optimization.md`` for the rationale.
+    ``docs/developer/self-healing-internals.md`` for the rationale.
     """
 
     axis: str  # e.g. "llm_only.model"

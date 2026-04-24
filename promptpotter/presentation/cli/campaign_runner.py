@@ -503,8 +503,7 @@ async def cmd_fork(args: argparse.Namespace) -> CommandResult:
             human=(
                 f"No fork_hint.json in campaigns/{ctx.cycle_id}/. Fork is "
                 f"only available after `optimize` halts with a "
-                f"ResumeDivergenceError; see `docs/architecture/"
-                f"optimization.md § Rescore-on-resume and --fork`."
+                f"ResumeDivergenceError; see `docs/operations/rewind-and-fork.md`."
             ),
         )
 

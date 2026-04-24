@@ -1,6 +1,6 @@
 """Docs ↔ registry sync for ``information-flow.md``.
 
-The L1/L2 inbox table in ``docs/architecture/information-flow.md`` must
+The L1/L2 inbox table in ``docs/developer/information-flow.md`` must
 name exactly the fields declared in ``inbox_registry.INBOX`` under
 ``LAYER_ORDER[L1] | LAYER_ORDER[L2]``. Silent drift between code and
 docs is the single most common way architectural docs rot, so we
@@ -18,7 +18,7 @@ from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
 )
 
-DOC = Path(__file__).resolve().parents[1] / "docs" / "architecture" / "information-flow.md"
+DOC = Path(__file__).resolve().parents[1] / "docs" / "developer" / "information-flow.md"
 
 
 def _extract_l1_l2_table_field_names() -> list[str]:

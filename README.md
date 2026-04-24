@@ -19,11 +19,11 @@ At its core, PromptPotter just collects a lot of datapoints. Every evaluation is
 - **Statistical early-stopping** — sequential elimination via paired Wilcoxon signed-rank test stops inferior candidates after ~6 queries instead of running the full eval set. Real cost is well below `n_variants × eval_size`.
 - **Cross-run learning** — every evaluation flows into a shared `SearchMemory` store: parameter impact, axis exhaustion, query tractability, failure-group correlations. The optimizer carries what it learned across runs.
 - **Auto-injected scoring** — define your scoring formula once in `campaign.json`. It compiles into every eval path automatically. No glue code.
-- **Scoring as policy, not data** — per-trace `scorer_id` ledger + rescore-on-load; resume replays recorded decisions against rescored inputs and halts on first divergence. `promptpotter fork` re-roots with `parent_cycle_id`. [`optimization.md`](docs/architecture/optimization.md#data-vs-scoring-policy)
+- **Scoring as policy, not data** — per-trace `scorer_id` ledger + rescore-on-load; resume replays recorded decisions against rescored inputs and halts on first divergence. `promptpotter fork` re-roots with `parent_cycle_id`. [`scoring-and-traces.md`](docs/concepts/scoring-and-traces.md)
 - **Symmetric mid-output tail lookup** — one answer-extraction primitive (same regex on prediction and ground truth, last match wins) backs `\boxed{…}`, `**…**`, and GSM8K `#### N`. Prose-wrapped answers score cleanly without per-dataset parsers.
 - **IDE-native operation** — drive a full optimization campaign from the terminal via the `/potter-run` Claude Code skill. No notebook required.
 
-For a head-to-head comparison with other prompt-optimization frameworks, see [`docs/research/README.md`](docs/research/README.md). For the self-healing architecture in detail, see [`docs/architecture/optimization.md`](docs/architecture/optimization.md).
+For a head-to-head comparison with other prompt-optimization frameworks, see [`docs/research/related-work.md`](docs/research/related-work.md). For the self-healing architecture in detail, see [`docs/concepts/self-healing.md`](docs/concepts/self-healing.md).
 
 Your backend's monolithic prompt gets decomposed into independent, optimizable fields:
 
@@ -85,21 +85,29 @@ Confidence intervals and two-proportion significance tests are built into the ca
 > 5. WebApp *(planned)*
 
 > [!IMPORTANT]
-> PromptPotter requires a backend that exposes a `/matches` evaluation endpoint and a `GET /pipeline` endpoint that declares every node, its parameters, and their allowed values. The optimizer searches **only** parameters declared in `pipeline.json` — nothing else is touched. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [Backend Requirements](docs/setup-guide.md#backend-requirements) for the full contract.
+> PromptPotter requires a backend that exposes a `/matches` evaluation endpoint and a `GET /pipeline` endpoint that declares every node, its parameters, and their allowed values. The optimizer searches **only** parameters declared in `pipeline.json` — nothing else is touched. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [`docs/operations/backend-integration.md`](docs/operations/backend-integration.md) for the full contract.
 
 ### 🧬 SearchPoint — the unit of evaluation
 
-Every evaluation is a **SearchPoint**: content-hashable, stored once, discoverable by any workflow. The decomposed prompt fields and pipeline parameters live together inside it, which is what makes joint search possible in the first place. See [prompt scheme](docs/architecture/prompt-scheme.md) for the SearchPoint hierarchy and alias groups.
+Every evaluation is a **SearchPoint**: content-hashable, stored once, discoverable by any workflow. The decomposed prompt fields and pipeline parameters live together inside it, which is what makes joint search possible in the first place. See [prompts and candidates](docs/concepts/prompts-and-candidates.md) for the decomposition and [prompt-scheme-internals.md](docs/developer/prompt-scheme-internals.md) for the SearchPoint hierarchy and alias groups.
 
 ## Documentation
 
-| 🏗 Architecture | ⚙ Operations | 🔬 Research |
+**New here? Start with [`docs/manual/`](docs/manual/README.md)** — six numbered chapters, install → first run → reading output → troubleshooting.
+
+For reference material:
+
+| 🧠 Concepts | ⚙ Operations | 🔬 Research |
 |---|---|---|
-| [Overview](docs/architecture/overview.md) | [Setup guide](docs/setup-guide.md) | [Benchmarks](docs/research/benchmarks.md) |
-| [Optimization loop](docs/architecture/optimization.md) | [CLI workflow](docs/cli-workflow.md) | [SearchMemory intelligence](docs/architecture/search-memory-intelligence.md) |
-| [Prompt scheme](docs/architecture/prompt-scheme.md) | [Observability](docs/observability.md) | |
-| [Information flow](docs/architecture/information-flow.md) | | |
-| [Node standard](docs/architecture/node-standard.md) | | |
+| [Campaign lifecycle](docs/concepts/campaign-lifecycle.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
+| [Three-layer loop](docs/concepts/three-layer-loop.md) | [Environment](docs/operations/environment.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
+| [Self-healing](docs/concepts/self-healing.md) | [Backend integration](docs/operations/backend-integration.md) | [Related work](docs/research/related-work.md) |
+| [Scoring and traces](docs/concepts/scoring-and-traces.md) | [Persistence and state](docs/operations/persistence-and-state.md) | |
+| [Search memory](docs/concepts/search-memory.md) | [Rewind and fork](docs/operations/rewind-and-fork.md) | |
+| [Prompts and candidates](docs/concepts/prompts-and-candidates.md) | [Observability](docs/operations/observability.md) | |
+| [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
+
+Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).
 
 ### 🧠 Cross-run memory
 
@@ -137,7 +145,7 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 
 ### 🔌 Backend contract
 
-PromptPotter requires a backend that exposes a `/matches` evaluation endpoint and a `GET /pipeline` endpoint that declares every node, its parameters, and their allowed values. The optimizer searches **only** parameters declared in `pipeline.json` — nothing else is touched. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [Backend Requirements](docs/setup-guide.md#backend-requirements) for the full contract.
+PromptPotter requires a backend that exposes a `/matches` evaluation endpoint and a `GET /pipeline` endpoint that declares every node, its parameters, and their allowed values. The optimizer searches **only** parameters declared in `pipeline.json` — nothing else is touched. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [`docs/operations/backend-integration.md`](docs/operations/backend-integration.md) for the full contract.
 
 ```
 ┌──────────────────────┐                       ┌──────────────────────┐
@@ -159,7 +167,7 @@ pip install -e ".[all,dev]"
 cp .env.example .env   # add your LLM API keys (Groq, OpenAI, or Anthropic)
 ```
 
-The `[all]` extras bundle enables every optional feature (Excel datasets, HuggingFace benchmarks, Langfuse tracing, Anthropic client, JupyterLab). For a minimal install pick only the extras you need — see [Setup Guide](docs/setup-guide.md).
+The `[all]` extras bundle enables every optional feature (Excel datasets, HuggingFace benchmarks, Langfuse tracing, Anthropic client, JupyterLab). For a minimal install pick only the extras you need — see [Environment](docs/operations/environment.md).
 
 ### Docker (one command)
 
@@ -168,7 +176,7 @@ cd docker && docker-compose up --build
 # JupyterLab: http://localhost:8888  |  API: http://localhost:8001
 ```
 
-See the [Setup Guide](docs/setup-guide.md) for prerequisites and first run, and the [CLI Workflow](docs/cli-workflow.md) for the full command reference.
+See the [Manual](docs/manual/README.md) for prerequisites and first run, and the [CLI Reference](docs/operations/cli-reference.md) for the full command reference.
 
 
 

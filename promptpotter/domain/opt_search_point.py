@@ -217,7 +217,7 @@ class OptimizationMemory(BaseModel):
         "set is `[openai/gpt-oss-120b]`). A non-empty list makes the "
         "SearchPoint structurally invalid; score_search_point() short-"
         "circuits to a synthetic 0 instead of running the backend. See "
-        "docs/architecture/optimization.md.",
+        "docs/developer/self-healing-internals.md.",
     )
     runtime_failures: list[RuntimeFailure] = Field(
         default_factory=list,

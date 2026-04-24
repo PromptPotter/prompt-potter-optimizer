@@ -1,7 +1,7 @@
 """Structural invariants for the inbox registry.
 
 The registry is the single source of truth for optimizer-prompt wiring
-(see ``docs/architecture/information-flow.md``). These checks guard:
+(see ``docs/developer/information-flow.md``). These checks guard:
 
 1. Every name listed in ``LAYER_ORDER`` has a matching ``InboxField`` in
    ``INBOX``.

@@ -102,7 +102,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 On top of that, there are three ways a cycle can start, scattered across different flags and implicit behaviors:
 
 - Fresh baseline from `datasets/{name}/prompts/` (implicit, default)
-- Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/architecture/optimization.md § Resuming mid-cycle`)
+- Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/operations/rewind-and-fork.md`)
 - Recon-brief-seeded start (implicit, lives in session state)
 
 All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is now a supported primitive via `python -m promptpotter fork`; the trigger and mechanics are documented in `optimization.md § Decision records and resume-divergence replay`.
@@ -191,7 +191,7 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 2. **Tenant threading.** `build_stores(base_dir, tenant_id="default")`; `FileSink.__init__(tenant_id=...)`; `--tenant` CLI flag on every subcommand; `TenantContext` from Track 2 wired through.
 3. **MLflow SDK adoption.** `mlflow` added as optional extra in `pyproject.toml`; `FileSink` MLflow block rewritten to use the SDK; hand-rolled writers deleted.
 4. **Migration script.** `promptpotter migrate` verb that walks existing `.promptpotter/projects/default/{backend_id}/…` (v2) trees and rewrites them to the new shape (v3). Writes `.promptpotter/schema_version=3` marker. Refuse to start on unmigrated v2 dirs without explicit `migrate` invocation.
-5. **Docs updated.** `CLAUDE.md § Architecture`, `docs/architecture/overview.md § Persistence`, `docs/architecture/optimization.md § Resuming mid-cycle` (path citations), `docs/architecture/observability-audit.md` (full sink mapping rewrite), `docs/observability.md` (navigation starting points), `docs/cli-workflow.md` (new `--tenant` flag).
+5. **Docs updated.** `CLAUDE.md § Architecture`, `docs/operations/persistence-and-state.md`, `docs/operations/rewind-and-fork.md` (path citations), `docs/operations/observability.md` (full sink mapping rewrite + navigation starting points), `docs/operations/cli-reference.md` (new `--tenant` flag).
 6. **Test updates.** `tests/test_artifact_parity.py` split into `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` parity assertions plus a check that every campaign records a `parent_session_id`. Any test fixture with a path string in it.
 
 **Sequencing:** Wave 1, alongside Track 2. Both are foundational move-only work; other tracks build on both. Track 4 (file-directory UI v0) should render the *new* tree, not rework around the old one later. Track 5 (CLI unification) needs the two-tree layout in place to know where `init` writes session state versus where `optimize` writes campaign state.
@@ -269,7 +269,7 @@ LoopEnv  (per-run infrastructure, transient)
 4. `configure_and_apply_pipeline()`, `apply_stored_overrides()`, and recon-result merging stop mutating user config.
 5. `LoopEnv.zero_signal_filter_*` fields moved to `CampaignConfig.optimization`; `LoopEnv` reads from `CampaignConfig` at `run_optimization` construction time.
 6. Existing `campaign.json` files in `datasets/*/` parse unchanged (validator handles legacy shape). Test fixture coverage extends to both shapes.
-7. `docs/architecture/overview.md` + `CLAUDE.md` updated with the new three-object boundary: *user knobs / session identity / loop infrastructure*.
+7. `docs/developer/code-layout.md` + `CLAUDE.md` updated with the new three-object boundary: *user knobs / session identity / loop infrastructure*.
 
 **Sequencing:** Wave 2, alongside Track 3 (multi-dataset). Track 3 adds `dataset_name` and `pipeline_name` as required session fields — the same surgery that Track 7 is doing on `session_id` / `project_root` / `recon_brief`. Landing them together keeps `SessionEnv`'s shape stable afterwards. Depends on Track 2 (hexagonal layout) being complete so the imports don't move again mid-refactor.
 

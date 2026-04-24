@@ -1,6 +1,6 @@
 """Cycle-identity hashing — decides whether two runs share a feedback cycle.
 
-See ``docs/architecture/optimization.md § Cycle Identity`` for the full
+See ``docs/concepts/scoring-and-traces.md`` for the full
 two-tier (experiment vs strict) specification.
 """
 
