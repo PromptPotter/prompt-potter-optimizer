@@ -20,7 +20,7 @@ Axes are classified: *consistently impactful* (big effects most of the time), *s
 
 Every query accumulates a record of hits and misses across all configurations tried. Some queries are always easy — they hit under every configuration, so changing the configuration doesn't tell us anything. Others are always hard — they miss under every configuration, for the same reason. Still others are *discriminating*: some configurations hit them, others miss them. Discriminating queries are the ones that teach the optimizer something; the others are noise.
 
-The zero-signal filter uses this: queries that always hit or always miss across enough observations are physically moved out of the active dataset. The adaptive prefix uses it too, in a gentler form — low-information queries are swapped out of the scoring slice in favor of higher-information ones.
+The zero-signal filter uses this: queries that always hit or always miss across enough observations are physically moved out of the active dataset. The exploration/exploitation sample selector (the "adaptive prefix") uses it too, in a gentler form — queries whose difficulty is already well characterized are swapped out of the scoring slice in favor of queries whose difficulty is still uncertain and informative to measure.
 
 ### Failure modes — "where does the pipeline break?"
 

@@ -88,7 +88,7 @@ Between rounds, three things may happen (in order):
 
 1. **Search memory refresh.** New evaluation data from the completed round is folded into the historical intelligence store. The next round's L1 Generate has an updated view.
 2. **Zero-signal filter** (off by default). Queries that always hit or always miss across a minimum number of observations carry no information for the optimizer. When the filter is enabled, these queries are moved out of the active dataset. This keeps the scoring set informative as the campaign runs.
-3. **Adaptive prefix** (off by default). A statistical model fits difficulty estimates to each query based on accumulated results, then swaps low-information queries out of the scoring prefix in favor of higher-information ones. The prefix stays the same within a round; it only changes between rounds.
+3. **Exploration / exploitation rebalance** (off by default). A statistical model (Rasch IRT) tracks per-query difficulty. Between rounds, the scoring prefix is rebalanced: queries whose difficulty we already know are dropped (exploitation has extracted most of their signal), and queries whose difficulty is still uncertain are pulled in when measuring them would be informative enough (exploration). The prefix stays the same within a round; it only changes between rounds.
 
 ---
 

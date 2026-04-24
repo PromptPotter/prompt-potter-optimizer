@@ -5,6 +5,6 @@ Statistical and algorithmic foundations of PromptPotter. Two independent procedu
 | Page | What it covers |
 |------|----------------|
 | [Candidate elimination](candidate-elimination.md) | Paired Wilcoxon signed-rank test + Holm-Bonferroni correction — how candidates are dropped before consuming full budget |
-| [Adaptive sampling](adaptive-sampling.md) | Rasch + Knowledge Gradient prefix evolution, sample tiering, zero-signal filter |
+| [Exploration / exploitation sample selection](exploration-exploitation.md) | Rasch + Knowledge Gradient prefix evolution, sample tiering, zero-signal filter. Companion capability: [hard-sample sorter](../specs/hard-sample-sorter.md) |
 
 For the research positioning of these methods (AutoML lineage, F-Race → irace → SMAC), see [`../research/related-work.md`](../research/related-work.md).

@@ -34,7 +34,7 @@ The `concepts/` folder explains the ideas behind PromptPotter in plain language.
 ## Methods — the statistics
 
 - [Candidate elimination](../methods/candidate-elimination.md) — Wilcoxon signed-rank + Holm-Bonferroni
-- [Adaptive sampling](../methods/adaptive-sampling.md) — Rasch + Knowledge Gradient
+- [Exploration / exploitation sample selection](../methods/exploration-exploitation.md) — Rasch + Knowledge Gradient
 
 ## Research — benchmarks and the paper
 
