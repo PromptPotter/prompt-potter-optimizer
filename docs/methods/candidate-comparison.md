@@ -68,3 +68,28 @@ evaluated on the full query set.
   query order mitigates ordering effects but not latent correlation.
 - **Candidate stationarity** is assumed (performance stable across queries).
   Holds by construction for stateless pipeline configurations.
+
+
+
+# Rasch + KG, not heuristics
+
+Rasch (`application/intelligence/rasch.py`) is the joint logistic-IRT model `P(hit_{c,s} = 1) = σ(θ_c − δ_s)`: candidate ability × sample difficulty. Joint MAP via alternating Newton on the sparse observation matrix; Laplace standard errors for posterior CIs. Anchored to `mean(θ) == 0` for identifiability. The fit gives a first-class **sample-difficulty parameter** (`δ_s`, surfaces directly as the hardness leaderboard) and a first-class **candidate-ability parameter** (`θ_c`).
+
+Knowledge Gradient is the one-step Bayesian acquisition function: how much would measuring `(c, s)` shift our point estimate of the best candidate? Closed-form for Bernoulli observations under Laplace.
+
+All swap decisions reduce to **float thresholds on these statistical quantities**:
+- `swap_out_delta_se` — SE on `δ_s` below which the sample is "understood" (default 0.25 logits ≈ 95% CI width 1.0).
+- `swap_in_kg_threshold` — minimum `KG(s)` to be swap-in eligible (default 0.01).
+- `max_swaps_per_round` — cap on prefix churn per round (default 3).
+- `min_prefix_size` — floor on prefix size; never drops below `elimination_n_min` (defaults to 4).
+
+### Relationship to Wilcoxon
+
+`EliminationCheck` is created **fresh inside `score_candidates()` per round** — Wilcoxon priors are per-round-internal, not cross-round. Adaptive prefix changes the slice between rounds, but within any given round all candidates score the same prefix so the paired-test invariant holds. The two mechanisms run at different cadences answering different questions:
+
+| Mechanism | Cadence | Question | Statistical tool |
+|---|---|---|---|
+| `EliminationCheck` (Wilcoxon) | Mid-evaluation, every query after `n_min` | Is this in-progress candidate decisively worse than the round's completed priors? | Paired signed-rank, Holm-Bonferroni |
+| `evolve_prefix` (Rasch + KG) | Once per round, between rounds | Which samples should the next round score to maximize information gain about the best candidate? | MAP fit + closed-form one-step KG |
+
+The Wilcoxon gate stays untouched. A future iteration could replace it with a Rasch-posterior elimination (`P(θ_c < θ_winner | data) > 0.95`); out of scope today.
