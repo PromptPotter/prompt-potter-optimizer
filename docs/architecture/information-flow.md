@@ -58,16 +58,18 @@ L3 fires when L2 stalls and owns the strategic plan. In addition to its `{{inbox
 | `{{inbox}}` | SearchMemory: axis rankings, bottleneck distribution, failure clusters, persistent failures |
 
 
-## Compression chain
+## 3. Three Tiers of Intelligence
 
-```
-eval results ──► L1 Critique (LLM) ──► critique text ──► L2 (LLM) ──► L2 directive ──► L1 (LLM)
-                 1st hop                                   2nd hop
-```
+L1 focuses on generating diverse candidates. Everything else is one of three tiers, each with a distinct owner, trigger, and signal type.
 
-When L2 fires, L1 is 2 LLM hops from evaluation data. Each hop is lossy compression. The guidance mutex ensures L1 sees the most-processed form available. Validation failures bypass L1 critique entirely and feed L2 directly (1 hop instead of 2) — the signal is already structured.
+| Tier | Handled by | Fires when | What | Example |
+|------|-----------|------------|------|---------|
+| **Tier 1 — Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | Zero-signal sample filtering (§ 5) |
+| **Tier 2 — Every-round critique hub** | L1 Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
+| **Tier 3 — Strategic** | L2 Refine + L3 Plan (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
 
-L3 sees only the last 3 L2 outcomes (what changed, whether accuracy moved) — never L2's directive or reasoning. Strategy from outcomes, not tactics.
+L1 continues to receive: L1 critique text, scan context, failure analysis patterns, and SearchMemory summaries (failure clusters, top axes, dead queries). L3 receives the aggregate picture (axis rankings, bottleneck distribution, failure clusters, persistent failures) for strategic plan pivots.
+More at: [search-memory-intelligence.md](search-memory-intelligence.md)
 
 ## Internal — not a prompt injection
 

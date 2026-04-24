@@ -45,6 +45,11 @@ M11+ is the opportunistic bucket. Items here ship after M11 as user demand, time
 | Item | Notes |
 |------|-------|
 | Further OptSearchPoint refinement | Advanced L1/L2/L3 strategies surfaced during M10 ablations |
+| Diminishing returns detector | Critique (anomaly flag) + L2 (strategic context) — signal when optimization is plateauing |
+| Candidate diversity monitor | L2 — detect mode collapse in candidate generation |
+| Query improvement attribution | Critique (this-round) + L2 (cross-round patterns) — track which prompt changes drove which query flips |
+| Cross-candidate failure diff | Critique — missed opportunities from non-winner candidates |
+| Failure group refresh in loop | L2 — periodic recomputation of failure group × axis correlations during optimization |
 | Additional benchmarks | Beyond HotPotQA + GSM8K — MMLU, BBH, LiveCodeBench, domain-specific |
 | Longer-horizon ablations | SearchMemory value over N campaigns, learning curves |
 | Human evaluation | Qualitative prompt quality assessment beyond task accuracy |

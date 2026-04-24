@@ -93,3 +93,64 @@ All swap decisions reduce to **float thresholds on these statistical quantities*
 | `evolve_prefix` (Rasch + KG) | Once per round, between rounds | Which samples should the next round score to maximize information gain about the best candidate? | MAP fit + closed-form one-step KG |
 
 The Wilcoxon gate stays untouched. A future iteration could replace it with a Rasch-posterior elimination (`P(θ_c < θ_winner | data) > 0.95`); out of scope today.
+
+
+## 4. How the Tiers Operate on Sample Data
+
+### Tier 1 in action — Deterministic Sample Triage
+
+Per-query failure streak detection. Three severity levels:
+
+- **Zero-signal** (always-hit or always-miss with enough observations) → drives the zero-signal sample filter. Physically removed from the active dataset.
+- **Chronically failing** (recent streak) → surfaced to Critique and L2/L3 as persistent failures.
+- **Intermittent** (variable) → kept in the scoring set. High discrimination value.
+
+### Zero-Signal Sample Filtering
+
+Applied at round boundaries. When enabled, queries with exactly 0 variance across enough observations are moved into the dataset's excluded list.
+
+**Criteria.** A query is zero-signal when:
+1. It has enough observations (default 5) — prevents premature exclusion on a fresh campaign.
+2. Hit rate is exactly 0.0 or 1.0 — variance is zero. Always-hit and always-miss are treated symmetrically.
+
+**Persistence — "exchange from the default set".** Excluded queries are **physically moved** inside `{tenant_id}/library/backends/{backend_id}/datasets/{name}.json` from `items` into an `excluded` sidelist. The sidelist entry captures the full original item plus metadata (reason, hit rate, observations, campaign ID, timestamp). A fresh campaign launched tomorrow sees the shrunken `items` list — not transient state, actually pruned. Recovery moves entries back.
+
+```json
+{
+  "name": "train",
+  "items": [...],
+  "excluded": [
+    {
+      "item": {"query": "...", "ground_truth": "..."},
+      "reason": "zero_signal",
+      "hit_rate": 0.0,
+      "observations": 7,
+      "campaign_id": "cyc_...",
+      "excluded_at": "2026-04-14T..."
+    }
+  ]
+}
+```
+
+**In-round effect.** The filter also mutates the in-memory active dataset so the *current* run's next round immediately sees the smaller set, not just future runs.
+
+
+**Config.** Two `CampaignConfig.optimization` fields:
+- `zero_signal_filter_enabled: bool = True` — master switch (on by default).
+- `zero_signal_filter_min_observations: int = 5` — confidence gate.
+
+**Known limitations (to be refined in M10).** This first implementation drops excluded queries outright rather than tiering them (no probation, rotate-back-in, or cold storage). There is no guard preventing the active dataset from shrinking below the scoring budget. See M10 spec.
+
+### Adaptive sample prefix (Rasch + KG)
+
+Sibling round-boundary mutation. The zero-signal filter answers "is this sample dead across the campaign?" and writes to the on-disk dataset. The adaptive sample prefix answers "given everything measured, which samples should the *next round* score to maximize information gain?" and writes only to the in-memory scoring slice — the on-disk dataset is untouched.
+
+Both run at the end of each round, in this order: zero-signal filter first (it may shrink the active dataset), then adaptive prefix (it picks a slice from what survives). Full mechanics in [optimization.md § Adaptive sample prefix](optimization.md#adaptive-sample-prefix--rasch--knowledge-gradient).
+
+### Tier 3 in action — L2 Strategic Intelligence
+
+Meta-reasoning injected into L2 Refine only:
+
+- **Failure group × axis** — cross-tabulates failure clusters with per-axis accuracy deltas. Produced after a sensitivity scan via failure group sensitivity analysis.
+
+Note — round trajectory and per-candidate comparison used to be surfaced to L2 directly. That was a residual skip connection: L1 critique already distills both and re-injecting the raw forms into L2 duplicated signal the critique already carries. L2 now reads those through L1 critique text only.

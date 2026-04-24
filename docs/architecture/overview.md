@@ -94,3 +94,7 @@ Prior evaluation results are automatically replayed without calling the backend 
 Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
 
 `events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind are driven entirely by `trials/trial_NNNN.json`, which carries the full serialized optimizer state. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
+
+## Self-optimization (meta-level)
+
+The optimizer's own prompts are themselves prompt templates — the 8-field decomposition applies recursively, which is what enables a future self-optimization mode. A trace dataset freezes archived campaign transitions into `{round_context → next_directive → score_delta}` rows that an outer-loop PromptPotter instance can score meta-prompt variants against. See [prompt-scheme.md § Optimizer Meta-Prompts](prompt-scheme.md#optimizer-meta-prompts) and [§ Potter Trace Dataset](prompt-scheme.md#potter-trace-dataset).
