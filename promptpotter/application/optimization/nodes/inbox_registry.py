@@ -9,7 +9,7 @@ fields declared here. Each :class:`InboxField` owns:
     * how to render that value into a section string,
     * the section label/header shown in each consuming layer,
     * optional mutex membership for mutually-exclusive pairs (e.g.
-      ``l2_directive`` wins over ``critique_text`` on L1 only).
+      ``l2_directive`` wins over ``l1_critique_text`` on L1 only).
 
 :func:`assemble_inbox` is the one function callers need. It walks
 :data:`LAYER_ORDER` for the target layer, applies mutex resolution,
@@ -457,7 +457,7 @@ INBOX: tuple[InboxField, ...] = (
         retention=Retention.MEMORY,
         docstring="Non-probe aggregated escalation alert — suppressed by an active l2_directive.",
     ),
-    # Mutex pair on L1: directive wins over critique when both populated.
+    # Mutex pair on L1: directive wins over l1_critique when both populated.
     InboxField(
         name="l2_directive",
         layers=frozenset({Layer.L1, Layer.L2}),
@@ -468,12 +468,12 @@ INBOX: tuple[InboxField, ...] = (
         mutex={Layer.L1: ("guidance", 2)},
     ),
     InboxField(
-        name="critique_text",
+        name="l1_critique_text",
         layers=frozenset({Layer.L1, Layer.L2}),
-        source=_src_memory("critique_text"),
+        source=_src_memory("l1_critique_text"),
         render=_r_labeled(""),  # placeholder; overridden per-layer below
         retention=Retention.MEMORY,
-        docstring="Latest critique output; L2 digests into a directive before L1 sees it.",
+        docstring="Latest L1 critique output; L2 digests into a directive before L1 sees it.",
         mutex={Layer.L1: ("guidance", 1)},
     ),
     InboxField(
@@ -550,14 +550,14 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
         "escalation_probe",
         "escalation_alert",
         "l2_directive",
-        "critique_text",
+        "l1_critique_text",
         "thinking_styles",
         "plan",
     ),
     Layer.L2: (
         "escalation_section",
         "warning_inventory",
-        "critique_text",
+        "l1_critique_text",
         "l2_directive",
         "validation_failures",
         "runtime_failures",
@@ -568,8 +568,8 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
 
 _LABEL_BY_LAYER: dict[tuple[Layer, str], str] = {
     (Layer.L1, "l2_directive"): "DIRECTIVE:",
-    (Layer.L1, "critique_text"): "CRITIQUE:",
-    (Layer.L2, "critique_text"): "CRITIQUE:",
+    (Layer.L1, "l1_critique_text"): "CRITIQUE:",
+    (Layer.L2, "l1_critique_text"): "CRITIQUE:",
     (Layer.L2, "l2_directive"): "PREVIOUS DIRECTIVE:",
 }
 

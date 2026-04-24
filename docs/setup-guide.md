@@ -1,6 +1,6 @@
 # Setup Guide — PromptPotter Optimizer
 
-Automatic prompt optimization — from single LLM calls to multi-step pipelines. Evaluates via the backend's `/matches` endpoint; uses a separate optimizer LLM (`LLM_PROVIDER`/`LLM_MODEL`) for candidate generation and critique.
+Automatic prompt optimization — from single LLM calls to multi-step pipelines. Evaluates via the backend's `/matches` endpoint; uses a separate optimizer LLM (`LLM_PROVIDER`/`LLM_MODEL`) for candidate generation and L1 critique.
 
 ---
 

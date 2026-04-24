@@ -6,10 +6,10 @@ PromptPotter uses a 3-layer escalation model inspired by PromptWizard's critique
 
 The workhorse. Generates N candidate `OptSearchPoint`s (prompt field variants + pipeline_params), evaluates them against the dataset, and selects the best.
 
-**Input**: critique from previous round (or `l2_directive` after L2 runs), task_context, thinking_styles, scan_brief, search_memory.
+**Input**: L1 critique from previous round (or `l2_directive` after L2 runs), task_context, thinking_styles, scan_brief, search_memory.
 **Output**: winner candidate (or no improvement → stall counter increments).
 
-After evaluation, the **Critique Agent** (every-round intelligence hub) analyzes results — pipeline health, rank analysis, failure details, query categories — enriched with SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends). It produces a compact critique that feeds the next L1 round. Critique and L1 Generate are **mutually exclusive with l2_directive**: when L2 fires, its directive replaces critique as L1's primary signal.
+After evaluation, the **L1 Critique Agent** (every-round intelligence hub) analyzes results — pipeline health, rank analysis, failure details, query categories — enriched with SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends). It produces a compact L1 critique that feeds the next L1 round. L1 critique and L1 Generate are **mutually exclusive with l2_directive**: when L2 fires, its directive replaces L1 critique as L1's primary signal.
 
 **Stall**: When L1 fails to improve for `patience` consecutive rounds → escalate to L2.
 
@@ -21,7 +21,7 @@ Escalation-only meta-controller. Adjusts the optimization environment rather tha
 
 **Does NOT decide**: `pipeline_params` — that stays L1's job.
 
-**Input**: critique, previous l2_directive (to evolve/supersede), escalation report (or warning_inventory), task_context, pipeline schema param keys, round trajectory summary, candidate comparison from last round, SearchMemory (axis rankings, bottleneck distribution, failure group × axis, persistent failures).
+**Input**: L1 critique, previous l2_directive (to evolve/supersede), escalation report (or warning_inventory), task_context, pipeline schema param keys, round trajectory summary, candidate comparison from last round, SearchMemory (axis rankings, bottleneck distribution, failure group × axis, persistent failures).
 
 **Stall**: When L2 runs `l2_patience` times without L1 improving → escalate to L3.
 
@@ -61,7 +61,7 @@ L1 stalls (patience rounds without improvement)
 | `l2_patience` | 2 | L2 invocations without improvement before L3 |
 | `enable_l3` | true | Allow L3 escalation |
 | `l3_patience` | 1 | L3 invocations without improvement before stop |
-| `enable_critique` | true | Critique-guided generation (vs. direct generation) |
+| `enable_l1_critique` | true | L1 critique-guided generation (vs. direct generation) |
 | `degradation_threshold` | 0.4 | Mid-eval abort threshold (0 = disabled) |
 
 ## What to Tell the User

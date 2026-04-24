@@ -1,6 +1,6 @@
 # Information Flow — Optimization Loop
 
-Every optimizer LLM prompt (L1, L2, Critique, L3) receives an `{{inbox}}`
+Every optimizer LLM prompt (L1, L2, L1 Critique, L3) receives an `{{inbox}}`
 block assembled from one declarative catalogue:
 [`promptpotter/application/optimization/nodes/inbox_registry.py`](../../promptpotter/application/optimization/nodes/inbox_registry.py).
 
@@ -29,7 +29,7 @@ Three state concepts, flat hierarchy:
 
 | Concept | What it holds | Lifetime | Persisted |
 |---------|---------------|----------|-----------|
-| `OptSearchPoint` (opt_sp) | prompt fields + `task_context` + `plan`; `opt_sp.memory` carries `critique_text`, `l2_directive`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `runtime_failures`, `validation_failures`, `failure_analysis`, `round_history`, … | per-cycle, mutable | `campaigns/{cycle_id}/trial_NNNN.json` |
+| `OptSearchPoint` (opt_sp) | prompt fields + `task_context` + `plan`; `opt_sp.memory` carries `l1_critique_text`, `l2_directive`, `thinking_styles`, `escalation_journal`, `warning_inventory`, `runtime_failures`, `validation_failures`, `failure_analysis`, `round_history`, … | per-cycle, mutable | `campaigns/{cycle_id}/trial_NNNN.json` |
 | `SearchMemory` | cross-cycle aggregates (axis impact, sample_index, failure clusters) | cross-cycle, watermarked | `library/search_memory.json` + `library/sample_index.json` |
 | `Session` + narrowed `Cycle` | infra handles (store, scoring_ctx, pipeline_schema) on `Session`; orchestration state (full `RoundResult` buffer, best/current cache, escalation counters, probe flag, pending decisions) on `Cycle` | per-session | reconstructed on resume from opt_sp + trial JSON |
 
@@ -55,7 +55,7 @@ Rows with `—` in a layer column are skipped when rendering that layer.
 | `escalation_probe` | `opt_sp.memory.escalation_journal` (probe-round only) | memory | _probe-round block_ | — | |
 | `escalation_alert` | `opt_sp.memory.escalation_journal` (non-probe, no directive) | memory | `PIPELINE ISSUE: ...` | — | |
 | `l2_directive` | `opt_sp.memory.l2_directive` | memory | `DIRECTIVE:` | `PREVIOUS DIRECTIVE:` | `(L1, guidance, 2)` |
-| `critique_text` | `opt_sp.memory.critique_text` | memory | `CRITIQUE:` | `CRITIQUE:` | `(L1, guidance, 1)` |
+| `l1_critique_text` | `opt_sp.memory.l1_critique_text` | memory | `CRITIQUE:` | `CRITIQUE:` | `(L1, guidance, 1)` |
 | `thinking_styles` | `opt_sp.memory.thinking_styles` | memory | `THINKING STYLES:` | — | |
 | `plan` | `opt_sp.plan` | opt_sp | `PLAN:` | — | |
 | `escalation_section` | `ctx.escalation_check_result` + `opt_sp.memory.escalation_journal` | transient | — | `PIPELINE STABILITY REPORT ...` | |
@@ -66,10 +66,10 @@ Rows with `—` in a layer column are skipped when rendering that layer.
 
 ### Mutex rules (the three rules hiding in prose before)
 
-- **L1 `guidance`.** `l2_directive` wins over `critique_text` on L1 —
-  when L2 fires it digests the critique into a directive, so the
+- **L1 `guidance`.** `l2_directive` wins over `l1_critique_text` on L1 —
+  when L2 fires it digests the L1 critique into a directive, so the
   directive absorbs the signal. `clear_volatile()` wipes `l2_directive`
-  on improvement; `critique_text` regenerates every round.
+  on improvement; `l1_critique_text` regenerates every round.
 - **L2 `escalation_section` vs `warning_inventory`.** L2's fallback rule
   implemented by the `warning_inventory` source: it returns `None`
   whenever `escalation_section`'s source produces content. Same single
@@ -80,10 +80,10 @@ Rows with `—` in a layer column are skipped when rendering that layer.
   rounds only; alert returns the aggregated banner only when NOT a
   probe AND no `l2_directive` is active.
 
-## Critique inbox
+## L1 Critique inbox
 
-Critique keeps its own assembler (in
-[`critique.py`](../../promptpotter/application/optimization/nodes/critique.py))
+L1 critique keeps its own assembler (in
+[`l1_critique.py`](../../promptpotter/application/optimization/nodes/l1_critique.py))
 because its sections share cross-cutting state (`anomalies` accumulator,
 near-miss-query set passed between `_rank_analysis_section` and
 `_failure_details_section`). Each section is a private helper:
@@ -103,9 +103,9 @@ near-miss-query set passed between `_rank_analysis_section` and
 | `## THIS ROUND` | `RoundSnapshot.round_analysis` (trajectory + cross-candidate diff) |
 | `## AVAILABLE SCHEMA MUTATIONS` | pipeline-schema nodes with mutable `output_schema` |
 
-Critique is the only layer with raw `QueryResult` access — it's the
+L1 critique is the only layer with raw `QueryResult` access — it's the
 every-round intelligence hub. Its output lands on
-`opt_sp.memory.critique_text` and then flows into L1/L2's `critique_text`
+`opt_sp.memory.l1_critique_text` and then flows into L1/L2's `l1_critique_text`
 inbox field.
 
 ## L3 — multi-hole template
@@ -132,7 +132,7 @@ set. The candidate short-circuits to synthetic 0; the failure lands on
 `opt_sp.memory.validation_failures`. L2's next round receives it in the
 `validation_failures` inbox field and produces a directive that names
 the disallowed value. L1 heals on the following round via the
-`guidance` mutex — the directive absorbs the critique channel.
+`guidance` mutex — the directive absorbs the L1 critique channel.
 
 **Rail 2 — Runtime failures.** `DegradationCheck` fires mid-evaluation
 when `degraded_rate ≥ threshold`. `_score_candidates()` synthesises a
@@ -154,13 +154,13 @@ with L3 escalation.
 ## Compression chain
 
 ```
-eval results ──► Critique (LLM) ──► critique_text ──► L2 (LLM) ──► l2_directive ──► L1 (LLM)
-                 1st hop                               2nd hop
+eval results ──► L1 Critique (LLM) ──► l1_critique_text ──► L2 (LLM) ──► l2_directive ──► L1 (LLM)
+                 1st hop                                      2nd hop
 ```
 
 When L2 fires, L1 is 2 LLM hops from eval data. Each hop is lossy
 compression. The `guidance` mutex ensures L1 sees the most-processed
-form available. Validation failures bypass critique entirely and feed
+form available. Validation failures bypass L1 critique entirely and feed
 L2 directly (1 hop instead of 2) — the signal is already structured,
 no eval-result digestion needed.
 

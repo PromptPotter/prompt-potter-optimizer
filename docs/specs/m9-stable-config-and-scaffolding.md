@@ -29,8 +29,8 @@ M9 delivers the foundation. M10 populates it with benchmark results. M11 general
 | Prompt | File | Temperature | Max Tokens | State |
 |--------|------|-------------|------------|-------|
 | L1 Generate | `meta_scan_aware.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
-| Critique | `critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
-| Critique (negative) | `critique_negative.json` | 0.3 | 4096 | Fallback for low accuracy |
+| L1 Critique | `l1_critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
+| L1 Critique (negative) | `l1_critique_negative.json` | 0.3 | 4096 | Fallback for low accuracy |
 | L2 Refine | `l2_refine_strategy.json` | 0.3 | 2048 | Working, clean layer transition |
 | L3 Replan | `l3_modify_plan.json` | 0.5 | 2048 | Working, strategic pivots |
 
@@ -85,7 +85,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **Deliverables:**
 
-1. A file-directory view model under `sessions/{session_id}/views/` (exact path open). Content is a superset of what the notebook currently displays: round summary, candidate leaderboard, current trajectory, critique text, active SearchPoint.
+1. A file-directory view model under `sessions/{session_id}/views/` (exact path open). Content is a superset of what the notebook currently displays: round summary, candidate leaderboard, current trajectory, L1 critique text, active SearchPoint.
 2. Format TBD during the track — likely a mix of small JSON files for structured data and pre-rendered Markdown snippets for human-readable dashboards. Open: temp vs permanent files, rolling vs append-only.
 3. CLI `show-status` becomes a thin renderer that reads the view directory and pretty-prints. No live-state polling.
 4. Notebook output becomes a thin renderer that reads the view directory. This closes the remaining notebook ↔ CLI parity gap (renderer divergence); artifact-write parity is already closed via the `run_optimization` auto-mint.

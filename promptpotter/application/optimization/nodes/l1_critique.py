@@ -1,6 +1,6 @@
-"""Critique agent — LLM analysis of a round's results.
+"""L1 Critique agent — LLM analysis of a round's results.
 
-The agent consumes a :class:`RoundSnapshot` (in ``critique_payload``), assembles
+The agent consumes a :class:`RoundSnapshot` (in ``l1_critique_payload``), assembles
 a stat-rich prompt from the snapshot, calls the LLM, and returns the 6-field
 critique dict consumed by L1/L2. All section builders are private to this
 module — they have no other callers.
@@ -15,11 +15,11 @@ from collections import Counter
 from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence import load_variant_library
-from promptpotter.application.optimization.nodes.critique_payload import (
+from promptpotter.application.optimization.nodes.formatting import format_search_memory_block
+from promptpotter.application.optimization.nodes.l1_critique_payload import (
     RoundSnapshot,
     get_candidates,
 )
-from promptpotter.application.optimization.nodes.formatting import format_search_memory_block
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.shared.errors import is_error_result
@@ -32,9 +32,9 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "CritiqueAgent",
+    "L1CritiqueAgent",
     "RoundSnapshot",
-    "format_critique_for_prompt",
+    "format_l1_critique_for_prompt",
     "sample_thinking_styles",
 ]
 
@@ -51,7 +51,7 @@ _CRITIQUE_SM_LABELS = {
 _RF_CFG_AXES = ("model", "temperature", "max_tokens", "reasoning_effort")
 
 
-class CritiqueAgent:
+class L1CritiqueAgent:
     """Analyzes scoring results; returns 6-field critique dict consumed by L1/L2."""
 
     def __init__(
@@ -64,12 +64,12 @@ class CritiqueAgent:
 
     async def run(self, ctx: RoundSnapshot) -> dict:
         """Build critique from pipeline stats + LLM analysis."""
-        sections = _assemble_critique_sections(ctx)
+        sections = _assemble_l1_critique_sections(ctx)
         _compile_vars = {"inbox": sections}
-        _template = load_optimizer_prompt("critique")
+        _template = load_optimizer_prompt("l1_critique")
         prompt = _template.compile_prompt(**_compile_vars)
         logger.info(
-            "Rich critique: %d chars prompt, round %d, acc=%.3f",
+            "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",
             len(prompt),
             ctx.current_round + 1,
             ctx.accuracy,
@@ -78,20 +78,20 @@ class CritiqueAgent:
         response = await llm_call(
             self.llm_client,
             messages=[{"role": "user", "content": prompt}],
-            node="critique",
+            node="l1_critique",
             model=self.model,
             trace_meta={
-                "template_name": "critique",
+                "template_name": "l1_critique",
                 "template_fields": _template.prompt_field_dict(),
                 "variables": _compile_vars,
             },
         )
 
-        return _parse_critique(response.content)
+        return _parse_l1_critique(response.content)
 
 
-def _parse_critique(content: str) -> dict:
-    """Parse LLM critique response into the 6-field dict."""
+def _parse_l1_critique(content: str) -> dict:
+    """Parse LLM L1 critique response into the 6-field dict."""
     try:
         result = json.loads(content)
     except (json.JSONDecodeError, TypeError):
@@ -106,8 +106,8 @@ def _parse_critique(content: str) -> dict:
     }
 
 
-def format_critique_for_prompt(critique: dict) -> str:
-    """Critique dict → compact text for L1/L2 (summary + priority_fix + axes + highlights)."""
+def format_l1_critique_for_prompt(critique: dict) -> str:
+    """L1 critique dict → compact text for L1/L2 (summary + priority_fix + axes + highlights)."""
     parts = []
     if critique.get("summary"):
         parts.append(critique["summary"])
@@ -134,7 +134,7 @@ def sample_thinking_styles(n: int = 3, seed: int | None = None) -> list[str]:
 
 
 # ---------------------------------------------------------------------------
-# Stat-section builders — private helpers for _assemble_critique_sections.
+# Stat-section builders — private helpers for _assemble_l1_critique_sections.
 # ---------------------------------------------------------------------------
 
 
@@ -415,8 +415,8 @@ def _runtime_failures_section(entries: list[dict]) -> str:
     return "\n".join(lines)
 
 
-def _assemble_critique_sections(ctx: RoundSnapshot) -> str:
-    """Build stat-rich sections for the critique template."""
+def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
+    """Build stat-rich sections for the L1 critique template."""
     results = ctx.results
     anomalies: list[str] = []
 

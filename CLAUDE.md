@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
+PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → l1_critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
 **Note — `application/recon/` is a preserved template, not dead code.** The sensitivity-scan / recon pass is kept as a working-shape reference for anyone who wants to revive it later. It is dormant by design: no CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it. **Do not remove it** — the structure itself is the spec. To revive, re-wire the seams; otherwise ignore.
 
@@ -69,7 +69,7 @@ promptpotter/
 ├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, ScoringEnv — pure, no I/O
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration
-│   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
+│   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, l1_critique, llm_call, restructure
 │   ├── recon/         # TEMPLATE — dormant sensitivity-scan archive, preserved for future revival
 │   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library
 │   ├── scoring/       # score_search_point gateway

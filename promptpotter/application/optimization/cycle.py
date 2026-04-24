@@ -82,7 +82,7 @@ class Cycle:
     """Mutable state threaded through the feedback cycle round loop.
 
     Pure optimizer progress — infrastructure handles live on ``Session``.
-    Per-candidate/round optimizer memory (critique_text, l2_directive,
+    Per-candidate/round optimizer memory (l1_critique_text, l2_directive,
     task_context, escalation_journal, warning_inventory, failure_analysis,
     round_history, ...) lives on ``opt_sp`` (and its ``memory`` sub-object).
     What remains on ``Cycle`` is purely *orchestration* state: the heavy

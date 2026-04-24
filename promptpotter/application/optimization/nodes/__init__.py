@@ -1,1 +1,1 @@
-"""Per-round execution nodes — generate, score, critique, escalation."""
+"""Per-round execution nodes — generate, score, l1_critique, escalation."""

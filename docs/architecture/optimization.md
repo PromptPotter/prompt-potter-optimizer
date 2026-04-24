@@ -107,31 +107,31 @@ Critique-guided optimization with 3-layer escalation, inspired by [PromptWizard]
 ```
 INIT (pure prep, no backend calls): load prompt + dataset, compute cycle_hash, write campaigns/{cycle_id}/ artifacts
   ↓
-OPTIMIZE PHASE 0 (baseline on seeded t-test slice — same sample L1 uses) → bootstrap critique + sample thinking styles
+OPTIMIZE PHASE 0 (baseline on seeded t-test slice — same sample L1 uses) → bootstrap L1 critique + sample thinking styles
   ↓
-ROUND 0: Growth (bootstrap critique + styles) → Eval → critique₀ → winner vs current best
+ROUND 0: Growth (bootstrap L1 critique + styles) → Eval → l1_critique₀ → winner vs current best
   ↓
-ROUND 1: Growth (critique₀ + new styles)      → Eval → critique₁ → winner vs current best
+ROUND 1: Growth (l1_critique₀ + new styles)      → Eval → l1_critique₁ → winner vs current best
   ...
 ```
 
 Each round:
 
-1. **Growth** -- Generate N candidates. The meta-prompt includes **critique from previous round** + freshly sampled **thinking styles** as mutation guidance.
-2. **Eval + Critique** -- Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **critique** of remaining failures/successes, fed forward to next round.
+1. **Growth** -- Generate N candidates. The meta-prompt includes **L1 critique from previous round** + freshly sampled **thinking styles** as mutation guidance.
+2. **Eval + L1 Critique** -- Evaluate candidates via the backend, compare by composite score against the current best (previous winner). Generate a **L1 critique** of remaining failures/successes, fed forward to next round.
 3. **Loop control** -- Stall counter on no improvement. Patience exhausted: escalate L2 (`task_context`) then L3 (strategy). Pluggable `EscalationCheck`s can also trigger L2/L3/abort mid-round (e.g., `DegradationCheck` on target pipeline regression). Stop on `max_rounds` or perfect accuracy.
 
-**Breadth over depth.** Failure analysis surfaces 2-3 distinct improvement directions ranked by failure count, not a single dominant fix. L1 receives all directions and generates candidates across them rather than N variations on one theme — this is the primary guard against mode collapse. The single `priority_fix` in critique output is one signal among several; `failure_highlights` and `suggested_axes` carry the breadth.
+**Breadth over depth.** Failure analysis surfaces 2-3 distinct improvement directions ranked by failure count, not a single dominant fix. L1 receives all directions and generates candidates across them rather than N variations on one theme — this is the primary guard against mode collapse. The single `priority_fix` in L1 critique output is one signal among several; `failure_highlights` and `suggested_axes` carry the breadth.
 
-**Init is pure prep.** It loads the baseline prompt and dataset, computes the cycle hash, and writes the full `campaigns/{cycle_id}/` artifact set (`dashboard.json`, `control.json`, `events.jsonl`, `index.json`, logs). No backend calls, no scoring — so Ctrl+C during `init` is always safe. The baseline runs as **phase 0 of `optimize`** before round 1; the first critique is bootstrapped from its results. The baseline slice is `sample_dataset(dataset, sp_budget_ttest)` — the deterministic top-`sp_budget_ttest` prefix; datasets are already shuffled at creation, so no second RNG is needed. Byte-identical to L1's round-1 sampler at `runner.py:649` — so baseline results populate the per-query cache (`DatasetRunStore.load_reusable_results`, keyed by query text under matching `node_configs`) in exactly the shape L1 consumes: 100% cache hit on round 1. `sp_budget_ttest` is a campaign-level knob and stays off `pipeline_params`, keeping the `JobSearchPoint` hash target-layer-pure.
+**Init is pure prep.** It loads the baseline prompt and dataset, computes the cycle hash, and writes the full `campaigns/{cycle_id}/` artifact set (`dashboard.json`, `control.json`, `events.jsonl`, `index.json`, logs). No backend calls, no scoring — so Ctrl+C during `init` is always safe. The baseline runs as **phase 0 of `optimize`** before round 1; the first L1 critique is bootstrapped from its results. The baseline slice is `sample_dataset(dataset, sp_budget_ttest)` — the deterministic top-`sp_budget_ttest` prefix; datasets are already shuffled at creation, so no second RNG is needed. Byte-identical to L1's round-1 sampler at `runner.py:649` — so baseline results populate the per-query cache (`DatasetRunStore.load_reusable_results`, keyed by query text under matching `node_configs`) in exactly the shape L1 consumes: 100% cache hit on round 1. `sp_budget_ttest` is a campaign-level knob and stays off `pipeline_params`, keeping the `JobSearchPoint` hash target-layer-pure.
 
 ---
 
-## Critique Agent
+## L1 Critique Agent
 
-Failure analysis is **separated from candidate generation** (PromptWizard pattern). Critique is the **every-round intelligence hub** — it runs every round inside L1 Evaluate after backend evaluation and winner selection. It is the **sole reader** of raw eval results AND receives SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends) to frame its analysis. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation). L2 only fires on escalation — critique is the normal-flow intelligence bridge.
+Failure analysis is **separated from candidate generation** (PromptWizard pattern). L1 critique is the **every-round intelligence hub** — it runs every round inside L1 Evaluate after backend evaluation and winner selection. It is the **sole reader** of raw eval results AND receives SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends) to frame its analysis. Its output feeds forward to **L1 Generate** (next round) and **L2 Refine** (on escalation). L2 only fires on escalation — L1 critique is the normal-flow intelligence bridge.
 
-### Critique Output
+### L1 Critique Output
 
 Both positive and negative paths produce the same 6-field JSON:
 
@@ -146,13 +146,13 @@ Both positive and negative paths produce the same 6-field JSON:
 }
 ```
 
-Formatted by `format_critique_for_prompt()` (emits only actionable fields: summary, priority_fix, suggested_axes, failure_highlights — positive/negative_critique stays internal). Injected into:
-- **L1 Generate** as `critique_text` — only when no `l2_directive` (mutual exclusion)
-- **L2 Refine** as `critique_text` in intelligence sections (always, so L2 can build on it)
+Formatted by `format_l1_critique_for_prompt()` (emits only actionable fields: summary, priority_fix, suggested_axes, failure_highlights — positive/negative_critique stays internal). Injected into:
+- **L1 Generate** as `l1_critique_text` — only when no `l2_directive` (mutual exclusion)
+- **L2 Refine** as `l1_critique_text` in intelligence sections (always, so L2 can build on it)
 
 ### Stat-Rich Analysis
 
-`_assemble_critique_sections()` in `critique.py` builds the stat sections from section helper functions. The critique template (`critique.json`) wraps these sections with persona, task_intent, and answer_format. Critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
+`_assemble_l1_critique_sections()` in `l1_critique.py` builds the stat sections from section helper functions. The L1 critique template (`l1_critique.json`) wraps these sections with persona, task_intent, and answer_format. L1 critique is the **sole reader** of raw eval results — all other nodes receive its digested output (see [`information-flow.md`](information-flow.md) consumer matrix).
 
 Per-query diagnostics are derived from `PipelineSchema.nodes` via `NODE_TYPE_METRICS` (`pipeline_schema.py`) — a registry mapping node type → metrics → `pipeline_data_key`. Schema-driven, not hardcoded: when the pipeline gains a new node or node type, diagnostics extend automatically without code changes.
 
@@ -180,7 +180,7 @@ Computed inline from the health, rank, and evolution sections:
 
 ### Pipeline Data Flow
 
-Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`). Flow: `measure_sample()` projects `diagnostics` into `pipeline_data` → `_pipeline_health_section()` → anomaly flags in critique meta-prompt.
+Backend `/matches` returns `diagnostics.warnings[]` per query. A query is **"degraded"** if it has any non-empty warnings list. Each warning carries `{step, code, message}` — classified as **`{step}:{code}`** (e.g., `web_search:partial_scrape`). Flow: `measure_sample()` projects `diagnostics` into `pipeline_data` → `_pipeline_health_section()` → anomaly flags in L1 critique meta-prompt.
 
 ---
 
@@ -225,7 +225,7 @@ Degradation is no longer a round-level escalation — the round never aborts for
 
 | Field | Lifecycle | Purpose |
 |---|---|---|
-| `critique_text` | per-round, cleared on improvement | Critique node's narrative for next L1 |
+| `l1_critique_text` | per-round, cleared on improvement | L1 critique node's narrative for next L1 |
 | `thinking_styles` | per-round | 2-3 strategy hints sampled into the meta-prompt |
 | `escalation_journal` | cross-round, append-only | History of degradation events with outcomes |
 | `warning_inventory` | cross-round | Per-query warning aggregation |
@@ -258,9 +258,9 @@ Both rails share the rule *"detect → trace on the candidate → surface on `ca
 
 Some L1-generated candidates are invalid before evaluation starts — the optimizer LLM hallucinated a value outside the user-declared allowed set. Canonical example: `pipeline_params_override.llm_only.model = "gpt-4o"` when the backend only has `openai/gpt-oss-120b` per `PipelineSchema.available_models`.
 
-`validate_overrides()` in `application/optimization/nodes/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `_score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `_select_round_winner`, and the round checkpoint persists the failure with the rest of the optimizer memory.
+`validate_overrides()` in `application/optimization/nodes/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `_score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `_select_round_winner`, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
-**L2 teaches L1.** L2 `refine_strategy` already reads critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces critique for next round's L1 via the normal directive/critique mutual exclusion. L1 next round follows the directive and heals itself.
+**L2 teaches L1.** L2 `refine_strategy` already reads L1 critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces L1 critique for next round's L1 via the normal directive/l1_critique mutual exclusion. L1 next round follows the directive and heals itself.
 
 Flow: `detect → attach to candidate memory → synthetic-0 → surface on candidate_scores → L2 directive → L1 next round heals`.
 
@@ -360,7 +360,7 @@ Reference: `web_search`. Default chain works for **any** target pipeline node th
 |------|------|-------|-----------|
 | **1** | Emit `diagnostics.warnings[]` with `{step, code, message}` | Backend | **Yes** |
 | **2** | Add routing strategy for `{step}:{code}` | `escalation.py` | No (defaults to L2) |
-| **3** | Add anomaly detector | `critique.py` | No |
+| **3** | Add anomaly detector | `l1_critique.py` | No |
 | **4** | Set `degradation_threshold` | campaign config | **Yes** (0 = disabled) |
 
 Example -- adding `entity_profiling` error detection:
@@ -369,7 +369,7 @@ Example -- adding `entity_profiling` error detection:
 {"step": "entity_profiling", "code": "schema_error", "message": "Failed to parse JSON"}
 ```
 
-That's it. `DegradationCheck` counts the warning, synthesises a `RuntimeFailure` on the offending candidate, and the round completes normally. L2 reads the failure next round and adjusts its own strategy (directive, task_context, optimizer_params) to steer L1 away from the failing config region. If the pattern persists across L2 rounds, L3 replans. Critique still shows `ANOMALY FLAGS` for the winner's warnings — but the round-level escalation path is gone for per-candidate runtime issues.
+That's it. `DegradationCheck` counts the warning, synthesises a `RuntimeFailure` on the offending candidate, and the round completes normally. L2 reads the failure next round and adjusts its own strategy (directive, task_context, optimizer_params) to steer L1 away from the failing config region. If the pattern persists across L2 rounds, L3 replans. L1 critique still shows `ANOMALY FLAGS` for the winner's warnings — but the round-level escalation path is gone for per-candidate runtime issues.
 
 ---
 
@@ -445,7 +445,7 @@ The feedback cycle emits `PhaseEvent` objects at phase boundaries via `on_phase`
 |-------|---------|
 | `init` | Cycle start |
 | `l1_generate` | Candidate generation |
-| `l1_evaluate` | Evaluation, winner selection & critique |
+| `l1_evaluate` | Evaluation, winner selection & L1 critique |
 | `refine_strategy` | L2 escalation |
 | `modify_plan` | L3 escalation |
 | `escalation` | `EscalationCheck` fires mid-eval |
@@ -470,10 +470,10 @@ campaign_config = {
         "max_rounds": 10,
         "hard_cap": 100,                       # absolute round limit (safety)
         "max_consecutive_errors": 3,           # abort eval after N backend errors
-        "enable_critique": True,               # critique-guided generation
-        "degradation_threshold": 0.4,          # 0 = disabled
-        "critique_degradation_threshold": 0.4, # critique anomaly flag threshold
-        "critique_near_miss_ratio": 0.3,       # GT-in-candidates ratio for near-miss flag
+        "enable_l1_critique": True,                    # L1 critique-guided generation
+        "degradation_threshold": 0.4,                  # 0 = disabled
+        "l1_critique_degradation_threshold": 0.4,      # L1 critique anomaly flag threshold
+        "l1_critique_near_miss_ratio": 0.3,            # GT-in-candidates ratio for near-miss flag
         "enable_l2": True,                     # refine task_context on L1 stall
         "l2_patience": 2,                      # None = unlimited during degradation
         "enable_l3": True,                     # modify plan on L2 stall
@@ -481,7 +481,7 @@ campaign_config = {
         "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],
         "plan": None,                          # override optimizer strategy (str)
         "context": None,                       # override domain task_context (str)
-        "critique": None,                      # override bootstrap critique (str)
+        "l1_critique": None,                   # override bootstrap L1 critique (str)
     },
     "eval_llm": { ... },
 }
@@ -492,7 +492,7 @@ campaign_config = {
 ## Troubleshooting
 
 - **Stalls at low accuracy** — Lower `improvement_threshold`, increase `n_variants`, or manually escalate to L2/L3.
-- **Generic critique** — Try a more capable `eval_llm.model`, or `enable_critique: False` for direct generation.
+- **Generic L1 critique** — Try a more capable `eval_llm.model`, or `enable_l1_critique: False` for direct generation.
 - **Low diversity** — Increase `creativity` or `n_variants`.
 - **Scan aborted early** — Circuit breaker. See [sensitivity-scan.md](../specs/archive/sensitivity-scan.md#circuit-breaker).
 
@@ -589,9 +589,9 @@ The replay-and-fork machinery treats decision *kinds* as opaque. It doesn't know
 
 | File | Role |
 |------|------|
-| `campaign/nodes/critique.py` | `CritiqueAgent`, `format_critique_for_prompt()`, pos/neg routing, stat computation |
+| `campaign/nodes/l1_critique.py` | `L1CritiqueAgent`, `format_l1_critique_for_prompt()`, pos/neg routing, stat computation |
 | `campaign/nodes/escalation.py` | `DegradationCheck`, `DEFAULT_STRATEGIES`, `classify_warnings` |
-| `campaign/runner.py` | Orchestration, escalation journal, critique threading |
+| `campaign/runner.py` | Orchestration, escalation journal, L1 critique threading |
 | `campaign/nodes/layer_transitions.py` | L2 (`task_context` + meta-settings), L3 (plan) |
 | `campaign/nodes/generate.py` | L1 generation (sole pipeline_params decider) |
 | `campaign/nodes/score.py` | L1 scoring, winner selection, composite score |

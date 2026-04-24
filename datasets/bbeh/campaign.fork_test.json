@@ -17,7 +17,7 @@
       "empty_output_threshold": 0.0,
       "enable_l2": false,
       "enable_l3": false,
-      "enable_critique": false
+      "enable_l1_critique": false
     },
     "optimizer_llm": {
       "model": "openai/gpt-oss-120b",

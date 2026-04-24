@@ -36,7 +36,7 @@ def _make_trial(
             "plan": plan,
             "optimizer_params": optimizer_params or {},
             "l2_directive": l2_directive,
-            "critique_text": "c",
+            "l1_critique_text": "c",
             "changes_description": changes_description,
         },
         "results": [],

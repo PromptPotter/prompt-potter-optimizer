@@ -315,7 +315,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
     listener.display = display
 
-    # Re-run baseline (fast — cached) to populate baseline_results for critique
+    # Re-run baseline (fast — cached) to populate baseline_results for L1 critique
     _baseline, dataset, campaign_rounds, _baseline_results = await prepare_scoring_context(
         session,
         train_data,

@@ -8,16 +8,16 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.nodes.critique import (
-    CritiqueAgent,
-    format_critique_for_prompt,
+from promptpotter.application.optimization.nodes.formatting import candidate_summaries
+from promptpotter.application.optimization.nodes.l1_critique import (
+    L1CritiqueAgent,
+    format_l1_critique_for_prompt,
     sample_thinking_styles,
 )
-from promptpotter.application.optimization.nodes.critique_payload import (
+from promptpotter.application.optimization.nodes.l1_critique_payload import (
     RoundSnapshot,
     update_query_tracker,
 )
-from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.application.scoring.metrics import compute_composite_score
@@ -26,7 +26,7 @@ from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.infrastructure.llm import client as _llm_client
 from promptpotter.infrastructure.tracing import observed_node
 from promptpotter.infrastructure.tracing.events import (
-    CritiqueWritten,
+    L1CritiqueWritten,
     PromptVersion,
     RoundEnd,
     RoundStart,
@@ -93,7 +93,7 @@ async def _generate_or_load_candidates(
         n_variants=_n_variants,
         creativity=_creativity,
         model=model or "(default)",
-        has_critique=bool(cycle.opt_sp.memory.critique_text),
+        has_l1_critique=bool(cycle.opt_sp.memory.l1_critique_text),
         pipeline_params=cycle.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
@@ -166,18 +166,18 @@ async def _generate_or_load_candidates(
     return candidates
 
 
-async def _run_critique(
+async def _run_l1_critique(
     scoring_result: L1ScoringResult,
     round_num: int,
     cycle: Cycle,
 ) -> str:
-    """Run critique analysis on evaluation results. Returns formatted critique text."""
+    """Run L1 critique analysis on evaluation results. Returns formatted critique text."""
     config = cycle.config
-    if not config.optimization.enable_critique or not scoring_result.winner_results:
+    if not config.optimization.enable_l1_critique or not scoring_result.winner_results:
         return ""
 
     crit_llm = _llm_client.get_llm_client()
-    agent = CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
+    agent = L1CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
 
     _CRITIQUE_SM_KEYS = frozenset(
         {
@@ -200,7 +200,7 @@ async def _run_critique(
         ),
     )
     result = await agent.run(cctx)
-    return format_critique_for_prompt(result)
+    return format_l1_critique_for_prompt(result)
 
 
 async def _score_and_select(
@@ -294,15 +294,15 @@ async def _score_and_select(
                     improved=scoring_result.improved,
                 )
 
-        scoring_result.critique_text = await _run_critique(scoring_result, round_num, cycle)
+        scoring_result.l1_critique_text = await _run_l1_critique(scoring_result, round_num, cycle)
         scoring_result.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed + round_num + 1)
-        if obs and scoring_result.critique_text:
-            with graceful("CritiqueWritten emit failed"):
+        if obs and scoring_result.l1_critique_text:
+            with graceful("L1CritiqueWritten emit failed"):
                 obs.emit_write_point(
-                    CritiqueWritten,
+                    L1CritiqueWritten,
                     campaign_id=session.obs_campaign_id,
                     round_num=round_num,
-                    critique_text=scoring_result.critique_text,
+                    l1_critique_text=scoring_result.l1_critique_text,
                 )
 
     emit_phase(
@@ -315,7 +315,7 @@ async def _score_and_select(
         winner_composite=scoring_result.winner_composite,
         improved=scoring_result.improved,
         candidate_scores=scoring_result.candidate_scores,
-        critique_text=scoring_result.critique_text,
+        l1_critique_text=scoring_result.l1_critique_text,
     )
 
     return scoring_result
@@ -357,7 +357,7 @@ async def execute_round(
         degradation_checks=degradation_checks,
     )
 
-    cycle.opt_sp.memory.critique_text = scoring_result.critique_text
+    cycle.opt_sp.memory.l1_critique_text = scoring_result.l1_critique_text
     cycle.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
 
     if scoring_result.winner_results and session.pipeline_schema:
@@ -430,7 +430,7 @@ async def execute_round(
                     candidate_scores=scoring_result.candidate_scores,
                     model=config.optimizer_llm.model or "",
                     n_variants=config.optimization.n_variants,
-                    optimizer_templates=["meta_scan_aware", "critique"],
+                    optimizer_templates=["meta_scan_aware", "l1_critique"],
                     evaluators=dict(scoring_result.winner_evaluators),
                 )
             )

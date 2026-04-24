@@ -1,38 +1,46 @@
 # Node Standard
 
-**Version:** 0.3.0
-**Date:** 2026-04-21
-**Status:** Describes what's in the tree. Anything aspirational lives under § Future work.
+**Version:** 0.5.0
+**Date:** 2026-04-24
+**Status:** Describes what's in the tree.
 
 ---
 
 ## Overview
 
-A **node** is one pipeline step — prompt assembly + execution + response parsing in one plug-and-play unit. Both pipeline backends (TermNorm's `entity_profiling`, `llm_ranking`, etc.) and PromptPotter's optimizer loop (`l1_generate`, `critique`, `l2_refine_strategy`, `l3_modify_plan`) are composed from nodes. They share the same three primitives and the same JSON declaration shape.
+The optimizer loop itself — `l1_generate`, `critique`, `l2_refine_strategy`, `l3_modify_plan` — is built from nodes. So is every backend pipeline step. Anyone can write a new node; a JSON declaration is all that's needed to register it.
 
-Every node has one signature: `async def run(ctx: Ctx) -> None`. Reads from ctx, writes to ctx. Self-contained — each node handles its own prompt assembly, LLM call, and parsing.
+Built-in nodes cover the common cases: fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. For pipelines that need database-backed candidate assignment, PromptPotter ships a basic assignment pipe. In practice, most pipelines reduce to one or more LLM nodes — an LLM is a universal approximator and handles the majority of pipeline tasks.
 
 ---
 
-## The three primitives
+## Node capabilities
 
-Everything builds on three shared primitives. There is no Python class hierarchy on top of them — `type:` and `node_role:` in the pipeline JSON (below) carry the taxonomy.
+Capabilities are opt-in. A deterministic node declares none of these; an LLM node in the optimizer loop may use all of them.
 
-| Primitive | Purpose | Lives in |
-|-----------|---------|----------|
-| `llm_call(client, messages, node, model, trace_meta, ...)` | Make one LLM call with config overrides + tracing. | `application/optimization/pipeline.py` |
-| `get_node_config(node_id)` | Look up a node's resolved config from `optimizer_pipeline.json` (cached). | `application/optimization/pipeline.py` |
-| `observed_node(name, node_type, obs=, ...)` | Context manager that opens a Langfuse observation + emits `NodeStart`/`NodeEnd` events. | `infrastructure/tracing/` |
+### All nodes
 
-All optimizer nodes call `llm_call()` — none of them talk to an LLM client directly. All nodes wrap their body in `observed_node()`.
+- **Exit-point declaration** — a node that produces candidates declares where its output lives. PromptPotter reads this to find the last active exit point, enabling step-sequence cache reuse and partial run replay. See [`overview.md`](overview.md).
+- **Escalation signals** — a node signals the orchestrator to eliminate a candidate or abort the round entirely, rather than failing silently.
 
-The `CritiqueAgent` class (`application/optimization/nodes/critique.py`) is the one multi-step node in-tree: it builds rich stat sections + calls the LLM + parses a 6-field dict. Its runtime surface is the same three primitives.
+### LLM nodes additionally
+
+- **Prompt exposure** — an LLM node exposes its prompt so PromptPotter can read, display, and optimize it. The prompt is broken into named fields (`system`, `few_shot`, `instruction`, `output_format`, `cot_directive`). See [`prompt-scheme.md`](prompt-scheme.md).
+- **Optimizer-discoverable parameters** — the node declares which parameters it accepts and their valid values. PromptPotter picks these up automatically as optimization axes — no hardcoding required on either side. This is what makes a node tunable by the AI without any PromptPotter code knowing the node's internals.
+- **Self-healing — Rail 1** — if the optimizer proposes a parameter value the node doesn't accept, the proposal is rejected before any run. The optimizer learns from this and won't propose it again. See [`optimization.md § Self-healing`](optimization.md).
+- **Self-healing — Rail 2** — if a candidate's configuration produces degraded results consistently, the failure is recorded against that configuration. The optimizer adjusts its strategy; if the pattern continues, a higher-level replanning step takes over. See [`optimization.md § Self-healing`](optimization.md).
+- **Warnings → optimizer context** — per-query warnings from the node accumulate and are fed to the optimizer as context, even when no hard failure has fired.
+- **Warnings → escalation counter** — sustained degradation increments a patience counter. When patience runs out, the orchestrator escalates to a higher layer or halts the round. See [`optimization.md § Escalation ladder`](optimization.md).
+- **Warnings → search-point attachment** — failures are pinned to the exact configuration that caused them, not to the round. Future proposals that resemble the failing config are penalized.
+- **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run; the remaining candidates continue normally.
+- **Abort** — a candidate can signal that the round should stop entirely.
+- **Fatal fast-path** — certain failure codes eliminate a candidate on the very first query, with no rate threshold.
 
 ---
 
 ## Pipeline declaration format
 
-Both backends and the optimizer loop declare their pipelines as JSON, consumed by `parse_pipeline_response()` (`application/pipeline_discovery.py`) which builds a `PipelineSchema`. The optimizer's pipeline lives at [`promptpotter/application/optimization/optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json); the backend's pipeline is fetched via `GET /pipeline`.
+Both backends and the optimizer loop declare their pipelines as JSON. The optimizer's pipeline lives at [`promptpotter/application/optimization/optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json); the backend's pipeline is fetched via `GET /pipeline`.
 
 ```json
 {
@@ -58,65 +66,16 @@ Both backends and the optimizer loop declare their pipelines as JSON, consumed b
 
 The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple pipeline sequences.
 
-### Node `type` — observability shape
-
-The `type` string tells the tracing layer what kind of Langfuse observation to emit (generation vs. span vs. tool). It does NOT correspond to a Python class. Values in use today:
-
-- `llm` — one LLM call, raw prompt → response
-- `llm/structured` — one LLM call with a prompt template + output schema (TermNorm's `entity_profiling`, `llm_ranking`)
-- `llm/meta` — one LLM call with multi-source prompt assembly (optimizer's `l1_generate`, `l2_refine_strategy`, `l3_modify_plan`)
-- `agent` — multi-step LLM loop (`CritiqueAgent`)
-- `web_search` — external HTTP service
-- `deterministic` — pure function (e.g. fuzzy matching)
-- `evaluation` — backend call + comparison (`l1_evaluate`)
-
-### Node `node_role` — pipeline function
-
-| Role | Purpose | Produces candidates? |
-|------|---------|---------------------|
-| `cache` | Short-circuit lookup (e.g., exact match cache) | No |
-| `candidate_source` | Generates or retrieves candidate matches | **Yes** |
-| `enricher` | Adds context without producing candidates (e.g., web search, profiling) | No |
-| `ranker` | Re-ranks/scores candidates from upstream sources | **Yes** |
-
-**Exit point convention.** Nodes with role `candidate_source` or `ranker` are valid pipeline exit points. They MUST declare an `observation_mappings` entry whose `pipeline_key` points to their candidate list output. The candidate list is an ordered array of `{"candidate": string, ...}` objects, best-first.
-
-PromptPotter auto-detects exit points from this metadata. When a pipeline terminates early (e.g., `llm_ranking` excluded), the system reads candidates from the last active exit point's declared output key. This enables:
-
-- **Step-sequence cache reuse**: A cached run with more nodes serves a request for fewer nodes by re-scoring from the appropriate exit point.
-- **Partial prior-run reuse**: Queries that short-circuited before the divergence between two searchpoints can be replayed from the earlier run's stored results (`DatasetRunStore.load_reusable_results`).
-
-**Example** — a multi-node pipeline's two exit points:
-
-```
-token_matching  (candidate_source) → "token_matched_candidates"
-llm_ranking     (ranker)           → "ranked_candidates"
-```
-
-Excluding `llm_ranking` makes `token_matching` the last exit point. Cached full-pipeline results are re-scored by reading `token_matched_candidates` instead of `ranked_candidates`.
-
 ---
 
 ## Reference
 
-- **Backend pipeline config:** `GET /pipeline` endpoint
-- **Optimizer pipeline config:** [`promptpotter/application/optimization/optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json)
-- **Observability:** [`observability.md`](../observability.md) — node tracing via `observed_node`
-
----
-
-## Future work
-
-The `type` strings are currently **observability shape strings**, not class names. If a future refactor extracts a shared node-type package (post-ConnectorProtocol), the taxonomy below may become an actual class hierarchy:
-
-```
-llm                  ← raw prompt → response
-├── llm/structured   ← + prompt template + output schema
-│   └── llm/meta     ← + multi-source assembly + context parsing
-└── agent            ← + multi-step loop
-web_search
-deterministic
-evaluation
-```
-
-Do not cite this hierarchy as an existing invariant. The string is the contract today; the hierarchy is a sketch.
+| Resource | What it covers |
+|----------|---------------|
+| [`optimization.md § Self-healing optimization`](optimization.md) | Rail 1 + Rail 2 mechanics in full |
+| [`optimization.md § Escalation ladder`](optimization.md) | Full elimination sequence — validation skip through campaign abort |
+| [`prompt-scheme.md`](prompt-scheme.md) | Prompt field decomposition, `PromptTemplate` |
+| [`observability.md`](../observability.md) | Node tracing and Langfuse integration |
+| [`overview.md`](overview.md) | Pipeline exit points, cache reuse |
+| [`optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json) | Live optimizer node declarations |
+| `GET /pipeline` | Backend self-description — source of the pipeline schema at runtime |

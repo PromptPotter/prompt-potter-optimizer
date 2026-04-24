@@ -45,7 +45,7 @@ Your backend's monolithic prompt gets decomposed into independent, optimizable f
 
 1. **Provide a labeled dataset** — input/output pairs (and any extra context)
 2. **Provide your `pipeline.json`** — your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file — nothing else is touched.
-3. **Optimize** — run the critique-guided feedback cycle. The optimization loop is self-contained: it measures the baseline, generates candidates, scores them, critiques failures, and iterates.
+3. **Optimize** — run the critique-guided feedback cycle. The optimization loop is self-contained: it measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
 
 The primary UI is a Jupyter notebook, backed by a FastAPI service designed to work with any LLM pipeline backend.
 
@@ -58,9 +58,9 @@ The primary UI is a Jupyter notebook, backed by a FastAPI service designed to wo
 
 ```
   ┌──────────────────────────────────────────────────────────┐
-  │  l1_generate ────► l1_evaluate (+ critique)              │
+  │  l1_generate ────► l1_evaluate (+ l1_critique)            │
   │       ▲                 │                                │
-  │       │  critique OR l2_directive                         │
+  │       │  l1_critique OR l2_directive                      │
   │       │  + thinking_styles                               │
   │       └──────── ◄───────┘                                │
   │                                                          │
@@ -72,7 +72,7 @@ The primary UI is a Jupyter notebook, backed by a FastAPI service designed to wo
 
 ### 🔄 The 3-layer loop
 
-A **critique-guided** feedback cycle: each round generates candidates, scores them against your dataset, and produces a structured **critique** of failures that feeds forward into the next round — alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). 3-layer escalation: **L1** generates prompt + parameter candidates every round, **L2** (context) adjusts when L1 stalls, **L3** (strategy) rarely changes. Five LLM call sites: `restructure`, `l1_generate`, `critique`, `l2_context`, `l3_plan`.
+A **critique-guided** feedback cycle: each round generates candidates, scores them against your dataset, and produces a structured **L1 critique** of failures that feeds forward into the next round — alongside sampled **thinking styles** as mutation guidance. This separates failure analysis from candidate generation (inspired by [PromptWizard](https://arxiv.org/abs/2405.18369)'s critique-and-refine pattern). 3-layer escalation: **L1** generates prompt + parameter candidates every round, **L2** (context) adjusts when L1 stalls, **L3** (strategy) rarely changes. Five LLM call sites: `restructure`, `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`.
 
 Confidence intervals and two-proportion significance tests are built into the candidate comparison. Non-parametric tests are planned.
 
@@ -118,8 +118,8 @@ round 3/10 · 5 candidates · sp_budget_ttest=40
                                                      → L2 directive next round
 
 winner: c1  (+12pp over baseline, p=0.003)
-critique: "Step-by-step improves multi-hop reasoning. Socratic overlaps
-           but adds no marginal gain. Persona drift hurt format compliance."
+L1 critique: "Step-by-step improves multi-hop reasoning. Socratic overlaps
+              but adds no marginal gain. Persona drift hurt format compliance."
 ```
 
 </details>

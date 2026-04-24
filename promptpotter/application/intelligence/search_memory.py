@@ -211,7 +211,7 @@ class SearchMemory:
         return self._axis_failure_group_deltas.get(axis, {})
 
     def _format_recent_attributions(self, limit: int = 5) -> str | None:
-        """Format recent positive flips (miss→hit) for injection into critique."""
+        """Format recent positive flips (miss→hit) for injection into L1 critique."""
         flips = self.sample_index.all_flips()
         positive = [f for f in flips if f["new_hit"] and not f["old_hit"]]
         if not positive:
@@ -317,7 +317,7 @@ class SearchMemory:
                 ctx[key] = value
 
         # Failure clusters — strategic layers see top-3 (with counts); L1 and
-        # critique see top-2 to keep the inbox tight, same pair all round.
+        # L1 critique see top-2 to keep the inbox tight, same pair all round.
         need_clusters = want is None or "failure_clusters" in want
         if need_clusters and include_clusters:
             c3 = self.sample_index.failure_clusters(3)

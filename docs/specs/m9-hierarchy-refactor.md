@@ -32,7 +32,7 @@ promptpotter/
 │
 ├── application/            # use cases / orchestration — no direct disk or network
 │   ├── campaign/           # lifecycle, runner, round_execution, setup
-│   ├── optimization/       # L1/L2/L3 pipeline, critique, escalation, layer_transitions
+│   ├── optimization/       # L1/L2/L3 pipeline, l1_critique, escalation, layer_transitions
 │   ├── search/             # search_memory (and dormant recon producers)
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │

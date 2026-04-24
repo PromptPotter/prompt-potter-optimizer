@@ -106,10 +106,10 @@ All optimizer prompts follow: JSON template (`promptpotter/application/optimizat
 
 The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt file under `promptpotter/application/optimization/prompts/` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
 
-Every L1/L2/critique/L3 template receives a single `inbox` hole holding
+Every L1/L2/l1_critique/L3 template receives a single `inbox` hole holding
 the intelligence block assembled by
-`inbox_registry.assemble_inbox()` (or, for critique, by its own
-`_assemble_critique_sections`). L3 keeps additional context holes for
+`inbox_registry.assemble_inbox()` (or, for l1_critique, by its own
+`_assemble_l1_critique_sections`). L3 keeps additional context holes for
 anchoring (current plan, L2 history, rendered prompt, pipeline
 snapshot). See
 [`information-flow.md`](information-flow.md) for the per-field table.
@@ -117,7 +117,7 @@ snapshot). See
 | Template file | Consumer | Compile variables |
 |---|---|---|
 | `meta_scan_aware.json` | `l1_generate()` — `nodes/generate.py` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `inbox` |
-| `critique.json` | `CritiqueAgent.run()` — `nodes/critique.py` | `inbox` |
+| `l1_critique.json` | `L1CritiqueAgent.run()` — `nodes/l1_critique.py` | `inbox` |
 | `l2_refine_strategy.json` | `refine_strategy()` — `nodes/layer_transitions.py` | `current_params`, `task_context_section`, `inbox` |
 | `l3_modify_plan.json` | `modify_plan()` — `nodes/layer_transitions.py` | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `inbox` |
 | `restructure.json` | `decompose_prompt_fields()` — `pipeline.py` | `consultation_instruction` |
@@ -195,7 +195,7 @@ Row schema:
 |---|---|---|
 | `query` | str | `f"{cycle_id}:round_{N}"` — identifies the transition |
 | `ground_truth` | str | `trial[N+1].prompt_fields.changes_description` (or label) |
-| `round_context` | dict | Serialized `OptSearchPoint` at round N + critique_text, l2_directive, optimizer_params, prev_accuracy |
+| `round_context` | dict | Serialized `OptSearchPoint` at round N + l1_critique_text, l2_directive, optimizer_params, prev_accuracy |
 | `score_delta` | float | `trial[N+1].accuracy - trial[N].accuracy` |
 | `prev_prompt` | str | `OptSearchPoint.render()` at round N |
 | `next_prompt` | str | `OptSearchPoint.render()` at round N+1 |
@@ -213,4 +213,4 @@ Usage: `load_dataset("potter_traces", store=..., backend_id=...)`. Natural scori
 - `promptpotter/domain/opt_search_point.py` — `PromptTemplate` + `OptSearchPoint` (render, derive, project)
 - `promptpotter/application/optimization/prompts/` — meta-prompt JSON templates
 
-For the `OptimizationMemory` submodel inventory (cross-round optimizer state — `critique_text`, `escalation_journal`, `validation_failures`, etc.) and the validation-failure mechanism, see [optimization.md](optimization.md) "OptimizationMemory state" and "Validation failures as SearchPoint properties".
+For the `OptimizationMemory` submodel inventory (cross-round optimizer state — `l1_critique_text`, `escalation_journal`, `validation_failures`, etc.) and the validation-failure mechanism, see [optimization.md](optimization.md) "OptimizationMemory state" and "Validation failures as SearchPoint properties".

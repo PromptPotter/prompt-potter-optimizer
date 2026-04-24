@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.l1_critique_payload import extract_warning_types
 from promptpotter.application.optimization.nodes.layer_transitions import (
     L2RefineStrategy,
     L3ModifyPlan,

@@ -79,8 +79,8 @@ def _print_init_enter(d: dict, state: _CycleDisplayState) -> None:
     print(_dbox_line(f"Min detectable {YELLOW}\u00b1{mde:.1%}{RESET} (\u03b1=0.05, 80% power)"))
     print(_dbox_line(f"Model          {model}"))
     print(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    critique = "enabled" if opt.enable_critique else "disabled"
-    print(_dbox_line(f"Critique       {critique}"))
+    critique = "enabled" if opt.enable_l1_critique else "disabled"
+    print(_dbox_line(f"L1 Critique    {critique}"))
     print(_dbox_bottom())
 
 
@@ -105,20 +105,20 @@ def _print_init_exit(d: dict, state: _CycleDisplayState) -> None:
         f"  {GREEN}✓{RESET} Initialized  baseline={cycle.current_accuracy:.1%}  "
         f"cycle={cycle_id}  samples={samples}  obs={obs}"
     )
-    crit = cycle.opt_sp.memory.critique_text
+    crit = cycle.opt_sp.memory.l1_critique_text
     if crit:
         preview = crit.replace("\n", " ").strip()
         if len(preview) > 80:
             preview = preview[:77] + "..."
-        print(f"    {CYAN}Bootstrap critique:{RESET} {preview}")
+        print(f"    {CYAN}Bootstrap L1 critique:{RESET} {preview}")
     resumed = session.resumed_from_round
     if resumed > 0:
         state_parts = []
-        critique_chars = len(cycle.opt_sp.memory.critique_text)
+        critique_chars = len(cycle.opt_sp.memory.l1_critique_text)
         task_context_keys = len(cycle.opt_sp.task_context)
         l2_round = cycle.escalation.l2.round
         if critique_chars:
-            state_parts.append(f"critique={critique_chars} chars")
+            state_parts.append(f"l1_critique={critique_chars} chars")
         if task_context_keys:
             state_parts.append(f"task_context={task_context_keys} keys")
         if l2_round:
@@ -139,7 +139,7 @@ def _print_l1_generate_enter(d: dict, state: _CycleDisplayState) -> None:
     n = d.get("n_variants", 0)
     model = d.get("model") or "(default)"
     creativity = d.get("creativity", 0.7)
-    crit = "YES" if d.get("has_critique") else "NO"
+    crit = "YES" if d.get("has_l1_critique") else "NO"
 
     new_flat = _flatten_sp_summary(
         d.get("pipeline_params"),
@@ -264,10 +264,10 @@ def _print_l1_score_exit(d: dict, state: _CycleDisplayState) -> None:
     else:
         print(f"  {YELLOW}{BOLD}\u26a0 NO IMPROVEMENT{RESET}  best candidate {w_acc:.1%}{comp_tag}")
 
-    crit = d.get("critique_text", "")
+    crit = d.get("l1_critique_text", "")
     if crit:
         crit_text = crit.replace("\n", " ").strip()
-        print(f"  {CYAN}Critique:{RESET} {crit_text}")
+        print(f"  {CYAN}L1 Critique:{RESET} {crit_text}")
 
 
 def _print_escalation_enter(d: dict, state: _CycleDisplayState) -> None:

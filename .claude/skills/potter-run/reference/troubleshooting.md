@@ -33,7 +33,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 This is the primary diagnostic tool. It's a structured markdown log with sections per phase:
 
 - **Init section**: baseline accuracy, active pipeline, dataset count
-- **Round sections**: per-round accuracy, winner config, critique summary, L2/L3 escalation notes
+- **Round sections**: per-round accuracy, winner config, L1 critique summary, L2/L3 escalation notes
 - **Completion section**: final accuracy, stop reason, total rounds
 
 Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts.

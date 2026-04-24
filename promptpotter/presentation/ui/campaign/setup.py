@@ -124,7 +124,7 @@ def dev_reload() -> None:
         "promptpotter.application.campaign.config",
         "promptpotter.application.optimization.nodes.escalation",
         "promptpotter.application.optimization.nodes.layer_transitions",
-        "promptpotter.application.optimization.nodes.critique",
+        "promptpotter.application.optimization.nodes.l1_critique",
         "promptpotter.application.optimization.nodes.round_execution",
         "promptpotter.application.campaign.runner",
         "promptpotter.infrastructure.store.dataset_run_store",

@@ -169,7 +169,7 @@ def _print_preflight_sections(
 
     # Step 3: Context assembly
     print(f"  {CYAN}3. CONTEXT ASSEMBLY{RESET}")
-    print("     LLM generates from failures + critique + SearchMemory")
+    print("     LLM generates from failures + L1 critique + SearchMemory")
 
     # Step 4: LLM candidate generation
     print(f"  {CYAN}4. LLM CANDIDATE GENERATION{RESET}")

@@ -126,12 +126,12 @@ class RoundWinnerChosen:
 
 
 @dataclass(frozen=True, slots=True)
-class CritiqueWritten:
-    """Critique text produced after scoring (inline in ``_score_and_select``)."""
+class L1CritiqueWritten:
+    """L1 critique text produced after scoring (inline in ``_score_and_select``)."""
 
     campaign_id: str
     round_num: int
-    critique_text: str
+    l1_critique_text: str
 
 
 @dataclass(frozen=True, slots=True)
@@ -215,7 +215,7 @@ OptimizationEvent = Union[
     CandidateCreated,
     CandidateScored,
     RoundWinnerChosen,
-    CritiqueWritten,
+    L1CritiqueWritten,
     LayerApplied,
 ]
 

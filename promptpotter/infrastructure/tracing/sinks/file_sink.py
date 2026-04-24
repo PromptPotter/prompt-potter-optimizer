@@ -19,10 +19,10 @@ from promptpotter.infrastructure.tracing.events import (
     CampaignStart,
     CandidateCreated,
     CandidateScored,
-    CritiqueWritten,
     DatasetRegistered,
     DatasetRun,
     Event,
+    L1CritiqueWritten,
     LayerApplied,
     NodeEnd,
     NodeStart,
@@ -206,7 +206,7 @@ class FileSink(EventSink):
         CandidateCreated: "_on_write_point",
         CandidateScored: "_on_write_point",
         RoundWinnerChosen: "_on_write_point",
-        CritiqueWritten: "_on_write_point",
+        L1CritiqueWritten: "_on_write_point",
         LayerApplied: "_on_layer_applied",
     }
 
@@ -219,7 +219,7 @@ class FileSink(EventSink):
             "round_winner_chosen",
             ("winner_candidate_id", "winner_accuracy", "improved"),
         ),
-        CritiqueWritten: ("critique_written", ("critique_text",)),
+        L1CritiqueWritten: ("l1_critique_written", ("l1_critique_text",)),
     }
 
     def _on_write_point(self, event: Any) -> None:

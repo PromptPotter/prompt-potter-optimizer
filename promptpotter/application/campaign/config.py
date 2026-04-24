@@ -87,10 +87,10 @@ class OptimizationConfig(BaseModel):
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
 
-    # Critique
-    enable_critique: bool = Field(True)
-    critique_degradation_threshold: float = Field(0.4)
-    critique_near_miss_ratio: float = Field(0.3)
+    # L1 Critique
+    enable_l1_critique: bool = Field(True)
+    l1_critique_degradation_threshold: float = Field(0.4)
+    l1_critique_near_miss_ratio: float = Field(0.3)
 
     # Degradation / escalation
     degradation_threshold: float = Field(0.4)

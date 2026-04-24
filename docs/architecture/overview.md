@@ -23,7 +23,7 @@ Maturity order (features land left → right): Notebook > CLI > FastAPI > webapp
 
 ## Core Loop
 
-One core feature — the critique-guided optimization loop in `application/optimization/`.
+One core feature — the L1-critique-guided optimization loop in `application/optimization/`.
 
 ```
   CORE  (application/optimization/)
@@ -33,7 +33,7 @@ One core feature — the critique-guided optimization loop in `application/optim
   │ 5 LLMs:                      │
   │  restructure  (one-time)     │
   │  l1_generate  (every round)  │
-  │  critique     (every round)  │
+  │  l1_critique  (every round)  │
   │  l2_context   (on stall)     │
   │  l3_plan      (rare)         │
   └──────────────┬───────────────┘
@@ -111,7 +111,7 @@ Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prio
 
 ## Where to Read Next
 
-- [optimization.md](optimization.md) — L1/L2/L3 loop, critique, escalation
+- [optimization.md](optimization.md) — L1/L2/L3 loop, l1_critique, escalation
 - [prompt-scheme.md](prompt-scheme.md) — 8-field decomposition, variant library
 - [information-flow.md](information-flow.md) — prompt injection map
 - [node-standard.md](node-standard.md) — node types, `llm_call()` primitive

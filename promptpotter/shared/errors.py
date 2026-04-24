@@ -81,7 +81,7 @@ class RequestTooLargeError(RuntimeError):
             f"Reduce the L1 meta-prompt (biggest levers first):\n"
             f"  - CampaignConfig.optimization.max_failures: 15 -> 5\n"
             f"  - CampaignConfig.optimization.n_variants: 5 -> 3\n"
-            f"  - CampaignConfig.optimization.enable_critique: false for early rounds\n"
+            f"  - CampaignConfig.optimization.enable_l1_critique: false for early rounds\n"
             f"  - shorten datasets/<name>/task_description.md\n"
             f"Or upgrade your provider tier."
         )

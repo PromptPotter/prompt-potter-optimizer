@@ -43,7 +43,7 @@ class TokenUsage:
     """Per-call LLM token record.
 
     Attributes:
-        node: Logical node name (optimizer: ``"l1_generate"``, ``"critique"``,
+        node: Logical node name (optimizer: ``"l1_generate"``, ``"l1_critique"``,
             …; backend: ``"entity_profiling"``, ``"llm_ranking"``, …).
         kind: ``"optimizer"`` for meta-prompt calls, ``"backend"`` for
             in-pipeline LLM calls. Sinks use this to threshold separately.

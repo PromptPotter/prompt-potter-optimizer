@@ -3,7 +3,7 @@
 SearchMemory is a materialized view over all historical evaluation data,
 persisted at `{tenant_id}/library/search_memory.json`. It is refreshed
 incrementally before each optimization round and provides read-only
-intelligence to L1 generate, L2 refine, and the critique agent.[^impl]
+intelligence to L1 generate, L2 refine, and the L1 critique agent.[^impl]
 
 This document describes what data is collected, how it flows into LLM
 prompts, and where the gaps are.
@@ -95,12 +95,12 @@ Callers (selected):
 
 The result is a `dict[str, str]` rendered through `format_search_memory_block()` for a
 consistent "HISTORICAL INTELLIGENCE" block shape.[^blockfmt] The
-critique agent additionally receives `round_history` — per-round
+L1 critique agent additionally receives `round_history` — per-round
 accuracy / composite / pipeline_params / degraded-count dicts built
 inline in `round_execution.py`.[^crit]
 
 [^blockfmt]: `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
-[^crit]: `promptpotter/application/optimization/nodes/critique_payload.py` — the critique agent's `round_history` payload is built from `state.rounds`; the same field name on `opt_sp.memory.round_history` (persisted summaries) is a distinct, narrower record.
+[^crit]: `promptpotter/application/optimization/nodes/l1_critique_payload.py` — the L1 critique agent's `round_history` payload is built from `state.rounds`; the same field name on `opt_sp.memory.round_history` (persisted summaries) is a distinct, narrower record.
 
 ## 3. Three Tiers of Intelligence
 
@@ -109,10 +109,10 @@ L1 focuses on generating diverse candidates. Everything else is one of three tie
 | Tier | Handled by | Fires when | What | Example |
 |------|-----------|------------|------|---------|
 | **Tier 1 — Deterministic** | Code (statistics) | Every round | Per-query triage without LLM reasoning | Zero-signal sample filtering (§ 5) |
-| **Tier 2 — Every-round critique hub** | Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
+| **Tier 2 — Every-round L1 critique hub** | L1 Critique (LLM) | Every round | Frame this-round analysis with historical context | Tractability profiles, axis exhaustion, value trends |
 | **Tier 3 — Strategic** | L2 Refine + L3 Plan (LLM) | Escalation only | Meta-reasoning about why optimization is stuck | Round trajectory, candidate comparison, failure group × axis |
 
-L1 continues to receive: critique text, scan context, failure analysis
+L1 continues to receive: L1 critique text, scan context, failure analysis
 patterns, and SearchMemory summaries (failure clusters, top axes, dead
 queries). These are sufficient for candidate generation. L3 receives
 the aggregate SearchMemory picture (axis rankings, bottleneck
@@ -222,11 +222,11 @@ Meta-reasoning injected into L2 Refine only:
 
 - **Failure group × axis** — `_parameter_failure_correlation()`: cross-tabulates failure clusters with per-axis deltas. Producer runs after scan via `failure_group_sensitivity()`.
 
-Note — round trajectory and per-candidate comparison used to be surfaced to L2 directly via the inbox registry. That was a residual skip connection: critique already distills both (`_round_evolution_section`, `## THIS ROUND / MISSED OPPORTUNITIES`) and re-injecting the raw forms into L2 duplicated signal `critique_text` already carries. L2 now reads those through `critique_text` only.
+Note — round trajectory and per-candidate comparison used to be surfaced to L2 directly via the inbox registry. That was a residual skip connection: L1 critique already distills both (`_round_evolution_section`, `## THIS ROUND / MISSED OPPORTUNITIES`) and re-injecting the raw forms into L2 duplicated signal `l1_critique_text` already carries. L2 now reads those through `l1_critique_text` only.
 
 ## 6. Status
 
-All core items implemented: failure streak triage, round trajectory (via critique), failure group × axis, candidate comparison (via critique), critique tractability/exhaustion/trends, L3 intelligence.
+All core items implemented: failure streak triage, round trajectory (via L1 critique), failure group × axis, candidate comparison (via L1 critique), L1 critique tractability/exhaustion/trends, L3 intelligence.
 
 ## 7. Future Work
 

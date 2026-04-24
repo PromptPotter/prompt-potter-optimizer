@@ -56,7 +56,7 @@ def test_no_warn_when_optimizer_under_threshold(caplog, monkeypatch):
     with caplog.at_level(logging.WARNING, logger="promptpotter.infrastructure.llm.token_usage"):
         emit_token_usage(
             TokenUsage(
-                node="critique",
+                node="l1_critique",
                 kind="optimizer",
                 input_tokens=500,
                 output_tokens=50,

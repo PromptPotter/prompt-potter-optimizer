@@ -32,7 +32,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## M7: Optimizer-as-Pipeline -- Complete
 
-5-node optimizer pipeline (l1_generate, l1_evaluate, critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: [`archive/m7-optimizer-pipeline.md`](archive/m7-optimizer-pipeline.md)
+5-node optimizer pipeline (l1_generate, l1_evaluate, l1_critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: [`archive/m7-optimizer-pipeline.md`](archive/m7-optimizer-pipeline.md)
 
 ---
 
@@ -44,7 +44,7 @@ Three-layer I/O architecture (persistence / display / control). `CampaignPersist
 
 ## M8: Campaign Intelligence -- Complete
 
-Made campaigns smarter and faster through accumulated data. Four pillars: (1) per-node intermediate caching — prompt variants skip redundant upstream computation (~60% speedup), (2) adaptive sensitivity scan with statistical pruning (Wilson CI overlap, minimum detectable effect), (3) SearchMemory — cross-campaign materialized view over dataset_runs (parameter impact, query patterns, failure modes), (4) three-tier intelligence architecture feeding L1/L2/L3/critique/scan advisor with accumulated analysis. All 17 waves complete.
+Made campaigns smarter and faster through accumulated data. Four pillars: (1) per-node intermediate caching — prompt variants skip redundant upstream computation (~60% speedup), (2) adaptive sensitivity scan with statistical pruning (Wilson CI overlap, minimum detectable effect), (3) SearchMemory — cross-campaign materialized view over dataset_runs (parameter impact, query patterns, failure modes), (4) three-tier intelligence architecture feeding L1/L2/L3/l1_critique/scan advisor with accumulated analysis. All 17 waves complete.
 
 Architecture: [`../architecture/search-memory-intelligence.md`](../architecture/search-memory-intelligence.md), [`../architecture/optimization.md`](../architecture/optimization.md). Original spec preserved in git history.
 
@@ -56,7 +56,7 @@ M9 is foundation work. Four parallel tracks build the scaffolding that M10 and M
 
 ### Track 1: Stable Optimizer Configuration
 
-Systematically evaluate and tune the optimizer's own meta-prompts (L1 generate, critique, L2 refine, L3 replan). Define second-order success metrics (rounds to convergence, final accuracy, escalation frequency, candidate diversity, optimizer cost). Run meta-prompt variants on small-sample campaigns and document final configs with rationale. Generic prompts — adapt via `task_context` injection, not task-specific sets.
+Systematically evaluate and tune the optimizer's own meta-prompts (L1 generate, L1 critique, L2 refine, L3 replan). Define second-order success metrics (rounds to convergence, final accuracy, escalation frequency, candidate diversity, optimizer cost). Run meta-prompt variants on small-sample campaigns and document final configs with rationale. Generic prompts — adapt via `task_context` injection, not task-specific sets.
 
 Spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md)
 
@@ -75,7 +75,7 @@ promptpotter/
 │
 ├── application/            # use cases / orchestration — no direct disk or network
 │   ├── campaign/           # lifecycle, runner, round_execution, setup
-│   ├── optimization/       # L1/L2/L3 pipeline, critique, escalation, layer_transitions
+│   ├── optimization/       # L1/L2/L3 pipeline, l1_critique, escalation, layer_transitions
 │   ├── search/             # search_memory (and dormant recon producers)
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │
@@ -129,7 +129,7 @@ Full spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffold
 
 First publication slice. **Primary benchmark: BBEH** (Big-Bench Extra Hard, 23 diverse reasoning tasks). GSM8K and AIME are effectively saturated at `gpt-oss-120b` and are deprioritized; they may still appear as secondary numbers if headroom is found. HotPotQA runs second as a multi-hop QA data point — pending a saturation check, it may also be deprioritized. Head-to-head infrastructure for BBEH already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) with CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks against the same model and split.
 
-Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
+Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, l1_critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
 
 **Entry criteria:** M9 exit gate passed.
 

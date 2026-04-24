@@ -1,12 +1,12 @@
 """Shared round-result helpers: :class:`RoundSnapshot` + result extractors.
 
-``RoundSnapshot`` is the critique agent's input packet; the four free
+``RoundSnapshot`` is the L1 critique agent's input packet; the four free
 functions (``extract_warning_types``, ``update_query_tracker``,
 ``candidate_keys_from_schema``, ``get_candidates``) are consumed by escalation,
-round-execution, notebook display, and the critique agent itself.
+round-execution, notebook display, and the L1 critique agent itself.
 
-The prompt-section builders and ``assemble_critique_sections`` used to live
-here as private helpers for a single caller — they now live in ``critique.py``
+The prompt-section builders and ``_assemble_l1_critique_sections`` used to live
+here as private helpers for a single caller — they now live in ``l1_critique.py``
 where they belong.
 """
 
@@ -119,8 +119,8 @@ class RoundSnapshot:
             pipeline_params=(cycle.current_sp.pipeline_params if cycle.current_sp else None),
             candidate_keys=candidate_keys_from_schema(schema),
             pipeline_schema=schema,
-            degradation_threshold=config.optimization.critique_degradation_threshold,
-            near_miss_ratio=config.optimization.critique_near_miss_ratio,
+            degradation_threshold=config.optimization.l1_critique_degradation_threshold,
+            near_miss_ratio=config.optimization.l1_critique_near_miss_ratio,
             search_memory_digest=search_memory_digest,
             round_analysis=round_analysis,
             runtime_failures=[

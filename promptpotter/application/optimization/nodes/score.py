@@ -46,7 +46,7 @@ class L1ScoringResult(BaseModel):
     degraded_queries: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
     decisions: list[dict] = Field(default_factory=list)
-    critique_text: str = ""
+    l1_critique_text: str = ""
     thinking_styles: list[str] = Field(default_factory=list)
 
 

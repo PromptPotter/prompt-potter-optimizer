@@ -44,7 +44,7 @@ Preliminary probing showed GSM8K and AIME 2025 are effectively **saturated** at 
 
 ### Track 2: Ablation Studies
 
-**Problem:** The paper's differentiator story (three-layer escalation, SearchMemory, critique) needs quantitative backing.
+**Problem:** The paper's differentiator story (three-layer escalation, SearchMemory, L1 critique) needs quantitative backing.
 
 **Deliverables:**
 
@@ -63,14 +63,14 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 
 **Problem:** The v0 zero-signal filter (landed 2026-04-14, on by default) is deliberately rudimentary. It works — it catches always-hit/always-miss queries after `min_observations=5` and physically moves them into `datasets/{name}.json::excluded` — but it has two known weaknesses we should close before publication:
 
-1. **Hard exclusion vs. tiered storage.** Excluded queries are dropped outright. A better design would keep them in a *second tier* that's still queryable — e.g. for critique / L2 as negative-evidence context ("these 12 queries are trivially solved by every config, these 7 are intractable across everything we tried"), as degradation canaries (an always-hit query suddenly missing is a strong regression signal), or as a rehabilitation pool (probation → rotate back in after N rounds when the pipeline has materially changed). Right now the information is persisted but only read by `restore_dataset_items()` as a manual recovery path — nothing in the loop uses it as live signal.
+1. **Hard exclusion vs. tiered storage.** Excluded queries are dropped outright. A better design would keep them in a *second tier* that's still queryable — e.g. for L1 critique / L2 as negative-evidence context ("these 12 queries are trivially solved by every config, these 7 are intractable across everything we tried"), as degradation canaries (an always-hit query suddenly missing is a strong regression signal), or as a rehabilitation pool (probation → rotate back in after N rounds when the pipeline has materially changed). Right now the information is persisted but only read by `restore_dataset_items()` as a manual recovery path — nothing in the loop uses it as live signal.
 
 2. **No shrink-below-budget guard.** The filter will happily prune the active dataset below `sp_budget_ttest`, leaving fewer samples than the scoring loop expects. At some point it's better to *keep* a zero-signal sample than to run on an under-sized eval set. The right threshold isn't obvious — strict (`len(items) >= sp_budget_ttest`), soft (`>= 2 * sp_budget_ttest` so Wilcoxon elimination has margin), or *never shrink past the last confirmed informative set*. Needs empirical grounding from the BBEH runs.
 
 **Deliverables:**
 
-1. **Tiered storage design.** Replace the binary `items` / `excluded` split with tiers: `items` (active), `probation` (recently excluded, eligible for re-admission after N rounds or on pipeline change), `cold` (archived, read-only, surfaced to critique/L2 as context). Define promotion/demotion rules.
-2. **Exposure to L2/critique.** Thread the cold tier into the SearchMemory digest as a dedicated signal ("zero-signal inventory: 12 trivial, 7 intractable") so the LLM tiers can reason about dataset shape rather than just per-query outcomes.
+1. **Tiered storage design.** Replace the binary `items` / `excluded` split with tiers: `items` (active), `probation` (recently excluded, eligible for re-admission after N rounds or on pipeline change), `cold` (archived, read-only, surfaced to L1 critique/L2 as context). Define promotion/demotion rules.
+2. **Exposure to L2/L1 critique.** Thread the cold tier into the SearchMemory digest as a dedicated signal ("zero-signal inventory: 12 trivial, 7 intractable") so the LLM tiers can reason about dataset shape rather than just per-query outcomes.
 3. **Shrink guard.** Add a hard floor tied to `sp_budget_ttest`. Decide strict vs soft empirically on BBEH — log how often the guard fires, whether it blocks the filter during long runs, and whether campaigns that hit the guard underperform.
 4. **Degradation-canary role for always-hit.** Re-examine the symmetric treatment. Always-hit queries have value as regression signals; exclusion may be the wrong action even when they're zero-signal for *candidate ranking*. Possibly split the two branches: always-miss → excluded outright, always-hit → demoted to probation + used as canary.
 5. **Ablation row.** Add a "zero-signal filter on vs off" row to the Track 2 ablation table on BBEH. Confirms the feature actually earns its place before it lands in the paper.
