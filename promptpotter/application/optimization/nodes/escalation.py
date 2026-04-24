@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.l1_critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.l1.critique_payload import extract_warning_types
 from promptpotter.application.optimization.nodes.layer_transitions import (
     L2RefineStrategy,
     L3ModifyPlan,
@@ -445,7 +445,7 @@ async def escalate_l2(
 ) -> StopReason | None:
     """L1→L2 (and optional L2→L3) escalation; from_degradation resets counters instead of stopping."""
     from promptpotter.application.campaign.decisions import record_decision
-    from promptpotter.application.optimization.nodes.round_execution import PauseForReviewError
+    from promptpotter.application.optimization.nodes.l1 import PauseForReviewError
     from promptpotter.application.optimization.phases import StopReason
 
     opt = config.optimization

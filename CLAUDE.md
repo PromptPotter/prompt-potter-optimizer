@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What This Is
 
-PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a critique-guided 3-layer loop (L1 generate + score → l1_critique → L2 refine → L3 replan). Five LLM call sites in the core: `restructure` (one-time), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
+PromptPotter finds better prompts automatically. Give it a dataset + an LLM pipeline endpoint — it tries prompt and parameter variations, measures accuracy, and iterates through a 3-node loop: **L1** (generate candidates → score → critique results), **L2** (refine on escalation), **L3** (replan when L2 stalls). Four LLM nodes: `restructure` (one-time), `l1` (`l1_generate` + `l1_critique` sub-phases), `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
 **Note — `application/recon/` is a preserved template, not dead code.** The sensitivity-scan / recon pass is kept as a working-shape reference for anyone who wants to revive it later. It is dormant by design: no CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it. **Do not remove it** — the structure itself is the spec. To revive, re-wire the seams; otherwise ignore.
 

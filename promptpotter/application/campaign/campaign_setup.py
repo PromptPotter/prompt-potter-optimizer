@@ -518,7 +518,7 @@ async def init_optimization_loop(
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
-    from promptpotter.application.optimization.nodes.l1_critique import sample_thinking_styles
+    from promptpotter.application.optimization.nodes.l1.critique import sample_thinking_styles
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.infrastructure.tracing import ObservabilityBridge
     from promptpotter.shared.scoring import compile_round_scorer

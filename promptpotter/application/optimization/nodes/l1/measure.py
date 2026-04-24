@@ -55,7 +55,7 @@ def parse_candidates(
     schema: PipelineSchema | None,
 ) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
     """Normalize raw candidates → OptSearchPoints + merged pp; attaches validation failures."""
-    from promptpotter.application.optimization.nodes.generate import validate_overrides
+    from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
 
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []

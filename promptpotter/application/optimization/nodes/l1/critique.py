@@ -1,9 +1,9 @@
-"""L1 Critique agent — LLM analysis of a round's results.
+"""L1 critique phase — LLM analysis of a round's results.
 
-The agent consumes a :class:`RoundSnapshot` (in ``l1_critique_payload``), assembles
-a stat-rich prompt from the snapshot, calls the LLM, and returns the 6-field
-critique dict consumed by L1/L2. All section builders are private to this
-module — they have no other callers.
+Runs inside the L1 round after scoring+winner selection. Consumes a
+:class:`RoundSnapshot` (in ``critique_payload``), assembles a stat-rich prompt,
+calls the LLM, and returns the 6-field critique dict. Output feeds the next L1
+generate phase (via inbox) and L2 refine (on escalation).
 """
 
 from __future__ import annotations
@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.intelligence import load_variant_library
 from promptpotter.application.optimization.nodes.formatting import format_search_memory_block
-from promptpotter.application.optimization.nodes.l1_critique_payload import (
+from promptpotter.application.optimization.nodes.l1.critique_payload import (
     RoundSnapshot,
     get_candidates,
 )

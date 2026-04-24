@@ -1,4 +1,4 @@
-"""Round execution — generate, evaluate, select winner, update state."""
+"""L1 round execution — generate → score+select → critique → persist to memory."""
 
 from __future__ import annotations
 
@@ -9,12 +9,12 @@ from typing import TYPE_CHECKING
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
-from promptpotter.application.optimization.nodes.l1_critique import (
+from promptpotter.application.optimization.nodes.l1.critique import (
     L1CritiqueAgent,
     format_l1_critique_for_prompt,
     sample_thinking_styles,
 )
-from promptpotter.application.optimization.nodes.l1_critique_payload import (
+from promptpotter.application.optimization.nodes.l1.critique_payload import (
     RoundSnapshot,
     update_query_tracker,
 )
@@ -37,7 +37,7 @@ from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.nodes.escalation import DegradationCheck
-    from promptpotter.application.optimization.nodes.score import L1ScoringResult
+    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -124,7 +124,7 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from promptpotter.application.optimization.nodes.generate import l1_generate
+    from promptpotter.application.optimization.nodes.l1.generate import l1_generate
 
     client = _llm_client.get_llm_client()
     async with observed_node(
@@ -171,7 +171,7 @@ async def _run_l1_critique(
     round_num: int,
     cycle: Cycle,
 ) -> str:
-    """Run L1 critique analysis on evaluation results. Returns formatted critique text."""
+    """Run L1 critique phase on evaluation results. Returns formatted critique text."""
     config = cycle.config
     if not config.optimization.enable_l1_critique or not scoring_result.winner_results:
         return ""
@@ -212,8 +212,8 @@ async def _score_and_select(
     obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1ScoringResult:
-    """Evaluate candidates, run critique, select winner."""
-    from promptpotter.application.optimization.nodes.score import l1_score
+    """Evaluate candidates and select winner."""
+    from promptpotter.application.optimization.nodes.l1.score import l1_score
 
     session = cycle.session
     config = cycle.config
@@ -294,17 +294,6 @@ async def _score_and_select(
                     improved=scoring_result.improved,
                 )
 
-        scoring_result.l1_critique_text = await _run_l1_critique(scoring_result, round_num, cycle)
-        scoring_result.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed + round_num + 1)
-        if obs and scoring_result.l1_critique_text:
-            with graceful("L1CritiqueWritten emit failed"):
-                obs.emit_write_point(
-                    L1CritiqueWritten,
-                    campaign_id=session.obs_campaign_id,
-                    round_num=round_num,
-                    l1_critique_text=scoring_result.l1_critique_text,
-                )
-
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -315,7 +304,6 @@ async def _score_and_select(
         winner_composite=scoring_result.winner_composite,
         improved=scoring_result.improved,
         candidate_scores=scoring_result.candidate_scores,
-        l1_critique_text=scoring_result.l1_critique_text,
     )
 
     return scoring_result
@@ -328,7 +316,7 @@ async def execute_round(
     callbacks: RunListener,
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> RoundResult:
-    """Execute one optimization round: generate → evaluate → select winner → obs log."""
+    """Execute one L1 round: generate → score+select → critique → persist to memory."""
     session = cycle.session
     config = cycle.config
     obs = session.obs
@@ -356,6 +344,19 @@ async def execute_round(
         obs=obs,
         degradation_checks=degradation_checks,
     )
+
+    scoring_result.l1_critique_text = await _run_l1_critique(scoring_result, round_num, cycle)
+    scoring_result.thinking_styles = sample_thinking_styles(
+        n=3, seed=config.optimization.seed + round_num + 1
+    )
+    if obs and scoring_result.l1_critique_text:
+        with graceful("L1CritiqueWritten emit failed"):
+            obs.emit_write_point(
+                L1CritiqueWritten,
+                campaign_id=session.obs_campaign_id,
+                round_num=round_num,
+                l1_critique_text=scoring_result.l1_critique_text,
+            )
 
     cycle.opt_sp.memory.l1_critique_text = scoring_result.l1_critique_text
     cycle.opt_sp.memory.thinking_styles = scoring_result.thinking_styles

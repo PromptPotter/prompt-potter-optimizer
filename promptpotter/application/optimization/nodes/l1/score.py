@@ -6,11 +6,11 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.application.optimization.nodes.candidate_measurement import (
+from promptpotter.application.optimization.nodes.l1.measure import (
     parse_candidates,
     score_candidates,
 )
-from promptpotter.application.optimization.nodes.winner_selection import select_round_winner
+from promptpotter.application.optimization.nodes.l1.winner import select_round_winner
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint

@@ -53,8 +53,8 @@ All consumers call one method with a chosen subset of intelligence keys. The cro
 
 | Consumer | Intelligence received |
 |----------|-----------------------|
-| **L1** | Failure clusters, dead queries, top parameter axes + best values |
-| **L1 Critique** | Discriminating queries, failure clusters, tractability profiles, exhausted axes, value trends, improvement attribution |
+| **L1 — generate phase** | Failure clusters, dead queries, top parameter axes + best values |
+| **L1 — critique phase** | Discriminating queries, failure clusters, tractability profiles, exhausted axes, value trends, improvement attribution |
 | **L2** | Axis rankings, bottleneck distribution, failure group × axis correlations, persistent failures, volatile queries |
 | **L3** | Axis rankings, bottleneck distribution, failure clusters, persistent failures |
 
@@ -68,14 +68,14 @@ accessors each key aggregates.
 
 | Key (frozenset member) | Public accessors | Private accessors | Consumed by |
 |------------------------|------------------|-------------------|-------------|
-| `failure_clusters` | `failure_clusters(3)` | — | L1, Critique (no counts), L3 via `include_clusters=True` |
-| `dead_queries` | `dead_queries(include_always_hit=False)` | — | L1 |
-| `top_axes`, `top_values` | `axis_rankings()[:3]`, `top_k_values(...)` | — | L1 |
-| `discriminating_queries` | — | `discriminating()` | Critique |
-| `tractability` | — | `persistent_failures(3)` | Critique |
-| `exhausted_axes` | — | `_exhausted_axes()` | Critique |
-| `value_trends` | — | `_axis_value_trend()` | Critique |
-| `improvement_attribution` | — | `_format_recent_attributions()` | Critique |
+| `failure_clusters` | `failure_clusters(3)` | — | L1 generate, L1 critique (no counts), L3 via `include_clusters=True` |
+| `dead_queries` | `dead_queries(include_always_hit=False)` | — | L1 generate |
+| `top_axes`, `top_values` | `axis_rankings()[:3]`, `top_k_values(...)` | — | L1 generate |
+| `discriminating_queries` | — | `discriminating()` | L1 critique |
+| `tractability` | — | `persistent_failures(3)` | L1 critique |
+| `exhausted_axes` | — | `_exhausted_axes()` | L1 critique |
+| `value_trends` | — | `_axis_value_trend()` | L1 critique |
+| `improvement_attribution` | — | `_format_recent_attributions()` | L1 critique |
 | `axis_rankings` | `axis_rankings()[:5]` | — | L2, L3 |
 | `bottleneck_distribution` | `bottleneck_distribution()` | — | L2, L3 |
 | `persistent_failures` | — | `persistent_failures(3)` | L2, L3 |
@@ -83,19 +83,19 @@ accessors each key aggregates.
 | `volatile_queries` | — | `flips(limit=50)` (via `include_correlations=True`) | L2 |
 
 Callers (selected):
-- L1 — `digest(frozenset({"failure_clusters", "dead_queries", "top_axes", "top_values"}))`
-- Critique — `digest(frozenset({"discriminating_queries", "failure_clusters", "tractability", "exhausted_axes", "value_trends", "improvement_attribution"}))`
+- L1 generate — `digest(frozenset({"failure_clusters", "dead_queries", "top_axes", "top_values"}))`
+- L1 critique — `digest(frozenset({"discriminating_queries", "failure_clusters", "tractability", "exhausted_axes", "value_trends", "improvement_attribution"}))`
 - L2 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_group_insights", "persistent_failures", "volatile_queries"}), include_correlations=True)`
 - L3 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_clusters", "persistent_failures"}), include_clusters=True)`
 
 The result is a `dict[str, str]` rendered through `format_search_memory_block()` for a
 consistent "HISTORICAL INTELLIGENCE" block shape.[^blockfmt] The
-L1 critique agent additionally receives `round_history` — per-round
+L1 critique phase additionally receives `round_history` — per-round
 accuracy / composite / pipeline_params / degraded-count dicts built
 inline in `round_execution.py`.[^crit]
 
 [^blockfmt]: `promptpotter/application/optimization/nodes/formatting.py:format_search_memory_block()`.
-[^crit]: `promptpotter/application/optimization/nodes/l1_critique_payload.py` — the L1 critique agent's `round_history` payload is built from `state.rounds`; the same field name on `opt_sp.memory.round_history` (persisted summaries) is a distinct, narrower record.
+[^crit]: `promptpotter/application/optimization/nodes/l1_critique_payload.py` — the critique phase `round_history` payload is built from `state.rounds`; the same field name on `opt_sp.memory.round_history` (persisted summaries) is a distinct, narrower record.
 
 ## 3. Materialized View Mechanics
 

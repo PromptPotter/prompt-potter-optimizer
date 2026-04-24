@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Literal
 
 from promptpotter.application.optimization.nodes.escalation import FATAL_WARNINGS
-from promptpotter.application.optimization.nodes.l1_critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.l1.critique_payload import extract_warning_types
 from promptpotter.presentation.views.formatting import fmt_ci, fmt_pvalue
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.scoring import extract_display_answer
