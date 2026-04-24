@@ -110,6 +110,21 @@ async def _generate_or_load_candidates(
                 len(persisted),
                 round_num,
             )
+            # Synthesize an ``l1_generate`` block for the round recorder —
+            # ``pipeline.llm_call()`` never fires on this branch, so
+            # ``dashboard.json::current_round.nodes`` and
+            # ``rounds/round_NNNN.json`` would otherwise miss the node.
+            from promptpotter.application.optimization.pipeline import get_round_recorder
+
+            _rr = get_round_recorder()
+            if _rr is not None:
+                _rr.set_node(
+                    "l1_generate",
+                    {
+                        "input": {"source": "loaded_from_disk", "round": round_num},
+                        "output": {"candidates": candidate_summaries(persisted)},
+                    },
+                )
             emit_phase(
                 on_phase,
                 CampaignPhase.L1_GENERATE,

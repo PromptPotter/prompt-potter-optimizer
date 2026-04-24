@@ -1,10 +1,10 @@
-"""Dashboard / status renderers — consume ``dashboard.json`` scalar tiers.
+"""Dashboard / status renderers — consume the slim ``dashboard.json``.
 
-Tier layout mirrors ``infrastructure/persistence/session_emitter.py``
-``_make_initial_state`` — execution / timing / pipeline / quality /
-historical / config. Consumers pass the loaded dict unchanged; missing
-keys render as ``-`` so partial dashboards from early-cycle runs still
-display cleanly.
+``dashboard.json`` is the machine-readable live-state scalar file. The
+human-readable log (per-round narrative, per-query detail, optimizer
+node I/O) lives in ``log.md`` — that's the file to cat when you want to
+read what's happening. This renderer exists for ``show-status`` and
+shows only what ``dashboard.json`` carries.
 """
 
 from __future__ import annotations
@@ -19,82 +19,52 @@ def _get(d: dict, key: str, default: Any = "-") -> Any:
     return default if v is None or v == "" else v
 
 
-def _fmt_secs(v: Any) -> str:
-    try:
-        s = float(v)
-    except (TypeError, ValueError):
-        return "-"
-    if s < 60:
-        return f"{s:.1f}s"
-    m, sec = divmod(s, 60)
-    if m < 60:
-        return f"{int(m)}m{int(sec):02d}s"
-    h, m = divmod(int(m), 60)
-    return f"{h}h{m:02d}m"
-
-
 def render_dashboard(dashboard: dict) -> str:
-    """Pretty-print the scalar dashboard tiers from ``dashboard.json``."""
+    """Pretty-print the slim ``dashboard.json`` state."""
     if not dashboard:
         return "No dashboard data."
 
     d = dashboard
-    active = d.get("active_nodes") or []
-    excluded = d.get("excluded_nodes") or []
-    evals = d.get("round_evaluators") or {}
-
     lines = [
         "\nDASHBOARD",
         "=" * 70,
-        "  Execution",
-        f"    phase         : {_get(d, 'phase')}",
-        f"    workflow      : {_get(d, 'workflow')}",
-        f"    round         : {_get(d, 'round')} / {_get(d, 'max_rounds')}",
-        f"    layer         : {_get(d, 'layer')}",
-        f"    candidate     : {_get(d, 'candidate')}",
-        f"    patience      : {_get(d, 'patience')}",
-        f"    baseline      : {fmt_pct(d.get('baseline'))}",
-        f"    best          : {fmt_pct(d.get('best'))}  (round {_get(d, 'best_round')})",
-        f"    current       : {fmt_pct(d.get('current_acc'))}",
-        f"    cycle_id      : {_get(d, 'cycle_id')}",
+        f"  phase         : {_get(d, 'phase')}",
+        f"  round         : {_get(d, 'round')}",
+        f"  layer         : {_get(d, 'layer')}",
+        f"  candidate     : {_get(d, 'candidate')}",
+        f"  query         : {_get(d, 'query')}",
+        f"  patience      : {_get(d, 'patience')}",
+        f"  baseline      : {fmt_pct(d.get('baseline'))}",
+        f"  best          : {fmt_pct(d.get('best'))}",
+        f"  current       : {fmt_pct(d.get('current_acc'))}",
+        f"  cycle_id      : {_get(d, 'cycle_id')}",
     ]
-    if d.get("stop_reason"):
-        lines.append(f"    stop_reason   : {d['stop_reason']}")
-    if d.get("pause_point"):
-        lines.append(f"    pause_point   : {d['pause_point']}")
-
     lines += [
-        "  Timing",
-        f"    elapsed       : {_fmt_secs(d.get('elapsed_s'))}",
-        f"    round_elapsed : {_fmt_secs(d.get('round_elapsed_s'))}",
-        f"    avg_query     : {_fmt_secs(d.get('avg_query_time_s'))}",
-        f"    eta           : {_fmt_secs(d.get('eta_s'))}",
-        "  Pipeline",
-        f"    active        : {', '.join(active) if active else '-'}",
-        f"    excluded      : {', '.join(excluded) if excluded else '-'}",
-        f"    terminated_at : {_get(d, 'terminated_at')}",
-        f"    cache_hit_rate: {fmt_pct(d.get('cache_hit_rate'))}",
-        "  Quality",
-        f"    hit_rate      : {fmt_pct(d.get('hit_rate'))}",
-        f"    degraded      : {_get(d, 'degraded_count', 0)}",
-        f"    errors        : {_get(d, 'error_count', 0)}",
-        f"    improvement   : streak {_get(d, 'improvement_streak', 0)}",
-        "  Historical",
-        f"    rounds_done   : {_get(d, 'rounds_completed', 0)}",
-        f"    queries_total : {_get(d, 'total_queries_scored', 0)}",
-        f"    backend_calls : {_get(d, 'total_backend_calls', 0)}",
-        "  Config",
-        f"    model         : {_get(d, 'model')}",
-        f"    n_variants    : {_get(d, 'n_variants')}",
-        f"    sp_budget     : {_get(d, 'sp_budget_ttest')}",
+        f"  degraded      : {_get(d, 'degraded_count', 0)}",
+        f"  errors        : {_get(d, 'error_count', 0)}",
+        f"  queries_total : {_get(d, 'total_queries_scored', 0)}",
+        f"  backend_calls : {_get(d, 'total_backend_calls', 0)}",
+        f"  n_variants    : {_get(d, 'n_variants')}",
+        f"  sp_budget     : {_get(d, 'sp_budget_ttest')}",
     ]
-    if evals:
-        lines.append("  Evaluators (this round)")
-        for k, v in evals.items():
-            try:
-                lines.append(f"    {k:<14s}: {float(v):.4f}")
-            except (TypeError, ValueError):
-                lines.append(f"    {k:<14s}: {v}")
+    if d.get("query_in_flight"):
+        payload = d.get("current_query_payload") or ""
+        lines += [
+            "  in flight     :",
+            f"    since       : {_get(d, 'query_started_at')}",
+            f"    payload     : {payload}",
+        ]
+
+    hitl = d.get("hitl") or {}
+    lines += [
+        "",
+        "HITL",
+        "=" * 70,
+        f"  requested_state      : {_get(hitl, 'requested_state')}",
+        f"  pause_before_l2      : {bool(hitl.get('pause_before_l2_scoring'))}",
+        f"  pause_point          : {_get(hitl, 'pause_point')}",
+        f"  stop_reason          : {_get(hitl, 'stop_reason')}",
+    ]
     return "\n".join(lines)
 
 
@@ -103,16 +73,15 @@ def render_status(
     control: dict | None = None,
     result: dict | None = None,
 ) -> str:
-    """Human form for ``show-status`` — dashboard + control + last result."""
-    parts = [render_dashboard(dashboard)]
+    """Human form for ``show-status`` — dashboard + last result.
 
-    if control:
-        req = control.get("requested_state", "-")
-        pause = control.get("pause_before_scoring", False)
-        parts.append(
-            "\nCONTROL\n" + "=" * 70 + f"\n  requested_state     : {req}"
-            f"\n  pause_before_score  : {pause}"
-        )
+    HITL signals are nested inside ``dashboard["hitl"]`` so the separate
+    ``control`` arg is accepted but ignored (kept for caller shape). For
+    a narrative view of the run (round summary, critique, leaderboard,
+    optimizer node I/O, per-query detail), read ``log.md`` instead.
+    """
+    del control
+    parts = [render_dashboard(dashboard)]
 
     if result:
         parts.append(

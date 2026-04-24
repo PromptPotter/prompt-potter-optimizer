@@ -16,7 +16,7 @@ The fatal-warning suppression of `↩ …` is load-bearing: when a fatal warning
 
 ---
 
-Canonical visualization patterns that every PromptPotter entry point (notebook, CLI, API, webapp) should render identically. One pattern, learned once.
+Canonical visualization patterns that every PromptPotter entry point (notebook, CLI, `/potter-run` skill, API, webapp) should render identically. One pattern, learned once.
 
 ## The `⚠ … ↳` finding-and-addressed-by convention
 

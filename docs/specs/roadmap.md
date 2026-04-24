@@ -20,19 +20,19 @@
 | M11 | Multi-Connector, Competitor Comparison, Webapp Phase 2 | Future |
 | M11+ | Backlog | Future |
 
-Archived specs (M0-M7, governance docs, old M9) are in `archive/` or git history.
+Archived specs (M0-M7, governance docs, old M9) live in git history.
 
 ---
 
 ## M6: PipelineSchema + Pipeline Composability -- Complete
 
-PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_type-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M11. Spec: [`archive/m6-pipeline-composability.md`](archive/m6-pipeline-composability.md)
+PipelineSchema model, `GET /pipeline` self-describing config, schema derivation (6 chokepoints resolved), unified tracing, composite scoring, node_type-driven intermediate metrics, consolidated pipeline control surfaces. Wave 4 (workflow nodes) deferred to M11. Spec: see git history (pre-`c94aaa83`).
 
 ---
 
 ## M7: Optimizer-as-Pipeline -- Complete
 
-5-node optimizer pipeline (l1_generate, l1_evaluate, l1_critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: [`archive/m7-optimizer-pipeline.md`](archive/m7-optimizer-pipeline.md)
+5-node optimizer pipeline (l1_generate, l1_evaluate, l1_critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: see git history (pre-`c94aaa83`).
 
 ---
 
@@ -148,8 +148,6 @@ Generalize beyond the current single-backend setup. Abstract `BackendClient` int
 **Exit gate:** Second backend connector runs through the same optimization workflow. Competitor comparison published. Webapp can launch and monitor a campaign end-to-end.
 
 Full spec: [`m11-multi-connector.md`](m11-multi-connector.md)
-
-Preserved context: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md)
 
 ---
 

@@ -47,12 +47,10 @@ class SessionCtx:
     def task_context(self) -> dict | None:
         return self.state.get("task_context")
 
-    def save_phase(self, phase: str, *, log: str = "") -> None:
-        """Set phase, persist the whole state, optionally append log entry."""
+    def save_phase(self, phase: str) -> None:
+        """Set phase and persist the session state."""
         self.state["phase"] = phase
         self.store.sessions.update(self.session_id, dict(self.state))
-        if log and self.cycle_id:
-            self.store.campaigns.append_log(self.backend_id, self.cycle_id, log)
 
 
 def no_dataset_hint() -> str:

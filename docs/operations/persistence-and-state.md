@@ -41,7 +41,7 @@ Full tree:
       output.log / log.md
       trials/trial_NNNN.json           # resume source of truth
       candidates/round_NNNN.json       # pre-scoring checkpoint
-      rounds/round_NNN.json            # per-round LLM action audit
+      rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated) + HITL snapshot
       events.jsonl                     # observability mirror (not read for state)
       langfuse/                        # trace persistence
       prompts/{family}/{version}/      # rendered optimizer prompts
@@ -66,7 +66,8 @@ Prior evaluation results are replayed without calling the backend when a new pip
 | `dashboard.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
 | `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
-| `log.md` | End of each round | Structured markdown report |
+| `log.md` | Every optimization event | Sliding-window human dashboard: header (with HITL line) · CURRENT round · LAST COMPLETED round (critique + leaderboard + optimizer-node one-liners) · EARLIER (compact) · PER-QUERY DETAIL. Overwritten, not appended |
+| `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_refine_strategy/l3_modify_plan (when escalated); plus HITL snapshot |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
 | `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
 | `candidates/round_NNNN.json` | Each round's pre-scoring step | Generated candidate list checkpoint |
@@ -78,7 +79,14 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `workflow`, `phase`, `round`, `baseline`, `best`, `cycle_id`, `rounds_completed`, `total_queries_scored`, `total_backend_calls`, `cache_hit_rate`, `hit_rate`, `eta_s`, `candidate`, `query`. For per-query / per-candidate / per-round detail, read `output.log` or `rounds/round_NNN.json` directly.
+Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`, `hitl` (nested: `requested_state`, `pause_before_l2_scoring`, `pause_point`, `stop_reason`). For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
+
+### `rounds/round_NNNN.json`
+
+Consolidated per-round view — one JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type), `hitl` (snapshot at round end). Node types:
+
+- `l1_generate`, `l1_critique`, `l2_refine_strategy`, `l3_modify_plan` — LLM meta-prompt calls. Each has `input.template_fields` (the canonical prompt-string fields from `PROMPT_STRING_FIELDS` plus `few_shot_examples`), `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
+- `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid/validation_failures/is_winner/eliminated_at, and `output.candidates[*].samples` lists per-query outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
 
 ### `trials/trial_NNNN.json`
 
@@ -92,7 +100,7 @@ Bidirectional HITL control. `requested_state` ∈ `{"pause", "resume", "stop"}`.
 
 ## Entry-point emission boundary
 
-Entry points (CLI, notebook, API) MUST NOT write campaign artifacts directly. The sole writer is `CampaignPersistenceEmitter` in `promptpotter/infrastructure/persistence/session_emitter.py`. New artifacts are added to the `CAMPAIGN_ARTIFACTS` or `SESSION_ARTIFACTS` allowlists; `tests/test_artifact_parity.py` enforces both sets. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
+Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. The sole writer is `CampaignPersistenceEmitter` in `promptpotter/infrastructure/persistence/session_emitter.py`. New artifacts are added to the `CAMPAIGN_ARTIFACTS` or `SESSION_ARTIFACTS` allowlists; `tests/test_artifact_parity.py` enforces both sets. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
 
 ---
 

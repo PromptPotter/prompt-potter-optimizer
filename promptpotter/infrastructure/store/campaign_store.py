@@ -436,23 +436,8 @@ class CampaignStore(EntityStore):
                 round_num,
             )
 
-    # -- Campaign log ---------------------------------------------------------
-
-    def append_log(
-        self,
-        backend_id: str,
-        cycle_id: str,
-        section: str,
-    ) -> None:
-        """Append a markdown section to the campaign log (``log.md``)."""
-        path = self._campaign_dir(backend_id, cycle_id) / "log.md"
-        path.parent.mkdir(parents=True, exist_ok=True)
-        with open(path, "a", encoding="utf-8") as f:
-            f.write(section + "\n\n")
-
-    def load_log(self, backend_id: str, cycle_id: str) -> str:
-        """Load the full campaign log. Returns empty string if not found."""
-        path = self._campaign_dir(backend_id, cycle_id) / "log.md"
-        if not path.exists():
-            return ""
-        return path.read_text(encoding="utf-8")
+    # log.md is owned exclusively by CampaignPersistenceEmitter — see
+    # infrastructure/persistence/session_emitter.py and dashboard_md.py.
+    # No store-level append/load accessors: appending from multiple
+    # writers was the source of the duplicate-header bug the sliding-
+    # window dashboard replaced.

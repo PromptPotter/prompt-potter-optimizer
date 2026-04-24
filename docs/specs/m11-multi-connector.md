@@ -30,9 +30,7 @@ Three gaps M11 closes:
 3. **TermNorm connector** — existing `BackendClient` becomes `TermNormConnector` implementing the protocol. Zero behavior change.
 4. **Query parser registry** — `split_query_parts()` moves into a per-connector registry; TermNorm's parser is one entry.
 5. **Second connector** — a second backend (candidate: a minimal LLM-only connector or a new backend we stand up) demonstrates the abstraction runs end-to-end through a full optimization campaign.
-6. **Workflow nodes** — M6 Wave 4's deferred content: conditional routing, multi-step branching. Resurfaced from `archive/m6-pipeline-composability.md`.
 
-Preserved context: [`archive/m9-multi-connector.md`](archive/m9-multi-connector.md) — the original M9 spec for this work, repurposed here.
 
 ### Track 2: Competitor Comparison (Publication Closure)
 

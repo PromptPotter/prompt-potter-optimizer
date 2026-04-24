@@ -80,6 +80,8 @@ Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds
 
 `--from <round>` rewinds the active cycle to after round N and resumes in-place. Same `cycle_id`, not a new campaign. See [rewind-and-fork.md](rewind-and-fork.md) for full mechanics.
 
+While `optimize` runs, the live in-flight round's per-node I/O (l1_generate, l1_critique, l1_score with per-sample lines and stats) mirrors into `campaigns/{cycle_id}/dashboard.json::current_round`; each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Full shape in [persistence-and-state.md § `rounds/round_NNNN.json`](persistence-and-state.md#roundsround_nnnnjson).
+
 ---
 
 ## show-results

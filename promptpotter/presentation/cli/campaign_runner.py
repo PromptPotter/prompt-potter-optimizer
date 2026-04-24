@@ -154,20 +154,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     session.session_id = session_id
     session.cycle_id = cycle_id
 
-    excl_str = f"{', '.join(excluded)} excluded" if excluded else "none excluded"
-    session.store.campaigns.append_log(
-        backend_id,
-        cycle_id,
-        f"""# Campaign Report — {cycle_id}
-(session {session_id})
-
-## Setup
-- Backend: {backend_id} @ {args.backend_url}
-- Active steps: {", ".join(active)} ({excl_str})
-- Dataset: {len(dataset)} queries
-- Baseline: pending (runs in optimize phase 0)""",
-    )
-
     return CommandResult(
         data={
             "session_id": session_id,
@@ -297,6 +283,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         pause_before_scoring=pause_before_scoring,
         resumed_from_round=resume_from_round,
+        dataset_count=ctx.state.get("dataset_count"),
+        backend_id=ctx.backend_id,
     )
     control_reader = CampaignControlReader(session_dir).check
     listener = RunListener(emitter=emitter, control=control_reader)
@@ -443,15 +431,6 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
             campaign_id=ctx.state.get("experiment_id", ""),
         )
         human_parts.append("Winner saved.")
-
-    session.store.campaigns.append_log(
-        ctx.backend_id,
-        ctx.cycle_id,
-        f"""## Results
-- Rounds: {len(campaign_rounds)}
-- Best: {best.get("accuracy", 0):.1%} (round {best.get("round", "?")})
-- Saved: {args.save}""",
-    )
 
     return CommandResult(
         data={

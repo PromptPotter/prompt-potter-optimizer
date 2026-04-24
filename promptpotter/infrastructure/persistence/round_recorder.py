@@ -1,10 +1,15 @@
 """Per-round action trace recorder.
 
-Accumulates L1 / L2 / L3 actions within a single round and flushes them
-atomically to ``{session_dir}/rounds/round_NNN{_l2|_l3}.json``.  The round
-file is the source of truth for optimizer *layer* decisions that the
-``campaign_store`` trial files don't capture — reviewing a round means
-reading this file.
+Accumulates one JSON object per node that ran in a single round and
+flushes them atomically to ``campaigns/{cycle_id}/rounds/round_NNNN.json``.
+The round file is the authoritative per-round view — reviewing a round
+means reading this file.
+
+Node types captured from ``llm_call()``: ``l1_generate``, ``l1_critique``,
+``l2_refine_strategy``, ``l3_modify_plan``. The scoring phase
+(``l1_score``) is deposited by the session emitter via ``set_l1_score``
+just before ``flush()``. HITL snapshot is deposited by the emitter via
+``set_hitl``.
 """
 
 from __future__ import annotations
@@ -21,85 +26,158 @@ logger = logging.getLogger(__name__)
 __all__ = ["RoundRecorder"]
 
 
-# L2/L3 transition action types → filename suffix. Keep in sync with the
-# ``template_name`` on ``LayerTransition`` subclasses in
-# ``application/optimization/nodes/layer_transitions.py``.
-_LAYER_ACTION_SUFFIX: dict[str, str] = {
-    "l2_refine_strategy": "_l2",
-    "l3_modify_plan": "_l3",
-}
+def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
+    """Project an LLM action dict into the ``nodes[*]`` block shape.
+
+    Input: the dict passed to ``add_action`` from ``pipeline.llm_call()``.
+    Output: ``{input: {template_fields, variables}, output: {response},
+    usage, model, duration_s, timestamp}``. Falls back to ``messages``
+    when the caller didn't supply a ``template_fields`` decomposition.
+    """
+    input_block: dict[str, Any] = {}
+    template_fields = action.get("template_fields")
+    if template_fields is not None:
+        input_block["template_fields"] = template_fields
+    variables = action.get("variables")
+    if variables is not None:
+        input_block["variables"] = variables
+    template_name = action.get("template_name")
+    if template_name is not None:
+        input_block["template_name"] = template_name
+    # Fallback path: raw compiled messages when the call site didn't
+    # provide a template decomposition.
+    if not input_block and "messages" in action:
+        input_block["messages"] = action["messages"]
+
+    block: dict[str, Any] = {
+        "input": input_block,
+        "output": {"response": action.get("response")},
+    }
+    if "usage" in action:
+        block["usage"] = action["usage"]
+    if "model" in action:
+        block["model"] = action["model"]
+    if "config" in action:
+        block["config"] = action["config"]
+    if "duration_s" in action:
+        block["duration_s"] = action["duration_s"]
+    if "timestamp" in action:
+        block["timestamp"] = action["timestamp"]
+    return block
 
 
 class RoundRecorder:
-    """Accumulates actions within a round, writes ``round_NNN.json`` on flush."""
+    """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush."""
 
     def __init__(self, rounds_dir: Path) -> None:
         self.rounds_dir = rounds_dir
         self._current_round: int = 0
-        self._actions: list[dict[str, Any]] = []
+        self._nodes: dict[str, dict[str, Any]] = {}
+        self._l1_score: dict[str, Any] | None = None
+        self._hitl: dict[str, Any] | None = None
         self._started_at: str = ""
-        self._has_escalation = False
 
     def begin_round(self, round_num: int) -> None:
-        """Start recording a new round. Flushes any pending actions."""
-        if self._actions:
+        """Start recording a new round. Discards any pending node data."""
+        if self._nodes or self._l1_score or self._hitl:
             logger.warning(
-                "RoundRecorder: unflushed actions from round %d discarded",
+                "RoundRecorder: unflushed state from round %d discarded",
                 self._current_round,
             )
         self._current_round = round_num
-        self._actions = []
+        self._nodes = {}
+        self._l1_score = None
+        self._hitl = None
         self._started_at = datetime.now(UTC).isoformat()
-        self._has_escalation = False
 
     def add_action(self, action: dict[str, Any]) -> None:
-        """Append an action to the current round's trace."""
+        """Record an LLM node call into the current round.
+
+        Called by ``pipeline.llm_call()`` for every optimizer node. The
+        action dict is reshaped into the ``{input, output, usage, ...}``
+        block and keyed by node type (``l1_generate``, ``l1_critique``,
+        ``l2_refine_strategy``, ``l3_modify_plan``). Re-entry on the same
+        type overwrites — probes or retries naturally shadow the earlier
+        call, matching the user's mental model ("what was the last thing
+        node X did this round?").
+        """
         action.setdefault("timestamp", datetime.now(UTC).isoformat())
-        if action.get("type") in _LAYER_ACTION_SUFFIX:
-            self._has_escalation = True
-        self._actions.append(action)
+        node_type = str(action.get("type") or "llm_call")
+        self._nodes[node_type] = _action_to_node_block(action)
+
+    def set_node(self, name: str, block: dict[str, Any]) -> None:
+        """Deposit a prebuilt node block under ``name``.
+
+        Used when a node's output is available but didn't flow through
+        ``pipeline.llm_call()`` — e.g. ``l1_generate`` on a resumed round
+        where candidates were loaded from ``candidates/round_NNNN.json``
+        instead of generated by a fresh LLM call.
+        """
+        self._nodes[name] = block
+
+    def set_l1_score(self, block: dict[str, Any]) -> None:
+        """Deposit the scoring-phase block built by the session emitter."""
+        self._l1_score = block
+
+    def set_hitl(self, block: dict[str, Any]) -> None:
+        """Deposit the HITL snapshot built by the session emitter."""
+        self._hitl = block
+
+    def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
+        """Return a copy of the current in-progress ``nodes`` dict.
+
+        Used by the session emitter to mirror the LLM node I/O captured
+        so far into ``dashboard.json::current_round`` while the round is
+        still running. The scoring-phase block (``l1_score``) is *not*
+        included — the emitter owns that data and composes it separately.
+        """
+        return dict(self._nodes)
 
     def flush(self) -> Path | None:
-        """Write the round file and reset. Returns the written path.
+        """Write ``round_NNNN.json`` and reset. Returns the written path.
 
-        Round files are the LLM-call audit trail — every ``add_action`` from
-        ``pipeline.py``'s ``llm_call()`` during the round. Round *outcome*
-        (accuracy, hits, decision, opt_sp) lives in ``trials/trial_NNNN.json`` via
-        ``_checkpoint_round`` — this file is not the place for that data.
+        Node ordering in the output: ``l1_generate``, ``l1_critique``,
+        ``l1_score``, then any remaining (L2, L3, etc.) in insertion
+        order. Round *outcome* (accuracy, decision, opt_sp) still lives
+        in ``trials/trial_NNNN.json`` via ``_checkpoint_round`` — this
+        file is not the place for that data.
         """
-        if not self._actions:
+        if not self._nodes and self._l1_score is None and self._hitl is None:
             return None
 
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
 
-        suffix = ""
-        if self._has_escalation:
-            for a in self._actions:
-                mapped = _LAYER_ACTION_SUFFIX.get(a.get("type", ""))
-                if mapped:
-                    suffix = mapped
-                    break
+        nodes_ordered: dict[str, Any] = {}
+        # Prefer a predictable reading order: L1 generate/critique first,
+        # then scoring, then any escalation layers.
+        for preferred in ("l1_generate", "l1_critique"):
+            if preferred in self._nodes:
+                nodes_ordered[preferred] = self._nodes[preferred]
+        if self._l1_score is not None:
+            nodes_ordered["l1_score"] = self._l1_score
+        for key, block in self._nodes.items():
+            if key not in nodes_ordered:
+                nodes_ordered[key] = block
 
-        filename = f"round_{self._current_round:03d}{suffix}.json"
-        path = self.rounds_dir / filename
+        path = self.rounds_dir / f"round_{self._current_round:04d}.json"
+        payload: dict[str, Any] = {
+            "round": self._current_round,
+            "started_at": self._started_at,
+            "finished_at": datetime.now(UTC).isoformat(),
+            "nodes": nodes_ordered,
+        }
+        if self._hitl is not None:
+            payload["hitl"] = self._hitl
 
-        write_json(
-            path,
-            {
-                "round": self._current_round,
-                "started_at": self._started_at,
-                "finished_at": datetime.now(UTC).isoformat(),
-                "actions": self._actions,
-            },
-            default=str,
-        )
+        write_json(path, payload, default=str)
         logger.debug(
-            "Round %d recorded: %d actions → %s",
+            "Round %d recorded: %d nodes → %s",
             self._current_round,
-            len(self._actions),
-            filename,
+            len(nodes_ordered),
+            path.name,
         )
 
-        self._actions = []
-        self._has_escalation = False
+        self._nodes = {}
+        self._l1_score = None
+        self._hitl = None
         return path

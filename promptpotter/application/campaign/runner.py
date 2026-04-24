@@ -460,6 +460,8 @@ async def run_optimization(
             sp_budget_ttest=campaign_config.sp_budget_ttest,
             pause_before_scoring=opt.pause_before_scoring,
             resumed_from_round=session.resumed_from_round,
+            dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
+            backend_id=session.backend_id,
         )
     cb.emitter = emitter
 

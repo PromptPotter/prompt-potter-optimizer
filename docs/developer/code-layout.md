@@ -109,7 +109,8 @@ Features land left → right.
 
 1. **Notebook** — `notebooks/optimization_campaign.ipynb`; `presentation/ui/campaign/` is pure display.
 2. **CLI** — `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
-3. **FastAPI** — `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
-4. **Next.js webapp** — planned; zero code today.
+3. **Claude skill `/potter-run`** — `.claude/skills/potter-run/SKILL.md`. Operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
+4. **FastAPI** — `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
+5. **Next.js webapp** — planned; zero code today.
 
 Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`. Live-phase per-query output is notebook-only today.
