@@ -1,10 +1,16 @@
-# Methods: SearchMemory as Intelligence Feed
+# SearchMemory — Intelligence Feed
 
 SearchMemory is a materialized view over all historical evaluation data, persisted at `{tenant_id}/library/search_memory.json`. It is refreshed incrementally before each optimization round and provides read-only intelligence to L1 generate, L2 refine, and the L1 critique agent.
 
 This document describes what data is collected, how it flows into LLM prompts, and where the gaps are.
 
 **The key insight: every evaluation is saved.** When an optimization thread stops improving, its data isn't wasted — on a later run, the optimizer discovers all stored evaluations, knows the landscape better, and a fresh optimization starts from higher ground. This shared memory is independent of both the optimization loop and the scan.
+
+Each consumer (L1, L1 Critique, L2, L3) asks typed questions via `digest()` and receives a summary — never raw records. SearchMemory's job is to convert a growing archive of dataset runs into actionable intelligence that fits in a prompt.
+
+The materialized view is incremental: each refresh folds in only the new dataset runs since the last watermark, then persists the updated view. The cost of one refresh is proportional to new evaluations since the last refresh, not to total history.
+
+---
 
 ## 1. Data Model
 

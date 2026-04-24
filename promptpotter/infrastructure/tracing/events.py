@@ -16,7 +16,7 @@ Two families:
   Langfuse trace per query, linked to dataset items. Emitted by the backfill
   replayer reading ``dataset_runs/`` from disk.
 
-The audit table at ``docs/architecture/observability-audit.md`` documents
+The audit table at ``docs/planned/observability-refactor.md`` documents
 exactly which Langfuse SDK calls each event triggers.
 """
 

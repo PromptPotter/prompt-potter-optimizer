@@ -2,6 +2,11 @@
 
 PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization.
 
+Decomposing the prompt into 8 named fields (persona, task intent, instruction, etc.) makes each axis independently tunable: the optimizer can vary `thinking_style` without touching `answer_format`, measure which fields matter, and learn which are worth spending search budget on.
+
+The same decomposition applies recursively: the optimizer's own meta-prompts — the templates driving L1, L2, L3, and Critique — are themselves `PromptTemplate` instances with the same 8 fields. A future outer-loop PromptPotter can optimize the optimizer's prompts using the same machinery.
+
+
 ## Rendering Pipeline
 
 ```
@@ -58,6 +63,51 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
 
 Dynamic field mutation (L2-driven add/remove) is a future optimization direction — see [optimization.md § Dynamic Field Set](optimization.md#dynamic-field-set-design-vision).
+
+---
+
+## Two Prompt Stores
+
+PromptPotter keeps two independent prompt stores, each answering a different question.
+
+### 1. Per-dataset starting points — `datasets/{name}/prompts/*.json` (canonical)
+
+**The one true source for the initial pipeline configuration.** Each file is a full prompt template — the 6 canonical fields plus optional `few_shot_examples` and `plan`. The campaign config picks a variant name via `starting_prompt` (defaults to `"default"`).
+
+**Layout:**
+
+```
+datasets/{name}/prompts/
+  default.json              # single-node datasets (BBEH, GSM8K, AIME, HotPotQA)
+  {node_name}.json          # multi-node datasets (TermNorm: entity_profiling.json, llm_ranking.json)
+```
+
+**Resolution per node:** `{node_name}.json` wins when present; otherwise `default.json` is used. Missing both is a hard error at init time — author the canonical template first.
+
+Add alt starting points by dropping more files in the same directory (`zero_shot.json`, `cot_explicit.json`, etc.) and pointing `starting_prompt` at them.
+
+**Deprecated:** a monolithic `"prompt"` string inside `pipeline.json` or as a single atomic parameter axis. Both are flagged with deprecation warnings at load time. Replace with the 6 canonical fields and move the prompt text into `datasets/{name}/prompts/`.
+
+### 2. L1 crossover / recombination pool — `promptpotter/config/prompt_variants.json`
+
+**Not a starting-point store.** Task-agnostic material that L1 recombines from during optimization. Never read at init time as the source of the baseline prompt.
+
+**Index convention (provisional):**
+- **Index 0** — empty string (always present; lets the optimizer start from scratch)
+- **Index 1** — task-agnostic defaults
+- **Index 2+** — dataset-specific and PromptWizard variants from the original library
+
+| Field | Variant count | Source |
+|-------|--------------|--------|
+| `persona` | 6 | Hand-crafted role framings |
+| `task_intent` | ~5 | Task description variations |
+| `problem_description` | ~5 | Domain context variations |
+| `thinking_style` | 35+ | Research literature (CoT, ToT, etc.) |
+| `answer_format` | ~5 | Output structure variations |
+| `instruction` | — | Always LLM-generated |
+| `few_shot_examples` | — | Not in variant library |
+
+Prompt field axes are dropped automatically when the pipeline has no LLM node with a prompt template. In practice, prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.
 
 ---
 
@@ -119,48 +169,3 @@ Three transformations bridge optimizer state to the wire:
 | 3 | `run_match()` | `pipeline_params` dict → backend `node_config` wire payload |
 
 `to_job_search_point()` also carries `prompt_fields` (the decomposed dict) on the `JobSearchPoint` for variant derivation without round-tripping through `OptSearchPoint`.
-
----
-
-## Two Prompt Stores
-
-PromptPotter keeps two independent prompt stores, each answering a different question.
-
-### 1. Per-dataset starting points — `datasets/{name}/prompts/*.json` (canonical)
-
-**The one true source for the initial pipeline configuration.** Each file is a full prompt template — the 6 canonical fields plus optional `few_shot_examples` and `plan`. The campaign config picks a variant name via `starting_prompt` (defaults to `"default"`).
-
-**Layout:**
-
-```
-datasets/{name}/prompts/
-  default.json              # single-node datasets (BBEH, GSM8K, AIME, HotPotQA)
-  {node_name}.json          # multi-node datasets (TermNorm: entity_profiling.json, llm_ranking.json)
-```
-
-**Resolution per node:** `{node_name}.json` wins when present; otherwise `default.json` is used. Missing both is a hard error at init time — author the canonical template first.
-
-Add alt starting points by dropping more files in the same directory (`zero_shot.json`, `cot_explicit.json`, etc.) and pointing `starting_prompt` at them.
-
-**Deprecated:** a monolithic `"prompt"` string inside `pipeline.json` or as a single atomic parameter axis. Both are flagged with deprecation warnings at load time. Replace with the 6 canonical fields and move the prompt text into `datasets/{name}/prompts/`.
-
-### 2. L1 crossover / recombination pool — `promptpotter/config/prompt_variants.json`
-
-**Not a starting-point store.** Task-agnostic material that L1 recombines from during optimization. Never read at init time as the source of the baseline prompt.
-
-**Index convention (provisional):**
-- **Index 0** — empty string (always present; lets the optimizer start from scratch)
-- **Index 1** — task-agnostic defaults
-- **Index 2+** — dataset-specific and PromptWizard variants from the original library
-
-| Field | Variant count | Source |
-|-------|--------------|--------|
-| `persona` | 6 | Hand-crafted role framings |
-| `task_intent` | ~5 | Task description variations |
-| `problem_description` | ~5 | Domain context variations |
-| `thinking_style` | 35+ | Research literature (CoT, ToT, etc.) |
-| `answer_format` | ~5 | Output structure variations |
-| `instruction` | — | Always LLM-generated |
-| `few_shot_examples` | — | Not in variant library |
-
-Prompt field axes are dropped automatically when the pipeline has no LLM node with a prompt template. In practice, prompt fields are inactive when the only LLM node (e.g. `llm_ranking`) is excluded from the pipeline.

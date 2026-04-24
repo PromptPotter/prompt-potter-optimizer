@@ -1,6 +1,12 @@
 # Information Flow — Optimization Loop
 
-Every optimizer LLM prompt (L1, L2, L1 Critique, L3) receives an `{{inbox}}` block.
+Every optimizer LLM prompt (L1, L2, L1 Critique, L3) receives an `{{inbox}}` block — the single channel through which evaluation history, search memory, and cross-round signals enter a prompt.
+
+This doc owns the data-routing contract: which data enters which inbox, how long each piece of data lives, and which fields are mutually exclusive. [optimization.md](optimization.md) owns the execution sequence; this file owns the data.
+
+The key invariant: no prompt site summarizes its own data. All compression flows through the chain documented below — if a field isn't in these tables, it doesn't enter a prompt.
+
+---
 
 ## How to read
 

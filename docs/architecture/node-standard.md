@@ -38,34 +38,6 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 
 ---
 
-## Pipeline declaration format
-
-Both backends and the optimizer loop declare their pipelines as JSON. The optimizer's pipeline lives at [`promptpotter/application/optimization/optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json); the backend's pipeline is fetched via `GET /pipeline`.
-
-```json
-{
-  "name": "Pipeline Name",
-  "version": "v1.0",
-  "nodes": {
-    "node_name": {
-      "type": "llm | llm/structured | llm/meta | agent | deterministic | evaluation | web_search",
-      "node_role": "cache | candidate_source | enricher | ranker",
-      "config": { ... },
-      "optimizer": {
-        "observation_mappings": [
-          {"pipeline_key": "output_key_name", "output_field": "field_in_response"}
-        ]
-      }
-    }
-  },
-  "pipelines": {
-    "pipeline_name": ["node1", "node2", "node3"]
-  }
-}
-```
-
-The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple pipeline sequences.
-
 ## Wiring a New Node
 
 Reference: `web_search`. Default chain works for **any** target pipeline node that emits warnings.
@@ -84,6 +56,36 @@ Example — adding `entity_profiling` error detection:
 ```
 
 That's it. The degradation check counts the warning, synthesises a runtime failure on the offending candidate, and the round completes normally. L2 reads the failure next round and adjusts its own strategy to steer L1 away from the failing config region. If the pattern persists, L3 replans.
+
+---
+
+## Pipeline declaration format
+
+Both backends and the optimizer loop declare their pipelines as JSON. The optimizer's pipeline lives at [`promptpotter/application/optimization/optimizer_pipeline.json`](../../promptpotter/application/optimization/optimizer_pipeline.json); the backend's pipeline is fetched via `GET /pipeline`.
+
+```json
+{
+  "name": "Pipeline Name",
+  "version": "v1.0",
+  "nodes": {
+    "node_name": {
+      "type": "llm | llm/structured | llm/meta | agent | deterministic | evaluation | web_search",
+      "node_role": "cache | candidate_source | enricher | ranker",
+      "config": { },
+      "optimizer": {
+        "observation_mappings": [
+          {"pipeline_key": "output_key_name", "output_field": "field_in_response"}
+        ]
+      }
+    }
+  },
+  "pipelines": {
+    "pipeline_name": ["node1", "node2", "node3"]
+  }
+}
+```
+
+The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple pipeline sequences.
 
 ---
 

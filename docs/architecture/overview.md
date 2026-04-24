@@ -1,66 +1,23 @@
 # Architecture
 
-Orientation page for `docs/architecture/`. Everything deep links out — read this top-to-bottom in three minutes, then jump.
+Navigation hub for `docs/architecture/`. Read `introduction.md` and `how-a-campaign-runs.md` first if you're new — this page links out, it doesn't explain.
 
-## System Overview
+---
 
-Four entry points over a shared hexagonal core (`domain/` → `application/` → `infrastructure/` → `presentation/`):
+## Entry Points
 
-1. **Notebook** — `notebooks/optimization_campaign.ipynb` (primary, daily driver).
-2. **CLI** — `python -m promptpotter` (`init → [set-task] → optimize → show-results`).
-3. **FastAPI** — `promptpotter/main.py` mounts `/api/v1/{backends,campaigns}`.
-4. **Next.js webapp** — planned (M10 → M11), reads the file-directory view model.
+Four ways to drive a campaign, in maturity order (features land left → right):
 
-Layer responsibilities:
+1. **Notebook** — `notebooks/optimization_campaign.ipynb` — primary, daily driver.
+2. **CLI** — `python -m promptpotter` — `init → [set-task] → optimize → show-results`.
+3. **FastAPI** — `promptpotter/main.py` — currently read-only API.
+4. **Next.js webapp** — planned (M10/M11).
 
-- **`domain/`** — `JobSearchPoint`, `OptSearchPoint`, `PipelineSchema`, `ScoringEnv`. Pure, no I/O.
-- **`application/`** — `campaign/`, `optimization/` (the core loop), `intelligence/` (SearchMemory), `scoring/`, `datasets/`.
-- **`infrastructure/`** — `store/`, `backend/`, `llm/`, `tracing/`, `persistence/`.
-- **`presentation/`** — `cli/`, `api/`, `ui/`. Thin per-surface adapters.
-- Leaf: `shared/`, `config/`.
-
-Maturity order (features land left → right): Notebook > CLI > FastAPI > webapp. Don't invert.
-
-## Core Loop
-
-One core feature — the L1-critique-guided optimization loop in `application/optimization/`.
-
-```
-  CORE LOOP
-  ────────────────────────────────────────────
-  5 LLM call sites:
-    restructure    (one-time setup)
-    l1_generate    (every round)
-    l1_critique    (every round)
-    l2_context     (on stall)
-    l3_plan        (rare)
-                │
-                ▼
-    SearchMemory — cross-campaign intelligence
-    writes evaluations; reads aggregate history
-```
-
-## Two-Layer Tracing
-
-Every piece of state is traced at both layers, independently reconstructable from disk:
-
-- **Target layer** — `JobSearchPoint` → `score_search_point()` → `dataset_runs/` (content-addressed, shared).
-- **Optimizer layer** — `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint).
-
-## SearchPoint Hierarchy
-
-```
-SearchPoint (abstract)
-  ├── JobSearchPoint       — frozen target spec (pipeline_params)
-  └── PromptTemplate       — 8-field prompt decomposition
-        └── OptSearchPoint — + lineage, L2/L3, optimizer memory (mutable)
-```
-
-All scoring services share one contract: given `JobSearchPoint + PipelineSchema + dataset` → produce scores. Prompt scheme: [prompt-scheme.md](prompt-scheme.md).
+---
 
 ## Persistence
 
-Sessions and campaigns are separate concepts. A session is the operator workspace; a campaign is one optimization cycle inside it. Today the relation is 1:1; the layout is wired so a session can host several campaigns over time without reorg. The workspace-wide active cycle is recorded in `.promptpotter/active_session.json` (single source of truth).
+Sessions and campaigns are separate concepts. A session is the operator workspace; a campaign is one optimization cycle inside it. The active cycle is recorded in `.promptpotter/active_session.json` (single source of truth for all commands).
 
 ```
 .promptpotter/
@@ -89,12 +46,25 @@ Sessions and campaigns are separate concepts. A session is the operator workspac
       restructure_cache.json
 ```
 
-Prior evaluation results are automatically replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run.
+Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`.
 
-Reuse across runs is handled by `DatasetRunStore.load_reusable_results` — prior dataset run entries whose `node_configs` share a prefix with the current searchpoint are replayed without calling the backend.
+---
 
-`events.jsonl` is a **pure observability mirror** — nothing reads it for state reconstruction. Resume and the mid-cycle rewind are driven entirely by `trials/trial_NNNN.json`, which carries the full serialized optimizer state. See [optimization.md § Resuming mid-cycle](optimization.md#resuming-mid-cycle).
+## Where to Read Next
 
-## Self-optimization (meta-level)
+**New to PromptPotter:** [`../introduction.md`](../introduction.md) → [`../how-a-campaign-runs.md`](../how-a-campaign-runs.md) → [`optimization.md`](optimization.md)
 
-The optimizer's own prompts are themselves prompt templates — the 8-field decomposition applies recursively, which is what enables a future self-optimization mode. A trace dataset freezes archived campaign transitions into `{round_context → next_directive → score_delta}` rows that an outer-loop PromptPotter instance can score meta-prompt variants against. See [prompt-scheme.md § Optimizer Meta-Prompts](prompt-scheme.md#optimizer-meta-prompts) and [§ Potter Trace Dataset](prompt-scheme.md#potter-trace-dataset).
+**Extending the system:** [`node-standard.md`](node-standard.md) → [`information-flow.md`](information-flow.md) → [`prompt-scheme.md`](prompt-scheme.md)
+
+**Debugging a campaign:** [`../troubleshooting.md`](../troubleshooting.md) → [`optimization.md § Self-healing`](optimization.md) → [`search-memory-intelligence.md`](search-memory-intelligence.md)
+
+| Document | What it covers |
+|----------|---------------|
+| [`optimization.md`](optimization.md) | Full loop mechanics — L1/L2/L3, escalation, self-healing, elimination, resume |
+| [`scoring-policy.md`](scoring-policy.md) | Traces vs. scores, rescore-on-load, decision-replay, fork |
+| [`prompt-scheme.md`](prompt-scheme.md) | The 8-field prompt decomposition, two prompt stores, rendering pipeline |
+| [`information-flow.md`](information-flow.md) | What each optimizer layer reads and writes |
+| [`node-standard.md`](node-standard.md) | Node capabilities, wiring a new node, pipeline declaration format |
+| [`search-memory-intelligence.md`](search-memory-intelligence.md) | SearchMemory — historical intelligence across campaigns |
+| [`display-conventions.md`](display-conventions.md) | Per-query output format, annotation symbols |
+| [`../observability.md`](../observability.md) | Tracing, Langfuse integration |
