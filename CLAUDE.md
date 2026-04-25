@@ -66,7 +66,7 @@ Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `in
 
 ```
 promptpotter/
-├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, ScoringEnv — pure, no I/O
+├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema — pure, no I/O
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, l1_critique, llm_call, restructure
@@ -85,7 +85,7 @@ promptpotter/
 **Three-layer I/O architecture (INVARIANT):**
 - **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts go in `CAMPAIGN_ARTIFACTS` (per-cycle, in `campaigns/{cycle_id}/`) or `SESSION_ARTIFACTS` (per-session, in `sessions/{session_id}/`); `tests/test_artifact_parity.py` enforces both sets.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
-- **Control** (per-entry-point) — `FileControlSurface` (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
+- **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 
 **SearchPoint hierarchy** — `JobSearchPoint` (frozen target spec, pipeline_params) and `PromptTemplate` → `OptSearchPoint` (optimizer state + memory). All services: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state traced at both layers: `JobSearchPoint` → `dataset_runs/` (content-addressed, shared); `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Details in [`docs/developer/code-layout.md`](docs/developer/code-layout.md).
 
@@ -114,7 +114,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 
 ## Key Patterns
 
-- **Three-object boundary** (M9 Track 7): user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); session identity + infra + runtime-derived state live on `SessionEnv` (`session_id`, `cycle_id`, `project_root`, `pipeline_schema`, `pipeline_params`); transient loop infra lives on `LoopEnv`. Services take whichever two they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
+- **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/campaign/campaign_setup.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore, PlanStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.

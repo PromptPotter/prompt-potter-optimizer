@@ -362,8 +362,8 @@ def _optimizer_nodes_section(campaign_dir: Path, round_idx: int) -> list[str]:
     ``rounds/round_{NNNN:04d}.json``; empty when absent.
 
     The round file lists one entry per node that ran (``l1_generate``,
-    ``l1_critique``, ``l1_score``, plus ``l2_refine_strategy`` /
-    ``l3_modify_plan`` when escalated). This renderer is for humans —
+    ``l1_critique``, ``l1_score``, plus ``l2_context`` /
+    ``l3_plan`` when escalated). This renderer is for humans —
     the raw JSON is the authoritative view.
     """
     path = campaign_dir / "rounds" / f"round_{round_idx:04d}.json"
@@ -389,7 +389,7 @@ def _optimizer_nodes_section(campaign_dir: Path, round_idx: int) -> list[str]:
         in_t = int(usage.get("prompt_tokens") or 0)
         out_t = int(usage.get("completion_tokens") or 0)
         lines.append(f"  {name:<20} {dur:6.1f}s · in={in_t} out={out_t}")
-        if name in ("l2_refine_strategy", "l3_modify_plan"):
+        if name in ("l2_context", "l3_plan"):
             output = block.get("output") or {}
             snippet = _compact_response(output.get("response"))
             if snippet:

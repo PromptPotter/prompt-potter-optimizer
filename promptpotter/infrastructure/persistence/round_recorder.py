@@ -6,7 +6,7 @@ The round file is the authoritative per-round view — reviewing a round
 means reading this file.
 
 Node types captured from ``llm_call()``: ``l1_generate``, ``l1_critique``,
-``l2_refine_strategy``, ``l3_modify_plan``. The scoring phase
+``l2_context``, ``l3_plan``. The scoring phase
 (``l1_score``) is deposited by the session emitter via ``set_l1_score``
 just before ``flush()``. HITL snapshot is deposited by the emitter via
 ``set_hitl``.
@@ -96,7 +96,7 @@ class RoundRecorder:
         Called by ``pipeline.llm_call()`` for every optimizer node. The
         action dict is reshaped into the ``{input, output, usage, ...}``
         block and keyed by node type (``l1_generate``, ``l1_critique``,
-        ``l2_refine_strategy``, ``l3_modify_plan``). Re-entry on the same
+        ``l2_context``, ``l3_plan``). Re-entry on the same
         type overwrites — probes or retries naturally shadow the earlier
         call, matching the user's mental model ("what was the last thing
         node X did this round?").

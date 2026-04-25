@@ -434,7 +434,7 @@ async def execute_round(
                     candidate_scores=scoring_result.candidate_scores,
                     model=config.optimizer_llm.model or "",
                     n_variants=config.optimization.n_variants,
-                    optimizer_templates=["meta_scan_aware", "l1_critique"],
+                    optimizer_templates=["l1_generate", "l1_critique"],
                     evaluators=dict(scoring_result.winner_evaluators),
                 )
             )

@@ -98,8 +98,6 @@ async def _handle_escalation_signal(
             raise
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
-        except Exception:
-            logger.warning("L2 escalation failed", exc_info=True)
     elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
         raise StopLoop(StopReason.ABORT)
 

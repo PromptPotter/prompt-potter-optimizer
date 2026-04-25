@@ -154,7 +154,7 @@ class L2RefineStrategy(LayerTransition):
     """L2: tune ``optimizer_params`` + ``task_context`` + directive (one-round window)."""
 
     layer: ClassVar[Literal["L2", "L3"]] = "L2"
-    template_name: ClassVar[str] = "l2_refine_strategy"
+    template_name: ClassVar[str] = "l2_context"
     default_temperature: ClassVar[float] = 0.3
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
 
@@ -303,7 +303,7 @@ class L3ModifyPlan(LayerTransition):
     """L3: propose a new strategic plan + optional pipeline_params deltas."""
 
     layer: ClassVar[Literal["L2", "L3"]] = "L3"
-    template_name: ClassVar[str] = "l3_modify_plan"
+    template_name: ClassVar[str] = "l3_plan"
     default_temperature: ClassVar[float] = 0.5
     phase: ClassVar[CampaignPhase] = CampaignPhase.MODIFY_PLAN
 

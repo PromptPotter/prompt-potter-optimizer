@@ -148,7 +148,9 @@ def _handle_cache_hit(
     elim_check: Any,
 ) -> dict:
     """Full-run cache hit — register with elim_check and build replay report."""
-    elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id)
+    elim_check.register_completed(
+        [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+    )
     return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
 
 
@@ -172,7 +174,9 @@ def _handle_scored_candidate(
 
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
     if len(results) == len(dataset) and not aborted:
-        elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id)
+        elim_check.register_completed(
+            [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+        )
 
     new_rf: RuntimeFailure | None = None
     candidate_label = osp_c.lineage.changes_description or ""
@@ -334,7 +338,9 @@ async def score_candidates(
 
     for idx, osp_c in enumerate(osp_candidates):
         override = candidate_overrides[idx]
-        callbacks.on_candidate_started(idx, n_candidates, osp_c.lineage.changes_description or "", override)
+        callbacks.on_candidate_started(
+            idx, n_candidates, osp_c.lineage.changes_description or "", override
+        )
 
         # Path 1 — validation-skip synthetic-0.
         if osp_c.memory.validation_failures:

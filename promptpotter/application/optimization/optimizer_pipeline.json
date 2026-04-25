@@ -7,7 +7,7 @@
       "config": {
         "temperature": 0.7,
         "output_format": "json",
-        "prompt_family": "meta_scan_aware",
+        "prompt_family": "l1_generate",
         "context_sources": ["l1_critique", "task_context", "escalation_journal"],
         "response_parser": "candidate_list"
       }
@@ -39,22 +39,22 @@
         "positive_threshold": 0.7
       }
     },
-    "l2_refine_strategy": {
+    "l2_context": {
       "type": "llm/meta",
       "config": {
         "temperature": 0.3,
         "output_format": "json",
-        "prompt_family": "l2_refine_strategy",
+        "prompt_family": "l2_context",
         "context_sources": ["l1_critique", "task_context", "l2_directive"],
         "response_parser": "transition_result"
       }
     },
-    "l3_modify_plan": {
+    "l3_plan": {
       "type": "llm/meta",
       "config": {
         "temperature": 0.5,
         "output_format": "json",
-        "prompt_family": "l3_modify_plan",
+        "prompt_family": "l3_plan",
         "context_sources": ["l1_critique", "task_context", "plan", "escalation_journal"],
         "response_parser": "transition_result"
       }
@@ -70,7 +70,7 @@
   "pipelines": {
     "l1_round": ["l1_generate", "l1_score"],
     "l1_round_with_l1_critique": ["l1_generate", "l1_score", "l1_critique"],
-    "l2_escalation": ["l2_refine_strategy", "l1_generate", "l1_score", "l1_critique"],
-    "l3_escalation": ["l3_modify_plan", "l2_refine_strategy", "l1_generate", "l1_score", "l1_critique"]
+    "l2_escalation": ["l2_context", "l1_generate", "l1_score", "l1_critique"],
+    "l3_escalation": ["l3_plan", "l2_context", "l1_generate", "l1_score", "l1_critique"]
   }
 }

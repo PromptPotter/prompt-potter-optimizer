@@ -291,7 +291,7 @@ async def l1_generate(
     }
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     generated, meta_prompt = await run_optimizer_node(
-        template_name="meta_scan_aware",
+        template_name="l1_generate",
         compile_vars=_compile_vars,
         llm_client=llm_client,
         model=model,

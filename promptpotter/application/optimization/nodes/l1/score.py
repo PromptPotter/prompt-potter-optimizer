@@ -172,9 +172,7 @@ async def l1_score(
 
     w_idx = winner_entry["winner_idx"]
     winner_id = (
-        evaluated_candidates[w_idx].lineage.id
-        if w_idx is not None and evaluated_candidates
-        else ""
+        evaluated_candidates[w_idx].lineage.id if w_idx is not None and evaluated_candidates else ""
     )
     record_decision(
         decisions,
