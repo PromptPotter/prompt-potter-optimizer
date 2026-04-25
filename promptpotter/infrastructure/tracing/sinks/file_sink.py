@@ -21,7 +21,6 @@ from promptpotter.infrastructure.tracing.events import (
     CandidateScored,
     DatasetRegistered,
     DatasetRun,
-    Event,
     L1CritiqueWritten,
     LayerApplied,
     NodeEnd,
@@ -31,7 +30,6 @@ from promptpotter.infrastructure.tracing.events import (
     RoundStart,
     RoundWinnerChosen,
 )
-from promptpotter.infrastructure.tracing.sinks.base import EventSink
 
 logger = logging.getLogger(__name__)
 
@@ -46,17 +44,18 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat().replace("+00:00", "Z")
 
 
-class FileSink(EventSink):
-    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in)."""
+class FileSink:
+    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in).
+
+    The bridge calls ``on_<event_name>(event)`` directly per :data:`bridge._DISPATCH`.
+    Sink methods that aren't listed in the dispatch table are not reached.
+    """
 
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
-        from promptpotter.config.settings import settings
-
         self._tenant_root = Path(store_base_dir)
         self._tenant_id = self._tenant_root.name
         self._library_dir = self._tenant_root / "library"
         self._backend_id = backend_id
-        self._obs_enabled: bool = settings.OBS_ENABLED
         self._cycle_id: str | None = None
         self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
@@ -64,10 +63,6 @@ class FileSink(EventSink):
         self._round_obs_ids: dict[tuple[str, int], tuple[str, str]] = {}
         # (campaign_id, round_num, node_id) → (trace_id, obs_id) — so NodeEnd updates the same file.
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
-
-    @property
-    def enabled(self) -> bool:
-        return self._obs_enabled
 
     # --- Scope resolution ---
 
@@ -191,24 +186,7 @@ class FileSink(EventSink):
             mlflow.log_metrics(metrics)
             mlflow.set_tags(tags)
 
-    # --- Event dispatch (Topology B is Langfuse-only; no file analogue) ---
-
-    _HANDLERS: ClassVar[dict[type[Event], str]] = {
-        DatasetRegistered: "_on_dataset_registered",
-        CampaignStart: "_on_campaign_start",
-        DatasetRun: "_on_dataset_run",
-        RoundStart: "_on_round_start",
-        NodeStart: "_on_node_start",
-        NodeEnd: "_on_node_end",
-        RoundEnd: "_on_round_end",
-        PromptVersion: "_on_prompt_version",
-        CampaignEnd: "_on_campaign_end",
-        CandidateCreated: "_on_write_point",
-        CandidateScored: "_on_write_point",
-        RoundWinnerChosen: "_on_write_point",
-        L1CritiqueWritten: "_on_write_point",
-        LayerApplied: "_on_layer_applied",
-    }
+    # --- Event handlers (Topology B is Langfuse-only; no file analogue) ---
 
     # Fields per event class forwarded into the events.jsonl payload. Keep
     # in sync with the event dataclass fields that should be mirrored.
@@ -222,7 +200,7 @@ class FileSink(EventSink):
         L1CritiqueWritten: ("l1_critique_written", ("l1_critique_text",)),
     }
 
-    def _on_write_point(self, event: Any) -> None:
+    def on_write_point(self, event: Any) -> None:
         """Append a mid-round observability event to events.jsonl (pure mirror — not used for resume)."""
         event_name, fields = self._WRITE_POINT_FIELDS[type(event)]
         payload = {
@@ -234,7 +212,7 @@ class FileSink(EventSink):
         }
         self._log_event(payload)
 
-    def _on_layer_applied(self, event: LayerApplied) -> None:
+    def on_layer_applied(self, event: LayerApplied) -> None:
         """Append an ``l2_applied`` / ``l3_applied`` mirror to events.jsonl.
 
         Event-name string (``l2_applied`` / ``l3_applied``) is preserved on
@@ -252,7 +230,7 @@ class FileSink(EventSink):
 
     # --- Optimization topology (A) handlers ---
 
-    def _on_dataset_registered(self, event: DatasetRegistered) -> None:
+    def on_dataset_registered(self, event: DatasetRegistered) -> None:
         import hashlib
 
         ds_dir = self._scope_dir() / "langfuse" / "datasets" / event.dataset_name
@@ -296,7 +274,7 @@ class FileSink(EventSink):
             }
         )
 
-    def _on_campaign_start(self, event: CampaignStart) -> None:
+    def on_campaign_start(self, event: CampaignStart) -> None:
         # Bind cycle_id so subsequent writes target campaigns/{cycle_id}/.
         # session_id carries the resolved cycle_id (see runner:start_campaign).
         if event.session_id:
@@ -321,7 +299,7 @@ class FileSink(EventSink):
             }
         )
 
-    def _on_dataset_run(self, event: DatasetRun) -> None:
+    def on_dataset_run(self, event: DatasetRun) -> None:
         trace_id = self._write_trace(
             name="dataset_run",
             input_data={
@@ -350,7 +328,7 @@ class FileSink(EventSink):
             }
         )
 
-    def _on_round_start(self, event: RoundStart) -> None:
+    def on_round_start(self, event: RoundStart) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
             obs_id = self._write_observation(
@@ -362,7 +340,7 @@ class FileSink(EventSink):
             )
             self._round_obs_ids[(event.campaign_id, event.round_num)] = (trace_id, obs_id)
 
-    def _on_node_start(self, event: NodeStart) -> None:
+    def on_node_start(self, event: NodeStart) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if not trace_id:
             return
@@ -387,7 +365,7 @@ class FileSink(EventSink):
             }
         )
 
-    def _on_node_end(self, event: NodeEnd) -> None:
+    def on_node_end(self, event: NodeEnd) -> None:
         key = (event.campaign_id, event.round_num, event.node_id)
         ids = self._node_obs.pop(key, None)
         if ids is None:
@@ -413,7 +391,7 @@ class FileSink(EventSink):
         }
         self._log_event(node_end_payload)
 
-    def _on_round_end(self, event: RoundEnd) -> None:
+    def on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
             round_ids = self._round_obs_ids.pop((event.campaign_id, event.round_num), None)
@@ -458,7 +436,7 @@ class FileSink(EventSink):
             log_entry["optimizer_templates"] = event.optimizer_templates
         self._log_event(log_entry)
 
-    def _on_prompt_version(self, event: PromptVersion) -> None:
+    def on_prompt_version(self, event: PromptVersion) -> None:
         family = "optimizer_prompt"
         version = event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown"
         prompt_dir = self._scope_dir() / "prompts" / family / version
@@ -482,7 +460,7 @@ class FileSink(EventSink):
             }
         )
 
-    def _on_campaign_end(self, event: CampaignEnd) -> None:
+    def on_campaign_end(self, event: CampaignEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
             trace_path = self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json"

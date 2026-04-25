@@ -20,7 +20,7 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
-from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.errors import is_degraded, is_error_result
 from promptpotter.shared.scoring import RoundScorer, compile_round_scorer
 
 if TYPE_CHECKING:
@@ -87,11 +87,6 @@ def _compute_accuracy(results: list[QueryResult]) -> dict:
 def count_failures(results: list[QueryResult]) -> int:
     """Count non-hit results (misses + errors)."""
     return sum(1 for r in results if not r.get("hit"))
-
-
-def is_degraded(result: Mapping[str, Any]) -> bool:
-    """A query is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
-    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
 def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:

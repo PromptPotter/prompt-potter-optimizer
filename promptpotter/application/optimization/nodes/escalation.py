@@ -7,7 +7,7 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.l1.critique_payload import extract_warning_types
+from promptpotter.application.optimization.nodes.l1.utils import extract_warning_types
 from promptpotter.application.optimization.nodes.layer_transitions import (
     L2RefineStrategy,
     L3ModifyPlan,
@@ -216,7 +216,7 @@ def _maybe_emit_backend_warning(
     logger.warning("Backend warning at round %d (%d resets, steps: %s)", round_num, count, steps)
 
 
-async def _do_layer_transition(
+async def _run_transition(
     transition: LayerTransition,
     cycle: Cycle,
     config: CampaignConfig,
@@ -226,28 +226,28 @@ async def _do_layer_transition(
     *,
     obs: ObservabilityBridge | None,
     obs_campaign_id: str,
-    run_kwargs: dict[str, Any],
-    enter_payload: dict[str, Any],
-    exit_payload_fn: Callable[[Any], dict[str, Any]],
-    temperature: float,
+    ctx: dict[str, Any] | None = None,
 ) -> Any:
-    """Unified L2/L3 orchestrator: emit enter → call → adopt → emit LayerApplied → side-effects → emit exit.
+    """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit.
 
-    Layer-specific prep (run_kwargs, enter/exit payloads, temperature) is
-    passed in by the thin L2/L3 callers below. Layer-specific state tail
-    lives on ``transition.apply_side_effects`` (called after adopt).
+    Per-layer payload shapes (``enter_payload``, ``exit_payload``,
+    ``run_kwargs``, ``temperature``) live on the ``LayerTransition``
+    subclass; this function is the thin glue that times the LLM call,
+    persists the result, and emits the surrounding phase events.
     """
     from promptpotter.infrastructure.llm import client as _llm_client
     from promptpotter.infrastructure.tracing import observed_node
 
     assert cycle.current_sp is not None
+    ctx = {**(ctx or {}), "round_num": round_num}
     client = _llm_client.get_llm_client()
     current_pp = cycle.current_sp.pipeline_params
-    observed_name = f"{transition.template_name}_r{round_num}"
 
-    emit_phase(on_phase, transition.phase, "enter", round=round_num, **enter_payload)
+    emit_phase(
+        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle, ctx)
+    )
     async with observed_node(
-        observed_name,
+        f"{transition.template_name}_r{round_num}",
         "llm/meta",
         obs=obs,
         campaign_id=obs_campaign_id,
@@ -257,9 +257,9 @@ async def _do_layer_transition(
             cycle,
             client,
             model=config.optimizer_llm.model,
-            temperature=temperature,
+            temperature=transition.temperature(config),
             pipeline_params=current_pp,
-            **run_kwargs,
+            **transition.run_kwargs(cycle, ctx),
         )
     cycle.adopt_transition(
         result.opt_search_point,
@@ -276,115 +276,14 @@ async def _do_layer_transition(
                 changes_description=result.opt_search_point.changes_description or "",
             )
     transition.apply_side_effects(cycle, result, round_num)
-    emit_phase(on_phase, transition.phase, "exit", round=round_num, **exit_payload_fn(result))
+    emit_phase(
+        on_phase,
+        transition.phase,
+        "exit",
+        round=round_num,
+        **transition.exit_payload(cycle, result),
+    )
     return result
-
-
-async def _do_l2_transition(
-    cycle: Cycle,
-    config: CampaignConfig,
-    pipeline_schema: Any,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: ObservabilityBridge | None = None,
-    obs_campaign_id: str = "",
-    escalation_check_result: dict | None = None,
-) -> Any:
-    """L2 refine_strategy thin wrapper — builds args, delegates to ``_do_layer_transition``."""
-    from promptpotter.application.optimization.nodes.formatting import warning_summary
-
-    last_candidates = cycle.rounds[-1].candidate_scores if cycle.rounds else []
-
-    enter_payload = {
-        "l2_round": cycle.escalation.l2.round,
-        "l1_stall_count": cycle.escalation.l1_stall_count,
-        "current_params": cycle.opt_sp.optimizer_params,
-        "current_accuracy": cycle.current_accuracy,
-        "best_accuracy": cycle.best_accuracy,
-    }
-
-    def _exit(result: Any) -> dict[str, Any]:
-        warned_count, top_warning = warning_summary(cycle.opt_sp.memory.warning_inventory)
-        return {
-            "l2_round": cycle.escalation.l2.round,
-            "param_changes_count": len(result.opt_search_point.optimizer_params),
-            "task_context_changed": result.task_context is not None,
-            "changes_description": result.opt_search_point.changes_description or "",
-            "pipeline_params_changed": result.pipeline_params is not None,
-            "pipeline_params": result.pipeline_params,
-            "action": result.action,
-            "warned_queries": warned_count,
-            "top_warning": top_warning,
-            "l2_prompt": result.debug_prompt,
-            "l2_response": result.debug_response,
-        }
-
-    return await _do_layer_transition(
-        L2RefineStrategy(),
-        cycle,
-        config,
-        pipeline_schema,
-        round_num,
-        on_phase,
-        obs=obs,
-        obs_campaign_id=obs_campaign_id,
-        run_kwargs={
-            "candidate_scores": last_candidates,
-            "escalation_check_result": escalation_check_result,
-            "round_num": round_num,
-        },
-        enter_payload=enter_payload,
-        exit_payload_fn=_exit,
-        temperature=config.optimization.l2_temperature,
-    )
-
-
-async def _do_l3_transition(
-    cycle: Cycle,
-    config: CampaignConfig,
-    pipeline_schema: Any,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: ObservabilityBridge | None = None,
-    obs_campaign_id: str = "",
-) -> Any:
-    """L3 modify_plan thin wrapper — builds args, delegates to ``_do_layer_transition``."""
-    l2_history = [
-        {
-            "l2_round": cycle.escalation.l2.round,
-            "optimizer_params": cycle.opt_sp.optimizer_params,
-            "accuracy_change": cycle.best_composite - cycle.escalation.l3.best_composite_at_entry,
-        }
-    ]
-
-    enter_payload = {
-        "l3_round": cycle.escalation.l3.round,
-        "l2_stall_count": cycle.escalation.l2.stall_count,
-        "current_plan_preview": str(cycle.opt_sp.plan)[:120],
-    }
-
-    def _exit(result: Any) -> dict[str, Any]:
-        return {
-            "l3_round": cycle.escalation.l3.round,
-            "new_plan_preview": str(result.opt_search_point.plan)[:120],
-            "changes_description": result.opt_search_point.changes_description or "",
-            "pipeline_params_changed": result.pipeline_params is not None,
-        }
-
-    return await _do_layer_transition(
-        L3ModifyPlan(),
-        cycle,
-        config,
-        pipeline_schema,
-        round_num,
-        on_phase,
-        obs=obs,
-        obs_campaign_id=obs_campaign_id,
-        run_kwargs={"l2_history": l2_history},
-        enter_payload=enter_payload,
-        exit_payload_fn=_exit,
-        temperature=config.optimization.l3_temperature,
-    )
 
 
 async def _exhaust_or_reset(
@@ -418,7 +317,8 @@ async def _exhaust_or_reset(
         cycle.escalation.l3.round = 0
     cycle.opt_sp.memory.degradation_reset_count += 1
     _maybe_emit_backend_warning(cycle, config, round_num, on_phase)
-    await _do_l2_transition(
+    await _run_transition(
+        L2RefineStrategy(),
         cycle,
         config,
         pipeline_schema,
@@ -426,7 +326,7 @@ async def _exhaust_or_reset(
         on_phase,
         obs=obs,
         obs_campaign_id=obs_campaign_id,
-        escalation_check_result=escalation_check_result,
+        ctx={"escalation_check_result": escalation_check_result},
     )
     return None
 
@@ -474,7 +374,8 @@ async def escalate_l2(
         },
     )
     if not l2_stalled:
-        await _do_l2_transition(
+        await _run_transition(
+            L2RefineStrategy(),
             cycle,
             config,
             pipeline_schema,
@@ -482,7 +383,7 @@ async def escalate_l2(
             on_phase,
             obs=obs,
             obs_campaign_id=obs_campaign_id,
-            escalation_check_result=escalation_check_result,
+            ctx={"escalation_check_result": escalation_check_result},
         )
         if on_checkpoint:
             ctrl = on_checkpoint("before_l2_scoring")
@@ -529,7 +430,8 @@ async def escalate_l2(
         },
     )
     if not l3_exhausted:
-        await _do_l3_transition(
+        await _run_transition(
+            L3ModifyPlan(),
             cycle,
             config,
             pipeline_schema,

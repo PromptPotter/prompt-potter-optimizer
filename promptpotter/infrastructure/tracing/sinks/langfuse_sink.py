@@ -4,53 +4,37 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, ClassVar
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
-from promptpotter.infrastructure.tracing.events import (
-    CampaignEnd,
-    CampaignStart,
-    DatasetRegistered,
-    DatasetRun,
-    Event,
-    NodeEnd,
-    NodeStart,
-    PromptVersion,
-    QueryEvalEnd,
-    QueryEvalStart,
-    QueryNodeSpan,
-    RoundEnd,
-    RoundStart,
-)
-from promptpotter.infrastructure.tracing.sinks.base import EventSink
 
 if TYPE_CHECKING:
+    from promptpotter.infrastructure.tracing.events import (
+        CampaignEnd,
+        CampaignStart,
+        DatasetRegistered,
+        DatasetRun,
+        NodeEnd,
+        NodeStart,
+        PromptVersion,
+        QueryEvalEnd,
+        QueryEvalStart,
+        QueryNodeSpan,
+        RoundEnd,
+        RoundStart,
+    )
     from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
 
-class LangfuseSink(EventSink):
-    """Dispatches events to a ``LangfuseLogger``; owns persisted id state."""
+class LangfuseSink:
+    """Forwards events to a ``LangfuseLogger`` and persists id state.
 
-    @property
-    def enabled(self) -> bool:
-        return self._lf.enabled
-
-    _HANDLERS: ClassVar[dict[type[Event], str]] = {
-        CampaignStart: "_on_campaign_start",
-        DatasetRegistered: "_on_dataset_registered",
-        DatasetRun: "_on_dataset_run",
-        RoundStart: "_on_round_start",
-        NodeStart: "_on_node_start",
-        NodeEnd: "_on_node_end",
-        RoundEnd: "_on_round_end",
-        PromptVersion: "_on_prompt_version",
-        CampaignEnd: "_on_campaign_end",
-        QueryEvalStart: "_on_query_eval_start",
-        QueryNodeSpan: "_on_query_node_span",
-        QueryEvalEnd: "_on_query_eval_end",
-    }
+    The bridge dispatches each event to ``on_<event_name>(event)`` directly
+    (see :data:`bridge._DISPATCH`). Methods absent from the dispatch table
+    are not invoked.
+    """
 
     def __init__(
         self,
@@ -126,7 +110,7 @@ class LangfuseSink(EventSink):
 
     # --- Topology A ---
 
-    def _on_campaign_start(self, event: CampaignStart) -> None:
+    def on_campaign_start(self, event: CampaignStart) -> None:
         if event.session_id:
             self._bind_session(event.session_id)
         cloud_id = self._lf.create_trace(
@@ -150,7 +134,7 @@ class LangfuseSink(EventSink):
             )
             self._persist()
 
-    def _on_dataset_registered(self, event: DatasetRegistered) -> None:
+    def on_dataset_registered(self, event: DatasetRegistered) -> None:
         if len(event.items) > 100:
             logger.warning(
                 "Skipping Langfuse cloud dataset registration for %d items "
@@ -176,7 +160,7 @@ class LangfuseSink(EventSink):
                 self._dataset_item_ids[(event.dataset_name, query)] = cloud_id
         self._persist()
 
-    def _on_dataset_run(self, event: DatasetRun) -> None:
+    def on_dataset_run(self, event: DatasetRun) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -198,7 +182,7 @@ class LangfuseSink(EventSink):
             as_type="tool",
         )
 
-    def _on_round_start(self, event: RoundStart) -> None:
+    def on_round_start(self, event: RoundStart) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -213,7 +197,7 @@ class LangfuseSink(EventSink):
             self._round_obs_ids[(event.campaign_id, event.round_num)] = obs_id
             self._persist()
 
-    def _on_node_start(self, event: NodeStart) -> None:
+    def on_node_start(self, event: NodeStart) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -231,7 +215,7 @@ class LangfuseSink(EventSink):
             self._node_obs_ids[(event.campaign_id, event.round_num, event.node_id)] = obs_id
             self._persist()
 
-    def _on_node_end(self, event: NodeEnd) -> None:
+    def on_node_end(self, event: NodeEnd) -> None:
         key = (event.campaign_id, event.round_num, event.node_id)
         obs_id = self._node_obs_ids.pop(key, None)
         if not obs_id:
@@ -248,7 +232,7 @@ class LangfuseSink(EventSink):
         )
         self._persist()
 
-    def _on_round_end(self, event: RoundEnd) -> None:
+    def on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -291,7 +275,7 @@ class LangfuseSink(EventSink):
             )
         self._persist()
 
-    def _on_prompt_version(self, event: PromptVersion) -> None:
+    def on_prompt_version(self, event: PromptVersion) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -312,7 +296,7 @@ class LangfuseSink(EventSink):
             as_type="tool",
         )
 
-    def _on_campaign_end(self, event: CampaignEnd) -> None:
+    def on_campaign_end(self, event: CampaignEnd) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
@@ -336,7 +320,7 @@ class LangfuseSink(EventSink):
 
     # --- Topology B (backfill replay) ---
 
-    def _on_query_eval_start(self, event: QueryEvalStart) -> None:
+    def on_query_eval_start(self, event: QueryEvalStart) -> None:
         if event.session_id:
             self._bind_session(event.session_id)
         metadata: dict[str, Any] = {
@@ -361,7 +345,7 @@ class LangfuseSink(EventSink):
                 event.origin,
             )
 
-    def _on_query_node_span(self, event: QueryNodeSpan) -> None:
+    def on_query_node_span(self, event: QueryNodeSpan) -> None:
         entry = self._query_trace_ids.get((event.run_id, event.query))
         if not entry:
             return
@@ -377,7 +361,7 @@ class LangfuseSink(EventSink):
             usage_details=event.usage_details,
         )
 
-    def _on_query_eval_end(self, event: QueryEvalEnd) -> None:
+    def on_query_eval_end(self, event: QueryEvalEnd) -> None:
         entry = self._query_trace_ids.pop((event.run_id, event.query), None)
         if not entry:
             return

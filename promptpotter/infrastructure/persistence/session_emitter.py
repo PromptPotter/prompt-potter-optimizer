@@ -16,7 +16,6 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.phases import CampaignPhase
-from promptpotter.application.scoring.metrics import is_degraded
 from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.persistence.dashboard_md import (
     fmt_sample_line,
@@ -26,6 +25,7 @@ from promptpotter.infrastructure.persistence.dashboard_md import (
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
+from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import HardSampleSorterConfig

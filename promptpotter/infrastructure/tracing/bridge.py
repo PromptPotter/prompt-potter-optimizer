@@ -1,7 +1,8 @@
 """Observability bridge — single entry point over file + Langfuse sinks.
 
 Call sites build event dataclasses from :mod:`events` and call
-``bridge.emit(event)``; the bridge fans out to every registered sink under
+``bridge.emit(event)``. The bridge looks the event type up in
+:data:`_DISPATCH`, then calls ``on_<name>`` on each sink directly under
 :func:`graceful` so observability can never crash the optimization loop.
 
 The dual-state ``ObsLogger`` it replaces held both a file logger and a
@@ -19,15 +20,27 @@ import time
 from contextlib import asynccontextmanager
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Protocol
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.infrastructure.tracing.events import (
     CampaignEnd,
     CampaignStart,
+    CandidateCreated,
+    CandidateScored,
     DatasetRegistered,
+    DatasetRun,
     Event,
+    L1CritiqueWritten,
+    LayerApplied,
     NodeEnd,
     NodeStart,
+    PromptVersion,
+    QueryEvalEnd,
+    QueryEvalStart,
+    QueryNodeSpan,
+    RoundEnd,
+    RoundStart,
+    RoundWinnerChosen,
 )
 from promptpotter.infrastructure.tracing.sinks.file_sink import FileSink
 from promptpotter.infrastructure.tracing.sinks.langfuse_sink import LangfuseSink
@@ -41,9 +54,30 @@ logger = logging.getLogger(__name__)
 __all__ = ["NodeTrace", "ObservabilityBridge", "observed_node"]
 
 
-class _Sink(Protocol):
-    def handle(self, event: Event) -> None: ...
-    def flush(self) -> None: ...
+# Single source of truth for event-type → sink-method-name dispatch.
+# Sinks expose ``on_<name>(event)`` (or skip a key, in which case the bridge
+# silently drops the event for that sink — see ``getattr(.., None)`` below).
+# The four mid-round write-points all map to ``on_write_point`` because the
+# file sink writes them through one shared formatter.
+_DISPATCH: dict[type[Event], str] = {
+    DatasetRegistered: "on_dataset_registered",
+    CampaignStart: "on_campaign_start",
+    DatasetRun: "on_dataset_run",
+    RoundStart: "on_round_start",
+    NodeStart: "on_node_start",
+    NodeEnd: "on_node_end",
+    RoundEnd: "on_round_end",
+    PromptVersion: "on_prompt_version",
+    CampaignEnd: "on_campaign_end",
+    CandidateCreated: "on_write_point",
+    CandidateScored: "on_write_point",
+    RoundWinnerChosen: "on_write_point",
+    L1CritiqueWritten: "on_write_point",
+    LayerApplied: "on_layer_applied",
+    QueryEvalStart: "on_query_eval_start",
+    QueryNodeSpan: "on_query_node_span",
+    QueryEvalEnd: "on_query_eval_end",
+}
 
 
 @dataclass
@@ -54,7 +88,7 @@ class NodeTrace:
 
 
 class ObservabilityBridge:
-    """Fans events out to registered sinks under :func:`graceful`."""
+    """Fans events out to file + Langfuse sinks under :func:`graceful`."""
 
     def __init__(
         self,
@@ -69,9 +103,6 @@ class ObservabilityBridge:
         self._enabled: bool = settings.OBS_ENABLED
         self._file = file_sink
         self._langfuse = langfuse_sink
-        self._sinks: list[_Sink] = [file_sink]
-        if langfuse_sink is not None:
-            self._sinks.append(langfuse_sink)
 
     @classmethod
     def from_settings(
@@ -113,11 +144,26 @@ class ObservabilityBridge:
         )
 
     def emit(self, event: Event) -> None:
+        """Dispatch *event* to file + (optionally) Langfuse sinks directly.
+
+        A sink that doesn't subscribe to the event simply lacks the method;
+        ``getattr(...,  None)`` makes that a no-op without an explicit table
+        per sink.
+        """
         if not self._enabled:
             return
-        for sink in self._sinks:
-            with graceful(f"Tracing sink {type(sink).__name__} failed on {type(event).__name__}"):
-                sink.handle(event)
+        method = _DISPATCH.get(type(event))
+        if method is None:
+            return
+        fn = getattr(self._file, method, None)
+        if fn is not None:
+            with graceful(f"file sink {method} failed on {type(event).__name__}"):
+                fn(event)
+        if self._langfuse is not None:
+            fn = getattr(self._langfuse, method, None)
+            if fn is not None:
+                with graceful(f"langfuse {method} failed on {type(event).__name__}"):
+                    fn(event)
 
     def emit_write_point(
         self,
@@ -136,17 +182,12 @@ class ObservabilityBridge:
         if not self._enabled:
             return
         with graceful(f"{event_cls.__name__} emit failed"):
-            event = event_cls(
-                campaign_id=campaign_id,
-                round_num=round_num,
-                **extra,
-            )
-            self.emit(event)
+            self.emit(event_cls(campaign_id=campaign_id, round_num=round_num, **extra))
 
     def flush(self) -> None:
-        for sink in self._sinks:
-            with graceful(f"Tracing sink {type(sink).__name__} flush failed"):
-                sink.flush()
+        with graceful("Langfuse sink flush failed"):
+            if self._langfuse is not None:
+                self._langfuse.flush()
 
     def get_file_trace_id(self, campaign_id: str) -> str | None:
         return self._file.get_file_trace_id(campaign_id)

@@ -13,6 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.application.scoring.sample_measurement import measure_sample
+from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
@@ -21,12 +22,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["execute_stale_data_protocol", "is_degraded"]
-
-
-def is_degraded(result: Mapping[str, Any]) -> bool:
-    """Check if a result has pipeline degradation warnings."""
-    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
+__all__ = ["execute_stale_data_protocol"]
 
 
 def find_gt_rank(result: Mapping[str, Any]) -> int | None:

@@ -138,6 +138,11 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
     return bool(result.get("error")) or result.get("predicted") == "ERROR"
 
 
+def is_degraded(result: Mapping[str, Any]) -> bool:
+    """A query is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
+    return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
+
+
 @contextmanager
 def graceful(msg: str, *, level: int = logging.WARNING):
     """Suppress non-interrupt exceptions with a log message.

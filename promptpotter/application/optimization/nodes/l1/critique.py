@@ -1,9 +1,10 @@
 """L1 critique phase — LLM analysis of a round's results.
 
-Runs inside the L1 round after scoring+winner selection. Consumes a
-:class:`RoundSnapshot` (in ``critique_payload``), assembles a stat-rich prompt,
-calls the LLM, and returns the 6-field critique dict. Output feeds the next L1
-generate phase (via inbox) and L2 refine (on escalation).
+Runs inside the L1 round after scoring+winner selection. Builds a
+:class:`RoundSnapshot` from the round's state (defined here), assembles a
+stat-rich prompt, calls the LLM, and returns the 6-field critique dict.
+Output feeds the next L1 generate phase (via inbox) and L2 refine (on
+escalation).
 """
 
 from __future__ import annotations
@@ -12,12 +13,17 @@ import json
 import logging
 import random
 from collections import Counter
-from typing import TYPE_CHECKING
+from dataclasses import dataclass, field
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.intelligence import load_variant_library
-from promptpotter.application.optimization.nodes.formatting import format_search_memory_block
-from promptpotter.application.optimization.nodes.l1.critique_payload import (
-    RoundSnapshot,
+from promptpotter.application.optimization.nodes.formatting import (
+    build_cross_candidate_diff,
+    build_trajectory_report,
+    format_search_memory_block,
+)
+from promptpotter.application.optimization.nodes.l1.utils import (
+    candidate_keys_from_schema,
     get_candidates,
 )
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
@@ -25,9 +31,13 @@ from promptpotter.application.scoring.metrics import extract_sample_diagnostics,
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
     from promptpotter.infrastructure.llm.client import LLMClientBase
+
+    from .score import L1ScoringResult
 
 logger = logging.getLogger(__name__)
 
@@ -37,6 +47,103 @@ __all__ = [
     "format_l1_critique_for_prompt",
     "sample_thinking_styles",
 ]
+
+
+@dataclass
+class RoundSnapshot:
+    """Bundles current-round results + round history for critique diagnostics."""
+
+    results: list[QueryResult]
+    accuracy: float
+    composite: float = 0.0
+    degraded_queries: int = 0
+
+    round_history: list[dict] = field(default_factory=list)
+    current_round: int = 0
+    l1_stall_count: int = 0
+    best_accuracy: float = 0.0
+    best_round: int = -1
+
+    pipeline_params: dict | None = None
+
+    candidate_keys: list[str] = field(default_factory=list)
+    pipeline_schema: PipelineSchema | None = None
+
+    degradation_threshold: float = 0.4
+    near_miss_ratio: float = 0.3
+
+    search_memory_digest: dict | None = None
+    round_analysis: dict[str, str] = field(default_factory=dict)
+
+    runtime_failures: list[dict] = field(default_factory=list)
+
+    # Size (chars) of the current-best prompt — surfaced to the critique so
+    # it can flag bloat drift and prompt L1 to compress on the next round.
+    current_prompt_chars: int = 0
+
+    @classmethod
+    def from_round_state(
+        cls,
+        cycle: Cycle,
+        scoring_result: L1ScoringResult,
+        config: CampaignConfig,
+        schema: PipelineSchema | None,
+        *,
+        round_num: int,
+        search_memory_digest: dict | None = None,
+    ) -> RoundSnapshot:
+        """Build snapshot; round-local analysis (trajectory, cross-candidate diff) lives on its own field, not mutated onto the SearchMemory digest."""
+        round_analysis: dict[str, str] = {}
+        diff = build_cross_candidate_diff(
+            cast(list[dict], scoring_result.winner_results),
+            cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
+            scoring_result.candidate_scores,
+        )
+        if diff:
+            round_analysis["cross_candidate_diff"] = diff
+        trajectory = build_trajectory_report(cycle.rounds)
+        if trajectory and trajectory.classification != "healthy":
+            round_analysis["trajectory"] = f"{trajectory.classification}: {trajectory.description}"
+
+        return cls(
+            results=scoring_result.winner_results,
+            accuracy=scoring_result.winner_accuracy,
+            composite=scoring_result.winner_composite,
+            degraded_queries=scoring_result.degraded_queries,
+            round_history=[
+                {
+                    "round": r.round,
+                    "accuracy": r.accuracy,
+                    "composite": r.composite,
+                    "pipeline_params": r.pipeline_params,
+                    "degraded": getattr(r, "degraded_queries", 0),
+                    "n_candidates": len(r.candidate_scores),
+                }
+                for r in cycle.rounds
+            ],
+            current_round=round_num,
+            l1_stall_count=cycle.escalation.l1_stall_count,
+            best_accuracy=cycle.best_accuracy,
+            best_round=cycle.best_round,
+            pipeline_params=(cycle.current_sp.pipeline_params if cycle.current_sp else None),
+            candidate_keys=candidate_keys_from_schema(schema),
+            pipeline_schema=schema,
+            degradation_threshold=config.optimization.l1_critique_degradation_threshold,
+            near_miss_ratio=config.optimization.l1_critique_near_miss_ratio,
+            search_memory_digest=search_memory_digest,
+            round_analysis=round_analysis,
+            runtime_failures=[
+                {
+                    "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[
+                        :60
+                    ],
+                    **rf,
+                }
+                for cs in scoring_result.candidate_scores
+                for rf in (cs.get("runtime_failures") or [])
+            ],
+            current_prompt_chars=len(cycle.opt_sp.render()),
+        )
 
 
 _CRITIQUE_SM_LABELS = {

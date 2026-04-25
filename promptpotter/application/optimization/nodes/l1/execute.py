@@ -11,13 +11,11 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.nodes.l1.critique import (
     L1CritiqueAgent,
+    RoundSnapshot,
     format_l1_critique_for_prompt,
     sample_thinking_styles,
 )
-from promptpotter.application.optimization.nodes.l1.critique_payload import (
-    RoundSnapshot,
-    update_query_tracker,
-)
+from promptpotter.application.optimization.nodes.l1.utils import update_query_tracker
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.application.scoring.metrics import compute_composite_score

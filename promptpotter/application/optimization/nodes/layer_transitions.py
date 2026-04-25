@@ -1,10 +1,11 @@
 """L2 (refine_strategy) / L3 (modify_plan) transitions for the 3-loop feedback cycle.
 
 ``LayerTransition`` is the shared template method (load prompt → compile →
-LLM call → parse → derive ``OptSearchPoint`` → ``TransitionResult``). L2 and
-L3 are peer subclasses: each owns its prompt template, temperature,
-intelligence assembly, and result construction. Adding an L4 layer later is
-a new subclass plus a single call-site wiring in ``escalation.py``.
+LLM call → parse → derive ``OptSearchPoint`` → ``TransitionResult``). Each
+subclass declares its prompt template, temperature, intelligence assembly,
+result construction, post-transition side-effects, and the per-layer
+``enter_payload`` / ``exit_payload`` / ``run_kwargs`` shapes consumed by the
+unified orchestrator in ``escalation._run_transition``.
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from promptpotter.application.optimization.nodes.formatting import (
     format_pipeline_section,
     format_runtime_failures_for_l3,
     format_search_memory_block,
+    warning_summary,
 )
 from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
@@ -32,6 +34,7 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
@@ -155,6 +158,24 @@ class LayerTransition(ABC):
         record_entry + reset_for_l3).
         """
 
+    # --- Per-layer payload shapes consumed by the unified orchestrator. ---
+
+    @abstractmethod
+    def temperature(self, config: CampaignConfig) -> float:
+        """LLM sampling temperature for this layer (read from ``config``)."""
+
+    @abstractmethod
+    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        """Phase-event payload emitted *before* the transition runs."""
+
+    @abstractmethod
+    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+        """Phase-event payload emitted *after* the transition + side-effects run."""
+
+    @abstractmethod
+    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        """Extra kwargs forwarded into ``run()`` (and through to ``assemble_intelligence``)."""
+
 
 class L2RefineStrategy(LayerTransition):
     """L2: tune ``optimizer_params`` + ``task_context`` + directive (one-round window)."""
@@ -269,6 +290,41 @@ class L2RefineStrategy(LayerTransition):
             "L2 refine_strategy at round %d (l2_round=%d)", round_num, cycle.escalation.l2.round
         )
 
+    def temperature(self, config: CampaignConfig) -> float:
+        return config.optimization.l2_temperature
+
+    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "l2_round": cycle.escalation.l2.round,
+            "l1_stall_count": cycle.escalation.l1_stall_count,
+            "current_params": cycle.opt_sp.optimizer_params,
+            "current_accuracy": cycle.current_accuracy,
+            "best_accuracy": cycle.best_accuracy,
+        }
+
+    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+        warned_count, top_warning = warning_summary(cycle.opt_sp.memory.warning_inventory)
+        return {
+            "l2_round": cycle.escalation.l2.round,
+            "param_changes_count": len(result.opt_search_point.optimizer_params),
+            "task_context_changed": result.task_context is not None,
+            "changes_description": result.opt_search_point.changes_description or "",
+            "pipeline_params_changed": result.pipeline_params is not None,
+            "pipeline_params": result.pipeline_params,
+            "action": result.action,
+            "warned_queries": warned_count,
+            "top_warning": top_warning,
+            "l2_prompt": result.debug_prompt,
+            "l2_response": result.debug_response,
+        }
+
+    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "candidate_scores": cycle.rounds[-1].candidate_scores if cycle.rounds else [],
+            "escalation_check_result": ctx.get("escalation_check_result"),
+            "round_num": ctx.get("round_num", 0),
+        }
+
 
 class L3ModifyPlan(LayerTransition):
     """L3: propose a new strategic plan + optional pipeline_params deltas."""
@@ -373,3 +429,33 @@ class L3ModifyPlan(LayerTransition):
         logger.debug(
             "L3 modify_plan at round %d (l3_round=%d)", round_num, cycle.escalation.l3.round
         )
+
+    def temperature(self, config: CampaignConfig) -> float:
+        return config.optimization.l3_temperature
+
+    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "l3_round": cycle.escalation.l3.round,
+            "l2_stall_count": cycle.escalation.l2.stall_count,
+            "current_plan_preview": str(cycle.opt_sp.plan)[:120],
+        }
+
+    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+        return {
+            "l3_round": cycle.escalation.l3.round,
+            "new_plan_preview": str(result.opt_search_point.plan)[:120],
+            "changes_description": result.opt_search_point.changes_description or "",
+            "pipeline_params_changed": result.pipeline_params is not None,
+        }
+
+    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+        return {
+            "l2_history": [
+                {
+                    "l2_round": cycle.escalation.l2.round,
+                    "optimizer_params": cycle.opt_sp.optimizer_params,
+                    "accuracy_change": cycle.best_composite
+                    - cycle.escalation.l3.best_composite_at_entry,
+                }
+            ],
+        }

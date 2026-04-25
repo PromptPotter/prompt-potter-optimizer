@@ -300,8 +300,8 @@ def test_auto_mint_session_claims_active_pointer() -> None:
 def test_control_surface_reads_pause_signal(
     session_and_campaign_dirs: tuple[Path, Path],
 ) -> None:
-    """CampaignControlReader reads control signals from control.json."""
-    from promptpotter.infrastructure.persistence.control import CampaignControlReader
+    """make_control_check reads control signals from control.json."""
+    from promptpotter.infrastructure.persistence.control import make_control_check
 
     session_dir, _ = session_and_campaign_dirs
     control_path = session_dir / "control.json"
@@ -309,13 +309,13 @@ def test_control_surface_reads_pause_signal(
         json.dumps({"requested_state": "pause", "pause_before_l2_scoring": False})
     )
 
-    surface = CampaignControlReader(session_dir)
-    assert surface.check("after_round") == "pause"
+    check = make_control_check(session_dir)
+    assert check("after_round") == "pause"
 
 
 def test_control_surface_resumes(session_and_campaign_dirs: tuple[Path, Path]) -> None:
-    """CampaignControlReader acknowledges resume by clearing to running."""
-    from promptpotter.infrastructure.persistence.control import CampaignControlReader
+    """make_control_check acknowledges resume by clearing to running."""
+    from promptpotter.infrastructure.persistence.control import make_control_check
 
     session_dir, _ = session_and_campaign_dirs
     control_path = session_dir / "control.json"
@@ -323,16 +323,16 @@ def test_control_surface_resumes(session_and_campaign_dirs: tuple[Path, Path]) -
         json.dumps({"requested_state": "resume", "pause_before_l2_scoring": False})
     )
 
-    surface = CampaignControlReader(session_dir)
-    assert surface.check("after_round") is None
+    check = make_control_check(session_dir)
+    assert check("after_round") is None
 
     data = json.loads(control_path.read_text())
     assert data["requested_state"] == "running"
 
 
 def test_control_surface_l2_pause(session_and_campaign_dirs: tuple[Path, Path]) -> None:
-    """CampaignControlReader honors pause_before_l2_scoring at before_l2_scoring."""
-    from promptpotter.infrastructure.persistence.control import CampaignControlReader
+    """make_control_check honors pause_before_l2_scoring at before_l2_scoring."""
+    from promptpotter.infrastructure.persistence.control import make_control_check
 
     session_dir, _ = session_and_campaign_dirs
     control_path = session_dir / "control.json"
@@ -340,9 +340,9 @@ def test_control_surface_l2_pause(session_and_campaign_dirs: tuple[Path, Path]) 
         json.dumps({"requested_state": "running", "pause_before_l2_scoring": True})
     )
 
-    surface = CampaignControlReader(session_dir)
-    assert surface.check("after_round") is None
-    assert surface.check("before_l2_scoring") == "pause"
+    check = make_control_check(session_dir)
+    assert check("after_round") is None
+    assert check("before_l2_scoring") == "pause"
 
 
 def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
@@ -369,7 +369,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     cycle_id = "cycle_wire_parity"
     campaign_id = "cmp_wire_parity"
 
-    sink.handle(
+    sink.on_campaign_start(
         CampaignStart(
             campaign_id=campaign_id,
             config={"max_rounds": 1},
@@ -377,8 +377,8 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             session_id=cycle_id,
         )
     )
-    sink.handle(RoundStart(campaign_id=campaign_id, round_num=0))
-    sink.handle(
+    sink.on_round_start(RoundStart(campaign_id=campaign_id, round_num=0))
+    sink.on_node_start(
         NodeStart(
             campaign_id=campaign_id,
             round_num=0,
@@ -388,7 +388,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             input_data={"prompt": "hello"},
         )
     )
-    sink.handle(
+    sink.on_node_end(
         NodeEnd(
             campaign_id=campaign_id,
             round_num=0,
@@ -396,7 +396,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             output_data={"text": "world"},
         )
     )
-    sink.handle(
+    sink.on_round_end(
         RoundEnd(
             campaign_id=campaign_id,
             round_num=0,
@@ -409,7 +409,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             next_action="continue",
         )
     )
-    sink.handle(
+    sink.on_campaign_end(
         CampaignEnd(
             campaign_id=campaign_id,
             best_accuracy=0.7,
