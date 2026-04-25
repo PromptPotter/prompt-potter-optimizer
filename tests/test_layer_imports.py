@@ -22,25 +22,11 @@ import pathlib
 ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
 
 
-# Documented runtime cross-layer imports awaiting Phase D rework
-# (session_emitter currently *assembles* artifacts by reaching up into
-# application logic; Phase D inverts this so the emitter is a thin sink
-# that receives pre-built artifacts from application code).
-KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset(
-    {
-        # (relative_posix_path, imported_module)
-        # TODO Phase D: session_emitter should not assemble artifacts itself.
-        (
-            "promptpotter/infrastructure/persistence/session_emitter.py",
-            "promptpotter.application.optimization.pipeline",
-        ),
-        # TODO Phase D: same — emitter pulls hard_sample_sorter to build artifact.
-        (
-            "promptpotter/infrastructure/persistence/session_emitter.py",
-            "promptpotter.application.intelligence.hard_sample_sorter",
-        ),
-    }
-)
+# Documented runtime cross-layer imports. The codebase is currently clean
+# at runtime; this allowlist exists so that any *intentional* future
+# violation can be tracked here with a TODO pointer rather than slipping
+# in silently. Stale entries fail the test, so the list cannot drift.
+KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset()
 
 
 def _layer(rel_posix: str) -> str | None:

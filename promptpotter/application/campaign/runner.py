@@ -462,6 +462,7 @@ async def run_optimization(
             resumed_from_round=session.resumed_from_round,
             dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
             backend_id=session.backend_id,
+            recorder_provider=get_round_recorder,
         )
     cb.emitter = emitter
 

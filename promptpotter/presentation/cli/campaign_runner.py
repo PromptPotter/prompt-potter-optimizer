@@ -324,7 +324,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
-    from promptpotter.application.optimization.pipeline import set_round_recorder
+    from promptpotter.application.optimization.pipeline import (
+        get_round_recorder,
+        set_round_recorder,
+    )
     from promptpotter.infrastructure.persistence.control import make_control_check
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
     from promptpotter.infrastructure.persistence.session_emitter import (
@@ -391,6 +394,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         resumed_from_round=resume_from_round,
         dataset_count=ctx.state.get("dataset_count"),
         backend_id=ctx.backend_id,
+        recorder_provider=get_round_recorder,
     )
     control_reader = make_control_check(session_dir)
     listener = RunListener(emitter=emitter, control=control_reader)

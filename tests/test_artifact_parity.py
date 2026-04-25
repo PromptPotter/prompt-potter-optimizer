@@ -181,14 +181,12 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
     emitter.on_round_complete(round_result, l1_stall_count=0)
 
-    # Finalize — write_hard_samples is called by finalize_optimization_run in
-    # production; mirror it here so CAMPAIGN_ARTIFACTS parity holds from the
-    # emitter surface alone.
-    emitter.write_hard_samples(
-        [round_result],
-        config=config.optimization.hard_sample_sorter,
-        cycle_id="cycle_test_001",
-    )
+    # Finalize — finalize_optimization_run builds the artifact and hands it
+    # to the emitter in production; mirror that flow here so the application
+    # layer owns the build/empty policy and infrastructure just writes.
+    from promptpotter.application.intelligence.hard_sample_sorter import empty_artifact
+
+    emitter.write_hard_samples_artifact(empty_artifact(cycle_id="cycle_test_001", disabled=True))
     emitter.finalize(
         n_rounds=1,
         best_accuracy=0.6,

@@ -820,11 +820,22 @@ def finalize_optimization_run(
             best_round=cycle.best_round,
         )
     if emitter:
-        emitter.write_hard_samples(
-            cycle.rounds,
-            config=campaign_config.optimization.hard_sample_sorter,
-            cycle_id=session.cycle_id,
+        from promptpotter.application.intelligence.hard_sample_sorter import (
+            build_hard_samples_artifact,
+            empty_artifact,
         )
+
+        hs_cfg = campaign_config.optimization.hard_sample_sorter
+        if hs_cfg.enabled:
+            artifact = build_hard_samples_artifact(
+                cycle.rounds,
+                cycle_id=session.cycle_id,
+                top_k_candidates=hs_cfg.top_k_candidates,
+                top_k_samples=hs_cfg.top_k_samples,
+            )
+        else:
+            artifact = empty_artifact(cycle_id=session.cycle_id, disabled=True)
+        emitter.write_hard_samples_artifact(artifact)
         emitter.finalize(
             n_rounds=len(cycle.rounds),
             best_accuracy=cycle.best_accuracy,

@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import time
+from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
@@ -28,9 +29,16 @@ from promptpotter.infrastructure.store.session_store import session_dir_for
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import HardSampleSorterConfig
     from promptpotter.application.optimization.results import RoundResult, RunResult
     from promptpotter.domain.phases import PhaseEvent
+
+# Recorder provider: caller injects a zero-arg callable that returns the
+# active per-round recorder (or None). The emitter never imports the
+# concrete recorder type or its lookup function — that would couple
+# infrastructure upward into application/optimization. ``Any`` keeps
+# the contract loose; the emitter only needs ``snapshot_nodes()``,
+# ``set_l1_score()``, ``set_hitl()``.
+RecorderProvider = Callable[[], Any]
 
 __all__ = [
     "CAMPAIGN_ARTIFACTS",
@@ -230,6 +238,7 @@ class CampaignPersistenceEmitter:
         cycle_id: str | None = None,
         dataset_count: int | None = None,
         backend_id: str | None = None,
+        recorder_provider: RecorderProvider | None = None,
     ) -> None:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
@@ -237,6 +246,7 @@ class CampaignPersistenceEmitter:
         self.log_md_path = campaign_dir / "log.md"
         self.result_path = campaign_dir / "optimize_result.json"
         self.session_dir = session_dir
+        self._recorder_provider: RecorderProvider = recorder_provider or (lambda: None)
 
         self._patience_max: int = l1_patience
         self._state: dict[str, Any] = _make_initial_state(
@@ -309,6 +319,7 @@ class CampaignPersistenceEmitter:
         resumed_from_round: int | None = None,
         dataset_count: int | None = None,
         backend_id: str | None = None,
+        recorder_provider: RecorderProvider | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if ids are unknown.
 
@@ -360,6 +371,7 @@ class CampaignPersistenceEmitter:
             cycle_id=cycle_id,
             dataset_count=dataset_count,
             backend_id=backend_id,
+            recorder_provider=recorder_provider,
         )
 
     # -- Callbacks -------------------------------------------------------------
@@ -576,10 +588,11 @@ class CampaignPersistenceEmitter:
     def _deposit_round_recorder_state(self, round_result: RoundResult) -> None:
         """Build the ``l1_score`` node block and HITL snapshot, hand them
         to the active ``RoundRecorder`` for inclusion in ``round_NNNN.json``.
-        """
-        from promptpotter.application.optimization.pipeline import get_round_recorder
 
-        recorder = get_round_recorder()
+        Recorder is fetched via the injected ``recorder_provider`` callable
+        so this layer never imports the optimizer's ``get_round_recorder``.
+        """
+        recorder = self._recorder_provider()
         if recorder is None:
             return
         recorder.set_l1_score(self._build_l1_score_block(round_result))
@@ -672,34 +685,15 @@ class CampaignPersistenceEmitter:
         """Persist the final ``RunResult`` as ``optimize_result.json``."""
         write_json(self.result_path, result.model_dump(), default=str)
 
-    def write_hard_samples(
-        self,
-        rounds: list[RoundResult],
-        *,
-        config: HardSampleSorterConfig,
-        cycle_id: str | None = None,
-    ) -> None:
-        """Persist ``hard_samples.json`` — the hard-sample-sorter artifact.
+    def write_hard_samples_artifact(self, artifact: dict) -> None:
+        """Persist ``hard_samples.json`` from a pre-built artifact dict.
 
-        When ``config.enabled`` is false, writes a parseable stub so
-        ``CAMPAIGN_ARTIFACTS`` parity holds without a special-case read path.
+        The build / empty-stub policy lives in the application layer
+        (``application/intelligence/hard_sample_sorter`` +
+        ``finalize_optimization_run``); this emitter just writes whatever
+        dict it is handed, keeping infrastructure free of upward imports.
         """
-        from promptpotter.application.intelligence.hard_sample_sorter import (
-            build_hard_samples_artifact,
-            empty_artifact,
-        )
-
-        path = self.campaign_dir / "hard_samples.json"
-        if not config.enabled:
-            write_json(path, empty_artifact(cycle_id=cycle_id, disabled=True))
-            return
-        artifact = build_hard_samples_artifact(
-            rounds,
-            cycle_id=cycle_id,
-            top_k_candidates=config.top_k_candidates,
-            top_k_samples=config.top_k_samples,
-        )
-        write_json(path, artifact)
+        write_json(self.campaign_dir / "hard_samples.json", artifact)
 
     # -- Internal --------------------------------------------------------------
 
@@ -755,11 +749,9 @@ class CampaignPersistenceEmitter:
         so the file reflects scoring progress without waiting for the
         round to complete. L2/L3 blocks appear when the round escalates.
         """
-        from promptpotter.application.optimization.pipeline import get_round_recorder
-
         round_idx = self._current_round.get("round", self._state.get("round", 0))
         nodes: dict[str, Any] = {}
-        recorder = get_round_recorder()
+        recorder = self._recorder_provider()
         if recorder is not None:
             nodes.update(recorder.snapshot_nodes())
         if self._current_round.get("candidates"):
