@@ -34,7 +34,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.nodes.escalation import DegradationCheck
+    from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge

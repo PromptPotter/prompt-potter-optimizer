@@ -46,7 +46,7 @@ CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pyt
 ## Code Conventions
 
 - **Python 3.13+**. Type hints: PEP 604 (`X | None`, `list[str]`) — no `Optional`, no `List`.
-- **Ruff** line-length 100, McCabe max complexity 15.
+- **Ruff** line-length 100.
 - **Logging** via `logging` module, never `print()`. Setup in `promptpotter/config/logging.py`.
 - **No backward compatibility** — freely break signatures, rename, restructure. No shims.
 - Pipeline components are called **nodes**, not "building blocks" or "services".

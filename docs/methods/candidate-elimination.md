@@ -47,9 +47,9 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 |---|---|---|---|---|---|---|
 | 1 | **Validation skip** — `OptSearchPoint.memory.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `memory.validation_failures` | `application/optimization/nodes/l1/measure.py::score_candidates` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
-| 3 | **`DegradationCheck` — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py` |
-| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/nodes/escalation.py` |
-| 5 | **`EmptyOutputCheck`** — `empty_predicted_rate >= threshold` | every query | **3** | eliminated | — | `application/optimization/nodes/escalation.py::EmptyOutputCheck` |
+| 3 | **`DegradationCheck` — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
+| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
+| 5 | **`EmptyOutputCheck`** — `empty_predicted_rate >= threshold` | every query | **3** | eliminated | — | `application/optimization/elimination.py::EmptyOutputCheck` |
 | 6 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
 ### Ordering inside the query loop

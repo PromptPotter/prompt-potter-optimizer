@@ -116,10 +116,6 @@ class TestShouldStopEarly:
 
 
 class TestEliminationCheck:
-    def test_always_enabled(self):
-        check = EliminationCheck(n_min=6, alpha=0.05, n_queries=20)
-        assert check.enabled is True
-
     def test_returns_none_before_n_min(self):
         check = EliminationCheck(n_min=20, alpha=0.05, n_queries=100)
         check.register_completed([0.8] * 100)
@@ -142,7 +138,6 @@ class TestEliminationCheck:
 
     def test_protocol_conformance(self):
         check = EliminationCheck(n_min=20, alpha=0.05, n_queries=100)
-        assert hasattr(check, "enabled")
         assert hasattr(check, "name")
         assert check.name == "elimination"
         assert callable(check.evaluate)

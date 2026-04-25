@@ -17,8 +17,7 @@ from promptpotter.application.campaign.campaign_setup import (
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.nodes.escalation import (
-    EscalationTarget,
+from promptpotter.application.optimization.layer_escalation import (
     build_escalation_entry,
     escalate_l2,
 )
@@ -35,6 +34,7 @@ from promptpotter.application.optimization.phases import (
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
+from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition

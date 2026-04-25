@@ -122,7 +122,8 @@ def dev_reload() -> None:
         # Service layer — safe to reload (no Pydantic model classes)
         "promptpotter.shared.hashing",
         "promptpotter.application.campaign.config",
-        "promptpotter.application.optimization.nodes.escalation",
+        "promptpotter.application.optimization.elimination",
+        "promptpotter.application.optimization.layer_escalation",
         "promptpotter.application.optimization.nodes.layer_transitions",
         "promptpotter.application.optimization.nodes.l1_critique",
         "promptpotter.application.optimization.nodes.round_execution",

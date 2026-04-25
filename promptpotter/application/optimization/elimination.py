@@ -1,83 +1,173 @@
-"""Sequential candidate elimination for the optimization loop.
+"""Candidate elimination — four mid-evaluation checks (first-to-fire wins).
 
-``EliminationCheck`` implements the ``DegradationCheck`` protocol consumed
-by ``optimization/nodes/score.py::_score_candidates``. It compares the
-in-progress candidate's per-query scores against fully-evaluated priors
-via the Wilcoxon signed-rank test (with Holm-Bonferroni correction) and
-emits an ``EscalationSignal`` to abort early when the candidate is
-statistically inferior.
+Each check exposes ``.name`` and ``.evaluate(results, candidate_idx, n_total_candidates)
+-> EscalationSignal | None``. Ordering and rationale: see
+``docs/methods/candidate-elimination.md``.
 """
 
 from __future__ import annotations
 
+from collections import Counter
+from typing import TYPE_CHECKING, Any
+
+from promptpotter.application.optimization.nodes.l1.utils import extract_warning_types
+from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.shared.statistics import should_stop_early
 
+if TYPE_CHECKING:
+    from promptpotter.application.campaign.config import CampaignConfig
+
+
+# Deterministic — one occurrence ends the candidate. Grow this set when a new
+# warning proves equally conclusive; do not expose as a tunable.
+FATAL_WARNINGS: frozenset[str] = frozenset({"llm_only:empty_content_reasoning_fallback"})
+
+
+def _eliminate(
+    name: str, check_result: dict, candidate_idx: int, n_total_candidates: int
+) -> EscalationSignal:
+    return EscalationSignal(
+        check_name=name,
+        target=EscalationTarget.ELIMINATE_CANDIDATE,
+        check_result=check_result,
+        candidate_idx=candidate_idx,
+        candidates_scored=candidate_idx + 1,
+        candidates_skipped=n_total_candidates - candidate_idx - 1,
+    )
+
+
+class DegradationCheck:
+    """Fatal-warning fast-path + rate-based degradation."""
+
+    name = "degradation"
+
+    def __init__(self, threshold: float = 0.4, min_queries: int = 3) -> None:
+        self.threshold = threshold
+        self.min_queries = min_queries
+
+    def evaluate(
+        self, results: list[dict], candidate_idx: int, n_total_candidates: int
+    ) -> EscalationSignal | None:
+        if results:
+            latest = extract_warning_types(results[-1])
+            fatal = next((w for w in latest if w in FATAL_WARNINGS), None)
+            if fatal is not None:
+                n = len(results)
+                return _eliminate(
+                    self.name,
+                    {
+                        "degraded_rate": 1.0,
+                        "degraded_count": n,
+                        "total_evaluated": n,
+                        "warning_types": {fatal: 1},
+                        "dominant_warning": fatal,
+                        "fatal": True,
+                    },
+                    candidate_idx,
+                    n_total_candidates,
+                )
+
+        n = len(results)
+        if n < self.min_queries:
+            return None
+        degraded = count_degraded_queries(results)
+        rate = degraded / n
+        if rate < self.threshold:
+            return None
+
+        wtypes: Counter[str] = Counter()
+        for r in results:
+            wtypes.update(extract_warning_types(r))
+        dominant = max(wtypes, key=wtypes.get) if wtypes else "unknown"  # type: ignore[arg-type]
+        return _eliminate(
+            self.name,
+            {
+                "degraded_rate": rate,
+                "degraded_count": degraded,
+                "total_evaluated": n,
+                "warning_types": dict(wtypes),
+                "dominant_warning": dominant,
+            },
+            candidate_idx,
+            n_total_candidates,
+        )
+
+
+class EmptyOutputCheck:
+    """Eliminate when the LLM consistently returns empty predictions."""
+
+    name = "empty_output"
+
+    def __init__(self, threshold: float = 0.5, min_queries: int = 3) -> None:
+        self.threshold = threshold
+        self.min_queries = min_queries
+
+    def evaluate(
+        self, results: list[dict], candidate_idx: int, n_total_candidates: int
+    ) -> EscalationSignal | None:
+        n = len(results)
+        if n < self.min_queries:
+            return None
+        empty = sum(1 for r in results if not str(r.get("predicted") or "").strip())
+        rate = empty / n
+        if rate < self.threshold:
+            return None
+        return _eliminate(
+            self.name,
+            {"empty_count": empty, "empty_rate": rate, "total_evaluated": n},
+            candidate_idx,
+            n_total_candidates,
+        )
+
 
 class EliminationCheck:
-    """Stateful check that eliminates inferior candidates mid-evaluation.
+    """Paired one-sided Wilcoxon signed-rank vs completed priors (Holm-Bonferroni)."""
 
-    Conforms to the ``DegradationCheck`` protocol (``.enabled``, ``.name``,
-    ``.evaluate(results_so_far, candidate_idx, n_total_candidates)``).
-    """
-
-    name: str = "elimination"
+    name = "elimination"
 
     def __init__(self, *, n_min: int = 4, alpha: float = 0.2, n_queries: int) -> None:
         self.n_min = n_min
         self.alpha = alpha
         self.n_queries = n_queries
-        self.enabled = True
-        self._prior_scores: list[list[float]] = []
-        self._prior_ids: list[str] = []
+        self.priors: list[list[float]] = []
+        self.prior_ids: list[str] = []
 
     def register_completed(self, scores: list[float], candidate_id: str = "") -> None:
-        """Register a fully-evaluated candidate's per-query scores as a prior.
-
-        ``candidate_id`` is recorded alongside so elimination-cut decision
-        records can point to the exact priors that triggered the test.
-        """
-        self._prior_scores.append(scores)
-        self._prior_ids.append(candidate_id)
-
-    def prior_ids_snapshot(self) -> list[str]:
-        """Return the list of prior candidate ids, in registration order."""
-        return list(self._prior_ids)
+        self.priors.append(scores)
+        self.prior_ids.append(candidate_id)
 
     def evaluate(
-        self,
-        results_so_far: list[dict],
-        candidate_idx: int,
-        n_total_candidates: int,
+        self, results: list[dict], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
-        """Check whether the current candidate should be eliminated.
-
-        Returns ``None`` to continue evaluation, or an ``EscalationSignal``
-        to stop the candidate early.
-        """
-        if not self._prior_scores:
+        if not self.priors:
             return None
-
-        n = len(results_so_far)
+        n = len(results)
         if n < self.n_min:
             return None
-
-        current_scores = [r.get("score", 0.0) for r in results_so_far]
-        stop, ctx = should_stop_early(current_scores, self._prior_scores, self.alpha)
-
+        scores = [r.get("score", 0.0) for r in results]
+        stop, ctx = should_stop_early(scores, self.priors, self.alpha)
         if not stop:
             return None
-
-        return EscalationSignal(
-            check_name=self.name,
-            target=EscalationTarget.ELIMINATE_CANDIDATE,
-            check_result={
+        return _eliminate(
+            self.name,
+            {
                 "queries_evaluated": n,
                 "total_queries": self.n_queries,
-                "n_priors": len(self._prior_scores),
+                "n_priors": len(self.priors),
                 **ctx,
             },
-            candidate_idx=candidate_idx,
-            candidates_scored=candidate_idx + 1,
-            candidates_skipped=n_total_candidates - candidate_idx - 1,
+            candidate_idx,
+            n_total_candidates,
         )
+
+
+def build_degradation_checks(config: CampaignConfig) -> list[Any]:
+    """Per-query checks (degradation + empty-output). EliminationCheck is built by the runner."""
+    opt = config.optimization
+    checks: list[Any] = []
+    if opt.degradation_threshold > 0:
+        checks.append(DegradationCheck(threshold=opt.degradation_threshold))
+    if opt.empty_output_threshold > 0:
+        checks.append(EmptyOutputCheck(threshold=opt.empty_output_threshold))
+    return checks

@@ -267,7 +267,7 @@ class OptimizationMemory(BaseModel):
         """Append a journal entry; fill the previous entry's pending outcome.
 
         Pure memory operation — the caller shapes the dict (see
-        ``application/optimization/nodes/escalation.py::build_escalation_entry``).
+        ``application/optimization/layer_escalation.py::build_escalation_entry``).
         """
         journal = self.escalation_journal
         if journal and journal[-1]["outcome_degraded_rate"] is None:

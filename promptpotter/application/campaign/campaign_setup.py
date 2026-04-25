@@ -29,7 +29,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.data import CampaignBaseline
     from promptpotter.application.intelligence.sample_index import SampleIndex
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.nodes.escalation import DegradationCheck
+    from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.persistence.session_emitter import (
@@ -517,7 +517,7 @@ async def init_optimization_loop(
     from promptpotter.application.datasets.builder import sample_dataset
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.nodes.escalation import build_degradation_checks
+    from promptpotter.application.optimization.elimination import build_degradation_checks
     from promptpotter.application.optimization.nodes.l1.critique import sample_thinking_styles
     from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.infrastructure.tracing import ObservabilityBridge

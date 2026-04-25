@@ -36,13 +36,13 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | Symbol | Module |
 |--------|--------|
 | `assemble_inbox` | `promptpotter/application/optimization/nodes/inbox_registry.py` |
-| `DegradationCheck` | `promptpotter/application/optimization/nodes/escalation.py` |
+| `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
-| `EmptyOutputCheck` | `promptpotter/application/optimization/nodes/escalation.py` |
-| `EscalationSignal` | `promptpotter/application/optimization/nodes/escalation.py` |
+| `EmptyOutputCheck` | `promptpotter/application/optimization/elimination.py` |
+| `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/nodes/l1/execute.py` |
-| `FATAL_WARNINGS` | `promptpotter/application/optimization/nodes/escalation.py` |
+| `FATAL_WARNINGS` | `promptpotter/application/optimization/elimination.py` |
 | `L1CritiqueAgent` | `promptpotter/application/optimization/nodes/l1/critique.py` |
 | `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `l1_generate` | `promptpotter/application/optimization/nodes/l1/generate.py` |

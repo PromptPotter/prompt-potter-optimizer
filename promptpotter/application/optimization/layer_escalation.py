@@ -1,4 +1,9 @@
-"""Degradation check + L1→L2→L3 escalation orchestration."""
+"""L1→L2→L3 layer-escalation orchestration.
+
+This module owns the patience/stall flow that transitions optimizer state
+between layers when a *round* stalls — distinct from per-query candidate
+elimination (see ``elimination.py``). Entry point is ``escalate_l2``.
+"""
 
 from __future__ import annotations
 
@@ -7,15 +12,12 @@ from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.l1.utils import extract_warning_types
 from promptpotter.application.optimization.nodes.layer_transitions import (
     L2RefineStrategy,
     L3ModifyPlan,
     LayerTransition,
 )
 from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
-from promptpotter.application.scoring.metrics import count_degraded_queries
-from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared.errors import graceful
 
@@ -27,14 +29,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "FATAL_WARNINGS",
-    "DegradationCheck",
-    "EmptyOutputCheck",
-    "build_degradation_checks",
-    "build_escalation_entry",
-    "escalate_l2",
-]
+__all__ = ["build_escalation_entry", "escalate_l2"]
 
 
 def build_escalation_entry(
@@ -54,128 +49,6 @@ def build_escalation_entry(
         "warning_types": check_result.get("warning_types", {}),
         "outcome_degraded_rate": None,
     }
-
-
-# Warnings that are deterministic — one occurrence ends the candidate (no retry).
-FATAL_WARNINGS: frozenset[str] = frozenset(
-    {
-        "llm_only:empty_content_reasoning_fallback",
-    }
-)
-
-
-class DegradationCheck:
-    """Eliminates a candidate when warnings look terminal (fatal fast-path + rate-based)."""
-
-    name = "degradation"
-
-    def __init__(self, threshold: float = 0.4, min_queries: int = 3):
-        self.enabled = True
-        self.threshold = threshold
-        self.min_queries = min_queries
-
-    def evaluate(
-        self,
-        results_so_far: list[dict],
-        candidate_idx: int,
-        n_total_candidates: int,
-    ) -> EscalationSignal | None:
-        # Fast-path: a single fatal warning on the newest query ends the candidate.
-        if results_so_far:
-            latest_warnings = extract_warning_types(results_so_far[-1])
-            fatal_hit = next((w for w in latest_warnings if w in FATAL_WARNINGS), None)
-            if fatal_hit is not None:
-                n = len(results_so_far)
-                return EscalationSignal(
-                    check_name=self.name,
-                    target=EscalationTarget.ELIMINATE_CANDIDATE,
-                    check_result={
-                        "degraded_rate": 1.0,
-                        "degraded_count": n,
-                        "total_evaluated": n,
-                        "warning_types": {fatal_hit: 1},
-                        "dominant_warning": fatal_hit,
-                        "fatal": True,
-                    },
-                    candidate_idx=candidate_idx,
-                    candidates_scored=candidate_idx + 1,
-                    candidates_skipped=n_total_candidates - candidate_idx - 1,
-                )
-
-        if len(results_so_far) < self.min_queries:
-            return None
-
-        degraded = count_degraded_queries(results_so_far)
-        rate = degraded / len(results_so_far)
-        if rate < self.threshold:
-            return None
-
-        warning_types: Counter[str] = Counter()
-        for r in results_so_far:
-            warning_types.update(extract_warning_types(r))
-        dominant = max(warning_types, key=warning_types.get) if warning_types else "unknown"  # type: ignore[arg-type]
-
-        return EscalationSignal(
-            check_name=self.name,
-            target=EscalationTarget.ELIMINATE_CANDIDATE,
-            check_result={
-                "degraded_rate": rate,
-                "degraded_count": degraded,
-                "total_evaluated": len(results_so_far),
-                "warning_types": dict(warning_types),
-                "dominant_warning": dominant,
-            },
-            candidate_idx=candidate_idx,
-            candidates_scored=candidate_idx + 1,
-            candidates_skipped=n_total_candidates - candidate_idx - 1,
-        )
-
-
-class EmptyOutputCheck:
-    """Eliminates candidates whose LLM consistently returns empty predictions."""
-
-    name = "empty_output"
-
-    def __init__(self, threshold: float = 0.5, min_queries: int = 3) -> None:
-        self.enabled = threshold > 0
-        self.threshold = threshold
-        self.min_queries = min_queries
-
-    def evaluate(
-        self,
-        results_so_far: list[dict],
-        candidate_idx: int,
-        n_total_candidates: int,
-    ) -> EscalationSignal | None:
-        if len(results_so_far) < self.min_queries:
-            return None
-        empty = sum(1 for r in results_so_far if not str(r.get("predicted") or "").strip())
-        rate = empty / len(results_so_far)
-        if rate < self.threshold:
-            return None
-        return EscalationSignal(
-            check_name=self.name,
-            target=EscalationTarget.ELIMINATE_CANDIDATE,
-            check_result={
-                "empty_count": empty,
-                "empty_rate": rate,
-                "total_evaluated": len(results_so_far),
-            },
-            candidate_idx=candidate_idx,
-            candidates_scored=candidate_idx + 1,
-            candidates_skipped=n_total_candidates - candidate_idx - 1,
-        )
-
-
-def build_degradation_checks(config: CampaignConfig) -> list[Any]:
-    """Return the list of enabled per-query checks (degradation + empty-output)."""
-    checks: list[Any] = []
-    opt = config.optimization
-    if opt.degradation_threshold > 0:
-        checks.append(DegradationCheck(threshold=opt.degradation_threshold))
-    if opt.empty_output_threshold > 0:
-        checks.append(EmptyOutputCheck(threshold=opt.empty_output_threshold))
-    return checks
 
 
 def _maybe_emit_backend_warning(
@@ -205,10 +78,10 @@ def _maybe_emit_backend_warning(
         "notify",
         round=round_num,
         message=(
-            f"Repeated pipeline degradation \u2014 {count} investigation "
+            f"Repeated pipeline degradation — {count} investigation "
             "cycles exhausted. Likely a backend server issue."
         ),
-        advice="Paste warnings + connector code into Claude Code \u2192 docs/connectors",
+        advice="Paste warnings + connector code into Claude Code → docs/connectors",
         degradation_reset_count=count,
         problem_steps=steps,
         persistent_warning_types=dict(wtypes),

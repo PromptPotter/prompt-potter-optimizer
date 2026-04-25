@@ -348,9 +348,7 @@ async def score_candidates(
             schema=session.pipeline_schema,
         )
 
-        all_checks = list(degradation_checks or [])
-        if elim_check.enabled:
-            all_checks.append(elim_check)
+        all_checks = [*(degradation_checks or []), elim_check]
 
         def _on_result(r, qi, qt, _ci=idx):
             callbacks.on_sample_scored(_ci, n_candidates, qi, qt, r)
@@ -378,7 +376,7 @@ async def score_candidates(
             continue
 
         # Path 3 — scored. Snapshot priors BEFORE helper registers this candidate.
-        priors_at_test = elim_check.prior_ids_snapshot()
+        priors_at_test = list(elim_check.prior_ids)
         report, residual = _handle_scored_candidate(
             osp_c, override, results, scores, signal, merged_pp[idx], dataset, elim_check, round_num
         )

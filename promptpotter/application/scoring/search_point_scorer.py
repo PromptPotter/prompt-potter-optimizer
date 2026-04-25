@@ -320,16 +320,11 @@ async def _run_query_loop(
     )
 
     def _check_escalation() -> EscalationSignal | None:
-        return next(
-            (
-                s
-                for c in (degradation_checks or [])
-                if c.enabled
-                for s in (c.evaluate(state.results, candidate_idx, n_total_candidates),)
-                if s
-            ),
-            None,
-        )
+        for c in degradation_checks or []:
+            signal = c.evaluate(state.results, candidate_idx, n_total_candidates)
+            if signal is not None:
+                return signal
+        return None
 
     def _fire_on_measurement(result: QueryResult) -> None:
         """Auto-trigger: synchronous SampleIndex update after each measurement."""

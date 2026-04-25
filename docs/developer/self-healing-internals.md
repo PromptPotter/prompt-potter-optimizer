@@ -115,7 +115,7 @@ Validation is the only one that fires *before* evaluation — it needs nothing b
 
 ## `FATAL_WARNINGS` — hardcoded invariant
 
-`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `application/optimization/nodes/escalation.py`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `application/optimization/elimination.py`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
 
 ---
 
