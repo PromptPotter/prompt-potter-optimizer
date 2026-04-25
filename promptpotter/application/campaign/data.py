@@ -12,7 +12,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.campaign_setup import Session, load_baseline_prompt
+from promptpotter.application.campaign.campaign_setup import (
+    Session,
+    load_baseline_prompt,
+    populate_session_scoring,
+)
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
@@ -127,19 +131,20 @@ async def _run_baseline_scoring(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    # Populate the session's scoring block via for_baseline so the trace's
-    # ``scored`` audit map is keyed by the active scorer_id, matching the
-    # loop's bookkeeping. Overwrites session.scorer / source temporarily —
-    # the loop rebuilds these via for_loop before round 1.
+    # Populate the session's scoring block so the trace's ``scored`` audit
+    # map is keyed by the active scorer_id, matching the loop's
+    # bookkeeping. Overwrites session.scorer / source temporarily — the
+    # loop repopulates these before round 1.
     prior_schema = session.pipeline_schema
     if pipeline_schema is not None:
         session.pipeline_schema = pipeline_schema
-    Session.for_baseline(
+    populate_session_scoring(
         session,
         obs=obs,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
+        source="baseline",
     )
 
     # Wrap the listener with baseline pseudo-candidate coords (ci=0/ct=1) so

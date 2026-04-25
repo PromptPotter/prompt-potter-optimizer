@@ -51,6 +51,7 @@ __all__ = [
     "init_services",
     "load_baseline_prompt",
     "new_session_state",
+    "populate_session_scoring",
     "resolve_campaign_id",
     "resume_or_create",
 ]
@@ -104,80 +105,47 @@ class Session:
     source: str = ""
     stop_check: Callable[[], bool] | None = None
 
-    @classmethod
-    def for_loop(
-        cls,
-        base: Session,
-        *,
-        obs: ObservabilityBridge | None,
-        experiment_id: str,
-        cycle_id: str | None,
-        max_consecutive_errors: int,
-        stale_data_load_protocol: list[str] | None,
-        scoring_formula: str | None,
-        scoring_round_formula: str | None = None,
-        scorer_id: str | None = None,
-        source: str = "optimization_loop",
-    ) -> Session:
-        """Populate a ``Session`` in place with the scoring block for an optimization-loop run.
 
-        Owns the derived ``experiment_id`` fallback (short cycle-id prefix
-        when not explicitly set) and the scoring-formula compilation so the
-        caller just hands over raw config. Mutates *base* (attaches scorer +
-        derived fields) and returns it for chaining.
-        """
-        from promptpotter.shared.scoring import (
-            auto_scorer_id,
-            compile_round_scorer,
-            compile_scorer,
-        )
+def populate_session_scoring(
+    session: Session,
+    *,
+    obs: ObservabilityBridge | None,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None = None,
+    scorer_id: str | None = None,
+    experiment_id: str = "",
+    cycle_id: str | None = None,
+    max_consecutive_errors: int = 3,
+    stale_data_load_protocol: list[str] | None = None,
+    source: str = "optimization_loop",
+) -> None:
+    """Attach the scoring block onto ``session`` (mutates in place).
 
-        derived_experiment_id = experiment_id or (
-            cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
-        )
-        round_scorer = (
-            compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
-        )
-        base.experiment_id = derived_experiment_id
-        base.obs = obs
-        base.source = source
-        base.max_consecutive_errors = max_consecutive_errors
-        base.stale_data_load_protocol = stale_data_load_protocol
-        base.scorer = compile_scorer(scoring_formula)
-        base.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
-        base.scorer_formula = scoring_formula
-        base.round_scorer = round_scorer
-        return base
+    Single populate path used by both phases — the live optimization loop
+    overrides ``experiment_id`` / ``cycle_id`` / ``max_consecutive_errors``
+    / ``stale_data_load_protocol``; the baseline pass passes
+    ``source="baseline"`` and accepts the defaults. Falls back the
+    ``experiment_id`` to the short cycle-id prefix when not set.
+    """
+    from promptpotter.shared.scoring import (
+        auto_scorer_id,
+        compile_round_scorer,
+        compile_scorer,
+    )
 
-    @classmethod
-    def for_baseline(
-        cls,
-        base: Session,
-        *,
-        obs: ObservabilityBridge | None,
-        scoring_formula: str | None,
-        scoring_round_formula: str | None = None,
-        scorer_id: str | None = None,
-    ) -> Session:
-        """Populate *base* with baseline scoring block (phase 0 of ``optimize``).
-
-        Thin delegation to ``for_loop`` — keeps one source of truth for the
-        scorer-trio compilation. Baseline runs before ``cycle_id`` is bound
-        and on a small scoring set, so it doesn't carry the loop's
-        cycle-derived ``experiment_id`` or stale-data protocol.
-        """
-        return cls.for_loop(
-            base,
-            obs=obs,
-            experiment_id="",
-            cycle_id=None,
-            max_consecutive_errors=3,
-            stale_data_load_protocol=None,
-            scoring_formula=scoring_formula,
-            scoring_round_formula=scoring_round_formula,
-            scorer_id=scorer_id,
-            source="baseline",
-        )
+    session.experiment_id = experiment_id or (
+        cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
+    )
+    session.obs = obs
+    session.source = source
+    session.max_consecutive_errors = max_consecutive_errors
+    session.stale_data_load_protocol = stale_data_load_protocol
+    session.scorer = compile_scorer(scoring_formula)
+    session.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
+    session.scorer_formula = scoring_formula
+    session.round_scorer = (
+        compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
+    )
 
 
 def new_session_state(
@@ -764,7 +732,7 @@ async def init_optimization_loop(
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
 
-    Session.for_loop(
+    populate_session_scoring(
         session,
         obs=obs,
         experiment_id=experiment_id,

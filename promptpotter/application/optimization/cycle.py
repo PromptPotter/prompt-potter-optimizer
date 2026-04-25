@@ -59,21 +59,42 @@ class EscalationState:
             best_composite_at_entry=best_composite,
         )
 
-    def to_checkpoint_dict(self) -> dict[str, int]:
+    def to_checkpoint_dict(self) -> dict[str, Any]:
+        """Serialize for trial dict — includes entry baselines so patience semantics survive resume.
+
+        Without ``best_*_at_entry``, ``LayerCounter.record_outcome`` after
+        resume compares against 0.0 and treats every round as improved,
+        silently zeroing ``stall_count`` and breaking L2/L3 patience.
+        """
         return {
             "l1_stall_count": self.l1_stall_count,
             "l2_round": self.l2.round,
             "l3_round": self.l3.round,
             "l2_stall_count": self.l2.stall_count,
             "l3_stall_count": self.l3.stall_count,
+            "l2_best_accuracy_at_entry": self.l2.best_accuracy_at_entry,
+            "l2_best_composite_at_entry": self.l2.best_composite_at_entry,
+            "l3_best_accuracy_at_entry": self.l3.best_accuracy_at_entry,
+            "l3_best_composite_at_entry": self.l3.best_composite_at_entry,
         }
 
     @classmethod
     def from_checkpoint_dict(cls, d: dict) -> EscalationState:
+        """Restore — defaults the new entry-baseline keys to 0.0 for old trials."""
         return cls(
             l1_stall_count=d["l1_stall_count"],
-            l2=LayerCounter(round=d["l2_round"], stall_count=d["l2_stall_count"]),
-            l3=LayerCounter(round=d["l3_round"], stall_count=d["l3_stall_count"]),
+            l2=LayerCounter(
+                round=d["l2_round"],
+                stall_count=d["l2_stall_count"],
+                best_accuracy_at_entry=d.get("l2_best_accuracy_at_entry", 0.0),
+                best_composite_at_entry=d.get("l2_best_composite_at_entry", 0.0),
+            ),
+            l3=LayerCounter(
+                round=d["l3_round"],
+                stall_count=d["l3_stall_count"],
+                best_accuracy_at_entry=d.get("l3_best_accuracy_at_entry", 0.0),
+                best_composite_at_entry=d.get("l3_best_composite_at_entry", 0.0),
+            ),
         )
 
 
@@ -91,6 +112,12 @@ class Cycle:
     """
 
     # ---- back-refs ----
+    # Always set in the active loop (``Cycle.start`` populates them);
+    # the ``None`` default is only to keep dataclass field-ordering valid
+    # so tests + the adaptive-prefix subsystem can build a Cycle in
+    # isolation. Consumers in the active loop dereference without
+    # guards — typing them ``Session | None`` would force ~30 asserts
+    # for no real safety win.
     session: Session = None  # type: ignore[assignment]
     config: CampaignConfig = None  # type: ignore[assignment]
 
