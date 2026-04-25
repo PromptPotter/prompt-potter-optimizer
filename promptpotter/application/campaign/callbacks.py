@@ -11,8 +11,8 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.domain.phases import PhaseEvent
 
 __all__ = ["RunListener"]
 

@@ -17,14 +17,14 @@ from promptpotter.application.optimization.nodes.layer_transitions import (
     L3ModifyPlan,
     LayerTransition,
 )
-from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent, emit_phase
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
 from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.phases import StopReason
+    from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -219,7 +219,7 @@ async def escalate_l2(
     """L1→L2 (and optional L2→L3) escalation; from_degradation resets counters instead of stopping."""
     from promptpotter.application.campaign.decisions import record_decision
     from promptpotter.application.optimization.nodes.l1 import PauseForReviewError
-    from promptpotter.application.optimization.phases import StopReason
+    from promptpotter.domain.phases import StopReason
 
     opt = config.optimization
     esc = cycle.escalation

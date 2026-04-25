@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING, Any
 
 from tqdm.auto import tqdm
 
-from promptpotter.application.optimization.phases import CampaignPhase
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.presentation.ui.campaign.notebook_primitives import (
     BOLD,
     GREEN,
@@ -31,8 +31,8 @@ from promptpotter.presentation.ui.campaign.notebook_primitives import (
 from promptpotter.presentation.views.formatting import fmt_pct
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.domain.phases import PhaseEvent
 
 
 _PHASE_HEADERS: dict[str, str] = {

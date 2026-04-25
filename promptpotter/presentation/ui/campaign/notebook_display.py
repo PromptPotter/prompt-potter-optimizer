@@ -12,8 +12,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.infrastructure.persistence.session_emitter import (
     append_journal,
     read_claude_notes,

@@ -15,7 +15,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.phases import CampaignPhase
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.persistence.dashboard_md import (
     fmt_sample_line,
@@ -29,8 +29,8 @@ from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import HardSampleSorterConfig
-    from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult, RunResult
+    from promptpotter.domain.phases import PhaseEvent
 
 __all__ = [
     "CAMPAIGN_ARTIFACTS",

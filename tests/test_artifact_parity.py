@@ -73,8 +73,8 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
 
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.phases import PhaseEvent
     from promptpotter.application.optimization.results import RoundResult, RunResult
+    from promptpotter.domain.phases import PhaseEvent
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 
     session_dir, campaign_dir = session_and_campaign_dirs

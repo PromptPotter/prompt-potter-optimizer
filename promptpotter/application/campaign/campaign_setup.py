@@ -10,7 +10,6 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.phases import StopReason
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -18,6 +17,7 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
@@ -670,7 +670,7 @@ async def init_optimization_loop(
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import build_degradation_checks
     from promptpotter.application.optimization.nodes.l1.critique import sample_thinking_styles
-    from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
     from promptpotter.infrastructure.tracing import ObservabilityBridge
     from promptpotter.shared.scoring import compile_round_scorer
 

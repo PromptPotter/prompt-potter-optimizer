@@ -27,9 +27,9 @@ from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
     assemble_inbox,
 )
-from promptpotter.application.optimization.phases import CampaignPhase
 from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.shared.llm_parsing import extract_parsed_json
 

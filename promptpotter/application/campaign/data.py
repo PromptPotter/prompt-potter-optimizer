@@ -100,8 +100,8 @@ async def _run_baseline_scoring(
     scorer_id: str | None = None,
 ) -> tuple[list, list]:
     """Score the baseline prompt and build initial campaign_rounds list."""
-    from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
     from promptpotter.application.scoring.search_point_scorer import score_search_point
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
     from promptpotter.shared.errors import graceful
 
     backend_client = session.backend_client

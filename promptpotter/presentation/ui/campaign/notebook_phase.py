@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 
-from promptpotter.application.optimization.phases import PhaseEvent
+from promptpotter.domain.phases import PhaseEvent
 from promptpotter.shared.statistics import min_detectable_effect
 
 from .notebook_primitives import (
