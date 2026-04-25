@@ -6,6 +6,10 @@ The data is shared across campaigns. A campaign running on a new dataset sees wh
 
 ---
 
+## 🧬 SearchPoint — the unit of evaluation
+
+Every evaluation is a **SearchPoint**: content-hashable, stored once, discoverable by any workflow. The decomposed prompt fields and pipeline parameters live together inside it, which is what makes joint search possible in the first place. See [prompt-scheme-internals.md](../developer/prompt-scheme-internals.md) for the SearchPoint hierarchy and alias groups.
+
 ## Three pillars
 
 Search memory tracks three things, each answering a different question.

@@ -64,3 +64,11 @@ A stall escalates upward, but each layer continues to run in its own slot. When 
 The eight prompt fields aren't a hard ceiling. L2 can add a field — say, `domain_constraints` — to widen the search space when prior fields haven't captured the right axis. It can also remove a field that's proved irrelevant. This keeps the prompt-field set matched to what the current problem actually demands.
 
 For the mechanics of each layer — what data flows in, what memory persists, what signals escalation — see [self-healing.md](self-healing.md) and [../developer/information-flow.md](../developer/information-flow.md).
+
+## Inspiration and call sites
+
+The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). This separates failure analysis (critique) from candidate generation (L1 generate), which keeps the two from interfering.
+
+Five LLM call sites in the loop: `restructure` (one-time prompt decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`.
+
+Candidate comparison uses confidence intervals and two-proportion significance tests. Non-parametric tests are planned.

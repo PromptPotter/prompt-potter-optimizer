@@ -4,7 +4,23 @@ PromptPotter doesn't treat a prompt as one opaque string. It decomposes every pr
 
 ---
 
-## The eight fields
+## The prompt scheme
+
+PromptPotter decomposes your backend's monolithic prompt into independently optimizable fields:
+
+```
+┌─ PROMPT SCHEME ──────────────────────────┐
+│  1. task_intent                          │
+│  2. problem_description                  │
+│  3. instruction                          │
+│  4. thinking_style                       │
+│  5. answer_format                        │
+│  6. domain_constraints                   │
+│  +/- [???] auto configuring              │
+└──────────────────────────────────────────┘
+```
+
+### The eight fields
 
 | # | Field | Purpose |
 |---|-------|---------|

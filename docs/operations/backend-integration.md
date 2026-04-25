@@ -2,9 +2,19 @@
 
 PromptPotter works with any backend that implements a small contract. The pipeline can be anything from a single LLM call to a multi-step pipeline with retrieval, enrichment, and ranking nodes. PromptPotter discovers the pipeline structure via `GET /pipeline` and optimizes the parameters it finds there.
 
----
+## 🔌 Backend contract
+The optimizer searches the parameters declared in `/{your_project}/pipeline.json`. Currently tested with [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). See [`docs/operations/backend-integration.md`](docs/operations/backend-integration.md) for the full contract.
 
-## Backend contract
+```
+┌──────────────────────┐                       ┌──────────────────────┐
+│  Your Backend        │  GET  /pipeline   ──► │  PromptPotter        │
+│  (any pipeline)      │                       │  Optimizer           │
+│                      │  POST /matches    ◄── │                      │
+│  runs the task       │   {prompt, params}    │  generates candidates│
+│                      │                       │  scores + critiques  │
+│                      │  → predictions    ──► │  iterates            │
+└──────────────────────┘                       └──────────────────────┘
+```
 
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
