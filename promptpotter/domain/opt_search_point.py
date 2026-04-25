@@ -159,11 +159,35 @@ class PromptTemplate(SearchPoint):
         Return type follows ``cls`` — ``PromptTemplate.from_prompt_fields()``
         returns ``PromptTemplate``; ``OptSearchPoint.from_prompt_fields()``
         returns ``OptSearchPoint``.
+
+        For ``OptSearchPoint``, flat lineage keys (``id``, ``parent_id``,
+        ``changes_description``, ``created_at``) are extracted from *fields*
+        and bundled into a ``CandidateLineage`` so callers passing a legacy
+        flat dict (e.g. the ``winner_dict`` from ``l1_score``) still work.
         """
         fields = dict(fields)  # don't mutate caller's dict
         fse = fields.pop("few_shot_examples", [])
         if fse and isinstance(fse[0], dict):
             fse = [FewShotExample(**ex) for ex in fse]
+        # Extract flat lineage keys when present (OptSearchPoint callers only).
+        lin_id = fields.pop("id", None)
+        lin_parent = fields.pop("parent_id", None)
+        lin_desc = fields.pop("changes_description", None)
+        lin_ts = fields.pop("created_at", None)
+        lineage_kw: dict[str, Any] = {
+            k: v
+            for k, v in [
+                ("id", lin_id),
+                ("parent_id", lin_parent),
+                ("changes_description", lin_desc),
+                ("created_at", lin_ts),
+            ]
+            if v is not None
+        }
+        if lineage_kw and "lineage" not in kwargs:
+            from promptpotter.domain.opt_search_point import CandidateLineage
+
+            kwargs["lineage"] = CandidateLineage(**lineage_kw)
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
@@ -275,21 +299,37 @@ class OptimizationMemory(BaseModel):
         journal.append(entry)
 
 
+class CandidateLineage(BaseModel):
+    """Identity and provenance of a single candidate search point.
+
+    Groups the four fields that describe *what this candidate is and where it
+    came from*.  Set once at candidate creation (``derive_candidate`` and
+    ``OptSearchPoint.__init__``); never mutated after that.
+    """
+
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    parent_id: str | None = None
+    changes_description: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
 class OptSearchPoint(PromptTemplate):
     """Optimizer-level search point — the optimizer's full working state.
 
     Inherits the 8 prompt fields and rendering from ``PromptTemplate``.
-    Adds lineage tracking, L2/L3 optimizer state, and optimization memory.
+    Adds four top-level groups beyond the prompt fields:
+
+    - ``lineage``        — identity + provenance (id, parent_id, ...)
+    - ``optimizer_params`` — L2/L3 tuning knobs
+    - ``task_context``  — structured domain understanding (TaskDecomposition)
+    - ``memory``        — cross-round working state (OptimizationMemory)
 
     Persisted in trial checkpoints. Enables L4 to correlate optimizer
     configuration with target-pipeline evaluation outcomes.
     """
 
     # -- Lineage -------------------------------------------------------------
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    parent_id: str | None = None
-    changes_description: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    lineage: CandidateLineage = Field(default_factory=CandidateLineage)
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
@@ -375,10 +415,11 @@ class OptSearchPoint(PromptTemplate):
     def derive_candidate(self, **changes: Any) -> OptSearchPoint:
         """Create a child OptSearchPoint with prompt field modifications.
 
-        Sets parent_id to this instance's id. Generates a new id/timestamp.
-        Copies prompt decomposition + L2/L3 state. ``memory`` is *not*
-        copied — children start fresh and only inherit accumulated memory
-        when L2/L3 transitions adopt them via ``Cycle.apply_transition``.
+        Sets lineage.parent_id to this instance's lineage.id. Generates a
+        new id/timestamp via a fresh CandidateLineage. Copies prompt
+        decomposition + L2/L3 state. ``memory`` is *not* copied — children
+        start fresh and only inherit accumulated memory when L2/L3
+        transitions adopt them via ``Cycle.apply_transition``.
         """
         data: dict[str, Any] = {}
         # Copy prompt decomposition fields
@@ -397,8 +438,10 @@ class OptSearchPoint(PromptTemplate):
         data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
         # Lineage
-        data["parent_id"] = self.id
-        data["changes_description"] = changes.pop("changes_description", "")
+        data["lineage"] = CandidateLineage(
+            parent_id=self.lineage.id,
+            changes_description=changes.pop("changes_description", ""),
+        )
         # Any remaining changes
         data.update(changes)
         return OptSearchPoint(**data)

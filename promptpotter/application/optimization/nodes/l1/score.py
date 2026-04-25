@@ -39,8 +39,8 @@ def select_round_winner(
     assert pipeline_schema is not None, "select_round_winner requires pipeline_schema"
 
     candidate_scores = {
-        c.id: compute_composite_score(
-            all_candidate_results[c.id],
+        c.lineage.id: compute_composite_score(
+            all_candidate_results[c.lineage.id],
             pipeline_schema,
             opt_sp=c,
             round_scorer=round_scorer,
@@ -57,14 +57,14 @@ def select_round_winner(
     winner_idx: int | None = None
 
     for idx, candidate in enumerate(candidates):
-        c_scores = candidate_scores[candidate.id]
+        c_scores = candidate_scores[candidate.lineage.id]
         c_acc = c_scores["accuracy"]
         if c_acc > best_acc:
             best_acc = c_acc
             best_composite = c_scores["composite"]
             best_ps = candidate
-            best_results = all_candidate_results[candidate.id]
-            best_label = candidate.changes_description or candidate.id[:12]
+            best_results = all_candidate_results[candidate.lineage.id]
+            best_label = candidate.lineage.changes_description or candidate.lineage.id[:12]
             best_evaluators = dict(c_scores.get("evaluators") or {})
             winner_idx = idx
 
@@ -155,7 +155,9 @@ async def l1_score(
         if cs.get("escalation_aborted") and not cs.get("elimination_stopped")
     }
     evaluated_candidates = [
-        c for c in osp_candidates if c.id in all_candidate_results and c.id not in aborted_ids
+        c
+        for c in osp_candidates
+        if c.lineage.id in all_candidate_results and c.lineage.id not in aborted_ids
     ]
     winner_entry = select_round_winner(
         evaluated_candidates,
@@ -169,12 +171,16 @@ async def l1_score(
     from promptpotter.application.campaign.decisions import record_decision
 
     w_idx = winner_entry["winner_idx"]
-    winner_id = evaluated_candidates[w_idx].id if w_idx is not None and evaluated_candidates else ""
+    winner_id = (
+        evaluated_candidates[w_idx].lineage.id
+        if w_idx is not None and evaluated_candidates
+        else ""
+    )
     record_decision(
         decisions,
         "round_winner",
         {
-            "candidate_ids": [c.id for c in evaluated_candidates],
+            "candidate_ids": [c.lineage.id for c in evaluated_candidates],
             "round_num": round_num,
         },
         winner_id,
@@ -186,9 +192,9 @@ async def l1_score(
     winner_results = winner_entry["results"]
     winner_dict = {
         **winner_osp.prompt_field_dict(),
-        "id": winner_osp.id,
-        "parent_id": winner_osp.parent_id,
-        "changes_description": winner_osp.changes_description,
+        "id": winner_osp.lineage.id,
+        "parent_id": winner_osp.lineage.parent_id,
+        "changes_description": winner_osp.lineage.changes_description,
     }
     return L1ScoringResult(
         label=winner_entry["label"],

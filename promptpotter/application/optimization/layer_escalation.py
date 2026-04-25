@@ -146,7 +146,7 @@ async def _run_transition(
                 layer=transition.layer,
                 campaign_id=obs_campaign_id,
                 round_num=round_num,
-                changes_description=result.opt_search_point.changes_description or "",
+                changes_description=result.opt_search_point.lineage.changes_description or "",
             )
     transition.apply_side_effects(cycle, result, round_num)
     emit_phase(

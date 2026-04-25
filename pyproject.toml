@@ -97,7 +97,7 @@ python_version = "3.13"
 warn_unused_configs = true
 warn_redundant_casts = true
 plugins = ["pydantic.mypy"]
-exclude = ["^datasets/"]
+exclude = ["^datasets/", "^promptpotter/application/recon/"]
 namespace_packages = false
 
 [[tool.mypy.overrides]]

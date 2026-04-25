@@ -73,7 +73,7 @@ def parse_candidates(
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r",
-                        osp.id[:8],
+                        osp.lineage.id[:8],
                         vf.axis,
                         vf.value,
                         vf.allowed,
@@ -100,8 +100,8 @@ def _build_score_report(
     """Build unified candidate score report dict."""
     vfs = osp.memory.validation_failures
     return {
-        "candidate_id": osp.id,
-        "changes_description": osp.changes_description or "",
+        "candidate_id": osp.lineage.id,
+        "changes_description": osp.lineage.changes_description or "",
         "pipeline_params_override": override,
         "accuracy": scores["accuracy"],
         "composite": scores.get("composite", scores["accuracy"]),
@@ -148,7 +148,7 @@ def _handle_cache_hit(
     elim_check: Any,
 ) -> dict:
     """Full-run cache hit — register with elim_check and build replay report."""
-    elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
+    elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id)
     return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
 
 
@@ -172,10 +172,10 @@ def _handle_scored_candidate(
 
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
     if len(results) == len(dataset) and not aborted:
-        elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.id)
+        elim_check.register_completed([r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id)
 
     new_rf: RuntimeFailure | None = None
-    candidate_label = osp_c.changes_description or ""
+    candidate_label = osp_c.lineage.changes_description or ""
     if elimination_stopped and signal is not None and signal.check_name == "degradation":
         cr = signal.check_result
         dominant = cr.get("dominant_warning", "unknown:unknown")
@@ -270,7 +270,7 @@ def _record_elimination_cut(
             decisions,
             "elimination_cut",
             {
-                "candidate_id": osp_c.id,
+                "candidate_id": osp_c.lineage.id,
                 "prior_candidate_ids": priors_at_test,
                 "queries_evaluated": int(cr.get("queries_evaluated", n_results)),
                 "alpha": float(elim_check.alpha),
@@ -334,12 +334,12 @@ async def score_candidates(
 
     for idx, osp_c in enumerate(osp_candidates):
         override = candidate_overrides[idx]
-        callbacks.on_candidate_started(idx, n_candidates, osp_c.changes_description or "", override)
+        callbacks.on_candidate_started(idx, n_candidates, osp_c.lineage.changes_description or "", override)
 
         # Path 1 — validation-skip synthetic-0.
         if osp_c.memory.validation_failures:
             results, report = _handle_validation_skip(osp_c, override, dataset)
-            all_candidate_results[osp_c.id] = results
+            all_candidate_results[osp_c.lineage.id] = results
             _fire(idx, report)
             continue
 
@@ -368,7 +368,7 @@ async def score_candidates(
             n_total_candidates=n_candidates,
             search_memory=search_memory,
         )
-        all_candidate_results[osp_c.id] = results
+        all_candidate_results[osp_c.lineage.id] = results
 
         # Path 2 — full-run cache replay
         if was_cached:

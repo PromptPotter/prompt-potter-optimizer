@@ -43,7 +43,7 @@ def lineage_hops(a: OptSearchPoint, b: OptSearchPoint, lineage: dict[str, str | 
     for the baseline). Hops to LCA on each side, summed. Returns a large
     sentinel when the two candidates have no common ancestor in the DAG.
     """
-    if a.id == b.id:
+    if a.lineage.id == b.lineage.id:
         return 0
 
     def chain(start: str) -> list[str]:
@@ -56,8 +56,8 @@ def lineage_hops(a: OptSearchPoint, b: OptSearchPoint, lineage: dict[str, str | 
             cur = lineage.get(cur)
         return out
 
-    chain_a = chain(a.id)
-    chain_b = chain(b.id)
+    chain_a = chain(a.lineage.id)
+    chain_b = chain(b.lineage.id)
     set_b = {cid: i for i, cid in enumerate(chain_b)}
     for i, cid in enumerate(chain_a):
         if cid in set_b:

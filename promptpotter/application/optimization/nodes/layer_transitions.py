@@ -253,7 +253,7 @@ class L2RefineStrategy(LayerTransition):
             data={
                 "action": str(result.action),
                 "l2_directive_preview": (result.l2_directive or "")[:200],
-                "changes_description": result.opt_search_point.changes_description or "",
+                "changes_description": result.opt_search_point.lineage.changes_description or "",
             },
         )
         if is_probe:
@@ -281,7 +281,7 @@ class L2RefineStrategy(LayerTransition):
             "l2_round": cycle.escalation.l2.round,
             "param_changes_count": len(result.opt_search_point.optimizer_params),
             "task_context_changed": result.task_context is not None,
-            "changes_description": result.opt_search_point.changes_description or "",
+            "changes_description": result.opt_search_point.lineage.changes_description or "",
             "pipeline_params_changed": result.pipeline_params is not None,
             "pipeline_params": result.pipeline_params,
             "action": result.action,
@@ -405,7 +405,7 @@ class L3ModifyPlan(LayerTransition):
         return {
             "l3_round": cycle.escalation.l3.round,
             "new_plan_preview": str(result.opt_search_point.plan)[:120],
-            "changes_description": result.opt_search_point.changes_description or "",
+            "changes_description": result.opt_search_point.lineage.changes_description or "",
             "pipeline_params_changed": result.pipeline_params is not None,
         }
 

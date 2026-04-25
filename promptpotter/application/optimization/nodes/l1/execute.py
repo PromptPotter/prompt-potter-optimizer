@@ -286,7 +286,7 @@ async def _score_and_select(
         )
 
         if obs and scoring_result.candidate_scores:
-            winner_id = str(scoring_result.winner_prompt_fields.get("id", ""))
+            winner_id = str(scoring_result.winner_prompt_fields.get("id") or "")
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
@@ -444,10 +444,10 @@ async def execute_round(
                 PromptVersion(
                     campaign_id=session.obs_campaign_id,
                     round_num=round_num,
-                    prompt_fields_id=w_osp.id,
+                    prompt_fields_id=w_osp.lineage.id,
                     rendered_prompt=w_osp.render(),
                     layer1_fields={f: getattr(w_osp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_id=w_osp.parent_id,
+                    parent_id=w_osp.lineage.parent_id,
                 )
             )
 

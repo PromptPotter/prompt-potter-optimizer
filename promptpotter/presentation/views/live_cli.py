@@ -24,15 +24,21 @@ from promptpotter.presentation.ui.campaign.notebook_primitives import (
     YELLOW,
     _fmt_delta,
     _fmt_query_result,
+    _node_bottom,
+    _node_top,
     _scoreboard,
     build_candidate_summary,
     fmt_candidate_header,
+    render_patience_status,
+    render_progress_table,
+    render_round_stats,
 )
 from promptpotter.presentation.views.formatting import fmt_pct
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.phases import PhaseEvent
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
 _PHASE_HEADERS: dict[str, str] = {
@@ -67,6 +73,7 @@ class CliDisplay:
         l1_patience: int,
         sp_budget_ttest: int,
         scoring_formula: str | None = None,
+        pipeline_schema: PipelineSchema | None = None,
     ) -> None:
         self.baseline_acc = baseline_acc  # rolling — bumped on improvement
         self.original_baseline = baseline_acc
@@ -74,11 +81,13 @@ class CliDisplay:
         self.l1_patience = l1_patience
         self.sp_budget_ttest = sp_budget_ttest  # per-SP cap; early-stop fills < cap
         self.scoring_formula = scoring_formula
+        self._pipeline_schema = pipeline_schema
         self.current_round: int = 0
         self.best_acc: float = baseline_acc
         self._pbar: Any = None
         self._current_cand_idx: int = -1
         self._in_baseline: bool = False
+        self._round_records: list[dict] = []
 
     def set_baseline(self, fresh: float) -> None:
         """Post-baseline rewire — replace the pre-baseline placeholder.
@@ -220,11 +229,28 @@ class CliDisplay:
         self._close_pbar()
         if rr.accuracy > self.best_acc:
             self.best_acc = rr.accuracy
-        self._write(
-            f"── R{rr.round}: best={fmt_pct(self.best_acc)} "
-            f"(orig baseline {fmt_pct(self.original_baseline)})  "
-            f"patience={l1_stall_count}/{self.l1_patience}"
+        self._round_records.append(
+            {
+                "round": rr.round,
+                "label": rr.label,
+                "accuracy": rr.accuracy,
+                "composite": rr.composite,
+                "improved": rr.improved,
+            }
         )
+        self._write(_node_top(f"ROUND {rr.round} SUMMARY"))
+        for line in render_progress_table(self._round_records).split("\n"):
+            self._write(line)
+        stats = render_round_stats(rr, self._pipeline_schema)
+        if stats:
+            for line in stats.split("\n"):
+                if line:
+                    self._write(line)
+        for line in render_patience_status(rr.improved, l1_stall_count, self.l1_patience).split(
+            "\n"
+        ):
+            self._write(line)
+        self._write(_node_bottom())
 
     # ------------------------------------------------------------------
     # Scoreboard (L1_SCORE:exit)

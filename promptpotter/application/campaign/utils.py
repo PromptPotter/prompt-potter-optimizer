@@ -107,7 +107,7 @@ def save_campaign_winner(
         "saved_at": datetime.now(UTC).isoformat(),
     }
 
-    filename = f"optimization/campaign_winner_{winner.id[:12]}.json"
+    filename = f"optimization/campaign_winner_{winner.lineage.id[:12]}.json"
     store.backends.save_sync(backend_id, filename, save_data)
 
     if campaign_id:
@@ -118,7 +118,7 @@ def save_campaign_winner(
                     backend_id,
                     full_id,
                     {
-                        "winner_prompt_fields_id": winner.id,
+                        "winner_prompt_fields_id": winner.lineage.id,
                         "winner_accuracy": winner_acc,
                         "winner_filename": filename,
                     },
@@ -127,7 +127,7 @@ def save_campaign_winner(
     logger.info("Winner saved: %s (acc=%.1f%%)", filename, winner_acc * 100)
     return {
         **save_data,
-        "winner_id": winner.id,
+        "winner_id": winner.lineage.id,
         "filename": filename,
         "backend_id": backend_id,
     }

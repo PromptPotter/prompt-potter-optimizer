@@ -16,25 +16,29 @@ from typing import Any
 def _lineage_refs(rd: dict) -> tuple[str, str, str]:
     """Pull ``(id, parent_id, changes_description)`` from a round dict.
 
-    Tries the disk shape (``opt_search_point`` dict from ``model_dump``)
-    first, then the notebook shape (``prompt_fields`` as an OptSearchPoint
-    object with attributes), then falls back to ``prompt_fields_id`` from
-    the campaign-index summary.
+    Tries the disk shape (``opt_search_point`` dict from ``model_dump``,
+    where lineage is nested under ``opt_search_point["lineage"]``) first,
+    then the notebook shape (``prompt_fields`` as an OptSearchPoint object
+    with a ``.lineage`` attribute), then falls back to ``prompt_fields_id``
+    from the campaign-index summary.
     """
     osp = rd.get("opt_search_point")
     if isinstance(osp, dict):
+        lin = osp.get("lineage") or {}
         return (
-            str(osp.get("id", "")),
-            str(osp.get("parent_id", "") or ""),
-            str(osp.get("changes_description", "") or ""),
+            str(lin.get("id", "")),
+            str(lin.get("parent_id", "") or ""),
+            str(lin.get("changes_description", "") or ""),
         )
     pf = rd.get("prompt_fields")
     if pf is not None and not isinstance(pf, dict):
-        return (
-            str(getattr(pf, "id", "") or ""),
-            str(getattr(pf, "parent_id", "") or ""),
-            str(getattr(pf, "changes_description", "") or ""),
-        )
+        lin = getattr(pf, "lineage", None)
+        if lin is not None:
+            return (
+                str(getattr(lin, "id", "") or ""),
+                str(getattr(lin, "parent_id", "") or ""),
+                str(getattr(lin, "changes_description", "") or ""),
+            )
     return str(rd.get("prompt_fields_id", "") or ""), "", ""
 
 
