@@ -54,7 +54,7 @@ All consumers call one method with a chosen subset of intelligence keys. The cro
 | **L2** | Axis rankings, bottleneck distribution, failure group × axis correlations, persistent failures, volatile queries |
 | **L3** | Axis rankings, bottleneck distribution, failure clusters, persistent failures |
 
-All consumers call: `SearchMemory.digest(keys, *, include_correlations=False, include_clusters=False)`. The caller passes a `frozenset` of keys — each layer owns its own key selector. The same computation backs every consumer; only the key subset (and the two boolean flags) differ.
+Each consumer calls its own typed method: `digest_for_l1_generate()`, `digest_for_l1_critique()`, `digest_for_l2()`, `digest_for_l3()`. Each method composes a fixed set of keys for that layer and shares the underlying private accessors (no parameterized "keys" argument). The L2 method always includes correlations; the L3 method always includes top-3 failure clusters with counts.
 
 The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 inbox](information-flow.md). This section documents the composition: which public and private accessors each key aggregates.
 
@@ -71,14 +71,14 @@ The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 
 | `axis_rankings` | `axis_rankings()[:5]` | — | L2, L3 |
 | `bottleneck_distribution` | `bottleneck_distribution()` | — | L2, L3 |
 | `persistent_failures` | — | `persistent_failures(3)` | L2, L3 |
-| `failure_group_insights` | — | `_parameter_failure_correlation()` (via `include_correlations=True`) | L2 |
-| `volatile_queries` | — | `flips(limit=50)` (via `include_correlations=True`) | L2 |
+| `failure_group_insights` | — | `_parameter_failure_correlation()` | L2 |
+| `volatile_queries` | — | `flips(limit=50)` | L2 |
 
 Callers (selected):
-- L1 generate — `digest(frozenset({"failure_clusters", "dead_queries", "top_axes", "top_values"}))`
-- L1 critique — `digest(frozenset({"discriminating_queries", "failure_clusters", "tractability", "exhausted_axes", "value_trends", "improvement_attribution"}))`
-- L2 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_group_insights", "persistent_failures", "volatile_queries"}), include_correlations=True)`
-- L3 — `digest(frozenset({"axis_rankings", "bottleneck_distribution", "failure_clusters", "persistent_failures"}), include_clusters=True)`
+- L1 generate — `digest_for_l1_generate()` → `failure_clusters` (top-2 with counts), `dead_queries`, `top_axes`, `top_values`
+- L1 critique — `digest_for_l1_critique()` → `discriminating_queries`, `failure_clusters` (top-2 no counts), `tractability`, `exhausted_axes`, `value_trends`, `improvement_attribution`
+- L2 — `digest_for_l2()` → `axis_rankings`, `bottleneck_distribution`, `failure_group_insights`, `persistent_failures`, `volatile_queries`
+- L3 — `digest_for_l3()` → `failure_clusters` (top-3 with counts), `axis_rankings`, `bottleneck_distribution`, `persistent_failures`
 
 The result is a `dict[str, str]` rendered through `format_search_memory_block()` for a consistent "HISTORICAL INTELLIGENCE" block shape. The L1 critique phase additionally receives `round_history` — per-round accuracy / composite / pipeline_params / degraded-count dicts built inline during round execution.
 
@@ -92,7 +92,7 @@ Each pillar tracks a watermark — the set of `dataset_run` IDs already folded i
 
 ### Design constraint
 
-`SearchMemory` exposes granular data accessors returning structured data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`). It never produces LLM-ready text. A single digest method — `digest(keys, *, include_correlations=False, include_clusters=False)` — composes a caller-chosen subset of keys for each consumer. Accessors used only by a digest (`_discriminating_queries`, `_persistent_failures`, `_exhausted_axes`, `_axis_value_trend`, `_parameter_failure_correlation`, `_query_flip_history`, `_format_recent_attributions`, `_record_query_flips`, `_recompute_failure_group_correlations`) are module-private — consumers call only `digest()` and a handful of public aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`, `bottleneck_distribution`, `query_tractability`, `dead_queries`, `query_degradation_*`). This keeps `SearchMemory` from growing into a god object that knows about every prompt template.
+`SearchMemory` exposes granular data accessors returning structured data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`). It never produces LLM-ready text directly — instead, four typed digest methods (`digest_for_l1_generate`, `digest_for_l1_critique`, `digest_for_l2`, `digest_for_l3`) compose a fixed key set per consumer. Accessors used only by a digest (`_discriminating_queries`, `_persistent_failures`, `_exhausted_axes`, `_axis_value_trend`, `_parameter_failure_correlation`, `_query_flip_history`, `_format_recent_attributions`, `_record_query_flips`, `_recompute_failure_group_correlations`) are module-private — consumers call only the per-layer digest method and a handful of public aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`, `bottleneck_distribution`, `query_tractability`, `dead_queries`, `query_degradation_*`). This keeps `SearchMemory` from growing into a god object that knows about every prompt template.
 
 ### Per-refresh cache
 

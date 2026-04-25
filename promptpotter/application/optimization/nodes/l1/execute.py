@@ -192,16 +192,6 @@ async def _run_l1_critique(
     crit_llm = _llm_client.get_llm_client()
     agent = L1CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
 
-    _CRITIQUE_SM_KEYS = frozenset(
-        {
-            "discriminating_queries",
-            "failure_clusters",
-            "tractability",
-            "exhausted_axes",
-            "value_trends",
-            "improvement_attribution",
-        }
-    )
     cctx = RoundSnapshot.from_round_state(
         cycle,
         scoring_result,
@@ -209,7 +199,7 @@ async def _run_l1_critique(
         cycle.session.pipeline_schema,
         round_num=round_num,
         search_memory_digest=(
-            cycle.search_memory.digest(_CRITIQUE_SM_KEYS) if cycle.search_memory else None
+            cycle.search_memory.digest_for_l1_critique() if cycle.search_memory else None
         ),
     )
     result = await agent.run(cctx)

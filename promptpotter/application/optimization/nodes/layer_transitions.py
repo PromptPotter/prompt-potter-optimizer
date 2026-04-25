@@ -362,19 +362,7 @@ class L3ModifyPlan(LayerTransition):
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
             ),
             "inbox": format_search_memory_block(
-                search_memory.digest(
-                    frozenset(
-                        {
-                            "axis_rankings",
-                            "bottleneck_distribution",
-                            "failure_clusters",
-                            "persistent_failures",
-                        }
-                    ),
-                    include_clusters=True,
-                )
-                if search_memory is not None
-                else None,
+                search_memory.digest_for_l3() if search_memory is not None else None,
                 {
                     "axis_rankings": "Axis impact rankings",
                     "bottleneck_distribution": "Bottleneck distribution",

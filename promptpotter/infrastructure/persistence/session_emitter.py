@@ -585,17 +585,28 @@ class CampaignPersistenceEmitter:
         recorder.set_l1_score(self._build_l1_score_block(round_result))
         recorder.set_hitl(self._snapshot_hitl())
 
-    def _build_l1_score_block(self, round_result: RoundResult) -> dict[str, Any]:
-        """Project in-memory per-candidate state + RoundResult.candidate_scores
-        into the ``l1_score`` node block.
+    def _build_l1_score_block(
+        self,
+        round_result: RoundResult | None = None,
+    ) -> dict[str, Any]:
+        """Project per-candidate state into the ``l1_score`` node block.
+
+        Two modes share a single body:
+
+        * **Round-complete** (``round_result`` provided) — pulls authoritative
+          ``candidate_scores`` and stamps ``is_winner`` / ``eliminated_at`` on
+          stats; samples are kept as full structured dicts for ``rounds/round_NNNN.json``.
+        * **Live in-flight** (``round_result is None``) — no authoritative
+          scores yet; samples become compact CLI one-liners since
+          ``dashboard.json`` would otherwise carry ~2 kB BBEH query strings.
 
         Input side mirrors the candidates L1 generate produced (idx, label,
-        ``changes_description``, ``pp_override``). Output side lists the
-        samples that landed and the finalized stats — the same data that
-        already drives the PER-QUERY DETAIL section of ``log.md``.
+        ``changes_description``, ``pp_override``). Output side carries
+        the per-candidate stats + samples shape consumed by ``log.md``.
         """
         candidates = self._current_round.get("candidates") or {}
-        authoritative = list(round_result.candidate_scores or [])
+        authoritative = list(round_result.candidate_scores or []) if round_result else []
+        is_live = round_result is None
 
         input_candidates: list[dict[str, Any]] = []
         output_candidates: list[dict[str, Any]] = []
@@ -612,21 +623,23 @@ class CampaignPersistenceEmitter:
                 }
             )
             scores = cand.get("scores") or {}
-            stats = {
+            stats: dict[str, Any] = {
                 "accuracy": scores.get("accuracy"),
                 "composite": scores.get("composite"),
                 "hits": scores.get("hits"),
                 "total": scores.get("total"),
                 "invalid": scores.get("invalid", False),
                 "validation_failures": scores.get("validation_failures") or [],
-                "is_winner": bool(cs.get("is_winner", False)),
-                "eliminated_at": cs.get("eliminated_at"),
             }
+            if not is_live:
+                stats["is_winner"] = bool(cs.get("is_winner", False))
+                stats["eliminated_at"] = cs.get("eliminated_at")
+            samples = cand.get("samples") or []
             output_candidates.append(
                 {
                     "idx": idx,
                     "stats": stats,
-                    "samples": list(cand.get("samples") or []),
+                    "samples": [fmt_sample_line(s) for s in samples] if is_live else list(samples),
                 }
             )
 
@@ -750,7 +763,7 @@ class CampaignPersistenceEmitter:
         if recorder is not None:
             nodes.update(recorder.snapshot_nodes())
         if self._current_round.get("candidates"):
-            nodes["l1_score"] = self._build_live_l1_score_block()
+            nodes["l1_score"] = self._build_l1_score_block()
 
         ordered: dict[str, Any] = {}
         for preferred in ("l1_generate", "l1_critique"):
@@ -760,49 +773,6 @@ class CampaignPersistenceEmitter:
             ordered["l1_score"] = nodes.pop("l1_score")
         ordered.update(nodes)
         return {"round": round_idx, "nodes": ordered}
-
-    def _build_live_l1_score_block(self) -> dict[str, Any]:
-        """Live variant of ``_build_l1_score_block`` — no authoritative
-        ``candidate_scores`` yet (round not complete), so ``is_winner``
-        and ``eliminated_at`` are omitted from in-flight stats.
-        """
-        candidates = self._current_round.get("candidates") or {}
-        input_candidates: list[dict[str, Any]] = []
-        output_candidates: list[dict[str, Any]] = []
-        for idx in sorted(candidates.keys()):
-            cand = candidates[idx]
-            label = cand.get("label") or ""
-            input_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "changes_description": label,
-                    "pp_override": cand.get("pp_override"),
-                }
-            )
-            scores = cand.get("scores") or {}
-            stats = {
-                "accuracy": scores.get("accuracy"),
-                "composite": scores.get("composite"),
-                "hits": scores.get("hits"),
-                "total": scores.get("total"),
-                "invalid": scores.get("invalid", False),
-                "validation_failures": scores.get("validation_failures") or [],
-            }
-            output_candidates.append(
-                {
-                    "idx": idx,
-                    "stats": stats,
-                    # ``dashboard.json`` uses the compact CLI one-liner per sample —
-                    # full structured sample dicts (with ~2 kB BBEH query strings)
-                    # only go to ``rounds/round_NNNN.json`` via ``_build_l1_score_block``.
-                    "samples": [fmt_sample_line(s) for s in (cand.get("samples") or [])],
-                }
-            )
-        return {
-            "input": {"candidates": input_candidates},
-            "output": {"candidates": output_candidates},
-        }
 
     def _write_dashboard_md(self) -> None:
         """Overwrite ``log.md`` with the current sliding-window view."""

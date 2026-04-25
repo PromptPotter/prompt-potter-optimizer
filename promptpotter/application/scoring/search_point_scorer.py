@@ -157,6 +157,138 @@ def _build_scoring_error_signal(
     )
 
 
+@dataclass
+class _LoopContext:
+    """Read-only context threaded through per-sample processing."""
+
+    search_point: JobSearchPoint
+    session: Session
+    run_id: str
+    prior_results: dict[str, QueryResult]
+    on_result: Callable[[QueryResult, int, int], None] | None
+    on_start: Callable[[str, int, int], None] | None
+    search_memory: SearchMemory | None
+    scorer: Scorer  # narrowed from session.scorer (asserted non-None on construction)
+    scorer_id: str
+    scorer_formula: str | None
+
+
+@dataclass
+class _LoopState:
+    """Mutable state accumulated across the dataset loop."""
+
+    results: list[QueryResult]
+    consecutive_errors: int = 0
+
+
+@dataclass
+class _SampleOutcome:
+    """Outcome of processing one sample. Both fields ``None`` ⇒ continue normally."""
+
+    abort_reason: str | None = None
+    escalation: EscalationSignal | None = None
+
+
+async def _maybe_recover_degraded(
+    result: QueryResult,
+    sample: Sample,
+    ctx: _LoopContext,
+) -> QueryResult:
+    """Run the stale-data protocol if the result is degraded and protocol is wired."""
+    if not (_is_degraded(result) and ctx.session.stale_data_load_protocol):
+        return result
+    recovered, _step = await _execute_stale_data_protocol(
+        ctx.session.stale_data_load_protocol,
+        sample,
+        cast(dict[str, Any], result),
+        ctx.session,
+        pipeline_params=ctx.search_point.pipeline_params,
+        search_memory=ctx.search_memory,
+    )
+    return cast(QueryResult, recovered)
+
+
+def _classify_abort(
+    result: QueryResult,
+    state: _LoopState,
+    session: Session,
+) -> str:
+    """Return abort reason for an errored result, or "" to continue.
+
+    Mutates ``state.consecutive_errors``: increments on server-side errors,
+    resets to 0 here (caller must reset on success path separately).
+    """
+    cat = error_category(result.get("error"))
+    if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
+        return f"skipped_after_{cat or 'pipeline'}_error"
+    state.consecutive_errors += 1
+    if state.consecutive_errors >= session.max_consecutive_errors:
+        return "skipped_after_consecutive_errors"
+    return ""
+
+
+async def _process_cache_hit(
+    sample: Sample,
+    idx: int,
+    dataset_len: int,
+    state: _LoopState,
+    ctx: _LoopContext,
+    check_escalation: Callable[[], EscalationSignal | None],
+    fire_on_measurement: Callable[[QueryResult], None],
+) -> _SampleOutcome:
+    """Materialize a prior-cache result, append, and check escalation."""
+    cached_r = _materialize_cached(
+        ctx.prior_results[sample.query],
+        ctx.scorer,
+        ctx.scorer_id,
+        ctx.scorer_formula,
+    )
+    cached_r = await _maybe_recover_degraded(cached_r, sample, ctx)
+    # Overlay current-run sample_id — archived traces may predate the field.
+    cached_r["sample_id"] = sample.id
+    state.results.append(cached_r)
+    fire_on_measurement(cached_r)
+    if ctx.on_result is not None:
+        ctx.on_result(cached_r, idx, dataset_len)
+    # Elimination must see cached rows too — otherwise a candidate
+    # whose priors already dominate it runs one extra real query.
+    esc = check_escalation()
+    return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
+
+
+async def _process_fresh_sample(
+    sample: Sample,
+    idx: int,
+    dataset_len: int,
+    state: _LoopState,
+    ctx: _LoopContext,
+    check_escalation: Callable[[], EscalationSignal | None],
+    fire_on_measurement: Callable[[QueryResult], None],
+) -> _SampleOutcome:
+    """Backend-measure one sample, classify errors, check escalation."""
+    result = await measure_sample(
+        sample,
+        ctx.session,
+        pipeline_params=ctx.search_point.pipeline_params,
+    )
+    result = await _maybe_recover_degraded(result, sample, ctx)
+    state.results.append(result)
+    fire_on_measurement(result)
+
+    if is_error_result(result):
+        abort_reason = _classify_abort(result, state, ctx.session)
+        if abort_reason:
+            return _SampleOutcome(abort_reason=abort_reason)
+    else:
+        state.consecutive_errors = 0
+
+    if ctx.on_result is not None:
+        ctx.on_result(result, idx, dataset_len)
+
+    esc = check_escalation()
+    return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
+
+
 async def _run_query_loop(
     search_point: JobSearchPoint,
     dataset: list[Sample],
@@ -172,9 +304,20 @@ async def _run_query_loop(
     search_memory: SearchMemory | None,
 ) -> QueryLoopResult:
     """Evaluate dataset samples, reusing prior results where available."""
-    results: list[QueryResult] = []
-    consecutive_errors = 0
     assert session.scorer is not None, "session.scorer required for scoring"
+    state = _LoopState(results=[])
+    ctx = _LoopContext(
+        search_point=search_point,
+        session=session,
+        run_id=run_id,
+        prior_results=prior_results,
+        on_result=on_result,
+        on_start=on_start,
+        search_memory=search_memory,
+        scorer=session.scorer,
+        scorer_id=session.scorer_id,
+        scorer_formula=session.scorer_formula,
+    )
 
     def _check_escalation() -> EscalationSignal | None:
         return next(
@@ -182,7 +325,7 @@ async def _run_query_loop(
                 s
                 for c in (degradation_checks or [])
                 if c.enabled
-                for s in (c.evaluate(results, candidate_idx, n_total_candidates),)
+                for s in (c.evaluate(state.results, candidate_idx, n_total_candidates),)
                 if s
             ),
             None,
@@ -196,112 +339,44 @@ async def _run_query_loop(
     try:
         for i, sample in enumerate(dataset):
             if session.stop_check and session.stop_check():
-                logger.debug("Graceful stop after query %d/%d.", len(results), len(dataset))
-                return QueryLoopResult(results, completed=False, stop_reason="graceful")
-
-            query = sample.query
+                logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
+                return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
             if on_start is not None:
-                on_start(query, i, len(dataset))
+                on_start(sample.query, i, len(dataset))
 
-            # Reuse: prior-result cache from previous dataset_runs.
-            if query in prior_results:
-                cached_r = _materialize_cached(
-                    prior_results[query],
-                    session.scorer,
-                    session.scorer_id,
-                    session.scorer_formula,
-                )
-                if _is_degraded(cached_r) and session.stale_data_load_protocol:
-                    recovered, _step = await _execute_stale_data_protocol(
-                        session.stale_data_load_protocol,
-                        sample,
-                        cast(dict[str, Any], cached_r),
-                        session,
-                        pipeline_params=search_point.pipeline_params,
-                        search_memory=search_memory,
-                    )
-                    cached_r = cast(QueryResult, recovered)
-                # Overlay current-run sample_id — archived traces may predate
-                # the field; display should always show the current ID.
-                cached_r["sample_id"] = sample.id
-                results.append(cached_r)
-                _fire_on_measurement(cached_r)
-                if on_result is not None:
-                    on_result(cached_r, i, len(dataset))
-                # Elimination must see cached rows too — otherwise a candidate
-                # whose priors already dominate it runs one extra real query.
-                esc_signal = _check_escalation()
-                if esc_signal:
-                    return QueryLoopResult(
-                        results,
-                        completed=False,
-                        stop_reason="escalation",
-                        escalation_signal=esc_signal,
-                    )
-                continue
-
-            # Miss → backend call.
-            result = await measure_sample(
-                sample,
-                session,
-                pipeline_params=search_point.pipeline_params,
+            handler = _process_cache_hit if sample.query in prior_results else _process_fresh_sample
+            outcome = await handler(
+                sample, i, len(dataset), state, ctx, _check_escalation, _fire_on_measurement
             )
 
-            if _is_degraded(result) and session.stale_data_load_protocol:
-                stale_result, _step = await _execute_stale_data_protocol(
-                    session.stale_data_load_protocol,
-                    sample,
-                    cast(dict[str, Any], result),
-                    session,
-                    pipeline_params=search_point.pipeline_params,
-                    search_memory=search_memory,
-                )
-                result = cast(QueryResult, stale_result)
-
-            results.append(result)
-            _fire_on_measurement(result)
-
-            # Consecutive-error abort policy.
-            if is_error_result(result):
-                cat = error_category(result.get("error"))
-                if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
-                    abort_reason = f"skipped_after_{cat or 'pipeline'}_error"
-                else:
-                    consecutive_errors += 1
-                    abort_reason = (
-                        "skipped_after_consecutive_errors"
-                        if consecutive_errors >= session.max_consecutive_errors
-                        else ""
-                    )
-                if abort_reason:
-                    logger.warning(
-                        "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
-                        abort_reason,
-                        i + 1,
-                        len(dataset) - i - 1,
-                    )
-                    results.extend(_error_result(rq, abort_reason) for rq in dataset[i + 1 :])
-                    return QueryLoopResult(results, completed=False, stop_reason=abort_reason)
-            else:
-                consecutive_errors = 0
-
-            if on_result is not None:
-                on_result(result, i, len(dataset))
-
-            esc_signal = _check_escalation()
-            if esc_signal:
+            if outcome.escalation:
                 return QueryLoopResult(
-                    results,
+                    state.results,
                     completed=False,
                     stop_reason="escalation",
-                    escalation_signal=esc_signal,
+                    escalation_signal=outcome.escalation,
+                )
+            if outcome.abort_reason:
+                logger.warning(
+                    "Aborting scoring: %s on query %d. Marking remaining %d as errors.",
+                    outcome.abort_reason,
+                    i + 1,
+                    len(dataset) - i - 1,
+                )
+                state.results.extend(
+                    _error_result(rq, outcome.abort_reason) for rq in dataset[i + 1 :]
+                )
+                return QueryLoopResult(
+                    state.results, completed=False, stop_reason=outcome.abort_reason
                 )
     except (KeyboardInterrupt, asyncio.CancelledError):
-        logger.warning("Query loop force-interrupted at query %d/%d.", len(results), len(dataset))
-        return QueryLoopResult(results, completed=False, stop_reason="force")
+        logger.warning(
+            "Query loop force-interrupted at query %d/%d.", len(state.results), len(dataset)
+        )
+        return QueryLoopResult(state.results, completed=False, stop_reason="force")
 
-    return QueryLoopResult(results)
+    return QueryLoopResult(state.results)
 
 
 async def score_search_point(

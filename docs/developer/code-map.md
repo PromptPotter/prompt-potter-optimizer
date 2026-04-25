@@ -86,7 +86,7 @@ Meta-prompt template names (`l2_refine_strategy`, `l3_modify_plan`) are declared
 | `adaptive_prefix` | `promptpotter/application/intelligence/adaptive_prefix.py` |
 | `rasch` | `promptpotter/application/intelligence/rasch.py` |
 | `sample_index` | `promptpotter/application/intelligence/sample_index.py` |
-| `SearchMemory.digest` | `promptpotter/application/intelligence/search_memory.py` |
+| `SearchMemory.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/search_memory.py` |
 | `variant_library` | `promptpotter/application/intelligence/variant_library.py` |
 
 ## Infrastructure

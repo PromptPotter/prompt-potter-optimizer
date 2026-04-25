@@ -6,7 +6,8 @@ counts, flips) lives in :class:`SampleIndex`; SearchMemory composes it
 and retains only the axis-side aggregate state + digest builders.
 
 Public surface — consumers import only these:
-    * ``digest(keys=..., include_correlations=..., include_clusters=...)``
+    * ``digest_for_l1_generate()`` / ``digest_for_l1_critique()``
+    * ``digest_for_l2()`` / ``digest_for_l3()``
     * ``on_round_complete()`` / ``record_flips_from_rounds()``
     * ``query_degradation_rate()`` / ``query_degradation_count()``
     * ``dead_queries()`` / ``axis_rankings()`` / ``top_k_values()``
@@ -225,13 +226,12 @@ class SearchMemory:
             )
         return f"{len(positive)} queries improved (last {len(recent)}):\n" + "\n".join(parts)
 
-    def _recompute_failure_group_correlations(self) -> bool:
-        """Recompute failure-group × axis deltas from current hits/axis values."""
-        clusters = self.sample_index.failure_clusters(5)
-        if not clusters:
-            return False
+    def _build_failure_groups(self, clusters: list[FailureCluster]) -> dict[str, set[int]]:
+        """Map each failure mode to the full set of sample_ids whose dominant mode matches.
 
-        # Build groups: failure_mode → set of sample_ids with that dominant mode.
+        ``cluster.example_queries`` only holds the top few; we scan every sample's
+        failure-mode counter to recover full membership.
+        """
         groups: dict[str, set[int]] = {}
         for cluster in clusters:
             mode = cluster.failure_mode
@@ -240,203 +240,201 @@ class SearchMemory:
                 sid = self.sample_index.id_for_query(q)
                 if sid is not None:
                     group_sids.add(sid)
-            # The cluster.example_queries only holds 3 samples; we need the full
-            # list. Recompute by scanning _failure_modes for dominant mode match.
-            for sid in list(self.sample_index._samples.keys()):
+            for sid in self.sample_index._samples:
                 modes = self.sample_index.failure_modes(sid)
                 if modes and Counter(modes).most_common(1)[0][0] == mode:
                     group_sids.add(sid)
             if group_sids:
                 groups[mode] = group_sids
+        return groups
 
+    def _compute_group_hit_rate(self, sids: set[int]) -> float:
+        """Average per-sample hit rate across a failure-group's sample ids."""
+        if not sids:
+            return 0.0
+        total = 0.0
+        for sid in sids:
+            hits = self.sample_index.hits(sid)
+            if hits:
+                total += sum(hits) / len(hits)
+        return total / len(sids)
+
+    def _recompute_failure_group_correlations(self) -> bool:
+        """Recompute failure-group × axis deltas from current hits/axis values."""
+        clusters = self.sample_index.failure_clusters(5)
+        if not clusters:
+            return False
+
+        groups = self._build_failure_groups(clusters)
         if not groups:
             return False
+
+        # Hit rate per group is constant across axes — compute once.
+        hit_rates = {name: self._compute_group_hit_rate(sids) for name, sids in groups.items()}
 
         new_deltas: dict[str, dict[str, float]] = {}
         for axis, values in self._axis_values.items():
             if len(values) < 2:
                 continue
-            for group_name, group_sids in groups.items():
-                group_hit_rate = 0.0
-                for sid in group_sids:
-                    hits = self.sample_index.hits(sid)
-                    if hits:
-                        group_hit_rate += sum(hits) / len(hits)
-                if group_sids:
-                    group_hit_rate /= len(group_sids)
+            impact = self._compute_axis_impact(axis, values)
+            if not (impact and impact.effect_size > NOISE_THRESHOLD):
+                continue
+            for group_name, hit_rate in hit_rates.items():
+                correlation = impact.effect_size * (1 - hit_rate)
+                if correlation > 0.005:
+                    new_deltas.setdefault(axis, {})[group_name] = round(correlation, 4)
 
-                impact = self._compute_axis_impact(axis, values)
-                if impact and impact.effect_size > NOISE_THRESHOLD:
-                    correlation = impact.effect_size * (1 - group_hit_rate)
-                    if correlation > 0.005:
-                        new_deltas.setdefault(axis, {})[group_name] = round(correlation, 4)
-
-        if new_deltas:
+        if new_deltas and new_deltas != self._axis_failure_group_deltas:
             self._axis_failure_group_deltas = new_deltas
             return True
         return False
 
-    # --- Prompt digest (one parameterized entry point) ---
+    # --- Prompt digests (one method per consumer layer) ---
 
-    def digest(
-        self,
-        keys: frozenset[str] | set[str] | None = None,
-        *,
-        include_correlations: bool = False,
-        include_clusters: bool = False,
-    ) -> dict[str, str] | None:
-        """Unified digest. Caller selects which keys to materialize.
+    def digest_for_l1_generate(self) -> dict[str, str] | None:
+        """Build the SearchMemory digest for the L1 generate inbox.
 
-        When *keys* is ``None``, every available key is returned; otherwise
-        the result is filtered to the intersection of populated keys and
-        *keys*. ``include_correlations`` and ``include_clusters`` gate the
-        more expensive strategic-layer computations.
-
-        Known keys — one table, one digest:
-
-        * ``failure_clusters`` — dominant failure modes with query counts
-        * ``dead_queries`` — samples never hit (count only)
-        * ``top_axes`` — top-3 axis impacts
-        * ``top_values`` — best-performing values on the top axis
-        * ``discriminating_queries`` — samples that vary across configs
-        * ``tractability`` — persistent-failure breakdown
-        * ``exhausted_axes`` — axes tested with negligible effect
-        * ``value_trends`` — directional trends on top axes
-        * ``improvement_attribution`` — recent positive flips
-        * ``axis_rankings`` — top-5 axes with classification
-        * ``bottleneck_distribution`` — termination-step failure share
-        * ``persistent_failures`` — intractable + chronic (terse)
-        * ``failure_group_insights`` — axis × failure-group correlations
-        * ``volatile_queries`` — frequently flipping samples
+        Keys: ``failure_clusters`` (top-2, with counts), ``dead_queries``
+        (count), ``top_axes`` (top-3 rankings), ``top_values`` (top-2 on
+        the winning axis).
         """
         ctx: dict[str, str] = {}
-        want = None if keys is None else set(keys)
 
-        def emit(key: str, value: str) -> None:
-            if value and (want is None or key in want):
-                ctx[key] = value
+        c2 = self.sample_index.failure_clusters(2)
+        if c2:
+            ctx["failure_clusters"] = _fmt_clusters(c2, with_counts=True)
 
-        # Failure clusters — strategic layers see top-3 (with counts); L1 and
-        # L1 critique see top-2 to keep the inbox tight, same pair all round.
-        need_clusters = want is None or "failure_clusters" in want
-        if need_clusters and include_clusters:
-            c3 = self.sample_index.failure_clusters(3)
-            if c3:
-                emit("failure_clusters", _fmt_clusters(c3, with_counts=True))
-        elif need_clusters:
-            c2 = self.sample_index.failure_clusters(2)
-            if c2:
-                if want is not None and "dead_queries" in want:
-                    emit("failure_clusters", _fmt_clusters(c2, with_counts=True))
-                else:
-                    emit("failure_clusters", _fmt_clusters(c2, with_counts=False))
+        dead = self.sample_index.dead(include_always_hit=False)
+        if dead:
+            ctx["dead_queries"] = f"{len(dead)} queries never hit"
 
-        # Dead queries (L1 only)
-        if want is None or "dead_queries" in want:
-            dead = self.sample_index.dead(include_always_hit=False)
-            if dead:
-                emit("dead_queries", f"{len(dead)} queries never hit")
-
-        # Critique-only signals
-        if want is None or "discriminating_queries" in want:
-            disc = self.sample_index.discriminating()
-            if disc:
-                emit("discriminating_queries", f"{len(disc)} queries vary across configs")
-
-        if want is None or "tractability" in want:
-            persistent = self.sample_index.persistent_failures(min_streak=3)
-            if persistent:
-                emit("tractability", _fmt_persistent_failures(persistent))
-
-        if want is None or "exhausted_axes" in want:
-            exhausted = self._exhausted_axes()
-            if exhausted:
-                emit(
-                    "exhausted_axes",
-                    "; ".join(
-                        f"{a.axis} ({self._values_tested_count(a.axis)} values tested, "
-                        f"effect={a.effect_size:.3f})"
-                        for a in exhausted[:5]
-                    ),
+        rankings3 = self.axis_rankings()[:3]
+        if rankings3:
+            ctx["top_axes"] = _fmt_axis_rankings(rankings3)
+            top_vals = self.top_k_values(rankings3[0].axis, k=2)
+            if top_vals:
+                ctx["top_values"] = "; ".join(
+                    f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
                 )
 
-        if want is None or "value_trends" in want:
-            rankings3 = self.axis_rankings()[:3]
-            trend_parts = []
+        return ctx or None
+
+    def digest_for_l1_critique(self) -> dict[str, str] | None:
+        """Build the SearchMemory digest for the L1 critique agent.
+
+        Keys: ``discriminating_queries``, ``failure_clusters`` (top-2, no counts),
+        ``tractability``, ``exhausted_axes``, ``value_trends``,
+        ``improvement_attribution``.
+        """
+        ctx: dict[str, str] = {}
+
+        disc = self.sample_index.discriminating()
+        if disc:
+            ctx["discriminating_queries"] = f"{len(disc)} queries vary across configs"
+
+        c2 = self.sample_index.failure_clusters(2)
+        if c2:
+            ctx["failure_clusters"] = _fmt_clusters(c2, with_counts=False)
+
+        persistent = self.sample_index.persistent_failures(min_streak=3)
+        if persistent:
+            ctx["tractability"] = _fmt_persistent_failures(persistent)
+
+        exhausted = self._exhausted_axes()
+        if exhausted:
+            ctx["exhausted_axes"] = "; ".join(
+                f"{a.axis} ({self._values_tested_count(a.axis)} values tested, "
+                f"effect={a.effect_size:.3f})"
+                for a in exhausted[:5]
+            )
+
+        trend_parts: list[str] = []
+        for a in self.axis_rankings()[:3]:
+            trend = self._axis_value_trend(a.axis)
+            if trend not in ("flat", "non_numeric"):
+                trend_parts.append(f"{a.axis}: {trend}")
+        if trend_parts:
+            ctx["value_trends"] = "; ".join(trend_parts)
+
+        attributions = self._format_recent_attributions(limit=3)
+        if attributions:
+            ctx["improvement_attribution"] = attributions
+
+        return ctx or None
+
+    def digest_for_l2(self) -> dict[str, str] | None:
+        """Build the SearchMemory digest for the L2 refine_strategy inbox.
+
+        Keys: ``axis_rankings`` (top-5), ``bottleneck_distribution``,
+        ``persistent_failures`` (terse), ``failure_group_insights``,
+        ``volatile_queries``. Always includes correlations.
+        """
+        ctx: dict[str, str] = {}
+
+        rankings5 = self.axis_rankings()[:5]
+        if rankings5:
+            ctx["axis_rankings"] = _fmt_axis_rankings(rankings5)
+
+        bottleneck = self.bottleneck_distribution()
+        if bottleneck:
+            ctx["bottleneck_distribution"] = "; ".join(
+                f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
+            )
+
+        persistent = self.sample_index.persistent_failures(min_streak=3)
+        if persistent:
+            ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
+
+        rankings3 = self.axis_rankings()[:3]
+        if rankings3:
+            fg_lines: list[str] = []
             for a in rankings3:
-                trend = self._axis_value_trend(a.axis)
-                if trend not in ("flat", "non_numeric"):
-                    trend_parts.append(f"{a.axis}: {trend}")
-            if trend_parts:
-                emit("value_trends", "; ".join(trend_parts))
+                corr = self._parameter_failure_correlation(a.axis)
+                if corr:
+                    parts = [
+                        f"{mode}: {delta:+.0%}"
+                        for mode, delta in sorted(corr.items(), key=lambda x: -abs(x[1]))[:3]
+                    ]
+                    fg_lines.append(f"{a.axis} → {', '.join(parts)}")
+            if fg_lines:
+                ctx["failure_group_insights"] = "; ".join(fg_lines)
 
-        if want is None or "improvement_attribution" in want:
-            attributions = self._format_recent_attributions(limit=3)
-            if attributions:
-                emit("improvement_attribution", attributions)
-
-        # L1 axis digest (top-3 rankings + top-2 values on the winner — kept
-        # tight; L2/L3 get the fuller picture via `axis_rankings` below)
-        if want is None or "top_axes" in want or "top_values" in want:
-            rankings3 = self.axis_rankings()[:3]
-            if rankings3:
-                emit("top_axes", _fmt_axis_rankings(rankings3))
-                top_vals = self.top_k_values(rankings3[0].axis, k=2)
-                if top_vals:
-                    emit(
-                        "top_values",
-                        "; ".join(
-                            f"{v.value_preview} (acc={v.mean_accuracy:.1%})" for v in top_vals
-                        ),
+            flips = self.sample_index.flips(limit=50)
+            if flips:
+                flip_counts = Counter(f["query"] for f in flips)
+                volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
+                if volatile:
+                    ctx["volatile_queries"] = "; ".join(
+                        f"{q[:50]} ({n} flips)" for q, n in volatile
                     )
 
-        # Strategic (L2/L3) signals
-        if want is None or "axis_rankings" in want:
-            rankings5 = self.axis_rankings()[:5]
-            if rankings5:
-                emit("axis_rankings", _fmt_axis_rankings(rankings5))
+        return ctx or None
 
-        if want is None or "bottleneck_distribution" in want:
-            bottleneck = self.bottleneck_distribution()
-            if bottleneck:
-                emit(
-                    "bottleneck_distribution",
-                    "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items()),
-                )
+    def digest_for_l3(self) -> dict[str, str] | None:
+        """Build the SearchMemory digest for the L3 modify_plan inbox.
 
-        if want is None or "persistent_failures" in want:
-            persistent = self.sample_index.persistent_failures(min_streak=3)
-            if persistent:
-                emit("persistent_failures", _fmt_persistent_failures(persistent, terse=True))
+        Keys: ``failure_clusters`` (top-3, with counts), ``axis_rankings``
+        (top-5), ``bottleneck_distribution``, ``persistent_failures`` (terse).
+        """
+        ctx: dict[str, str] = {}
 
-        if include_correlations:
-            rankings3 = self.axis_rankings()[:3]
-            if rankings3:
-                if want is None or "failure_group_insights" in want:
-                    fg_lines = []
-                    for a in rankings3:
-                        corr = self._parameter_failure_correlation(a.axis)
-                        if corr:
-                            parts = [
-                                f"{mode}: {delta:+.0%}"
-                                for mode, delta in sorted(corr.items(), key=lambda x: -abs(x[1]))[
-                                    :3
-                                ]
-                            ]
-                            fg_lines.append(f"{a.axis} → {', '.join(parts)}")
-                    if fg_lines:
-                        emit("failure_group_insights", "; ".join(fg_lines))
+        c3 = self.sample_index.failure_clusters(3)
+        if c3:
+            ctx["failure_clusters"] = _fmt_clusters(c3, with_counts=True)
 
-                if want is None or "volatile_queries" in want:
-                    flips = self.sample_index.flips(limit=50)
-                    if flips:
-                        flip_counts = Counter(f["query"] for f in flips)
-                        volatile = [(q, n) for q, n in flip_counts.most_common(5) if n >= 2]
-                        if volatile:
-                            emit(
-                                "volatile_queries",
-                                "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile),
-                            )
+        rankings5 = self.axis_rankings()[:5]
+        if rankings5:
+            ctx["axis_rankings"] = _fmt_axis_rankings(rankings5)
+
+        bottleneck = self.bottleneck_distribution()
+        if bottleneck:
+            ctx["bottleneck_distribution"] = "; ".join(
+                f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
+            )
+
+        persistent = self.sample_index.persistent_failures(min_streak=3)
+        if persistent:
+            ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
 
         return ctx or None
 
