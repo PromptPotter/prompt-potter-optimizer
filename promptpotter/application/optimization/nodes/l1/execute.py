@@ -10,9 +10,9 @@ from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.nodes.l1.critique import (
-    L1CritiqueAgent,
     RoundSnapshot,
     format_l1_critique_for_prompt,
+    run_l1_critique,
     sample_thinking_styles,
 )
 from promptpotter.application.optimization.results import RoundResult
@@ -190,8 +190,6 @@ async def _run_l1_critique(
         return ""
 
     crit_llm = _llm_client.get_llm_client()
-    agent = L1CritiqueAgent(crit_llm, model=config.optimizer_llm.model)
-
     cctx = RoundSnapshot.from_round_state(
         cycle,
         scoring_result,
@@ -202,7 +200,7 @@ async def _run_l1_critique(
             cycle.search_memory.digest_for_l1_critique() if cycle.search_memory else None
         ),
     )
-    result = await agent.run(cctx)
+    result = await run_l1_critique(cctx, crit_llm, model=config.optimizer_llm.model)
     return format_l1_critique_for_prompt(result)
 
 

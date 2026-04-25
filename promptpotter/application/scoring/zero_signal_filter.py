@@ -43,7 +43,7 @@ def apply_zero_signal_exclusions(
     The caller is responsible for surfacing the result to the UI
     (``RunListener.on_phase`` or similar).
     """
-    dead = memory.dead_queries(min_observations=min_observations)
+    dead = memory.sample_index.dead(min_observations=min_observations)
     if not dead:
         return []
 

@@ -164,7 +164,7 @@ def export_search_memory_summary(memory: SearchMemory) -> dict[str, Any]:
         for ai in axis_impacts
     ]
 
-    clusters = memory.failure_clusters()
+    clusters = memory.sample_index.failure_clusters()
     failure_modes = [
         {
             "mode": fc.failure_mode,
@@ -175,7 +175,7 @@ def export_search_memory_summary(memory: SearchMemory) -> dict[str, Any]:
         for fc in clusters
     ]
 
-    tractability = memory.query_tractability()
+    tractability = memory.sample_index.records()
     n_easy = sum(1 for q in tractability if q.hit_rate >= 0.8)
     n_hard = sum(1 for q in tractability if 0 < q.hit_rate < 0.2)
     n_dead = sum(1 for q in tractability if q.hit_rate == 0.0)
@@ -191,7 +191,7 @@ def export_search_memory_summary(memory: SearchMemory) -> dict[str, Any]:
             "n_hard": n_hard,
             "n_dead": n_dead,
         },
-        "bottleneck_distribution": memory.bottleneck_distribution(),
+        "bottleneck_distribution": memory.sample_index.bottleneck_distribution(),
     }
 
 

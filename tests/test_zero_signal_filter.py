@@ -39,11 +39,11 @@ def test_dead_queries_respects_min_observations() -> None:
         }
     )
 
-    dead = mem.dead_queries(min_observations=5)
+    dead = mem.sample_index.dead(min_observations=5)
     dead_qs = {r.query for r in dead}
     assert dead_qs == {"proven_miss", "proven_hit"}
 
-    miss_only = mem.dead_queries(min_observations=5, include_always_hit=False)
+    miss_only = mem.sample_index.dead(min_observations=5, include_always_hit=False)
     assert {r.query for r in miss_only} == {"proven_miss"}
 
 

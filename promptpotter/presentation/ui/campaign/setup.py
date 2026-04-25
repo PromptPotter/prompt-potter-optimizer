@@ -76,7 +76,7 @@ async def decompose_task_context(
         llm_client = llm_client or _client
         model = model or _model
 
-    result = await _decompose_task_context(
+    task_context, consultation, was_cached = await _decompose_task_context(
         task_description,
         llm_client,
         model,
@@ -84,17 +84,17 @@ async def decompose_task_context(
         backend_id=session.backend_id,
     )
 
-    cache_tag = " (cached)" if result.was_cached else ""
+    cache_tag = " (cached)" if was_cached else ""
     print(f"TASK CONTEXT DECOMPOSITION{cache_tag}")
     print("-" * 50)
-    for f in result.task_context.FIELDS:
-        val = getattr(result.task_context, f, "")
+    for f in task_context.FIELDS:
+        val = getattr(task_context, f, "")
         print(f"  {f}: {val or '(empty)'}")
 
-    if result.consultation:
-        print(f"  Consultation: {result.consultation}")
+    if consultation:
+        print(f"  Consultation: {consultation}")
 
-    return result.task_context
+    return task_context
 
 
 # ---------------------------------------------------------------------------

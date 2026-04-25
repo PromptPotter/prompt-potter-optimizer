@@ -8,7 +8,6 @@ import hashlib
 import json
 import logging
 import time
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Literal, cast
@@ -451,27 +450,16 @@ async def decompose_prompt_fields_cached(
 # ---------------------------------------------------------------------------
 
 
-@dataclass
-class TaskContextResult:
-    """Result from ``decompose_task_context()``."""
-
-    task_context: TaskDecomposition
-    consultation: str | None
-    was_cached: bool
-
-
 async def decompose_task_context(
     task_description: str,
     llm_client: LLMClientBase,
     model: str,
     store_base_dir: Path | None = None,
     backend_id: str = "",
-) -> TaskContextResult:
-    """Decompose task description → TaskDecomposition (disk-cached)."""
+) -> tuple[TaskDecomposition, str | None, bool]:
+    """Decompose task description → ``(task_context, consultation, was_cached)`` (disk-cached)."""
     if not task_description:
-        return TaskContextResult(
-            task_context=TaskDecomposition(), consultation=None, was_cached=False
-        )
+        return TaskDecomposition(), None, False
 
     rp_hash = hashlib.sha256(f"task_ctx:{task_description}".encode()).hexdigest()[:16]
 
@@ -486,10 +474,4 @@ async def decompose_task_context(
 
     tc_dict = result.get("task_context", {})
     tc_dict["raw_description"] = task_description
-    task_context = TaskDecomposition.from_dict(tc_dict)
-
-    return TaskContextResult(
-        task_context=task_context,
-        consultation=result.get("consultation"),
-        was_cached=was_cached,
-    )
+    return TaskDecomposition.from_dict(tc_dict), result.get("consultation"), was_cached

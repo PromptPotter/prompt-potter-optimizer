@@ -772,21 +772,19 @@ async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
 
     session = await init_services_cli(**ctx.init_params)
     llm_client, model = create_llm_client(ctx.campaign_config)
-    result = await _svc_decompose(
+    task_context, _consultation, was_cached = await _svc_decompose(
         task_description,
         llm_client,
         model,
         store_base_dir=session.store.base_dir if session.store else None,
         backend_id=session.backend_id,
     )
-    cache_tag = " (cached)" if result.was_cached else ""
-    logger.info("Task context decomposed%s: %d fields", cache_tag, len(result.task_context))
+    cache_tag = " (cached)" if was_cached else ""
+    logger.info("Task context decomposed%s: %d fields", cache_tag, len(task_context))
 
-    ctx.state["task_context"] = result.task_context.to_dict()
+    ctx.state["task_context"] = task_context.to_dict()
     ctx.save_phase("task-context")
-    return CommandResult(
-        data={"task_context": result.task_context.to_dict(), "cached": result.was_cached}
-    )
+    return CommandResult(data={"task_context": task_context.to_dict(), "cached": was_cached})
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -530,15 +530,6 @@ def resolve_campaign_id(
     return None
 
 
-def _campaign_status_for(stop_reason: StopReason) -> str:
-    return {
-        StopReason.PAUSED_FOR_REVIEW: "paused",
-        StopReason.USER_PAUSED: "paused",
-        StopReason.USER_STOPPED: "stopped",
-        StopReason.INTERRUPTED: "interrupted",
-    }.get(stop_reason, "completed")
-
-
 def resume_or_create(
     store: CampaignStore,
     backend_id: str,
@@ -804,10 +795,16 @@ def finalize_optimization_run(
 ) -> str | None:
     """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
     if session.campaign_store and session.cycle_id:
+        status = {
+            StopReason.PAUSED_FOR_REVIEW: "paused",
+            StopReason.USER_PAUSED: "paused",
+            StopReason.USER_STOPPED: "stopped",
+            StopReason.INTERRUPTED: "interrupted",
+        }.get(stop_reason, "completed")
         session.campaign_store.mark_finished(
             session.backend_id,
             session.cycle_id,
-            status=_campaign_status_for(stop_reason),
+            status=status,
             stop_reason=stop_reason,
             best_accuracy=cycle.best_accuracy,
             best_round=cycle.best_round,

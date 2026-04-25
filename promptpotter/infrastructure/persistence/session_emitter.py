@@ -731,24 +731,12 @@ class CampaignPersistenceEmitter:
         # display file; all readers already suppress JSONDecodeError on
         # partial reads, and the file is rewritten on the next callback.
         self._state["hitl"] = self._snapshot_hitl()
-        self._state["current_round"] = self._snapshot_current_round()
-        self._state["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
-        self.state_path.write_text(
-            json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
-            encoding="utf-8",
-        )
-        self._write_dashboard_md()
 
-    def _snapshot_current_round(self) -> dict[str, Any]:
-        """Mirror the per-round node I/O live into ``dashboard.json``.
-
-        Same shape as ``rounds/round_NNNN.json::nodes`` — ``l1_generate``
-        and ``l1_critique`` are pulled from the active ``RoundRecorder``
-        as soon as each fires; ``l1_score`` is synthesized from the
-        in-memory candidate/sample accumulator every time a sample lands
-        so the file reflects scoring progress without waiting for the
-        round to complete. L2/L3 blocks appear when the round escalates.
-        """
+        # Mirror the per-round node I/O live into ``dashboard.json`` —
+        # same shape as ``rounds/round_NNNN.json::nodes``. ``l1_generate``
+        # and ``l1_critique`` come from the active ``RoundRecorder`` as
+        # soon as each fires; ``l1_score`` is synthesized from the
+        # in-memory candidate/sample accumulator every time a sample lands.
         round_idx = self._current_round.get("round", self._state.get("round", 0))
         nodes: dict[str, Any] = {}
         recorder = self._recorder_provider()
@@ -756,7 +744,6 @@ class CampaignPersistenceEmitter:
             nodes.update(recorder.snapshot_nodes())
         if self._current_round.get("candidates"):
             nodes["l1_score"] = self._build_l1_score_block()
-
         ordered: dict[str, Any] = {}
         for preferred in ("l1_generate", "l1_critique"):
             if preferred in nodes:
@@ -764,7 +751,14 @@ class CampaignPersistenceEmitter:
         if "l1_score" in nodes:
             ordered["l1_score"] = nodes.pop("l1_score")
         ordered.update(nodes)
-        return {"round": round_idx, "nodes": ordered}
+        self._state["current_round"] = {"round": round_idx, "nodes": ordered}
+
+        self._state["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
+        self.state_path.write_text(
+            json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
+            encoding="utf-8",
+        )
+        self._write_dashboard_md()
 
     def _write_dashboard_md(self) -> None:
         """Overwrite ``log.md`` with the current sliding-window view."""

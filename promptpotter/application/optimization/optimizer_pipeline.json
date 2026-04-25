@@ -35,7 +35,6 @@
       "type": "agent",
       "config": {
         "temperature": 0.3,
-        "agent_class": "L1CritiqueAgent",
         "positive_threshold": 0.7
       }
     },

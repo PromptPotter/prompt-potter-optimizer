@@ -493,7 +493,7 @@ def _build_search_memory_section(search_memory: Any) -> str:
                 f"  - {a.axis}: effect={a.effect_size:.3f}, {a.classification} [{val_str}]"
             )
 
-    bottleneck = search_memory.bottleneck_distribution()
+    bottleneck = search_memory.sample_index.bottleneck_distribution()
     if bottleneck:
         lines.append("Pipeline bottleneck distribution:")
         for step, frac in bottleneck.items():

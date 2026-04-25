@@ -10,9 +10,13 @@ Public surface — consumers import only these:
     * ``digest_for_l2()`` / ``digest_for_l3()``
     * ``on_round_complete()`` / ``record_flips_from_rounds()``
     * ``query_degradation_rate()`` / ``query_degradation_count()``
-    * ``dead_queries()`` / ``axis_rankings()`` / ``top_k_values()``
-    * ``failure_clusters()`` / ``bottleneck_distribution()`` / ``query_tractability()``
+    * ``axis_rankings()`` / ``top_k_values()``
     * ``refresh()`` / ``ensure_for()`` / ``save()`` / ``load()``
+
+Per-sample queries (tractability, dead samples, failure clusters,
+bottleneck distribution) are exposed directly on
+``SearchMemory.sample_index`` — call :class:`SampleIndex` instead of
+adding a forwarder here.
 
 Persistence is split:
     * ``library/search_memory.json`` — axis-side state (this class)
@@ -104,27 +108,7 @@ class SearchMemory:
         records.sort(key=lambda r: -r.mean_accuracy)
         return records[:k]
 
-    # --- Query Patterns (delegated to SampleIndex) ---
-
-    def query_tractability(self) -> list[QueryRecord]:
-        """Return all samples with their tractability profiles."""
-        return self.sample_index.records()
-
-    def dead_queries(
-        self,
-        *,
-        min_observations: int = 1,
-        include_always_hit: bool = True,
-        include_always_miss: bool = True,
-    ) -> list[QueryRecord]:
-        """Return zero-signal samples — always-hit and/or always-miss."""
-        return self.sample_index.dead(
-            min_observations=min_observations,
-            include_always_hit=include_always_hit,
-            include_always_miss=include_always_miss,
-        )
-
-    # --- Degradation (delegated to SampleIndex, bridged via query→id lookup) ---
+    # --- Degradation (bridged via query→sample_id lookup; null-fallback) ---
 
     def query_degradation_rate(self, query: str) -> float:
         """Return fraction of evaluations where *query* was degraded."""
@@ -139,16 +123,6 @@ class SearchMemory:
         if sid is None:
             return 0
         return self.sample_index.degradation_count(sid)
-
-    # --- Failure Modes ---
-
-    def bottleneck_distribution(self) -> dict[str, float]:
-        """Return {terminated_at_step: fraction_of_failures}."""
-        return self.sample_index.bottleneck_distribution()
-
-    def failure_clusters(self, max_clusters: int = 5) -> list[FailureCluster]:
-        """Return samples grouped by dominant failure mode."""
-        return self.sample_index.failure_clusters(max_clusters)
 
     # --- Digest-internal helpers ---
 
@@ -375,7 +349,7 @@ class SearchMemory:
         if rankings5:
             ctx["axis_rankings"] = _fmt_axis_rankings(rankings5)
 
-        bottleneck = self.bottleneck_distribution()
+        bottleneck = self.sample_index.bottleneck_distribution()
         if bottleneck:
             ctx["bottleneck_distribution"] = "; ".join(
                 f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
@@ -426,7 +400,7 @@ class SearchMemory:
         if rankings5:
             ctx["axis_rankings"] = _fmt_axis_rankings(rankings5)
 
-        bottleneck = self.bottleneck_distribution()
+        bottleneck = self.sample_index.bottleneck_distribution()
         if bottleneck:
             ctx["bottleneck_distribution"] = "; ".join(
                 f"{step}: {frac:.0%}" for step, frac in bottleneck.items()
