@@ -190,9 +190,7 @@ async def l1_score(
     winner_results = winner_entry["results"]
     winner_dict = {
         **winner_osp.prompt_field_dict(),
-        "id": winner_osp.lineage.id,
-        "parent_id": winner_osp.lineage.parent_id,
-        "changes_description": winner_osp.lineage.changes_description,
+        "lineage": winner_osp.lineage.model_dump(),
     }
     return L1ScoringResult(
         label=winner_entry["label"],

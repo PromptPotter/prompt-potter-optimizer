@@ -287,7 +287,7 @@ def _build_live_display(
     baseline_acc: float,
 ):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
-    from promptpotter.presentation.ui.campaign.notebook_primitives import set_display_tags
+    from promptpotter.presentation.views.display_primitives import set_display_tags
     from promptpotter.shared.scoring import split_scoring_block
 
     set_display_tags(session.pipeline_schema)

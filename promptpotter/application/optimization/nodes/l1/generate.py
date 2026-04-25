@@ -341,9 +341,7 @@ async def l1_generate(
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
         c_dict = child.prompt_field_dict()
-        c_dict["id"] = child.lineage.id
-        c_dict["parent_id"] = child.lineage.parent_id
-        c_dict["changes_description"] = child.lineage.changes_description
+        c_dict["lineage"] = child.lineage.model_dump()
         if node_overrides:
             c_dict["__pipeline_params_override__"] = node_overrides
         candidates.append(c_dict)

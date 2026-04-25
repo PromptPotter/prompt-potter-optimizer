@@ -5,9 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 
 from promptpotter.domain.phases import PhaseEvent
-from promptpotter.shared.statistics import min_detectable_effect
-
-from .notebook_primitives import (
+from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
     GREEN,
@@ -26,6 +24,8 @@ from .notebook_primitives import (
     _scoreboard,
     fmt_pvalue,
 )
+from promptpotter.shared.statistics import min_detectable_effect
+
 from .notebook_sp_diff import (
     _build_candidate_flat,
     _CycleDisplayState,

@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from tqdm.auto import tqdm
 
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.presentation.ui.campaign.notebook_primitives import (
+from promptpotter.presentation.views.display_primitives import (
     BOLD,
     GREEN,
     RESET,

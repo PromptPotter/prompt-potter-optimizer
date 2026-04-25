@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 
-from .notebook_primitives import (
+from promptpotter.presentation.views.display_primitives import (
     CYAN,
     DIM,
     RESET,

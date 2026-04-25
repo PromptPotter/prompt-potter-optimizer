@@ -13,14 +13,7 @@ from promptpotter.application.campaign.data import (
 from promptpotter.application.optimization.results import RunResult
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.presentation.views import render_pipeline_overrides
-from promptpotter.shared.statistics import (
-    min_detectable_effect,
-    proportion_test,
-    wilson_ci,
-)
-
-from .notebook_analytics import show_progress
-from .notebook_primitives import (
+from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
     GREEN,
@@ -31,6 +24,13 @@ from .notebook_primitives import (
     _dbox_sep,
     _dbox_top,
 )
+from promptpotter.shared.statistics import (
+    min_detectable_effect,
+    proportion_test,
+    wilson_ci,
+)
+
+from .notebook_analytics import show_progress
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
@@ -350,5 +350,4 @@ async def run_optimization_notebook(
 from promptpotter.application.campaign.campaign_setup import (  # noqa: E402
     load_baseline_prompt,
 )
-
-from .notebook_primitives import fmt_ci, fmt_pvalue  # noqa: E402
+from promptpotter.presentation.views.display_primitives import fmt_ci, fmt_pvalue  # noqa: E402

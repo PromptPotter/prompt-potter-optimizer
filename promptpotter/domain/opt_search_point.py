@@ -156,38 +156,13 @@ class PromptTemplate(SearchPoint):
     def from_prompt_fields(cls, fields: dict[str, Any], **kwargs: Any) -> Self:
         """Create an instance from a dict of prompt fields + optional extra state.
 
-        Return type follows ``cls`` — ``PromptTemplate.from_prompt_fields()``
-        returns ``PromptTemplate``; ``OptSearchPoint.from_prompt_fields()``
-        returns ``OptSearchPoint``.
-
-        For ``OptSearchPoint``, flat lineage keys (``id``, ``parent_id``,
-        ``changes_description``, ``created_at``) are extracted from *fields*
-        and bundled into a ``CandidateLineage`` so callers passing a legacy
-        flat dict (e.g. the ``winner_dict`` from ``l1_score``) still work.
+        Return type follows ``cls``. Pydantic auto-coerces a nested
+        ``lineage: {...}`` dict into ``CandidateLineage`` when present.
         """
-        fields = dict(fields)  # don't mutate caller's dict
+        fields = dict(fields)
         fse = fields.pop("few_shot_examples", [])
         if fse and isinstance(fse[0], dict):
             fse = [FewShotExample(**ex) for ex in fse]
-        # Extract flat lineage keys when present (OptSearchPoint callers only).
-        lin_id = fields.pop("id", None)
-        lin_parent = fields.pop("parent_id", None)
-        lin_desc = fields.pop("changes_description", None)
-        lin_ts = fields.pop("created_at", None)
-        lineage_kw: dict[str, Any] = {
-            k: v
-            for k, v in [
-                ("id", lin_id),
-                ("parent_id", lin_parent),
-                ("changes_description", lin_desc),
-                ("created_at", lin_ts),
-            ]
-            if v is not None
-        }
-        if lineage_kw and "lineage" not in kwargs:
-            from promptpotter.domain.opt_search_point import CandidateLineage
-
-            kwargs["lineage"] = CandidateLineage(**lineage_kw)
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 

@@ -18,9 +18,7 @@ from promptpotter.infrastructure.persistence.session_emitter import (
     append_journal,
     read_claude_notes,
 )
-
-from .notebook_phase import _dispatch_phase
-from .notebook_primitives import (
+from promptpotter.presentation.views.display_primitives import (
     DIM,
     RESET,
     _box_bottom,
@@ -36,6 +34,8 @@ from .notebook_primitives import (
     render_progress_table,
     render_round_stats,
 )
+
+from .notebook_phase import _dispatch_phase
 from .notebook_sp_diff import _CycleDisplayState
 
 if TYPE_CHECKING:

@@ -137,7 +137,7 @@ def dev_reload() -> None:
         "promptpotter.application.optimization.nodes.formatting",
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
-        "promptpotter.presentation.ui.campaign.notebook_primitives",
+        "promptpotter.presentation.views.display_primitives",
         "promptpotter.presentation.ui.campaign.notebook_phase",
         "promptpotter.presentation.ui.campaign.notebook_display",
         "promptpotter.presentation.ui.campaign.optimize",
@@ -195,8 +195,7 @@ def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dic
     Delegates to shared orchestration and adds display-specific tags.
     """
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
-
-    from .notebook_primitives import set_display_tags
+    from promptpotter.presentation.views.display_primitives import set_display_tags
 
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)
@@ -330,7 +329,7 @@ async def prepare_scoring_context(
         prepare_scoring_context as _svc_prepare,
     )
     from promptpotter.infrastructure.tracing import ObservabilityBridge
-    from promptpotter.presentation.ui.campaign.notebook_primitives import (
+    from promptpotter.presentation.views.display_primitives import (
         _fmt_query_result,
     )
 

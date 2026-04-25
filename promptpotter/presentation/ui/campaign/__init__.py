@@ -9,6 +9,17 @@ import types as _types
 
 # -- Reporting (supplemental materials) — direct from services ----------------
 from promptpotter.application.campaign.reporting import generate_export_json
+from promptpotter.presentation.views.display_primitives import (
+    BLUE,
+    BOLD,
+    CYAN,
+    GREEN,
+    MAGENTA,
+    RED,
+    RESET,
+    YELLOW,
+    set_display_tags,
+)
 from promptpotter.presentation.views.formatting import generate_supplemental
 
 # -- Campaigns (list, load, diff, overrides) ----------------------------------
@@ -27,17 +38,6 @@ from .notebook_analytics import (
     show_flip_tracking,
     show_lineage_chain,
     show_progress,
-)
-from .notebook_primitives import (
-    BLUE,
-    BOLD,
-    CYAN,
-    GREEN,
-    MAGENTA,
-    RED,
-    RESET,
-    YELLOW,
-    set_display_tags,
 )
 
 # -- Optimization (feedback cycle, stats, scoring) --------------------------------
