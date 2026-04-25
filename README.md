@@ -4,42 +4,59 @@
 
 </p>
 
-**PromptPotter brews better prompts.** Drop in a labeled dataset, and it searches prompts and pipeline parameters jointly — critique-guided, statistically early-stopped, and every evaluation banked for the next run.
+# PromptPotter: Automated Prompt Optimization for LLMs and Pipelines
 
-> [!IMPORTANT]
-> **New here? Start with [`docs/manual/`](docs/manual/README.md)** — six numbered chapters, install → first run → reading output → troubleshooting.
+**PromptPotter brews better prompts.** Point it at your task and it tries thousands of prompt and parameter combinations for you, keeping what works. No more guessing which wording the model likes.
 
-## TL;DR
+## Why PromptPotter?
 
-Give it a labeled dataset and an LLM. PromptPotter systematically searches for a better prompt — measuring accuracy, critiquing failures, and iterating through a 3-layer optimization loop. Same setup as academic benchmarks (HotPotQA, GSM8K), same loop for complex pipelines. Exports paper-ready results with confidence intervals and significance tests. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for the comparison protocol.
+Manual prompt tuning is slow, inconsistent, and the lessons don't carry over to the next project. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Whether you're an office worker iterating on the same daily report or an AI agent learning a new tool, you get a better prompt without the trial and error.
 
-At its core, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
+Under the hood, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
 
 
 ## The Workflow
 
 **Core path (what everyone runs):**
 
-1. **Provide a labeled dataset** — input/output pairs (and any extra context)
-2. **Provide your `pipeline.json`** — your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file — nothing else is touched.
-3. **Optimize** — run the critique-guided feedback cycle. The optimization loop is self-contained: it measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
+1. **Provide a labeled dataset:** input/output pairs (and any extra context)
+2. **Provide your `pipeline.json`:** your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file. Nothing else is touched.
+3. **Optimize:** run the critique-guided feedback cycle. The optimization loop is self-contained. It measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
 
-
-## ⭐ Features
-
-- **🔁 Self-healing optimization** — when the optimizer hallucinates a value your backend doesn't accept (e.g. `model: gpt-4o`), PromptPotter catches it before any API call, scores the candidate 0, and tells the strategy layer what went wrong so the next round stops repeating the mistake. Full architecture: [self-healing.md](docs/concepts/self-healing.md).
-- **Prompt + pipeline optimization** — searches the prompt (8-field decomposition) AND your pipeline parameters jointly. Most tools optimize one or the other. Head-to-head: [related-work.md](docs/research/related-work.md).
-- **🔍 Hard-sample sorter** *(WIP)* — point it at your dataset + a handful of candidate prompts, get back a Rasch-ranked difficulty list and a candidate × sample hit/miss heatmap. Works standalone — no optimizer loop required. Spec: [`docs/specs/hard-sample-sorter.md`](docs/specs/hard-sample-sorter.md).
-- **Statistical early-stopping** — sequential elimination via paired Wilcoxon signed-rank test stops inferior candidates after ~6 queries instead of running the full eval set. Real cost is well below `n_variants × eval_size`.
-- **Cross-run learning** — every evaluation flows into a shared `SearchMemory` store: parameter impact, axis exhaustion, query tractability, failure-group correlations. The optimizer carries what it learned across runs.
-- **Auto-injected scoring** — define your scoring formula once in `campaign.json`. It compiles into every eval path automatically. No glue code.
-- **Scoring as policy, not data** — per-trace `scorer_id` ledger + rescore-on-load; resume replays recorded decisions against rescored inputs and halts on first divergence. `promptpotter fork` re-roots with `parent_cycle_id`. [`scoring-and-traces.md`](docs/concepts/scoring-and-traces.md)
-- **Symmetric mid-output tail lookup** — one answer-extraction primitive (same regex on prediction and ground truth, last match wins) backs `\boxed{…}`, `**…**`, and GSM8K `#### N`. Prose-wrapped answers score cleanly without per-dataset parsers.
-- **IDE-native operation** — drive a full optimization campaign from the terminal via the `/potter-run` Claude Code skill. No notebook required.
+> [!IMPORTANT]
+> **New here? Start with [`docs/manual/`](docs/manual/README.md):** six numbered chapters, install → first run → reading output → troubleshooting.
+>
+> **Choose your personal experiance:** 5 was to operate the software:
+> 1. `/potter-run` skill via Claude Code - 2. CLI- 3. Python / Jupyter notebook - 4. REST API - 5. WebApp *(planned)*
 
 ## 🔄 The 3-layer loop
 
-A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round — with **L2** escalating on stall and **L3** escalating when L2 stalls. Full mechanics in [three-layer-loop.md](docs/concepts/three-layer-loop.md).
+A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round, with **L2** escalating on stall and **L3** escalating when L2 stalls. Full mechanics in [three-layer-loop.md](docs/concepts/three-layer-loop.md).
+
+```
+  ┌──────────────────────────────────────────────────────────┐
+  │  l1_generate ────► l1_evaluate (+ l1_critique)            │
+  │       ▲                 │                                │
+  │       │  l1_critique OR l2_directive                      │
+  │       │  + thinking_styles                               │
+  │       └──────── ◄───────┘                                │
+  │                                                          │
+  │  stall?       ──► l2_refine_strategy ──► resume L1        │
+  │  degradation? ──► l2_refine_strategy ──► resume L1        │
+  │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
+  └──────────────────────────────────────────────────────────┘
+```
+
+## ⭐ Features
+
+- **Prompt + pipeline optimization:** searches your prompt AND your pipeline parameters jointly. Most tools optimize one or the other. Head-to-head: [related-work.md](docs/research/related-work.md).
+- **Auto-injected scoring:** define your scoring formula once in `campaign.json`. It's wired into every evaluation path automatically. No glue code.
+- **IDE-native operation:** drive a full optimization campaign from your terminal via the `/potter-run` Claude Code skill. No notebook required.
+- **🔁 Self-healing optimization:** when a proposed setting isn't valid for your task workflow, the verification harness catches it (deterministic) and tells the strategy layer (L2 or L3) what went wrong, which in turn updates the prompt of the model that proposed the invalid setting. Full architecture: [self-healing.md](docs/concepts/self-healing.md).
+- **Statistical early-stopping:** weak candidates are dropped after a handful of queries using statistical significance testing, instead of burning the full evaluation budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
+- **Cross-run learning:** every evaluation flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
+
+## How It Works
 
 > [!TIP]
 > <details>
@@ -68,31 +85,11 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
 [![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
 [![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
 
-Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring — no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
+Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
 
-## How It Works
+Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
 
-```
-  ┌──────────────────────────────────────────────────────────┐
-  │  l1_generate ────► l1_evaluate (+ l1_critique)            │
-  │       ▲                 │                                │
-  │       │  l1_critique OR l2_directive                      │
-  │       │  + thinking_styles                               │
-  │       └──────── ◄───────┘                                │
-  │                                                          │
-  │  stall?       ──► l2_refine_strategy ──► resume L1        │
-  │  degradation? ──► l2_refine_strategy ──► resume L1        │
-  │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
-  └──────────────────────────────────────────────────────────┘
-```
 
-> [!IMPORTANT]
-> **Five ways to drive a campaign** — pick whichever fits your workflow:
-> 1. `/potter-run` skill via Claude Code
-> 2. REST API (`uvicorn promptpotter.main:app`)
-> 3. CLI (`python -m promptpotter optimize`)
-> 4. Python / Jupyter notebook
-> 5. WebApp *(planned)*
 
 ## Documentation
 
@@ -110,30 +107,17 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 
 ## Limitations
 
-- **Parameter-based optimization only** — PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
-- **Requires a labeled dataset** — you need input/output pairs. No labeled data, no optimization.
-- **Langfuse dependency** — observability is currently coupled to Langfuse (v2). It works but adds operational complexity and is not optional for full tracing.
+- **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
+- **Requires a labeled dataset.** You need input/output pairs. No labeled data, no optimization.
+- **Langfuse dependency.** Observability is currently coupled to Langfuse (v2). It works but adds operational complexity and is not optional for full tracing.
 
-## Getting Started
+## Citation
 
-### Local install
-
-```bash
-pip install -e ".[all,dev]"
-cp .env.example .env   # add your LLM API keys (Groq, OpenAI, or Anthropic)
+```bibtex
+@software{promptpotter,
+  title  = {PromptPotter: Automated Prompt and Pipeline Optimization for LLMs},
+  author = {Streuli, David},
+  year   = {2026},
+  url    = {https://github.com/uniqued4ve/prompt-potter-optimizer}
+}
 ```
-
-The `[all]` extras bundle enables every optional feature (Excel datasets, HuggingFace benchmarks, Langfuse tracing, Anthropic client, JupyterLab). For a minimal install pick only the extras you need — see [Environment](docs/operations/environment.md).
-
-### Docker (one command)
-
-```bash
-cd docker && docker-compose up --build
-# JupyterLab: http://localhost:8888  |  API: http://localhost:8001
-```
-
-See the [Manual](docs/manual/README.md) for prerequisites and first run, and the [CLI Reference](docs/operations/cli-reference.md) for the full command reference.
-
-
-
-
