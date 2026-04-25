@@ -9,7 +9,6 @@ escalation).
 
 from __future__ import annotations
 
-import json
 import logging
 import random
 from collections import Counter
@@ -22,7 +21,7 @@ from promptpotter.application.optimization.nodes.formatting import (
     build_trajectory_report,
     format_search_memory_block,
 )
-from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
+from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.application.optimization.utils import (
     candidate_keys_from_schema,
     get_candidates,
@@ -172,44 +171,30 @@ class L1CritiqueAgent:
     async def run(self, ctx: RoundSnapshot) -> dict:
         """Build critique from pipeline stats + LLM analysis."""
         sections = _assemble_l1_critique_sections(ctx)
-        _compile_vars = {"inbox": sections}
-        _template = load_optimizer_prompt("l1_critique")
-        prompt = _template.compile_prompt(**_compile_vars)
+        result, prompt = await run_optimizer_node(
+            template_name="l1_critique",
+            compile_vars={"inbox": sections},
+            llm_client=self.llm_client,
+            model=self.model,
+        )
         logger.info(
             "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",
             len(prompt),
             ctx.current_round + 1,
             ctx.accuracy,
         )
-
-        response = await llm_call(
-            self.llm_client,
-            messages=[{"role": "user", "content": prompt}],
-            node="l1_critique",
-            model=self.model,
-            trace_meta={
-                "template_name": "l1_critique",
-                "template_fields": _template.prompt_field_dict(),
-                "variables": _compile_vars,
-            },
-        )
-
-        return _parse_l1_critique(response.content)
+        return _parse_l1_critique(result)
 
 
-def _parse_l1_critique(content: str) -> dict:
-    """Parse LLM L1 critique response into the 6-field dict."""
-    try:
-        result = json.loads(content)
-    except (json.JSONDecodeError, TypeError):
-        result = {}
+def _parse_l1_critique(result: dict) -> dict:
+    """Extract the 6-field critique dict from the parsed LLM response."""
     return {
-        "positive_critique": result.get("positive_critique", ""),
-        "negative_critique": result.get("negative_critique", ""),
-        "priority_fix": result.get("priority_fix", ""),
-        "suggested_axes": result.get("suggested_axes", []),
-        "failure_highlights": result.get("failure_highlights", []),
-        "summary": result.get("summary", content),
+        "positive_critique": result["positive_critique"],
+        "negative_critique": result["negative_critique"],
+        "priority_fix": result["priority_fix"],
+        "suggested_axes": result["suggested_axes"],
+        "failure_highlights": result["failure_highlights"],
+        "summary": result["summary"],
     }
 
 

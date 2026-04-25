@@ -181,6 +181,46 @@ async def llm_call(
     return response
 
 
+async def run_optimizer_node(
+    *,
+    template_name: str,
+    compile_vars: dict,
+    llm_client: LLMClientBase,
+    model: str | None,
+    temperature: float = 0.0,
+    json_schema: dict | None = None,
+    user_content: str | None = None,
+) -> tuple[Any, str]:
+    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
+
+    When ``user_content`` is given the compiled template becomes the system message
+    and ``user_content`` is the user turn (used by the restructure node).
+    """
+    template = load_optimizer_prompt(template_name)
+    prompt = template.compile_prompt(**compile_vars)
+    if user_content is not None:
+        messages: list[dict[str, str]] = [
+            {"role": "system", "content": prompt},
+            {"role": "user", "content": user_content},
+        ]
+    else:
+        messages = [{"role": "user", "content": prompt}]
+    response = await llm_call(
+        llm_client,
+        messages=messages,
+        node=template_name,
+        model=model,
+        temperature=temperature,
+        json_schema=json_schema,
+        trace_meta={
+            "template_name": template_name,
+            "template_fields": template.prompt_field_dict(),
+            "variables": compile_vars,
+        },
+    )
+    return extract_parsed_json(response), prompt
+
+
 # ---------------------------------------------------------------------------
 # Prompt template loading (from Langfuse or local JSON)
 # ---------------------------------------------------------------------------
@@ -300,20 +340,13 @@ async def decompose_prompt_fields(
         "fields that don't apply. Be concise and actionable."
     )
 
-    system_prompt = load_optimizer_prompt("restructure").compile_prompt(
-        consultation_instruction=consultation_instruction,
-    )
-
-    response = await llm_call(
-        llm_client,
-        messages=[
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_content},
-        ],
-        node="restructure",
+    result, _ = await run_optimizer_node(
+        template_name="restructure",
+        compile_vars={"consultation_instruction": consultation_instruction},
+        llm_client=llm_client,
         model=model,
+        user_content=user_content,
     )
-    result = extract_parsed_json(response)
 
     for key in (
         "persona",

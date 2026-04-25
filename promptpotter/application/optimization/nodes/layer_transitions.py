@@ -27,11 +27,10 @@ from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
     assemble_inbox,
 )
-from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
+from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -69,32 +68,6 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-async def _run_llm_transition(
-    *,
-    template_name: str,
-    compile_vars: dict,
-    llm_client: LLMClientBase,
-    model: str | None,
-    temperature: float,
-) -> tuple[dict, str]:
-    """Shared L2/L3 plumbing: template → compile → llm_call → JSON; returns (parsed, prompt)."""
-    template = load_optimizer_prompt(template_name)
-    prompt = template.compile_prompt(**compile_vars)
-    response = await llm_call(
-        llm_client,
-        messages=[{"role": "user", "content": prompt}],
-        node=template_name,
-        model=model,
-        temperature=temperature,
-        trace_meta={
-            "template_name": template_name,
-            "template_fields": template.prompt_field_dict(),
-            "variables": compile_vars,
-        },
-    )
-    return extract_parsed_json(response), prompt
-
-
 class LayerTransition(ABC):
     """Template method for an LLM-driven optimizer transition (L2 or L3).
 
@@ -124,7 +97,7 @@ class LayerTransition(ABC):
             pipeline_params=pipeline_params,
             **ctx,
         )
-        raw, prompt = await _run_llm_transition(
+        raw, prompt = await run_optimizer_node(
             template_name=self.template_name,
             compile_vars=compile_vars,
             llm_client=llm_client,

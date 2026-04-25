@@ -9,10 +9,7 @@ from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
     assemble_inbox,
 )
-from promptpotter.application.optimization.pipeline import (
-    llm_call,
-    load_optimizer_prompt,
-)
+from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
@@ -23,7 +20,6 @@ from promptpotter.shared.constants import (
     classify_axis,
 )
 from promptpotter.shared.errors import graceful
-from promptpotter.shared.llm_parsing import extract_parsed_json
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
@@ -293,27 +289,16 @@ async def l1_generate(
             pipeline_schema_text=schema_text,
         ),
     }
-    _template = load_optimizer_prompt("meta_scan_aware")
-    meta_prompt = _template.compile_prompt(**_compile_vars)
-
-    _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
-
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
-
-    response = await llm_call(
-        llm_client,
-        messages=[{"role": "user", "content": meta_prompt}],
-        node="l1_generate",
+    generated, meta_prompt = await run_optimizer_node(
+        template_name="meta_scan_aware",
+        compile_vars=_compile_vars,
+        llm_client=llm_client,
         model=model,
         temperature=creativity,
         json_schema=output_schema,
-        trace_meta={
-            "template_name": "meta_scan_aware",
-            "template_fields": _template.prompt_field_dict(),
-            "variables": _compile_vars,
-        },
     )
-    generated = extract_parsed_json(response)
+    _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 
