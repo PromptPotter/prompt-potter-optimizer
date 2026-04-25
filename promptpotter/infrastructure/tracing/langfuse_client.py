@@ -37,6 +37,11 @@ class LangfuseLogger:
     - Set these in .env to route data to the correct project
 
     Gracefully disables logging if credentials are missing.
+
+    Error-level policy: routine per-call observability failures (lost trace, lost
+    span, lost score) log at ``DEBUG`` — losing one observation is expected during
+    network blips and never blocks the loop. Setup-time and post-retry failures
+    log at ``WARNING`` since they signal a real condition the user should see.
     """
 
     _instance: "LangfuseLogger | None" = None
@@ -101,7 +106,7 @@ class LangfuseLogger:
         try:
             return self.client.create_trace_id()
         except Exception:
-            logger.warning("Failed to create Langfuse trace ID", exc_info=True)
+            logger.debug("Failed to create Langfuse trace ID", exc_info=True)
             return None
 
     def create_trace(
@@ -145,7 +150,7 @@ class LangfuseLogger:
             self._trace_metadata[trace_id] = root
             return trace_id
         except Exception:
-            logger.warning("Failed to create Langfuse trace", exc_info=True)
+            logger.debug("Failed to create Langfuse trace", exc_info=True)
             return None
 
     def start_span(
@@ -185,7 +190,7 @@ class LangfuseLogger:
             self._open_observations[obs_id] = child
             return obs_id
         except Exception:
-            logger.warning("Failed to start Langfuse span", exc_info=True)
+            logger.debug("Failed to start Langfuse span", exc_info=True)
             return None
 
     def end_observation(
@@ -262,7 +267,7 @@ class LangfuseLogger:
             child.end()
             return getattr(child, "id", uuid.uuid4().hex[:12])
         except Exception:
-            logger.warning("Failed to log Langfuse span", exc_info=True)
+            logger.debug("Failed to log Langfuse span", exc_info=True)
             return None
 
     def create_score(
@@ -287,7 +292,7 @@ class LangfuseLogger:
             )
             return True
         except Exception:
-            logger.warning("Failed to log Langfuse score", exc_info=True)
+            logger.debug("Failed to log Langfuse score", exc_info=True)
             return False
 
     def update_trace(
@@ -316,7 +321,7 @@ class LangfuseLogger:
                     root.update_trace(**kwargs)
             return True
         except Exception:
-            logger.warning("Failed to update Langfuse trace", exc_info=True)
+            logger.debug("Failed to update Langfuse trace", exc_info=True)
             return False
 
     def end_trace(self, trace_id: str) -> None:
@@ -350,7 +355,7 @@ class LangfuseLogger:
             )
             return True
         except Exception:
-            logger.warning("Failed to create Langfuse dataset", exc_info=True)
+            logger.debug("Failed to create Langfuse dataset", exc_info=True)
             return False
 
     def create_dataset_item(
@@ -393,7 +398,7 @@ class LangfuseLogger:
         try:
             return self.client.get_dataset(name=name)
         except Exception:
-            logger.warning("Failed to get Langfuse dataset", exc_info=True)
+            logger.debug("Failed to get Langfuse dataset", exc_info=True)
             return None
 
     def update_dataset_item(
@@ -414,7 +419,7 @@ class LangfuseLogger:
             self.client.create_dataset_item(**kwargs)
             return True
         except Exception:
-            logger.warning("Failed to update Langfuse dataset item", exc_info=True)
+            logger.debug("Failed to update Langfuse dataset item", exc_info=True)
             return False
 
     @property

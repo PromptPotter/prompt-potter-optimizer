@@ -260,29 +260,9 @@ class OpenAICompatibleClient(LLMClientBase):
             raw = await client.chat.completions.with_raw_response.create(**request_params)
             response = raw.parse()
         except Exception as exc:
-            _raise_if_request_too_large(exc, self._provider_name)
-            status = getattr(exc, "status_code", None)
-            if status == 404:
-                model_name = request_params.get("model", "unknown")
-                raise ValueError(
-                    f"Model '{model_name}' not found on {self._provider_name}. "
-                    f"Update campaign_config['optimizer_llm']['model'] or "
-                    f"set EXPERIMENT_ID = None to use current config."
-                ) from exc
-            if status == 400 and "json_validate_failed" in str(exc):
-                repaired = _repair_json_validate_failure(str(exc))
-                if repaired is not None:
-                    fg_text, parsed = repaired
-                    logger.info(
-                        "%s: salvaged failed_generation via JSON repair",
-                        self._provider_name,
-                    )
-                    return LLMResponse(
-                        content=fg_text,
-                        model=request_params.get("model", ""),
-                        usage={"prompt_tokens": 0, "completion_tokens": 0},
-                        parsed=parsed,
-                    )
+            recovered = self._try_recover_from_chat_error(exc, request_params)
+            if recovered is not None:
+                return recovered
             raise
 
         if self._rate_limiter is not None:
@@ -312,6 +292,40 @@ class OpenAICompatibleClient(LLMClientBase):
             finish_reason=response.choices[0].finish_reason,
             parsed=parsed,
         )
+
+    def _try_recover_from_chat_error(
+        self, exc: Exception, request_params: dict[str, Any]
+    ) -> LLMResponse | None:
+        """Translate known provider quirks into a salvaged response or a clearer raise.
+
+        Returns a salvaged ``LLMResponse`` only for Groq's 400 json_validate_failed
+        when the body carries a recoverable ``failed_generation``. Returns ``None``
+        when the caller should re-raise the original exception.
+        """
+        _raise_if_request_too_large(exc, self._provider_name)
+        status = getattr(exc, "status_code", None)
+        if status == 404:
+            model_name = request_params.get("model", "unknown")
+            raise ValueError(
+                f"Model '{model_name}' not found on {self._provider_name}. "
+                f"Update campaign_config['optimizer_llm']['model'] or "
+                f"set EXPERIMENT_ID = None to use current config."
+            ) from exc
+        if status == 400 and "json_validate_failed" in str(exc):
+            repaired = _repair_json_validate_failure(str(exc))
+            if repaired is not None:
+                fg_text, parsed = repaired
+                logger.info(
+                    "%s: salvaged failed_generation via JSON repair",
+                    self._provider_name,
+                )
+                return LLMResponse(
+                    content=fg_text,
+                    model=request_params.get("model", ""),
+                    usage={"prompt_tokens": 0, "completion_tokens": 0},
+                    parsed=parsed,
+                )
+        return None
 
 
 class AnthropicClient(LLMClientBase):
