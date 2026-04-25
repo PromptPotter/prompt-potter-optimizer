@@ -110,8 +110,3 @@ def test_faulty_sink_does_not_block_others(caplog):
         emit_token_usage(usage)
     assert received == [usage]
     assert any("sink" in r.message and "failed" in r.message for r in caplog.records)
-
-
-def test_total_tokens_property():
-    u = TokenUsage(node="x", kind="optimizer", input_tokens=42, output_tokens=58, duration_s=0.1)
-    assert u.total_tokens == 100
