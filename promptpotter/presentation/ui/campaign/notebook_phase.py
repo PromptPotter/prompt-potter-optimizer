@@ -22,8 +22,8 @@ from promptpotter.presentation.views.display_primitives import (
     _node_top,
     _round_rule,
     _scoreboard,
-    fmt_pvalue,
 )
+from promptpotter.presentation.views.formatting import fmt_pvalue
 from promptpotter.shared.statistics import min_detectable_effect
 
 from .notebook_sp_diff import (

@@ -111,27 +111,6 @@ def render_pipeline_overrides(
     return "\n".join(parts)
 
 
-def _md_table(headers: list[str], rows: list[list[str]]) -> str:
-    """Render a markdown table with header alignment."""
-    col_widths = [len(h) for h in headers]
-    for row in rows:
-        for i, cell in enumerate(row):
-            if i < len(col_widths):
-                col_widths[i] = max(col_widths[i], len(cell))
-
-    def _pad(cells: list[str]) -> str:
-        parts = [c.ljust(col_widths[i]) for i, c in enumerate(cells)]
-        return "| " + " | ".join(parts) + " |"
-
-    lines = [
-        _pad(headers),
-        "| " + " | ".join("-" * w for w in col_widths) + " |",
-    ]
-    for row in rows:
-        lines.append(_pad(row))
-    return "\n".join(lines)
-
-
 # ---------------------------------------------------------------------------
 # Per-table row builders
 # ---------------------------------------------------------------------------
@@ -279,7 +258,24 @@ def render_table(data: Any, config_name: str) -> str:
 
     headers = cfg["headers"](data) if callable(cfg["headers"]) else cfg["headers"]
     rows = cfg["rows"](data)
-    return _md_table(headers, rows)
+
+    col_widths = [len(h) for h in headers]
+    for row in rows:
+        for i, cell in enumerate(row):
+            if i < len(col_widths):
+                col_widths[i] = max(col_widths[i], len(cell))
+
+    def _pad(cells: list[str]) -> str:
+        parts = [c.ljust(col_widths[i]) for i, c in enumerate(cells)]
+        return "| " + " | ".join(parts) + " |"
+
+    lines = [
+        _pad(headers),
+        "| " + " | ".join("-" * w for w in col_widths) + " |",
+    ]
+    for row in rows:
+        lines.append(_pad(row))
+    return "\n".join(lines)
 
 
 # ---------------------------------------------------------------------------

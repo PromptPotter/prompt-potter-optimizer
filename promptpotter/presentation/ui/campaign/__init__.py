@@ -31,6 +31,7 @@ from .campaigns import (
     load_stored_campaign_config,
     show_experiment_dashboard,
 )
+from .langfuse_config import configure_langfuse, push_langfuse, sync_langfuse
 
 # -- Display ------------------------------------------------------------------
 from .notebook_analytics import (
@@ -53,7 +54,6 @@ from .optimize import (
 )
 from .setup import (
     build_all_index_terms,
-    configure_langfuse,
     configure_pipeline,
     decompose_task_context,
     dev_reload,
@@ -61,12 +61,10 @@ from .setup import (
     load_variant_library,
     prepare_datasets,
     prepare_scoring_context,
-    push_langfuse,
     save_campaign_winner,
     setup_llm,
     show_backend_status,
     show_pipeline_snapshot,
-    sync_langfuse,
 )
 
 # __all__ derived from the explicit imports above — no manual list to maintain.

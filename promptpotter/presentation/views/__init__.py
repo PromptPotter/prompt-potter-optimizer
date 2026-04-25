@@ -11,9 +11,9 @@ from __future__ import annotations
 
 from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .dashboard import render_dashboard, render_status
-from .display_primitives import render_patience_status, render_progress_table, render_round_stats
 from .formatting import generate_supplemental, render_pipeline_overrides, render_table
 from .hard_sample_heatmap import render_hard_sample_heatmap
+from .round_summary import render_patience_status, render_progress_table, render_round_stats
 from .rounds import (
     render_campaign_summary,
     render_flip_tracking,

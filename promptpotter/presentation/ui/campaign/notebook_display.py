@@ -18,6 +18,10 @@ from promptpotter.infrastructure.persistence.session_emitter import (
     append_journal,
     read_claude_notes,
 )
+from promptpotter.presentation.views.candidate_view import (
+    build_candidate_summary,
+    fmt_candidate_header,
+)
 from promptpotter.presentation.views.display_primitives import (
     DIM,
     RESET,
@@ -25,11 +29,11 @@ from promptpotter.presentation.views.display_primitives import (
     _box_bottom_info,
     _box_line,
     _box_top,
-    _fmt_query_result,
     _node_bottom,
     _node_top,
-    build_candidate_summary,
-    fmt_candidate_header,
+)
+from promptpotter.presentation.views.query_format import _fmt_query_result
+from promptpotter.presentation.views.round_summary import (
     render_patience_status,
     render_progress_table,
     render_round_stats,

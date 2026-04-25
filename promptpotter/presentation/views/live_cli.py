@@ -17,23 +17,27 @@ from typing import TYPE_CHECKING, Any
 from tqdm.auto import tqdm
 
 from promptpotter.domain.phases import CampaignPhase
+from promptpotter.presentation.views.candidate_view import (
+    build_candidate_summary,
+    fmt_candidate_header,
+)
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     GREEN,
     RESET,
     YELLOW,
     _fmt_delta,
-    _fmt_query_result,
     _node_bottom,
     _node_top,
     _scoreboard,
-    build_candidate_summary,
-    fmt_candidate_header,
+)
+from promptpotter.presentation.views.formatting import fmt_pct
+from promptpotter.presentation.views.query_format import _fmt_query_result
+from promptpotter.presentation.views.round_summary import (
     render_patience_status,
     render_progress_table,
     render_round_stats,
 )
-from promptpotter.presentation.views.formatting import fmt_pct
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult

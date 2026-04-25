@@ -5,6 +5,9 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from promptpotter.application.campaign.campaign_setup import (
+    load_baseline_prompt,
+)
+from promptpotter.application.campaign.campaign_setup import (
     resolve_campaign_id as _resolve_campaign_id,
 )
 from promptpotter.application.campaign.data import (
@@ -24,6 +27,7 @@ from promptpotter.presentation.views.display_primitives import (
     _dbox_sep,
     _dbox_top,
 )
+from promptpotter.presentation.views.formatting import fmt_ci, fmt_pvalue
 from promptpotter.shared.statistics import (
     min_detectable_effect,
     proportion_test,
@@ -36,14 +40,6 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
-
-
-def _per_query_formula(campaign_config: CampaignConfig | None) -> str | None:
-    """Return the per-query scoring formula from a ``scoring`` block."""
-    from promptpotter.shared.scoring import split_scoring_block
-
-    raw = campaign_config.scoring if campaign_config else None
-    return split_scoring_block(raw)[0]
 
 
 __all__ = [
@@ -244,6 +240,8 @@ async def run_optimization_notebook(
     _bl = _extract_campaign_baseline(campaign_rounds)
     baseline_acc = _bl.baseline_acc
 
+    from promptpotter.shared.scoring import split_scoring_block
+
     l1_patience = campaign_config.optimization.l1_patience
     display = NotebookDisplay(
         campaign_rounds=campaign_rounds,
@@ -251,7 +249,9 @@ async def run_optimization_notebook(
         l1_patience=l1_patience,
         pipeline_schema=session.pipeline_schema,
         store=store,
-        scoring_formula=_per_query_formula(campaign_config),
+        scoring_formula=split_scoring_block(campaign_config.scoring if campaign_config else None)[
+            0
+        ],
     )
 
     # Resolve explicit experiment_id to full cycle_id
@@ -345,9 +345,3 @@ async def run_optimization_notebook(
         raise KeyboardInterrupt(f"optimization interrupted after {result.n_rounds} rounds")
 
     return campaign_rounds, result
-
-
-from promptpotter.application.campaign.campaign_setup import (  # noqa: E402
-    load_baseline_prompt,
-)
-from promptpotter.presentation.views.display_primitives import fmt_ci, fmt_pvalue  # noqa: E402

@@ -31,28 +31,17 @@ if TYPE_CHECKING:
 
 __all__ = [
     "build_all_index_terms",
-    # Langfuse
-    "configure_langfuse",
-    # Pipeline config
     "configure_pipeline",
-    # Task context
     "decompose_task_context",
-    # Dev
     "dev_reload",
-    # Service init
     "init_services",
     "load_variant_library",
     "prepare_datasets",
     "prepare_scoring_context",
-    "push_langfuse",
-    # Re-exports
     "save_campaign_winner",
     "setup_llm",
-    # Backend status & datasets
     "show_backend_status",
-    # Pipeline snapshot
     "show_pipeline_snapshot",
-    "sync_langfuse",
 ]
 
 
@@ -329,9 +318,7 @@ async def prepare_scoring_context(
         prepare_scoring_context as _svc_prepare,
     )
     from promptpotter.infrastructure.tracing import ObservabilityBridge
-    from promptpotter.presentation.views.display_primitives import (
-        _fmt_query_result,
-    )
+    from promptpotter.presentation.views.query_format import _fmt_query_result
 
     _raw_scoring = campaign_config.scoring if campaign_config else None
     scoring_formula: str | None = (
@@ -425,116 +412,3 @@ def prepare_datasets(
     print(f"{'=' * 50}")
 
     return result.train_data, result.index_terms
-
-
-# ---------------------------------------------------------------------------
-# Langfuse operations (absorbed from _langfuse.py)
-# ---------------------------------------------------------------------------
-
-
-def configure_langfuse(
-    *,
-    enabled: bool | None = None,
-    host: str | None = None,
-    public_key: str | None = None,
-    secret_key: str | None = None,
-) -> None:
-    """Configure Langfuse settings at runtime from a notebook cell."""
-    from promptpotter.config.settings import settings
-    from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
-
-    changed = False
-    if enabled is not None:
-        settings.LANGFUSE_ENABLED = enabled
-        changed = True
-    if host is not None:
-        settings.LANGFUSE_HOST = host
-        changed = True
-    if public_key is not None:
-        settings.LANGFUSE_PUBLIC_KEY = public_key
-        changed = True
-    if secret_key is not None:
-        settings.LANGFUSE_SECRET_KEY = secret_key
-        changed = True
-
-    if changed:
-        LangfuseLogger.reset_instance()
-        lf = LangfuseLogger.get_instance()
-        status = "enabled" if lf.enabled else "disabled"
-        print(f"Langfuse reconfigured: {status}")
-
-
-def sync_langfuse(
-    store,
-    backend_id: str,
-    *,
-    dataset_name: str = "ground_truth",
-    backfill: bool = True,
-    reset: bool = False,
-) -> dict | None:
-    """Configure Langfuse dataset name and optionally push all runs."""
-    from promptpotter.infrastructure.tracing.langfuse_backfill import sync_langfuse_runs
-
-    result = sync_langfuse_runs(
-        store,
-        backend_id,
-        dataset_name=dataset_name,
-        backfill=backfill,
-        reset=reset,
-    )
-    if result is None:
-        if not backfill:
-            print(f"Langfuse dataset: {dataset_name} (backfill disabled)")
-        else:
-            print("No completed dataset runs yet — skipping Langfuse backfill.")
-        return None
-    return result
-
-
-def push_langfuse(store, backend_id: str) -> dict:
-    """Push all historical dataset_runs to cloud Langfuse (dataset-first)."""
-    from promptpotter.infrastructure.tracing.langfuse_backfill import push_all_runs
-
-    summaries = store.dataset_runs.list_all(backend_id)
-
-    print("=" * 70)
-    print("  LANGFUSE PUSH (dataset-first)")
-    print("=" * 70)
-    print(f"Found {len(summaries)} completed dataset runs for '{backend_id}'")
-
-    stats = push_all_runs(store, backend_id, on_progress=print)
-
-    if "error" in stats:
-        print(f"\nPush aborted: {stats['error']}")
-        return stats
-
-    new_runs = stats["new_runs"]
-    already = stats["already_done"]
-
-    if new_runs == 0:
-        print(f"\nAll {already} runs already pushed. Nothing to do.")
-    else:
-        print(f"\nPush complete: {new_runs} runs pushed to Langfuse")
-        print(f"Session: {stats['session_id']}")
-
-    print("=" * 70)
-    print("  PUSH SUMMARY")
-    print("=" * 70)
-    print(f"  Total runs on disk:  {stats['total_on_disk']}")
-    print(f"  Newly pushed:        {new_runs}")
-    print(f"  Already done:        {already}")
-    print(f"  Dataset:             {stats.get('dataset_name', 'N/A')}")
-    print(f"  Dataset items:       {stats.get('dataset_items', 0)}")
-
-    for origin, info in stats.get("origins", {}).items():
-        n = info["n_runs"]
-        items = info["total_items"]
-        best = info["best_accuracy"]
-        avg = info["avg_accuracy"]
-        print(f"\n  {origin}:")
-        print(f"    Runs: {n}, Items: {items}")
-        print(f"    Best accuracy: {best:.1%}, Avg: {avg:.1%}")
-
-    print("=" * 70)
-
-    return stats
