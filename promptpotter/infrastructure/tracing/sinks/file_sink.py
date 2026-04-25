@@ -146,6 +146,24 @@ class FileSink:
         }
         append_jsonl(self._scope_dir() / "langfuse" / "scores" / f"{trace_id}.jsonl", score)
 
+    def _finalize_observation(
+        self,
+        trace_id: str,
+        obs_id: str,
+        output: Any,
+        metadata_extra: dict[str, Any] | None = None,
+    ) -> None:
+        """Read-modify-write the observation JSON: set output, endTime, merge metadata."""
+        obs_path = self._scope_dir() / "langfuse" / "observations" / trace_id / f"{obs_id}.json"
+        if not obs_path.exists():
+            return
+        obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
+        obs_data["output"] = output
+        obs_data["endTime"] = _utcnow_iso()
+        if metadata_extra:
+            obs_data.setdefault("metadata", {}).update(metadata_extra)
+        write_json(obs_path, obs_data)
+
     # --- MLflow (opt-in via MLFLOW_ENABLED) ---
 
     def _log_mlflow_run(self, event: RoundEnd) -> None:
@@ -371,25 +389,21 @@ class FileSink:
         if ids is None:
             return
         trace_id, obs_id = ids
-        obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
-        obs_path = obs_dir / f"{obs_id}.json"
-        if obs_path.exists():
-            obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
-            obs_data["output"] = event.output_data
-            obs_data["endTime"] = _utcnow_iso()
-            if event.metrics:
-                obs_data.setdefault("metadata", {})["metrics"] = event.metrics
-            if event.error:
-                obs_data.setdefault("metadata", {})["error"] = event.error
-            write_json(obs_path, obs_data)
-        node_end_payload: dict[str, Any] = {
-            "event": "node_end",
-            "trace_id": trace_id,
-            "obs_id": obs_id,
-            "node_id": event.node_id,
-            "error": event.error,
-        }
-        self._log_event(node_end_payload)
+        meta_extra: dict[str, Any] = {}
+        if event.metrics:
+            meta_extra["metrics"] = event.metrics
+        if event.error:
+            meta_extra["error"] = event.error
+        self._finalize_observation(trace_id, obs_id, event.output_data, meta_extra or None)
+        self._log_event(
+            {
+                "event": "node_end",
+                "trace_id": trace_id,
+                "obs_id": obs_id,
+                "node_id": event.node_id,
+                "error": event.error,
+            }
+        )
 
     def on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
@@ -397,25 +411,22 @@ class FileSink:
             round_ids = self._round_obs_ids.pop((event.campaign_id, event.round_num), None)
             if round_ids is not None:
                 _, obs_id = round_ids
-                obs_path = (
-                    self._scope_dir() / "langfuse" / "observations" / trace_id / f"{obs_id}.json"
-                )
-                if obs_path.exists():
-                    obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
-                    obs_data["output"] = {
+                meta_extra: dict[str, Any] = {"candidate_scores": event.candidate_scores}
+                if event.optimizer_templates:
+                    meta_extra["optimizer_templates"] = event.optimizer_templates
+                self._finalize_observation(
+                    trace_id,
+                    obs_id,
+                    {
                         "accuracy": event.accuracy,
                         "hits": event.hits,
                         "total": event.total,
                         "improved": event.improved,
                         "next_action": event.next_action,
                         "winner_prompt_fields_id": event.winner_prompt_fields_id,
-                    }
-                    obs_data["endTime"] = _utcnow_iso()
-                    meta = obs_data.setdefault("metadata", {})
-                    meta["candidate_scores"] = event.candidate_scores
-                    if event.optimizer_templates:
-                        meta["optimizer_templates"] = event.optimizer_templates
-                    write_json(obs_path, obs_data)
+                    },
+                    meta_extra,
+                )
             self._write_score(trace_id, "accuracy", event.accuracy)
 
         self._log_mlflow_run(event)

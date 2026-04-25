@@ -46,6 +46,33 @@ logger = logging.getLogger(__name__)
 __all__ = ["run_optimization"]
 
 
+async def _escalate_or_stop(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    round_num: int,
+    cb: RunListener,
+    *,
+    from_degradation: bool = False,
+    escalation_check_result: dict | None = None,
+) -> None:
+    """Run L2 escalation; raise ``StopLoop`` if it returned a stop reason."""
+    stop = await escalate_l2(
+        cycle,
+        config,
+        session.pipeline_schema,
+        round_num,
+        cb.on_phase,
+        on_checkpoint=cb.on_checkpoint,
+        obs=session.obs,
+        obs_campaign_id=session.obs_campaign_id,
+        from_degradation=from_degradation,
+        escalation_check_result=escalation_check_result,
+    )
+    if stop:
+        raise StopLoop(stop)
+
+
 async def _handle_escalation_signal(
     cycle: Cycle,
     config: CampaignConfig,
@@ -66,7 +93,6 @@ async def _handle_escalation_signal(
         degraded_rate=signal.check_result.get("degraded_rate"),
         warning_types=signal.check_result.get("warning_types"),
     )
-    esc_check_result = signal.check_result
 
     if (
         signal.target in (EscalationTarget.L2, EscalationTarget.L3)
@@ -75,29 +101,19 @@ async def _handle_escalation_signal(
         cycle.opt_sp.memory.append_escalation(
             build_escalation_entry(
                 round_num,
-                esc_check_result,
+                signal.check_result,
                 cycle.current_sp.pipeline_params if cycle.current_sp else None,
             )
         )
-        try:
-            stop = await escalate_l2(
-                cycle,
-                config,
-                session.pipeline_schema,
-                round_num,
-                cb.on_phase,
-                on_checkpoint=cb.on_checkpoint,
-                obs=session.obs,
-                obs_campaign_id=session.obs_campaign_id,
-                from_degradation=True,
-                escalation_check_result=esc_check_result,
-            )
-            if stop:
-                raise StopLoop(stop)
-        except StopLoop:
-            raise
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
+        await _escalate_or_stop(
+            cycle,
+            config,
+            session,
+            round_num,
+            cb,
+            from_degradation=True,
+            escalation_check_result=signal.check_result,
+        )
     elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
         raise StopLoop(StopReason.ABORT)
 
@@ -108,96 +124,6 @@ async def _handle_escalation_signal(
             round_num + 1,
         )
     emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
-
-
-def _maybe_evolve_adaptive_prefix(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    round_num: int,
-    dataset: list[Sample],
-    cb: RunListener,
-) -> None:
-    """Round-end Rasch + KG swap of the active scoring prefix."""
-    ap_cfg = config.optimization.adaptive_prefix
-    if not ap_cfg.enabled:
-        return
-    if not cycle.rounds:
-        return
-
-    from promptpotter.application.intelligence.adaptive_prefix import (
-        build_prefix_event,
-        evolve_prefix,
-    )
-
-    with graceful("AdaptivePrefix evolve failed"):
-        result = evolve_prefix(
-            full_dataset=dataset,
-            current_prefix=session.scoring_dataset,
-            rounds=cycle.rounds,
-            config=ap_cfg,
-            elimination_n_min=config.optimization.elimination_n_min,
-        )
-        if result.swapped_in or result.swapped_out:
-            session.scoring_dataset[:] = result.new_prefix
-            event = build_prefix_event(round_num=round_num, result=result)
-            cycle.prefix_events.append(event)
-            emit_phase(
-                cb.on_phase,
-                "adaptive_prefix",
-                "evolved",
-                round=round_num,
-                swapped_out=event["swapped_out"],
-                swapped_in=event["swapped_in"],
-                new_prefix_size=event["new_prefix_size"],
-            )
-
-
-def _maybe_apply_zero_signal_filter(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    round_num: int,
-    dataset: list[Sample],
-    cb: RunListener,
-) -> None:
-    """Prune always-hit/always-miss queries from the active dataset at round boundaries."""
-    if not config.optimization.zero_signal_filter_enabled:
-        return
-    dataset_name = session.dataset_name
-    if not dataset_name:
-        return
-    memory = cycle.search_memory
-    if memory is None or session.store is None:
-        return
-
-    with graceful("Zero-signal filter failed"):
-        excluded = apply_zero_signal_exclusions(
-            store=session.store,
-            dataset_name=dataset_name,
-            memory=memory,
-            active_dataset=dataset,
-            min_observations=config.optimization.zero_signal_filter_min_observations,
-            campaign_id=session.cycle_id or "",
-        )
-        if excluded:
-            excluded_queries = {e["query"] for e in excluded}
-            session.scoring_dataset[:] = [
-                s for s in session.scoring_dataset if s.query not in excluded_queries
-            ]
-            always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
-            always_hit = len(excluded) - always_miss
-            emit_phase(
-                cb.on_phase,
-                "zero_signal_filter",
-                "applied",
-                round=round_num,
-                count=len(excluded),
-                always_miss=always_miss,
-                always_hit=always_hit,
-                examples=[e["query"] for e in excluded[:3]],
-                dataset_name=dataset_name,
-            )
 
 
 async def _post_round(
@@ -241,27 +167,73 @@ async def _post_round(
 
     if cycle.search_memory:
         cycle.search_memory.on_round_complete(cycle, session, config, round_num, dataset)
-        _maybe_apply_zero_signal_filter(cycle, config, session, round_num, dataset, cb)
+        # Round-end zero-signal filter — prune always-hit/always-miss queries from the active set.
+        zsf = config.optimization.zero_signal_filter_enabled
+        dataset_name = session.dataset_name
+        if zsf and dataset_name and session.store is not None:
+            with graceful("Zero-signal filter failed"):
+                excluded = apply_zero_signal_exclusions(
+                    store=session.store,
+                    dataset_name=dataset_name,
+                    memory=cycle.search_memory,
+                    active_dataset=dataset,
+                    min_observations=config.optimization.zero_signal_filter_min_observations,
+                    campaign_id=session.cycle_id or "",
+                )
+                if excluded:
+                    excluded_queries = {e["query"] for e in excluded}
+                    session.scoring_dataset[:] = [
+                        s for s in session.scoring_dataset if s.query not in excluded_queries
+                    ]
+                    always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
+                    emit_phase(
+                        cb.on_phase,
+                        "zero_signal_filter",
+                        "applied",
+                        round=round_num,
+                        count=len(excluded),
+                        always_miss=always_miss,
+                        always_hit=len(excluded) - always_miss,
+                        examples=[e["query"] for e in excluded[:3]],
+                        dataset_name=dataset_name,
+                    )
 
-    _maybe_evolve_adaptive_prefix(cycle, config, session, round_num, dataset, cb)
+    # Round-end Rasch + KG swap of the active scoring prefix.
+    ap_cfg = config.optimization.adaptive_prefix
+    if ap_cfg.enabled and cycle.rounds:
+        from promptpotter.application.intelligence.adaptive_prefix import (
+            build_prefix_event,
+            evolve_prefix,
+        )
+
+        with graceful("AdaptivePrefix evolve failed"):
+            ap_result = evolve_prefix(
+                full_dataset=dataset,
+                current_prefix=session.scoring_dataset,
+                rounds=cycle.rounds,
+                config=ap_cfg,
+                elimination_n_min=config.optimization.elimination_n_min,
+            )
+            if ap_result.swapped_in or ap_result.swapped_out:
+                session.scoring_dataset[:] = ap_result.new_prefix
+                event = build_prefix_event(round_num=round_num, result=ap_result)
+                cycle.prefix_events.append(event)
+                emit_phase(
+                    cb.on_phase,
+                    "adaptive_prefix",
+                    "evolved",
+                    round=round_num,
+                    swapped_out=event["swapped_out"],
+                    swapped_in=event["swapped_in"],
+                    new_prefix_size=event["new_prefix_size"],
+                )
 
     if cycle.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)
     if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
         if not config.optimization.enable_l2:
             raise StopLoop(StopReason.PATIENCE)
-        stop = await escalate_l2(
-            cycle,
-            config,
-            session.pipeline_schema,
-            round_num,
-            cb.on_phase,
-            on_checkpoint=cb.on_checkpoint,
-            obs=session.obs,
-            obs_campaign_id=session.obs_campaign_id,
-        )
-        if stop:
-            raise StopLoop(stop)
+        await _escalate_or_stop(cycle, config, session, round_num, cb)
         cycle.escalation.l1_stall_count = 0
 
 
@@ -321,18 +293,7 @@ async def _run_round_loop(
             if is_probe:
                 cycle.set_probe(False)
                 if opt.enable_l2:
-                    stop = await escalate_l2(
-                        cycle,
-                        config,
-                        session.pipeline_schema,
-                        round_num,
-                        cb.on_phase,
-                        on_checkpoint=cb.on_checkpoint,
-                        obs=session.obs,
-                        obs_campaign_id=session.obs_campaign_id,
-                    )
-                    if stop:
-                        raise StopLoop(stop)
+                    await _escalate_or_stop(cycle, config, session, round_num, cb)
                 round_num += 1
                 clean_rounds += 1
                 continue

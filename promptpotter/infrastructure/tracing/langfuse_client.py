@@ -153,6 +153,14 @@ class LangfuseLogger:
             logger.debug("Failed to create Langfuse trace", exc_info=True)
             return None
 
+    def _resolve_parent(self, trace_id: str, parent_observation_id: str | None) -> Any | None:
+        """Find an SDK observation to nest under: explicit open obs → root → None."""
+        if parent_observation_id:
+            parent = self._open_observations.get(parent_observation_id)
+            if parent is not None:
+                return parent
+        return self._trace_metadata.get(trace_id)
+
     def start_span(
         self,
         trace_id: str,
@@ -171,15 +179,9 @@ class LangfuseLogger:
             return None
 
         try:
-            # Find parent: explicit parent obs, or root trace span
-            parent = None
-            if parent_observation_id:
-                parent = self._open_observations.get(parent_observation_id)
-            if parent is None:
-                parent = self._trace_metadata.get(trace_id)
+            parent = self._resolve_parent(trace_id, parent_observation_id)
             if parent is None:
                 return None
-
             child = parent.start_observation(
                 as_type=as_type,
                 name=name,
@@ -243,14 +245,9 @@ class LangfuseLogger:
             return None
 
         try:
-            parent = None
-            if parent_observation_id:
-                parent = self._open_observations.get(parent_observation_id)
-            if parent is None:
-                parent = self._trace_metadata.get(trace_id)
+            parent = self._resolve_parent(trace_id, parent_observation_id)
             if parent is None:
                 return None
-
             kwargs: dict[str, Any] = {
                 "as_type": as_type,
                 "name": name,
