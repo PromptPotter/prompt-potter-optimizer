@@ -1,15 +1,13 @@
-"""Optional human-driven reconnaissance package.
+"""DORMANT — do not maintain. See ./README.md.
 
-The recon pass (a one-at-a-time sensitivity scan) is an *optional* human-in-the-loop
-exploration step that runs before the AI optimization loop. It probes which axes
-of the search space actually move the needle, so the operator can focus the optimizer.
+Sensitivity-scan / recon package, preserved as a working-shape reference.
+Has zero callers in the active loop. Read-only by policy; do not refactor,
+"improve," modernize, or fix this code. If a test breaks, skip it. If a
+lint or type rule fails, exclude the file.
 
-This package is independent of the optimization loop. The only sanctioned
-bridge is ``ReconBrief`` flowing through ``RunConfig`` into L1 — see
-``application/campaign/config.py``.
-
-Directionality: ``recon`` may import from ``optimization`` (for primitives like
-``llm_call``), but ``optimization`` must never import from ``recon``.
+Directionality (when revived): ``recon`` may import from ``optimization``
+(for primitives like ``llm_call``); ``optimization`` must never import
+from ``recon``.
 """
 
 from __future__ import annotations

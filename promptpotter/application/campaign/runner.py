@@ -386,7 +386,7 @@ async def run_optimization(
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
 
     if not session_id:
-        from promptpotter.application.campaign.session_state import auto_mint_session
+        from promptpotter.application.campaign.campaign_setup import auto_mint_session
         from promptpotter.domain.cycle_identity import cycle_hash_suffix
 
         ps = baseline.baseline_ps

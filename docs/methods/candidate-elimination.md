@@ -14,7 +14,7 @@ Candidates are evaluated sequentially on **Q** in the same deterministic order. 
 Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the candidate is stopped early. The round winner is selected from all candidates (including early-stopped) by composite score, subject to an improvement threshold (default delta > 0.01).[^winner]
 
 [^elim]: `promptpotter/shared/statistics.py::should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
-[^winner]: `promptpotter/application/optimization/nodes/l1/winner.py::select_round_winner()`.
+[^winner]: `promptpotter/application/optimization/nodes/l1/score.py::select_round_winner()`.
 
 ---
 

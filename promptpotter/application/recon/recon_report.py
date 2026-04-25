@@ -1,8 +1,9 @@
-"""Post-scan processing: diagnostic resume, winner selection, context preparation,
-and scan baseline preparation.
+"""DORMANT — do not maintain. See ./README.md.
 
-Pure functions for working with scan results — no backend calls, no eval
-(except ``decompose_recon_baseline`` which delegates to decompose).
+Post-scan processing: diagnostic resume, winner selection, context preparation,
+and scan baseline preparation. Pure functions for working with scan results
+— no backend calls, no eval (except ``decompose_recon_baseline`` which
+delegates to decompose).
 """
 
 from __future__ import annotations

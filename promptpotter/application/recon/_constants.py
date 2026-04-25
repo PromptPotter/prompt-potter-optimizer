@@ -1,8 +1,9 @@
-"""Recon-local constants — diagnostic set thresholds.
+"""DORMANT — do not maintain. See ./README.md.
 
-Kept inside ``application/recon/`` so the dormant template is
-self-contained: a future reviver can read and re-wire the module
-without hunting through ``shared/``.
+Recon-local constants — diagnostic set thresholds. Kept inside
+``application/recon/`` so the dormant template is self-contained: a
+future reviver can read and re-wire the module without hunting through
+``shared/``.
 """
 
 DEFAULT_DIAGNOSTIC_QUERIES: int = 6

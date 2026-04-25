@@ -15,9 +15,9 @@ from promptpotter.application.optimization.nodes.l1.critique import (
     format_l1_critique_for_prompt,
     sample_thinking_styles,
 )
-from promptpotter.application.optimization.nodes.l1.utils import update_query_tracker
 from promptpotter.application.optimization.phases import CampaignPhase, emit_phase
 from promptpotter.application.optimization.results import RoundResult
+from promptpotter.application.optimization.utils import update_query_tracker
 from promptpotter.application.scoring.metrics import compute_composite_score
 
 # Module-level import for test monkeypatching.

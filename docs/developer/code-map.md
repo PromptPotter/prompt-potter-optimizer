@@ -51,7 +51,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
 | `PauseForReviewError` | `promptpotter/application/optimization/nodes/l1/execute.py` |
 | `score_candidates` | `promptpotter/application/optimization/nodes/l1/measure.py` |
-| `select_round_winner` | `promptpotter/application/optimization/nodes/l1/winner.py` |
+| `select_round_winner` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `validate_overrides` | `promptpotter/application/optimization/nodes/l1/generate.py` |
 

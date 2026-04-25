@@ -10,7 +10,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes.l1.utils import extract_warning_types
+from promptpotter.application.optimization.utils import extract_warning_types
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.shared.statistics import should_stop_early

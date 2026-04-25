@@ -22,11 +22,11 @@ from promptpotter.application.optimization.nodes.formatting import (
     build_trajectory_report,
     format_search_memory_block,
 )
-from promptpotter.application.optimization.nodes.l1.utils import (
+from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
+from promptpotter.application.optimization.utils import (
     candidate_keys_from_schema,
     get_candidates,
 )
-from promptpotter.application.optimization.pipeline import llm_call, load_optimizer_prompt
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.shared.errors import is_error_result
 

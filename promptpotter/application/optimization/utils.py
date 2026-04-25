@@ -1,8 +1,8 @@
-"""L1-shared result extractors.
+"""Result-extraction helpers shared across the optimization layer.
 
-Used by escalation, execute, critique, and the notebook display. Pure
-read-only helpers over a result dict / pipeline schema — no LLM calls,
-no I/O.
+Pure read-only helpers over a result dict / pipeline schema — no LLM calls,
+no I/O. Consumed by elimination, L1 execute, L1 critique, and the notebook
+display layer.
 """
 
 from __future__ import annotations

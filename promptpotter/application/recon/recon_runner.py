@@ -1,7 +1,8 @@
-"""OAT sensitivity scan — one-at-a-time perturbation scanning.
+"""DORMANT — do not maintain. See ./README.md.
 
+OAT sensitivity scan — one-at-a-time perturbation scanning.
 Evaluates each axis value against the baseline, holding all other axes at
-their baseline values.  Returns per-variant results and axis profiles
+their baseline values. Returns per-variant results and axis profiles
 sorted by sensitivity.
 """
 

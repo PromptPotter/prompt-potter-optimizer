@@ -1,5 +1,6 @@
-"""Scan advisor — LLM-powered sensitivity scan configuration, plus schema mutation model.
+"""DORMANT — do not maintain. See ./README.md.
 
+Scan advisor — LLM-powered sensitivity scan configuration, plus schema mutation model.
 Analyzes the connected pipeline (nodes, params, node types) and recommends
 which axes to focus the sensitivity scan on, BEFORE running it.
 

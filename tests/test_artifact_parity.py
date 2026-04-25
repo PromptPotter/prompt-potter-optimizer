@@ -235,8 +235,8 @@ def test_auto_mint_session_claims_active_pointer() -> None:
     from types import SimpleNamespace
     from unittest.mock import patch
 
+    from promptpotter.application.campaign.campaign_setup import auto_mint_session
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.campaign.session_state import auto_mint_session
 
     sessions_calls: dict = {}
     campaigns_calls: dict = {}

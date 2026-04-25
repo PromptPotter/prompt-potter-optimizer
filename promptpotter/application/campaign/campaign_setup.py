@@ -3,11 +3,12 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.phases import StopReason
 from promptpotter.config.settings import (
@@ -43,11 +44,15 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "Session",
+    "auto_mint_session",
+    "bootstrap_cycle",
     "finalize_optimization_run",
     "init_optimization_loop",
     "init_services",
     "load_baseline_prompt",
+    "new_session_state",
     "resolve_campaign_id",
+    "resume_or_create",
 ]
 
 
@@ -173,6 +178,76 @@ class Session:
             scorer_id=scorer_id,
             source="baseline",
         )
+
+
+def new_session_state(
+    *,
+    init_params: dict,
+    campaign_config: dict,
+    pipeline_params: dict,
+    active_steps: list[str],
+) -> dict[str, Any]:
+    """Build a fresh campaign session-state dict — shared by CLI init and the orchestrator."""
+    return {
+        "phase": "init",
+        "init_params": init_params,
+        "campaign_config": campaign_config,
+        "pipeline_params": pipeline_params,
+        "active_steps": active_steps,
+        "baseline_prompt_fields": {},
+        "dataset_count": 0,
+        "baseline_accuracy": 0.0,
+        "task_context": None,
+        "experiment_id": None,
+    }
+
+
+def auto_mint_session(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    cycle_hash: str,
+    baseline_acc: float = 0.0,
+    baseline_prompt_fields: dict | None = None,
+    dataset_size: int = 0,
+    experiment_id: str | None = None,
+) -> tuple[str, str]:
+    """Mint (session_id, cycle_id) + write session + claim active pointer when called outside CLI init."""
+    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
+    from promptpotter.infrastructure.store.base import validate_path_component
+
+    validate_path_component(cycle_hash)
+    session_id = mint_session_id()
+    cycle_id = f"cycle_{cycle_hash}"
+
+    state = new_session_state(
+        init_params={
+            "backend_url": session.backend_client.base_url,
+            "backend_id": session.backend_id,
+            "experiment_id": experiment_id,
+            "dataset_name": session.dataset_name,
+        },
+        campaign_config=campaign_config.model_dump(),
+        pipeline_params={},
+        active_steps=[],
+    )
+    state["baseline_accuracy"] = baseline_acc
+    state["dataset_count"] = dataset_size
+    state["baseline_prompt_fields"] = baseline_prompt_fields or {}
+
+    sessions = session.store.sessions
+    sessions.create(session_id, state)
+    sessions.ensure_narrative_files(session_id)
+
+    session.store.campaigns.create(
+        session.backend_id,
+        cycle_id,
+        {"parent_session_id": session_id},
+    )
+
+    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
+    logger.info("Auto-minted session %s + cycle %s", session_id, cycle_id)
+    return session_id, cycle_id
 
 
 def load_baseline_prompt(
@@ -492,6 +567,115 @@ def _campaign_status_for(stop_reason: StopReason) -> str:
     }.get(stop_reason, "completed")
 
 
+def resume_or_create(
+    store: CampaignStore,
+    backend_id: str,
+    cycle_id: str,
+    *,
+    config_snapshot: dict[str, Any],
+    baseline_accuracy: float,
+    hot_update_keys: frozenset[str] = frozenset(),
+    parent_session_id: str = "",
+) -> int:
+    """Resume an existing cycle or create a new one.
+
+    Returns ``resumed_from_round`` — the number of trial files already on
+    disk (0 for a fresh cycle). If the cycle exists and ``hot_update_keys``
+    is non-empty, merge those keys from ``config_snapshot`` into the stored
+    config before returning. ``parent_session_id`` is stamped only on fresh
+    creation.
+    """
+    existing = store.load(backend_id, cycle_id)
+    if existing is not None:
+        if hot_update_keys:
+            stored_cfg = existing.get("config", {})
+            if stored_cfg:
+                cfg_updated = False
+                for k in hot_update_keys:
+                    if stored_cfg.get(k) != config_snapshot.get(k):
+                        stored_cfg[k] = config_snapshot.get(k)
+                        cfg_updated = True
+                if cfg_updated:
+                    store.update(backend_id, cycle_id, {"config": stored_cfg})
+                    logger.info("Updated loop-control config for %s", cycle_id)
+        resumed_from_round = len(existing.get("trials", []))
+        if resumed_from_round:
+            logger.debug(
+                "Resuming cycle %s — %d prior round(s) on disk",
+                cycle_id,
+                resumed_from_round,
+            )
+        return resumed_from_round
+
+    store.create(
+        backend_id,
+        cycle_id,
+        {
+            "type": "optimization_loop",
+            "config": config_snapshot,
+            "baseline_accuracy": baseline_accuracy,
+            "parent_session_id": parent_session_id,
+        },
+    )
+    return 0
+
+
+def bootstrap_cycle(
+    config: CampaignConfig,
+    session: Session,
+    baseline_render: str,
+    baseline_accuracy: float,
+    dataset: list,
+    active_steps: list[str],
+    cycle_id_override: str | None,
+    *,
+    parent_session_id: str = "",
+    resume_from_round_override: int | None = None,
+) -> tuple[CampaignStore | None, str | None, int]:
+    """Open the store and resume/create the cycle in one shot.
+
+    Returns ``(store, cycle_id, resumed_from_round)``. All-None on
+    missing project_root/backend_id or any resume failure. ``parent_session_id``
+    is recorded on a newly created campaign; ignored on resume. When
+    ``resume_from_round_override`` is set, trials for rounds > N are archived
+    into ``archived/resumed_at_<ts>/`` and the trial index is rebuilt before
+    resume.
+    """
+    from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
+    from promptpotter.infrastructure.store.campaign_store import CampaignStore
+
+    if not (session.project_root and session.backend_id):
+        return None, None, 0
+    try:
+        store = CampaignStore(Path(session.project_root))
+        resolved = cycle_id_override or cycle_config_identity(
+            config,
+            baseline_render,
+            dataset,
+            active_steps,
+            strict=config.optimization.strict_cycle_identity,
+        )
+        if resume_from_round_override is not None:
+            store.rewind_to_round(
+                session.backend_id,
+                resolved,
+                resume_from_round_override,
+            )
+        resumed_from = resume_or_create(
+            store,
+            session.backend_id,
+            resolved,
+            config_snapshot=config.model_dump(mode="json"),
+            baseline_accuracy=baseline_accuracy,
+            hot_update_keys=TUNING_KEYS if cycle_id_override else frozenset(),
+            parent_session_id=parent_session_id,
+        )
+        return store, resolved, resumed_from
+    except (OSError, json.JSONDecodeError, KeyError):
+        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+        return None, None, 0
+
+
 async def init_optimization_loop(
     baseline: CampaignBaseline,
     dataset: list[Sample],
@@ -511,7 +695,6 @@ async def init_optimization_loop(
     started_at: str,
 ) -> Cycle:
     """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
-    from promptpotter.application.campaign.bootstrap import bootstrap_cycle
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset

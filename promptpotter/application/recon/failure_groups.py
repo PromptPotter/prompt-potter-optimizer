@@ -1,5 +1,6 @@
-"""Failure-group sensitivity analysis for the recon scan.
+"""DORMANT — do not maintain. See ./README.md.
 
+Failure-group sensitivity analysis for the recon scan.
 Cross-tabulates per-axis scan results against failure clusters from
 SearchMemory to reveal which axes specifically help which failure modes.
 """

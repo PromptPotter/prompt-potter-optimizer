@@ -1,5 +1,6 @@
-"""Shared types and utilities for sensitivity scan and adaptive search.
+"""DORMANT — do not maintain. See ./README.md.
 
+Shared types and utilities for sensitivity scan and adaptive search.
 Axis classification, variant library filtering, eval function factory,
 diagnostic set builder, and plan persistence.
 """
