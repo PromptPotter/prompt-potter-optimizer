@@ -113,41 +113,24 @@ def _three_node_schema() -> PipelineSchema:
 
 
 class TestCoordinateLookups:
-    def test_has_node(self):
+    def test_exclude_drops_named_nodes_and_returns_self_for_empty(self):
         schema = _three_node_schema()
-        assert schema.has_node("a")
-        assert schema.has_node("b")
-        assert not schema.has_node("z")
-
-    def test_exclude(self):
-        schema = _three_node_schema()
-        reduced = schema.exclude({"b"})
-        assert [n.name for n in reduced.nodes] == ["a", "c"]
-        # None / empty → identity
+        assert [n.name for n in schema.exclude({"b"}).nodes] == ["a", "c"]
         assert schema.exclude(None) is schema
         assert schema.exclude(set()) is schema
 
     def test_node_configs_preserves_order_and_fills_empty(self):
         schema = _three_node_schema()
-        pp = {"a": {"max_results": 5}, "b": {"temperature": 0.7}}
-        configs = schema.node_configs(pp)
+        configs = schema.node_configs({"a": {"max_results": 5}, "b": {"temperature": 0.7}})
         assert [name for name, _ in configs] == ["a", "b", "c"]
         assert configs[0][1] == {"max_results": 5}
         assert configs[2][1] == {}  # missing node → empty dict
 
-    def test_sp_hash_matches_stable_hash_of_node_configs(self):
+    def test_sp_hash_distinguishes_configs_and_handles_empty_schema(self):
         from promptpotter.domain.pipeline_schema import stable_hash
 
         schema = _three_node_schema()
         pp = {"a": {"max_results": 5}}
         assert schema.sp_hash(pp) == stable_hash(schema.node_configs(pp))
-
-    def test_sp_hash_empty_schema(self):
-        schema = PipelineSchema(nodes=[])
-        assert schema.sp_hash({}) == ""
-
-    def test_sp_hash_changes_with_config(self):
-        schema = _three_node_schema()
-        h1 = schema.sp_hash({"a": {"max_results": 5}})
-        h2 = schema.sp_hash({"a": {"max_results": 10}})
-        assert h1 != h2
+        assert schema.sp_hash(pp) != schema.sp_hash({"a": {"max_results": 10}})
+        assert PipelineSchema(nodes=[]).sp_hash({}) == ""

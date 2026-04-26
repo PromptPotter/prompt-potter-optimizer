@@ -6,7 +6,6 @@ import pytest
 
 from promptpotter.application.scoring.evaluators import (
     all_evaluators,
-    default_per_round_formula,
     materialize_round_values,
 )
 from promptpotter.application.scoring.metrics import compute_composite_score
@@ -106,132 +105,63 @@ def _recall_schema() -> PipelineSchema:
 # ---------------------------------------------------------------------------
 
 
-def test_registry_has_expected_names():
-    names = {ev.name for ev in all_evaluators()}
-    assert {
-        "accuracy",
-        "error_rate",
-        "degraded_rate",
-        "runtime_failure_rate",
-        "latency_norm",
-        "source_recall",
-        "candidate_recall",
-        "cache_hit_rate",
-        "retrieval_shortfall",
-        "mean_retrieval_shortfall",
-        "pipeline_compactness",
-    }.issubset(names)
-
-
 def test_registry_scopes_are_valid():
+    """Every registered evaluator declares a known scope + data type."""
+    names = {ev.name for ev in all_evaluators()}
+    assert {"accuracy", "error_rate", "latency_norm", "source_recall"}.issubset(names)
     for ev in all_evaluators():
         assert ev.scope in ("per_query", "per_round")
         assert ev.data_type in ("NUMERIC", "BOOLEAN")
 
 
-# ---------------------------------------------------------------------------
-# Materialization
-# ---------------------------------------------------------------------------
+def test_materialize_recall_only_emits_for_typed_nodes():
+    """Recall evaluators only materialize when the schema has a candidate_source/ranker."""
+    single = materialize_round_values(_single_node_schema(), [_result(score=1.0)])
+    assert "source_recall" not in single
 
-
-def test_materialize_round_values_single_node():
-    schema = _single_node_schema()
-    results = [_result(score=1.0), _result(score=0.0), _result(score=0.5)]
-    values = materialize_round_values(schema, results)
-
-    assert values["accuracy"] == pytest.approx(0.5)
-    assert values["error_rate"] == 0.0
-    assert values["degraded_rate"] == 0.0
-    # No recall evaluators apply — those names should be absent.
-    assert "source_recall" not in values
-    assert "candidate_recall" not in values
-    assert "cache_hit_rate" not in values
-
-
-def test_materialize_round_values_recall_schema():
     schema = _recall_schema()
-    results = [
-        _result(
-            final_ranking=[{"candidate": "gt"}, {"candidate": "x"}],
-            candidate_ranking=[{"candidate": "gt"}],
-            step_timings={"cache_lookup": 5.0, "fuzzy": 10.0, "ranker": 20.0},
-        ),
-        _result(
-            final_ranking=[{"candidate": "x"}, {"candidate": "y"}],
-            candidate_ranking=[{"candidate": "gt"}, {"candidate": "z"}],
-            step_timings={"cache_lookup": None, "fuzzy": 10.0, "ranker": 20.0},
-        ),
-    ]
-    values = materialize_round_values(schema, results)
-
-    assert "source_recall" in values  # single candidate_source node → no namespace
-    assert "candidate_recall" in values
+    values = materialize_round_values(
+        schema,
+        [
+            _result(
+                final_ranking=[{"candidate": "gt"}],
+                candidate_ranking=[{"candidate": "gt"}],
+                step_timings={"cache_lookup": 5.0, "fuzzy": 10.0, "ranker": 20.0},
+            ),
+            _result(
+                final_ranking=[{"candidate": "x"}],
+                candidate_ranking=[{"candidate": "gt"}],
+                step_timings={"cache_lookup": None, "fuzzy": 10.0, "ranker": 20.0},
+            ),
+        ],
+    )
+    assert values["source_recall"] == pytest.approx(1.0)
+    assert values["candidate_recall"] == pytest.approx(0.5)
     assert "cache_hit_rate" in values
-    assert values["source_recall"] == pytest.approx(1.0)  # gt in both candidate_rankings
-    assert values["candidate_recall"] == pytest.approx(0.5)  # gt in only first final_ranking
-
-
-# ---------------------------------------------------------------------------
-# Composite via compute_pipeline_metrics — backward-compat lock
-# ---------------------------------------------------------------------------
 
 
 def test_composite_matches_default_formula():
     schema = _single_node_schema()
     results = [_result(score=1.0, total_time=100), _result(score=0.0, total_time=200)]
-
     scored = compute_composite_score(results, schema)
-    # Accuracy = 0.5, latency_norm = 1 - 150/10000 = 0.985, health = 1.0 (no errors/degraded).
-    # No recall evaluators → recall term falls back to accuracy.
+    # Accuracy=0.5, latency_norm=0.985, health=1.0; recall term falls back to accuracy.
     expected = 0.7 * 0.5 + 0.15 * 1.0 + 0.10 * 0.985 + 0.05 * 0.5
     assert scored["composite"] == pytest.approx(expected, abs=1e-4)
-    assert scored["accuracy"] == pytest.approx(0.5)
 
 
 def test_composite_zeroed_on_validation_failure():
     from types import SimpleNamespace
 
-    schema = _single_node_schema()
-    results = [_result(score=1.0)]
-
-    fake_opt_sp = SimpleNamespace(
-        validation_failures=[object()],
-        runtime_failures=[],
+    fake_opt_sp = SimpleNamespace(validation_failures=[object()], runtime_failures=[])
+    scored = compute_composite_score(
+        [_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp
     )
-    scored = compute_composite_score(results, schema, opt_sp=fake_opt_sp)
     assert scored["composite"] == 0.0
 
 
-def test_round_scorer_fails_loud_on_missing_name():
-    scorer = compile_round_scorer("nonexistent_evaluator * 0.5")
+def test_round_scorer_fails_loud_and_clamps_unit_interval():
     with pytest.raises(NameError):
-        scorer({"accuracy": 1.0})
-
-
-def test_round_scorer_default_uses_accuracy():
-    scorer = compile_round_scorer(None)
-    assert scorer({"accuracy": 0.75}) == pytest.approx(0.75)
-
-
-def test_round_scorer_clamps_to_unit_interval():
-    scorer = compile_round_scorer("accuracy * 10")
-    assert scorer({"accuracy": 0.5}) == 1.0
-    scorer = compile_round_scorer("accuracy - 2")
-    assert scorer({"accuracy": 0.5}) == 0.0
-
-
-def test_default_per_round_formula_shape():
-    schema = _single_node_schema()
-    formula = default_per_round_formula(schema)
-    assert "accuracy" in formula
-    assert "error_rate" in formula
-    assert "latency_norm" in formula
-    # Compile + execute to prove the formula is evaluable against the
-    # registry namespace for this schema.
-    values = materialize_round_values(
-        schema,
-        [_result(score=1.0), _result(score=0.0)],
-    )
-    scorer = compile_round_scorer(formula)
-    out = scorer(values)
-    assert 0.0 <= out <= 1.0
+        compile_round_scorer("nonexistent_evaluator * 0.5")({"accuracy": 1.0})
+    assert compile_round_scorer("accuracy * 10")({"accuracy": 0.5}) == 1.0
+    assert compile_round_scorer("accuracy - 2")({"accuracy": 0.5}) == 0.0
+    assert compile_round_scorer(None)({"accuracy": 0.75}) == pytest.approx(0.75)

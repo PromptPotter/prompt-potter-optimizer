@@ -45,16 +45,14 @@ class JobSearchPoint(SearchPoint):
     prompt_fields: dict | None = None
 
     def render(self) -> str:
-        """Render the prompt string.
+        """Read the cached rendered prompt out of ``pipeline_params``.
 
-        Assembles from ``prompt_fields`` when present (preserving
-        ``PROMPT_STRING_FIELDS`` order), otherwise extracts from
-        ``pipeline_params``.
+        ``to_job_search_point`` and ``derive`` are the only constructors
+        that set ``prompt_fields``, and both also inject the rendered
+        string into ``pipeline_params[prompt_node]["prompt"]``, so the
+        cached copy is the single source.
         """
-        if self.prompt_fields:
-            return _render_from_fields(self.prompt_fields)
-        pp = self.pipeline_params or {}
-        for node_config in pp.values():
+        for node_config in (self.pipeline_params or {}).values():
             if isinstance(node_config, dict) and "prompt" in node_config:
                 return node_config["prompt"]
         return ""
@@ -88,46 +86,27 @@ class JobSearchPoint(SearchPoint):
         and injected into pipeline_params to keep sp_hash consistent.
         """
         new_pp = changes.get("pipeline_params", self.pipeline_params)
-        new_pf = self.prompt_fields  # carry forward by default
+        new_pf = self.prompt_fields
 
         if "prompt_fields" in changes:
-            base_pf = dict(self.prompt_fields or {})
-            base_pf.update(changes["prompt_fields"])
-            new_pf = base_pf
-
-            # Re-render and inject into pipeline_params
-            rendered = _render_from_fields(new_pf)
+            new_pf = {**(self.prompt_fields or {}), **changes["prompt_fields"]}
+            sections = [v for f in PROMPT_STRING_FIELDS if (v := new_pf.get(f))]
+            if block := new_pf.get("few_shot_block"):
+                sections.append(block)
+            rendered = "\n\n".join(sections)
             new_pp = dict(new_pp or {})
-            injected = False
             for node_name, node_cfg in new_pp.items():
                 if isinstance(node_cfg, dict) and "prompt" in node_cfg:
                     new_pp[node_name] = {**node_cfg, "prompt": rendered}
-                    injected = True
                     break
-            if not injected and rendered:
-                raise ValueError(
-                    "Cannot inject rendered prompt: no node with a 'prompt' key "
-                    "found in pipeline_params. Pass pipeline_params with the "
-                    "target node pre-configured."
-                )
+            else:
+                if rendered:
+                    raise ValueError(
+                        "Cannot inject rendered prompt: no node with a 'prompt' key "
+                        "found in pipeline_params."
+                    )
 
-        return JobSearchPoint(
-            pipeline_params=new_pp,
-            prompt_fields=new_pf,
-        )
-
-
-def _render_from_fields(pf: dict) -> str:
-    """Assemble prompt string from a prompt_fields dict."""
-    parts: list[str] = []
-    for field_name in PROMPT_STRING_FIELDS:
-        value = pf.get(field_name, "")
-        if value:
-            parts.append(value)
-    few_shot = pf.get("few_shot_block", "")
-    if few_shot:
-        parts.append(few_shot)
-    return "\n\n".join(parts)
+        return JobSearchPoint(pipeline_params=new_pp, prompt_fields=new_pf)
 
 
 # ---------------------------------------------------------------------------
