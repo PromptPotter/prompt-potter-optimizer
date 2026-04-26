@@ -125,8 +125,6 @@ class Cycle:
     # Flushed into the next trial's ``decisions`` list before ``campaign_store.add_trial``.
     pending_decisions: list[dict] = field(default_factory=list)
 
-    prefix_events: list[dict] = field(default_factory=list)
-
     state_version: int = 1
 
     # -- Construction / restore ------------------------------------------------
@@ -184,7 +182,6 @@ class Cycle:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
         self.escalation = EscalationState.from_checkpoint_dict(trial)
-        self.prefix_events = list(trial.get("prefix_events", []))
 
     def adopt_transition(
         self,
@@ -287,5 +284,5 @@ class Cycle:
             "evaluators": dict(rr.evaluators),
             **self.escalation.to_checkpoint_dict(),
             "opt_search_point": self.opt_sp.model_dump(),
-            "prefix_events": list(self.prefix_events),
+            **({"prefix_events": list(rr.prefix_events)} if rr.prefix_events else {}),
         }

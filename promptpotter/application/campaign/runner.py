@@ -163,7 +163,7 @@ async def _post_round(
             if ap_result.swapped_in or ap_result.swapped_out:
                 session.scoring_dataset[:] = ap_result.new_prefix
                 event = build_prefix_event(round_num=round_num, result=ap_result)
-                cycle.prefix_events.append(event)
+                round_result.prefix_events.append(event)
                 emit_phase(
                     cb.on_phase,
                     "adaptive_prefix",

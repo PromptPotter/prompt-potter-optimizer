@@ -37,6 +37,11 @@ class RoundResult(BaseModel):
     degraded_queries: int = 0
     escalation_signal: EscalationSignal | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
+    # Adaptive-prefix events emitted during this round (only populated
+    # when ``adaptive_prefix.enabled``; empty otherwise). Persisted to the
+    # trial JSON so post-hoc renderers can walk the trial list and
+    # reconstruct the full event log.
+    prefix_events: list[dict] = Field(default_factory=list)
 
 
 class RunResult(BaseModel):
