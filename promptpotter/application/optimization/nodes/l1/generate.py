@@ -302,7 +302,7 @@ async def l1_generate(
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 
-    candidates: list[dict] = []
+    population: list[dict] = []
     for v in variants_list[:n_variants]:
         pp_override = v.get("pipeline_params_override") or {}
         pp_override.pop("steps", None)  # LLM must not override pipeline composition
@@ -333,7 +333,7 @@ async def l1_generate(
                 logger.warning("l1_generate: dropping hallucinated node %r", bk)
                 del node_overrides[bk]
 
-        # Override validation is deferred to _parse_candidates — one producer of truth.
+        # Override validation is deferred to parse_population — one producer of truth.
         child = opt_sp.derive_candidate(
             changes_description=v.get("changes_description", ""),
             **prompt_changes,
@@ -344,7 +344,7 @@ async def l1_generate(
         c_dict["lineage"] = child.lineage.model_dump()
         if node_overrides:
             c_dict["__pipeline_params_override__"] = node_overrides
-        candidates.append(c_dict)
+        population.append(c_dict)
 
         if obs:
             with graceful("CandidateCreated emit failed"):
@@ -352,8 +352,8 @@ async def l1_generate(
                     CandidateCreated,
                     campaign_id=obs_campaign_id,
                     round_num=round_num,
-                    candidate_idx=len(candidates) - 1,
+                    candidate_idx=len(population) - 1,
                     candidate_id=child.lineage.id,
                 )
 
-    return candidates
+    return population

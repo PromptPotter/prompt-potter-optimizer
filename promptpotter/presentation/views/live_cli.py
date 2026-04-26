@@ -18,8 +18,8 @@ from tqdm.auto import tqdm
 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.presentation.views.candidate_view import (
-    build_candidate_summary,
-    fmt_candidate_header,
+    build_individual_summary,
+    fmt_individual_header,
 )
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
@@ -179,7 +179,7 @@ class CliDisplay:
         # Close any still-open bar (e.g. final query of prior candidate) so
         # the header lands above the fresh bar.
         self._close_pbar()
-        self._write(fmt_candidate_header(idx, total, changes_description, pp_override))
+        self._write(fmt_individual_header(idx, total, changes_description, pp_override))
 
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
         if self._in_baseline:
@@ -220,7 +220,7 @@ class CliDisplay:
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         self._close_pbar()
-        summary = build_candidate_summary(scores, self.baseline_acc)
+        summary = build_individual_summary(scores, self.baseline_acc)
         # Flat CLI layout: label+tag on one line; body_line indented under it
         # when non-empty (skipped on invalid); detail lines follow.
         self._write(f"  cand {idx + 1}/{total}  {summary.tag}")

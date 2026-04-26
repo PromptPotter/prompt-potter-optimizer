@@ -20,8 +20,8 @@ from promptpotter.infrastructure.persistence.session_emitter import (
     read_claude_notes,
 )
 from promptpotter.presentation.views.candidate_view import (
-    build_candidate_summary,
-    fmt_candidate_header,
+    build_individual_summary,
+    fmt_individual_header,
 )
 from promptpotter.presentation.views.display_primitives import (
     _box_bottom,
@@ -157,13 +157,13 @@ class NotebookDisplay:
         changes_description: str,
         pp_override: dict | None,
     ) -> None:
-        print(fmt_candidate_header(idx, total, changes_description, pp_override), flush=True)
+        print(fmt_individual_header(idx, total, changes_description, pp_override), flush=True)
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        summary = build_candidate_summary(scores, baseline_acc)
+        summary = build_individual_summary(scores, baseline_acc)
 
         print(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:

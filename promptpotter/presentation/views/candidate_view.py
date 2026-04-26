@@ -41,7 +41,7 @@ def fmt_pp_override(pp: dict | None) -> str:
     return "  ".join(parts)
 
 
-def fmt_candidate_header(
+def fmt_individual_header(
     idx: int,
     total: int,
     changes_description: str,
@@ -54,7 +54,7 @@ def fmt_candidate_header(
     machine-readable diff), else falls back to the human-written
     ``changes_description`` from the L1 variant plan, else the parent tag.
     """
-    label = f"cand {idx + 1}/{total}"
+    label = f"ind {idx + 1}/{total}"
     body = fmt_pp_override(pp_override)
     if not body and changes_description:
         body = changes_description.strip()
@@ -85,7 +85,7 @@ def format_elimination_summary(ctx: dict, prior_label: str | None = None) -> str
 
 
 @dataclass(frozen=True)
-class CandidateSummary:
+class IndividualSummary:
     """Structured candidate render — displays pick plain vs box wrapping.
 
     Pieces the two displays can compose independently:
@@ -122,7 +122,7 @@ def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def build_candidate_summary(scores: dict, baseline_acc: float) -> CandidateSummary:
+def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
     Single source of truth for what the CLI and notebook show per candidate.
@@ -136,7 +136,7 @@ def build_candidate_summary(scores: dict, baseline_acc: float) -> CandidateSumma
 
     if scores.get("invalid"):
         failures = scores.get("validation_failures") or []
-        return CandidateSummary(
+        return IndividualSummary(
             status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",
@@ -154,7 +154,7 @@ def build_candidate_summary(scores: dict, baseline_acc: float) -> CandidateSumma
         scored_q = scores.get("scored_queries", n)
         expected_q = scores.get("expected_queries", n)
         hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
-        return CandidateSummary(
+        return IndividualSummary(
             status="aborted",
             tag=tag,
             body_line=f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}",
@@ -179,7 +179,7 @@ def build_candidate_summary(scores: dict, baseline_acc: float) -> CandidateSumma
     status: Literal["ok", "eliminated"] = (
         "eliminated" if scores.get("elimination_stopped") else "ok"
     )
-    return CandidateSummary(
+    return IndividualSummary(
         status=status,
         tag=tag,
         body_line=body_line,

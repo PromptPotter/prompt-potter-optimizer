@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_candidates", "score_candidates"]
+__all__ = ["parse_population", "score_population"]
 
 
 def _merge_pipeline_params(
@@ -49,18 +49,18 @@ def _merge_pipeline_params(
     return merged
 
 
-def parse_candidates(
-    candidates: list[dict],
+def parse_population(
+    variants: list[dict],
     pipeline_params: dict | None,
     schema: PipelineSchema | None,
 ) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
-    """Normalize raw candidates → OptSearchPoints + merged pp; attaches validation failures."""
+    """Normalize raw variants → OptSearchPoints + merged pp; attaches validation failures."""
     from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
 
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
-    for c in candidates:
+    for c in variants:
         override = c.get("__pipeline_params_override__")
         overrides.append(override)
         osp = OptSearchPoint.from_prompt_fields(
@@ -289,9 +289,9 @@ def _record_elimination_cut(
         )
 
 
-async def score_candidates(
+async def score_population(
     cycle: Cycle,
-    osp_candidates: list[OptSearchPoint],
+    population: list[OptSearchPoint],
     merged_pp: list[dict | None],
     candidate_overrides: list[dict | None],
     dataset: list,
@@ -303,7 +303,7 @@ async def score_candidates(
     round_num: int = 0,
     decisions: list[dict] | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
-    """Evaluate each candidate; dispatch over three exit paths (validation/cache/scored)."""
+    """Evaluate each individual; dispatch over three exit paths (validation/cache/scored)."""
     from promptpotter.application.optimization.elimination import EliminationCheck
     from promptpotter.application.scoring.search_point_scorer import score_search_point
 
@@ -314,7 +314,7 @@ async def score_candidates(
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []
     escalation_signal: EscalationSignal | None = None
-    n_candidates = len(osp_candidates)
+    n_individuals = len(population)
     obs = session.obs
 
     elim_check = EliminationCheck(
@@ -325,7 +325,7 @@ async def score_candidates(
 
     def _fire(idx: int, report: dict) -> None:
         candidate_scores.append(report)
-        callbacks.on_candidate_scored(idx, n_candidates, report)
+        callbacks.on_candidate_scored(idx, n_individuals, report)
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
@@ -336,10 +336,10 @@ async def score_candidates(
                     report=report,
                 )
 
-    for idx, osp_c in enumerate(osp_candidates):
+    for idx, osp_c in enumerate(population):
         override = candidate_overrides[idx]
         callbacks.on_candidate_started(
-            idx, n_candidates, osp_c.lineage.changes_description or "", override
+            idx, n_individuals, osp_c.lineage.changes_description or "", override
         )
 
         # Path 1 — validation-skip synthetic-0.
@@ -357,10 +357,10 @@ async def score_candidates(
         all_checks = [*(degradation_checks or []), elim_check]
 
         def _on_result(r, qi, qt, _ci=idx):
-            callbacks.on_sample_scored(_ci, n_candidates, qi, qt, r)
+            callbacks.on_sample_scored(_ci, n_individuals, qi, qt, r)
 
         def _on_start(qtxt, qi, qt, _ci=idx):
-            callbacks.on_sample_started(_ci, n_candidates, qi, qt, qtxt)
+            callbacks.on_sample_started(_ci, n_individuals, qi, qt, qtxt)
 
         results, scores, was_cached, signal = await score_search_point(
             sp,
@@ -371,7 +371,7 @@ async def score_candidates(
             on_start=_on_start,
             degradation_checks=all_checks or None,
             candidate_idx=idx,
-            n_total_candidates=n_candidates,
+            n_total_candidates=n_individuals,
             search_memory=search_memory,
         )
         all_candidate_results[osp_c.lineage.id] = results
