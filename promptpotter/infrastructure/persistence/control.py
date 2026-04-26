@@ -26,11 +26,13 @@ CONTROL_FILENAME = "control.json"
 __all__ = ["CONTROL_FILENAME", "ensure_control_file", "make_control_check"]
 
 
-def ensure_control_file(session_dir: Path, *, pause_before_scoring: bool) -> None:
+def ensure_control_file(session_dir: Path) -> None:
     """Seed ``control.json`` with defaults if it doesn't exist.
 
     A lingering pause from a previous session survives ``init`` — the file
-    is only written when missing, never overwritten.
+    is only written when missing, never overwritten. Users flip the
+    ``pause_before_l2_scoring`` flag at runtime via the CLI ``control``
+    command or by hand-editing the file.
     """
     path = session_dir / CONTROL_FILENAME
     if path.exists():
@@ -39,7 +41,7 @@ def ensure_control_file(session_dir: Path, *, pause_before_scoring: bool) -> Non
         path,
         {
             "requested_state": "running",
-            "pause_before_l2_scoring": pause_before_scoring,
+            "pause_before_l2_scoring": False,
         },
     )
 

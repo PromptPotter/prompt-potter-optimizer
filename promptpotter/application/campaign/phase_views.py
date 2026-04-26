@@ -69,7 +69,6 @@ def _init_enter(d: dict, ctx: dict) -> dict:
         "model": config.optimizer_llm.model or "(default)",
         "l2_enabled": opt.enable_l2,
         "l3_enabled": opt.enable_l3,
-        "critique_enabled": opt.enable_l1_critique,
         "original_sp_flat": dict(ctx["original_sp_flat"]),
         "node_param_keys": ctx["node_param_keys"],
     }

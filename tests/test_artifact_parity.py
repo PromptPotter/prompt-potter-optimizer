@@ -92,7 +92,6 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         model="",
         n_variants=5,
         sp_budget_ttest=20,
-        pause_before_scoring=False,
     )
 
     # Simulate a single round lifecycle.  The emitter only reads a handful of

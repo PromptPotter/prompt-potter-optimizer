@@ -242,7 +242,6 @@ class CampaignPersistenceEmitter:
         model: str,
         n_variants: int,
         sp_budget_ttest: int,
-        pause_before_scoring: bool,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
         dataset_count: int | None = None,
@@ -299,7 +298,7 @@ class CampaignPersistenceEmitter:
         # idempotent; narrative pair is touched so parity holds from mint
         # even if SessionStore.ensure_narrative_files wasn't called yet.
         session_dir.mkdir(parents=True, exist_ok=True)
-        ensure_control_file(session_dir, pause_before_scoring=pause_before_scoring)
+        ensure_control_file(session_dir)
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
@@ -336,7 +335,6 @@ class CampaignPersistenceEmitter:
         model: str,
         n_variants: int,
         sp_budget_ttest: int,
-        pause_before_scoring: bool,
         resumed_from_round: int | None = None,
         dataset_count: int | None = None,
         backend_id: str | None = None,
@@ -388,7 +386,6 @@ class CampaignPersistenceEmitter:
             model=model,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
-            pause_before_scoring=pause_before_scoring,
             resume_from=resume_from,
             cycle_id=cycle_id,
             dataset_count=dataset_count,

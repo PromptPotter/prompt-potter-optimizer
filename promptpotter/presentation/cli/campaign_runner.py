@@ -375,10 +375,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0) or 0.0
     opt = campaign_config.optimization
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-    # HITL pause is honored once at startup; for subsequent resume passes
-    # within this command run we want the optimizer to skip the pause.
-    # Stamp the override locally — never mutate the user's CampaignConfig.
-    pause_before_scoring = opt.pause_before_scoring
     emitter = CampaignPersistenceEmitter.for_session(
         pre_baseline_acc,
         ctx.cycle_id,
@@ -390,7 +386,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         model=campaign_config.optimizer_llm.model or "",
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
-        pause_before_scoring=pause_before_scoring,
         resumed_from_round=resume_from_round,
         dataset_count=ctx.state.get("dataset_count"),
         backend_id=ctx.backend_id,

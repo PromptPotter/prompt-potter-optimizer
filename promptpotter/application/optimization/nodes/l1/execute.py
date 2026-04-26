@@ -185,10 +185,10 @@ async def _run_l1_critique(
     cycle: Cycle,
 ) -> str:
     """Run L1 critique phase on evaluation results. Returns formatted critique text."""
-    config = cycle.config
-    if not config.optimization.enable_l1_critique or not scoring_result.winner_results:
+    if not scoring_result.winner_results:
         return ""
 
+    config = cycle.config
     crit_llm = _llm_client.get_llm_client()
     cctx = RoundSnapshot.from_round_state(
         cycle,
@@ -332,9 +332,6 @@ async def execute_round(
         n_eval_queries=len(scoring_dataset),
         obs=obs,
     )
-
-    if config.optimization.pause_before_scoring:
-        raise PauseForReviewError(candidates, round_num, pause_point="before_scoring")
 
     scoring_result = await _score_and_select(
         candidates,

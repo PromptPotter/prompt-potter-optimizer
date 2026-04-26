@@ -400,7 +400,6 @@ async def run_optimization(
             model=campaign_config.optimizer_llm.model or "",
             n_variants=opt.n_variants,
             sp_budget_ttest=campaign_config.sp_budget_ttest,
-            pause_before_scoring=opt.pause_before_scoring,
             resumed_from_round=session.resumed_from_round,
             dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
             backend_id=session.backend_id,

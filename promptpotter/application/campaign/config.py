@@ -117,7 +117,6 @@ class OptimizationConfig(BaseModel):
     l3_temperature: float = Field(0.5)
 
     # L1 Critique
-    enable_l1_critique: bool = Field(True)
     l1_critique_degradation_threshold: float = Field(0.4)
     l1_critique_near_miss_ratio: float = Field(0.3)
 
@@ -142,9 +141,6 @@ class OptimizationConfig(BaseModel):
     # Zero-signal filter
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
-
-    # HITL
-    pause_before_scoring: bool = Field(False)
 
     # Adaptive sample-prefix selection (Rasch + KG)
     adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)
