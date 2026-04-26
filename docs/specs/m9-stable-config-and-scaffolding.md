@@ -105,7 +105,7 @@ On top of that, there are three ways a cycle can start, scattered across differe
 - Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/operations/rewind-and-fork.md`)
 - Recon-brief-seeded start (implicit, lives in session state)
 
-All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is now a supported primitive via `python -m promptpotter fork`; the trigger and mechanics are documented in `optimization.md § Decision records and resume-divergence replay`.
+All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is now a supported primitive via `optimize --fork-on-divergence`; the trigger and mechanics are documented in `optimization.md § Decision records and resume-divergence replay`.
 
 **Why now (M9, not earlier):** Doing this as a standalone change would thrash the notebook UI layer, the API routers, and the active-session-pointer semantics for a gain that's mostly aesthetic. M9's stable-config / hierarchy / file-directory UI refactor is already touching all of these surfaces — Track 5 is cheap when it rides on top of Tracks 2 + 4, and expensive if it lands on its own.
 

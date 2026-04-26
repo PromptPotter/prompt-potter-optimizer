@@ -8,7 +8,7 @@ python -m promptpotter [--tenant <id>] <subcommand> [options]
 
 `--tenant` is a root flag (default `"default"`) that selects the partition under `.promptpotter/projects/`. Single-user CLI workflows can ignore it; multi-tenant setups set it once per session.
 
-For the active-session pointer and state files, see [persistence-and-state.md](persistence-and-state.md). For `optimize --from` and `fork`, see [rewind-and-fork.md](rewind-and-fork.md).
+For the active-session pointer and state files, see [persistence-and-state.md](persistence-and-state.md). For `optimize --from` and `optimize --fork-on-divergence`, see [rewind-and-fork.md](rewind-and-fork.md).
 
 ---
 

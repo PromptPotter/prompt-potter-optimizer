@@ -143,9 +143,8 @@ class OptimizationConfig(BaseModel):
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
 
-    # HITL + reproducibility
+    # HITL
     pause_before_scoring: bool = Field(False)
-    strict_cycle_identity: bool = Field(False)
 
     # Adaptive sample-prefix selection (Rasch + KG)
     adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)

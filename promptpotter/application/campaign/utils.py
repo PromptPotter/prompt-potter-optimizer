@@ -222,7 +222,6 @@ def resolve_active_campaign_id(
             bl_rendered,
             dataset,
             active_steps,
-            strict=campaign_config.optimization.strict_cycle_identity,
         )
     except Exception:
         logger.debug("Could not compute active campaign ID", exc_info=True)

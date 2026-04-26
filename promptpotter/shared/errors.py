@@ -95,9 +95,9 @@ class ResumeDivergenceError(RuntimeError):
     currently active scorer. The only mechanism: every recorded decision is
     a pure function of scored results, and rescoring changes the inputs.
 
-    Emit ``fork`` to branch a new cycle from this point under the new
-    policy, or revert ``campaign.json::scoring`` to continue the original
-    trajectory.
+    Rerun ``optimize`` with ``--fork-on-divergence`` to branch a sibling
+    cycle from this point under the new policy, or revert
+    ``campaign.json::scoring`` to continue the original trajectory.
     """
 
     def __init__(

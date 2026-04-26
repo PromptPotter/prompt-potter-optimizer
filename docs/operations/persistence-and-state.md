@@ -108,6 +108,6 @@ Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write ca
 
 - **Resume** — `optimize` with no flags. Picks up from the latest completed round.
 - **Rewind** — `optimize --from N`. Same `cycle_id`, archive trials after round N.
-- **Fork** — `python -m promptpotter fork`. New `cycle_id` from the divergence point.
+- **Fork** — `optimize --fork-on-divergence`. On detected divergence, mints a new `cycle_id` from the divergence point and continues.
 
 Full mechanics: [rewind-and-fork.md](rewind-and-fork.md).

@@ -25,17 +25,17 @@ This archives `trials/trial_0003.json` onward into `campaigns/{cycle_id}/archive
 
 ---
 
-## Fork — `python -m promptpotter fork`
+## Fork — `optimize --fork-on-divergence`
 
-Fork exists for one specific situation: the scoring formula changed, and resume detects that decisions recorded under the old scorer no longer match the rescored results under the new scorer. The optimizer stops rather than drift silently onto a path the new policy would not have chosen. You then have two choices: revert the scoring change, or commit to the new one with `fork`.
+Fork exists for one specific situation: the scoring formula changed, and resume detects that decisions recorded under the old scorer no longer match the rescored results under the new scorer. The optimizer stops rather than drift silently onto a path the new policy would not have chosen. You then have two choices: revert the scoring change, or commit to the new one by rerunning with `--fork-on-divergence`.
 
 ```bash
-python -m promptpotter fork
+python -m promptpotter optimize --fork-on-divergence
 ```
 
-Fork mints a new `cycle_id` rooted at the divergence point, copies the trials up to and including the divergence round into the new cycle, and records a `parent_cycle_id` pointer back to the original. The shared `dataset_runs/` trace corpus is not duplicated — both cycles read the same underlying traces, each through their own scoring ledger. The old cycle is left alone as a record of what happened under the original scorer.
+When this flag is set and resume detects a divergence, the run mints a new `cycle_id` rooted at the divergence point, copies the trials before the divergent round into the new cycle, records a `parent_cycle_id` pointer back to the original, retargets the active session pointer at the new cycle, and continues — re-running the divergent round under the current scorer. The shared `dataset_runs/` trace corpus is not duplicated — both cycles read the same underlying traces, each through their own scoring ledger. The old cycle is left alone as a record of what happened under the original scorer.
 
-From the fork point forward, the new cycle runs under the current scorer. It does not backfill decisions against the old history — those stayed in the parent.
+Without the flag, divergence halts so you can review the diagnostic and decide. There is no separate `fork` subcommand — fork is just a continuation flag on the next `optimize` call.
 
 ### Why rewind is not enough
 

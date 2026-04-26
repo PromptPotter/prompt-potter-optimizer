@@ -1,9 +1,22 @@
-"""Decision records + replayers — kind-agnostic divergence mechanism."""
+"""Decision records + replayers — kind-agnostic divergence mechanism.
+
+When a recorded decision re-derives to a different outcome under the
+current scorer, the resume path either halts (default) or — when the
+caller passed ``fork_on_divergence=True`` — mints a sibling cycle that
+inherits trials before the divergence point and re-runs the divergent
+round under the new policy. Forking is inlined here because it is just
+"truncate trials at R, stamp ``parent_cycle_id``, retarget the active
+pointer" — there is no separate ``fork`` command.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import logging
+import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -15,12 +28,16 @@ __all__ = [
     "REPLAYERS",
     "Decision",
     "Divergence",
+    "ForkResult",
     "ReplayContext",
     "record_decision",
     "replay_decisions",
     "replayer",
     "resume_with_divergence_check",
 ]
+
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -68,6 +85,18 @@ class ReplayContext:
     trial: dict[str, Any]
     prior_trials: list[dict[str, Any]] = field(default_factory=list)
     baseline_results: list[dict[str, Any]] = field(default_factory=list)
+
+
+@dataclass(frozen=True)
+class ForkResult:
+    """Resume detected divergence and forked into a sibling cycle.
+
+    Caller updates ``resolved_cycle_id`` and ``resumed_from_round`` so the
+    loop continues against the newly minted cycle.
+    """
+
+    new_cycle_id: str
+    new_resumed_from_round: int
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
@@ -246,6 +275,89 @@ def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
 # Unknown-kind decisions are silently skipped by replay_decisions above.
 
 
+# ───────────────────────────── Inline fork ──────────────────────────────
+
+
+def _mint_fork_cycle_id(old_cycle_id: str) -> str:
+    """Derive a stable-looking new cycle id rooted at the parent."""
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
+    return f"{old_cycle_id}_fork_{suffix}"
+
+
+def _fork_at_divergence(
+    campaign_store: CampaignStore,
+    tenant_id: str,
+    session_id: str,
+    old_cycle_id: str,
+    fork_from_round: int,
+    surviving_trials: list[dict[str, Any]],
+) -> str:
+    """Mint a sibling cycle that re-runs round ``fork_from_round``.
+
+    Copies ``index.json`` (rewriting ``campaign_id``, stamping
+    ``parent_cycle_id`` + ``forked_from_round``), plus trials and candidates
+    for rounds < ``fork_from_round``. The divergent round itself is dropped
+    so the new cycle re-runs it under the current scorer. Retargets the
+    active session pointer at the new cycle.
+    """
+    from promptpotter.infrastructure.store.base import read_json_optional, write_json
+    from promptpotter.infrastructure.store.stores import save_active_pointer
+
+    new_cycle_id = _mint_fork_cycle_id(old_cycle_id)
+    old_dir = campaign_store.campaign_dir(old_cycle_id)
+    new_dir = campaign_store.campaign_dir(new_cycle_id)
+    if new_dir.exists():
+        raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    index = read_json_optional(old_dir / "index.json") or {}
+    best_acc = max((float(t.get("accuracy", 0.0)) for t in surviving_trials), default=0.0)
+    best_trial_id = next(
+        (t.get("trial_id") for t in surviving_trials if float(t.get("accuracy", 0.0)) == best_acc),
+        None,
+    )
+    now = datetime.now(UTC).isoformat()
+    index.update(
+        {
+            "campaign_id": new_cycle_id,
+            "parent_cycle_id": old_cycle_id,
+            "forked_from_round": fork_from_round,
+            "forked_at": now,
+            "trials": list(surviving_trials),
+            "n_trials": len(surviving_trials),
+            "best_accuracy": best_acc,
+            "best_trial_id": best_trial_id,
+            "status": "resumed",
+            "updated_at": now,
+        }
+    )
+    write_json(new_dir / "index.json", index)
+
+    for sub, prefix in (("trials", "trial_"), ("candidates", "round_")):
+        src = old_dir / sub
+        if not src.exists():
+            continue
+        dst = new_dir / sub
+        dst.mkdir(parents=True, exist_ok=True)
+        for p in sorted(src.glob(f"{prefix}*.json")):
+            try:
+                n = int(p.stem.removeprefix(prefix))
+            except ValueError:
+                continue
+            if n < fork_from_round:
+                shutil.copyfile(p, dst / p.name)
+
+    save_active_pointer(tenant_id, session_id, new_cycle_id)
+    logger.info(
+        "Forked cycle %s → %s at round %d (active pointer retargeted)",
+        old_cycle_id,
+        new_cycle_id,
+        fork_from_round,
+    )
+    return new_cycle_id
+
+
 def resume_with_divergence_check(
     campaign_store: CampaignStore,
     backend_id: str,
@@ -255,9 +367,17 @@ def resume_with_divergence_check(
     cycle: Cycle,
     *,
     skip_divergence_check: bool,
-) -> None:
-    """Rescore prior trials under the active scorer; halt on first divergence with a fork hint."""
-    from promptpotter.infrastructure.store.base import write_json
+    fork_on_divergence: bool = False,
+) -> ForkResult | None:
+    """Rescore prior trials under the active scorer; halt or fork on divergence.
+
+    With ``fork_on_divergence=False`` (default), divergence raises
+    :class:`ResumeDivergenceError`. With ``fork_on_divergence=True``, the
+    method instead mints a sibling cycle that re-runs the divergent round
+    under the new policy, and returns a :class:`ForkResult` so the caller
+    can update ``resolved_cycle_id`` / ``resumed_from_round`` for the rest
+    of loop init.
+    """
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.scoring import rescore_results
 
@@ -295,22 +415,28 @@ def resume_with_divergence_check(
             )
             if div is None:
                 continue
-            fork_hint = {
-                "cycle_id": cycle_id,
-                "fork_from_round": div.round_num,
-                "divergence": {
-                    "kind": div.kind,
-                    "recorded_outcome": div.recorded_outcome,
-                    "current_outcome": div.current_outcome,
-                    "inputs_ref": dict(div.inputs_ref),
-                },
-                "scorer_id": session.scorer_id,
-                "scorer_formula": session.scorer_formula,
-            }
-            write_json(
-                campaign_store.campaign_dir(cycle_id) / "fork_hint.json",
-                fork_hint,
-            )
+            if fork_on_divergence:
+                survivors = list(prior[:i])
+                new_cycle_id = _fork_at_divergence(
+                    campaign_store,
+                    session.store.tenant_id,
+                    session.session_id,
+                    cycle_id,
+                    div.round_num,
+                    survivors,
+                )
+                if survivors:
+                    cycle.restore_from_trial(survivors[-1])
+                logger.warning(
+                    "Resume diverged at round %d (%s); forked → %s",
+                    div.round_num,
+                    div.kind,
+                    new_cycle_id,
+                )
+                return ForkResult(
+                    new_cycle_id=new_cycle_id,
+                    new_resumed_from_round=div.round_num,
+                )
             raise ResumeDivergenceError(
                 round_num=div.round_num,
                 kind=div.kind,
@@ -318,9 +444,13 @@ def resume_with_divergence_check(
                 current_outcome=div.current_outcome,
                 diagnostics={
                     "scorer_id": session.scorer_id,
-                    "fork_hint": "run `python -m promptpotter fork` to branch here",
+                    "fork_hint": (
+                        "rerun `optimize --fork-on-divergence` to branch a new "
+                        "cycle here under the current scorer"
+                    ),
                 },
             )
 
     if prior:
         cycle.restore_from_trial(prior[-1])
+    return None

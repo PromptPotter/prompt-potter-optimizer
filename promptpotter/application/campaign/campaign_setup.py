@@ -42,6 +42,25 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Loop-control fields safe to hot-update on a stored cycle when the user
+# resumes via an explicit ``cycle_id_override`` (these don't change *what
+# problem* the cycle is solving, only *how* the optimizer searches).
+_HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
+    {
+        "max_rounds",
+        "l1_patience",
+        "l2_patience",
+        "l3_patience",
+        "degradation_threshold",
+        "model",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "sp_budget_ttest",
+        "seed",
+    }
+)
+
 __all__ = [
     "Session",
     "auto_mint_session",
@@ -566,7 +585,7 @@ def bootstrap_cycle(
     into ``archived/resumed_at_<ts>/`` and the trial index is rebuilt before
     resume.
     """
-    from promptpotter.domain.cycle_identity import TUNING_KEYS, cycle_config_identity
+    from promptpotter.domain.cycle_identity import cycle_config_identity
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
     if not (session.project_root and session.backend_id):
@@ -578,7 +597,6 @@ def bootstrap_cycle(
             baseline_render,
             dataset,
             active_steps,
-            strict=config.optimization.strict_cycle_identity,
         )
         if resume_from_round_override is not None:
             store.rewind_to_round(
@@ -592,7 +610,7 @@ def bootstrap_cycle(
             resolved,
             config_snapshot=config.model_dump(mode="json"),
             baseline_accuracy=baseline_accuracy,
-            hot_update_keys=TUNING_KEYS if cycle_id_override else frozenset(),
+            hot_update_keys=_HOT_UPDATEABLE_KEYS if cycle_id_override else frozenset(),
             parent_session_id=parent_session_id,
         )
         return store, resolved, resumed_from
@@ -612,6 +630,7 @@ async def init_optimization_loop(
     scoring_round_formula: str | None,
     scorer_id: str,
     no_divergence_check: bool,
+    fork_on_divergence: bool,
     langfuse_session_id: str | None,
     cycle_id: str | None,
     resume_from_round_override: int | None,
@@ -702,7 +721,7 @@ async def init_optimization_loop(
     )
 
     if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
-        resume_with_divergence_check(
+        fork_result = resume_with_divergence_check(
             campaign_store,
             session.backend_id,
             resolved_cycle_id,
@@ -710,7 +729,14 @@ async def init_optimization_loop(
             session,
             cycle,
             skip_divergence_check=no_divergence_check,
+            fork_on_divergence=fork_on_divergence,
         )
+        if fork_result is not None:
+            resolved_cycle_id = fork_result.new_cycle_id
+            resumed_from_round = fork_result.new_resumed_from_round
+            if resumed_from_round == 0:
+                # Fork left no surviving trials — treat the new cycle like a fresh start.
+                cycle.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     else:
         cycle.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     if session.store:

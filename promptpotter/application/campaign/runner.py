@@ -321,6 +321,7 @@ async def run_optimization(
     resume_from_round_override: int | None = None,
     emitter: CampaignPersistenceEmitter | None = None,
     no_divergence_check: bool = False,
+    fork_on_divergence: bool = False,
 ) -> RunResult:
     """Run the full optimization loop from a prepared baseline. Returns RunResult (never None)."""
     started_at = datetime.now(UTC).isoformat()
@@ -343,7 +344,6 @@ async def run_optimization(
                 baseline_render,
                 dataset,
                 active_steps,
-                strict=campaign_config.optimization.strict_cycle_identity,
             ),
             baseline_acc=baseline.baseline_acc,
             baseline_prompt_fields=baseline_prompt_fields,
@@ -378,6 +378,7 @@ async def run_optimization(
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
         no_divergence_check=no_divergence_check,
+        fork_on_divergence=fork_on_divergence,
         langfuse_session_id=langfuse_session_id,
         cycle_id=cycle_id,
         resume_from_round_override=resume_from_round_override,

@@ -5,8 +5,11 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from promptpotter.application.campaign.decisions import REPLAYERS, replay_decisions
-from promptpotter.application.campaign.fork import fork_cycle
+from promptpotter.application.campaign.decisions import (
+    REPLAYERS,
+    _fork_at_divergence,
+    replay_decisions,
+)
 from promptpotter.infrastructure.store.stores import build_stores
 from promptpotter.shared.scoring import compile_scorer, rescore_results
 
@@ -107,7 +110,8 @@ def test_unknown_decision_kind_silently_skipped() -> None:
     assert replay_decisions(trial) is None
 
 
-def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> None:
+def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> list[dict]:
+    """Lay down a minimal cycle dir on disk; return the trial-index list."""
     base = projects_root / tenant / "campaigns" / cycle_id
     (base / "trials").mkdir(parents=True)
     (base / "candidates").mkdir(parents=True)
@@ -129,23 +133,27 @@ def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) 
         ),
         encoding="utf-8",
     )
+    return trials_index
 
 
-def test_fork_cycle_drops_round_R_and_sets_parent_pointer(tmp_path: Path, monkeypatch) -> None:
+def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Forking inside resume must inherit trials < R, drop R, and retarget the pointer."""
     tenant = "default"
     old_cycle = "cycle_abc123"
-    _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=4)
+    trials = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=4)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
     monkeypatch.setattr("promptpotter.infrastructure.store.stores._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
-    new_cycle = fork_cycle(
-        stores,
+    new_cycle = _fork_at_divergence(
+        stores.campaigns,
         tenant_id=tenant,
         session_id="s_test",
-        backend_id="backend",
         old_cycle_id=old_cycle,
         fork_from_round=2,
+        surviving_trials=trials[:2],
     )
 
     new_dir = tmp_path / tenant / "campaigns" / new_cycle
