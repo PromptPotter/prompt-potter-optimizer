@@ -44,20 +44,12 @@ __all__ = ["PauseForReviewError", "execute_round"]
 
 
 class PauseForReviewError(Exception):
-    """Raised when HITL mode pauses the loop for human/AI review."""
+    """Raised when HITL mode pauses the loop at the after_round checkpoint."""
 
-    def __init__(
-        self,
-        candidates: list[dict],
-        round_num: int,
-        pause_point: str,
-    ) -> None:
+    def __init__(self, candidates: list[dict], round_num: int) -> None:
         self.candidates = candidates
         self.round_num = round_num
-        self.pause_point = pause_point  # CampaignPhase.L1_GENERATE, "before_l2_eval", "user_pause"
-        super().__init__(
-            f"Paused at {pause_point}: {len(candidates)} candidates (round {round_num})"
-        )
+        super().__init__(f"Paused: {len(candidates)} candidates (round {round_num})")
 
 
 async def _generate_or_load_candidates(

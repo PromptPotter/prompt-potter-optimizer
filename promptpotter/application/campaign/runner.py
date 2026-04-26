@@ -107,7 +107,7 @@ async def _post_round(
 
     _ctrl = cb.on_checkpoint("after_round")
     if _ctrl == "pause":
-        raise PauseForReviewError([], round_num, pause_point="user_pause")
+        raise PauseForReviewError([], round_num)
     if _ctrl == "stop":
         raise StopLoop(StopReason.USER_STOPPED)
 
@@ -291,7 +291,7 @@ async def _run_round_loop(
     except StopLoop as sl:
         return sl.reason
     except PauseForReviewError as pause:
-        logger.info("HITL: paused at %s (round %d).", pause.pause_point, pause.round_num)
+        logger.info("HITL: paused at round %d.", pause.round_num)
         return StopReason.USER_PAUSED
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning("Optimization interrupted at round %d.", len(cycle.rounds))
