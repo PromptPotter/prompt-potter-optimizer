@@ -38,14 +38,17 @@ class ConfigDiff:
     current: Any
 
 
-_OVERRIDE_LOCATIONS: dict[str, tuple[str, ...]] = {
-    # flat key -> path on CampaignConfig
-    "l1_patience": ("optimization", "l1_patience"),
+# Flat key → path on ``CampaignConfig``. Used by both ``apply_stored_overrides``
+# (write) and ``diff_campaign_config`` (read). Keys mirror ``HOT_UPDATEABLE_KEYS``.
+_CAMPAIGN_FIELDS: dict[str, tuple[str, ...]] = {
     "max_rounds": ("optimization", "max_rounds"),
+    "l1_patience": ("optimization", "l1_patience"),
     "n_variants": ("optimization", "n_variants"),
     "creativity": ("optimization", "creativity"),
+    "improvement_threshold": ("optimization", "improvement_threshold"),
     "model": ("optimizer_llm", "model"),
     "sp_budget_ttest": ("sp_budget_ttest",),
+    "seed": ("optimization", "seed"),
 }
 
 
@@ -56,12 +59,11 @@ def apply_stored_overrides(
     """Merge stored experiment config into a new ``CampaignConfig`` copy.
 
     Returns ``(updated_config, stored_pipeline_params)``.  Does NOT mutate
-    the input — user config stays user config.  Callers apply
-    ``stored_pipeline_params`` (when non-None) by writing
-    ``session.pipeline_params = pp``.
+    the input.  Callers apply ``stored_pipeline_params`` (when non-None) by
+    writing ``session.pipeline_params = pp``.
     """
     patch = campaign_config.model_dump()
-    for key, path in _OVERRIDE_LOCATIONS.items():
+    for key, path in _CAMPAIGN_FIELDS.items():
         val = stored_cfg.get(key)
         if val is None:
             continue
@@ -133,20 +135,6 @@ def save_campaign_winner(
     }
 
 
-# Surface fields used in ``diff_campaign_config``. Tracks the same scalars
-# that ``_OVERRIDE_LOCATIONS`` covers + a couple of tuning-facing ones.
-_DIFF_KEYS: dict[str, tuple[str, ...]] = {
-    "max_rounds": ("optimization", "max_rounds"),
-    "l1_patience": ("optimization", "l1_patience"),
-    "n_variants": ("optimization", "n_variants"),
-    "creativity": ("optimization", "creativity"),
-    "improvement_threshold": ("optimization", "improvement_threshold"),
-    "model": ("optimizer_llm", "model"),
-    "sp_budget_ttest": ("sp_budget_ttest",),
-    "seed": ("optimization", "seed"),
-}
-
-
 def _read_current(config: CampaignConfig, path: tuple[str, ...]) -> Any:
     value: Any = config
     for p in path:
@@ -163,7 +151,7 @@ def diff_campaign_config(
 ) -> dict[str, ConfigDiff]:
     """Compute parameter differences between stored and current campaign config."""
     diffs: dict[str, ConfigDiff] = {}
-    for flat_key, path in _DIFF_KEYS.items():
+    for flat_key, path in _CAMPAIGN_FIELDS.items():
         sv = stored_config.get(flat_key)
         cv = _read_current(campaign_config, path)
         if sv != cv:

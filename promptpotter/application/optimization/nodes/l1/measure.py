@@ -18,7 +18,7 @@ from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunListener
+    from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.cycle import Cycle
 
 logger = logging.getLogger(__name__)

@@ -24,9 +24,9 @@ from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.data import CampaignBaseline
+    from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.intelligence.sample_index import SampleIndex
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import DegradationCheck

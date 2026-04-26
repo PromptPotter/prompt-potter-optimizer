@@ -16,7 +16,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.callbacks import RunListener
+    from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
 

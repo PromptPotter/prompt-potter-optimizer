@@ -6,7 +6,6 @@ import json
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.nodes.l1.critique import (
@@ -33,6 +32,7 @@ from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.sample import Sample

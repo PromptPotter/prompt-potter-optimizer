@@ -1,12 +1,6 @@
-"""CLI campaign runner — terminal orchestration for PromptPotter optimization.
+"""CLI campaign runner — argparse schema, every ``cmd_*``, COMMANDS, ``main()``.
 
-Single dispatch file: argparse schema, every ``cmd_*`` function, the
-``COMMANDS`` registry, and ``main()``. Sibling modules carry only the
-narrow surfaces a command body shouldn't have to know about:
-
-- ``result.py`` — ``CommandResult``
-- ``session.py`` — ``SessionCtx``, ``load_session``, ``load_campaign_config``
-- ``bootstrap.py`` — service init, pipeline config, scoring setup, verbose toggle
+``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
 """
 
 from __future__ import annotations
@@ -406,8 +400,10 @@ def _build_live_display(
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
-    from promptpotter.application.campaign.callbacks import RunListener
     from promptpotter.application.campaign.data import build_campaign_emitter
+    from promptpotter.application.campaign.runner import (
+        RunListener,
+    )
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )

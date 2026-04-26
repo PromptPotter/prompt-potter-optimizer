@@ -8,7 +8,6 @@ from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
-from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.campaign_setup import (
     Session,
     init_optimization_loop,
@@ -32,6 +31,7 @@ from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
     CampaignPhase,
+    PhaseEvent,
     StopLoop,
     StopReason,
     emit_phase,
@@ -43,7 +43,71 @@ from promptpotter.shared.errors import graceful
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["run_optimization"]
+__all__ = ["RunListener", "run_optimization"]
+
+
+class RunListener:
+    """Direct-dispatch listener: persistence emitter + optional display + control hook."""
+
+    __slots__ = ("control", "display", "emitter")
+
+    def __init__(
+        self,
+        *,
+        emitter: Any = None,
+        display: Any = None,
+        control: Callable[[str], str | None] | None = None,
+    ) -> None:
+        self.emitter = emitter
+        self.display = display
+        self.control = control
+
+    def on_phase(self, event: PhaseEvent) -> None:
+        if self.emitter is not None:
+            self.emitter.on_phase(event)
+        if self.display is not None:
+            self.display.on_phase(event)
+
+    def on_candidate_started(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        if self.emitter is not None:
+            self.emitter.on_candidate_started(idx, total, changes_description, pp_override)
+        if self.display is not None:
+            self.display.on_candidate_started(idx, total, changes_description, pp_override)
+
+    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+        if self.emitter is not None:
+            self.emitter.on_candidate_scored(idx, total, scores)
+        if self.display is not None:
+            self.display.on_candidate_scored(idx, total, scores)
+
+    def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
+        if self.emitter is not None:
+            self.emitter.on_sample_started(ci, ct, qi, qt, query_text)
+        if self.display is not None:
+            self.display.on_sample_started(ci, ct, qi, qt, query_text)
+
+    def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+        if self.emitter is not None:
+            self.emitter.on_sample_scored(ci, ct, qi, qt, result)
+        if self.display is not None:
+            self.display.on_sample_scored(ci, ct, qi, qt, result)
+
+    def on_round_complete(self, rr: RoundResult, l1_stall_count: int) -> None:
+        if self.emitter is not None:
+            self.emitter.on_round_complete(rr, l1_stall_count)
+        if self.display is not None:
+            self.display.on_round_complete(rr, l1_stall_count)
+
+    def on_checkpoint(self, name: str) -> str | None:
+        if self.control is not None:
+            return self.control(name)
+        return None
 
 
 async def _escalate_or_stop(

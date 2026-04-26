@@ -10,6 +10,7 @@ from promptpotter.application.campaign.cycle_store import (
 )
 from promptpotter.application.campaign.utils import (
     apply_stored_overrides,
+    load_stored_campaign_config,
 )
 from promptpotter.application.campaign.utils import (
     diff_campaign_config as _diff_campaign_config,
@@ -192,24 +193,6 @@ def diff_campaign_config(
         print("  (identical — will resume this campaign)")
     print("=" * 60)
     return diffs
-
-
-def load_stored_campaign_config(
-    store: Stores,
-    backend_id: str,
-    experiment_id: str,
-) -> dict | None:
-    """Load stored campaign config for an experiment.
-
-    Returns the stored config dict, or None if not found.
-    """
-    full_id = _resolve_campaign_id(store, backend_id, experiment_id)
-    if not full_id:
-        return None
-    campaign = store.campaigns.load(backend_id, full_id)
-    if not campaign:
-        return None
-    return campaign.get("config", {})
 
 
 def load_and_apply_experiment(
