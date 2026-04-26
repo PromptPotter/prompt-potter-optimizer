@@ -7,8 +7,14 @@ display for interactive use.
 
 import types as _types
 
-# -- Reporting (supplemental materials) — direct from services ----------------
+# -- Reporting + display primitives ------------------------------------------
 from promptpotter.application.campaign.reporting import generate_export_json
+from promptpotter.presentation.views import (
+    render_campaign_summary,
+    render_flip_tracking,
+    render_lineage,
+    render_progress,
+)
 from promptpotter.presentation.views.display_primitives import (
     BLUE,
     BOLD,
@@ -32,14 +38,6 @@ from .campaigns import (
     show_experiment_dashboard,
 )
 from .langfuse_config import configure_langfuse, push_langfuse, sync_langfuse
-
-# -- Display ------------------------------------------------------------------
-from .notebook_analytics import (
-    show_campaign_summary,
-    show_flip_tracking,
-    show_lineage_chain,
-    show_progress,
-)
 
 # -- Optimization (feedback cycle, stats, scoring) --------------------------------
 from .optimize import (
@@ -66,6 +64,26 @@ from .setup import (
     show_backend_status,
     show_pipeline_snapshot,
 )
+
+# -- Notebook print wrappers — print(render_*(rounds)) ------------------------
+
+
+def show_progress(campaign_rounds: list, window: int = 8) -> None:
+    print(render_progress(campaign_rounds, window=window))
+
+
+def show_campaign_summary(campaign_rounds: list) -> None:
+    print(render_campaign_summary(campaign_rounds))
+
+
+def show_flip_tracking(campaign_rounds: list) -> None:
+    out = render_flip_tracking(campaign_rounds)
+    print(out if out else "Need at least 2 rounds with results for flip tracking.")
+
+
+def show_lineage_chain(campaign_rounds: list) -> None:
+    print(render_lineage(campaign_rounds))
+
 
 # __all__ derived from the explicit imports above — no manual list to maintain.
 # Filter out submodule names (types.ModuleType) to export only functions/constants.

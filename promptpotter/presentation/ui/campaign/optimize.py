@@ -34,8 +34,6 @@ from promptpotter.shared.statistics import (
     wilson_ci,
 )
 
-from .notebook_analytics import show_progress
-
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
@@ -52,7 +50,6 @@ __all__ = [
     "proportion_test",
     "run_optimization_notebook",
     "show_feedback_preflight",
-    "show_progress",
     "wilson_ci",
 ]
 

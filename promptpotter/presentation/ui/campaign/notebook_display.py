@@ -31,7 +31,7 @@ from promptpotter.presentation.views.display_primitives import (
     _node_bottom,
     _node_top,
 )
-from promptpotter.presentation.views.markdown_box import render_markdown_box
+from promptpotter.presentation.views.formatting import render_markdown_box
 from promptpotter.presentation.views.phase_events import render_phase_event
 from promptpotter.presentation.views.query_format import _fmt_query_result
 from promptpotter.presentation.views.round_summary import (

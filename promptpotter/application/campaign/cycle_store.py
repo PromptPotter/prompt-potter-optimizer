@@ -4,13 +4,12 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.infrastructure.store import Stores
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
 
 logger = logging.getLogger(__name__)
@@ -37,7 +36,6 @@ __all__ = [
     "HOT_UPDATEABLE_KEYS",
     "bootstrap_cycle",
     "resolve_campaign_id",
-    "resume_or_create",
 ]
 
 
@@ -63,52 +61,6 @@ def resolve_campaign_id(
     return None
 
 
-def resume_or_create(
-    store: CampaignStore,
-    backend_id: str,
-    cycle_id: str,
-    *,
-    config_snapshot: dict[str, Any],
-    baseline_accuracy: float,
-    hot_update_keys: frozenset[str] = frozenset(),
-    parent_session_id: str = "",
-) -> int:
-    """Resume an existing cycle or create a new one. Returns ``resumed_from_round``."""
-    existing = store.load(backend_id, cycle_id)
-    if existing is not None:
-        if hot_update_keys:
-            stored_cfg = existing.get("config", {})
-            if stored_cfg:
-                cfg_updated = False
-                for k in hot_update_keys:
-                    if stored_cfg.get(k) != config_snapshot.get(k):
-                        stored_cfg[k] = config_snapshot.get(k)
-                        cfg_updated = True
-                if cfg_updated:
-                    store.update(backend_id, cycle_id, {"config": stored_cfg})
-                    logger.info("Updated loop-control config for %s", cycle_id)
-        resumed_from_round = len(existing.get("trials", []))
-        if resumed_from_round:
-            logger.debug(
-                "Resuming cycle %s — %d prior round(s) on disk",
-                cycle_id,
-                resumed_from_round,
-            )
-        return resumed_from_round
-
-    store.create(
-        backend_id,
-        cycle_id,
-        {
-            "type": "optimization_loop",
-            "config": config_snapshot,
-            "baseline_accuracy": baseline_accuracy,
-            "parent_session_id": parent_session_id,
-        },
-    )
-    return 0
-
-
 def bootstrap_cycle(
     config: CampaignConfig,
     session: Session,
@@ -121,7 +73,12 @@ def bootstrap_cycle(
     parent_session_id: str = "",
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resume or create the cycle via ``session.store.campaigns``. Returns ``(cycle_id, resumed_from_round)``."""
+    """Resume an existing cycle or create a new one via ``session.store.campaigns``.
+
+    Returns ``(cycle_id, resumed_from_round)``. Hot-updateable config keys
+    on the existing cycle are refreshed from the current snapshot when
+    ``cycle_id_override`` is set.
+    """
     from promptpotter.domain.cycle_identity import cycle_config_identity
 
     if not session.backend_id:
@@ -135,21 +92,32 @@ def bootstrap_cycle(
             active_steps,
         )
         if resume_from_round_override is not None:
-            store.rewind_to_round(
-                session.backend_id,
-                resolved,
-                resume_from_round_override,
-            )
-        resumed_from = resume_or_create(
-            store,
+            store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
+        config_snapshot = config.model_dump(mode="json")
+        existing = store.load(session.backend_id, resolved)
+        if existing is not None:
+            if cycle_id_override:
+                stored_cfg = existing.get("config", {}) or {}
+                cfg_updated = False
+                for k in HOT_UPDATEABLE_KEYS:
+                    if stored_cfg.get(k) != config_snapshot.get(k):
+                        stored_cfg[k] = config_snapshot.get(k)
+                        cfg_updated = True
+                if cfg_updated and stored_cfg:
+                    store.update(session.backend_id, resolved, {"config": stored_cfg})
+                    logger.info("Updated loop-control config for %s", resolved)
+            return resolved, len(existing.get("trials", []))
+        store.create(
             session.backend_id,
             resolved,
-            config_snapshot=config.model_dump(mode="json"),
-            baseline_accuracy=baseline_accuracy,
-            hot_update_keys=HOT_UPDATEABLE_KEYS if cycle_id_override else frozenset(),
-            parent_session_id=parent_session_id,
+            {
+                "type": "optimization_loop",
+                "config": config_snapshot,
+                "baseline_accuracy": baseline_accuracy,
+                "parent_session_id": parent_session_id,
+            },
         )
-        return resolved, resumed_from
+        return resolved, 0
     except (OSError, json.JSONDecodeError, KeyError):
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
         return None, 0

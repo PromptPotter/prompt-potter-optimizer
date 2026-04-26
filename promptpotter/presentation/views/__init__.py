@@ -11,9 +11,13 @@ from __future__ import annotations
 
 from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .dashboard import render_dashboard, render_status
-from .formatting import generate_supplemental, render_pipeline_overrides, render_table
+from .formatting import (
+    generate_supplemental,
+    render_markdown_box,
+    render_pipeline_overrides,
+    render_table,
+)
 from .hard_sample_heatmap import render_hard_sample_heatmap
-from .markdown_box import render_markdown_box
 from .phase_events import render_phase_event
 from .round_summary import render_patience_status, render_progress_table, render_round_stats
 from .rounds import (

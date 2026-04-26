@@ -25,26 +25,124 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
     sys.stdout.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
     sys.stderr.reconfigure(encoding="utf-8", errors="replace")  # type: ignore[union-attr]
 
+from dataclasses import dataclass
+from typing import TYPE_CHECKING
+
 from promptpotter.application.campaign.campaign_setup import new_session_state
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-from promptpotter.presentation.cli.bootstrap import (
-    configure_pipeline,
-    init_services_cli,
-    load_cli_baseline,
-    log_startup_summary,
-    set_verbose,
-)
-from promptpotter.presentation.cli.result import CommandResult
 from promptpotter.presentation.cli.session import (
     load_campaign_config,
     load_session,
 )
 
+if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.campaign.config import CampaignConfig
+
 logger = logging.getLogger("promptpotter.presentation.cli")
+
+
+# ---------------------------------------------------------------------------
+# CommandResult — what every cmd_* returns
+# ---------------------------------------------------------------------------
+
+
+@dataclass
+class CommandResult:
+    """``data`` is machine-readable; ``human`` is pre-rendered text. ``main()`` picks one."""
+
+    data: dict[str, Any] | None = None
+    human: str | None = None
+
+
+# ---------------------------------------------------------------------------
+# Service bootstrap — verbose toggle, init, pipeline configure, baseline load
+# ---------------------------------------------------------------------------
+
+_VERBOSE = False
+
+
+def set_verbose(value: bool) -> None:
+    """Toggle verbose mode. Called once from ``main()`` before dispatch."""
+    global _VERBOSE
+    _VERBOSE = value
+
+
+def _noop(*_: object, **__: object) -> None:
+    pass
+
+
+def _status_sink(msg: str) -> None:
+    if _VERBOSE:
+        logger.info(msg)
+
+
+def log_startup_summary(
+    session: Session,
+    pipeline_params: dict | None,
+    dataset_len: int,
+    backend_url: str,
+    dataset_name: str | None,
+) -> None:
+    """One-line collapsed summary of pipeline + backend + dataset + active nodes."""
+    ps = session.pipeline_schema
+    pipe = f"{ps.name} v{ps.version}" if ps else "pipeline unavailable"
+    active = list((pipeline_params or {}).get("steps") or [])
+    nodes = f"{len(active)} node{'s' if len(active) != 1 else ''}"
+    if active:
+        nodes += f" ({', '.join(active)})"
+    ds = f"{dataset_name or '?'} ({dataset_len} queries)"
+    logger.info("%s · %s · backend %s · dataset %s", pipe, nodes, backend_url, ds)
+
+
+async def init_services_cli(
+    backend_url: str = DEFAULT_BACKEND_URL,
+    backend_id: str = DEFAULT_BACKEND_ID,
+    experiment_id: str = DEFAULT_EXPERIMENT_ID,
+    dataset_name: str | None = None,
+    take_over: bool = False,
+    tenant_id: str = "default",
+) -> Session:
+    """Initialize services for a CLI command (logging style + service init)."""
+    from promptpotter.application.campaign.campaign_setup import init_services
+    from promptpotter.config.logging import setup_logging
+
+    setup_logging(style="full" if _VERBOSE else "cli")
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    return await init_services(
+        backend_url=backend_url,
+        backend_id=backend_id,
+        experiment_id=experiment_id,
+        project_root=project_root,
+        dataset_name=dataset_name,
+        on_status=_status_sink,
+        take_over=take_over,
+        tenant_id=tenant_id,
+    )
+
+
+def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
+    """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
+    from promptpotter.application.campaign.config import configure_and_apply_pipeline
+
+    log = logger.info if _VERBOSE else _noop
+    return configure_and_apply_pipeline(session, campaign_config, log=log)
+
+
+def load_cli_baseline(session: Session):
+    """Load baseline prompt for the active session's pipeline schema."""
+    from promptpotter.application.campaign.data import load_baseline_prompt
+
+    prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
+    return load_baseline_prompt(
+        session.experiment_extract,
+        prompt_node_names=prompt_nodes,
+        dataset_name=session.dataset_name,
+    )
 
 
 # Signal name → ``control.json`` (key, value). Source of truth for both the

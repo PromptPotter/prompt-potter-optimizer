@@ -27,7 +27,6 @@ from promptpotter.application.optimization.nodes.l1 import (
 )
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
-from promptpotter.application.optimization.teardown import finalize_optimization_run
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -416,7 +415,7 @@ async def run_optimization(
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    langfuse_trace_id = finalize_optimization_run(
+    langfuse_trace_id = _finalize_run(
         cycle, session, emitter, stop_reason, finished_at, campaign_config
     )
 
@@ -439,3 +438,60 @@ async def run_optimization(
     if emitter:
         emitter.write_result(run_result)
     return run_result
+
+
+def _finalize_run(
+    cycle: Cycle,
+    session: Session,
+    emitter: CampaignPersistenceEmitter | None,
+    stop_reason: StopReason,
+    finished_at: str,
+    campaign_config: CampaignConfig,
+) -> str | None:
+    """Mark cycle finished, end obs, write hard samples, finalize emitter; return cloud trace id."""
+    if session.cycle_id:
+        status = {
+            StopReason.USER_PAUSED: "paused",
+            StopReason.USER_STOPPED: "stopped",
+            StopReason.INTERRUPTED: "interrupted",
+        }.get(stop_reason, "completed")
+        session.store.campaigns.mark_finished(
+            session.backend_id,
+            session.cycle_id,
+            status=status,
+            stop_reason=stop_reason,
+            best_accuracy=cycle.best_accuracy,
+            best_round=cycle.best_round,
+            n_rounds=len(cycle.rounds),
+            finished_at=finished_at,
+        )
+    obs = session.obs
+    if obs:
+        obs.end_campaign(
+            session.obs_campaign_id,
+            best_accuracy=cycle.best_accuracy,
+            n_rounds=len(cycle.rounds),
+            stop_reason=stop_reason,
+            best_round=cycle.best_round,
+        )
+    if emitter:
+        from promptpotter.application.intelligence.hard_sample_sorter import (
+            build_hard_samples_artifact,
+            empty_artifact,
+        )
+
+        hs_cfg = campaign_config.optimization.hard_sample_sorter
+        if hs_cfg.enabled:
+            artifact = build_hard_samples_artifact(
+                cycle.rounds,
+                cycle_id=session.cycle_id,
+                top_k_candidates=hs_cfg.top_k_candidates,
+                top_k_samples=hs_cfg.top_k_samples,
+            )
+        else:
+            artifact = empty_artifact(cycle_id=session.cycle_id, disabled=True)
+        emitter.write_hard_samples_artifact(artifact)
+        emitter.finalize(stop_reason)
+    if stop_reason == StopReason.INTERRUPTED or obs is None:
+        return None
+    return obs.get_langfuse_trace_id(session.obs_campaign_id)
