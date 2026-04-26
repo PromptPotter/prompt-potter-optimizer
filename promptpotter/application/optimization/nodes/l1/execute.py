@@ -94,19 +94,12 @@ async def _generate_or_load_candidates(
             round_num,
         )
         if persisted is not None:
-            logger.debug(
-                "Loaded %d persisted candidates for round %d",
-                len(persisted),
-                round_num,
-            )
-            # Synthesize an ``l1_generate`` block for the round recorder —
-            # ``pipeline.llm_call()`` never fires on this branch, so
-            # ``dashboard.json::current_round.nodes`` and
-            # ``rounds/round_NNNN.json`` would otherwise miss the node.
+            logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
+            # llm_call never fires on this branch — synthesize l1_generate
+            # so dashboard.json + round_NNNN.json don't miss the node.
             from promptpotter.application.optimization.pipeline import get_round_recorder
 
-            _rr = get_round_recorder()
-            if _rr is not None:
+            if _rr := get_round_recorder():
                 _rr.set_node(
                     "l1_generate",
                     {
@@ -222,7 +215,7 @@ async def _score_and_select(
         current_pipeline_params=cycle.current_sp.pipeline_params if cycle.current_sp else None,
     )
 
-    # Probe rounds: subset baseline to probe's query set; else every probe looks like a regression.
+    # Probe rounds need a baseline subset on the probe's queries — else a probe always looks like regression.
     _baseline_acc = cycle.current_accuracy
     _baseline_comp = cycle.current_composite
     _baseline_results = cycle.current_results
@@ -376,13 +369,13 @@ async def execute_round(
         evaluators=scoring_result.winner_evaluators,
     )
 
-    # Warning inventory spans ALL candidate results — aborted candidates carry warnings.
+    # Aborted candidates also carry warnings — span all candidate results.
     _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
         update_query_tracker(cycle.opt_sp.warning_inventory, _all_results)
 
-    # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by source/warning/config)
-    # so L2 sees accumulated evidence across rounds; L3 replans when L2 can't reduce.
+    # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by
+    # source/warning/config) so L2 sees accumulated evidence across rounds.
     from promptpotter.domain.analysis import RuntimeFailure
 
     def _rf_key(rf_dict: dict) -> tuple:

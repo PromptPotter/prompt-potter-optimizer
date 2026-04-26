@@ -1,19 +1,6 @@
-"""
-Langfuse SDK wrapper for workflow observability.
+"""Langfuse SDK wrapper — singleton client with project isolation via API keys.
 
-Provides singleton access to Langfuse client with automatic project isolation
-via API keys. Logs traces, observations (generations/spans), and scores.
-
-Uses the Langfuse SDK v3 ``start_span()`` / ``start_generation()`` API to build
-a proper trace hierarchy: one root span per trace, child spans nested underneath.
-
-Usage:
-    langfuse = LangfuseLogger.get_instance()
-    trace_id = langfuse.create_trace("workflow_name", inputs)
-    langfuse.create_span(trace_id, "step_name", input, output)
-    langfuse.create_score(trace_id, "accuracy", 0.95)
-    langfuse.end_trace(trace_id)
-    langfuse.flush()
+One root span per trace, child spans nested via ``start_observation``.
 """
 
 import logging
@@ -30,24 +17,16 @@ logger = logging.getLogger(__name__)
 
 
 class LangfuseLogger:
-    """Wrapper for Langfuse SDK with project isolation.
+    """Langfuse SDK wrapper. Disabled if credentials are missing.
 
-    Project isolation is automatic via API keys:
-    - Each Langfuse project has unique LANGFUSE_PUBLIC_KEY and LANGFUSE_SECRET_KEY
-    - Set these in .env to route data to the correct project
-
-    Gracefully disables logging if credentials are missing.
-
-    Error-level policy: routine per-call observability failures (lost trace, lost
-    span, lost score) log at ``DEBUG`` — losing one observation is expected during
-    network blips and never blocks the loop. Setup-time and post-retry failures
-    log at ``WARNING`` since they signal a real condition the user should see.
+    Error-level policy: per-call observability failures log at DEBUG (a lost
+    span is expected during network blips). Setup + post-retry failures log
+    at WARNING.
     """
 
     _instance: "LangfuseLogger | None" = None
 
     def __init__(self) -> None:
-        """Initialize Langfuse client from settings."""
         from promptpotter.config.settings import settings
 
         self.enabled = bool(
@@ -56,12 +35,9 @@ class LangfuseLogger:
             and settings.LANGFUSE_PUBLIC_KEY
         )
         self.client = None
-        # Maps trace_id → root SDK observation object (not a plain dict)
-        self._trace_metadata: dict[str, Any] = {}
-        # Maps obs_id → open SDK observation (for long-running spans)
-        self._open_observations: dict[str, Any] = {}
-        # Rate-limit tracking for REST API calls
-        self._rate_limit_until: float = 0.0  # unix timestamp when quota resets
+        self._trace_metadata: dict[str, Any] = {}  # trace_id → root SDK observation
+        self._open_observations: dict[str, Any] = {}  # obs_id → open SDK observation
+        self._rate_limit_until: float = 0.0  # unix ts when quota resets
 
         if self.enabled:
             try:
@@ -84,23 +60,17 @@ class LangfuseLogger:
 
     @classmethod
     def get_instance(cls) -> "LangfuseLogger":
-        """Get singleton instance."""
         if cls._instance is None:
             cls._instance = cls()
         return cls._instance
 
     @classmethod
     def reset_instance(cls) -> None:
-        """Reset singleton (useful for testing)."""
         cls._instance = None
 
     def create_trace_id(self) -> str | None:
-        """Create a bare trace ID without a root observation.
-
-        Use this for pipeline traces where step observations carry trace metadata
-        via ``trace_params`` on ``create_top_level_observation()``. This avoids
-        creating a root chain that collapses steps in the Langfuse graph view.
-        """
+        """Bare trace ID without a root observation — keeps pipeline traces
+        from collapsing into a root chain in the Langfuse graph view."""
         if not self.enabled or not self.client:
             return None
         try:
@@ -118,15 +88,8 @@ class LangfuseLogger:
         session_id: str | None = None,
         tags: list[str] | None = None,
     ) -> str | None:
-        """Create a new trace with a root span and proper metadata.
-
-        Creates a trace_id, starts a root span linked to it, then calls
-        ``update_trace()`` on the root span to set trace-level metadata
-        (name, session_id, tags, input). This ensures the trace appears in
-        Langfuse with full metadata instead of as a bare auto-created stub.
-
-        Returns trace_id or None if logging is disabled.
-        """
+        """Create trace with a root span; pushes metadata via ``update_trace``
+        so the cloud UI shows full info instead of an auto-stub."""
         if not self.enabled or not self.client:
             return None
 
@@ -171,10 +134,7 @@ class LangfuseLogger:
         parent_observation_id: str | None = None,
         as_type: str = "span",
     ) -> str | None:
-        """Start a long-running observation. Call end_observation() when done.
-
-        Returns observation_id or None if logging is disabled.
-        """
+        """Start a long-running observation; pair with ``end_observation``."""
         if not self.enabled or not self.client or not trace_id:
             return None
 
@@ -201,7 +161,6 @@ class LangfuseLogger:
         output: Any = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        """Close a previously started observation (span/chain/tool)."""
         if not self.enabled or not obs_id:
             return
 
@@ -231,16 +190,7 @@ class LangfuseLogger:
         model: str | None = None,
         usage_details: dict[str, int] | None = None,
     ) -> str | None:
-        """Log a non-LLM observation nested under root or a parent observation.
-
-        Args:
-            parent_observation_id: Nest under this open observation instead of root.
-            as_type: Observation type (``span``, ``tool``, ``chain``, etc.).
-            model: Model name (for generation-type steps).
-            usage_details: Token usage dict (for generation-type steps).
-
-        Returns observation_id or None if logging is disabled.
-        """
+        """Log a closed observation nested under root or a parent obs."""
         if not self.enabled or not self.client or not trace_id:
             return None
 
@@ -275,7 +225,6 @@ class LangfuseLogger:
         data_type: str = "NUMERIC",
         comment: str | None = None,
     ) -> bool:
-        """Log an evaluation score for a trace."""
         if not self.enabled or not self.client or not trace_id:
             return False
 
@@ -298,11 +247,7 @@ class LangfuseLogger:
         output: dict[str, Any] | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Update a trace with final output or additional metadata.
-
-        Uses the root SDK span's ``update_trace()`` method to push changes
-        to the server (not just a local dict merge).
-        """
+        """Push trace-level output/metadata via the root span's ``update_trace``."""
         if not self.enabled or not self.client or not trace_id:
             return False
 
@@ -322,7 +267,6 @@ class LangfuseLogger:
             return False
 
     def end_trace(self, trace_id: str) -> None:
-        """End the root span for a trace (marks the trace as complete)."""
         if not self.enabled or not self.client or not trace_id:
             return
 
@@ -331,9 +275,7 @@ class LangfuseLogger:
             if root:
                 root.end()
 
-    # ------------------------------------------------------------------
-    # Dataset API
-    # ------------------------------------------------------------------
+    # -- Dataset API ---------------------------------------------------------
 
     def create_dataset(
         self,
@@ -341,7 +283,7 @@ class LangfuseLogger:
         description: str | None = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Create a Langfuse dataset (idempotent — no error if it exists)."""
+        """Idempotent — no error if the dataset exists."""
         if not self.enabled or not self.client:
             return False
         try:
@@ -363,10 +305,7 @@ class LangfuseLogger:
         metadata: dict[str, Any] | None = None,
         _max_retries: int = 3,
     ) -> str | None:
-        """Create a dataset item. Returns item ID or None.
-
-        Retries with exponential backoff on 429 rate-limit errors.
-        """
+        """Retries with exponential backoff on 429."""
         if not self.enabled or not self.client:
             return None
         for attempt in range(_max_retries):
@@ -389,7 +328,6 @@ class LangfuseLogger:
         return None
 
     def get_dataset(self, name: str) -> object | None:
-        """Fetch a dataset by name. Returns SDK dataset object or None."""
         if not self.enabled or not self.client:
             return None
         try:
@@ -404,7 +342,6 @@ class LangfuseLogger:
         expected_output: Any = None,
         metadata: dict[str, Any] | None = None,
     ) -> bool:
-        """Update an existing dataset item (e.g. to set expectedOutput)."""
         if not self.enabled or not self.client:
             return False
         try:
@@ -421,7 +358,6 @@ class LangfuseLogger:
 
     @property
     def rate_limited(self) -> bool:
-        """True if we're currently blocked by a Langfuse rate limit."""
         return time.time() < self._rate_limit_until
 
     def link_item_to_run(
@@ -434,16 +370,11 @@ class LangfuseLogger:
         *,
         max_retries: int = 3,
     ) -> bool:
-        """Link a trace/observation to a dataset item via a Dataset Run.
+        """Link trace/observation to a dataset item via REST (the SDK only
+        exposes a context-manager approach unsuitable for backfill).
 
-        Uses the REST API directly because the Python SDK does not expose
-        ``create_dataset_run_item`` (it only offers a context-manager approach
-        via ``item.run()`` which is unsuitable for backfill).
-
-        Respects 429 rate limits: retries with exponential backoff for short
-        waits, but if ``Retry-After`` exceeds 300s (daily quota exhausted),
-        sets ``rate_limited`` and returns False immediately so callers can
-        stop early.
+        429 with Retry-After > 300s sets ``rate_limited`` and returns False
+        so callers can stop early instead of retrying for hours.
         """
         if not self.enabled or not self.client:
             return False
@@ -505,7 +436,6 @@ class LangfuseLogger:
             return False
 
     def flush(self) -> None:
-        """Ensure all pending events are sent to Langfuse."""
         if self.enabled and self.client:
             with graceful("Failed to flush Langfuse events"):
                 self.client.flush()

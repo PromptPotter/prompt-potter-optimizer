@@ -146,12 +146,7 @@ _INBOX_SECTION_HEADERS: tuple[str, ...] = (
 
 
 def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
-    """Best-effort per-section size breakdown of the rendered inbox string.
-
-    Sections are separated by ``\\n\\n`` and tagged by which known header
-    line they start with (or ``<unknown>``). Returns a list ordered by size
-    descending, newest first on ties, so the log surfaces the bloat source.
-    """
+    """Per-section size of the rendered inbox, ordered by size desc."""
     if not inbox:
         return []
     parts = inbox.split("\n\n")
@@ -169,12 +164,7 @@ def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
 
 
 def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
-    """Log L1 meta-prompt input-side breakdown (informational).
-
-    Input-side visibility for dedup work. Output budgeting is the provider's
-    job now — no artificial max_tokens cap, no projected-request-tokens
-    heuristic. Top inbox sections surface where bytes live.
-    """
+    # Input-side visibility for dedup work; output budgeting is the provider's job.
     total_chars = len(meta_prompt)
     rendered = str(compile_vars.get("rendered_prompt", ""))
     inbox = str(compile_vars.get("inbox", ""))
@@ -199,14 +189,7 @@ _ENUM_RENDER_CAP = 12
 
 
 def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
-    """Build pipeline schema description for L1 LLM context.
-
-    Rendering rules (kept tight because this block lives on every L1 call):
-    * Enums cap at ``_ENUM_RENDER_CAP`` values, then ``(+N more)``.
-    * Output-schema mutation syntax is printed once globally, not per node.
-    * Node-level mechanics/description text comes from the pipeline JSON
-      — no hardcoded backend-specific commentary here.
-    """
+    """Pipeline schema for L1 context. Enums capped at ``_ENUM_RENDER_CAP``."""
     lines: list[str] = []
     npk = pipeline_schema.node_param_keys()
     if not npk:

@@ -29,12 +29,7 @@ logger = logging.getLogger(__name__)
 
 
 class LangfuseSink:
-    """Forwards events to a ``LangfuseLogger`` and persists id state.
-
-    The bridge dispatches each event to ``on_<event_name>(event)`` directly
-    (see :data:`bridge._DISPATCH`). Methods absent from the dispatch table
-    are not invoked.
-    """
+    """Forwards events to ``LangfuseLogger`` and persists id state."""
 
     def __init__(
         self,
@@ -46,29 +41,23 @@ class LangfuseSink:
         self._backend_id = backend_id
         self._lf = langfuse
 
-        self._trace_ids: dict[str, str] = {}  # campaign_id → lf trace id
+        self._trace_ids: dict[str, str] = {}
         self._round_obs_ids: dict[tuple[str, int], str] = {}
         self._node_obs_ids: dict[tuple[str, int, str], str] = {}
         self._dataset_item_ids: dict[tuple[str, str], str] = {}
-        self._session_ids: dict[str, str] = {}  # campaign_id → langfuse session id
-        # In-progress Topology B traces, keyed by (run_id, query).
-        # Value = (trace_id, dataset_name, origin).
+        self._session_ids: dict[str, str] = {}
+        # (run_id, query) → (trace_id, dataset_name, origin) — Topology B in-flight.
         self._query_trace_ids: dict[tuple[str, str], tuple[str, str, str]] = {}
 
-        # The session-id-dependent state path is resolved lazily on the
-        # first CampaignStart event (session_id lives on that event).
+        # Resolved lazily on first CampaignStart (session_id lives there).
         self._state_session_id: str | None = None
         self._state_path: Path | None = None
 
-    # --- Persistence ---
-
     def _session_state_path(self, session_id: str) -> Path:
-        # ``session_id`` here is the campaign cycle_id (the sink uses
-        # campaign-scoped state); the Langfuse shadow is per-campaign.
+        # session_id == cycle_id here; state is per-campaign.
         return self._base / "campaigns" / session_id / "langfuse" / "state.json"
 
     def _bind_session(self, session_id: str) -> None:
-        """Latch the session state path and restore any prior state."""
         if self._state_session_id == session_id:
             return
         self._state_session_id = session_id
@@ -103,12 +92,8 @@ class LangfuseSink:
         }
         write_json(self._state_path, state)
 
-    # --- Accessors ---
-
     def get_langfuse_trace_id(self, campaign_id: str) -> str | None:
         return self._trace_ids.get(campaign_id)
-
-    # --- Topology A ---
 
     def on_campaign_start(self, event: CampaignStart) -> None:
         if event.session_id:
@@ -318,8 +303,6 @@ class LangfuseSink:
         self._lf.end_trace(trace_id)
         self._persist()
 
-    # --- Topology B (backfill replay) ---
-
     def on_query_eval_start(self, event: QueryEvalStart) -> None:
         if event.session_id:
             self._bind_session(event.session_id)
@@ -389,21 +372,14 @@ class LangfuseSink:
     def flush(self) -> None:
         self._lf.flush()
 
-    # --- Backfill helper ---
-
     def reconcile_dataset(
         self,
         dataset_name: str,
         gt_map: dict[str, str],
         seed_items: dict[str, str] | None = None,
     ) -> dict[str, str]:
-        """Create/update a Langfuse dataset and reconcile item ids.
-
-        Replaces the old ``langfuse_backfill._register_dataset_items``.
-        Returns ``{query: item_id}`` and also populates the sink's
-        ``_dataset_item_ids`` map so subsequent query eval events can
-        link traces to items.
-        """
+        """Create/update Langfuse dataset, returning ``{query: item_id}`` and
+        populating ``_dataset_item_ids`` for query-eval link-back."""
         query_to_item_id: dict[str, str] = dict(seed_items or {})
 
         ok = self._lf.create_dataset(

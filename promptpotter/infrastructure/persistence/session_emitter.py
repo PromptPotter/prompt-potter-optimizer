@@ -1,10 +1,7 @@
-"""Campaign session emitter — writes the live dashboard + audit log.
+"""Campaign session emitter — live dashboard + audit log writer.
 
-Owns the per-cycle operational artifacts in ``CAMPAIGN_ARTIFACTS`` and
-ensures the per-session narrative artifacts in ``SESSION_ARTIFACTS``
-exist. ``tests/test_artifact_parity.py`` enforces both sets across entry
-points. Instantiated by ``run_optimization()`` so every entry point
-produces identical artifacts.
+Owns ``CAMPAIGN_ARTIFACTS`` (per-cycle) and ensures ``SESSION_ARTIFACTS``
+(per-session). Parity enforced by ``tests/test_artifact_parity.py``.
 """
 
 from __future__ import annotations
@@ -32,20 +29,12 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult, RunResult
     from promptpotter.domain.phases import PhaseEvent
 
-# Recorder provider: caller injects a zero-arg callable that returns the
-# active per-round recorder (or None). The emitter never imports the
-# concrete recorder type or its lookup function — that would couple
-# infrastructure upward into application/optimization. ``Any`` keeps
-# the contract loose; the emitter only needs ``snapshot_nodes()``,
-# ``set_l1_score()``, ``set_hitl()``.
+# Injected callable returning the active RoundRecorder or None — keeps
+# infrastructure from importing upward into application/optimization.
 RecorderProvider = Callable[[], Any]
 
-# Phase-view builder: caller injects ``(PhaseEvent, ctx) -> dict | None``.
-# The emitter calls it on every ``on_phase`` to obtain a serializable
-# ``view`` it appends as a line to ``phase_events.jsonl``. Returns
-# ``None`` if no builder is registered for the (phase, event) pair —
-# the emitter then skips the JSONL append. Same upward-coupling
-# avoidance as ``RecorderProvider``: this types is intentionally loose.
+# Injected ``(PhaseEvent, ctx) -> dict | None`` builder for phase_events.jsonl
+# entries; ``None`` skips the append. Same upward-coupling avoidance.
 PhaseViewBuilder = Callable[["PhaseEvent", dict[str, Any]], dict[str, Any] | None]
 
 __all__ = [
@@ -57,32 +46,28 @@ __all__ = [
 ]
 
 
-# Per-cycle operational artifacts — produced by the emitter under
-# ``campaigns/{cycle_id}/``. Consumed by resume, status, UI.
+# Per-cycle artifacts under ``campaigns/{cycle_id}/``.
 CAMPAIGN_ARTIFACTS = {
-    "index.json",  # campaign metadata + trial index + parent_session_id
-    "dashboard.json",  # live scalar counters
-    "output.log",  # per-query audit log
-    "log.md",  # round-by-round markdown summary
-    "optimize_result.json",  # final RunResult snapshot
-    "hard_samples.json",  # hard-sample-sorter artifact (top-K candidate×sample view)
-    "phase_events.jsonl",  # append-only phase-event stream (init/L1/L2/L3 banners)
+    "index.json",
+    "dashboard.json",
+    "output.log",
+    "log.md",
+    "optimize_result.json",
+    "hard_samples.json",
+    "phase_events.jsonl",
 }
 
-# Per-session artifacts — produced under ``sessions/{session_id}/``.
-# session.json is owned by SessionStore; the emitter ensures the
-# free-form narrative pair + control.json exist for parity from mint.
+# Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
+# is owned by SessionStore; the emitter ensures the rest exist from mint.
 SESSION_ARTIFACTS = {
-    "session.json",  # session metadata
-    "journal.md",  # operator narrative (notebook ↔ Claude exchange)
-    "notes.md",  # Claude notes
-    "control.json",  # HITL control signals
+    "session.json",
+    "journal.md",
+    "notes.md",
+    "control.json",
 }
 
 
-# L2/L3 transition phase → dashboard layer label. Keep in sync with
-# ``LayerTransition.phase`` / ``.layer`` in
-# ``application/optimization/nodes/layer_transitions.py``.
+# Keep in sync with ``LayerTransition.phase`` / ``.layer``.
 _PHASE_TO_LAYER: dict[str, str] = {
     CampaignPhase.REFINE_STRATEGY: "L2",
     CampaignPhase.MODIFY_PLAN: "L3",
@@ -90,7 +75,6 @@ _PHASE_TO_LAYER: dict[str, str] = {
 
 
 def append_journal(session_dir: Path, action: str, body: str = "") -> None:
-    """Append a timestamped user note to ``journal.md`` (notebook ↔ Claude narrative channel)."""
     ts = datetime.now(UTC).isoformat(timespec="seconds")
     entry = f"## {ts} \u2014 {action}\n"
     if body:
@@ -100,7 +84,6 @@ def append_journal(session_dir: Path, action: str, body: str = "") -> None:
 
 
 def read_claude_notes(session_dir: Path) -> str:
-    """Read ``notes.md`` or return ``''`` if missing/empty."""
     path = session_dir / "notes.md"
     if not path.exists():
         return ""
@@ -115,18 +98,9 @@ def _make_initial_state(
     n_variants: int,
     sp_budget_ttest: int,
 ) -> dict[str, Any]:
-    """Build the scalar-only dashboard dict.
-
-    Only fields that earn their place live here. Setup info (max_rounds,
-    model, active_nodes, dataset_count, backend_id) lives as emitter
-    attributes; derived displays (elapsed timing, rolling rates, round
-    history stats) are computed on read by the ``log.md`` renderer.
-    Per-round working state lives on ``_current_round`` + ``_round_history``.
-    """
+    """Build the scalar-only dashboard dict (no setup/derived fields)."""
     r = resume_from or {}
-    # On resume, mirror ``requested_state`` from prior HITL, but always
-    # reset ``stop_reason`` and ``pause_point`` — a fresh run hasn't
-    # stopped and hasn't paused.
+    # Mirror prior ``requested_state`` but reset stop/pause — fresh run.
     prior_hitl = r.get("hitl") or {}
     return {
         # Execution markers
@@ -151,12 +125,10 @@ def _make_initial_state(
         "current_query_payload": None,
         "last_query_elapsed_s": 0.0,
         "wallclock_serialized_at": None,
-        # Config
         "n_variants": n_variants,
         "sp_budget_ttest": sp_budget_ttest,
-        # HITL — gathered (see ``_snapshot_hitl``). ``requested_state``
-        # mirrors ``control.json``; ``pause_point`` and ``stop_reason``
-        # are set by the loop when it halts.
+        # ``requested_state`` mirrors control.json; pause_point/stop_reason
+        # are written by the loop on halt. See ``_snapshot_hitl``.
         "hitl": {
             "requested_state": prior_hitl.get("requested_state", "running"),
             "pause_point": None,
@@ -168,15 +140,10 @@ def _make_initial_state(
 def _round_summary_from_round_result(
     rr: RoundResult, current_round: dict[str, Any]
 ) -> dict[str, Any]:
-    """Build the dashboard round_summary shape from an in-memory RoundResult
-    + the live per-candidate accumulator. Shared schema with
-    ``dashboard_md.round_summary_from_trial`` so sections render the same
-    whether the data is in-memory or reloaded from disk."""
+    """Build dashboard round_summary; same schema as ``round_summary_from_trial``."""
     candidates = current_round.get("candidates") or {}
     leaderboard: list[dict[str, Any]] = []
-    # Prefer authoritative per-candidate scores from RoundResult when present;
-    # fall back to the live accumulator for runs where the loop doesn't emit
-    # candidate_scores yet.
+    # Prefer authoritative RoundResult scores; fall back to live accumulator.
     scored = list(rr.candidate_scores or [])
     if scored:
         for idx, cs in enumerate(scored):
@@ -223,11 +190,9 @@ def _round_summary_from_round_result(
 
 
 class CampaignPersistenceEmitter:
-    """Writes per-cycle dashboard + audit log under ``campaigns/{cycle_id}/``,
-    and ensures per-session narrative + control files exist under
-    ``sessions/{session_id}/``. Not an optimizer checkpoint — resume uses
-    ``campaigns/{cycle_id}/trials/trial_NNNN.json``; counters here are display
-    continuity only."""
+    """Per-cycle dashboard + audit log writer; ensures per-session narrative
+    + control files. Not an optimizer checkpoint — resume reads
+    ``trials/trial_NNNN.json``, counters here are display continuity only."""
 
     def __init__(
         self,
@@ -274,41 +239,32 @@ class CampaignPersistenceEmitter:
         self._round_start = time.monotonic()
         self._query_start: float | None = None
 
-        # Setup info — doesn't change over the run, lives on the emitter so
-        # log.md header can show it without bloating dashboard.json.
+        # Setup info — kept off dashboard.json; rendered in log.md header.
         self._max_rounds = max_rounds
         self._model = model
         self._active_nodes = list(active_nodes)
         self._dataset_count = dataset_count
         self._backend_id = backend_id
 
-        # Sliding-window dashboard state. ``_current_round`` accumulates
-        # per-candidate detail for the in-flight round; ``_round_history``
-        # holds completed round summaries (oldest-first). On resume, history
-        # is rebuilt from ``trials/`` so the EARLIER section is accurate.
+        # ``_current_round`` accumulates the in-flight round; ``_round_history``
+        # holds completed summaries (oldest-first), rebuilt from trials/ on resume.
         self._current_round: dict[str, Any] = {"round": 0, "candidates": {}}
         self._round_history: list[dict[str, Any]] = []
         self._rehydrate_history_from_disk()
 
         self._persist()
 
-        # Per-session narrative + control. ``ensure_control_file`` is
-        # idempotent; narrative pair is touched so parity holds from mint
-        # even if SessionStore.ensure_narrative_files wasn't called yet.
         session_dir.mkdir(parents=True, exist_ok=True)
         ensure_control_file(session_dir)
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
-        # Append-only log — hold one handle for the emitter's lifetime so
-        # 100+ writes/round don't each open() the file.  Closed in ``finalize``.
+        # One log handle for the emitter's lifetime; closed in ``finalize``.
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_fh: IO[str] = open(  # noqa: SIM115
             self.log_path, "a", encoding="utf-8", buffering=1
         )
-        # Touch the phase-events JSONL file so artifact-parity holds even
-        # before the first ``on_phase`` callback fires. On resume, the file
-        # is preserved (append-only); fresh runs start with an empty file.
+        # Touch for artifact parity — append-only, preserved on resume.
         self.phase_events_path.touch()
         if resume_from:
             r = resume_from
@@ -339,17 +295,10 @@ class CampaignPersistenceEmitter:
         recorder_provider: RecorderProvider | None = None,
         phase_view_builder: PhaseViewBuilder | None = None,
     ) -> CampaignPersistenceEmitter | None:
-        """Construct the emitter for a run, or ``None`` if ids are unknown.
-
-        Reads prior ``dashboard.json`` (if present) to carry UI counters
-        across resumes — optimizer resume is a separate concern
-        via ``Cycle.restore_from_trial``.
-
-        On a mid-cycle rewind (``--from N``), ``resumed_from_round`` is the
-        round the runner will execute next; dashboard counters that outran
-        the surviving trials are clamped so the UI doesn't show phantom
-        rounds.
-        """
+        """Build emitter, or ``None`` if ids missing. Carries prior UI counters
+        across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
+        On ``--from N`` rewind, dashboard counters past the surviving trials
+        are clamped to avoid phantom rounds."""
         if not (project_root and session_id and cycle_id):
             return None
 
@@ -413,9 +362,7 @@ class CampaignPersistenceEmitter:
             s["round"] = data.get("round", s["round"])
             self._round_start = time.monotonic()
             s["degraded_count"] = 0
-            # Fresh round — clear the in-flight per-candidate accumulator
-            # so the CURRENT section starts empty. History was already
-            # populated in on_round_complete for the previous round.
+            # Fresh round — clear in-flight accumulator (history already populated).
             self._current_round = {"round": s["round"], "candidates": {}}
         elif phase in _PHASE_TO_LAYER:
             s["layer"] = _PHASE_TO_LAYER[phase]
@@ -425,12 +372,7 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def _persist_phase_event(self, event: PhaseEvent) -> None:
-        """Build the serializable view and append a line to ``phase_events.jsonl``.
-
-        No-op when no ``phase_view_builder`` was injected (e.g. in tests
-        that don't wire the application layer) or when the builder
-        returns ``None`` for this (phase, event) pair.
-        """
+        """Append a phase_events.jsonl line; no-op without a builder."""
         if self._phase_view_builder is None:
             return
         view = self._phase_view_builder(event, self._phase_ctx)
@@ -455,10 +397,8 @@ class CampaignPersistenceEmitter:
         changes_description: str,
         pp_override: dict | None,
     ) -> None:
-        # Seed the candidate entry so the CURRENT section shows labelled
-        # pending slots before scoring begins. ``on_sample_scored`` /
-        # ``on_candidate_scored`` lazy-init for the same key, so runs that
-        # skip this callback still render correctly.
+        # Seed the entry so CURRENT shows labelled pending slots; sample/score
+        # callbacks lazy-init the same key for paths that skip this callback.
         entry = self._current_round.setdefault("candidates", {}).setdefault(idx, {})
         entry["idx"] = idx
         entry["total"] = total
@@ -469,7 +409,6 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
-        """Refresh dashboard candidate/query labels."""
         s = self._state
         s["candidate"] = f"C{ci + 1}/{ct}"
         s["query"] = f"{qi + 1}/{qt}"
@@ -516,14 +455,12 @@ class CampaignPersistenceEmitter:
         if not is_cached:
             s["total_backend_calls"] += 1
 
-        # Clear in-flight markers — query landed.
         s["query_in_flight"] = False
         s["query_started_at"] = None
         s["current_query_payload"] = None
         s["last_query_elapsed_s"] = round(query_time, 2)
         self._query_start = None
 
-        # Audit log line — the only live record of per-query detail.
         q_text = (result.get("query") or "")[:45]
         pred = (result.get("prediction") or "")[:35]
         mark = "HIT" if hit else "MISS"
@@ -533,25 +470,18 @@ class CampaignPersistenceEmitter:
             f"{mark}{cache_mark} {q_text} -> {pred}\n"
         )
 
-        # Accumulate for the dashboard PER-QUERY DETAIL section. Lazy-init
-        # the candidate entry — tests/older paths may skip on_candidate_started.
+        # Lazy-init candidate entry — older paths may skip on_candidate_started.
         cand = self._current_round.setdefault("candidates", {}).setdefault(
             ci, {"idx": ci, "total": ct, "label": "", "samples": [], "scores": None}
         )
-        sample_id = result.get("sample_id")
-        # Token counts may be nested on the sample result or the pipeline
-        # envelope depending on the backend; emit ``None`` when absent.
-        input_tokens = result.get("input_tokens")
-        if input_tokens is None:
-            input_tokens = pd.get("input_tokens")
-        output_tokens = result.get("output_tokens")
-        if output_tokens is None:
-            output_tokens = pd.get("output_tokens")
+        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
+        in_tok = result.get("input_tokens")
+        out_tok = result.get("output_tokens")
         cand["samples"].append(
             {
                 "qi": qi,
                 "qt": qt,
-                "sample_id": sample_id,
+                "sample_id": result.get("sample_id"),
                 "hit": hit,
                 "cached": is_cached,
                 "query": result.get("query") or "",
@@ -559,8 +489,8 @@ class CampaignPersistenceEmitter:
                 "ground_truth": result.get("ground_truth") or "",
                 "time_s": round(query_time, 2),
                 "terminated_at": terminated,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
+                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
+                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
             }
         )
         self._persist()
@@ -612,16 +542,12 @@ class CampaignPersistenceEmitter:
             f"(patience {l1_stall_count}) <<<\n\n"
         )
 
-        # Deposit the scoring-phase block + HITL snapshot onto the active
-        # round recorder before runner.py calls ``flush()``. The recorder
-        # already holds the L1/L2/L3 LLM actions captured during
-        # ``execute_round`` via ``pipeline.llm_call()`` — so flushing now
-        # writes one consolidated ``rounds/round_NNNN.json``.
+        # Deposit l1_score block + HITL onto the active recorder before
+        # runner.py flush() — produces one consolidated rounds/round_NNNN.json.
         self._deposit_round_recorder_state(round_result)
 
-        # Flush the in-flight round into history. Use the RoundResult's
-        # candidate_scores as authoritative leaderboard data; fall back to
-        # the accumulated per-candidate state if candidate_scores is empty.
+        # Flush in-flight round into history (RoundResult.candidate_scores is
+        # authoritative; fall back to accumulator if empty).
         self._round_history.append(
             _round_summary_from_round_result(round_result, self._current_round)
         )
@@ -629,12 +555,7 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def _deposit_round_recorder_state(self, round_result: RoundResult) -> None:
-        """Build the ``l1_score`` node block and HITL snapshot, hand them
-        to the active ``RoundRecorder`` for inclusion in ``round_NNNN.json``.
-
-        Recorder is fetched via the injected ``recorder_provider`` callable
-        so this layer never imports the optimizer's ``get_round_recorder``.
-        """
+        """Hand l1_score block + HITL snapshot to the active recorder."""
         recorder = self._recorder_provider()
         if recorder is None:
             return
@@ -645,20 +566,12 @@ class CampaignPersistenceEmitter:
         self,
         round_result: RoundResult | None = None,
     ) -> dict[str, Any]:
-        """Project per-candidate state into the ``l1_score`` node block.
+        """l1_score block for dashboard/round_NNNN.json.
 
-        Two modes share a single body:
-
-        * **Round-complete** (``round_result`` provided) — pulls authoritative
-          ``candidate_scores`` and stamps ``is_winner`` / ``eliminated_at`` on
-          stats; samples are kept as full structured dicts for ``rounds/round_NNNN.json``.
-        * **Live in-flight** (``round_result is None``) — no authoritative
-          scores yet; samples become compact CLI one-liners since
-          ``dashboard.json`` would otherwise carry ~2 kB BBEH query strings.
-
-        Input side mirrors the candidates L1 generate produced (idx, label,
-        ``changes_description``, ``pp_override``). Output side carries
-        the per-candidate stats + samples shape consumed by ``log.md``.
+        Round-complete (round_result given): authoritative candidate_scores +
+        is_winner/eliminated_at + full structured samples.
+        Live in-flight (round_result=None): samples compacted to one-liners
+        to keep dashboard.json from carrying 2 kB BBEH query strings.
         """
         candidates = self._current_round.get("candidates") or {}
         authoritative = list(round_result.candidate_scores or []) if round_result else []
@@ -713,36 +626,22 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def finalize(self, stop_reason: str) -> None:
-        """Set stop reason and close the log handle."""
         self.set_stop_reason(stop_reason)
         self._log_fh.close()
 
     def write_result(self, result: RunResult) -> None:
-        """Persist the final ``RunResult`` as ``optimize_result.json``."""
         write_json(self.result_path, result.model_dump(), default=str)
 
     def write_hard_samples_artifact(self, artifact: dict) -> None:
-        """Persist ``hard_samples.json`` from a pre-built artifact dict.
-
-        The build / empty-stub policy lives in the application layer
-        (``application/intelligence/hard_sample_sorter`` +
-        ``finalize_optimization_run``); this emitter just writes whatever
-        dict it is handed, keeping infrastructure free of upward imports.
-        """
+        # Build/empty-stub policy lives in application/intelligence; we just write.
         write_json(self.campaign_dir / "hard_samples.json", artifact)
 
     # -- Internal --------------------------------------------------------------
 
     def _snapshot_hitl(self) -> dict[str, Any]:
-        """Build the consolidated HITL block — control signals + halt state.
-
-        ``requested_state`` mirrors ``sessions/{session_id}/control.json``
-        (session-level HITL intent). ``pause_point`` and ``stop_reason``
-        come from the in-memory state (set by the loop when it actually
-        halts). Silently falls back to last-known values if ``control.json``
-        is missing or malformed — the control surface is bidirectional and
-        may be briefly absent during a hand-edit.
-        """
+        """Consolidated HITL block. ``requested_state`` mirrors control.json
+        (silent fallback to last-known on missing/malformed — control.json
+        may be briefly absent during hand-edits)."""
         existing = self._state.get("hitl") or {}
         snapshot = {
             "requested_state": existing.get("requested_state", "running"),
@@ -758,16 +657,11 @@ class CampaignPersistenceEmitter:
         return snapshot
 
     def _persist(self) -> None:
-        # Direct write (no tempfile+rename) — dashboard.json is a pure
-        # display file; all readers already suppress JSONDecodeError on
-        # partial reads, and the file is rewritten on the next callback.
+        # Direct write — dashboard.json is display-only; readers tolerate
+        # partial reads and the file is rewritten on the next callback.
         self._state["hitl"] = self._snapshot_hitl()
 
-        # Mirror the per-round node I/O live into ``dashboard.json`` —
-        # same shape as ``rounds/round_NNNN.json::nodes``. ``l1_generate``
-        # and ``l1_critique`` come from the active ``RoundRecorder`` as
-        # soon as each fires; ``l1_score`` is synthesized from the
-        # in-memory candidate/sample accumulator every time a sample lands.
+        # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
         round_idx = self._current_round.get("round", self._state.get("round", 0))
         nodes: dict[str, Any] = {}
         recorder = self._recorder_provider()
@@ -792,7 +686,6 @@ class CampaignPersistenceEmitter:
         self._write_dashboard_md()
 
     def _write_dashboard_md(self) -> None:
-        """Overwrite ``log.md`` with the current sliding-window view."""
         content = render_dashboard_md(
             self.campaign_dir,
             self._state,
@@ -808,8 +701,7 @@ class CampaignPersistenceEmitter:
         self.log_md_path.write_text(content, encoding="utf-8")
 
     def _rehydrate_history_from_disk(self) -> None:
-        """On resume, rebuild ``_round_history`` from ``trials/`` so the
-        EARLIER + LAST COMPLETED sections survive a restart."""
+        # Rebuild round history from trials/ so EARLIER + LAST COMPLETED survive restart.
         trials_dir = self.campaign_dir / "trials"
         if not trials_dir.exists():
             return

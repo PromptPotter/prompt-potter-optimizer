@@ -102,28 +102,21 @@ def build_parser() -> argparse.ArgumentParser:
         type=int,
         default=None,
         metavar="ROUND",
-        help="Resume the active cycle from after round N. Archives trial "
-        "files for rounds > N into archived/resumed_at_<ts>/, rebuilds the "
-        "trial index, and loads trial_N as the restart baseline. Omit to "
-        "resume from the latest completed round (default).",
+        help="Resume after round N (archives trials > N, reloads trial_N). "
+        "Omit to resume from the latest completed round.",
     )
     p_opt.add_argument(
         "--no-divergence-check",
         dest="no_divergence_check",
         action="store_true",
-        help="On resume, rescore cached traces under the current scorer "
-        "but skip the decision-replay halt — continue even if a prior "
-        "round's winner would flip under the new policy. Use when you "
-        "accept that historical trajectory stays as-recorded.",
+        help="On resume, rescore but skip the decision-replay halt.",
     )
     p_opt.add_argument(
         "--fork-on-divergence",
         dest="fork_on_divergence",
         action="store_true",
-        help="On divergence, mint a sibling cycle that inherits trials "
-        "before the divergence point (with parent_cycle_id) and re-run "
-        "the divergent round under the current scorer. Without this "
-        "flag, divergence halts so you can review and decide.",
+        help="On divergence, mint a sibling cycle (with parent_cycle_id) "
+        "and re-run the divergent round under the current scorer.",
     )
 
     p_ctl = sub.add_parser("control", help="Write control signal to dashboard")

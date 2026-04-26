@@ -45,11 +45,7 @@ def _utcnow_iso() -> str:
 
 
 class FileSink:
-    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in).
-
-    The bridge calls ``on_<event_name>(event)`` directly per :data:`bridge._DISPATCH`.
-    Sink methods that aren't listed in the dispatch table are not reached.
-    """
+    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in)."""
 
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
         self._tenant_root = Path(store_base_dir)
@@ -59,20 +55,14 @@ class FileSink:
         self._cycle_id: str | None = None
         self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
-        # (campaign_id, round_num) → (trace_id, obs_id) — so NodeStart children set parentObservationId.
         self._round_obs_ids: dict[tuple[str, int], tuple[str, str]] = {}
-        # (campaign_id, round_num, node_id) → (trace_id, obs_id) — so NodeEnd updates the same file.
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
-
-    # --- Scope resolution ---
 
     def _scope_dir(self) -> Path:
         if self._cycle_id:
             return self._tenant_root / "campaigns" / self._cycle_id
-        # Orphan fallback: out-of-campaign file_only() emits share this pool.
+        # Orphan fallback for out-of-campaign file_only() emits.
         return self._library_dir / "obs"
-
-    # --- File helpers ---
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = _utcnow_iso()
@@ -148,7 +138,6 @@ class FileSink:
         output: Any,
         metadata_extra: dict[str, Any] | None = None,
     ) -> None:
-        """Read-modify-write the observation JSON: set output, endTime, merge metadata."""
         obs_path = self._scope_dir() / "langfuse" / "observations" / trace_id / f"{obs_id}.json"
         if not obs_path.exists():
             return
@@ -199,10 +188,7 @@ class FileSink:
             mlflow.log_metrics(metrics)
             mlflow.set_tags(tags)
 
-    # --- Event handlers (Topology B is Langfuse-only; no file analogue) ---
-
-    # Fields per event class forwarded into the events.jsonl payload. Keep
-    # in sync with the event dataclass fields that should be mirrored.
+    # Fields per event-class mirrored into events.jsonl.
     _WRITE_POINT_FIELDS: ClassVar[dict[type, tuple[str, tuple[str, ...]]]] = {
         CandidateCreated: ("candidate_created", ("candidate_idx", "candidate_id")),
         CandidateScored: ("candidate_scored", ("candidate_idx", "report")),
@@ -214,7 +200,6 @@ class FileSink:
     }
 
     def on_write_point(self, event: Any) -> None:
-        """Append a mid-round observability event to events.jsonl (pure mirror — not used for resume)."""
         event_name, fields = self._WRITE_POINT_FIELDS[type(event)]
         payload = {
             "event": event_name,
@@ -240,8 +225,6 @@ class FileSink:
                 "changes_description": event.changes_description,
             }
         )
-
-    # --- Optimization topology (A) handlers ---
 
     def on_dataset_registered(self, event: DatasetRegistered) -> None:
         import hashlib
@@ -288,8 +271,7 @@ class FileSink:
         )
 
     def on_campaign_start(self, event: CampaignStart) -> None:
-        # Bind cycle_id so subsequent writes target campaigns/{cycle_id}/.
-        # session_id carries the resolved cycle_id (see runner:start_campaign).
+        # event.session_id carries the cycle_id; bind so writes target campaigns/{cycle_id}/.
         if event.session_id:
             self._cycle_id = event.session_id
         trace_id = self._write_trace(

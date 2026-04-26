@@ -1,16 +1,8 @@
-"""Observability bridge — single entry point over file + Langfuse sinks.
+"""Observability bridge — fans events from :mod:`events` to file + Langfuse sinks
+under :func:`graceful` so observability never crashes the loop.
 
-Call sites build event dataclasses from :mod:`events` and call
-``bridge.emit(event)``. The bridge looks the event type up in
-:data:`_DISPATCH`, then calls ``on_<name>`` on each sink directly under
-:func:`graceful` so observability can never crash the optimization loop.
-
-The dual-state ``ObsLogger`` it replaces held both a file logger and a
-shadowed Langfuse client with six in-memory id maps that were lost on
-resume. :class:`LangfuseSink` now persists all id state to
-``campaigns/{cycle_id}/langfuse_state.json`` after every mutation, so a
-campaign interrupted on the CLI and resumed from the notebook produces one
-continuous trace.
+LangfuseSink persists id state to campaigns/{cycle_id}/langfuse/state.json
+after every mutation so CLI-interrupted resumes produce one continuous trace.
 """
 
 from __future__ import annotations
@@ -54,11 +46,8 @@ logger = logging.getLogger(__name__)
 __all__ = ["NodeTrace", "ObservabilityBridge", "observed_node"]
 
 
-# Single source of truth for event-type → sink-method-name dispatch.
-# Sinks expose ``on_<name>(event)`` (or skip a key, in which case the bridge
-# silently drops the event for that sink — see ``getattr(.., None)`` below).
-# The four mid-round write-points all map to ``on_write_point`` because the
-# file sink writes them through one shared formatter.
+# Event-type → sink-method dispatch. Sinks lacking a method are silently
+# skipped. The 4 mid-round write-points share ``on_write_point`` (file sink).
 _DISPATCH: dict[type[Event], str] = {
     DatasetRegistered: "on_dataset_registered",
     CampaignStart: "on_campaign_start",
@@ -135,12 +124,6 @@ class ObservabilityBridge:
         )
 
     def emit(self, event: Event) -> None:
-        """Dispatch *event* to file + (optionally) Langfuse sinks directly.
-
-        A sink that doesn't subscribe to the event simply lacks the method;
-        ``getattr(...,  None)`` makes that a no-op without an explicit table
-        per sink.
-        """
         if not self._enabled:
             return
         method = _DISPATCH.get(type(event))
@@ -164,12 +147,7 @@ class ObservabilityBridge:
         round_num: int,
         **extra: Any,
     ) -> None:
-        """Emit a mid-round write-point observability event.
-
-        events.jsonl is a pure observability mirror — nothing reads these
-        events back for state reconstruction. Resume uses
-        ``campaigns/{cycle_id}/trials/trial_NNNN.json`` via ``CampaignStore``.
-        """
+        # events.jsonl is a pure mirror; resume uses trials/trial_NNNN.json.
         if not self._enabled:
             return
         with graceful(f"{event_cls.__name__} emit failed"):
@@ -188,10 +166,7 @@ class ObservabilityBridge:
         return self._langfuse
 
     def register_dataset(self, dataset_name: str, dataset: list) -> dict[str, str]:
-        """Emit ``DatasetRegistered`` and return ``{query: file_item_id}``.
-
-        Accepts ``list[Sample]`` or legacy ``list[dict]``.
-        """
+        """Emit ``DatasetRegistered``, return ``{query: file_item_id}``."""
         if not self._enabled:
             return {}
         import hashlib

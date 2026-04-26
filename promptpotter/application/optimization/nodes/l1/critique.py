@@ -189,14 +189,7 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
 
 
 def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
-    """Build stat-rich sections for the L1 critique template.
-
-    Sections appear in the assembled output in this order:
-    summary → pipeline health → runtime failures (rail 2) → rank
-    analysis → round evolution → query categories → failure details →
-    successes → historical intelligence → this-round analysis →
-    schema mutations.
-    """
+    """Build the L1 critique sections from RoundSnapshot."""
     results = ctx.results
     total = len(results)
     candidate_keys = ctx.candidate_keys or None

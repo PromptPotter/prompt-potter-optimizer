@@ -101,8 +101,7 @@ async def _post_round(
                 cycle.checkpoint(round_result, round_num),
             )
 
-    _rr = get_round_recorder()
-    if _rr:
+    if _rr := get_round_recorder():
         _rr.flush()
 
     _ctrl = cb.on_checkpoint("after_round")
@@ -113,7 +112,7 @@ async def _post_round(
 
     if cycle.search_memory:
         cycle.search_memory.on_round_complete(cycle, session, config, round_num, dataset)
-        # Round-end zero-signal filter — prune always-hit/always-miss queries from the active set.
+        # Prune always-hit/always-miss queries from the active set.
         zsf = config.optimization.zero_signal_filter_enabled
         dataset_name = session.dataset_name
         if zsf and dataset_name and session.store is not None:
@@ -127,9 +126,9 @@ async def _post_round(
                     campaign_id=session.cycle_id or "",
                 )
                 if excluded:
-                    excluded_queries = {e["query"] for e in excluded}
+                    excl_q = {e["query"] for e in excluded}
                     session.scoring_dataset[:] = [
-                        s for s in session.scoring_dataset if s.query not in excluded_queries
+                        s for s in session.scoring_dataset if s.query not in excl_q
                     ]
                     always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
                     emit_phase(
@@ -144,7 +143,7 @@ async def _post_round(
                         dataset_name=dataset_name,
                     )
 
-    # Round-end Rasch + KG swap of the active scoring prefix.
+    # Rasch + KG swap of the active scoring prefix.
     ap_cfg = config.optimization.adaptive_prefix
     if ap_cfg.enabled and cycle.rounds:
         from promptpotter.application.intelligence.adaptive_prefix import (
@@ -218,8 +217,7 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            _rr = get_round_recorder()
-            if _rr:
+            if _rr := get_round_recorder():
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
