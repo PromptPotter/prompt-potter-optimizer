@@ -160,7 +160,7 @@ def _partial_profiles_from_rows(
     diagnostic_len: int,
 ) -> list:
     """Rebuild axis profiles from the rows of a partial scan."""
-    from promptpotter.application.intelligence import load_variant_library
+    from promptpotter.application.intelligence.variant_library import load_variant_library
     from promptpotter.application.recon.adaptive_recon import build_axis_profiles
 
     vl = load_variant_library()
@@ -193,7 +193,7 @@ async def resume_or_build_diagnostic(
     / sibling / diagnostic_only). On a miss, runs the LLM restructure + builds
     a fresh diagnostic set and saves the new plan.
     """
-    from promptpotter.application.intelligence import load_variant_library
+    from promptpotter.application.intelligence.variant_library import load_variant_library
     from promptpotter.application.optimization.pipeline import decompose_prompt_fields
     from promptpotter.application.recon.adaptive_recon import (
         adaptive_recon_plan_identity,

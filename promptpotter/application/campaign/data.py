@@ -8,9 +8,8 @@ from __future__ import annotations
 
 import logging
 from collections.abc import Callable
-from dataclasses import dataclass
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.campaign.campaign_setup import (
     Session,
@@ -41,8 +40,7 @@ __all__ = [
 ]
 
 
-@dataclass
-class CampaignBaseline:
+class CampaignBaseline(NamedTuple):
     """Extracted baseline state from campaign_rounds."""
 
     baseline_ps: dict | None
@@ -224,8 +222,7 @@ async def prepare_scoring_context(
     return baseline, dataset, campaign_rounds, baseline_results
 
 
-@dataclass
-class DatasetSummary:
+class DatasetSummary(NamedTuple):
     """Return from ``prepare_datasets()``."""
 
     train_data: list[Sample] | None
@@ -302,8 +299,7 @@ def build_all_index_terms(store: Stores) -> list[str]:
     return sorted(gt_set)
 
 
-@dataclass
-class DatasetRunSummary:
+class DatasetRunSummary(NamedTuple):
     """Aggregated dataset run statistics for dashboard display."""
 
     total: int

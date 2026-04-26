@@ -20,7 +20,7 @@ from promptpotter.application.campaign.data import (
 from promptpotter.application.campaign.utils import (
     save_campaign_winner,
 )
-from promptpotter.application.intelligence import load_variant_library
+from promptpotter.application.intelligence.variant_library import load_variant_library
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.store import Stores

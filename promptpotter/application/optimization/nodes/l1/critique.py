@@ -15,7 +15,7 @@ from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.intelligence import load_variant_library
+from promptpotter.application.intelligence.variant_library import load_variant_library
 from promptpotter.application.optimization.nodes.formatting import (
     build_cross_candidate_diff,
     build_trajectory_report,
