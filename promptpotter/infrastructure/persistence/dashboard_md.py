@@ -421,8 +421,7 @@ def _read_critique(campaign_dir: Path, round_idx: int) -> str:
     except (json.JSONDecodeError, OSError):
         return ""
     opt_sp = data.get("opt_search_point") or {}
-    memory = opt_sp.get("memory") or {}
-    return (memory.get("critique_text") or "").strip()
+    return (opt_sp.get("l1_critique_text") or "").strip()
 
 
 def _trim(text: str, n: int) -> str:

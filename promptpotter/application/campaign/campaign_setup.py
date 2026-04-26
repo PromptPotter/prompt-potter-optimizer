@@ -750,7 +750,7 @@ async def init_optimization_loop(
             skip_divergence_check=no_divergence_check,
         )
     else:
-        cycle.opt_sp.memory.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
+        cycle.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()

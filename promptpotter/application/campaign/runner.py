@@ -99,7 +99,7 @@ async def _handle_escalation_signal(
         signal.target in (EscalationTarget.L2, EscalationTarget.L3)
         and config.optimization.enable_l2
     ):
-        cycle.opt_sp.memory.append_escalation(
+        cycle.opt_sp.append_escalation(
             build_escalation_entry(
                 round_num,
                 signal.check_result,
@@ -141,7 +141,7 @@ async def _post_round(
         0 if round_result.improved else cycle.escalation.l1_stall_count + 1
     )
     if round_result.improved:
-        cycle.opt_sp.memory.clear_volatile()
+        cycle.opt_sp.clear_volatile()
 
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
@@ -256,9 +256,7 @@ async def _run_round_loop(
         while clean_rounds < max_rounds and round_num < hard_cap:
             is_probe = cycle.probe_next_round
             if is_probe:
-                warned = {
-                    q for q, e in cycle.opt_sp.memory.warning_inventory.items() if e.get("warnings")
-                }
+                warned = {q for q, e in cycle.opt_sp.warning_inventory.items() if e.get("warnings")}
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:

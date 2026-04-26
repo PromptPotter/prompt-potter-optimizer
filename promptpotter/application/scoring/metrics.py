@@ -287,9 +287,9 @@ def compute_pipeline_metrics(
     # OptSP-layer counts for display and the validation-failure short-circuit.
     runtime_failure_count = 0
     validation_failure_count = 0
-    if opt_sp is not None and hasattr(opt_sp, "memory"):
-        runtime_failure_count = len(getattr(opt_sp.memory, "runtime_failures", []) or [])
-        validation_failure_count = len(getattr(opt_sp.memory, "validation_failures", []) or [])
+    if opt_sp is not None:
+        runtime_failure_count = len(getattr(opt_sp, "runtime_failures", []) or [])
+        validation_failure_count = len(getattr(opt_sp, "validation_failures", []) or [])
 
     if validation_failure_count > 0:
         composite = 0.0

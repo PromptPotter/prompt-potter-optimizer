@@ -90,7 +90,7 @@ def _init_exit(d: dict, ctx: dict) -> dict:
     cycle_id_short = (session.cycle_id or "?")[:12]
     samples = len(session.scoring_dataset)
     obs_on = session.obs is not None
-    crit = cycle.opt_sp.memory.l1_critique_text or ""
+    crit = cycle.opt_sp.l1_critique_text or ""
     bootstrap_critique = _truncate(crit.replace("\n", " ").strip(), 80)
 
     resumed = session.resumed_from_round
@@ -101,7 +101,7 @@ def _init_exit(d: dict, ctx: dict) -> dict:
         "obs_on": obs_on,
         "bootstrap_critique": bootstrap_critique,
         "resumed_from_round": resumed,
-        "l1_critique_chars": len(cycle.opt_sp.memory.l1_critique_text or ""),
+        "l1_critique_chars": len(cycle.opt_sp.l1_critique_text or ""),
         "task_context_keys": len(cycle.opt_sp.task_context),
         "l2_round": cycle.escalation.l2.round,
         "prompt_field_overlays": overlays,

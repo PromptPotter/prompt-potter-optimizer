@@ -56,7 +56,7 @@ _TASK_CONTEXT_SKIP = frozenset({"raw_description", "upstream_context", "downstre
 
 def _src_memory(attr: str) -> Callable[[Cycle, InboxTransients], Any]:
     def _read(cycle: Cycle, _t: InboxTransients) -> Any:
-        return getattr(cycle.opt_sp.memory, attr) or None
+        return getattr(cycle.opt_sp, attr) or None
 
     return _read
 
@@ -75,7 +75,7 @@ def _src_pipeline_schema_text(_cycle: Cycle, t: InboxTransients) -> str | None:
 
 
 def _src_failure_analysis(cycle: Cycle, _t: InboxTransients) -> FailureAnalysis | None:
-    fa = cycle.opt_sp.memory.failure_analysis
+    fa = cycle.opt_sp.failure_analysis
     return fa if fa and fa.patterns else None
 
 
@@ -83,7 +83,7 @@ def _src_escalation_probe(cycle: Cycle, _t: InboxTransients) -> list[dict] | Non
     """Probe-round per-query warning block — fires only when probe AND journal present."""
     if not cycle.probe_next_round:
         return None
-    journal = cycle.opt_sp.memory.escalation_journal
+    journal = cycle.opt_sp.escalation_journal
     return journal or None
 
 
@@ -91,9 +91,9 @@ def _src_escalation_alert(cycle: Cycle, _t: InboxTransients) -> list[dict] | Non
     """Non-probe aggregated alert — suppressed by an active l2_directive."""
     if cycle.probe_next_round:
         return None
-    if cycle.opt_sp.memory.l2_directive:
+    if cycle.opt_sp.l2_directive:
         return None
-    journal = cycle.opt_sp.memory.escalation_journal
+    journal = cycle.opt_sp.escalation_journal
     return journal or None
 
 
@@ -116,7 +116,7 @@ def _src_escalation_section(cycle: Cycle, t: InboxTransients) -> str | None:
     schema = cycle.session.pipeline_schema if cycle.session is not None else None
     text = format_escalation_report(
         t.escalation_check_result,
-        cycle.opt_sp.memory.escalation_journal or None,
+        cycle.opt_sp.escalation_journal or None,
         t.pipeline_params,
         pipeline_schema=schema,
     )
@@ -127,7 +127,7 @@ def _src_warning_inventory_l2(cycle: Cycle, t: InboxTransients) -> dict | None:
     """L2 fallback: per-query warning inventory when no escalation section."""
     if _src_escalation_section(cycle, t):
         return None
-    return cycle.opt_sp.memory.warning_inventory or None
+    return cycle.opt_sp.warning_inventory or None
 
 
 def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | None:
@@ -138,7 +138,7 @@ def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | 
 
 
 def _src_runtime_failures(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
-    rfs = [rf.to_dict() for rf in cycle.opt_sp.memory.runtime_failures]
+    rfs = [rf.to_dict() for rf in cycle.opt_sp.runtime_failures]
     return rfs or None
 
 
@@ -207,7 +207,7 @@ def _r_escalation_probe(
         "PROBE ROUND: queries have recurring pipeline warnings. "
         "Generate candidates that address pipeline robustness."
     ]
-    warning_inventory = cycle.opt_sp.memory.warning_inventory or None
+    warning_inventory = cycle.opt_sp.warning_inventory or None
     if warning_inventory:
         inv = summarize_warning_inventory(warning_inventory)
         if inv:

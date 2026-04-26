@@ -195,10 +195,8 @@ def test_composite_zeroed_on_validation_failure():
     results = [_result(score=1.0)]
 
     fake_opt_sp = SimpleNamespace(
-        memory=SimpleNamespace(
-            validation_failures=[object()],
-            runtime_failures=[],
-        )
+        validation_failures=[object()],
+        runtime_failures=[],
     )
     scored = compute_composite_score(results, schema, opt_sp=fake_opt_sp)
     assert scored["composite"] == 0.0

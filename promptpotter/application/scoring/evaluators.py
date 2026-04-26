@@ -65,9 +65,9 @@ def compute_degraded_rate(*, results: list[QueryResult], **_: Any) -> float:
 def compute_runtime_failure_rate(
     *, results: list[QueryResult], opt_sp: Any = None, **_: Any
 ) -> float:
-    if not results or opt_sp is None or not hasattr(opt_sp, "memory"):
+    if not results or opt_sp is None:
         return 0.0
-    count = len(getattr(opt_sp.memory, "runtime_failures", []) or [])
+    count = len(getattr(opt_sp, "runtime_failures", []) or [])
     return min(count / len(results), 1.0)
 
 

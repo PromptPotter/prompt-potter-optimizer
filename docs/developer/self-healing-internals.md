@@ -47,9 +47,9 @@ For the prompt-injection routing (who reads each failure list), see [information
 
 ---
 
-## `OptimizationMemory` state
+## Optimizer-memory state
 
-`OptSearchPoint.memory` (an `OptimizationMemory` Pydantic submodel in `domain/opt_search_point.py`) bundles the cross-round optimizer state that travels with each candidate. Every field is persisted with the round trial JSON; lifecycles vary:
+The fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (in `domain/opt_search_point.py`) are the cross-round optimizer state that travels with each candidate. Each is a flat field on `OptSearchPoint`, persisted with the round trial JSON; lifecycles vary:
 
 | Field | Lifecycle | Purpose |
 |---|---|---|

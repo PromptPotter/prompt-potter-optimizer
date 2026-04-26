@@ -69,7 +69,7 @@ def parse_candidates(
         if schema and override:
             failures = validate_overrides(override, schema)
             if failures:
-                osp.memory.validation_failures = failures
+                osp.validation_failures = failures
                 for vf in failures:
                     logger.warning(
                         "candidate %s: validation failure on %s — proposed %r not in allowed %r",
@@ -98,7 +98,7 @@ def _build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
 ) -> dict:
     """Build unified candidate score report dict."""
-    vfs = osp.memory.validation_failures
+    vfs = osp.validation_failures
     return {
         "candidate_id": osp.lineage.id,
         "changes_description": osp.lineage.changes_description or "",
@@ -212,7 +212,7 @@ def _handle_scored_candidate(
             candidate_label=candidate_label,
         )
     if new_rf is not None:
-        osp_c.memory.runtime_failures = [*osp_c.memory.runtime_failures, new_rf]
+        osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
 
     elim_ctx: dict | None = None
     if elimination_stopped and signal is not None and signal.check_name == "elimination":
@@ -343,7 +343,7 @@ async def score_candidates(
         )
 
         # Path 1 — validation-skip synthetic-0.
-        if osp_c.memory.validation_failures:
+        if osp_c.validation_failures:
             results, report = _handle_validation_skip(osp_c, override, dataset)
             all_candidate_results[osp_c.lineage.id] = results
             _fire(idx, report)

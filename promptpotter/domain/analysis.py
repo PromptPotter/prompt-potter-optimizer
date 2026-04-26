@@ -103,7 +103,7 @@ class ValidationFailure:
     """A parse-time invariant violation on an L1-generated candidate.
 
     Recorded as a property of the OptSearchPoint (in
-    ``OptimizationMemory.validation_failures``). Drives the synthetic-0
+    ``OptSearchPoint.validation_failures``). Drives the synthetic-0
     early exit in ``score_search_point()`` — see
     ``docs/developer/self-healing-internals.md`` for the rationale.
     """
@@ -128,7 +128,7 @@ class RuntimeFailure:
     the failure to the specific candidate that caused it, not the
     round, so winners are never penalised for losers' runtime issues.
 
-    Stored on ``OptimizationMemory.runtime_failures``, surfaced in the
+    Stored on ``OptSearchPoint.runtime_failures``, surfaced in the
     candidate's score report, and ingested by L2 next round as a
     self-healing directive signal — mirroring the ValidationFailure
     pipeline. Does **not** drive synthetic-0: the candidate's real

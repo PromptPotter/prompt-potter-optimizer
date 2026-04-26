@@ -91,7 +91,7 @@ async def _generate_or_load_candidates(
         n_variants=_n_variants,
         creativity=_creativity,
         model=model or "(default)",
-        has_l1_critique=bool(cycle.opt_sp.memory.l1_critique_text),
+        has_l1_critique=bool(cycle.opt_sp.l1_critique_text),
         pipeline_params=cycle.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
@@ -359,18 +359,18 @@ async def execute_round(
                 l1_critique_text=scoring_result.l1_critique_text,
             )
 
-    cycle.opt_sp.memory.l1_critique_text = scoring_result.l1_critique_text
-    cycle.opt_sp.memory.thinking_styles = scoring_result.thinking_styles
+    cycle.opt_sp.l1_critique_text = scoring_result.l1_critique_text
+    cycle.opt_sp.thinking_styles = scoring_result.thinking_styles
 
     if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
-        cycle.opt_sp.memory.failure_analysis = compile_failure_analysis(
+        cycle.opt_sp.failure_analysis = compile_failure_analysis(
             scoring_result.winner_results,
             session.pipeline_schema,
         )
     else:
-        cycle.opt_sp.memory.failure_analysis = None
+        cycle.opt_sp.failure_analysis = None
 
     round_result = RoundResult(
         round=round_num,
@@ -395,7 +395,7 @@ async def execute_round(
     # Warning inventory spans ALL candidate results — aborted candidates carry warnings.
     _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
     if _all_results:
-        update_query_tracker(cycle.opt_sp.memory.warning_inventory, _all_results)
+        update_query_tracker(cycle.opt_sp.warning_inventory, _all_results)
 
     # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by source/warning/config)
     # so L2 sees accumulated evidence across rounds; L3 replans when L2 can't reduce.
@@ -409,14 +409,14 @@ async def execute_round(
             json.dumps(cfg, sort_keys=True, default=str),
         )
 
-    existing_keys = {_rf_key(rf.to_dict()) for rf in cycle.opt_sp.memory.runtime_failures}
+    existing_keys = {_rf_key(rf.to_dict()) for rf in cycle.opt_sp.runtime_failures}
     for cs in scoring_result.candidate_scores:
         for rf_dict in cs.get("runtime_failures") or []:
             k = _rf_key(rf_dict)
             if k in existing_keys:
                 continue
             existing_keys.add(k)
-            cycle.opt_sp.memory.runtime_failures.append(RuntimeFailure(**rf_dict))
+            cycle.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
 
     if obs:
         with graceful("RoundEnd emit failed"):

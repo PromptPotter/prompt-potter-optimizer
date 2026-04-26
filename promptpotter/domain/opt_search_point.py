@@ -19,7 +19,7 @@ import copy
 import re
 import uuid
 from datetime import UTC, datetime
-from typing import TYPE_CHECKING, Any, Self
+from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
@@ -41,7 +41,7 @@ class FewShotExample(BaseModel):
 
 
 class RoundSummary(BaseModel):
-    """Compact per-round record persisted on ``OptimizationMemory.round_history``.
+    """Compact per-round record persisted on ``OptSearchPoint.round_history``.
 
     Mirrors the trajectory-relevant fields of ``RoundResult`` — enough for
     ``build_trajectory_report`` (needs ``.accuracy``). Drops raw per-query
@@ -166,16 +166,61 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
-class OptimizationMemory(BaseModel):
-    """Cross-round optimizer memory — the working set L1/L2/L3 build on.
+class CandidateLineage(BaseModel):
+    """Identity and provenance of a single candidate search point.
 
-    Bundled together because every field shares the same lifecycle:
-    preserved across L2/L3 transitions (``OptSearchPoint`` adopts the
-    parent's memory after derive_candidate dropped it), checkpointed as
-    one nested object, and reset only by ``clear_volatile()`` on round
-    improvement.
+    Groups the four fields that describe *what this candidate is and where it
+    came from*.  Set once at candidate creation (``derive_candidate`` and
+    ``OptSearchPoint.__init__``); never mutated after that.
     """
 
+    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
+    parent_id: str | None = None
+    changes_description: str = ""
+    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+
+
+class OptSearchPoint(PromptTemplate):
+    """Optimizer-level search point — the optimizer's full working state.
+
+    Inherits the 8 prompt fields and rendering from ``PromptTemplate``.
+    Adds three top-level groups beyond the prompt fields, plus the
+    flat optimizer-memory fields enumerated in :data:`MEMORY_FIELDS`:
+
+    - ``lineage``        — identity + provenance (id, parent_id, ...)
+    - ``optimizer_params`` — L2/L3 tuning knobs
+    - ``task_context``  — structured domain understanding (TaskDecomposition)
+    - memory fields     — see :data:`MEMORY_FIELDS` (preserved across L2/L3
+      transitions via :meth:`copy_memory_to`).
+
+    Persisted in trial checkpoints. Enables L4 to correlate optimizer
+    configuration with target-pipeline evaluation outcomes.
+    """
+
+    # -- Lineage -------------------------------------------------------------
+    lineage: CandidateLineage = Field(default_factory=CandidateLineage)
+
+    # -- L2 state ----------------------------------------------------------
+    optimizer_params: dict[str, Any] = Field(default_factory=dict)
+    task_context: TaskDecomposition = Field(
+        default_factory=TaskDecomposition,
+        description="Structured domain context (domain, pipeline_purpose, "
+        "data_characteristics, optimization_goals, key_challenges). "
+        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
+    )
+
+    @field_validator("task_context", mode="before")
+    @classmethod
+    def _coerce_task_context(cls, v: Any) -> TaskDecomposition:
+        if isinstance(v, TaskDecomposition):
+            return v
+        if isinstance(v, dict):
+            return TaskDecomposition.from_dict(v)
+        return TaskDecomposition()
+
+    # -- Optimization memory (flattened) -----------------------------------
+    # The fields below are bundled by MEMORY_FIELDS so they can be copied
+    # atomically across L2/L3 transitions (see :meth:`copy_memory_to`).
     l1_critique_text: str = Field(
         default="",
         description="Latest L1 critique summary fed to L1 when no l2_directive "
@@ -233,8 +278,8 @@ class OptimizationMemory(BaseModel):
         default=None,
         description="Latest round's clustered failure analysis over the "
         "winner's results. Consumed by L1 as an inbox section; replaced "
-        "each round. Lives on memory so L2/L3 derive_candidate + "
-        "adopt_transition carry it forward via model_copy(deep=True).",
+        "each round. Carried across L2/L3 derive_candidate + adopt_transition "
+        "by copy_memory_to().",
     )
     round_history: list[RoundSummary] = Field(
         default_factory=list,
@@ -243,6 +288,25 @@ class OptimizationMemory(BaseModel):
         "objects with raw query results stay transient on ``Cycle.rounds``; "
         "this persisted mirror survives trial checkpoints.",
     )
+
+    MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
+        "l1_critique_text",
+        "thinking_styles",
+        "escalation_journal",
+        "warning_inventory",
+        "l2_directive",
+        "degradation_reset_count",
+        "backend_warning_emitted",
+        "validation_failures",
+        "runtime_failures",
+        "failure_analysis",
+        "round_history",
+    )
+    """Names of the flat optimizer-memory fields preserved across L2/L3
+    transitions. The contract that ``OptimizationMemory`` used to bundle —
+    now a ClassVar so :meth:`copy_memory_to` can iterate."""
+
+    # -- Memory helpers ----------------------------------------------------
 
     def clear_volatile(self) -> None:
         """Drop one-round windows after an improving round.
@@ -273,59 +337,14 @@ class OptimizationMemory(BaseModel):
             journal[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
         journal.append(entry)
 
+    def copy_memory_to(self, target: OptSearchPoint) -> None:
+        """Deep-copy the :data:`MEMORY_FIELDS` from ``self`` onto *target* in place.
 
-class CandidateLineage(BaseModel):
-    """Identity and provenance of a single candidate search point.
-
-    Groups the four fields that describe *what this candidate is and where it
-    came from*.  Set once at candidate creation (``derive_candidate`` and
-    ``OptSearchPoint.__init__``); never mutated after that.
-    """
-
-    id: str = Field(default_factory=lambda: uuid.uuid4().hex)
-    parent_id: str | None = None
-    changes_description: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-
-
-class OptSearchPoint(PromptTemplate):
-    """Optimizer-level search point — the optimizer's full working state.
-
-    Inherits the 8 prompt fields and rendering from ``PromptTemplate``.
-    Adds four top-level groups beyond the prompt fields:
-
-    - ``lineage``        — identity + provenance (id, parent_id, ...)
-    - ``optimizer_params`` — L2/L3 tuning knobs
-    - ``task_context``  — structured domain understanding (TaskDecomposition)
-    - ``memory``        — cross-round working state (OptimizationMemory)
-
-    Persisted in trial checkpoints. Enables L4 to correlate optimizer
-    configuration with target-pipeline evaluation outcomes.
-    """
-
-    # -- Lineage -------------------------------------------------------------
-    lineage: CandidateLineage = Field(default_factory=CandidateLineage)
-
-    # -- L2 state ----------------------------------------------------------
-    optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: TaskDecomposition = Field(
-        default_factory=TaskDecomposition,
-        description="Structured domain context (domain, pipeline_purpose, "
-        "data_characteristics, optimization_goals, key_challenges). "
-        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
-    )
-
-    @field_validator("task_context", mode="before")
-    @classmethod
-    def _coerce_task_context(cls, v: Any) -> TaskDecomposition:
-        if isinstance(v, TaskDecomposition):
-            return v
-        if isinstance(v, dict):
-            return TaskDecomposition.from_dict(v)
-        return TaskDecomposition()
-
-    # -- Optimization memory -----------------------------------------------
-    memory: OptimizationMemory = Field(default_factory=lambda: OptimizationMemory())
+        Preserves the parent's accumulated optimizer memory (escalation
+        journal, failure analyses, etc.) when L2/L3 adopts a transition.
+        """
+        for f in self.MEMORY_FIELDS:
+            setattr(target, f, copy.deepcopy(getattr(self, f)))
 
     # -- Render seam: splice task context around problem_description ------
 

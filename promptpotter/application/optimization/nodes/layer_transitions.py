@@ -238,7 +238,7 @@ class L2RefineStrategy(LayerTransition):
 
         if result.task_context:
             cycle.opt_sp.task_context = result.task_context
-        cycle.opt_sp.memory.l2_directive = result.l2_directive
+        cycle.opt_sp.l2_directive = result.l2_directive
         cycle.escalation.l2.record_entry(cycle.best_accuracy, cycle.best_composite)
 
         is_probe = result.action == TransitionAction.PROBE
@@ -276,7 +276,7 @@ class L2RefineStrategy(LayerTransition):
         }
 
     def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-        warned_count, top_warning = warning_summary(cycle.opt_sp.memory.warning_inventory)
+        warned_count, top_warning = warning_summary(cycle.opt_sp.warning_inventory)
         return {
             "l2_round": cycle.escalation.l2.round,
             "param_changes_count": len(result.opt_search_point.optimizer_params),
@@ -323,7 +323,7 @@ class L3ModifyPlan(LayerTransition):
 
         # Runtime failure trail — patterns L2 couldn't reduce (empty string collapses template).
         runtime_failures_section = format_runtime_failures_for_l3(
-            [rf.to_dict() for rf in opt_sp.memory.runtime_failures]
+            [rf.to_dict() for rf in opt_sp.runtime_failures]
         )
 
         return {

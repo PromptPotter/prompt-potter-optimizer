@@ -58,7 +58,7 @@ def _maybe_emit_backend_warning(
     on_phase: Callable[[PhaseEvent], None] | None,
 ) -> None:
     """One-shot backend advisory when degradation resets exceed threshold."""
-    mem = cycle.opt_sp.memory
+    mem = cycle.opt_sp
     threshold = config.optimization.backend_warning_threshold
     if mem.backend_warning_emitted or threshold <= 0:
         return
@@ -188,7 +188,7 @@ async def _exhaust_or_reset(
     if reset_l3:
         cycle.escalation.l3.stall_count = 0
         cycle.escalation.l3.round = 0
-    cycle.opt_sp.memory.degradation_reset_count += 1
+    cycle.opt_sp.degradation_reset_count += 1
     _maybe_emit_backend_warning(cycle, config, round_num, on_phase)
     await _run_transition(
         L2RefineStrategy(),

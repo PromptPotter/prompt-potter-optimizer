@@ -17,7 +17,6 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `JobSearchPoint` | `promptpotter/domain/search_point.py` |
 | `OptSearchPoint` | `promptpotter/domain/opt_search_point.py` |
 | `OptimizationConfig` | `promptpotter/application/campaign/config.py` |
-| `OptimizationMemory` | `promptpotter/domain/opt_search_point.py` |
 | `PipelineNode` | `promptpotter/domain/pipeline_schema.py` |
 | `PipelineSchema` | `promptpotter/domain/pipeline_schema.py` |
 | `PromptTemplate` | `promptpotter/domain/opt_search_point.py` |

@@ -81,7 +81,7 @@ class Layer(enum.StrEnum):
 class Retention(enum.StrEnum):
     """How a field's source value survives across rounds (docs-only)."""
 
-    MEMORY = "memory"  # opt_sp.memory.* — persisted on OptSearchPoint
+    MEMORY = "memory"  # flattened onto opt_sp — see OptSearchPoint.MEMORY_FIELDS
     OPT_SP = "opt_sp"  # opt_sp.<top-level> — persisted on OptSearchPoint
     TRANSIENT = "transient"  # computed per-round, not stored
     CONFIG = "config"  # pipeline_schema / precomputed static text

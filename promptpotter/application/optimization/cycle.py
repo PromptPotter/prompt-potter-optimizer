@@ -221,7 +221,7 @@ class Cycle:
         schema: PipelineSchema | None,
     ) -> None:
         """Adopt a new OptSearchPoint, preserving accumulated memory."""
-        new_opt.memory = self.opt_sp.memory.model_copy(deep=True)
+        self.opt_sp.copy_memory_to(new_opt)
         self.opt_sp = new_opt
         assert self.current_sp is not None
         self.current_sp = self.opt_sp.to_job_search_point(
@@ -251,7 +251,7 @@ class Cycle:
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking.
 
-        Invariants enforced: ``rounds`` gets the RoundResult; ``opt_sp.memory
+        Invariants enforced: ``rounds`` gets the RoundResult; ``opt_sp
         .round_history`` gets a matching RoundSummary; ``opt_sp``'s prompt
         fields are synced to the winner's; ``current_sp`` / ``current_*`` and
         monotone ``best_*`` are updated via :meth:`update_current`.
@@ -261,7 +261,7 @@ class Cycle:
 
         schema = self.session.pipeline_schema if self.session is not None else None
         self.rounds.append(rr)
-        self.opt_sp.memory.round_history.append(
+        self.opt_sp.round_history.append(
             RoundSummary(
                 round=rr.round,
                 accuracy=rr.accuracy,
