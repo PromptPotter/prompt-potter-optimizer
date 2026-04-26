@@ -227,18 +227,11 @@ def _check_sp_budget_vs_dataset(config: CampaignConfig, dataset: list) -> Prefli
     return None
 
 
-_PREFLIGHT_CHECKS: list[Callable[[CampaignConfig, list], PreflightWarning | None]] = [
-    _check_sp_budget_vs_dataset,
-]
-
-
 def run_preflight_checks(config: CampaignConfig, dataset: list) -> list[PreflightWarning]:
-    """Run all registered preflight checks. Pure — no mutation, no I/O."""
+    """Run all preflight checks. Pure — no mutation, no I/O."""
     warnings: list[PreflightWarning] = []
-    for check in _PREFLIGHT_CHECKS:
-        w = check(config, dataset)
-        if w is not None:
-            warnings.append(w)
+    if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
+        warnings.append(w)
     return warnings
 
 
