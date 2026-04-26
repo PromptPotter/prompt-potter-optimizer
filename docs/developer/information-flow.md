@@ -43,7 +43,6 @@ Fields assembled by `assemble_inbox()` from the declarative registry in `applica
 | `escalation_alert` | ✓ | — | memory | — | Non-probe aggregated escalation alert — suppressed by an active `l2_directive`. |
 | `l2_directive` | DIRECTIVE: | PREVIOUS DIRECTIVE: | memory | guidance pri 2 | L2's one-round guidance window; clears on improvement. |
 | `l1_critique_text` | CRITIQUE: | CRITIQUE: | memory | guidance pri 1 | Latest L1 critique output; L2 digests into a directive before L1 sees it. |
-| `thinking_styles` | ✓ | — | memory | — | 3 sampled thinking styles for L1 meta-prompt injection. |
 | `plan` | ✓ | — | opt_sp | — | L3's strategic plan (read-only from L1's view). |
 | `escalation_section` | — | ✓ | transient | — | Aggregated pipeline stability report — composed from `escalation_check_result`. |
 | `warning_inventory` | — | ✓ | memory | — | Per-query warning breakdown — L2 fallback when no escalation section. |

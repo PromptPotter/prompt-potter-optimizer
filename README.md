@@ -38,7 +38,6 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
   │  l1_generate ────► l1_evaluate (+ l1_critique)            │
   │       ▲                 │                                │
   │       │  l1_critique OR l2_directive                      │
-  │       │  + thinking_styles                               │
   │       └──────── ◄───────┘                                │
   │                                                          │
   │  stall?       ──► l2_refine_strategy ──► resume L1        │

@@ -166,13 +166,6 @@ def _r_plan(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     return f"PLAN:\n{v}" if v else ""
 
 
-def _r_thinking_styles(v: list[str], _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
-    if not v:
-        return ""
-    styles = "\n".join(f"  {i + 1}. {s}" for i, s in enumerate(v))
-    return f"THINKING STYLES:\n{styles}"
-
-
 def _r_unused(_v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     """Sentinel for fields whose render is always supplied by ``_LABEL_BY_LAYER``."""
     return ""

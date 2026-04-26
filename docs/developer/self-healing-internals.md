@@ -54,12 +54,9 @@ The fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (in `domain/opt_search_p
 | Field | Lifecycle | Purpose |
 |---|---|---|
 | `l1_critique_text` | per-round, cleared on improvement | L1 critique node's narrative for next L1 |
-| `thinking_styles` | per-round | 2-3 strategy hints sampled into the meta-prompt |
 | `escalation_journal` | cross-round, append-only | History of degradation events with outcomes |
 | `warning_inventory` | cross-round | Per-query warning aggregation |
 | `l2_directive` | one-round window, cleared on improvement | L2's diagnostic + action guidance for L1 |
-| `degradation_reset_count` | cross-round | How many times L2/L3 patience exhausted |
-| `backend_warning_emitted` | one-shot | Backend-warning emission flag |
 | `validation_failures` | per-candidate (set at L1 parse time) | Parse-time invariant violations — Rail 1 |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Runtime-observed health failures — Rail 2. Candidate-level copies set in `score_candidates`; outer-level accumulated after the round; cleared never. |
 
@@ -106,7 +103,6 @@ Degradation is not a round-level escalation — the round never aborts for a sin
 |---|---|---|
 | **Validation failure** | L1 parse time, before evaluation | Synthetic 0; skip backend. L2 teaches L1 via directive next round. |
 | **`EliminationCheck`** | Mid-evaluation, after `n_min` queries | Stop scoring this candidate (Wilcoxon signed-rank says it can't beat the leader); continue with the next. See [../methods/candidate-elimination.md](../methods/candidate-elimination.md). |
-| **`EmptyOutputCheck`** | Mid-evaluation, after 3 queries | Stop scoring this candidate; continue with the next. |
 | **`DegradationCheck`** | Mid-evaluation, after 3 queries | Stop scoring this candidate; synthesise a runtime failure; mirror to outer memory. L2 reads NEW + ACCUMULATED next round. |
 
 Validation is the only one that fires *before* evaluation — it needs nothing but the candidate dict and the schema, which is why it can short-circuit the backend entirely.

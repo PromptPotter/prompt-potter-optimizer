@@ -109,12 +109,7 @@ class OptimizationConfig(BaseModel):
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
 
-    l1_critique_degradation_threshold: float = Field(0.4)
-    l1_critique_near_miss_ratio: float = Field(0.3)
-
     degradation_threshold: float = Field(...)
-    empty_output_threshold: float = Field(0.5)
-    backend_warning_threshold: int = Field(2)
 
     elimination_n_min: int = Field(4)
     elimination_alpha: float = Field(0.2)

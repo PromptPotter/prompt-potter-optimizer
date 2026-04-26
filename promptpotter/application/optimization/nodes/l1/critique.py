@@ -10,12 +10,10 @@ escalation).
 from __future__ import annotations
 
 import logging
-import random
 from collections import Counter
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
-from promptpotter.application.intelligence.variant_library import load_variant_library
 from promptpotter.application.optimization.nodes.formatting import (
     build_cross_candidate_diff,
     build_trajectory_report,
@@ -44,7 +42,6 @@ __all__ = [
     "RoundSnapshot",
     "format_l1_critique_for_prompt",
     "run_l1_critique",
-    "sample_thinking_styles",
 ]
 
 _PROMPT_BLOAT_CHARS = 3000
@@ -79,9 +76,6 @@ class RoundSnapshot:
 
     candidate_keys: list[str] = field(default_factory=list)
     pipeline_schema: PipelineSchema | None = None
-
-    degradation_threshold: float = 0.4
-    near_miss_ratio: float = 0.3
 
     search_memory_digest: dict | None = None
     round_analysis: dict[str, str] = field(default_factory=dict)
@@ -139,8 +133,6 @@ class RoundSnapshot:
             pipeline_params=(cycle.current_sp.pipeline_params if cycle.current_sp else None),
             candidate_keys=candidate_keys_from_schema(schema),
             pipeline_schema=schema,
-            degradation_threshold=config.optimization.l1_critique_degradation_threshold,
-            near_miss_ratio=config.optimization.l1_critique_near_miss_ratio,
             search_memory_digest=search_memory_digest,
             round_analysis=round_analysis,
             runtime_failures=[
@@ -196,24 +188,14 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
     return "\n".join(parts)
 
 
-def sample_thinking_styles(n: int = 3, seed: int | None = None) -> list[str]:
-    """Sample thinking styles from the variant library for meta-prompt injection."""
-    styles = [
-        s
-        for s in load_variant_library().get("prompt_fields", {}).get("thinking_style", [])
-        if s and s.strip()
-    ]
-    return random.Random(seed).sample(styles, min(n, len(styles))) if styles else []
-
-
 def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
     """Build stat-rich sections for the L1 critique template.
 
     Sections appear in the assembled output in this order:
-    summary → (anomaly flags, inserted post-hoc) → pipeline health →
-    runtime failures (rail 2) → rank analysis → round evolution →
-    query categories → failure details → successes → historical
-    intelligence → this-round analysis → schema mutations.
+    summary → pipeline health → runtime failures (rail 2) → rank
+    analysis → round evolution → query categories → failure details →
+    successes → historical intelligence → this-round analysis →
+    schema mutations.
     """
     results = ctx.results
     total = len(results)
@@ -259,10 +241,6 @@ def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
                 ph_lines.append(f"  {step}: {count}/{total}")
         ph_lines.append(f"Step degradation: {deg_rate:.0%} of queries")
         ph_lines.append(f"Error rate: {error_count / total:.0%}")
-        if deg_rate > ctx.degradation_threshold:
-            anomalies.append(
-                f"[HIGH] high_degradation: {web_warning_count}/{total} queries had degraded steps."
-            )
         sections.append("\n".join(ph_lines))
 
     # --- Runtime failures (rail 2 hard constraints) --------------------------
@@ -338,12 +316,6 @@ def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
                     f"  [{nm['rank']}] {nm['query']} → predicted: {nm['predicted']} "
                     f"(GT: {nm['ground_truth']})"
                 )
-        misses = [r for r in results if not r.get("hit") and not is_error_result(r)]
-        if misses and len(near_misses) / max(len(misses), 1) > ctx.near_miss_ratio:
-            anomalies.append(
-                f"[MEDIUM] near_miss_pattern: GT in candidates for "
-                f"{len(near_misses)}/{len(misses)} misses but not ranked first."
-            )
         sections.append("\n".join(ra_lines))
 
     # --- Round evolution -----------------------------------------------------

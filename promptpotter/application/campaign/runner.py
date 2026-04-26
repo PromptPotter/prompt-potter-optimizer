@@ -54,7 +54,6 @@ async def _escalate_or_stop(
     round_num: int,
     cb: RunListener,
     *,
-    from_degradation: bool = False,
     escalation_check_result: dict | None = None,
 ) -> None:
     """Run L2 escalation; raise ``StopLoop`` if it returned a stop reason."""
@@ -67,7 +66,6 @@ async def _escalate_or_stop(
         on_checkpoint=cb.on_checkpoint,
         obs=session.obs,
         obs_campaign_id=session.obs_campaign_id,
-        from_degradation=from_degradation,
         escalation_check_result=escalation_check_result,
     )
     if stop:
@@ -270,7 +268,6 @@ async def _run_round_loop(
                         session,
                         round_num,
                         cb,
-                        from_degradation=True,
                         escalation_check_result=signal.check_result,
                     )
                 elif signal.target == EscalationTarget.ABORT_CAMPAIGN:

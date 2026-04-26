@@ -14,7 +14,6 @@
       "seed": 42,
       "max_failures": 5,
       "degradation_threshold": 0.0,
-      "empty_output_threshold": 0.0,
       "enable_l2": false,
       "enable_l3": false,
       "enable_l1_critique": false

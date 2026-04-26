@@ -13,7 +13,6 @@ from promptpotter.application.optimization.nodes.l1.critique import (
     RoundSnapshot,
     format_l1_critique_for_prompt,
     run_l1_critique,
-    sample_thinking_styles,
 )
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.application.optimization.utils import update_query_tracker
@@ -344,9 +343,6 @@ async def execute_round(
     )
 
     scoring_result.l1_critique_text = await _run_l1_critique(scoring_result, round_num, cycle)
-    scoring_result.thinking_styles = sample_thinking_styles(
-        n=3, seed=config.optimization.seed + round_num + 1
-    )
     if obs and scoring_result.l1_critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(
@@ -357,7 +353,6 @@ async def execute_round(
             )
 
     cycle.opt_sp.l1_critique_text = scoring_result.l1_critique_text
-    cycle.opt_sp.thinking_styles = scoring_result.thinking_styles
 
     if scoring_result.winner_results and session.pipeline_schema:
         from promptpotter.application.scoring.metrics import compile_failure_analysis

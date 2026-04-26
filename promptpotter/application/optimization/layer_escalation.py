@@ -8,7 +8,6 @@ elimination (see ``elimination.py``). Entry point is ``escalate_l2``.
 from __future__ import annotations
 
 import logging
-from collections import Counter
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
@@ -17,7 +16,7 @@ from promptpotter.application.optimization.nodes.layer_transitions import (
     L3ModifyPlan,
     LayerTransition,
 )
-from promptpotter.domain.phases import CampaignPhase, PhaseEvent, emit_phase
+from promptpotter.domain.phases import PhaseEvent, emit_phase
 from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared.errors import graceful
 
@@ -49,44 +48,6 @@ def build_escalation_entry(
         "warning_types": check_result.get("warning_types", {}),
         "outcome_degraded_rate": None,
     }
-
-
-def _maybe_emit_backend_warning(
-    cycle: Cycle,
-    config: CampaignConfig,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None,
-) -> None:
-    """One-shot backend advisory when degradation resets exceed threshold."""
-    mem = cycle.opt_sp
-    threshold = config.optimization.backend_warning_threshold
-    if mem.backend_warning_emitted or threshold <= 0:
-        return
-    if mem.degradation_reset_count < threshold:
-        return
-
-    mem.backend_warning_emitted = True
-    count = mem.degradation_reset_count
-    steps = sorted({e["problem_step"] for e in mem.escalation_journal if e.get("problem_step")})
-    wtypes: Counter[str] = Counter()
-    for e in mem.escalation_journal:
-        wtypes.update(e.get("warning_types") or {})
-
-    emit_phase(
-        on_phase,
-        CampaignPhase.BACKEND_WARNING,
-        "notify",
-        round=round_num,
-        message=(
-            f"Repeated pipeline degradation — {count} investigation "
-            "cycles exhausted. Likely a backend server issue."
-        ),
-        advice="Paste warnings + connector code into Claude Code → docs/connectors",
-        degradation_reset_count=count,
-        problem_steps=steps,
-        persistent_warning_types=dict(wtypes),
-    )
-    logger.warning("Backend warning at round %d (%d resets, steps: %s)", round_num, count, steps)
 
 
 async def _run_transition(
@@ -159,51 +120,6 @@ async def _run_transition(
     return result
 
 
-async def _exhaust_or_reset(
-    cycle: Cycle,
-    config: CampaignConfig,
-    pipeline_schema: Any,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None,
-    *,
-    layer: str,
-    stall_count: int,
-    from_degradation: bool,
-    stop_reason: StopReason,
-    reset_l3: bool,
-    obs: ObservabilityBridge | None,
-    obs_campaign_id: str,
-    escalation_check_result: dict | None,
-) -> StopReason | None:
-    """Exhaust patience (return stop) OR reset counters + run L2."""
-    if not from_degradation:
-        logger.debug("%s patience exhausted (%d stalls) at round %d", layer, stall_count, round_num)
-        return stop_reason
-
-    logger.debug(
-        "%s patience exhausted during degradation — resetting at round %d", layer, round_num
-    )
-    cycle.escalation.l2.stall_count = 0
-    cycle.escalation.l2.round = 0
-    if reset_l3:
-        cycle.escalation.l3.stall_count = 0
-        cycle.escalation.l3.round = 0
-    cycle.opt_sp.degradation_reset_count += 1
-    _maybe_emit_backend_warning(cycle, config, round_num, on_phase)
-    await _run_transition(
-        L2RefineStrategy(),
-        cycle,
-        config,
-        pipeline_schema,
-        round_num,
-        on_phase,
-        obs=obs,
-        obs_campaign_id=obs_campaign_id,
-        ctx={"escalation_check_result": escalation_check_result},
-    )
-    return None
-
-
 async def escalate_l2(
     cycle: Cycle,
     config: CampaignConfig,
@@ -213,10 +129,9 @@ async def escalate_l2(
     on_checkpoint: Callable[[str], str | None] | None = None,
     obs: ObservabilityBridge | None = None,
     obs_campaign_id: str = "",
-    from_degradation: bool = False,
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
-    """L1→L2 (and optional L2→L3) escalation; from_degradation resets counters instead of stopping."""
+    """L1→L2 (and optional L2→L3) escalation; vanilla patience-exhausts → next layer / stop."""
     from promptpotter.application.campaign.decisions import record_decision
     from promptpotter.application.optimization.nodes.l1 import PauseForReviewError
     from promptpotter.domain.phases import StopReason
@@ -234,7 +149,6 @@ async def escalate_l2(
         {
             "round_num": round_num,
             "l2_patience": opt.l2_patience,
-            "from_degradation": from_degradation,
             "entry_round": entry_round_l2,
         },
         not l2_stalled,
@@ -267,21 +181,8 @@ async def escalate_l2(
         return None
 
     if not opt.enable_l3:
-        return await _exhaust_or_reset(
-            cycle,
-            config,
-            pipeline_schema,
-            round_num,
-            on_phase,
-            layer="L2",
-            stall_count=esc.l2.stall_count,
-            from_degradation=from_degradation,
-            stop_reason=StopReason.L2_PATIENCE,
-            reset_l3=False,
-            obs=obs,
-            obs_campaign_id=obs_campaign_id,
-            escalation_check_result=escalation_check_result,
-        )
+        logger.debug("L2 patience exhausted (%d stalls) at round %d", esc.l2.stall_count, round_num)
+        return StopReason.L2_PATIENCE
 
     esc.l3.record_outcome(cycle.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
@@ -315,18 +216,5 @@ async def escalate_l2(
         )
         return None
 
-    return await _exhaust_or_reset(
-        cycle,
-        config,
-        pipeline_schema,
-        round_num,
-        on_phase,
-        layer="L3",
-        stall_count=esc.l3.stall_count,
-        from_degradation=from_degradation,
-        stop_reason=StopReason.L3_PATIENCE,
-        reset_l3=True,
-        obs=obs,
-        obs_campaign_id=obs_campaign_id,
-        escalation_check_result=escalation_check_result,
-    )
+    logger.debug("L3 patience exhausted (%d stalls) at round %d", esc.l3.stall_count, round_num)
+    return StopReason.L3_PATIENCE

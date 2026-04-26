@@ -6,7 +6,7 @@ PromptPotter uses a 3-layer escalation model inspired by PromptWizard's critique
 
 The workhorse. Generates N candidate `OptSearchPoint`s (prompt field variants + pipeline_params), evaluates them against the dataset, and selects the best.
 
-**Input**: L1 critique from previous round (or `l2_directive` after L2 runs), task_context, thinking_styles, scan_brief, search_memory.
+**Input**: L1 critique from previous round (or `l2_directive` after L2 runs), task_context, scan_brief, search_memory.
 **Output**: winner candidate (or no improvement → stall counter increments).
 
 After evaluation, the **L1 Critique Agent** (every-round intelligence hub) analyzes results — pipeline health, rank analysis, failure details, query categories — enriched with SearchMemory intelligence (failure clusters, discriminating queries, tractability profiles, axis exhaustion, value trends). It produces a compact L1 critique that feeds the next L1 round. L1 critique and L1 Generate are **mutually exclusive with l2_directive**: when L2 fires, its directive replaces L1 critique as L1's primary signal.

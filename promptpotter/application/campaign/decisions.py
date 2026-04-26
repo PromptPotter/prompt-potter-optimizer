@@ -243,9 +243,7 @@ def _derive_stall_count(
 
 @replayer("l2_escalation_trigger")
 def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-derive L2 fire/patience-defer. Degradation-triggered L2 is archive-only (raises)."""
-    if bool(inputs_ref.get("from_degradation", False)):
-        raise NotImplementedError("degradation-triggered L2 is archive-only for replay")
+    """Re-derive L2 fire/patience-defer."""
     patience = inputs_ref.get("l2_patience")
     if patience is None:
         return True

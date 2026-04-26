@@ -49,8 +49,7 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
-| 5 | **`EmptyOutputCheck`** — `empty_predicted_rate >= threshold` | every query | **3** | eliminated | — | `application/optimization/elimination.py::EmptyOutputCheck` |
-| 6 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
+| 5 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
 ### Ordering inside the query loop
 

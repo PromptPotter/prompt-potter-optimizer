@@ -48,7 +48,6 @@ from promptpotter.application.optimization.nodes._inbox_helpers import (
     _r_search_memory_l1,
     _r_search_memory_l2,
     _r_task_context,
-    _r_thinking_styles,
     _r_unused,
     _r_validation_failures,
     _r_warning_inventory_l2,
@@ -192,14 +191,6 @@ INBOX: tuple[InboxField, ...] = (
         mutex={Layer.L1: ("guidance", 1)},
     ),
     InboxField(
-        name="thinking_styles",
-        layers=frozenset({Layer.L1}),
-        source=_src_memory("thinking_styles"),
-        render=_r_thinking_styles,
-        retention=Retention.MEMORY,
-        docstring="3 sampled thinking styles for L1 meta-prompt injection.",
-    ),
-    InboxField(
         name="plan",
         layers=frozenset({Layer.L1}),
         source=_src_plan,
@@ -266,7 +257,6 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
         "escalation_alert",
         "l2_directive",
         "l1_critique_text",
-        "thinking_styles",
         "plan",
     ),
     Layer.L2: (

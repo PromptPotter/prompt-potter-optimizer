@@ -50,7 +50,6 @@ _PHASE_HEADERS: dict[str, str] = {
     CampaignPhase.REFINE_STRATEGY: "refine-context",
     CampaignPhase.MODIFY_PLAN: "modify-plan",
     CampaignPhase.ESCALATION: "escalation",
-    CampaignPhase.BACKEND_WARNING: "backend-warning",
 }
 
 

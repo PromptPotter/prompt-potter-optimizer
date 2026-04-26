@@ -396,7 +396,6 @@ async def init_optimization_loop(
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import build_degradation_checks
-    from promptpotter.application.optimization.nodes.l1.critique import sample_thinking_styles
     from promptpotter.domain.phases import CampaignPhase, emit_phase
     from promptpotter.infrastructure.tracing import ObservabilityBridge
     from promptpotter.shared.scoring import compile_round_scorer
@@ -485,11 +484,6 @@ async def init_optimization_loop(
         if fork_result is not None:
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
-            if resumed_from_round == 0:
-                # Fork left no surviving trials — treat the new cycle like a fresh start.
-                cycle.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
-    else:
-        cycle.opt_sp.thinking_styles = sample_thinking_styles(n=3, seed=opt.seed)
     if session.store:
         session.store.dataset_runs.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()

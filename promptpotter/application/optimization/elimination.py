@@ -94,33 +94,6 @@ class DegradationCheck:
         )
 
 
-class EmptyOutputCheck:
-    """Eliminate when the LLM consistently returns empty predictions."""
-
-    name = "empty_output"
-
-    def __init__(self, threshold: float = 0.5, min_queries: int = 3) -> None:
-        self.threshold = threshold
-        self.min_queries = min_queries
-
-    def evaluate(
-        self, results: list[dict], candidate_idx: int, n_total_candidates: int
-    ) -> EscalationSignal | None:
-        n = len(results)
-        if n < self.min_queries:
-            return None
-        empty = sum(1 for r in results if not str(r.get("predicted") or "").strip())
-        rate = empty / n
-        if rate < self.threshold:
-            return None
-        return _eliminate(
-            self.name,
-            {"empty_count": empty, "empty_rate": rate, "total_evaluated": n},
-            candidate_idx,
-            n_total_candidates,
-        )
-
-
 class EliminationCheck:
     """Paired one-sided Wilcoxon signed-rank vs completed priors (Holm-Bonferroni)."""
 
@@ -163,11 +136,9 @@ class EliminationCheck:
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[Any]:
-    """Per-query checks (degradation + empty-output). EliminationCheck is built by the runner."""
+    """Per-query checks (degradation). EliminationCheck is built by the runner."""
     opt = config.optimization
     checks: list[Any] = []
     if opt.degradation_threshold > 0:
         checks.append(DegradationCheck(threshold=opt.degradation_threshold))
-    if opt.empty_output_threshold > 0:
-        checks.append(EmptyOutputCheck(threshold=opt.empty_output_threshold))
     return checks

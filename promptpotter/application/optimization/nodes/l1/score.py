@@ -106,7 +106,6 @@ class L1ScoringResult(BaseModel):
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
     decisions: list[dict] = Field(default_factory=list)
     l1_critique_text: str = ""
-    thinking_styles: list[str] = Field(default_factory=list)
 
 
 async def l1_score(

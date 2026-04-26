@@ -227,12 +227,6 @@ class OptSearchPoint(PromptTemplate):
         "is active. One-round window — cleared by clear_volatile() on "
         "improvement, same lifecycle as l2_directive.",
     )
-    thinking_styles: list[str] = Field(
-        default_factory=list,
-        description="3 thinking styles sampled at each round's critique phase "
-        "for injection into the L1 meta-prompt. One-round window — cleared by "
-        "clear_volatile() on improvement.",
-    )
     escalation_journal: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Cross-round degradation investigation memory.",
@@ -245,14 +239,6 @@ class OptSearchPoint(PromptTemplate):
         default="",
         description="L2's diagnostic reasoning + action guidance for L1. "
         "One-round window — cleared by clear_volatile() on improvement.",
-    )
-    degradation_reset_count: int = Field(
-        0,
-        description="How many times L2/L3 patience exhausted during degradation.",
-    )
-    backend_warning_emitted: bool = Field(
-        False,
-        description="One-shot flag — True after backend warning has been emitted.",
     )
     validation_failures: list[ValidationFailure] = Field(
         default_factory=list,
@@ -291,12 +277,9 @@ class OptSearchPoint(PromptTemplate):
 
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "l1_critique_text",
-        "thinking_styles",
         "escalation_journal",
         "warning_inventory",
         "l2_directive",
-        "degradation_reset_count",
-        "backend_warning_emitted",
         "validation_failures",
         "runtime_failures",
         "failure_analysis",
@@ -311,20 +294,17 @@ class OptSearchPoint(PromptTemplate):
     def clear_volatile(self) -> None:
         """Drop one-round windows after an improving round.
 
-        All three fields share the same lifecycle: they are produced to
-        steer *the next round only*, and once L1 succeeded the basis for
-        that guidance is stale.
+        Both fields share the same lifecycle: they are produced to steer
+        *the next round only*, and once L1 succeeded the basis for that
+        guidance is stale.
 
         * ``l2_directive``   — L2's action guidance for L1.
         * ``l1_critique_text`` — the prior round's L1 critique summary; mutex
           with ``l2_directive`` on L1, so a stale critique would otherwise
           bleed into the next L1 meta-prompt whenever L2 did not fire.
-        * ``thinking_styles`` — 3 samples drawn at each round's L1 critique
-          phase; tied to the same steering window.
         """
         self.l2_directive = ""
         self.l1_critique_text = ""
-        self.thinking_styles = []
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
         """Append a journal entry; fill the previous entry's pending outcome.

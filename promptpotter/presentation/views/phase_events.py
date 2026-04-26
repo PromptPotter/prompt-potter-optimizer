@@ -18,7 +18,6 @@ from promptpotter.presentation.views.display_primitives import (
     CYAN,
     DIM,
     GREEN,
-    RED,
     RESET,
     YELLOW,
     _dbox_bottom,
@@ -314,31 +313,6 @@ def _render_plan_exit(view: dict) -> str:
     return "\n".join(out)
 
 
-def _render_backend_warning(view: dict) -> str:
-    msg = view.get("message", "")
-    advice = view.get("advice", "")
-    resets = view.get("degradation_reset_count", 0)
-    steps = view.get("problem_steps") or []
-    wtypes = view.get("persistent_warning_types") or {}
-
-    out = [
-        "",
-        _dbox_top(),
-        _dbox_line(f"{RED}{BOLD}BACKEND WARNING{RESET}"),
-        _dbox_sep(),
-        _dbox_line(msg),
-        _dbox_line(""),
-        _dbox_line(advice),
-        _dbox_sep(),
-    ]
-    steps_str = ", ".join(steps) if steps else "unknown"
-    out.append(_dbox_line(f"Resets: {resets}  |  Steps: {steps_str}"))
-    for wt, count in wtypes.items():
-        out.append(_dbox_line(f"  {wt}: {count} occurrences"))
-    out.append(_dbox_bottom())
-    return "\n".join(out)
-
-
 _RENDERERS: dict[str, Callable[[dict], str]] = {
     "init:enter": _render_init_enter,
     "init:exit": _render_init_exit,
@@ -354,7 +328,6 @@ _RENDERERS: dict[str, Callable[[dict], str]] = {
     "escalation:exit": _render_escalation_exit,
     "probe_round:enter": _render_probe_enter,
     "probe_round:exit": _render_probe_exit,
-    "backend_warning:notify": _render_backend_warning,
 }
 
 

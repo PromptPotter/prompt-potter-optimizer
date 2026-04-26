@@ -321,16 +321,6 @@ def _plan_exit(d: dict, ctx: dict) -> dict:
     }
 
 
-def _backend_warning(d: dict, ctx: dict) -> dict:
-    return {
-        "message": d.get("message", ""),
-        "advice": d.get("advice", ""),
-        "degradation_reset_count": d.get("degradation_reset_count", 0),
-        "problem_steps": list(d.get("problem_steps") or []),
-        "persistent_warning_types": dict(d.get("persistent_warning_types") or {}),
-    }
-
-
 _BUILDERS: dict[str, Any] = {
     "init:enter": _init_enter,
     "init:exit": _init_exit,
@@ -346,7 +336,6 @@ _BUILDERS: dict[str, Any] = {
     "escalation:exit": _escalation_exit,
     "probe_round:enter": _probe_enter,
     "probe_round:exit": _probe_exit,
-    "backend_warning:notify": _backend_warning,
 }
 
 

@@ -37,7 +37,6 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `assemble_inbox` | `promptpotter/application/optimization/nodes/inbox_registry.py` |
 | `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
-| `EmptyOutputCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/nodes/l1/execute.py` |

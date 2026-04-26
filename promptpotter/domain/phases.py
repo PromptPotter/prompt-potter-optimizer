@@ -28,7 +28,6 @@ class CampaignPhase(enum.StrEnum):
     REFINE_STRATEGY = "refine_strategy"
     MODIFY_PLAN = "modify_plan"
     ESCALATION = "escalation"
-    BACKEND_WARNING = "backend_warning"
 
 
 class StopReason(enum.StrEnum):
