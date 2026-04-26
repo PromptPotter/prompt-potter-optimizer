@@ -21,7 +21,7 @@ Under the hood, PromptPotter just collects a lot of datapoints. Every evaluation
 
 1. **Provide a labeled dataset:** input/output pairs (and any extra context)
 2. **Provide your `pipeline.json`:** your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file. Nothing else is touched.
-3. **Optimize:** run the critique-guided feedback cycle. The optimization loop is self-contained. It measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
+3. **Optimize:** run the critique-guided feedback cycle — PromptPotter's flavour of **LLM-driven program evolution**. The optimization loop is self-contained. It measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
 
 > [!IMPORTANT]
 > **New here? Start with [`docs/manual/`](docs/manual/README.md):** six numbered chapters, install → first run → reading output → troubleshooting.
@@ -49,12 +49,12 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
 
 ## ⭐ Features
 
-- **Prompt + pipeline optimization:** searches your prompt AND your pipeline parameters jointly. Most tools optimize one or the other. Head-to-head: [related-work.md](docs/research/related-work.md).
+- **Prompt + pipeline optimization:** **LLM-driven program evolution** over your prompt AND your pipeline parameters jointly. Most tools optimize one or the other. Head-to-head: [related-work.md](docs/research/related-work.md).
 - **Auto-injected scoring:** define your scoring formula once in `campaign.json`. It's wired into every evaluation path automatically. No glue code.
 - **IDE-native operation:** drive a full optimization campaign from your terminal via the `/potter-run` Claude Code skill. No notebook required.
 - **🔁 Self-healing optimization:** when a proposed setting isn't valid for your task workflow, the verification harness catches it (deterministic) and tells the strategy layer (L2 or L3) what went wrong, which in turn updates the prompt of the model that proposed the invalid setting. Full architecture: [self-healing.md](docs/concepts/self-healing.md).
-- **Statistical early-stopping:** weak candidates are dropped after a handful of queries using statistical significance testing, instead of burning the full evaluation budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
-- **Cross-run learning:** every evaluation flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
+- **Statistical early-stopping:** unfit individuals are eliminated after a handful of queries via paired Wilcoxon signed-rank tests, instead of burning the full budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
+- **Cross-run learning:** every fitness measurement flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
 
 ## How It Works
 
@@ -100,7 +100,7 @@ Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and Pro
 | [Self-healing](docs/concepts/self-healing.md) | [🔌Backend integration](docs/operations/backend-integration.md) | [Related work](docs/research/related-work.md) |
 | [Scoring and traces](docs/concepts/scoring-and-traces.md) | [Persistence and state](docs/operations/persistence-and-state.md) | |
 | [Search memory](docs/concepts/search-memory.md) | [Rewind and fork](docs/operations/rewind-and-fork.md) | |
-| [Prompts and candidates](docs/concepts/prompts-and-candidates.md) | [Observability](docs/operations/observability.md) | |
+| [Prompts and individuals](docs/concepts/prompts-and-individuals.md) | [Observability](docs/operations/observability.md) | |
 | [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
 
 Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).

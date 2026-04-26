@@ -334,7 +334,7 @@ async def l1_generate(
                 del node_overrides[bk]
 
         # Override validation is deferred to parse_population — one producer of truth.
-        child = opt_sp.derive_candidate(
+        child = opt_sp.mutate(
             changes_description=v.get("changes_description", ""),
             **prompt_changes,
         )

@@ -21,10 +21,10 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-__all__ = ["L1ScoringResult", "l1_score", "select_round_winner"]
+__all__ = ["L1ScoringResult", "l1_score", "select_fittest"]
 
 
-def select_round_winner(
+def select_fittest(
     population: list[OptSearchPoint],
     all_candidate_results: dict[str, list[QueryResult]],
     current_best: dict[str, Any],
@@ -36,7 +36,7 @@ def select_round_winner(
     current_fitness = current_best["accuracy"]
     current_composite = current_best.get("composite", current_fitness)
 
-    assert pipeline_schema is not None, "select_round_winner requires pipeline_schema"
+    assert pipeline_schema is not None, "select_fittest requires pipeline_schema"
 
     individual_scores = {
         c.lineage.id: compute_composite_score(
@@ -159,7 +159,7 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
-    winner_entry = select_round_winner(
+    winner_entry = select_fittest(
         evaluated_population,
         all_candidate_results,
         cb,

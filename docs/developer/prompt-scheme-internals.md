@@ -1,6 +1,6 @@
 # Prompt Scheme Internals
 
-PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization. Conceptual overview in [../concepts/prompts-and-candidates.md](../concepts/prompts-and-candidates.md); this page covers the implementation.
+PromptPotter decomposes monolithic prompts into independent fields for perturbation, measurement, and optimization. Conceptual overview in [../concepts/prompts-and-individuals.md](../concepts/prompts-and-individuals.md); this page covers the implementation.
 
 The same decomposition applies recursively: the optimizer's own meta-prompts — the templates driving L1, L2, L3, and the critique step — are themselves `PromptTemplate` instances with the same 8 fields. A future outer-loop PromptPotter can optimize the optimizer's prompts using the same machinery.
 
@@ -44,7 +44,7 @@ SearchPoint (abstract)
 
 **Prompt scheme fields** — the 8 fields below — render into a single prompt string. **Pipeline node parameters** are a separate namespace: nested dicts keyed by node name (e.g., `{"token_matching": {"thinking_style": "single_pass"}}`). Some names overlap (e.g., `thinking_style` appears in both namespaces).
 
-L1 candidates use `pipeline_params_override` for both namespaces: keys matching `PROMPT_STRING_FIELDS` are auto-routed to `derive_candidate()` (updating prompt scheme fields); all other keys stay as node-level pipeline overrides.
+L1 candidates use `pipeline_params_override` for both namespaces: keys matching `PROMPT_STRING_FIELDS` are auto-routed to `mutate()` (updating prompt scheme fields); all other keys stay as node-level pipeline overrides.
 
 ---
 

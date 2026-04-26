@@ -1,8 +1,6 @@
 # Search Memory
 
-Search memory is PromptPotter's cross-campaign intelligence layer. Every evaluation the backend ever runs gets stored; search memory is the materialized view over that archive. When an optimization thread stops improving, the data isn't wasted — on a later run, the optimizer discovers all stored evaluations, knows the landscape better, and fresh optimization starts from higher ground.
-
-The data is shared across campaigns. A campaign running on a new dataset sees which queries have always been easy across all prior runs. A campaign with a new prompt sees which parameter axes have consistently moved the needle. The memory is independent of both the optimization loop and any single campaign's configuration.
+Search memory is PromptPotter's cross-campaign intelligence layer — a genome-indexed archive of every fitness measurement, materialised into views the optimiser queries each round. Data is shared across campaigns: a new run sees which queries have been consistently easy or hard, which axes have moved fitness, where failures cluster. Memory is independent of any one optimisation loop or campaign config.
 
 ---
 
@@ -49,8 +47,6 @@ L1 sees the fine-grained data it needs to propose sensible candidates. L2 sees t
 
 ## Why it's not just a cache
 
-A cache remembers results. Search memory remembers *patterns* — the statistical shape of the search space, extracted from those results. When a new campaign starts, it doesn't just skip queries it's seen before (that's the evaluation cache's job); it starts with a learned prior about which axes to explore, which queries are informative, and where failures cluster.
-
-This is what makes the system *compound*. Every run leaves more structure in the memory for the next run to exploit. A team running ten campaigns this year starts each one with more knowledge than the last.
+A cache remembers results; search memory remembers *patterns* — the fitness landscape's shape, extracted from those results. New campaigns start with a learned prior over axes, queries, and failure regions. Every run leaves more structure for the next, so the system compounds across campaigns.
 
 For the internal mechanics — refresh watermark, digest API, accessor catalog — see [../developer/search-memory-internals.md](../developer/search-memory-internals.md).

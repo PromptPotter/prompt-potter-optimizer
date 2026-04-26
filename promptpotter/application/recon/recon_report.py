@@ -94,7 +94,7 @@ async def decompose_recon_baseline(
         force=force_restructure,
     )
 
-    search_baseline = baseline.derive_candidate(
+    search_baseline = baseline.mutate(
         **{k: v for k, v in layer1_fields.items() if v and k != "consultation"},
         changes_description="search_baseline (decomposed)",
     )
@@ -261,7 +261,7 @@ async def resume_or_build_diagnostic(
         llm_client,
         model=model,
     )
-    search_baseline = baseline.derive_candidate(
+    search_baseline = baseline.mutate(
         **{k: v for k, v in layer1_fields.items() if v},
         changes_description="search_baseline (decomposed)",
     )
@@ -339,7 +339,7 @@ def _compose_winner(
         assert baseline_opt is not None, (
             "baseline_opt required for prompt_field perturbation in finalize_scan"
         )
-        best_sp = baseline_opt.derive_candidate(
+        best_sp = baseline_opt.mutate(
             **prompt_changes,
             changes_description="recon_winner",
         ).to_job_search_point(

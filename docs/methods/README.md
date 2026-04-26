@@ -7,4 +7,6 @@ Statistical and algorithmic foundations of PromptPotter. Two independent procedu
 | [Individual elimination](candidate-elimination.md) | Paired Wilcoxon signed-rank test + Holm-Bonferroni correction — how individuals are eliminated before consuming full budget |
 | [Exploration / exploitation sample selection](exploration-exploitation.md) | Rasch + Knowledge Gradient prefix evolution, sample tiering, zero-signal filter. Companion capability: [hard-sample sorter](../specs/hard-sample-sorter.md) |
 
-For the research positioning of these methods under the LLM-driven program evolution umbrella (AlphaEvolve, MIPROv2, GEPA, PromptWizard et al.), see [`../research/related-work.md`](../research/related-work.md). For the classical AutoML ancestry (F-Race → irace → SMAC) and the racing-primitive mapping, see [`../research/algorithm-configuration-lineage.md`](../research/algorithm-configuration-lineage.md).
+Within the LLM-driven program evolution paradigm, PromptPotter targets the bounded case: fixed pipeline, labelled dataset, scalar fitness. Open-ended program synthesis, multi-objective fitness, and unlabelled tasks remain open problems for the paradigm and are not supported here.
+
+For the research positioning of these methods alongside AlphaEvolve, MIPROv2, GEPA, PromptWizard et al., see [`../research/related-work.md`](../research/related-work.md). For the classical AutoML ancestry (F-Race → irace → SMAC) and the racing-primitive mapping, see [`../research/algorithm-configuration-lineage.md`](../research/algorithm-configuration-lineage.md).

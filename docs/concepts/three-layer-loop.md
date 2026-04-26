@@ -21,9 +21,7 @@ PromptPotter's optimizer runs three layers, each at a different cadence. L1 chan
 
 ## Why three layers
 
-Each layer operates at a different speed. L1 changes every round — fast, fine-grained parameter tuning. L2 changes on stall — a slower context shift, invoked when several rounds of L1 fail to improve. L3 changes on strategic failure — rarely, when L2 itself stalls.
-
-Keeping these cadences separate prevents a fast-moving parameter search from destabilizing the slower strategic context. If every layer changed every round, the optimizer would thrash. If only one layer existed, it would either be too fine-grained to break out of plateaus or too coarse to do useful tuning.
+Each layer fires at a different cadence: L1 every generation, L2 on consecutive-stall escalation, L3 when L2 itself stalls. Separating cadences keeps intra-generation mutation from destabilising the meta-strategy that constrains it, while still letting the meta-strategy reset when the population gets stuck.
 
 ## What each layer decides
 
@@ -71,4 +69,4 @@ The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/
 
 Five LLM call sites in the loop: `restructure` (one-time prompt decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`.
 
-Individual fitness comparison uses confidence intervals and two-proportion significance tests. Non-parametric tests are planned.
+Individual fitness comparison uses paired Wilcoxon signed-rank with Holm-Bonferroni correction — see [candidate-elimination.md](../methods/candidate-elimination.md).

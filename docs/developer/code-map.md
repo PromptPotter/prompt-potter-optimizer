@@ -50,7 +50,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
 | `PauseForReviewError` | `promptpotter/application/optimization/nodes/l1/execute.py` |
 | `score_candidates` | `promptpotter/application/optimization/nodes/l1/measure.py` |
-| `select_round_winner` | `promptpotter/application/optimization/nodes/l1/score.py` |
+| `select_fittest` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `validate_overrides` | `promptpotter/application/optimization/nodes/l1/generate.py` |
 
@@ -60,7 +60,7 @@ Meta-prompt template names (`l2_refine_strategy`, `l3_modify_plan`) are declared
 
 | Symbol | Module |
 |--------|--------|
-| `derive_candidate` | `promptpotter/domain/opt_search_point.py` |
+| `mutate` | `promptpotter/domain/opt_search_point.py` |
 | `format_search_memory_block` | `promptpotter/application/optimization/nodes/formatting.py` |
 | `PROMPT_STRING_FIELDS` | `promptpotter/shared/constants.py` |
 | `PromptTemplate.render` | `promptpotter/domain/opt_search_point.py` |

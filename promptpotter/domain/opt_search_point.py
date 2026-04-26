@@ -157,7 +157,7 @@ class PromptTemplate(SearchPoint):
         """Create an instance from a dict of prompt fields + optional extra state.
 
         Return type follows ``cls``. Pydantic auto-coerces a nested
-        ``lineage: {...}`` dict into ``CandidateLineage`` when present.
+        ``lineage: {...}`` dict into ``IndividualLineage`` when present.
         """
         fields = dict(fields)
         fse = fields.pop("few_shot_examples", [])
@@ -166,11 +166,11 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
-class CandidateLineage(BaseModel):
-    """Identity and provenance of a single candidate search point.
+class IndividualLineage(BaseModel):
+    """Identity and provenance of a single individual in the population.
 
-    Groups the four fields that describe *what this candidate is and where it
-    came from*.  Set once at candidate creation (``derive_candidate`` and
+    Groups the four fields that describe *what this individual is and where it
+    came from*.  Set once at individual creation (``mutate`` and
     ``OptSearchPoint.__init__``); never mutated after that.
     """
 
@@ -198,7 +198,7 @@ class OptSearchPoint(PromptTemplate):
     """
 
     # -- Lineage -------------------------------------------------------------
-    lineage: CandidateLineage = Field(default_factory=CandidateLineage)
+    lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
@@ -278,7 +278,7 @@ class OptSearchPoint(PromptTemplate):
         default=None,
         description="Latest round's clustered failure analysis over the "
         "winner's results. Consumed by L1 as an inbox section; replaced "
-        "each round. Carried across L2/L3 derive_candidate + adopt_transition "
+        "each round. Carried across L2/L3 mutate + adopt_transition "
         "by copy_memory_to().",
     )
     round_history: list[RoundSummary] = Field(
@@ -406,11 +406,11 @@ class OptSearchPoint(PromptTemplate):
 
     # -- Candidate derivation ------------------------------------------------
 
-    def derive_candidate(self, **changes: Any) -> OptSearchPoint:
+    def mutate(self, **changes: Any) -> OptSearchPoint:
         """Create a child OptSearchPoint with prompt field modifications.
 
         Sets lineage.parent_id to this instance's lineage.id. Generates a
-        new id/timestamp via a fresh CandidateLineage. Copies prompt
+        new id/timestamp via a fresh IndividualLineage. Copies prompt
         decomposition + L2/L3 state. ``memory`` is *not* copied — children
         start fresh and only inherit accumulated memory when L2/L3
         transitions adopt them via ``Cycle.apply_transition``.
@@ -432,7 +432,7 @@ class OptSearchPoint(PromptTemplate):
         data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
         # Lineage
-        data["lineage"] = CandidateLineage(
+        data["lineage"] = IndividualLineage(
             parent_id=self.lineage.id,
             changes_description=changes.pop("changes_description", ""),
         )

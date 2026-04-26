@@ -11,7 +11,7 @@ The `concepts/` folder explains the ideas behind PromptPotter in plain language.
 - [Self-healing](../concepts/self-healing.md) — how the optimizer recovers from bad proposals and degraded runs
 - [Scoring and traces](../concepts/scoring-and-traces.md) — why traces are facts and scores are policy; when to fork
 - [Search memory](../concepts/search-memory.md) — how PromptPotter accumulates knowledge across campaigns
-- [Prompts and candidates](../concepts/prompts-and-candidates.md) — the 8-field prompt decomposition
+- [Prompts and individuals](../concepts/prompts-and-individuals.md) — the 8-field prompt decomposition
 - [Nodes and pipelines](../concepts/nodes-and-pipelines.md) — what a pipeline node is and what it can do
 - [Glossary](../concepts/glossary.md) — terms used across the docs
 

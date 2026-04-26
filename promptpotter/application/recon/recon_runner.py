@@ -282,7 +282,7 @@ async def run_recon(
                 assert baseline_opt is not None, (
                     "baseline_opt required for prompt_field perturbation"
                 )
-                perturbed = baseline_opt.derive_candidate(
+                perturbed = baseline_opt.mutate(
                     **{axis_name: value},
                 ).to_job_search_point(
                     base_pipeline_params=baseline.pipeline_params,

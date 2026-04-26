@@ -16,7 +16,7 @@ from promptpotter.config.settings import (
     DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.opt_search_point import CandidateLineage, OptSearchPoint
+from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.tenant import TenantContext
@@ -268,7 +268,7 @@ def load_baseline_prompt(
                 )
                 return OptSearchPoint.from_prompt_fields(
                     template.prompt_field_dict(),
-                    lineage=CandidateLineage(
+                    lineage=IndividualLineage(
                         changes_description=(
                             f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
                         ),
@@ -281,7 +281,7 @@ def load_baseline_prompt(
     )
     return OptSearchPoint(
         instruction="",
-        lineage=CandidateLineage(
+        lineage=IndividualLineage(
             changes_description="Baseline (no prompt node active — param-only optimization)",
         ),
     )

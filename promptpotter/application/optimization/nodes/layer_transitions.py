@@ -223,7 +223,7 @@ class L2RefineStrategy(LayerTransition):
             len(l2_directive),
         )
 
-        new_opt_sp = opt_sp.derive_candidate(**changes) if changes else opt_sp
+        new_opt_sp = opt_sp.mutate(**changes) if changes else opt_sp
         return TransitionResult(
             opt_search_point=new_opt_sp,
             task_context=new_task_context,
@@ -373,7 +373,7 @@ class L3ModifyPlan(LayerTransition):
             "updated" if new_pipeline_params else "unchanged",
         )
 
-        new_opt_sp = opt_sp.derive_candidate(
+        new_opt_sp = opt_sp.mutate(
             plan=new_plan,
             changes_description=f"L3: {rationale[:80]}",
         )

@@ -267,7 +267,7 @@ def compute_pipeline_metrics(
       invalid candidates), and ``memory.runtime_failures`` feeds the
       ``runtime_failure_rate`` evaluator.
 
-    The composite is **recorded, not gating**: ``_select_round_winner``
+    The composite is **recorded, not gating**: ``select_fittest``
     compares candidates on ``accuracy`` (the user's per-query scoring
     function). Composite is displayed and persisted so operators can see
     whether a win came with hidden costs.
@@ -317,7 +317,7 @@ def compute_composite_score(
     """Compute composite score — delegates to ``compute_pipeline_metrics()``.
 
     The composite is a **recorded** multi-signal diagnostic, not the
-    winner-selection key. ``_select_round_winner`` compares candidates on
+    winner-selection key. ``select_fittest`` compares candidates on
     ``accuracy`` (the user's performance scoring function).
 
     Returns dict with at least: hits, total, accuracy, errors, composite,

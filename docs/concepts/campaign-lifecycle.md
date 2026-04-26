@@ -35,9 +35,7 @@ The number of candidates per round is controlled by your campaign config.
 
 ### Evaluate
 
-Each individual's fitness is measured query-by-query against the backend pipeline. The backend receives the individual's prompt and parameters, processes the query, and returns a result. PromptPotter scores the result and moves to the next query.
-
-Evaluation has an early-stopping mechanism: once enough queries have run, a paired statistical test can declare an individual clearly inferior to the current best and stop scoring it. This keeps the campaign moving without wasting budget on candidates that obviously won't win.
+Each individual's fitness is measured query-by-query against the backend pipeline. After a minimum sample, a paired Wilcoxon signed-rank test against completed individuals can stop scoring an inferior one early — see [candidate-elimination.md](../methods/candidate-elimination.md).
 
 ### Critique
 
@@ -65,11 +63,7 @@ After L2 fires, the patience counter resets. L1 resumes with the new framing.
 
 ## When L2 stalls — L3 fires
 
-After L2-adjusted rounds also fail to improve, L3 Modify Plan fires.
-
-L3 rewrites the strategic plan — a high-level optimization framework that is appended to every L1 Generate prompt. A new plan tells L1 to approach the search differently at a fundamental level: different axes to explore, different assumptions to question, different strategies to try.
-
-L3 is rare. When it fires, the optimizer is stepping back to rethink from scratch.
+When L2-adjusted rounds also fail to improve, L3 Modify Plan fires. L3 rewrites the plan — the framework appended to every L1 prompt that defines the population's mutation neighbourhood. A new plan redirects L1 at the meta-strategy level: different axes, different assumptions, different strategies. L3 is rare; when it fires, the meta-strategy is being reset.
 
 ---
 
@@ -87,8 +81,8 @@ Two things can go wrong during evaluation, and PromptPotter handles both without
 Between rounds, three things may happen (in order):
 
 1. **Search memory refresh.** New evaluation data from the completed round is folded into the historical intelligence store. The next round's L1 Generate has an updated view.
-2. **Zero-signal filter** (off by default). Queries that always hit or always miss across a minimum number of observations carry no information for the optimizer. When the filter is enabled, these queries are moved out of the active dataset. This keeps the scoring set informative as the campaign runs.
-3. **Exploration / exploitation rebalance** (off by default). A statistical model (Rasch IRT) tracks per-query difficulty. Between rounds, the scoring prefix is rebalanced: queries whose difficulty we already know are dropped (exploitation has extracted most of their signal), and queries whose difficulty is still uncertain are pulled in when measuring them would be informative enough (exploration). The prefix stays the same within a round; it only changes between rounds.
+2. **Zero-signal filter** (off by default). Queries that always hit or always miss across a minimum number of observations are moved out of the active dataset — they carry no fitness signal.
+3. **Exploration / exploitation rebalance** (off by default). A Rasch IRT posterior tracks per-query difficulty; between rounds, well-characterised queries are swapped out of the scoring prefix in favour of high-information ones. The prefix is held fixed within a round.
 
 ---
 

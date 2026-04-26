@@ -1,6 +1,6 @@
-# Prompts and Candidates
+# Prompts and Individuals
 
-PromptPotter doesn't treat a prompt as one opaque string. It decomposes every prompt into eight named fields, each independently tunable. This matters for two reasons: the optimizer can vary one axis without touching the others, and it can measure which axes actually move the needle.
+PromptPotter doesn't treat a prompt as one opaque string. It decomposes every prompt into eight named fields — eight mutation axes. L1 mutates one axis at a time, holding the rest fixed, so the fitness delta of each axis is unambiguous.
 
 ---
 
@@ -39,19 +39,17 @@ Each field can be swapped independently. A prompt with thinking style "chain of 
 
 ## Why decomposition matters
 
-Three things fall out of this design.
+**Measurable axes.** Search memory tracks effect size per axis. After enough campaigns, *thinking style* may routinely move fitness by several points on this kind of problem while *persona* barely matters; future rounds spend mutation budget where it pays off.
 
-**Measurable axes.** Search memory tracks effect size per axis. After enough campaigns, the optimizer knows that *thinking style* routinely moves scores by several percentage points on this kind of problem, while *persona* barely matters. Future rounds spend budget where budget pays off.
+**Targeted mutation.** L1 mutates one field, holds the rest, scores the delta. The genotype is high-dimensional but each per-round move is one-dimensional, so the signal is clean.
 
-**Targeted mutation.** L1 doesn't have to rewrite the entire prompt to try a variation. It can pick one field to change, keep the rest, and score the difference. A prompt is a high-dimensional point; each field is one dimension.
-
-**Recursion.** The optimizer's own meta-prompts — the templates driving L1, L2, L3, and the critique step — are themselves prompts, decomposed into the same eight fields. A future outer-loop PromptPotter could optimize the optimizer's prompts using the same machinery it uses on target-backend prompts. The design is self-similar all the way down.
+**Recursion.** The optimizer's own meta-prompts (L1, L2, L3, critique) are decomposed into the same eight fields, so the same evolution machinery applies recursively when an outer loop optimises the optimiser.
 
 ## Two parameter namespaces
 
-A candidate is more than a prompt. It also has pipeline parameters — thresholds, model names, temperature, retrieval budgets, anything the pipeline's nodes expose. These live in a separate namespace from the prompt fields. Some names overlap — *thinking style* might appear both as a prompt field (steering how the LLM reasons) and as a node parameter (selecting among hardcoded strategies in a non-LLM step). They're treated as independent axes regardless.
+An individual is more than a prompt. It also carries pipeline parameters — thresholds, model names, temperature, retrieval budgets — anything the pipeline's nodes expose. These live in a separate namespace from prompt fields. Names can overlap (*thinking style* may be both a prompt field and a node parameter); they remain independent axes regardless.
 
-When L1 proposes a candidate, both namespaces get optimized together. A proposal can be "change the persona and bump the web search budget," with no awareness of which knob lives where. The routing happens automatically at candidate-creation time.
+L1 mutates both namespaces in the same proposal — "change the persona and bump the web search budget" — with routing handled at individual-creation time.
 
 ## Two prompt stores
 
@@ -59,7 +57,7 @@ PromptPotter keeps two independent prompt stores, each answering a different que
 
 **Per-dataset starting points** ship in `datasets/{name}/prompts/`. Each file is a full prompt template — the six canonical fields plus optional few-shot examples and plan. The campaign config picks a variant by name. This is the source of truth for the initial pipeline configuration.
 
-**The crossover pool** ships with the project itself. It's a library of task-agnostic material — dozens of candidate values for each field — that L1 mixes and matches during optimization. It's not a starting-point store; it's the mutation dictionary.
+**The crossover pool** ships with the project itself. It's a task-agnostic library — dozens of values per field — that L1 draws from when mutating. Not a starting point; a mutation dictionary.
 
 The two stores don't overlap. The first answers *where do we start?*. The second answers *what variations can we try?*.
 

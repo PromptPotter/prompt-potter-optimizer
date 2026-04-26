@@ -640,7 +640,7 @@ async def run_adaptive_recon(
 
             for value in values:
                 if axis_type == "prompt_field":
-                    test_opt = current_opt.derive_candidate(**{axis_name: value})
+                    test_opt = current_opt.mutate(**{axis_name: value})
                     test_params = current_params
                 else:
                     test_opt = current_opt
@@ -685,7 +685,7 @@ async def run_adaptive_recon(
             improvement = best_composite - current_composite
             if improvement > stop_threshold:
                 if axis_type == "prompt_field":
-                    current_opt = current_opt.derive_candidate(
+                    current_opt = current_opt.mutate(
                         **{axis_name: best_value},
                         changes_description=(f"adaptive_r{round_num}_{axis_name}"),
                     )

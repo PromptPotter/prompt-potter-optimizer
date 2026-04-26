@@ -12,7 +12,7 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Campaign** — one complete optimization run. Fixed dataset, fixed pipeline endpoint, fixed starting prompt. A campaign is a sequence of rounds. Synonymous with *cycle* at the identity level (every campaign has a `cycle_id`).
 
-**Candidate** — one proposed configuration scored during a round. A candidate is a specific combination of prompt fields and pipeline parameters. Candidates compete within a round; one winner advances.
+**Candidate** — alias for *individual* used in scoring and elimination contexts where the comparison-among-options framing dominates. See *Individual*.
 
 **Critique** — the L1 analysis step that reads raw per-query results from a completed round and writes a structured summary: what worked, what failed, what to try next. Feeds the next round's L1 Generate.
 
@@ -22,7 +22,9 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Fork** — mint a new campaign from a divergence point in an existing one. Used when the scoring formula changed mid-campaign and resume would be unsafe. The old campaign stays intact as a record.
 
-**L1 / Layer 1** — the normal optimization layer: generate candidates, evaluate, critique. Fires every round.
+**Individual** — one member of a round's population: a specific combination of prompt fields and pipeline parameters. The fittest individual that clears the improvement threshold advances as the round winner.
+
+**L1 / Layer 1** — the normal generation layer: evolve a population, measure fitness, critique. Fires every round.
 
 **L2 / Layer 2** — engaged when L1 hasn't improved for `l1_patience` rounds. Rewrites the task framing fed to L1. Does not touch pipeline parameters directly.
 
@@ -40,7 +42,7 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Rewind** — restart an active campaign from an earlier round, discarding later trials. Same `cycle_id`, archived history. Run via `optimize --from N`.
 
-**Round** — one generate-evaluate-critique cycle inside a campaign. Each round produces a candidate list, scores them all, picks a winner, writes a critique.
+**Round** — one generation: evolve a population, measure fitness, select the winner, write a critique. A campaign is a sequence of rounds.
 
 **Scorer** — the function that converts a pipeline output into a numeric score against a ground-truth answer. Per-dataset; configured in `campaign.json::scoring`.
 
@@ -52,4 +54,4 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Trial** — the per-round serialized snapshot of optimizer state. Resume reads from the latest trial. `trials/trial_NNNN.json` is the resume source of truth.
 
-**Winner** — the best-scoring candidate in a round, provided it beats the current best by at least the improvement threshold. A round can have no winner if no candidate beats the bar.
+**Winner** — the fittest individual of a round, provided it clears the improvement threshold over the current best. A round can have no winner.
