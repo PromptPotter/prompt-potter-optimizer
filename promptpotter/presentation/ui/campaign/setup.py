@@ -127,7 +127,10 @@ def dev_reload() -> None:
         "promptpotter.application.campaign.campaign_setup",
         # Display layer — safe to reload (no model classes)
         "promptpotter.presentation.views.display_primitives",
-        "promptpotter.presentation.ui.campaign.notebook_phase",
+        "promptpotter.presentation.views.phase_events",
+        "promptpotter.presentation.views.sp_diff",
+        "promptpotter.application.campaign.phase_views",
+        "promptpotter.application.optimization.sp_diff_view",
         "promptpotter.presentation.ui.campaign.notebook_display",
         "promptpotter.presentation.ui.campaign.optimize",
         "promptpotter.presentation.ui.campaign.setup",

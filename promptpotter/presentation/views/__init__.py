@@ -13,6 +13,8 @@ from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .dashboard import render_dashboard, render_status
 from .formatting import generate_supplemental, render_pipeline_overrides, render_table
 from .hard_sample_heatmap import render_hard_sample_heatmap
+from .markdown_box import render_markdown_box
+from .phase_events import render_phase_event
 from .round_summary import render_patience_status, render_progress_table, render_round_stats
 from .rounds import (
     render_campaign_summary,
@@ -20,6 +22,7 @@ from .rounds import (
     render_lineage,
     render_progress,
 )
+from .sp_diff import render_sp_diff
 
 __all__ = [
     "collect_prefix_events",
@@ -30,11 +33,14 @@ __all__ = [
     "render_flip_tracking",
     "render_hard_sample_heatmap",
     "render_lineage",
+    "render_markdown_box",
     "render_patience_status",
+    "render_phase_event",
     "render_pipeline_overrides",
     "render_progress",
     "render_progress_table",
     "render_round_stats",
+    "render_sp_diff",
     "render_status",
     "render_table",
 ]

@@ -16,6 +16,7 @@ from promptpotter.application.campaign.campaign_setup import (
 )
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
+from promptpotter.application.campaign.phase_views import build_phase_view
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.layer_escalation import (
     build_escalation_entry,
@@ -422,6 +423,7 @@ async def run_optimization(
             dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
             backend_id=session.backend_id,
             recorder_provider=get_round_recorder,
+            phase_view_builder=build_phase_view,
         )
     cb.emitter = emitter
 

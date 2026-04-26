@@ -63,7 +63,11 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     written into both trees."""
     assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
     assert {"journal.md", "notes.md", "session.json", "control.json"} <= SESSION_ARTIFACTS
-    assert {"dashboard.json", "index.json"} <= CAMPAIGN_ARTIFACTS
+    assert {
+        "dashboard.json",
+        "index.json",
+        "phase_events.jsonl",
+    } <= CAMPAIGN_ARTIFACTS
 
 
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:

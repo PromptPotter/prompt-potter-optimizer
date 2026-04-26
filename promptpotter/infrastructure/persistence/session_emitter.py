@@ -40,6 +40,14 @@ if TYPE_CHECKING:
 # ``set_l1_score()``, ``set_hitl()``.
 RecorderProvider = Callable[[], Any]
 
+# Phase-view builder: caller injects ``(PhaseEvent, ctx) -> dict | None``.
+# The emitter calls it on every ``on_phase`` to obtain a serializable
+# ``view`` it appends as a line to ``phase_events.jsonl``. Returns
+# ``None`` if no builder is registered for the (phase, event) pair —
+# the emitter then skips the JSONL append. Same upward-coupling
+# avoidance as ``RecorderProvider``: this types is intentionally loose.
+PhaseViewBuilder = Callable[["PhaseEvent", dict[str, Any]], dict[str, Any] | None]
+
 __all__ = [
     "CAMPAIGN_ARTIFACTS",
     "SESSION_ARTIFACTS",
@@ -58,6 +66,7 @@ CAMPAIGN_ARTIFACTS = {
     "log.md",  # round-by-round markdown summary
     "optimize_result.json",  # final RunResult snapshot
     "hard_samples.json",  # hard-sample-sorter artifact (top-K candidate×sample view)
+    "phase_events.jsonl",  # append-only phase-event stream (init/L1/L2/L3 banners)
 }
 
 # Per-session artifacts — produced under ``sessions/{session_id}/``.
@@ -239,14 +248,22 @@ class CampaignPersistenceEmitter:
         dataset_count: int | None = None,
         backend_id: str | None = None,
         recorder_provider: RecorderProvider | None = None,
+        phase_view_builder: PhaseViewBuilder | None = None,
     ) -> None:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
         self.log_path = campaign_dir / "output.log"
         self.log_md_path = campaign_dir / "log.md"
         self.result_path = campaign_dir / "optimize_result.json"
+        self.phase_events_path = campaign_dir / "phase_events.jsonl"
         self.session_dir = session_dir
         self._recorder_provider: RecorderProvider = recorder_provider or (lambda: None)
+        self._phase_view_builder: PhaseViewBuilder | None = phase_view_builder
+        # Per-cycle accumulator that replaces the old ``_CycleDisplayState`` —
+        # phase-view builders mutate this between events to thread cross-event
+        # state (baseline_accuracy, original_sp_flat, current_sp_flat, ...).
+        self._phase_ctx: dict[str, Any] = {}
+        self._phase_event_seq: int = 0
 
         self._patience_max: int = l1_patience
         self._state: dict[str, Any] = _make_initial_state(
@@ -292,6 +309,10 @@ class CampaignPersistenceEmitter:
         self._log_fh: IO[str] = open(  # noqa: SIM115
             self.log_path, "a", encoding="utf-8", buffering=1
         )
+        # Touch the phase-events JSONL file so artifact-parity holds even
+        # before the first ``on_phase`` callback fires. On resume, the file
+        # is preserved (append-only); fresh runs start with an empty file.
+        self.phase_events_path.touch()
         if resume_from:
             r = resume_from
             self._log_fh.write(
@@ -320,6 +341,7 @@ class CampaignPersistenceEmitter:
         dataset_count: int | None = None,
         backend_id: str | None = None,
         recorder_provider: RecorderProvider | None = None,
+        phase_view_builder: PhaseViewBuilder | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Construct the emitter for a run, or ``None`` if ids are unknown.
 
@@ -372,6 +394,7 @@ class CampaignPersistenceEmitter:
             dataset_count=dataset_count,
             backend_id=backend_id,
             recorder_provider=recorder_provider,
+            phase_view_builder=phase_view_builder,
         )
 
     # -- Callbacks -------------------------------------------------------------
@@ -403,7 +426,32 @@ class CampaignPersistenceEmitter:
             s["layer"] = _PHASE_TO_LAYER[phase]
 
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
+        self._persist_phase_event(event)
         self._persist()
+
+    def _persist_phase_event(self, event: PhaseEvent) -> None:
+        """Build the serializable view and append a line to ``phase_events.jsonl``.
+
+        No-op when no ``phase_view_builder`` was injected (e.g. in tests
+        that don't wire the application layer) or when the builder
+        returns ``None`` for this (phase, event) pair.
+        """
+        if self._phase_view_builder is None:
+            return
+        view = self._phase_view_builder(event, self._phase_ctx)
+        if view is None:
+            return
+        record = {
+            "seq": self._phase_event_seq,
+            "phase": event.phase,
+            "event": event.event,
+            "round": event.round,
+            "ts": event.timestamp,
+            "view": view,
+        }
+        self._phase_event_seq += 1
+        with self.phase_events_path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
     def on_candidate_started(
         self,
