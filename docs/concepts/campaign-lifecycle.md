@@ -18,7 +18,7 @@ The first thing `optimize` does is score your starting prompt on the full scorin
 
 Two things come out of this:
 
-1. **A baseline accuracy number.** Every candidate in every subsequent round must beat this number to become the new best. The optimizer never regresses below the starting point.
+1. **A baseline fitness.** Every individual in every subsequent round must exceed this fitness to become the new best. The optimizer never regresses below the starting point.
 2. **The first critique.** The critique step analyzes the baseline results — which queries hit, which missed, what patterns appear — and writes an initial analysis. Round 1 enters with real data, not a blank slate.
 
 ---
@@ -29,15 +29,15 @@ Each round runs four steps in sequence.
 
 ### Generate
 
-L1 Generate proposes N candidate configurations. Each candidate is a combination of prompt fields (persona, thinking style, instruction, etc.) and pipeline parameters (thresholds, node settings, etc.). L1 reads the previous round's critique and the latest intelligence from search memory, then writes candidates designed to address what the critique flagged.
+L1 Generate evolves N individuals. Each individual is a combination of prompt fields (persona, thinking style, instruction, etc.) and pipeline parameters (thresholds, node settings, etc.). L1 reads the previous round's critique and the latest intelligence from search memory, then proposes individuals designed to address what the critique flagged.
 
 The number of candidates per round is controlled by your campaign config.
 
 ### Evaluate
 
-Each candidate is scored query-by-query against the backend pipeline. The backend receives the candidate's prompt and parameters, processes the query, and returns a result. PromptPotter scores the result and moves to the next query.
+Each individual's fitness is measured query-by-query against the backend pipeline. The backend receives the individual's prompt and parameters, processes the query, and returns a result. PromptPotter scores the result and moves to the next query.
 
-Evaluation has an early-stopping mechanism: once enough queries have run, a paired statistical test can declare a candidate clearly inferior to the current best and stop scoring it. This keeps the campaign moving without wasting budget on candidates that obviously won't win.
+Evaluation has an early-stopping mechanism: once enough queries have run, a paired statistical test can declare an individual clearly inferior to the current best and stop scoring it. This keeps the campaign moving without wasting budget on candidates that obviously won't win.
 
 ### Critique
 
@@ -47,7 +47,7 @@ This critique is written to optimizer memory and becomes the primary signal for 
 
 ### Winner selection
 
-The best-scoring candidate from the round is compared to the current best. If it beats the baseline by at least the configured improvement threshold, it becomes the new current best and the baseline advances. If no candidate beats the baseline, the round produces no winner and the patience counter increments.
+The fittest individual from the round is compared to the current best. If it beats the baseline by at least the configured improvement threshold, it becomes the new current best and the baseline advances. If no candidate beats the baseline, the round produces no winner and the patience counter increments.
 
 ---
 

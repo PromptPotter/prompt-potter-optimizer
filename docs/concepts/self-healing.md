@@ -1,6 +1,6 @@
 # Self-Healing
 
-The optimizer can produce bad candidates in two distinct ways, and it handles each on a separate rail. Failures always attach to the candidate that produced them, never to the round — so one bad candidate can't disrupt the round's winner.
+The optimizer can produce unfit individuals in two distinct ways, and it handles each on a separate rail. Failures always attach to the individual that produced them, never to the round — so one unfit individual can't disrupt the round's winner.
 
 ## The two rails
 
@@ -37,7 +37,7 @@ If the pattern keeps growing across L2 rounds, L3 replans. L3 reads the trail as
 
 ## Why failures attach to candidates, not rounds
 
-If a single bad candidate caused the round to abort, one wild L1 proposal could waste an entire round's budget. By pinning failures to the specific candidate and letting the round's other candidates run to completion, the round's winner is unaffected by a losing candidate's problem.
+If a single unfit individual caused the round to abort, one wild mutation could waste an entire round's budget. By pinning failures to the individual and letting the round's other individuals run to completion, the round's winner is unaffected.
 
 This is also what makes self-healing work at the right cadence. Rail 1 learns from its mistakes in a single round. Rail 2 learns across rounds by accumulating the trail — the *strategic* shape of the search is what's being adjusted, and that demands multi-round feedback.
 

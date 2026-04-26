@@ -2,16 +2,16 @@
 
 ## Setting
 
-At each optimization round, the system generates *N* candidate pipeline configurations (default *N* = 5) via an LLM meta-prompt.[^gen] Each candidate is evaluated on a shared query set **Q** of size *K* (typically 50–500), producing a per-query score in [0, 1] aggregated as a mean composite score.[^scoring] The evaluation budget per round is *N* × *K* backend calls, which dominates wall-clock time. The candidates are pre-enumerated — there is no parameter space to search, only a fixed set to compare.
+At each optimization round, the system evolves *N* individuals (default *N* = 5) via an LLM meta-prompt.[^gen] Each individual's fitness is measured on a shared query set **Q** of size *K* (typically 50–500), producing a per-query score in [0, 1] aggregated as a mean composite score.[^scoring] The evaluation budget per round is *N* × *K* backend calls, which dominates wall-clock time. The population is pre-enumerated — there is no parameter space to search, only a fixed set to compare.
 
 [^gen]: `promptpotter/application/optimization/nodes/l1/generate.py::l1_generate()`.
 [^scoring]: `promptpotter/shared/scoring.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
 
-## Candidate elimination
+## Individual elimination
 
-Candidates are evaluated sequentially on **Q** in the same deterministic order. The first candidate runs to completion (*K* queries), establishing a reference population. Each subsequent candidate is evaluated query by query; once a minimum sample *n_min* (default 20) is reached, a **one-sided paired Wilcoxon signed-rank test** is computed after every query against **all** previously evaluated candidates on the shared query prefix.[^elim]
+Individuals are evaluated sequentially on **Q** in the same deterministic order. The first individual runs to completion (*K* queries), establishing a reference. Each subsequent individual is measured query by query; once a minimum sample *n_min* (default 20) is reached, a **one-sided paired Wilcoxon signed-rank test** is computed after every query against **all** previously evaluated individuals on the shared query prefix.[^elim]
 
-Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the candidate is stopped early. The round winner is selected from all candidates (including early-stopped) by composite score, subject to an improvement threshold (default delta > 0.01).[^winner]
+Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the individual is stopped early. The round winner is selected from the full population (including early-stopped individuals) by composite fitness, subject to an improvement threshold (default delta > 0.01).[^winner]
 
 [^elim]: `promptpotter/shared/statistics.py::should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
 [^winner]: `promptpotter/application/optimization/nodes/l1/score.py::select_round_winner()`.
