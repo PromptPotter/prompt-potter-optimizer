@@ -20,7 +20,8 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
-from promptpotter.domain.scoring import RoundScorer, compile_round_scorer
+from promptpotter.domain.pipeline_schema import NodeType
+from promptpotter.domain.scoring import RoundScorer, compile_round_scorer, extract_candidate_label
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
@@ -53,20 +54,11 @@ __all__ = [
 
 
 def find_rank(candidates: list, ground_truth: str) -> int | None:
-    """Find 1-based rank of ground_truth in a candidates list.
-
-    Works with plain strings, dicts with a ``candidate`` key,
-    and list/tuple entries (uses first element).
-    """
+    """Return 1-based rank of *ground_truth* in *candidates*, or None."""
     if not candidates or not ground_truth:
         return None
     for i, c in enumerate(candidates):
-        name = (
-            c.get("candidate", c)
-            if isinstance(c, dict)
-            else (c[0] if isinstance(c, (list, tuple)) else str(c))
-        )
-        if str(name) == ground_truth:
+        if extract_candidate_label(c) == ground_truth:
             return i + 1
     return None
 
@@ -94,112 +86,78 @@ def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:
     return sum(1 for r in results if is_degraded(r))
 
 
-def _extract_candidate_label(c) -> str:
-    """Extract the display name from a candidate (dict, tuple, or string)."""
-    if isinstance(c, dict):
-        return str(c.get("candidate", c))
-    return c[0] if isinstance(c, (list, tuple)) else str(c)
-
-
 # ---------------------------------------------------------------------------
-# Per-query diagnostics — used by failure analysis and critique payloads.
-# These remain in this module (not in the Evaluator registry) because they
-# return typed mixed values (bool/int/str/None), not the float the registry
-# requires. They piggyback on ``PipelineNode.node_type`` the same way the
-# registry's recall evaluators do.
+# Per-query diagnostics — typed mixed values (bool/int/str/None), keyed off
+# ``PipelineNode.node_type``.
 # ---------------------------------------------------------------------------
-
-
-_DIAG_NODE_TYPES = ("candidate_source", "ranker", "enricher", "cache")
 
 
 def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """Extract per-query diagnostic signals from a single evaluation result.
-
-    Per-query complement to ``compute_pipeline_metrics()`` — returns a flat
-    dict of named diagnostic values derived from the result's ``pipeline_data``
-    and the schema's node types. Node-type metrics are namespaced as
-    ``{node_name}_{metric}`` when multiple nodes share a type.
-    """
+    """Extract per-query diagnostic signals; per-query complement to ``compute_pipeline_metrics``."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
-    diag: dict[str, float | bool | int | str | None] = {}
-
-    diag["terminated_at"] = pd.get("terminated_at")
-    diag["total_time_ms"] = pd.get("total_time")
-    diag["degraded"] = bool((pd.get("diagnostics") or {}).get("warnings"))
-    diag["error"] = is_error_result(result)
-
+    diag: dict[str, float | bool | int | str | None] = {
+        "terminated_at": pd.get("terminated_at"),
+        "total_time_ms": pd.get("total_time"),
+        "degraded": bool((pd.get("diagnostics") or {}).get("warnings")),
+        "error": is_error_result(result),
+    }
     if not pd:
         return diag
 
     type_steps: dict[str, list[PipelineNode]] = {}
     for step in pipeline_schema.nodes:
-        if step.node_type and step.node_type in _DIAG_NODE_TYPES:
+        if step.node_type and step.node_type in _DIAG_DISPATCH:
             type_steps.setdefault(step.node_type, []).append(step)
 
     for _ntype, steps in type_steps.items():
         needs_namespace = len(steps) > 1
         for step in steps:
             prefix = f"{step.name}_" if needs_namespace else ""
-            node_diag = _extract_node_diagnostics(step, pd, gt)
-            for k, v in node_diag.items():
+            for k, v in _DIAG_DISPATCH[step.node_type](step, pd, gt).items():
                 diag[f"{prefix}{k}"] = v
-
     return diag
 
 
-def _extract_node_diagnostics(
-    node: PipelineNode,
-    pipeline_data: Mapping[str, Any],
-    ground_truth: str,
-) -> dict[str, float | bool | int | str | None]:
-    """Extract per-query diagnostics for a single node, dispatched on node_type."""
-    ntype = node.node_type
-    if ntype == "candidate_source":
-        return _diag_candidate_source(node, pipeline_data, ground_truth)
-    if ntype == "ranker":
-        return _diag_ranker(node, pipeline_data, ground_truth)
-    if ntype == "enricher":
-        return _diag_enricher(node, pipeline_data)
-    if ntype == "cache":
-        return _diag_cache(node, pipeline_data)
-    return {}
-
-
-def _gt_position(candidates: list, ground_truth: str) -> int | None:
-    """Return 0-based position of ground_truth in candidates, or None."""
+def _gt_pos(candidates: list, gt: str) -> int | None:
+    """0-based position of *gt* in *candidates*, or None."""
     for i, c in enumerate(candidates):
-        if _extract_candidate_label(c) == ground_truth:
+        if extract_candidate_label(c) == gt:
             return i
     return None
 
 
-def _diag_candidate_source(
-    node: PipelineNode,
+def _diag_ranking(
     pd: Mapping[str, Any],
     gt: str,
+    *,
+    key: str,
+    label: str,
 ) -> dict[str, float | bool | int | str | None]:
-    candidates = pd.get("candidate_ranking", [])
-    pos = _gt_position(candidates, gt)
+    """Shared shape for candidate_source + ranker diagnostics."""
+    candidates = pd.get(key, [])
+    pos = _gt_pos(candidates, gt)
     return {
-        "gt_in_source": pos is not None,
-        "n_source_candidates": len(candidates),
-        "gt_source_rank": pos,
+        f"gt_in_{label}": pos is not None,
+        f"n_{label}_candidates": len(candidates),
+        f"gt_{label}_rank": pos,
     }
 
 
+def _diag_candidate_source(
+    node: PipelineNode, pd: Mapping[str, Any], gt: str
+) -> dict[str, float | bool | int | str | None]:
+    return _diag_ranking(pd, gt, key="candidate_ranking", label="source")
+
+
 def _diag_ranker(
-    node: PipelineNode,
-    pd: Mapping[str, Any],
-    gt: str,
+    node: PipelineNode, pd: Mapping[str, Any], gt: str
 ) -> dict[str, float | bool | int | str | None]:
     candidates = pd.get("final_ranking", [])
-    pos = _gt_position(candidates, gt)
-
+    pos = _gt_pos(candidates, gt)
     top_score_gap: float | None = None
     if len(candidates) >= 2:
         scores = []
@@ -210,7 +168,6 @@ def _diag_ranker(
                 scores.append(float(c[1]))
         if len(scores) == 2:
             top_score_gap = scores[0] - scores[1]
-
     return {
         "gt_in_ranked": pos is not None,
         "n_final_ranking": len(candidates),
@@ -220,22 +177,25 @@ def _diag_ranker(
 
 
 def _diag_enricher(
-    node: PipelineNode,
-    pd: Mapping[str, Any],
+    node: PipelineNode, pd: Mapping[str, Any], _gt: str
 ) -> dict[str, float | bool | int | str | None]:
-    n = 0
-    for mapping in node.observation_mappings:
-        if pd.get(mapping.pipeline_key) is not None:
-            n += 1
+    n = sum(1 for m in node.observation_mappings if pd.get(m.pipeline_key) is not None)
     return {"n_enriched_fields": n}
 
 
 def _diag_cache(
-    node: PipelineNode,
-    pd: Mapping[str, Any],
+    node: PipelineNode, pd: Mapping[str, Any], _gt: str
 ) -> dict[str, float | bool | int | str | None]:
     timings = pd.get("step_timings") or {}
     return {"cache_hit": timings.get(node.name) is not None}
+
+
+_DIAG_DISPATCH: dict[str, Any] = {
+    NodeType.CANDIDATE_SOURCE: _diag_candidate_source,
+    NodeType.RANKER: _diag_ranker,
+    NodeType.ENRICHER: _diag_enricher,
+    NodeType.CACHE: _diag_cache,
+}
 
 
 # ---------------------------------------------------------------------------

@@ -179,12 +179,6 @@ def auto_mint_session(
     sessions.create(session_id, state)
     sessions.ensure_narrative_files(session_id)
 
-    session.store.campaigns.create(
-        session.backend_id,
-        cycle_id,
-        {"parent_session_id": session_id},
-    )
-
     save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     logger.info("Auto-minted session %s + cycle %s", session_id, cycle_id)
     return session_id, cycle_id

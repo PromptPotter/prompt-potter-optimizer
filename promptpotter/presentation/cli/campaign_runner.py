@@ -309,6 +309,7 @@ def _build_live_display(
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.callbacks import RunListener
+    from promptpotter.application.campaign.data import build_campaign_emitter
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -318,9 +319,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
     from promptpotter.infrastructure.persistence.control import make_control_check
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
-    from promptpotter.infrastructure.persistence.session_emitter import (
-        CampaignPersistenceEmitter,
-    )
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
@@ -361,22 +359,12 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     # prior dashboard.json for resume continuity; baseline accuracy is
     # stamped later during the INIT exit phase.
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
-    opt = campaign_config.optimization
-    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-    emitter = CampaignPersistenceEmitter.for_session(
-        pre_baseline_acc,
-        ctx.cycle_id,
-        project_root=str(session.store.base_dir),
-        session_id=ctx.session_id,
-        max_rounds=opt.max_rounds or 999,
-        l1_patience=opt.l1_patience,
-        active_nodes=active_steps,
-        model=campaign_config.optimizer_llm.model or "",
-        n_variants=opt.n_variants,
-        sp_budget_ttest=campaign_config.sp_budget_ttest,
-        resumed_from_round=resume_from_round,
+    emitter = build_campaign_emitter(
+        session,
+        campaign_config,
+        baseline_accuracy=pre_baseline_acc,
         dataset_count=ctx.state["dataset_count"],
-        backend_id=ctx.backend_id,
+        resumed_from_round=resume_from_round,
         recorder_provider=get_round_recorder,
     )
     control_reader = make_control_check(session_dir)

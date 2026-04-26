@@ -136,6 +136,18 @@ class QueryRunner(Protocol):
 
 
 # ---------------------------------------------------------------------------
+# Candidate-label extraction — one definition, used by metrics/evaluators/views
+# ---------------------------------------------------------------------------
+
+
+def extract_candidate_label(c: Any) -> str:
+    """Return display name of a candidate (dict ``{candidate: ...}``, list/tuple, or string)."""
+    if isinstance(c, dict):
+        return str(c.get("candidate", c))
+    return c[0] if isinstance(c, (list, tuple)) else str(c)
+
+
+# ---------------------------------------------------------------------------
 # Scorer type aliases + sentinel ids
 # ---------------------------------------------------------------------------
 

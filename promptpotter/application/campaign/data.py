@@ -28,12 +28,49 @@ __all__ = [
     "DatasetRunSummary",
     "DatasetSummary",
     "build_all_index_terms",
+    "build_campaign_emitter",
     "extract_campaign_baseline",
     "load_baseline_prompt",
     "prepare_datasets",
     "prepare_scoring_context",
     "summarize_dataset_runs",
 ]
+
+
+def build_campaign_emitter(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    baseline_accuracy: float,
+    dataset_count: int | None = None,
+    resumed_from_round: int | None = None,
+    recorder_provider: Any | None = None,
+    phase_view_builder: Any | None = None,
+) -> Any:
+    """Build the campaign persistence emitter from session + config. Single factory shared by CLI and runner."""
+    from promptpotter.infrastructure.persistence.session_emitter import (
+        CampaignPersistenceEmitter,
+    )
+
+    opt = campaign_config.optimization
+    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
+    return CampaignPersistenceEmitter.for_session(
+        baseline_accuracy,
+        session.cycle_id,
+        project_root=session.project_root,
+        session_id=session.session_id,
+        max_rounds=opt.max_rounds or 999,
+        l1_patience=opt.l1_patience,
+        active_nodes=active_steps,
+        model=campaign_config.optimizer_llm.model or "",
+        n_variants=opt.n_variants,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        resumed_from_round=resumed_from_round,
+        dataset_count=dataset_count,
+        backend_id=session.backend_id,
+        recorder_provider=recorder_provider,
+        phase_view_builder=phase_view_builder,
+    )
 
 
 class CampaignBaseline(NamedTuple):

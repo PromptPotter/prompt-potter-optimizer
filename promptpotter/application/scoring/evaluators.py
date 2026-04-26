@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
+from promptpotter.domain.scoring import extract_candidate_label
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
@@ -88,12 +89,6 @@ def compute_latency_norm(*, results: list[QueryResult], **_: Any) -> float:
     return max(0.0, 1.0 - mean_ms / LATENCY_BUDGET_MS)
 
 
-def _extract_candidate_label(c: Any) -> str:
-    if isinstance(c, dict):
-        return str(c.get("candidate", c))
-    return c[0] if isinstance(c, (list, tuple)) else str(c)
-
-
 def _compute_recall(
     *,
     results: list[QueryResult],
@@ -120,7 +115,7 @@ def _compute_recall(
         raw = pd.get(candidate_key)
         candidates: list = list(raw) if isinstance(raw, list) else []
         gt = r.get("ground_truth", "")
-        if any(_extract_candidate_label(c) == gt for c in candidates):
+        if any(extract_candidate_label(c) == gt for c in candidates):
             found += 1
     return found / len(scoped)
 

@@ -400,21 +400,14 @@ async def run_optimization(
     )
 
     if emitter is None:
-        opt = campaign_config.optimization
-        emitter = CampaignPersistenceEmitter.for_session(
-            baseline.baseline_acc,
-            session.cycle_id,
-            project_root=session.project_root,
-            session_id=session.session_id,
-            max_rounds=opt.max_rounds or 999,
-            l1_patience=opt.l1_patience,
-            active_nodes=active_steps,
-            model=campaign_config.optimizer_llm.model or "",
-            n_variants=opt.n_variants,
-            sp_budget_ttest=campaign_config.sp_budget_ttest,
-            resumed_from_round=session.resumed_from_round,
+        from promptpotter.application.campaign.data import build_campaign_emitter
+
+        emitter = build_campaign_emitter(
+            session,
+            campaign_config,
+            baseline_accuracy=baseline.baseline_acc,
             dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
-            backend_id=session.backend_id,
+            resumed_from_round=session.resumed_from_round,
             recorder_provider=get_round_recorder,
             phase_view_builder=build_phase_view,
         )
