@@ -65,4 +65,4 @@ Project memory flags TermNorm `llm_only` returning empty → 0% campaigns. Noteb
 
 ## Related tools
 
-BBEH numbers feed `docs/research/table-sup-1.md`. CAPO/DSPy equivalents at `bbeh-comparison/bbeh_capo.ipynb` and `bbeh_dspy.ipynb` (Colab).
+BBEH numbers feed `docs/research/related-work.md` (head-to-head matchup tables). CAPO/DSPy equivalents at `bbeh-comparison/bbeh_capo.ipynb` and `bbeh_dspy.ipynb` (Colab).

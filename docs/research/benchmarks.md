@@ -124,19 +124,22 @@ All methods evaluated under identical conditions:
 
 ## Baselines
 
+The bbeh-comparison harness is deliberately scoped to **prompt-optimization peers in the algorithm-configuration umbrella** (CAPO, GEPA, MIPROv2, BootstrapFewShot vs. PromptPotter). AlphaEvolve and OpenEvolve target source-code algorithms rather than prompts on a fixed pipeline. See [`related-work.md`](related-work.md)
+
 | Method | Description | Source |
 |--------|-------------|--------|
 | Zero-shot | Raw question, no system prompt | Manual |
 | Few-shot (manual) | Hand-crafted 3-shot examples | Manual |
+| PromptPotter | LLM-driven program evolution | This work |
+| AlphaEvolve | LLM-driven program evolution | [DeepMind, 2025](https://arxiv.org/abs/2506.13131) |
+| OpenEvolve | Open re-implementation of AlphaEvolve | [repo](https://github.com/algorithmicsuperintelligence/openevolve) |
+|--------|-------------|--------|
 | DSPy Bootstrap | DSPy's bootstrap few-shot optimizer | [DSPy library](https://github.com/stanfordnlp/dspy) |
 | MIPROv2 | DSPy's MIPRO v2 instruction + demo optimizer (cited) | [Opsahl-Ong et al., 2024](https://arxiv.org/abs/2406.11695) |
 | GEPA | Reflective prompt evolution with trajectory feedback (cited) | [GEPA, 2025](https://github.com/stanfordnlp/dspy) |
 | Promptomatix | Meta-prompt + DSPy compiler, cost-aware (cited) | Salesforce, 2025 |
 | adv-CoT | Adversarial generator-discriminator for reasoning (cited) | adv-CoT, 2025 |
 | PromptWizard | Critique-guided prompt optimization (cited) | [Microsoft, 2024](https://arxiv.org/abs/2405.18369) |
-| PromptPotter (L1 only) | L1 generate + evaluate, no L2/L3 | This work |
-| PromptPotter (L1+L2) | L1 + L2 context refinement | This work |
-| PromptPotter (full) | L1 + L2 + L3 replanning | This work |
 
 ---
 
@@ -188,4 +191,4 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 Wall-clock numbers in this document rely on prior-result reuse from `dataset_runs/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
-See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for competitor positioning and the AutoML racing lineage.
+See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.

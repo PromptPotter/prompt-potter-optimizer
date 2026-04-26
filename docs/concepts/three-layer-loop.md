@@ -67,7 +67,7 @@ For the mechanics of each layer — what data flows in, what memory persists, wh
 
 ## Inspiration and call sites
 
-The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). This separates failure analysis (critique) from candidate generation (L1 generate), which keeps the two from interfering.
+The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). This separates failure analysis (critique) from candidate generation (L1 generate), which keeps the two from interfering. The broader paradigm — LLM-driven algorithm configuration — is surveyed in [`../research/related-work.md`](../research/related-work.md), where PromptPotter sits alongside AlphaEvolve, OpenEvolve, MIPROv2, GEPA, and PromptWizard as flat siblings under one umbrella.
 
 Five LLM call sites in the loop: `restructure` (one-time prompt decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`.
 

@@ -6,6 +6,8 @@ The same decomposition applies recursively: the optimizer's own meta-prompts —
 
 ## Rendering pipeline
 
+`PromptTemplate.render()` joins three groups with blank lines:
+
 ```
 ┌─ PROMPT_STRING_FIELDS (6) ───────────────┐
 │  1. persona                              │
@@ -24,6 +26,8 @@ The same decomposition applies recursively: the optimizer's own meta-prompts —
 │  8. L3 strategic framework (appended)    │
 └──────────────────────────────────────────┘
 ```
+
+L2-driven add/remove of fields is a future direction — see [../concepts/three-layer-loop.md § The dynamic field set](../concepts/three-layer-loop.md).
 
 ## SearchPoint hierarchy
 
@@ -57,9 +61,7 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 | 7 | `few_shot_examples` | L1 | No | Input/Output demonstration pairs (rendered separately) |
 | 8 | `plan` | L3 | No | Strategic optimization framework (rendered at end) |
 
-Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are rendered explicitly after the string fields.
-
-Dynamic field mutation (L2-driven add/remove) is a future direction — see [../concepts/three-layer-loop.md § The dynamic field set](../concepts/three-layer-loop.md).
+Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are appended by `PromptTemplate.render()` after the string fields.
 
 ---
 
