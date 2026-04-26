@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import logging
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
@@ -121,15 +120,14 @@ def bootstrap_cycle(
     *,
     parent_session_id: str = "",
     resume_from_round_override: int | None = None,
-) -> tuple[CampaignStore | None, str | None, int]:
-    """Open the store and resume/create the cycle in one shot. Returns ``(store, cycle_id, resumed_from_round)``."""
+) -> tuple[str | None, int]:
+    """Resume or create the cycle via ``session.store.campaigns``. Returns ``(cycle_id, resumed_from_round)``."""
     from promptpotter.domain.cycle_identity import cycle_config_identity
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
 
-    if not (session.project_root and session.backend_id):
-        return None, None, 0
+    if not session.backend_id:
+        return None, 0
     try:
-        store = CampaignStore(Path(session.project_root))
+        store = session.store.campaigns
         resolved = cycle_id_override or cycle_config_identity(
             config,
             baseline_render,
@@ -151,7 +149,7 @@ def bootstrap_cycle(
             hot_update_keys=HOT_UPDATEABLE_KEYS if cycle_id_override else frozenset(),
             parent_session_id=parent_session_id,
         )
-        return store, resolved, resumed_from
+        return resolved, resumed_from
     except (OSError, json.JSONDecodeError, KeyError):
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, None, 0
+        return None, 0

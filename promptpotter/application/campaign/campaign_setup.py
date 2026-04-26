@@ -18,10 +18,10 @@ from promptpotter.config.settings import (
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import RoundScorer, Scorer
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
-from promptpotter.shared.scoring import RoundScorer, Scorer
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.callbacks import RunListener
@@ -32,7 +32,6 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
@@ -68,7 +67,6 @@ class Session:
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
 
-    campaign_store: CampaignStore | None = None
     obs_campaign_id: str = ""
     scoring_dataset: list[Sample] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
@@ -101,7 +99,7 @@ def populate_session_scoring(
     source: str = "optimization_loop",
 ) -> None:
     """Attach the scoring block onto ``session`` (mutates in place)."""
-    from promptpotter.shared.scoring import (
+    from promptpotter.domain.scoring import (
         auto_scorer_id,
         compile_round_scorer,
         compile_scorer,
@@ -386,8 +384,8 @@ async def init_optimization_loop(
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import build_degradation_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
+    from promptpotter.domain.scoring import compile_round_scorer
     from promptpotter.infrastructure.tracing import ObservabilityBridge
-    from promptpotter.shared.scoring import compile_round_scorer
 
     opt = config.optimization
     preflight_warnings = run_preflight_checks(config, dataset)
@@ -424,7 +422,7 @@ async def init_optimization_loop(
     )
 
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-    campaign_store, resolved_cycle_id, resumed_from_round = bootstrap_cycle(
+    resolved_cycle_id, resumed_from_round = bootstrap_cycle(
         config,
         session,
         baseline_osp.render(),
@@ -459,9 +457,9 @@ async def init_optimization_loop(
         scorer_id=scorer_id,
     )
 
-    if resumed_from_round > 0 and campaign_store and resolved_cycle_id:
+    if resumed_from_round > 0 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
-            campaign_store,
+            session.store.campaigns,
             session.backend_id,
             resolved_cycle_id,
             resumed_from_round,
@@ -487,7 +485,6 @@ async def init_optimization_loop(
     )
     cycle.search_memory = search_memory
 
-    session.campaign_store = campaign_store
     if resolved_cycle_id:
         session.cycle_id = resolved_cycle_id
     session.obs_campaign_id = obs_campaign_id

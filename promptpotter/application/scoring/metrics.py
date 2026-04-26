@@ -20,8 +20,8 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
+from promptpotter.domain.scoring import RoundScorer, compile_round_scorer
 from promptpotter.shared.errors import is_degraded, is_error_result
-from promptpotter.shared.scoring import RoundScorer, compile_round_scorer
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import (
@@ -258,7 +258,7 @@ def compute_pipeline_metrics(
     the result of evaluating ``round_scorer`` against that namespace.
 
     - ``round_scorer`` can be a compiled callable (via
-      ``shared.scoring.compile_round_scorer``), a formula string, or
+      ``domain.scoring.compile_round_scorer``), a formula string, or
       ``None``. ``None`` uses the default formula produced by
       ``default_per_round_formula(schema)`` — reproduces the pre-migration
       4-bundle weighted sum on schemas that ship with recall nodes.

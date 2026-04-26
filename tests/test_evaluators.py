@@ -15,7 +15,7 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.shared.scoring import compile_round_scorer
+from promptpotter.domain.scoring import compile_round_scorer
 
 # ---------------------------------------------------------------------------
 # Fixtures

@@ -28,13 +28,13 @@ def finalize_optimization_run(
     campaign_config: CampaignConfig,
 ) -> str | None:
     """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
-    if session.campaign_store and session.cycle_id:
+    if session.cycle_id:
         status = {
             StopReason.USER_PAUSED: "paused",
             StopReason.USER_STOPPED: "stopped",
             StopReason.INTERRUPTED: "interrupted",
         }.get(stop_reason, "completed")
-        session.campaign_store.mark_finished(
+        session.store.campaigns.mark_finished(
             session.backend_id,
             session.cycle_id,
             status=status,

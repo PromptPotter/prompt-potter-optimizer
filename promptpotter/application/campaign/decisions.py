@@ -338,8 +338,8 @@ def resume_with_divergence_check(
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
     """Rescore prior trials under the active scorer; halt or fork on divergence."""
+    from promptpotter.domain.scoring import rescore_results
     from promptpotter.shared.errors import ResumeDivergenceError
-    from promptpotter.shared.scoring import rescore_results
 
     assert session.scorer is not None, "session.scorer required for divergence replay"
     prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)

@@ -10,7 +10,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
@@ -93,31 +93,6 @@ def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dic
 
     log = logger.info if _VERBOSE else _noop
     return configure_and_apply_pipeline(session, campaign_config, log=log)
-
-
-async def prepare_scoring_context(
-    session: Session,
-    train_data: list | None,
-    campaign_config: CampaignConfig | None = None,
-    pipeline_params: dict | None = None,
-    listener: Any | None = None,
-):
-    """Load baseline + dataset, run baseline eval on full dataset."""
-    from promptpotter.application.campaign.data import prepare_scoring_context as _svc_prepare
-
-    baseline, dataset, campaign_rounds, baseline_results = await _svc_prepare(
-        session.experiment_extract,
-        train_data,
-        campaign_config,
-        pipeline_params=pipeline_params,
-        pipeline_schema=session.pipeline_schema,
-        svc=session,
-        listener=listener,
-    )
-
-    if _VERBOSE:
-        logger.info("Evaluation data: %d queries", len(dataset))
-    return baseline, dataset, campaign_rounds, baseline_results
 
 
 def load_cli_baseline(session: Session):

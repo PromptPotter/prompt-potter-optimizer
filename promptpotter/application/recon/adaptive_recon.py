@@ -565,7 +565,7 @@ async def run_adaptive_recon(
     resolved_axes: set[str] = set()
     log_rows: list[dict] = []
 
-    from promptpotter.shared.scoring import compile_scorer
+    from promptpotter.domain.scoring import compile_scorer
 
     # Populate the session's scoring block for this adaptive recon pass.
     session.pipeline_schema = pipeline_schema

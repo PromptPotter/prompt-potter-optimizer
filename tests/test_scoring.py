@@ -2,7 +2,7 @@
 
 import pytest
 
-from promptpotter.shared.scoring import (
+from promptpotter.domain.scoring import (
     _aime_match,
     _exact_match,
     _extract_gsm8k_number,

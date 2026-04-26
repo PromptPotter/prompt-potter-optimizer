@@ -87,8 +87,8 @@ async def _generate_or_load_candidates(
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
 
-    if session.campaign_store and session.cycle_id:
-        persisted = session.campaign_store.load_round_candidates(
+    if session.cycle_id:
+        persisted = session.store.campaigns.load_round_candidates(
             session.backend_id,
             session.cycle_id,
             round_num,
@@ -141,8 +141,8 @@ async def _generate_or_load_candidates(
             round_num=round_num,
         )
 
-    if session.campaign_store and session.cycle_id:
-        session.campaign_store.save_round_candidates(
+    if session.cycle_id:
+        session.store.campaigns.save_round_candidates(
             session.backend_id,
             session.cycle_id,
             round_num,

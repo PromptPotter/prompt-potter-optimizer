@@ -18,7 +18,7 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.application.scoring.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
-from promptpotter.domain.scoring import QueryResult
+from promptpotter.domain.scoring import QueryResult, Scorer, rescore_results
 from promptpotter.shared.errors import (
     ErrorCategory,
     error_category,
@@ -27,7 +27,6 @@ from promptpotter.shared.errors import (
 from promptpotter.shared.errors import (
     is_degraded as _is_degraded,
 )
-from promptpotter.shared.scoring import Scorer, rescore_results
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session

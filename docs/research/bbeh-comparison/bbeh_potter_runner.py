@@ -17,7 +17,7 @@ from promptpotter.presentation.ui.campaign import (
     prepare_scoring_context,
     run_optimization_notebook,
 )
-from promptpotter.shared.scoring import SCORING_FUNCTIONS
+from promptpotter.domain.scoring import SCORING_FUNCTIONS
 
 BBEH_TASK_DESCRIPTION = (
     "Solve a reasoning problem from BIG-Bench Extra Hard (BBEH), which spans 23 "

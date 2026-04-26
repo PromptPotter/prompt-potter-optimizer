@@ -36,7 +36,6 @@ from promptpotter.presentation.cli.bootstrap import (
     init_services_cli,
     load_cli_baseline,
     log_startup_summary,
-    prepare_scoring_context,
     set_verbose,
 )
 from promptpotter.presentation.cli.result import CommandResult
@@ -276,8 +275,8 @@ def _build_live_display(
     baseline_acc: float,
 ):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
+    from promptpotter.domain.scoring import split_scoring_block
     from promptpotter.presentation.views.display_primitives import set_display_tags
-    from promptpotter.shared.scoring import split_scoring_block
 
     set_display_tags(session.pipeline_schema)
     scoring_formula = split_scoring_block(campaign_config.scoring).per_query
@@ -310,7 +309,6 @@ def _build_live_display(
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
     from promptpotter.application.campaign.callbacks import RunListener
-    from promptpotter.application.campaign.data import extract_campaign_baseline
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -397,34 +395,18 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
     listener.display = display
 
-    # Re-run baseline (fast — cached) to populate baseline_results for L1 critique
-    _baseline, dataset, campaign_rounds, _baseline_results = await prepare_scoring_context(
-        session,
-        train_data,
-        campaign_config,
-        pipeline_params=pipeline_params,
-        listener=listener,
-    )
     ctx.save_phase("optimizing")
 
     set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
 
-    baseline = extract_campaign_baseline(campaign_rounds)
-    # Display was built with ``pre_baseline_acc`` from resume state (0.0 on
-    # first run or when prior kill happened before baseline finished). The
-    # re-run above produced the fresh value — push it in now so per-candidate
-    # deltas, round headers, and best-tracking render against the actual
-    # baseline instead of 0 %.
-    display.set_baseline(baseline.baseline_acc)
-    state_path = campaign_dir / "dashboard.json"
     from promptpotter.shared.errors import ResumeDivergenceError
 
     try:
         cycle_result = await _orch_run_optimization(
-            dataset,
+            train_data,
             campaign_config,
-            baseline=baseline,
             session=session,
+            listener=listener,
             experiment_id=ctx.state["experiment_id"],
             task_context=ctx.task_context,
             session_id=ctx.session_id,
@@ -465,10 +447,11 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     ctx.save_phase("optimize")
 
     result_path = campaign_dir / "optimize_result.json"
+    dashboard_path = campaign_dir / "dashboard.json"
     return CommandResult(
         data=cycle_result.model_dump(),
         human=(
-            f"Campaign: {cycle_result.cycle_id}\nDashboard: {state_path}\nResult: {result_path}"
+            f"Campaign: {cycle_result.cycle_id}\nDashboard: {dashboard_path}\nResult: {result_path}"
         ),
     )
 

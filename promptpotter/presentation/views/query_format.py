@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from promptpotter.application.optimization.elimination import FATAL_WARNINGS
 from promptpotter.application.optimization.utils import extract_warning_types
+from promptpotter.domain.scoring import extract_display_answer
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.scoring import extract_display_answer
 
 from .display_primitives import _DISPLAY_TAGS, DIM, RED, RESET, YELLOW, _step_tag
 

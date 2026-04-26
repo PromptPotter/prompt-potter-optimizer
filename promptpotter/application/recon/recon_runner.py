@@ -86,7 +86,7 @@ async def run_recon(
         dataset = random.Random(42).sample(dataset, sample_size)
 
     # Populate the session's scoring block for this recon pass.
-    from promptpotter.shared.scoring import compile_scorer
+    from promptpotter.domain.scoring import compile_scorer
 
     scan_session = session
     scan_session.pipeline_schema = pipeline_schema

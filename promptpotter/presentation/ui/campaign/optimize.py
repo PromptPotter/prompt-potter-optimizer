@@ -240,7 +240,7 @@ async def run_optimization_notebook(
     _bl = _extract_campaign_baseline(campaign_rounds)
     baseline_acc = _bl.baseline_acc
 
-    from promptpotter.shared.scoring import split_scoring_block
+    from promptpotter.domain.scoring import split_scoring_block
 
     l1_patience = campaign_config.optimization.l1_patience
     display = NotebookDisplay(

@@ -10,8 +10,8 @@ from promptpotter.application.campaign.decisions import (
     _fork_at_divergence,
     replay_decisions,
 )
+from promptpotter.domain.scoring import compile_scorer, rescore_results
 from promptpotter.infrastructure.store.stores import build_stores
-from promptpotter.shared.scoring import compile_scorer, rescore_results
 
 
 def test_rescore_results_accumulates_and_projects_active() -> None:

@@ -93,9 +93,9 @@ async def _post_round(
     if cycle.pending_decisions:
         round_result.decisions.extend(cycle.flush_decisions())
 
-    if session.campaign_store and session.cycle_id:
+    if session.cycle_id:
         with graceful("Round checkpoint failed"):
-            session.campaign_store.add_trial(
+            session.store.campaigns.add_trial(
                 session.backend_id,
                 session.cycle_id,
                 cycle.checkpoint(round_result, round_num),
@@ -270,8 +270,8 @@ async def _run_round_loop(
                     )
                 elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
                     raise StopLoop(StopReason.ABORT)
-                if session.campaign_store and session.cycle_id:
-                    session.campaign_store.delete_round_candidates(
+                if session.cycle_id:
+                    session.store.campaigns.delete_round_candidates(
                         session.backend_id,
                         session.cycle_id,
                         round_num + 1,
@@ -300,8 +300,9 @@ async def run_optimization(
     dataset: list[Sample],
     campaign_config: CampaignConfig,
     *,
-    baseline: CampaignBaseline,
     session: Session,
+    baseline: CampaignBaseline | None = None,
+    listener: RunListener | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
@@ -314,8 +315,28 @@ async def run_optimization(
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
 ) -> RunResult:
-    """Run the full optimization loop from a prepared baseline. Returns RunResult (never None)."""
+    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult."""
     started_at = datetime.now(UTC).isoformat()
+
+    if baseline is None:
+        from promptpotter.application.campaign.data import (
+            extract_campaign_baseline,
+            prepare_scoring_context,
+        )
+
+        _, _, campaign_rounds, _ = await prepare_scoring_context(
+            session.experiment_extract,
+            dataset,
+            campaign_config,
+            pipeline_params=session.pipeline_params,
+            pipeline_schema=session.pipeline_schema,
+            svc=session,
+            listener=listener,
+        )
+        baseline = extract_campaign_baseline(campaign_rounds)
+        if display is not None and hasattr(display, "set_baseline"):
+            display.set_baseline(baseline.baseline_acc)
+
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
 
     if not session_id:
@@ -346,7 +367,7 @@ async def run_optimization(
     if cycle_id:
         session.cycle_id = cycle_id
 
-    from promptpotter.shared.scoring import split_scoring_block
+    from promptpotter.domain.scoring import split_scoring_block
 
     scoring_spec = split_scoring_block(campaign_config.scoring)
 
@@ -357,7 +378,7 @@ async def run_optimization(
     else:
         resolved_task_context = TaskDecomposition()
 
-    cb = RunListener(display=display, control=control)
+    cb = listener if listener is not None else RunListener(display=display, control=control)
 
     cycle = await init_optimization_loop(
         baseline,
