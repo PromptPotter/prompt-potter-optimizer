@@ -23,18 +23,11 @@
       "max_rounds": 15,
       "n_variants": 3,
       "creativity": 0.7,
-      "improvement_threshold": 0.01,
-      "seed": 42,
-      "max_failures": 15,
-      "degradation_threshold": 0.4,
       "backend_warning_threshold": 2,
-      "enable_l2": true,
-      "enable_l3": true,
       "l2_patience": 2,
       "l3_patience": 1,
       "l2_temperature": 0.3,
-      "l3_temperature": 0.5,
-      "enable_l1_critique": true
+      "l3_temperature": 0.5
     },
     "optimizer_llm": {
       "model": "openai/gpt-oss-120b",
