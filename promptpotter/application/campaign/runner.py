@@ -74,59 +74,6 @@ async def _escalate_or_stop(
         raise StopLoop(stop)
 
 
-async def _handle_escalation_signal(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    round_result: RoundResult,
-    round_num: int,
-    cb: RunListener,
-) -> None:
-    signal = round_result.escalation_signal
-    assert signal is not None
-    emit_phase(
-        cb.on_phase,
-        CampaignPhase.ESCALATION,
-        "enter",
-        round=round_num,
-        check_name=signal.check_name,
-        target=signal.target,
-        degraded_rate=signal.check_result.get("degraded_rate"),
-        warning_types=signal.check_result.get("warning_types"),
-    )
-
-    if (
-        signal.target in (EscalationTarget.L2, EscalationTarget.L3)
-        and config.optimization.enable_l2
-    ):
-        cycle.opt_sp.append_escalation(
-            build_escalation_entry(
-                round_num,
-                signal.check_result,
-                cycle.current_sp.pipeline_params if cycle.current_sp else None,
-            )
-        )
-        await _escalate_or_stop(
-            cycle,
-            config,
-            session,
-            round_num,
-            cb,
-            from_degradation=True,
-            escalation_check_result=signal.check_result,
-        )
-    elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
-        raise StopLoop(StopReason.ABORT)
-
-    if session.campaign_store and session.cycle_id:
-        session.campaign_store.delete_round_candidates(
-            session.backend_id,
-            session.cycle_id,
-            round_num + 1,
-        )
-    emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
-
-
 async def _post_round(
     cycle: Cycle,
     round_result: RoundResult,
@@ -298,7 +245,43 @@ async def _run_round_loop(
                 continue
 
             if round_result.escalation_signal:
-                await _handle_escalation_signal(cycle, config, session, round_result, round_num, cb)
+                signal = round_result.escalation_signal
+                emit_phase(
+                    cb.on_phase,
+                    CampaignPhase.ESCALATION,
+                    "enter",
+                    round=round_num,
+                    check_name=signal.check_name,
+                    target=signal.target,
+                    degraded_rate=signal.check_result.get("degraded_rate"),
+                    warning_types=signal.check_result.get("warning_types"),
+                )
+                if signal.target in (EscalationTarget.L2, EscalationTarget.L3) and opt.enable_l2:
+                    cycle.opt_sp.append_escalation(
+                        build_escalation_entry(
+                            round_num,
+                            signal.check_result,
+                            cycle.current_sp.pipeline_params if cycle.current_sp else None,
+                        )
+                    )
+                    await _escalate_or_stop(
+                        cycle,
+                        config,
+                        session,
+                        round_num,
+                        cb,
+                        from_degradation=True,
+                        escalation_check_result=signal.check_result,
+                    )
+                elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
+                    raise StopLoop(StopReason.ABORT)
+                if session.campaign_store and session.cycle_id:
+                    session.campaign_store.delete_round_candidates(
+                        session.backend_id,
+                        session.cycle_id,
+                        round_num + 1,
+                    )
+                emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
                 round_num += 1
                 continue
 
