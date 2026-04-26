@@ -59,13 +59,8 @@ class AdaptivePrefixConfig(BaseModel):
     )
     cold_start_prior_sigma: float = Field(
         1.5,
-        description="Sigma on theta prior when no observations yet — tight prior pulls "
-        "cold-start candidates toward kernel-weighted neighbors.",
+        description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
     )
-    kernel_lineage_weight: float = Field(0.3)
-    kernel_param_weight: float = Field(0.5)
-    kernel_prompt_weight: float = Field(0.2)
-    kernel_lineage_decay: float = Field(0.5)
 
 
 class HardSampleSorterConfig(BaseModel):
@@ -104,13 +99,13 @@ class OptimizationConfig(BaseModel):
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
-    improvement_threshold: float = Field(0.01, description="Min accuracy delta")
-    seed: int = Field(42, description="Random seed")
-    max_failures: int = Field(15, description="Max failure examples fed to L1")
+    improvement_threshold: float = Field(..., description="Min accuracy delta")
+    seed: int = Field(..., description="Random seed")
+    max_failures: int = Field(..., description="Max failure examples fed to L1")
 
     # L2/L3 escalation
-    enable_l2: bool = Field(True)
-    enable_l3: bool = Field(True)
+    enable_l2: bool = Field(...)
+    enable_l3: bool = Field(...)
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     l2_temperature: float = Field(0.3)
@@ -121,7 +116,7 @@ class OptimizationConfig(BaseModel):
     l1_critique_near_miss_ratio: float = Field(0.3)
 
     # Degradation / escalation
-    degradation_threshold: float = Field(0.4)
+    degradation_threshold: float = Field(...)
     empty_output_threshold: float = Field(0.5)
     backend_warning_threshold: int = Field(2)
 
@@ -172,14 +167,12 @@ class CampaignConfig(BaseModel):
     scoring: str | dict[str, str] | None = Field(None)
 
     # Nested
-    optimization: OptimizationConfig = Field(default_factory=OptimizationConfig)
+    optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
 
 
-def load_campaign_config(raw: dict | CampaignConfig | None) -> CampaignConfig:
+def load_campaign_config(raw: dict | CampaignConfig) -> CampaignConfig:
     """Normalize raw dict / Pydantic input into a validated ``CampaignConfig``."""
-    if raw is None:
-        return CampaignConfig()
     if isinstance(raw, CampaignConfig):
         return raw
     return CampaignConfig.model_validate(raw)

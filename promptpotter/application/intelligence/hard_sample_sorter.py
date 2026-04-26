@@ -5,15 +5,10 @@ a θ_c-ranked candidate list and a δ_s-ranked sample difficulty list, joined in
 a candidate × sample hit/miss/unmeasured matrix. Works standalone — no optimizer
 loop required. Full spec: ``docs/specs/hard-sample-sorter.md``.
 
-Two pure builders:
-
-- ``build_candidate_sample_matrix(rounds)`` — the phase-1 primitive. Returns the
-  raw ``{(cid, sid): hit}`` map; unmeasured cells are absent (callers read via
-  ``matrix.get(...)`` for the tri-state).
-- ``build_hard_samples_artifact(rounds, ...)`` — the phase-2 artifact. Fits
-  Rasch, resolves the spec's axis sort contract, and emits the dict that the
-  CLI renderer, the FastAPI endpoint, and the webapp heatmap all consume. Caps
-  to top-K on disk; pass ``top_k_*=None`` for the full matrix.
+``build_hard_samples_artifact(rounds, ...)`` fits Rasch, resolves the spec's
+axis sort contract, and emits the dict that the CLI renderer, the FastAPI
+endpoint, and the webapp heatmap all consume. Caps to top-K on disk; pass
+``top_k_*=None`` for the full matrix.
 
 Pure read-only — no I/O, no mutation of inputs. Reuses ``build_observations``
 so the error-flag and missing-sample-id policy is defined in exactly one place.
@@ -33,24 +28,11 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ARTIFACT_SCHEMA_VERSION",
-    "build_candidate_sample_matrix",
     "build_hard_samples_artifact",
     "empty_artifact",
 ]
 
 ARTIFACT_SCHEMA_VERSION = 1
-
-
-def build_candidate_sample_matrix(
-    rounds: list[RoundResult],
-) -> dict[tuple[str, int], bool]:
-    """Flatten per-round results into a sparse ``(candidate_id, sample_id) → hit`` map.
-
-    Unmeasured cells are absent; callers distinguish hit/miss/none via
-    ``matrix.get((cid, sid))`` (returns ``None`` when unmeasured). This tri-state
-    is the contract the ASCII heatmap and webapp heatmap consume.
-    """
-    return {(o.candidate_id, o.sample_id): o.hit for o in build_observations(rounds)}
 
 
 def _candidate_hit_rates(observations: list[Observation]) -> dict[str, float]:

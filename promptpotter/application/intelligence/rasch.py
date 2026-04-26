@@ -49,12 +49,6 @@ class RaschPosterior:
     n_iterations: int = 0
     converged: bool = False
 
-    def predict_hit(self, candidate_id: str, sample_id: int) -> float:
-        """Posterior point-estimate of P(hit) at ``(c, s)``. Defaults to 0.5 when unknown."""
-        t = self.theta.get(candidate_id, 0.0)
-        d = self.delta.get(sample_id, 0.0)
-        return _sigmoid(t - d)
-
 
 def _sigmoid(x: float) -> float:
     if x >= 0:
@@ -67,7 +61,6 @@ def _sigmoid(x: float) -> float:
 def fit_rasch(
     observations: list[Observation],
     *,
-    theta_prior_mean: dict[str, float] | None = None,
     theta_prior_sigma: float = 1.5,
     delta_prior_sigma: float = 2.0,
     max_iter: int = 50,
@@ -75,10 +68,8 @@ def fit_rasch(
 ) -> RaschPosterior:
     """Fit Rasch by alternating Newton MAP. Returns full posterior summary.
 
-    ``theta_prior_mean`` is the structural-kernel cold-start prior
-    on candidate ability. Candidates absent from the dict get prior mean 0.
-    The prior is ``N(mean, sigma²)``; sigma ``inf`` disables regularization
-    for that parameter.
+    Priors: ``theta ~ N(0, theta_prior_sigma²)``, ``delta ~ N(0, delta_prior_sigma²)``.
+    Sigma ``inf`` disables regularization for that parameter.
     """
     if not observations:
         return RaschPosterior(theta={}, theta_se={}, delta={}, delta_se={})
@@ -92,13 +83,6 @@ def fit_rasch(
     n_s = len(sample_ids)
     theta = np.zeros(n_c)
     delta = np.zeros(n_s)
-
-    # Prior mean on theta — defaults to zero unless caller passes structural prior.
-    prior_theta = np.zeros(n_c)
-    if theta_prior_mean:
-        for cid, mu in theta_prior_mean.items():
-            if cid in c_idx:
-                prior_theta[c_idx[cid]] = mu
 
     # Build sparse observation arrays for vectorized updates.
     rows = np.fromiter((c_idx[o.candidate_id] for o in observations), dtype=np.int64)
@@ -121,9 +105,7 @@ def fit_rasch(
         w = p * (1.0 - p)
 
         # Theta update: Newton step per candidate.
-        grad_theta = np.bincount(rows, weights=hits - p, minlength=n_c) - inv_var_theta * (
-            theta - prior_theta
-        )
+        grad_theta = np.bincount(rows, weights=hits - p, minlength=n_c) - inv_var_theta * theta
         info_theta = np.bincount(rows, weights=w, minlength=n_c) + inv_var_theta
         theta = theta + grad_theta / np.maximum(info_theta, 1e-9)
 
@@ -182,8 +164,6 @@ def knowledge_gradient(
     posterior: RaschPosterior,
     candidate_id: str,
     sample_id: int,
-    *,
-    theta_prior_sigma: float = 1.5,
 ) -> float:
     """One-step KG for measuring ``(candidate, sample)``.
 
@@ -203,7 +183,6 @@ def knowledge_gradient(
 
     p = _sigmoid(t - d)
     w = p * (1.0 - p)
-    n_obs = posterior.n_obs_per_candidate.get(candidate_id, 0)
 
     # Posterior info on theta_c is approximately n_obs * mean_w + 1/sigma_prior^2;
     # use the candidate's actual SE to back out the current info budget.
@@ -217,11 +196,8 @@ def knowledge_gradient(
     delta_if_miss = (0.0 - p) / max(info_new, 1e-9)
 
     # Expected absolute shift in posterior mean of theta_c.
+    # Already-measured pairs are naturally discounted by the 1/info_new factor.
     expected_shift = p * abs(delta_if_hit) + (1.0 - p) * abs(delta_if_miss)
-
-    # Already-measured pairs: KG should be discounted (returns ≈ 0 when n_obs >> 1).
-    # The 1/info_new factor handles this naturally; no extra term needed.
-    _ = n_obs, theta_prior_sigma  # parameters reserved for future variance-aware KG variant
     return float(expected_shift)
 
 

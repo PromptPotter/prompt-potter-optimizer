@@ -82,7 +82,18 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 
     session_dir, campaign_dir = session_and_campaign_dirs
-    config = CampaignConfig(optimization={"max_rounds": 5, "l1_patience": 3})
+    config = CampaignConfig(
+        optimization={
+            "max_rounds": 5,
+            "l1_patience": 3,
+            "improvement_threshold": 0.01,
+            "seed": 42,
+            "max_failures": 15,
+            "degradation_threshold": 0.4,
+            "enable_l2": True,
+            "enable_l3": True,
+        }
+    )
     emitter = CampaignPersistenceEmitter(
         campaign_dir,
         session_dir,

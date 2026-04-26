@@ -21,7 +21,7 @@ Today the infrastructure is almost there; only the **exposure** is missing. This
 
 ### Phase 1 — seed (this commit)
 
-- Data primitive: `promptpotter/application/intelligence/hard_sample_sorter.py::build_candidate_sample_matrix(rounds)`.
+- Data primitive: `promptpotter/application/intelligence/hard_sample_sorter.py::build_hard_samples_artifact(rounds, ...)` — fits Rasch, resolves the spec's axis sort contract, returns a dict with `candidate_order`, `sample_order`, `cells`, and a `rasch` posterior view. Capped to top-K on disk; pass `top_k_*=None` for the full matrix.
 - Narrative reframe of the methods doc so the sorter reads as "the other half" of exploration/exploitation, not an ad-hoc export.
 - This spec file.
 
@@ -41,25 +41,25 @@ Belongs under the **M10 webapp read-only track** (see [`m10-publication-benchmar
 
 ```python
 from promptpotter.application.intelligence.hard_sample_sorter import (
-    build_candidate_sample_matrix,
+    build_hard_samples_artifact,
 )
 
-matrix = build_candidate_sample_matrix(cycle.rounds)
-# type: dict[tuple[str, int], bool]
-# matrix[(candidate_id, sample_id)] == True  → hit
-# matrix[(candidate_id, sample_id)] == False → miss
-# matrix.get((candidate_id, sample_id))      → None when unmeasured
+artifact = build_hard_samples_artifact(cycle.rounds, top_k_candidates=None, top_k_samples=None)
+# artifact["candidate_order"]: list[str]               (θ_c desc)
+# artifact["sample_order"]:    list[int]               (δ_s desc, hardest first)
+# artifact["cells"]:           list[{"c", "s", "hit"}]  (measured only)
+# artifact["rasch"]:           {"theta", "theta_se", "delta", "delta_se", ...}
 ```
 
-**Tri-state cell.** Direct indexing returns `bool`; `.get()` returns `bool | None`. Heatmap renderers read via `.get()` so the unmeasured case is first-class.
+**Tri-state cell.** A cell is *measured & hit*, *measured & miss*, or *absent* (unmeasured). Heatmap renderers iterate `cells` for the measured pairs and treat any `(c ∈ candidate_order × s ∈ sample_order)` not present as the unmeasured tier.
 
-**Companion arrays** come from the Rasch posterior already available on `EvolveResult.rasch` (type `RaschPosterior`):
+**Companion arrays** ride on the artifact's `rasch` block (sourced from `RaschPosterior`):
 
-- `rasch.delta: dict[int, float]` — `δ_s` per sample.
-- `rasch.theta: dict[str, float]` — `θ_c` per candidate.
-- `rasch.delta_se`, `rasch.theta_se` — Laplace standard errors.
+- `rasch["delta"]: dict[str, float]` — `δ_s` per sample (string-keyed for JSON; cast back to int).
+- `rasch["theta"]: dict[str, float]` — `θ_c` per candidate.
+- `rasch["delta_se"]`, `rasch["theta_se"]` — Laplace standard errors.
 
-The renderer composes matrix + posterior; no new aggregation layer is introduced.
+The renderer composes the artifact's cells + posterior view; no new aggregation layer is introduced.
 
 ---
 

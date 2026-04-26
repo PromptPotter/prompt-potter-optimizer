@@ -48,9 +48,10 @@ def test_legacy_pipeline_params_is_rejected() -> None:
         CampaignConfig.model_validate({"dataset_name": "x", "pipeline_params": {"steps": ["a"]}})
 
 
-def test_defaults_round_trip_cleanly() -> None:
-    cfg = CampaignConfig()
-    assert cfg.optimization.l1_patience == 3
-    assert cfg.optimization.hard_cap == 100
-    assert cfg.optimization.zero_signal_filter_enabled is False
-    assert cfg.optimizer_llm.provider == "groq"
+def test_required_optimization_fields_must_be_explicit() -> None:
+    """Shared knobs (``improvement_threshold``, ``seed``, ``max_failures``,
+    ``degradation_threshold``, ``enable_l2``, ``enable_l3``) have no default —
+    a campaign that omits them is rejected at load time so dataset configs are
+    self-describing rather than relying on hidden defaults."""
+    with pytest.raises(ValidationError):
+        CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})
