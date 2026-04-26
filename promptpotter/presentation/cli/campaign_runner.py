@@ -280,7 +280,6 @@ def _build_live_display(
     *,
     session,
     campaign_config,
-    campaign_rounds: list,
     baseline_acc: float,
 ):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
@@ -296,7 +295,7 @@ def _build_live_display(
         from promptpotter.presentation.ui.campaign.notebook_display import NotebookDisplay
 
         return NotebookDisplay(
-            campaign_rounds=campaign_rounds,
+            campaign_rounds=[],
             baseline_acc=baseline_acc,
             l1_patience=opt.l1_patience,
             pipeline_schema=session.pipeline_schema,
@@ -359,7 +358,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         pipeline_params,
         len(train_data),
         ctx.backend_url,
-        ctx.init_params.get("dataset_name"),
+        ctx.init_params["dataset_name"],
     )
     session_dir = session.store.sessions.session_dir(ctx.session_id)
     campaign_dir = session.store.campaigns.campaign_dir(ctx.cycle_id)
@@ -370,7 +369,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     # the BASELINE phase, not just the L1 rounds.  The emitter reads any
     # prior dashboard.json for resume continuity; baseline accuracy is
     # stamped later during the INIT exit phase.
-    pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0) or 0.0
+    pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
     opt = campaign_config.optimization
     active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
     emitter = CampaignPersistenceEmitter.for_session(
@@ -385,7 +384,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         resumed_from_round=resume_from_round,
-        dataset_count=ctx.state.get("dataset_count"),
+        dataset_count=ctx.state["dataset_count"],
         backend_id=ctx.backend_id,
         recorder_provider=get_round_recorder,
     )
@@ -401,7 +400,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         args,
         session=session,
         campaign_config=campaign_config,
-        campaign_rounds=[],
         baseline_acc=pre_baseline_acc,
     )
     listener.display = display
@@ -434,7 +432,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             campaign_config,
             baseline=baseline,
             session=session,
-            experiment_id=ctx.state.get("experiment_id"),
+            experiment_id=ctx.state["experiment_id"],
             task_context=ctx.task_context,
             session_id=ctx.session_id,
             display=display,

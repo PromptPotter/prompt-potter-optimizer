@@ -70,13 +70,7 @@ def finalize_optimization_run(
         else:
             artifact = empty_artifact(cycle_id=session.cycle_id, disabled=True)
         emitter.write_hard_samples_artifact(artifact)
-        emitter.finalize(
-            n_rounds=len(cycle.rounds),
-            best_accuracy=cycle.best_accuracy,
-            best_round=cycle.best_round,
-            stop_reason=stop_reason,
-            cycle_id=session.cycle_id,
-        )
+        emitter.finalize(stop_reason)
     if stop_reason == StopReason.INTERRUPTED or obs is None:
         return None
     return obs.get_langfuse_trace_id(session.obs_campaign_id)

@@ -712,15 +712,8 @@ class CampaignPersistenceEmitter:
         hitl["pause_point"] = pause_point
         self._persist()
 
-    def finalize(
-        self,
-        n_rounds: int,
-        best_accuracy: float,
-        best_round: int,
-        stop_reason: str,
-        cycle_id: str | None = None,
-    ) -> None:
-        """Write final summary, set stop reason, close log handle."""
+    def finalize(self, stop_reason: str) -> None:
+        """Set stop reason and close the log handle."""
         self.set_stop_reason(stop_reason)
         self._log_fh.close()
 

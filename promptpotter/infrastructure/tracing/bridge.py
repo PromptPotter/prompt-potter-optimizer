@@ -92,8 +92,6 @@ class ObservabilityBridge:
 
     def __init__(
         self,
-        store_base_dir: str | Path,
-        backend_id: str,
         *,
         file_sink: FileSink,
         langfuse_sink: LangfuseSink | None,
@@ -123,12 +121,7 @@ class ObservabilityBridge:
                     lf_sink = LangfuseSink(store_base_dir, backend_id, lf)
         elif langfuse.enabled:
             lf_sink = LangfuseSink(store_base_dir, backend_id, langfuse)
-        return cls(
-            store_base_dir,
-            backend_id,
-            file_sink=file_sink,
-            langfuse_sink=lf_sink,
-        )
+        return cls(file_sink=file_sink, langfuse_sink=lf_sink)
 
     @classmethod
     def file_only(
@@ -137,8 +130,6 @@ class ObservabilityBridge:
         backend_id: str,
     ) -> ObservabilityBridge:
         return cls(
-            store_base_dir,
-            backend_id,
             file_sink=FileSink(store_base_dir, backend_id),
             langfuse_sink=None,
         )
@@ -188,9 +179,6 @@ class ObservabilityBridge:
         with graceful("Langfuse sink flush failed"):
             if self._langfuse is not None:
                 self._langfuse.flush()
-
-    def get_file_trace_id(self, campaign_id: str) -> str | None:
-        return self._file.get_file_trace_id(campaign_id)
 
     def get_langfuse_trace_id(self, campaign_id: str) -> str | None:
         return self._langfuse.get_langfuse_trace_id(campaign_id) if self._langfuse else None

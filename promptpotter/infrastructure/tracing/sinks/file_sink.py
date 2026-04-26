@@ -72,11 +72,6 @@ class FileSink:
         # Orphan fallback: out-of-campaign file_only() emits share this pool.
         return self._library_dir / "obs"
 
-    # --- Accessors ---
-
-    def get_file_trace_id(self, campaign_id: str) -> str | None:
-        return self._campaign_traces.get(campaign_id)
-
     # --- File helpers ---
 
     def _log_event(self, event: dict) -> None:

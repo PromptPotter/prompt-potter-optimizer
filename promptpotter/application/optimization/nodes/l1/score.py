@@ -34,7 +34,7 @@ def select_fittest(
 ) -> dict[str, Any]:
     """Compare population and select the round winner (on fitness, not composite)."""
     current_fitness = current_best["accuracy"]
-    current_composite = current_best.get("composite", current_fitness)
+    current_composite = current_best["composite"]
 
     assert pipeline_schema is not None, "select_fittest requires pipeline_schema"
 

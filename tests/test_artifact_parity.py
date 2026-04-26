@@ -201,13 +201,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.application.intelligence.hard_sample_sorter import empty_artifact
 
     emitter.write_hard_samples_artifact(empty_artifact(cycle_id="cycle_test_001", disabled=True))
-    emitter.finalize(
-        n_rounds=1,
-        best_accuracy=0.6,
-        best_round=0,
-        stop_reason="max_rounds",
-        cycle_id="cycle_test_001",
-    )
+    emitter.finalize("max_rounds")
     emitter.write_result(
         RunResult(
             rounds=[round_result],
