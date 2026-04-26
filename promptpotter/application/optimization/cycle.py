@@ -100,24 +100,9 @@ class EscalationState:
 
 @dataclass
 class Cycle:
-    """Mutable state threaded through the feedback cycle round loop.
+    """Mutable orchestration state for the feedback cycle round loop."""
 
-    Pure optimizer progress — infrastructure handles live on ``Session``.
-    Per-candidate/round optimizer memory (l1_critique_text, l2_directive,
-    task_context, escalation_journal, warning_inventory, failure_analysis,
-    round_history, ...) lives on ``opt_sp`` (and its ``memory`` sub-object).
-    What remains on ``Cycle`` is purely *orchestration* state: the heavy
-    full ``RoundResult`` buffer, current/best tracking caches, escalation
-    counters, the probe flag, and the pending-decisions queue.
-    """
-
-    # ---- back-refs ----
-    # Always set in the active loop (``Cycle.start`` populates them);
-    # the ``None`` default is only to keep dataclass field-ordering valid
-    # so tests + the adaptive-prefix subsystem can build a Cycle in
-    # isolation. Consumers in the active loop dereference without
-    # guards — typing them ``Session | None`` would force ~30 asserts
-    # for no real safety win.
+    # None default keeps dataclass field-ordering valid for test/adaptive-prefix isolation; active loop dereferences without guards.
     session: Session = None  # type: ignore[assignment]
     config: CampaignConfig = None  # type: ignore[assignment]
 
@@ -137,15 +122,9 @@ class Cycle:
     search_memory: SearchMemory | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
 
-    # Decision records recorded by escalation that fires AFTER execute_round
-    # has built its RoundResult (patience-triggered L2/L3, probe commits,
-    # degradation-triggered escalations). Flushed into the next trial's
-    # ``decisions`` list by the round loop before ``campaign_store.add_trial``.
+    # Flushed into the next trial's ``decisions`` list before ``campaign_store.add_trial``.
     pending_decisions: list[dict] = field(default_factory=list)
 
-    # Adaptive sample-prefix swap log. One dict per round where evolve_prefix()
-    # produced a non-trivial outcome (see runner._maybe_evolve_adaptive_prefix).
-    # Persisted via Cycle.checkpoint and restored by Cycle.restore_from_trial.
     prefix_events: list[dict] = field(default_factory=list)
 
     state_version: int = 1
@@ -165,13 +144,7 @@ class Cycle:
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        """Construct a fresh Cycle from an evaluated baseline.
-
-        Composite is derived from ``baseline_results`` when a schema is
-        present; otherwise falls back to ``baseline_accuracy``. Pass
-        ``round_scorer`` to use the dataset's configured per-round formula;
-        otherwise the registry's default formula is used.
-        """
+        """Construct a fresh Cycle from an evaluated baseline."""
         from promptpotter.application.scoring.metrics import compute_composite_score
 
         composite = (
@@ -249,13 +222,7 @@ class Cycle:
     # -- Write API -------------------------------------------------------------
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
-        """Append a RoundResult and propagate to memory + current/best tracking.
-
-        Invariants enforced: ``rounds`` gets the RoundResult; ``opt_sp
-        .round_history`` gets a matching RoundSummary; ``opt_sp``'s prompt
-        fields are synced to the winner's; ``current_sp`` / ``current_*`` and
-        monotone ``best_*`` are updated via :meth:`update_current`.
-        """
+        """Append a RoundResult and propagate to memory + current/best tracking."""
         from promptpotter.domain.opt_search_point import RoundSummary
         from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 

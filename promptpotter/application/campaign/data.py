@@ -13,11 +13,10 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.campaign.campaign_setup import (
     Session,
-    load_baseline_prompt,
     populate_session_scoring,
 )
 from promptpotter.application.campaign.config import CampaignConfig
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.constants import DATASET_NAME
 
@@ -34,6 +33,7 @@ __all__ = [
     "DatasetSummary",
     "build_all_index_terms",
     "extract_campaign_baseline",
+    "load_baseline_prompt",
     "prepare_datasets",
     "prepare_scoring_context",
     "summarize_dataset_runs",
@@ -85,6 +85,75 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     )
 
 
+def load_baseline_prompt(
+    experiment_extract: dict,
+    prompt_node_names: list[str] | None = None,
+    dataset_name: str | None = None,
+) -> OptSearchPoint:
+    """Resolve baseline OptSearchPoint: experiment prompts → datasets/{name}/prompts → empty."""
+    dependencies = experiment_extract.get("dependencies", {})
+    prompts = dependencies.get("prompts", {})
+    names = prompt_node_names or []
+
+    matched_prompt = None
+    matched_key = None
+    for node_name in names:
+        for key, prompt_info in prompts.items():
+            if node_name in key:
+                matched_prompt = prompt_info
+                matched_key = key
+                break
+        if matched_prompt:
+            break
+
+    if matched_prompt is None and not names and prompts:
+        matched_key, matched_prompt = next(iter(prompts.items()))
+
+    if matched_prompt is not None:
+        label = names[0] if names else matched_key
+        return OptSearchPoint(
+            instruction=matched_prompt["template"],
+            changes_description=f"Baseline prompt from {label} registry",
+        )
+
+    if dataset_name and names:
+        from promptpotter.application.datasets.prompt_store import (
+            has_dataset_prompts,
+            load_node_prompt,
+        )
+
+        if has_dataset_prompts(dataset_name):
+            for node_name in names:
+                try:
+                    template = load_node_prompt(dataset_name, node_name, "default")
+                except FileNotFoundError:
+                    continue
+                logger.info(
+                    "Baseline loaded from canonical store: datasets/%s/prompts/ → %s",
+                    dataset_name,
+                    node_name,
+                )
+                return OptSearchPoint.from_prompt_fields(
+                    template.prompt_field_dict(),
+                    lineage=IndividualLineage(
+                        changes_description=(
+                            f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
+                        ),
+                    ),
+                )
+
+    logger.info(
+        "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
+        names,
+    )
+    return OptSearchPoint(
+        instruction="",
+        lineage=IndividualLineage(
+            changes_description="Baseline (no prompt node active — param-only optimization)",
+        ),
+    )
+
+
 async def prepare_scoring_context(
     experiment_extract: dict | None,
     train_data: list[Sample] | None,
@@ -96,24 +165,7 @@ async def prepare_scoring_context(
     listener: Any | None = None,
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list, list]:
-    """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``.
-
-    Baseline evaluates the loaded prompt on the **same t-test slice that L1
-    uses** — ``sample_dataset(dataset, sp_budget_ttest)``, the deterministic
-    top-``sp_budget_ttest`` prefix. Datasets are already shuffled at creation,
-    so no second RNG is needed. Byte-identical to ``runner.py``'s L1 sampler,
-    so baseline populates the per-query cache
-    (``DatasetRunStore.load_reusable_results``, keyed by query text under
-    matching ``node_configs``) in the exact shape L1 round 1 requests —
-    100% hit bridge.
-
-    Skipped only when the prompt is genuinely empty (param-only optimization)
-    or when ``svc`` / ``campaign_config`` is missing.
-
-    ``sp_budget_ttest`` stays on ``CampaignConfig.optimization`` and never
-    enters ``pipeline_params`` → the ``JobSearchPoint`` hash remains
-    target-layer-pure.
-    """
+    """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
     from promptpotter.application.datasets.builder import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []

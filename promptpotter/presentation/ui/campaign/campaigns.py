@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign.campaign_setup import (
+from promptpotter.application.campaign.cycle_store import (
     resolve_campaign_id as _resolve_campaign_id,
 )
 from promptpotter.application.campaign.utils import (

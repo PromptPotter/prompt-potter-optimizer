@@ -11,7 +11,6 @@ from typing import Any
 from promptpotter.application.campaign.callbacks import RunListener
 from promptpotter.application.campaign.campaign_setup import (
     Session,
-    finalize_optimization_run,
     init_optimization_loop,
 )
 from promptpotter.application.campaign.config import CampaignConfig
@@ -28,6 +27,7 @@ from promptpotter.application.optimization.nodes.l1 import (
 )
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
+from promptpotter.application.optimization.teardown import finalize_optimization_run
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint

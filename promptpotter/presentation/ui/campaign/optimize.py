@@ -4,14 +4,14 @@ from __future__ import annotations
 
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign.campaign_setup import (
-    load_baseline_prompt,
-)
-from promptpotter.application.campaign.campaign_setup import (
+from promptpotter.application.campaign.cycle_store import (
     resolve_campaign_id as _resolve_campaign_id,
 )
 from promptpotter.application.campaign.data import (
     extract_campaign_baseline as _extract_campaign_baseline,
+)
+from promptpotter.application.campaign.data import (
+    load_baseline_prompt,
 )
 from promptpotter.application.optimization.results import RunResult
 from promptpotter.domain.search_point import TaskDecomposition

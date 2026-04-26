@@ -86,7 +86,7 @@ def save_campaign_winner(
     """Find best round, save to store + link to campaign. Returns save_data dict."""
     from datetime import UTC, datetime
 
-    from promptpotter.application.campaign.campaign_setup import resolve_campaign_id
+    from promptpotter.application.campaign.cycle_store import resolve_campaign_id
 
     winner = campaign_rounds[-1]["prompt_fields"]
     winner_acc = campaign_rounds[-1]["accuracy"]
@@ -187,7 +187,7 @@ def load_stored_campaign_config(
     experiment_id: str,
 ) -> dict | None:
     """Load stored experiment config for a campaign. Returns config dict or None."""
-    from promptpotter.application.campaign.campaign_setup import resolve_campaign_id
+    from promptpotter.application.campaign.cycle_store import resolve_campaign_id
 
     full_id = resolve_campaign_id(store, backend_id, experiment_id)
     if not full_id:

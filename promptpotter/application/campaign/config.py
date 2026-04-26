@@ -94,7 +94,6 @@ class HardSampleSorterConfig(BaseModel):
 class OptimizationConfig(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
-    # L1 loop control
     max_rounds: int | None = Field(10, description="Max rounds (None = unlimited)")
     l1_patience: int = Field(3, description="Stop after N consecutive non-improving L1 rounds")
     n_variants: int = Field(5, description="Candidates per round")
@@ -103,7 +102,6 @@ class OptimizationConfig(BaseModel):
     seed: int = Field(..., description="Random seed")
     max_failures: int = Field(..., description="Max failure examples fed to L1")
 
-    # L2/L3 escalation
     enable_l2: bool = Field(...)
     enable_l3: bool = Field(...)
     l2_patience: int | None = Field(2)
@@ -111,36 +109,27 @@ class OptimizationConfig(BaseModel):
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
 
-    # L1 Critique
     l1_critique_degradation_threshold: float = Field(0.4)
     l1_critique_near_miss_ratio: float = Field(0.3)
 
-    # Degradation / escalation
     degradation_threshold: float = Field(...)
     empty_output_threshold: float = Field(0.5)
     backend_warning_threshold: int = Field(2)
 
-    # Sequential elimination
     elimination_n_min: int = Field(4)
     elimination_alpha: float = Field(0.2)
 
-    # Eval robustness
     max_consecutive_errors: int = Field(3)
     hard_cap: int = Field(100)
 
-    # Stale data
     stale_data_load_protocol: list[str] = Field(
         default_factory=lambda: ["rerun", "samplescan", "sampleswitch"]
     )
 
-    # Zero-signal filter
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
 
-    # Adaptive sample-prefix selection (Rasch + KG)
     adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)
-
-    # Hard-sample-sorter artifact at finalize
     hard_sample_sorter: HardSampleSorterConfig = Field(default_factory=HardSampleSorterConfig)
 
 
@@ -158,7 +147,6 @@ class CampaignConfig(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    # Top-level scalars
     dataset_name: str = Field("")
     starting_prompt: str = Field("default")
     sp_budget_ttest: int = Field(20)
@@ -166,7 +154,6 @@ class CampaignConfig(BaseModel):
     pipeline_overrides: dict = Field(default_factory=dict)
     scoring: str | dict[str, str] | None = Field(None)
 
-    # Nested
     optimization: OptimizationConfig
     optimizer_llm: OptimizerLLMConfig = Field(default_factory=OptimizerLLMConfig)
 

@@ -89,11 +89,7 @@ class ReplayContext:
 
 @dataclass(frozen=True)
 class ForkResult:
-    """Resume detected divergence and forked into a sibling cycle.
-
-    Caller updates ``resolved_cycle_id`` and ``resumed_from_round`` so the
-    loop continues against the newly minted cycle.
-    """
+    """Resume detected divergence and forked into a sibling cycle."""
 
     new_cycle_id: str
     new_resumed_from_round: int
@@ -293,14 +289,7 @@ def _fork_at_divergence(
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
 ) -> str:
-    """Mint a sibling cycle that re-runs round ``fork_from_round``.
-
-    Copies ``index.json`` (rewriting ``campaign_id``, stamping
-    ``parent_cycle_id`` + ``forked_from_round``), plus trials and candidates
-    for rounds < ``fork_from_round``. The divergent round itself is dropped
-    so the new cycle re-runs it under the current scorer. Retargets the
-    active session pointer at the new cycle.
-    """
+    """Mint a sibling cycle that re-runs round ``fork_from_round``."""
     from promptpotter.infrastructure.store.base import read_json_optional, write_json
     from promptpotter.infrastructure.store.stores import save_active_pointer
 
@@ -369,15 +358,7 @@ def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    """Rescore prior trials under the active scorer; halt or fork on divergence.
-
-    With ``fork_on_divergence=False`` (default), divergence raises
-    :class:`ResumeDivergenceError`. With ``fork_on_divergence=True``, the
-    method instead mints a sibling cycle that re-runs the divergent round
-    under the new policy, and returns a :class:`ForkResult` so the caller
-    can update ``resolved_cycle_id`` / ``resumed_from_round`` for the rest
-    of loop init.
-    """
+    """Rescore prior trials under the active scorer; halt or fork on divergence."""
     from promptpotter.shared.errors import ResumeDivergenceError
     from promptpotter.shared.scoring import rescore_results
 

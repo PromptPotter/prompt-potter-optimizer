@@ -1,4 +1,4 @@
-"""Campaign initialization + lifecycle bookends — store, client, dataset, pipeline schema, loop init/finalize."""
+"""Campaign initialization — Session bundle, store/client/dataset wiring, loop setup."""
 
 from __future__ import annotations
 
@@ -16,8 +16,7 @@ from promptpotter.config.settings import (
     DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
-from promptpotter.domain.phases import StopReason
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
@@ -33,59 +32,26 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.infrastructure.persistence.session_emitter import (
-        CampaignPersistenceEmitter,
-    )
     from promptpotter.infrastructure.store.campaign_store import CampaignStore
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
 
-# Loop-control fields safe to hot-update on a stored cycle when the user
-# resumes via an explicit ``cycle_id_override`` (these don't change *what
-# problem* the cycle is solving, only *how* the optimizer searches).
-_HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
-    {
-        "max_rounds",
-        "l1_patience",
-        "l2_patience",
-        "l3_patience",
-        "degradation_threshold",
-        "model",
-        "n_variants",
-        "creativity",
-        "improvement_threshold",
-        "sp_budget_ttest",
-        "seed",
-    }
-)
-
 __all__ = [
     "Session",
     "auto_mint_session",
-    "bootstrap_cycle",
-    "finalize_optimization_run",
     "init_optimization_loop",
     "init_services",
-    "load_baseline_prompt",
     "new_session_state",
     "populate_session_scoring",
-    "resolve_campaign_id",
-    "resume_or_create",
 ]
 
 
 @dataclass
 class Session:
-    """Session-scoped identity + wire-up + loop-cycle infra + scoring.
+    """Session-scoped identity + wire-up + loop-cycle infra + scoring."""
 
-    Absorbs the old ``SessionEnv`` + ``LoopEnv`` + ``ScoringEnv`` triad into a
-    single object threaded through the optimization loop. ``project_root`` is
-    the tenant base dir.
-    """
-
-    # ---- identity (from SessionEnv) ----
     store: Stores
     backend_id: str
     experiment_id: str
@@ -102,18 +68,14 @@ class Session:
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
 
-    # ---- loop-cycle infra (from LoopEnv) ----
     campaign_store: CampaignStore | None = None
     obs_campaign_id: str = ""
     scoring_dataset: list[Sample] = field(default_factory=list)
     degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
 
-    # ---- scoring (from ScoringEnv) ----
     obs: ObservabilityBridge | None = None
-    # Compiled per-dataset scorer. Required by the scoring path but populated
-    # after bootstrap (Session is built before the active campaign config's
-    # scoring block is compiled).
+    # Populated after bootstrap — Session is built before the active config's scoring block compiles.
     scorer: Scorer | None = None
     scorer_id: str = "none"
     scorer_formula: str | None = None
@@ -138,14 +100,7 @@ def populate_session_scoring(
     stale_data_load_protocol: list[str] | None = None,
     source: str = "optimization_loop",
 ) -> None:
-    """Attach the scoring block onto ``session`` (mutates in place).
-
-    Single populate path used by both phases — the live optimization loop
-    overrides ``experiment_id`` / ``cycle_id`` / ``max_consecutive_errors``
-    / ``stale_data_load_protocol``; the baseline pass passes
-    ``source="baseline"`` and accepts the defaults. Falls back the
-    ``experiment_id`` to the short cycle-id prefix when not set.
-    """
+    """Attach the scoring block onto ``session`` (mutates in place)."""
     from promptpotter.shared.scoring import (
         auto_scorer_id,
         compile_round_scorer,
@@ -235,75 +190,6 @@ def auto_mint_session(
     save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     logger.info("Auto-minted session %s + cycle %s", session_id, cycle_id)
     return session_id, cycle_id
-
-
-def load_baseline_prompt(
-    experiment_extract: dict,
-    prompt_node_names: list[str] | None = None,
-    dataset_name: str | None = None,
-) -> OptSearchPoint:
-    """Resolve baseline OptSearchPoint: experiment prompts → datasets/{name}/prompts → empty."""
-    dependencies = experiment_extract.get("dependencies", {})
-    prompts = dependencies.get("prompts", {})
-    names = prompt_node_names or []
-
-    matched_prompt = None
-    matched_key = None
-    for node_name in names:
-        for key, prompt_info in prompts.items():
-            if node_name in key:
-                matched_prompt = prompt_info
-                matched_key = key
-                break
-        if matched_prompt:
-            break
-
-    if matched_prompt is None and not names and prompts:
-        matched_key, matched_prompt = next(iter(prompts.items()))
-
-    if matched_prompt is not None:
-        label = names[0] if names else matched_key
-        return OptSearchPoint(
-            instruction=matched_prompt["template"],
-            changes_description=f"Baseline prompt from {label} registry",
-        )
-
-    if dataset_name and names:
-        from promptpotter.application.datasets.prompt_store import (
-            has_dataset_prompts,
-            load_node_prompt,
-        )
-
-        if has_dataset_prompts(dataset_name):
-            for node_name in names:
-                try:
-                    template = load_node_prompt(dataset_name, node_name, "default")
-                except FileNotFoundError:
-                    continue
-                logger.info(
-                    "Baseline loaded from canonical store: datasets/%s/prompts/ → %s",
-                    dataset_name,
-                    node_name,
-                )
-                return OptSearchPoint.from_prompt_fields(
-                    template.prompt_field_dict(),
-                    lineage=IndividualLineage(
-                        changes_description=(
-                            f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
-                        ),
-                    ),
-                )
-
-    logger.info(
-        "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
-        names,
-    )
-    return OptSearchPoint(
-        instruction="",
-        lineage=IndividualLineage(
-            changes_description="Baseline (no prompt node active — param-only optimization)",
-        ),
-    )
 
 
 async def init_services(
@@ -427,12 +313,6 @@ async def init_services(
         valid = [item for item in items if item.get("query") and item.get("ground_truth")]
         base.queries = samples_from_dicts(valid)
         base.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
-        logger.info(
-            "Loaded dataset %r from store: %d items, %d session terms",
-            dataset_name,
-            len(items),
-            len(base.index_terms),
-        )
         status(f"Dataset: {dataset_name} ({len(items)} queries)")
         return base
 
@@ -489,136 +369,6 @@ async def init_services(
     return base
 
 
-def resolve_campaign_id(
-    store: Stores,
-    backend_id: str,
-    short_id: str,
-) -> str | None:
-    """Resolve short prefix/suffix to full campaign_id."""
-    campaigns = store.campaigns.list_all(backend_id)
-    matches = [c for c in campaigns if short_id in c["campaign_id"]]
-    if len(matches) == 1:
-        return matches[0]["campaign_id"]
-    if len(matches) > 1:
-        logger.warning(
-            "Ambiguous ID '%s' — %d matches: %s",
-            short_id,
-            len(matches),
-            [m["campaign_id"] for m in matches],
-        )
-        return None
-    logger.warning("No campaign matching '%s'", short_id)
-    return None
-
-
-def resume_or_create(
-    store: CampaignStore,
-    backend_id: str,
-    cycle_id: str,
-    *,
-    config_snapshot: dict[str, Any],
-    baseline_accuracy: float,
-    hot_update_keys: frozenset[str] = frozenset(),
-    parent_session_id: str = "",
-) -> int:
-    """Resume an existing cycle or create a new one.
-
-    Returns ``resumed_from_round`` — the number of trial files already on
-    disk (0 for a fresh cycle). If the cycle exists and ``hot_update_keys``
-    is non-empty, merge those keys from ``config_snapshot`` into the stored
-    config before returning. ``parent_session_id`` is stamped only on fresh
-    creation.
-    """
-    existing = store.load(backend_id, cycle_id)
-    if existing is not None:
-        if hot_update_keys:
-            stored_cfg = existing.get("config", {})
-            if stored_cfg:
-                cfg_updated = False
-                for k in hot_update_keys:
-                    if stored_cfg.get(k) != config_snapshot.get(k):
-                        stored_cfg[k] = config_snapshot.get(k)
-                        cfg_updated = True
-                if cfg_updated:
-                    store.update(backend_id, cycle_id, {"config": stored_cfg})
-                    logger.info("Updated loop-control config for %s", cycle_id)
-        resumed_from_round = len(existing.get("trials", []))
-        if resumed_from_round:
-            logger.debug(
-                "Resuming cycle %s — %d prior round(s) on disk",
-                cycle_id,
-                resumed_from_round,
-            )
-        return resumed_from_round
-
-    store.create(
-        backend_id,
-        cycle_id,
-        {
-            "type": "optimization_loop",
-            "config": config_snapshot,
-            "baseline_accuracy": baseline_accuracy,
-            "parent_session_id": parent_session_id,
-        },
-    )
-    return 0
-
-
-def bootstrap_cycle(
-    config: CampaignConfig,
-    session: Session,
-    baseline_render: str,
-    baseline_accuracy: float,
-    dataset: list,
-    active_steps: list[str],
-    cycle_id_override: str | None,
-    *,
-    parent_session_id: str = "",
-    resume_from_round_override: int | None = None,
-) -> tuple[CampaignStore | None, str | None, int]:
-    """Open the store and resume/create the cycle in one shot.
-
-    Returns ``(store, cycle_id, resumed_from_round)``. All-None on
-    missing project_root/backend_id or any resume failure. ``parent_session_id``
-    is recorded on a newly created campaign; ignored on resume. When
-    ``resume_from_round_override`` is set, trials for rounds > N are archived
-    into ``archived/resumed_at_<ts>/`` and the trial index is rebuilt before
-    resume.
-    """
-    from promptpotter.domain.cycle_identity import cycle_config_identity
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
-
-    if not (session.project_root and session.backend_id):
-        return None, None, 0
-    try:
-        store = CampaignStore(Path(session.project_root))
-        resolved = cycle_id_override or cycle_config_identity(
-            config,
-            baseline_render,
-            dataset,
-            active_steps,
-        )
-        if resume_from_round_override is not None:
-            store.rewind_to_round(
-                session.backend_id,
-                resolved,
-                resume_from_round_override,
-            )
-        resumed_from = resume_or_create(
-            store,
-            session.backend_id,
-            resolved,
-            config_snapshot=config.model_dump(mode="json"),
-            baseline_accuracy=baseline_accuracy,
-            hot_update_keys=_HOT_UPDATEABLE_KEYS if cycle_id_override else frozenset(),
-            parent_session_id=parent_session_id,
-        )
-        return store, resolved, resumed_from
-    except (OSError, json.JSONDecodeError, KeyError):
-        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, None, 0
-
-
 async def init_optimization_loop(
     baseline: CampaignBaseline,
     dataset: list[Sample],
@@ -640,6 +390,7 @@ async def init_optimization_loop(
 ) -> Cycle:
     """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
     from promptpotter.application.campaign.config import run_preflight_checks
+    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
     from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset
     from promptpotter.application.intelligence.search_memory import SearchMemory
@@ -771,67 +522,3 @@ async def init_optimization_loop(
         dataset=dataset,
     )
     return cycle
-
-
-def finalize_optimization_run(
-    cycle: Cycle,
-    session: Session,
-    emitter: CampaignPersistenceEmitter | None,
-    stop_reason: StopReason,
-    finished_at: str,
-    campaign_config: CampaignConfig,
-) -> str | None:
-    """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
-    if session.campaign_store and session.cycle_id:
-        status = {
-            StopReason.PAUSED_FOR_REVIEW: "paused",
-            StopReason.USER_PAUSED: "paused",
-            StopReason.USER_STOPPED: "stopped",
-            StopReason.INTERRUPTED: "interrupted",
-        }.get(stop_reason, "completed")
-        session.campaign_store.mark_finished(
-            session.backend_id,
-            session.cycle_id,
-            status=status,
-            stop_reason=stop_reason,
-            best_accuracy=cycle.best_accuracy,
-            best_round=cycle.best_round,
-            n_rounds=len(cycle.rounds),
-            finished_at=finished_at,
-        )
-    obs: ObservabilityBridge | None = session.obs
-    if obs:
-        obs.end_campaign(
-            session.obs_campaign_id,
-            best_accuracy=cycle.best_accuracy,
-            n_rounds=len(cycle.rounds),
-            stop_reason=stop_reason,
-            best_round=cycle.best_round,
-        )
-    if emitter:
-        from promptpotter.application.intelligence.hard_sample_sorter import (
-            build_hard_samples_artifact,
-            empty_artifact,
-        )
-
-        hs_cfg = campaign_config.optimization.hard_sample_sorter
-        if hs_cfg.enabled:
-            artifact = build_hard_samples_artifact(
-                cycle.rounds,
-                cycle_id=session.cycle_id,
-                top_k_candidates=hs_cfg.top_k_candidates,
-                top_k_samples=hs_cfg.top_k_samples,
-            )
-        else:
-            artifact = empty_artifact(cycle_id=session.cycle_id, disabled=True)
-        emitter.write_hard_samples_artifact(artifact)
-        emitter.finalize(
-            n_rounds=len(cycle.rounds),
-            best_accuracy=cycle.best_accuracy,
-            best_round=cycle.best_round,
-            stop_reason=stop_reason,
-            cycle_id=session.cycle_id,
-        )
-    if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW) or obs is None:
-        return None
-    return obs.get_langfuse_trace_id(session.obs_campaign_id)

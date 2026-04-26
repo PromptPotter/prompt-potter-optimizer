@@ -122,7 +122,7 @@ async def prepare_scoring_context(
 
 def load_cli_baseline(session: Session):
     """Shared baseline-prompt load used by ``scan`` and ``show-scan``."""
-    from promptpotter.application.campaign.campaign_setup import load_baseline_prompt
+    from promptpotter.application.campaign.data import load_baseline_prompt
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     return load_baseline_prompt(
