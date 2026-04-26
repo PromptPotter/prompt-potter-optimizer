@@ -43,13 +43,13 @@ from promptpotter.application.optimization.nodes._inbox_helpers import (
     _r_escalation_section,
     _r_failure_analysis,
     _r_identity,
-    _r_labeled,
     _r_plan,
     _r_runtime_failures_l2,
     _r_search_memory_l1,
     _r_search_memory_l2,
     _r_task_context,
     _r_thinking_styles,
+    _r_unused,
     _r_validation_failures,
     _r_warning_inventory_l2,
     _src_escalation_alert,
@@ -177,7 +177,7 @@ INBOX: tuple[InboxField, ...] = (
         name="l2_directive",
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l2_directive"),
-        render=_r_labeled(""),  # placeholder; overridden per-layer below
+        render=_r_unused,  # rendered via _LABEL_BY_LAYER override per layer
         retention=Retention.MEMORY,
         docstring="L2's one-round guidance window; clears on improvement.",
         mutex={Layer.L1: ("guidance", 2)},
@@ -186,7 +186,7 @@ INBOX: tuple[InboxField, ...] = (
         name="l1_critique_text",
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l1_critique_text"),
-        render=_r_labeled(""),  # placeholder; overridden per-layer below
+        render=_r_unused,  # rendered via _LABEL_BY_LAYER override per layer
         retention=Retention.MEMORY,
         docstring="Latest L1 critique output; L2 digests into a directive before L1 sees it.",
         mutex={Layer.L1: ("guidance", 1)},
@@ -297,7 +297,6 @@ def _render_one(f: InboxField, raw: Any, cycle: Cycle, t: InboxTransients, layer
     """Dispatch rendering — for labeled fields, use the per-layer label override."""
     label = _LABEL_BY_LAYER.get((layer, f.name))
     if label is not None:
-        # Labeled scalar text — same shape as _r_labeled.
         return f"{label}\n{raw}" if raw else ""
     return f.render(raw, cycle, t, layer)
 

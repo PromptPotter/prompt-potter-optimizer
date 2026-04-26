@@ -173,11 +173,9 @@ def _r_thinking_styles(v: list[str], _cycle: Cycle, _t: InboxTransients, _layer:
     return f"THINKING STYLES:\n{styles}"
 
 
-def _r_labeled(label: str) -> Callable[[Any, Cycle, InboxTransients, Layer], str]:
-    def _render(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
-        return f"{label}\n{v}" if v else ""
-
-    return _render
+def _r_unused(_v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    """Sentinel for fields whose render is always supplied by ``_LABEL_BY_LAYER``."""
+    return ""
 
 
 def _r_failure_analysis(
