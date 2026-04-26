@@ -1,9 +1,8 @@
 """Campaign control surface — bidirectional HITL signals.
 
-``control.json`` carries ``requested_state`` (pause / resume / stop)
-and ``pause_before_l2_scoring``.  Writers: CLI ``control`` command, webapp,
-and hand-edits.  Reader: the optimization loop at natural checkpoints
-(via :func:`make_control_check`).
+``control.json`` carries ``requested_state`` (pause / resume / stop).
+Writers: CLI ``control`` command, webapp, and hand-edits.  Reader: the
+optimization loop at natural checkpoints (via :func:`make_control_check`).
 
 Kept in its own file (separate from ``dashboard.json``) so the emitter
 never races user intent edits on a hot code path — see
@@ -30,28 +29,22 @@ def ensure_control_file(session_dir: Path) -> None:
     """Seed ``control.json`` with defaults if it doesn't exist.
 
     A lingering pause from a previous session survives ``init`` — the file
-    is only written when missing, never overwritten. Users flip the
-    ``pause_before_l2_scoring`` flag at runtime via the CLI ``control``
-    command or by hand-editing the file.
+    is only written when missing, never overwritten. Users flip
+    ``requested_state`` at runtime via the CLI ``control`` command or
+    by hand-editing the file.
     """
     path = session_dir / CONTROL_FILENAME
     if path.exists():
         return
-    write_json(
-        path,
-        {
-            "requested_state": "running",
-            "pause_before_l2_scoring": False,
-        },
-    )
+    write_json(path, {"requested_state": "running"})
 
 
 def make_control_check(path: Path) -> Callable[[str], str | None]:
     """Return a checkpoint reader for ``control.json``.
 
     Accepts either the session directory or the control file itself. The
-    returned callable is invoked at natural checkpoints (after_round,
-    before_l2_scoring, ...) and returns:
+    returned callable is invoked at natural checkpoints (after_round, ...)
+    and returns:
 
     - ``"pause"`` / ``"stop"`` when the user requested it,
     - ``None`` otherwise.
@@ -78,10 +71,6 @@ def make_control_check(path: Path) -> Callable[[str], str | None]:
         if requested in ("pause", "stop"):
             logger.info("Control: %s requested at %s", requested, checkpoint_name)
             return requested
-
-        if checkpoint_name == "before_l2_scoring" and control.get("pause_before_l2_scoring"):
-            logger.info("Control: pause_before_l2_scoring active at %s", checkpoint_name)
-            return "pause"
 
         return None
 

@@ -292,11 +292,7 @@ async def _run_round_loop(
         return sl.reason
     except PauseForReviewError as pause:
         logger.info("HITL: paused at %s (round %d).", pause.pause_point, pause.round_num)
-        return (
-            StopReason.USER_PAUSED
-            if pause.pause_point == "user_pause"
-            else StopReason.PAUSED_FOR_REVIEW
-        )
+        return StopReason.USER_PAUSED
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning("Optimization interrupted at round %d.", len(cycle.rounds))
         return StopReason.INTERRUPTED

@@ -54,8 +54,6 @@ SIGNAL_ACTIONS: dict[str, tuple[str, str | bool]] = {
     "pause": ("requested_state", "pause"),
     "resume": ("requested_state", "resume"),
     "stop": ("requested_state", "stop"),
-    "pause-before-l2": ("pause_before_l2_scoring", True),
-    "no-pause-l2": ("pause_before_l2_scoring", False),
 }
 
 

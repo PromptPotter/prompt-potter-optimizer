@@ -118,7 +118,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore, PlanStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.
-- **HITL pause**: runtime via `control.json::pause_before_l2_scoring` (CLI: `python -m promptpotter control pause-before-l2`); the optimizer reads at the `before_l2_scoring` checkpoint and raises `PauseForReviewError`. No static config flag.
+- **HITL pause**: runtime via `control.json::requested_state` (`pause` / `resume` / `stop`, CLI: `python -m promptpotter control pause`); the optimizer reads at the `after_round` checkpoint and raises `PauseForReviewError`. No static config flag.
 - **Optimizer LLM calls**: all go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
 - **Cycle identity**: hash covers only *what problem* the cycle solves (active steps + baseline prompt + dataset). Loop-control / strategy knobs are excluded so tweaking optimizer strategy or resuming with different budgets does not create a new cycle. See `cycle_config_identity()` in `domain/cycle_identity.py`.
 - **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set. Sequential elimination early-stops inferior candidates via the Wilcoxon signed-rank test.

@@ -79,7 +79,7 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`, `hitl` (nested: `requested_state`, `pause_before_l2_scoring`, `pause_point`, `stop_reason`). For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
+Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`, `hitl` (nested: `requested_state`, `pause_point`, `stop_reason`). For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
 
 ### `rounds/round_NNNN.json`
 

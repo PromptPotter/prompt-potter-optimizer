@@ -30,7 +30,6 @@ def finalize_optimization_run(
     """Finalize store, obs logger, emitter; return cloud trace id (or None)."""
     if session.campaign_store and session.cycle_id:
         status = {
-            StopReason.PAUSED_FOR_REVIEW: "paused",
             StopReason.USER_PAUSED: "paused",
             StopReason.USER_STOPPED: "stopped",
             StopReason.INTERRUPTED: "interrupted",
@@ -78,6 +77,6 @@ def finalize_optimization_run(
             stop_reason=stop_reason,
             cycle_id=session.cycle_id,
         )
-    if stop_reason in (StopReason.INTERRUPTED, StopReason.PAUSED_FOR_REVIEW) or obs is None:
+    if stop_reason == StopReason.INTERRUPTED or obs is None:
         return None
     return obs.get_langfuse_trace_id(session.obs_campaign_id)

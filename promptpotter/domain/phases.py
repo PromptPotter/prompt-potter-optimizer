@@ -41,7 +41,6 @@ class StopReason(enum.StrEnum):
     L2_PATIENCE = "l2_patience_exhausted"
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"
-    PAUSED_FOR_REVIEW = "paused_for_review"
     USER_PAUSED = "user_paused"
     USER_STOPPED = "user_stopped"
 

@@ -131,7 +131,6 @@ def _header(
     hitl = state.get("hitl") or {}
     stop = hitl.get("stop_reason")
     requested = hitl.get("requested_state") or "running"
-    pause_before_l2 = bool(hitl.get("pause_before_l2_scoring"))
     pause_point = hitl.get("pause_point")
 
     best_r, streak = _derive_best_and_streak(history)
@@ -148,8 +147,6 @@ def _header(
     best_line += f" · Streak +{streak} · Patience {patience}"
 
     hitl_bits = [f"requested={requested}"]
-    if pause_before_l2:
-        hitl_bits.append("pause-before-L2")
     if pause_point:
         hitl_bits.append(f"paused@{pause_point}")
     hitl_line = "HITL: " + " · ".join(hitl_bits)

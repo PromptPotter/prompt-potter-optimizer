@@ -17,7 +17,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 | `init` | Connect + configure (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`) |
 | `set-task` | Decompose task description (`--task-file` / `--task-text`) |
 | `optimize` | Run L1/L2/L3 loop |
-| `control` | `--pause` / `--resume` / `--stop` / `--pause-before-l2` — checked between queries (~5–10s lag) |
+| `control` | `--pause` / `--resume` / `--stop` — checked between queries (~5–10s lag) |
 | `show-status` | Live dashboard + session state |
 | `show-results` | Summary (`--save` persists winner to backend) |
 | `export <format>` | Post-campaign export (`--backend-id`, `-o <file>`) |

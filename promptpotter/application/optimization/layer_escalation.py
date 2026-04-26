@@ -133,7 +133,6 @@ async def escalate_l2(
 ) -> StopReason | None:
     """L1→L2 (and optional L2→L3) escalation; vanilla patience-exhausts → next layer / stop."""
     from promptpotter.application.campaign.decisions import record_decision
-    from promptpotter.application.optimization.nodes.l1 import PauseForReviewError
     from promptpotter.domain.phases import StopReason
 
     opt = config.optimization
@@ -172,12 +171,6 @@ async def escalate_l2(
             obs_campaign_id=obs_campaign_id,
             ctx={"escalation_check_result": escalation_check_result},
         )
-        if on_checkpoint:
-            ctrl = on_checkpoint("before_l2_scoring")
-            if ctrl == "pause":
-                raise PauseForReviewError([], round_num, pause_point="before_l2_scoring")
-            if ctrl == "stop":
-                return StopReason.USER_STOPPED
         return None
 
     if not opt.enable_l3:

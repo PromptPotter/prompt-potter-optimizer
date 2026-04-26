@@ -61,7 +61,6 @@ def render_dashboard(dashboard: dict) -> str:
         "HITL",
         "=" * 70,
         f"  requested_state      : {_get(hitl, 'requested_state')}",
-        f"  pause_before_l2      : {bool(hitl.get('pause_before_l2_scoring'))}",
         f"  pause_point          : {_get(hitl, 'pause_point')}",
         f"  stop_reason          : {_get(hitl, 'stop_reason')}",
     ]

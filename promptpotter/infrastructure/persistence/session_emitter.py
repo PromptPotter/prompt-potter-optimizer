@@ -124,10 +124,9 @@ def _make_initial_state(
     Per-round working state lives on ``_current_round`` + ``_round_history``.
     """
     r = resume_from or {}
-    # On resume, mirror ``requested_state`` / ``pause_before_l2_scoring``
-    # from prior HITL (or fall back to flat top-level keys from the
-    # pre-nested schema), but always reset ``stop_reason`` and
-    # ``pause_point`` — a fresh run hasn't stopped and hasn't paused.
+    # On resume, mirror ``requested_state`` from prior HITL, but always
+    # reset ``stop_reason`` and ``pause_point`` — a fresh run hasn't
+    # stopped and hasn't paused.
     prior_hitl = r.get("hitl") or {}
     return {
         # Execution markers
@@ -155,12 +154,11 @@ def _make_initial_state(
         # Config
         "n_variants": n_variants,
         "sp_budget_ttest": sp_budget_ttest,
-        # HITL — gathered (see ``_snapshot_hitl``). ``requested_state`` and
-        # ``pause_before_l2_scoring`` mirror ``control.json``; ``pause_point``
-        # and ``stop_reason`` are set by the loop when it halts.
+        # HITL — gathered (see ``_snapshot_hitl``). ``requested_state``
+        # mirrors ``control.json``; ``pause_point`` and ``stop_reason``
+        # are set by the loop when it halts.
         "hitl": {
             "requested_state": prior_hitl.get("requested_state", "running"),
-            "pause_before_l2_scoring": bool(prior_hitl.get("pause_before_l2_scoring", False)),
             "pause_point": None,
             "stop_reason": None,
         },
@@ -745,18 +743,16 @@ class CampaignPersistenceEmitter:
     def _snapshot_hitl(self) -> dict[str, Any]:
         """Build the consolidated HITL block — control signals + halt state.
 
-        ``requested_state`` and ``pause_before_l2_scoring`` mirror
-        ``sessions/{session_id}/control.json`` (session-level HITL intent).
-        ``pause_point`` and ``stop_reason`` come from the in-memory state
-        (set by the loop when it actually halts). Silently falls back to
-        last-known values if ``control.json`` is missing or malformed —
-        the control surface is bidirectional and may be briefly absent
-        during a hand-edit.
+        ``requested_state`` mirrors ``sessions/{session_id}/control.json``
+        (session-level HITL intent). ``pause_point`` and ``stop_reason``
+        come from the in-memory state (set by the loop when it actually
+        halts). Silently falls back to last-known values if ``control.json``
+        is missing or malformed — the control surface is bidirectional and
+        may be briefly absent during a hand-edit.
         """
         existing = self._state.get("hitl") or {}
         snapshot = {
             "requested_state": existing.get("requested_state", "running"),
-            "pause_before_l2_scoring": bool(existing.get("pause_before_l2_scoring", False)),
             "pause_point": existing.get("pause_point"),
             "stop_reason": existing.get("stop_reason"),
         }
@@ -766,9 +762,6 @@ class CampaignPersistenceEmitter:
         except (FileNotFoundError, json.JSONDecodeError, OSError):
             return snapshot
         snapshot["requested_state"] = control.get("requested_state", snapshot["requested_state"])
-        snapshot["pause_before_l2_scoring"] = bool(
-            control.get("pause_before_l2_scoring", snapshot["pause_before_l2_scoring"])
-        )
         return snapshot
 
     def _persist(self) -> None:
