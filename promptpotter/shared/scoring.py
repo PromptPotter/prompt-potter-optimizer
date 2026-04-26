@@ -263,8 +263,8 @@ def _build_namespace(result: dict) -> dict:
     output_tokens = 0
     for entry in step_tokens.values():
         if isinstance(entry, dict):
-            input_tokens += int(entry.get("input", 0) or 0)
-            output_tokens += int(entry.get("output", 0) or 0)
+            input_tokens += int(entry.get("input", 0))
+            output_tokens += int(entry.get("output", 0))
 
     ns: dict = {
         "hit": int(result.get("hit", False)),

@@ -1,6 +1,4 @@
-"""
-Shared I/O helpers for file-based stores.
-"""
+"""Shared I/O helpers for file-based stores."""
 
 import contextlib
 import json
@@ -15,10 +13,7 @@ _SAFE_PATH_RE = re.compile(r"^[a-zA-Z0-9_\-\.]+$")
 
 
 def validate_path_component(name: str) -> str:
-    """Validate that *name* is safe for use as a filesystem path component.
-
-    Raises ValueError on traversal attempts or disallowed characters.
-    """
+    """Validate that *name* is safe for use as a filesystem path component."""
     if not name or not _SAFE_PATH_RE.match(name):
         raise ValueError(
             f"Invalid path component: {name!r}. "

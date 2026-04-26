@@ -1,10 +1,4 @@
-"""SearchPoint diff view-model — flatten/build/group helpers for renderer consumption.
-
-Application layer because it consumes ``PipelineSchema`` and pipeline-param
-shape; the renderer in ``presentation/views/sp_diff.py`` takes the already-
-flattened columns and emits the N-column ANSI table. This split keeps
-display pure and lets a future webapp consume the same flat dicts.
-"""
+"""SearchPoint diff view-model — flatten/build/group helpers for renderer consumption."""
 
 from __future__ import annotations
 

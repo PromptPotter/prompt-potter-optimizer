@@ -1,27 +1,4 @@
-"""SearchMemory — interaction layer over the cross-campaign index.
-
-SearchMemory is the **digest + derived-view façade** that L1/L2/L3 prompts
-consume. The per-sample index storage (hits, failure modes, degradation
-counts, flips) lives in :class:`SampleIndex`; SearchMemory composes it
-and retains only the axis-side aggregate state + digest builders.
-
-Public surface — consumers import only these:
-    * ``digest_for_l1_generate()`` / ``digest_for_l1_critique()``
-    * ``digest_for_l2()`` / ``digest_for_l3()``
-    * ``on_round_complete()`` / ``record_flips_from_rounds()``
-    * ``query_degradation_rate()`` / ``query_degradation_count()``
-    * ``axis_rankings()`` / ``top_k_values()``
-    * ``refresh()`` / ``ensure_for()`` / ``save()`` / ``load()``
-
-Per-sample queries (tractability, dead samples, failure clusters,
-bottleneck distribution) are exposed directly on
-``SearchMemory.sample_index`` — call :class:`SampleIndex` instead of
-adding a forwarder here.
-
-Persistence is split:
-    * ``library/search_memory.json`` — axis-side state (this class)
-    * ``library/sample_index.json`` — per-sample state (``SampleIndex``)
-"""
+"""SearchMemory — digest + derived-view façade over SampleIndex (axis side)."""
 
 from __future__ import annotations
 
@@ -79,8 +56,6 @@ class SearchMemory:
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
 
-    # --- Parameter Impact ---
-
     def axis_rankings(self) -> list[AxisImpact]:
         """Return all axes ranked by effect size (descending)."""
         impacts = []
@@ -108,8 +83,6 @@ class SearchMemory:
         records.sort(key=lambda r: -r.mean_accuracy)
         return records[:k]
 
-    # --- Degradation (bridged via query→sample_id lookup; null-fallback) ---
-
     def query_degradation_rate(self, query: str) -> float:
         """Return fraction of evaluations where *query* was degraded."""
         sid = self.sample_index.id_for_query(query)
@@ -123,8 +96,6 @@ class SearchMemory:
         if sid is None:
             return 0
         return self.sample_index.degradation_count(sid)
-
-    # --- Digest-internal helpers ---
 
     def _exhausted_axes(self, min_values: int = 4, max_effect: float = 0.02) -> list[AxisImpact]:
         """Axes thoroughly tested with negligible effect — further exploration wastes budget."""
@@ -262,8 +233,6 @@ class SearchMemory:
             self._axis_failure_group_deltas = new_deltas
             return True
         return False
-
-    # --- Prompt digests (one method per consumer layer) ---
 
     def digest_for_l1_generate(self) -> dict[str, str] | None:
         """Build the SearchMemory digest for the L1 generate inbox.
@@ -411,8 +380,6 @@ class SearchMemory:
             ctx["persistent_failures"] = _fmt_persistent_failures(persistent, terse=True)
 
         return ctx or None
-
-    # --- Lifecycle ---
 
     def refresh(
         self,
@@ -569,8 +536,6 @@ class SearchMemory:
                 mem._axis_values[axis][v] = accs
         mem._axis_failure_group_deltas = data.get("axis_failure_group_deltas", {})
         return mem
-
-    # --- Internals ---
 
     def _ingest_run(self, detail: dict[str, Any]) -> None:
         """Ingest axis-side state from a dataset_runs/ entry."""

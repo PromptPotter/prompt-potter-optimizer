@@ -1,16 +1,4 @@
-"""Per-round action trace recorder.
-
-Accumulates one JSON object per node that ran in a single round and
-flushes them atomically to ``campaigns/{cycle_id}/rounds/round_NNNN.json``.
-The round file is the authoritative per-round view — reviewing a round
-means reading this file.
-
-Node types captured from ``llm_call()``: ``l1_generate``, ``l1_critique``,
-``l2_context``, ``l3_plan``. The scoring phase
-(``l1_score``) is deposited by the session emitter via ``set_l1_score``
-just before ``flush()``. HITL snapshot is deposited by the emitter via
-``set_hitl``.
-"""
+"""Per-round action trace recorder — flushes to ``campaigns/{cycle_id}/rounds/round_NNNN.json``."""
 
 from __future__ import annotations
 

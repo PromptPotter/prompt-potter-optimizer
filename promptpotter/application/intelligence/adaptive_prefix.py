@@ -1,15 +1,4 @@
-"""Round-level adaptive sample-prefix evolution.
-
-Between rounds, refit Rasch on accumulated ``(candidate, sample, hit)``
-observations. Identify low-info samples in the current prefix (narrow CI
-on δ_s) and high-KG samples not in the prefix. Swap K-out for K-in,
-respecting ``max_swaps_per_round`` and ``min_prefix_size``.
-
-No backfill needed — Wilcoxon's prior population is per-round-internal
-(``EliminationCheck`` is fresh each round in ``score_candidates``), so
-priors don't span the prefix change. Rasch handles the resulting sparse
-observation matrix natively.
-"""
+"""Round-level adaptive sample-prefix evolution via Rasch + KG."""
 
 from __future__ import annotations
 
@@ -36,12 +25,7 @@ __all__ = ["EvolveResult", "build_observations", "build_prefix_event", "evolve_p
 
 @dataclass
 class EvolveResult:
-    """Outcome of one ``evolve_prefix()`` call.
-
-    ``new_prefix`` is what the next round should score; the swap lists are
-    diagnostic. ``rasch`` is exposed so downstream consumers (hardness
-    view, dashboards) can read the same posterior without refitting.
-    """
+    """Outcome of one ``evolve_prefix()`` call."""
 
     new_prefix: list[Sample]
     swapped_out: list[Sample] = field(default_factory=list)
@@ -120,15 +104,13 @@ def _select_swap_ins(
         if s.id in prefix_sample_ids:
             continue
         if s.id not in posterior.delta:
-            # Never observed → no Rasch estimate. Skip in v1; could pull in
-            # later via a dedicated cold-exploration tier.
             continue
         kg = sample_kg_max(posterior, s.id, surviving_candidates)
         if kg < config.swap_in_kg_threshold:
             continue
         scored.append((kg, s.id))
 
-    scored.sort(reverse=True)  # largest KG first
+    scored.sort(reverse=True)
     return [sid for _, sid in scored[:n_slots]]
 
 
@@ -138,12 +120,7 @@ def build_prefix_event(
     result: EvolveResult,
     hardness_top_k: int = 5,
 ) -> dict:
-    """Serialize an ``EvolveResult`` into the persistable per-round event dict.
-
-    Compact by design — this lives in every trial JSON. Includes the top
-    ``hardness_top_k`` samples by posterior δ_s for the renderer; the rest
-    can be recomputed from the observation table on demand.
-    """
+    """Serialize an ``EvolveResult`` into the persistable per-round event dict."""
     rasch = result.rasch
     hardness: list[dict] = []
     rasch_summary: dict = {}

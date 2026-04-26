@@ -1,15 +1,4 @@
-"""Phase-event view builders — convert PhaseEvent payloads to serializable dicts.
-
-Each (phase, event) gets a builder ``(event_data, ctx) -> dict`` that returns
-flat scalars only (no domain objects). The ``ctx`` dict is the per-cycle
-accumulator (replaces the old ``_CycleDisplayState``) — it carries
-cross-handler state like ``original_sp_flat``, ``current_sp_flat``,
-``baseline_accuracy`` between events. Builders mutate it.
-
-The dispatcher ``build_phase_view(event, ctx) -> dict | None`` is what the
-emitter calls; it returns ``None`` for phase keys without a builder so the
-emitter can skip the JSONL append for those.
-"""
+"""Phase-event view builders — convert PhaseEvent payloads to serializable dicts."""
 
 from __future__ import annotations
 

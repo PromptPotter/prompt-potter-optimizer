@@ -1,12 +1,4 @@
-"""Render the live sliding-window dashboard at ``campaigns/{cycle_id}/log.md``.
-
-One human-readable file, overwritten on every event. Layout:
-header · CURRENT round (in-flight, summary) · LAST COMPLETED round
-(critique + leaderboard + optimizer-node I/O) · EARLIER (compact list) ·
-PER-QUERY DETAIL (all candidates × all samples of the current round,
-long — appended at the bottom). Overwrite semantics kill the
-duplicate-header bug that append-only caused on resume.
-"""
+"""Render the live sliding-window dashboard at ``campaigns/{cycle_id}/log.md``."""
 
 from __future__ import annotations
 
@@ -17,8 +9,7 @@ from typing import Any
 __all__ = ["fmt_sample_line", "render_dashboard_md", "round_summary_from_trial"]
 
 
-# Compact badge for the per-query terminator. Values above or below the
-# dict are shown as the first two characters of the node name.
+# Per-query terminator badge; unmapped nodes render as the first two characters of the node name.
 _NODE_BADGES: dict[str, str] = {
     "llm_only": "ai",
     "llm_ranking": "ai",

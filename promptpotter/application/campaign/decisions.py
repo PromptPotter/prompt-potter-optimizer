@@ -1,13 +1,4 @@
-"""Decision records + replayers — kind-agnostic divergence mechanism.
-
-When a recorded decision re-derives to a different outcome under the
-current scorer, the resume path either halts (default) or — when the
-caller passed ``fork_on_divergence=True`` — mints a sibling cycle that
-inherits trials before the divergence point and re-runs the divergent
-round under the new policy. Forking is inlined here because it is just
-"truncate trials at R, stamp ``parent_cycle_id``, retarget the active
-pointer" — there is no separate ``fork`` command.
-"""
+"""Decision records + replayers — kind-agnostic divergence + inline fork."""
 
 from __future__ import annotations
 
@@ -156,9 +147,6 @@ def replay_decisions(
     return None
 
 
-# Built-in replayers
-
-
 def _mean_score(results: list[dict]) -> float:
     """Mean of rescored ``score`` projection."""
     if not results:
@@ -218,7 +206,7 @@ def _derive_stall_count(
     entry_round: int,
     this_round: int,
 ) -> int:
-    """Reconstruct stall_count at end of this_round. Running-max monotonicity lets stall = (this-entry) unless any post-entry round's composite strictly exceeded the entry-time running max."""
+    """Reconstruct stall_count at end of this_round."""
     if entry_round < 0:
         return 0
     sorted_trials = sorted(prior_trials, key=lambda t: int(t.get("round", -1)))
@@ -263,13 +251,6 @@ def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     this_round = int(inputs_ref.get("round_num", -1))
     stalls = _derive_stall_count(ctx.prior_trials, entry_round, this_round)
     return stalls < int(patience)
-
-
-# probe_round_commitment — recorded but NOT replayed (archive-only, invariant under pure scorer swap).
-# Unknown-kind decisions are silently skipped by replay_decisions above.
-
-
-# ───────────────────────────── Inline fork ──────────────────────────────
 
 
 def _mint_fork_cycle_id(old_cycle_id: str) -> str:

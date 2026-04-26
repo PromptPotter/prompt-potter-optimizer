@@ -1,20 +1,4 @@
-"""SessionStore — per-session metadata under ``{tenant_root}/sessions/``.
-
-A session is a long-lived workspace identifier. One session today hosts
-exactly one campaign (1:1); the model is wired so it can host multiple
-campaigns over time (1:N) without a layout change. Each campaign records
-its parent in ``campaigns/{cycle_id}/index.json::parent_session_id``.
-The currently-active cycle for the whole workspace is recorded in
-``.promptpotter/active_session.json`` (see ``stores.save_active_pointer``).
-
-Disk layout::
-
-    {tenant_root}/sessions/{session_id}/
-      session.json      # session metadata
-      journal.md        # operator narrative (notebook ↔ Claude exchange)
-      notes.md          # Claude notes
-      control.json      # HITL control signals
-"""
+"""SessionStore — per-session metadata under ``{tenant_root}/sessions/``."""
 
 from __future__ import annotations
 

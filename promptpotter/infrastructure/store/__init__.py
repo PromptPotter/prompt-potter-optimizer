@@ -1,9 +1,4 @@
-"""Focused store modules for file-based persistence.
-
-The :class:`Stores` composite and :func:`build_stores` builder are the
-canonical entry point; leaf stores are re-exported for direct use in
-tests and narrow wiring.
-"""
+"""Focused store modules for file-based persistence."""
 
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore

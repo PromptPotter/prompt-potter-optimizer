@@ -242,11 +242,6 @@ async def init_services(
                 pipeline_schema = parse_pipeline_response(
                     json.loads(cfg_path.read_text(encoding="utf-8"))
                 )
-                logger.info(
-                    "Static pipeline schema loaded: %s v%s",
-                    pipeline_schema.name,
-                    pipeline_schema.version,
-                )
                 status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
             except Exception as exc:
                 logger.warning("Failed to parse static pipeline.json: %s", exc)
@@ -258,11 +253,6 @@ async def init_services(
     if not pipeline_schema:
         try:
             pipeline_schema = parse_pipeline_response(await client.fetch_pipeline())
-            logger.info(
-                "Pipeline schema loaded: %s v%s",
-                pipeline_schema.name,
-                pipeline_schema.version,
-            )
             status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
@@ -300,7 +290,6 @@ async def init_services(
             loader_items = DATASET_LOADERS[dataset_name]()
             base.store.backends.save_dataset(dataset_name, loader_items)
             ds = {"items": loader_items}
-            logger.info("Auto-loaded dataset %r: %d items", dataset_name, len(loader_items))
 
         if not (ds and ds.get("items")):
             status(f"Dataset '{dataset_name}' not available")

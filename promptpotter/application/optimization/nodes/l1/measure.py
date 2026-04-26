@@ -184,7 +184,7 @@ def _handle_scored_candidate(
         cr = signal.check_result
         dominant = cr.get("dominant_warning", "unknown:unknown")
         problem_node = dominant.split(":")[0] if ":" in dominant else ""
-        observed_node_cfg = (merged_pp_i or {}).get(problem_node, {}) or {}
+        observed_node_cfg = (merged_pp_i or {}).get(problem_node, {})
         new_rf = RuntimeFailure(
             source="degradation_check",
             dominant_warning=dominant,

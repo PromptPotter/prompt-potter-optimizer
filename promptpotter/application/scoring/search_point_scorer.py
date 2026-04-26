@@ -1,15 +1,4 @@
-"""Dataset scoring — query loop orchestration, archival, and observability.
-
-Reuses per-query results from prior dataset_runs via
-``DatasetRunStore.load_reusable_results`` (addressed by
-``PipelineSchema.node_configs``).  Single-sample measurement lives in
-``sample_measurement``; the stale-data ladder in ``stale_data``.
-
-Interrupt handling is pulled in from the caller via ``Session.stop_check``
-(polled between queries).  A hard cancel (``KeyboardInterrupt`` /
-``CancelledError`` propagating through ``measure_sample``) still yields
-``stop_reason="force"``.
-"""
+"""Dataset scoring — query loop orchestration, archival, and observability."""
 
 from __future__ import annotations
 

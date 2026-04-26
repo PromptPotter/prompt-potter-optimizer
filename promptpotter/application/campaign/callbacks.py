@@ -1,9 +1,4 @@
-"""Run listener — directly composed persistence + display + control hooks.
-
-Replaces the prior list-per-channel multicast: each dispatch fans out to
-at most two concrete listeners (the persistence emitter and an optional
-display) with direct method calls — no list iteration, no attach/bolt-on.
-"""
+"""Run listener — directly composed persistence + display + control hooks."""
 
 from __future__ import annotations
 

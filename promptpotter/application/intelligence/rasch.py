@@ -1,19 +1,4 @@
-"""Rasch model + Knowledge Gradient for adaptive sample selection.
-
-Rasch joint MLE on a sparse ``(candidate_id, sample_id, hit)`` observation
-matrix produces:
-  - ``theta``: candidate ability (higher = better candidate)
-  - ``delta``: sample difficulty (higher = harder sample)
-  - Laplace standard errors on both — first-class uncertainty readout
-    for hard-sample identification and swap decisions.
-
-Knowledge Gradient (one-step lookahead, Bernoulli closed-form): how much
-does a single new measurement at ``(c, s)`` shift our point estimate for
-the best candidate? Drives swap-in selection.
-
-Pure functions, numpy only, no I/O. Re-fit per round on the cumulative
-observation table; cheap at our scale (~50 candidates × ~200 samples).
-"""
+"""Rasch model + Knowledge Gradient for adaptive sample selection."""
 
 from __future__ import annotations
 

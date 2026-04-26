@@ -369,34 +369,6 @@ def assemble_inbox(
     return "\n\n".join(sections)
 
 
-# ---------------------------------------------------------------------------
-# Docs helper — emits the per-layer rows for information-flow.md.
-# ---------------------------------------------------------------------------
-
-
-def registry_rows_for_docs() -> list[dict[str, str]]:
-    """One row per (field, layer) — feeds the table in information-flow.md."""
-    rows: list[dict[str, str]] = []
-    for fname in LAYER_ORDER[Layer.L1] + LAYER_ORDER[Layer.L2]:
-        f = _by_name()[fname]
-        for layer in (Layer.L1, Layer.L2):
-            if fname not in LAYER_ORDER[layer]:
-                continue
-            label = _LABEL_BY_LAYER.get((layer, fname), "")
-            mutex = f.mutex.get(layer)
-            rows.append(
-                {
-                    "field": fname,
-                    "layer": str(layer),
-                    "label": label,
-                    "retention": str(f.retention),
-                    "mutex": (f"{mutex[0]} (pri {mutex[1]})" if mutex else ""),
-                    "docstring": f.docstring,
-                }
-            )
-    return rows
-
-
 __all__ = [
     "INBOX",
     "LAYER_ORDER",
@@ -405,5 +377,4 @@ __all__ = [
     "Layer",
     "Retention",
     "assemble_inbox",
-    "registry_rows_for_docs",
 ]

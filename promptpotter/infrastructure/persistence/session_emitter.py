@@ -1,8 +1,4 @@
-"""Campaign session emitter — live dashboard + audit log writer.
-
-Owns ``CAMPAIGN_ARTIFACTS`` (per-cycle) and ensures ``SESSION_ARTIFACTS``
-(per-session). Parity enforced by ``tests/test_artifact_parity.py``.
-"""
+"""Campaign session emitter — live dashboard + audit log writer."""
 
 from __future__ import annotations
 

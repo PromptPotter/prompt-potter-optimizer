@@ -33,11 +33,7 @@ __all__ = [
 
 
 def flatten_campaign_trials(campaign: dict[str, Any]) -> list[dict[str, Any]]:
-    """Flatten a campaign's trial summaries to tabular rows.
-
-    Each row contains round-level stats plus Wilson CI and improvement delta.
-    Operates on the campaign dict returned by ``CampaignStore.load()``.
-    """
+    """Flatten a campaign's trial summaries to tabular rows."""
     baseline_acc = campaign.get("baseline_accuracy", 0.0)
     rows: list[dict[str, Any]] = []
 
@@ -68,13 +64,7 @@ def flatten_campaign_trials(campaign: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def compare_campaigns(campaigns: list[dict[str, Any]]) -> dict[str, Any]:
-    """Compare N campaigns side-by-side for paper tables.
-
-    Returns:
-        summary_table: per-campaign summary rows
-        convergence: per-campaign round-by-round accuracy series
-        pairwise_significance: p-values between each pair's best trials
-    """
+    """Compare N campaigns side-by-side for paper tables."""
     summary_table: list[dict[str, Any]] = []
     convergence: dict[str, list[dict[str, Any]]] = {}
     best_trials: list[dict[str, Any]] = []

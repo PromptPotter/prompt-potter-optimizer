@@ -1,18 +1,4 @@
-"""SampleIndex — per-sample cross-campaign state, keyed by sample.id.
-
-Two ingest paths feed the same underlying state:
-
-- **Steady-state (auto-trigger)**: ``on_measurement(result, run_id)`` is
-  called synchronously from ``score_search_point()`` after each
-  per-sample measurement completes. The Sample + aggregate tables
-  update immediately — no watermark refresh needed.
-- **Cold-start**: ``ingest_run(run_detail)`` replays a persisted
-  ``dataset_runs/`` archive entry. Used by ``SearchMemory.refresh()``
-  on process restart and by tests that preload a known state.
-
-Archive (``library/dataset_runs/``) remains the truth; SampleIndex is a
-rebuildable cache. Persisted to ``library/sample_index.json``.
-"""
+"""SampleIndex — per-sample cross-campaign state, keyed by sample.id."""
 
 from __future__ import annotations
 
@@ -89,8 +75,6 @@ class SampleIndex:
         # Cache for derived query records; cleared on ingest.
         self._cache_records: list[QueryRecord] | None = None
 
-    # --- Sample registry ---
-
     def register(self, sample: Sample) -> None:
         """Register a Sample. Call at dataset-load time so on_measurement
         can find the right primitive to update."""
@@ -107,8 +91,6 @@ class SampleIndex:
     def id_for_query(self, query: str) -> int | None:
         """Reverse lookup for legacy string-keyed callers."""
         return self._query_to_id.get(query)
-
-    # --- Auto-trigger: synchronous per-measurement update ---
 
     def on_measurement(self, result: QueryResult, run_id: str) -> None:
         """Fired after each measurement. Mutates Sample + aggregate tables."""
@@ -132,8 +114,6 @@ class SampleIndex:
             sample.run_ids.append(run_id)
 
         self._cache_records = None
-
-    # --- Cold-start: batch replay from archive ---
 
     def ingest_run(self, run_detail: dict[str, Any]) -> None:
         """Replay a dataset_runs/ archive entry into the index."""
@@ -201,8 +181,6 @@ class SampleIndex:
                 )
                 count += 1
         return count
-
-    # --- Read API ---
 
     def hits(self, sample_id: int) -> list[bool]:
         return self._hits.get(sample_id, [])
@@ -354,8 +332,6 @@ class SampleIndex:
     def mark_watermark(self, run_id: str) -> None:
         self._watermark.add(run_id)
 
-    # --- Persistence ---
-
     def save(self, path: Path) -> None:
         data = {
             "watermark": sorted(self._watermark),
@@ -392,8 +368,6 @@ class SampleIndex:
         )
         idx._flips = data.get("flips", [])
         return idx
-
-    # --- Internal ---
 
     def _dominant_failure_mode(self, sample_id: int) -> str:
         modes = self._failure_modes.get(sample_id, [])

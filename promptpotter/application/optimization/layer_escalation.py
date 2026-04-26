@@ -1,9 +1,4 @@
-"""L1→L2→L3 layer-escalation orchestration.
-
-This module owns the patience/stall flow that transitions optimizer state
-between layers when a *round* stalls — distinct from per-query candidate
-elimination (see ``elimination.py``). Entry point is ``escalate_l2``.
-"""
+"""L1→L2→L3 layer-escalation orchestration. Entry point: ``escalate_l2``."""
 
 from __future__ import annotations
 
@@ -62,13 +57,7 @@ async def _run_transition(
     obs_campaign_id: str,
     ctx: dict[str, Any] | None = None,
 ) -> Any:
-    """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit.
-
-    Per-layer payload shapes (``enter_payload``, ``exit_payload``,
-    ``run_kwargs``, ``temperature``) live on the ``LayerTransition``
-    subclass; this function is the thin glue that times the LLM call,
-    persists the result, and emits the surrounding phase events.
-    """
+    """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
     from promptpotter.infrastructure.llm import client as _llm_client
     from promptpotter.infrastructure.tracing import observed_node
 

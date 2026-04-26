@@ -1,13 +1,4 @@
-"""Scoring models — query-result types and the backend runner protocol.
-
-``QueryResult`` / ``QueryResultFull`` define the per-query measurement schema.
-``QueryRunner`` is the async backend-connector protocol. Scoring infrastructure
-(``backend_client``, ``store``, ``scorer`` / ``round_scorer`` / ``scorer_id`` /
-``scorer_formula``, ``obs``, ``sample_index``, ``search_memory``, stale-data
-protocol) lives on :class:`~promptpotter.application.campaign.campaign_setup.Session`.
-Ground-truth comparison is owned by the compiled ``Scorer`` callable (from
-``shared/scoring.py``) — there is no separate comparator class.
-"""
+"""Scoring models — query-result types and the backend runner protocol."""
 
 from __future__ import annotations
 

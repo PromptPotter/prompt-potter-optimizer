@@ -1,18 +1,4 @@
-"""
-Dataset run storage — archive layer for eval history.
-
-Stores completed evaluation runs for SearchMemory, observability,
-campaign lineage, and full-run cache lookup (``find_by_node_configs``).
-
-Archive identity uses ``PipelineSchema.node_configs`` — the ordered
-list of ``(node_name, node_config)`` tuples.  Prefix matching over
-that list enables reuse of prior results when only downstream nodes
-changed; ``sp_hash = stable_hash(node_configs)`` is the terminal
-identity.
-
-Prompt alias groups are used by ``recon_baseline.py`` and
-``optimization_loop.py`` for SearchMemory historical linking.
-"""
+"""Dataset run storage — archive layer for eval history."""
 
 import hashlib
 import logging

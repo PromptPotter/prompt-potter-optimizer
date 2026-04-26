@@ -1,9 +1,4 @@
-"""Optimization cycle state — pure optimizer progress tracking.
-
-Mutable state threaded through the feedback cycle round loop.  All
-infrastructure handles (stores, scoring env, cycle id, dataset samples)
-live on ``Session`` instead — this module stays layer-clean.
-"""
+"""Optimization cycle state — pure optimizer progress tracking."""
 
 from __future__ import annotations
 
@@ -60,12 +55,7 @@ class EscalationState:
         )
 
     def to_checkpoint_dict(self) -> dict[str, Any]:
-        """Serialize for trial dict — includes entry baselines so patience semantics survive resume.
-
-        Without ``best_*_at_entry``, ``LayerCounter.record_outcome`` after
-        resume compares against 0.0 and treats every round as improved,
-        silently zeroing ``stall_count`` and breaking L2/L3 patience.
-        """
+        """Serialize for trial dict — entry baselines required so resume preserves L2/L3 patience."""
         return {
             "l1_stall_count": self.l1_stall_count,
             "l2_round": self.l2.round,
@@ -126,8 +116,6 @@ class Cycle:
     pending_decisions: list[dict] = field(default_factory=list)
 
     state_version: int = 1
-
-    # -- Construction / restore ------------------------------------------------
 
     @classmethod
     def start(
@@ -215,8 +203,6 @@ class Cycle:
             self.best_accuracy = self.current_accuracy
             self.best_round = round_num
             self.best_sp = self.current_sp
-
-    # -- Write API -------------------------------------------------------------
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""

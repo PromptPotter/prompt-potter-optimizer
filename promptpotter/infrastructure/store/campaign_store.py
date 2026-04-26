@@ -1,24 +1,4 @@
-"""Campaign registry persistence — per-cycle optimization artifacts.
-
-``CampaignStore`` owns the campaign tree only. Operator session state
-(journal/notes/control + the active-cycle pointer) lives in
-``SessionStore`` under a peer ``sessions/{session_id}/`` subtree; each
-campaign records its parent in ``index.json::parent_session_id``.
-
-Disk layout::
-
-    {tenant_root}/campaigns/{cycle_id}/                      # per-cycle dir
-      index.json                                              # campaign metadata + trial index + parent_session_id
-      dashboard.json                                          # live scalar counters
-      output.log                                              # per-query audit
-      log.md                                                  # round-by-round summary
-      trials/trial_NNNN.json                                  # optimizer resume WAL
-      candidates/round_NNNN.json                              # pre-scoring checkpoint
-
-The ``backend_id`` parameter on public methods is preserved for call-site
-stability; campaigns are tenant-global so it does not affect path
-construction. A campaign's ``backend_id`` is recorded in its metadata blob.
-"""
+"""Campaign registry persistence — per-cycle optimization artifacts under ``campaigns/{cycle_id}/``."""
 
 from __future__ import annotations
 

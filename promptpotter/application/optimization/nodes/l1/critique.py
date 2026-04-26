@@ -1,11 +1,4 @@
-"""L1 critique phase — LLM analysis of a round's results.
-
-Runs inside the L1 round after scoring+winner selection. Builds a
-:class:`RoundSnapshot` from the round's state (defined here), assembles a
-stat-rich prompt, calls the LLM, and returns the 6-field critique dict.
-Output feeds the next L1 generate phase (via inbox) and L2 refine (on
-escalation).
-"""
+"""L1 critique phase — LLM analysis of a round's results."""
 
 from __future__ import annotations
 

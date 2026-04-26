@@ -1,41 +1,4 @@
-"""Concrete store implementations — BackendStore, PlanStore, ``Stores`` bundle.
-
-Tenant is the outer axis; all per-tenant trees live under
-``{projects_root}/{tenant_id}/``. Three top-level partitions live inside
-each tenant:
-
-- ``sessions/{session_id}/``  — operator session metadata, journal/notes/control
-- ``campaigns/{cycle_id}/``   — per-cycle optimization artifacts (trials,
-                                dashboard, logs); each campaign records its
-                                ``parent_session_id`` in ``index.json``
-- ``library/``                — cross-run reference data (datasets, backends,
-                                dataset_runs cache, aliases)
-
-Sessions and campaigns are separate concepts. Today the relation is 1:1
-(one session hosts one campaign); the layout is wired so a future
-1:N relationship needs no reorg.
-
-Disk layout::
-
-    .promptpotter/projects/{tenant_id}/
-      sessions/{session_id}/
-        session.json                                # session metadata
-        journal.md / notes.md / control.json
-      campaigns/{cycle_id}/
-        index.json                                  # campaign metadata + trial index + parent_session_id
-        dashboard.json / output.log / log.md
-        trials/trial_NNNN.json
-        candidates/round_NNNN.json
-      library/
-        datasets/{name}.json                        # tenant-global datasets (future)
-        backends/{backend_id}/
-          backend.json, connector_profile.json
-          sync/, executions/, datasets/
-        dataset_runs/{run_id}.json                  # content-addressed
-        dataset_runs.json
-        prompt_aliases.json
-        search_memory.json
-"""
+"""Concrete store implementations — BackendStore, PlanStore, ``Stores`` bundle."""
 
 from __future__ import annotations
 

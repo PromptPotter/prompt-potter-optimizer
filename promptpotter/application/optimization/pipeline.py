@@ -58,8 +58,6 @@ def get_optimizer_schema() -> PipelineSchema:
 
 _LLM_DEFAULTS = {"temperature": 0.0, "output_format": "text"}
 
-# -- Round recorder (per-task context, not a module global) ----------------
-
 _recorder_var: contextvars.ContextVar[RoundRecorder | None] = contextvars.ContextVar(
     "round_recorder",
     default=None,
@@ -104,9 +102,7 @@ async def llm_call(
         "json_schema" if json_schema else merged["output_format"],
     )
 
-    # 429 retry loop: SDK's built-in max_retries gives up on long Retry-After
-    # (e.g. Groq TPD hitting 11-minute windows). We honor whatever the server
-    # advertises — no cap — and show a live countdown. Ctrl+C interrupts.
+    # 429 retry loop: honor server Retry-After uncapped (Groq TPD windows can run minutes).
     while True:
         try:
             response = await llm_client.chat(
@@ -135,8 +131,6 @@ async def llm_call(
 
     duration_s = round(time.monotonic() - _t0, 2)
 
-    # Token-usage chokepoint — sinks handle threshold warnings, will handle
-    # per-query display + composite-score penalty + cost tracking later.
     emit_token_usage(
         TokenUsage(
             node=node or "llm_call",
@@ -147,10 +141,8 @@ async def llm_call(
         )
     )
 
-    # Trace to round recorder if active
     _recorder = _recorder_var.get()
     if _recorder is not None:
-        # Parse JSON responses into structured objects (not escaped strings)
         response_data: dict | str
         try:
             response_data = json.loads(response.content)
@@ -170,10 +162,8 @@ async def llm_call(
             "duration_s": duration_s,
         }
         if trace_meta:
-            # template_name, template_fields, variables from call site
             action.update(trace_meta)
         else:
-            # Fallback: store compiled messages when no decomposition available
             action["messages"] = messages
         _recorder.add_action(action)
 
@@ -190,11 +180,7 @@ async def run_optimizer_node(
     json_schema: dict | None = None,
     user_content: str | None = None,
 ) -> tuple[Any, str]:
-    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
-
-    When ``user_content`` is given the compiled template becomes the system message
-    and ``user_content`` is the user turn (used by the restructure node).
-    """
+    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text)."""
     template = load_optimizer_prompt(template_name)
     prompt = template.compile_prompt(**compile_vars)
     if user_content is not None:
@@ -219,10 +205,6 @@ async def run_optimizer_node(
     )
     return extract_parsed_json(response), prompt
 
-
-# ---------------------------------------------------------------------------
-# Prompt template loading (from Langfuse or local JSON)
-# ---------------------------------------------------------------------------
 
 _PROMPT_DIR = Path(__file__).parent / "prompts"
 

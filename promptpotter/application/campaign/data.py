@@ -1,8 +1,4 @@
-"""Campaign data loading and baseline evaluation.
-
-Loads datasets, evaluates baselines, and prepares evaluation contexts
-for campaign optimization loops.
-"""
+"""Campaign data loading and baseline evaluation."""
 
 from __future__ import annotations
 
@@ -128,11 +124,6 @@ def load_baseline_prompt(
                     template = load_node_prompt(dataset_name, node_name, "default")
                 except FileNotFoundError:
                     continue
-                logger.info(
-                    "Baseline loaded from canonical store: datasets/%s/prompts/ → %s",
-                    dataset_name,
-                    node_name,
-                )
                 return OptSearchPoint.from_prompt_fields(
                     template.prompt_field_dict(),
                     lineage=IndividualLineage(
@@ -142,10 +133,6 @@ def load_baseline_prompt(
                     ),
                 )
 
-    logger.info(
-        "No prompt found for nodes %s — baseline uses empty prompt (param-only optimization)",
-        names,
-    )
     return OptSearchPoint(
         instruction="",
         lineage=IndividualLineage(
@@ -192,11 +179,6 @@ async def prepare_scoring_context(
     session: Session = svc
     sp_budget = campaign_config.sp_budget_ttest or 15
     eval_dataset = sample_dataset(dataset, sp_budget)
-    logger.info(
-        "Baseline eval on t-test slice (%d/%d queries, top-N prefix) — shared with L1",
-        len(eval_dataset),
-        len(dataset),
-    )
     spec = split_scoring_block(campaign_config.scoring)
 
     if session.index_terms:
@@ -215,8 +197,7 @@ async def prepare_scoring_context(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    # populate_session_scoring overwrites session.scorer / source temporarily;
-    # the loop repopulates these before round 1.
+    # populate_session_scoring overwrites session.scorer/source; loop repopulates before round 1.
     prior_schema = session.pipeline_schema
     if pipeline_schema is not None:
         session.pipeline_schema = pipeline_schema
@@ -229,8 +210,7 @@ async def prepare_scoring_context(
         source="baseline",
     )
 
-    # Pseudo-candidate coords (ci=0/ct=1) so the dashboard emitter ticks
-    # per-query during baseline exactly as it does during L1 scoring.
+    # ci=0/ct=1 makes the dashboard emitter tick per-query during baseline like L1.
     on_start_cb: Callable | None = None
     on_result_cb: Callable | None = None
     if listener is not None:
@@ -369,7 +349,7 @@ def summarize_dataset_runs(runs: list[dict]) -> DatasetRunSummary:
         name = r.get("name", "")
         source = name.split("_")[0] if "_" in name else "other"
         by_source[source] = by_source.get(source, 0) + 1
-        acc = r.get("scores", {}).get("accuracy", 0.0) or 0.0
+        acc = r.get("scores", {}).get("accuracy", 0.0)
         if acc > best_acc:
             best_acc = acc
             best_name = name

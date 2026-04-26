@@ -1,11 +1,4 @@
-"""
-Pipeline discovery: factory and dynamic pipeline view.
-
-``parse_pipeline_response()`` parses a backend ``GET /pipeline`` JSON
-response into a ``PipelineSchema``.  ``compute_pipeline_view()`` fetches
-the response.  No backend-specific defaults — the schema is built
-entirely from the live response.
-"""
+"""Pipeline discovery — parse backend ``GET /pipeline`` into ``PipelineSchema``."""
 
 from __future__ import annotations
 

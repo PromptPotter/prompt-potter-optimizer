@@ -1,9 +1,4 @@
-"""Candidate elimination — four mid-evaluation checks (first-to-fire wins).
-
-Each check exposes ``.name`` and ``.evaluate(results, candidate_idx, n_total_candidates)
--> EscalationSignal | None``. Ordering and rationale: see
-``docs/methods/candidate-elimination.md``.
-"""
+"""Candidate elimination — four mid-evaluation checks (first-to-fire wins)."""
 
 from __future__ import annotations
 
@@ -19,8 +14,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
 
 
-# Deterministic — one occurrence ends the candidate. Grow this set when a new
-# warning proves equally conclusive; do not expose as a tunable.
+# One occurrence ends the candidate; not a tunable.
 FATAL_WARNINGS: frozenset[str] = frozenset({"llm_only:empty_content_reasoning_fallback"})
 
 
