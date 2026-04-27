@@ -161,7 +161,9 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     out_tok = s.get("output_tokens")
     tok_seg = ""
     if in_tok is not None or out_tok is not None:
-        tok_seg = f" in={in_tok if in_tok is not None else '-'} out={out_tok if out_tok is not None else '-'}"
+        tok_seg = (
+            f" io={in_tok if in_tok is not None else '-'}/{out_tok if out_tok is not None else '-'}"
+        )
     return (
         f"  {time_s:4.1f}s #{qi:03d} {mark} [{badge}]{cache_icon}"
         f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"

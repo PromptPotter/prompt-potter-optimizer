@@ -503,7 +503,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     listener = RunListener(emitter=emitter, display=display, control=control_reader)
 
     ctx.save_phase("optimizing")
-    set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
+    recorder = RoundRecorder(campaign_dir / "rounds")
+    recorder.rehydrate_sticky()
+    set_round_recorder(recorder)
 
     try:
         cycle_result = await _orch_run_optimization(

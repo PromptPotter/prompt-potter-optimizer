@@ -95,29 +95,29 @@ def _fmt_query_result(
             tag = "MISS"
 
     cache_marker = "\U0001f4d6" if cached else ""
-    step = f"{step}{cache_marker}"
 
-    # Per-LLM-node token column: `[tag] in=N out=M` groups in pipeline order.
+    # Per-LLM-node token column: `[tag] io=N/M` groups in pipeline order.
     # Values are prefixed with `~` when the entry is a chars/4 estimate rather
-    # than a provider-exact count.
+    # than a provider-exact count. Single-node pipelines drop the io-group
+    # tag (source is unambiguous). The standalone step tag is kept only as
+    # the cache-marker anchor — `HIT [ai]📖 io=…` when cached, `HIT io=…`
+    # when not.
+    single_node = len(_DISPLAY_TAGS) == 1
     step_tokens = pd.get("step_tokens") or {}
     tok_col = ""
     if step_tokens:
         groups = []
         for node_name, entry in step_tokens.items():
-            tag_name = _DISPLAY_TAGS.get(node_name, node_name[:4])
             mark = "~" if entry.get("estimated") else ""
-            groups.append(
-                f"[{tag_name}] in={mark}{entry.get('input', 0)} out={mark}{entry.get('output', 0)}"
-            )
+            io_seg = f"io={mark}{entry.get('input', 0)}/{mark}{entry.get('output', 0)}"
+            if single_node:
+                groups.append(io_seg)
+            else:
+                tag_name = _DISPLAY_TAGS.get(node_name, node_name[:4])
+                groups.append(f"[{tag_name}] {io_seg}")
         tok_col = " " + " ".join(groups)
-        # Dedup: single-LLM pipeline, no cache marker, step tag identical to
-        # the token group's tag → drop standalone step tag.
-        if len(step_tokens) == 1 and not cached:
-            only_node = next(iter(step_tokens))
-            only_tag = _DISPLAY_TAGS.get(only_node, only_node[:4])
-            if step == f"[{only_tag}]":
-                step = ""
+
+    step = "" if (single_node and not cached) else f"{step}{cache_marker}"
 
     indent = prefix if prefix else ""
     if r.get("retry_of_deprecated_cache"):
