@@ -22,7 +22,7 @@ The separation is enforced at one seam: whenever a trace crosses from disk into 
 
 ### Deprecated samples
 
-Some traces describe measurements that are not valid observations — the backend warned that the LLM exhausted its reasoning budget and emitted a fallback / empty answer, or some other condition where the response cannot be treated as the model's real attempt at the query. The codebase tags these with the `FATAL_WARNINGS` set in `application/optimization/elimination.py`; today the only member is `llm_only:empty_content_reasoning_fallback`.
+Some traces describe measurements that are not valid observations — the LLM exhausted its reasoning budget before emitting visible content, the provider returned an empty response, the content filter fired, or some other condition where the response cannot be treated as the model's real attempt at the query. The backend (TermNorm or any other connector) emits **neutral advisory** warnings (e.g. `llm_only:content_empty`) plus raw response shape (`finish_reason`, `reasoning` token count) on every LLM call. PromptPotter's `classify_result()` in `application/optimization/diagnostics.py` walks those signals and derives **fatal codes** (`reasoning_budget_exhausted`, `empty_response`, `output_truncated`, `content_filtered`) — a result whose classifier returns any fatal code is deprecated. Backend = facts, optimizer = policy: the rule table lives in `diagnostics.py` and a new fatal pattern is added there, not in any cross-system string protocol.
 
 A deprecated sample has three effects at the **load boundary**:
 

@@ -16,7 +16,7 @@ Solve one puzzle per task from the BIG-Bench Extra Hard benchmark and commit to 
 
 ## Key failure modes
 
-- `empty_content_reasoning_fallback` on Groq reasoning models when `max_tokens` is set too low and the reasoning trace consumes the budget before the model emits visible content
+- `reasoning_budget_exhausted` (classified by PromptPotter from the backend's `content_empty` advisory + `finish_reason=length` + non-zero `reasoning_tokens`) on Groq reasoning models when `max_tokens` is set too low and the reasoning trace consumes the budget before the model emits visible content
 - Wrong-span extraction when the model uses bold formatting inside its reasoning (extractor grabs the last bolded phrase, which is a reasoning step instead of the answer)
 - Inventing new answer tokens when a subtask lists allowed values (e.g. `proved/disproved/unknown`) instead of picking one
 - Over-long reasoning traces for subtasks that only need a single-word answer

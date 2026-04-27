@@ -7,7 +7,7 @@ Failures attach to the **candidate that produced them** (per-candidate `OptSearc
 |  | **Rail 1 — `ValidationFailure`** | **Rail 2 — `RuntimeFailure`** |
 |---|---|---|
 | Detected | L1 parse time (before backend) | Mid-evaluation (after backend) |
-| Example | `model: gpt-4o` when allowed = `[gpt-oss-120b]` | `max_tokens=150` → 100% `empty_content_reasoning_fallback` on reasoning model |
+| Example | `model: gpt-4o` when allowed = `[gpt-oss-120b]` | `max_tokens=150` → 100% `reasoning_budget_exhausted` on reasoning model |
 | Who made the mistake | L1 (tactical — picked a disallowed value) | Nobody tactically (L1's value was in range; the *strategic shape* of the search didn't account for the runtime constraint) |
 | Score effect | Synthetic 0 (zero backend calls) | Real score stands (candidate is eliminated mid-eval) |
 | Per-candidate memory | `memory.validation_failures` | `memory.runtime_failures` |
@@ -33,7 +33,7 @@ Flow: `detect → attach to candidate memory → synthetic-0 → surface on cand
 
 ## Rail 2 — `RuntimeFailure` (L2 self-healing with L3 escalation)
 
-Some candidates are valid at parse time — every parameter is in the allowed range — but degrade at runtime. Canonical example: `llm_only.max_tokens=150` with `reasoning_effort=medium` on a Groq reasoning model. The model exhausts its reasoning budget before emitting visible content; the backend returns the raw reasoning trace as the answer; 7/7 evaluated queries produce an `llm_only:empty_content_reasoning_fallback` warning. No L1 rule was broken — the *strategic shape* of the search didn't account for the runtime constraint.
+Some candidates are valid at parse time — every parameter is in the allowed range — but degrade at runtime. Canonical example: `llm_only.max_tokens=150` with `reasoning_effort=medium` on a Groq reasoning model. The model exhausts its reasoning budget before emitting visible content; the backend returns `content=""` plus a neutral `llm_only:content_empty` advisory carrying `finish_reason=length` and the reasoning token count on `step_tokens.llm_only`; PromptPotter's `classify_result()` derives the fatal code `llm_only:reasoning_budget_exhausted` from those signals on every one of the 7/7 evaluated queries. No L1 rule was broken — the *strategic shape* of the search didn't account for the runtime constraint.
 
 **Outer-memory mirror.** After the round, every new runtime failure is appended to the outer optimizer state — deduplicated by `(source, dominant warning, observed config)` so recurring patterns don't bloat the list. This trail follows the optimizer forward automatically. It is never cleared — it represents discovered runtime constraints, not one-round guidance.
 
@@ -109,14 +109,23 @@ Validation is the only one that fires *before* evaluation — it needs nothing b
 
 ---
 
-## `FATAL_WARNINGS` — hardcoded invariant
+## `classify_result()` — fatal classification
 
-`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `application/optimization/elimination.py`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+`classify_result()` in `application/optimization/diagnostics.py` derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and the raw response shape carried in `pipeline_data.step_tokens.{node}` (normalized `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy: TermNorm reports observations and PromptPotter classifies. The rule table:
 
-A fatal warning has **three** load-boundary effects:
+- `content_empty` + `finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`
+- `content_empty` + `finish_reason=length` + `reasoning_tokens = 0` → `output_truncated`
+- `content_empty` + any other `finish_reason` → `empty_response`
+- `*:content_filtered` → passthrough as fatal
+
+Fatal codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
+
+Legacy archive alias: rows captured before TermNorm renamed the advisory carry `llm_only:empty_content_reasoning_fallback`; the classifier maps that directly to `reasoning_budget_exhausted` so resume on old cycles still deprecates correctly.
+
+A fatal classification has **three** load-boundary effects (consumed via the `is_deprecated()` wrapper in `application/optimization/utils.py`):
 
 1. **Candidate elimination** — `DegradationCheck` fast-path in `application/optimization/elimination.py::DegradationCheck.evaluate` returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_queries` and `threshold` entirely.
-2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `dataset_runs.load_reusable_results` and drops every entry whose diagnostics carry a `FATAL_WARNINGS` member. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The dataset_run archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
+2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `dataset_runs.load_reusable_results` and drops every entry the classifier marks fatal. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The dataset_run archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
 3. **Stats exclusion** — `_compute_accuracy` partitions deprecated rows into a separate `deprecated` count and excludes them from `hits`, `total`, `errors`, and the accuracy denominator. The display layer tags them `DEPR` instead of HIT/MISS, and the round summary appends `(N deprecated)` when any are present.
 
 ### Deprecated samples — why this is not a fallback

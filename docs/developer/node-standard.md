@@ -82,7 +82,7 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 - **Warnings → search-point attachment** — failures are pinned to the exact configuration that caused them, not to the round. Future proposals that resemble the failing config are penalized.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run; remaining candidates continue.
 - **Abort** — a candidate can signal the round should stop entirely.
-- **Fatal fast-path** — `FATAL_WARNINGS` codes eliminate a candidate on the first query, with no rate threshold.
+- **Fatal fast-path** — fatal codes derived by `classify_result()` (in `application/optimization/diagnostics.py`) eliminate a candidate on the first query, with no rate threshold.
 
 ---
 

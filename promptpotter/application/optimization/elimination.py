@@ -5,6 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.diagnostics import classify_result
 from promptpotter.application.optimization.utils import extract_warning_types
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
@@ -12,10 +13,6 @@ from promptpotter.shared.statistics import should_stop_early
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
-
-
-# One occurrence ends the candidate; not a tunable.
-FATAL_WARNINGS: frozenset[str] = frozenset({"llm_only:empty_content_reasoning_fallback"})
 
 
 def _eliminate(
@@ -32,7 +29,12 @@ def _eliminate(
 
 
 class DegradationCheck:
-    """Fatal-warning fast-path + rate-based degradation."""
+    """Fatal-classification fast-path + rate-based degradation.
+
+    Fatal codes come from :func:`classify_result` — derived from raw response
+    shape (finish_reason + reasoning_tokens), not from string-matching a
+    backend warning. One sighting ends the candidate; not a tunable.
+    """
 
     name = "degradation"
 
@@ -44,8 +46,8 @@ class DegradationCheck:
         self, results: list[dict], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if results:
-            latest = extract_warning_types(results[-1])
-            fatal = next((w for w in latest if w in FATAL_WARNINGS), None)
+            classification = classify_result(results[-1])
+            fatal = classification.dominant_fatal
             if fatal is not None:
                 n = len(results)
                 return _eliminate(
@@ -54,7 +56,7 @@ class DegradationCheck:
                         "degraded_rate": 1.0,
                         "degraded_count": n,
                         "total_evaluated": n,
-                        "warning_types": {fatal: 1},
+                        "warning_types": dict.fromkeys(classification.fatal_codes, 1),
                         "dominant_warning": fatal,
                         "fatal": True,
                     },

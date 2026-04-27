@@ -67,10 +67,10 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
 def _compute_accuracy(results: list[QueryResult]) -> dict:
     """Base scalars: hits, total, accuracy, errors, deprecated.
 
-    Deprecated samples (those carrying a ``FATAL_WARNINGS`` code) are not
-    valid measurements and are excluded from ``hits``, ``total``,
-    ``errors``, and the accuracy denominator. Their count surfaces as
-    ``deprecated`` for operator transparency.
+    Deprecated samples (those whose ``classify_result()`` returns any fatal
+    code) are not valid measurements and are excluded from ``hits``,
+    ``total``, ``errors``, and the accuracy denominator. Their count
+    surfaces as ``deprecated`` for operator transparency.
 
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.

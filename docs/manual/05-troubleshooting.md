@@ -62,7 +62,8 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What to try:**
 - Look at which `{step}:{code}` is firing. This is shown in the warning lines.
-- If the step is `llm_only` with code `empty_content_reasoning_fallback`: the LLM is producing empty outputs. This often means the model is overloaded or the prompt is causing it to refuse. L3 will eventually replan to avoid the failing region.
+- If the step is `llm_only` with fatal code `reasoning_budget_exhausted`: the reasoning model spent its entire output budget on the hidden reasoning trace before emitting visible content. Raise `pipeline_params.llm_only.max_tokens` (look at `step_tokens.llm_only.output` and `reasoning` to size it). L2's directive should already point at `max_tokens` directly.
+- If the fatal code is `empty_response` or `output_truncated`: the LLM returned empty or truncated content for a non-reasoning reason. Often a sign the prompt is causing a refusal or the model is overloaded. L3 will eventually replan to avoid the failing region.
 - If the step is a specific pipeline node: check that node's configuration in your campaign config — the degradation threshold may be set too tight, or the node may have a bug.
 
 ---

@@ -2,7 +2,7 @@
 
 import hashlib
 import logging
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any
 
@@ -183,6 +183,7 @@ class DatasetRunStore:
         self,
         backend_id: str,
         node_configs: list[tuple[str, dict]],
+        is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     ) -> dict[str, dict[str, Any]]:
         """Build per-query cache from prior dataset_runs sharing *node_configs*.
 
@@ -191,7 +192,12 @@ class DatasetRunStore:
         ``pipeline_data.terminated_at`` falls within the shared prefix —
         the query short-circuited before the diverging node.
 
-        Later runs overwrite earlier ones for the same query.
+        Later runs overwrite earlier ones for the same query, **except** when
+        ``is_fatal`` is supplied and the incoming row is fatal while the
+        existing row is clean — in that case the clean row stands. This keeps
+        a saved valid retry from being shadowed by an older deprecated archive
+        on a subsequent load. Policy callback stays in the caller's layer so
+        the store remains a pure I/O adapter.
         """
         if not node_configs:
             return {}
@@ -210,12 +216,19 @@ class DatasetRunStore:
                 q = item.get("query", "")
                 if not q or item.get("predicted") == "ERROR":
                     continue
-                if is_full_match:
-                    cache[q] = item
+                if not is_full_match:
+                    terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
+                    if not (terminated_at and terminated_at in trusted_nodes):
+                        continue
+                existing = cache.get(q)
+                if (
+                    existing is not None
+                    and is_fatal is not None
+                    and is_fatal(item)
+                    and not is_fatal(existing)
+                ):
                     continue
-                terminated_at = (item.get("pipeline_data") or {}).get("terminated_at", "")
-                if terminated_at and terminated_at in trusted_nodes:
-                    cache[q] = item
+                cache[q] = item
         return cache
 
     # -- prompt alias groups ---------------------------------------------------

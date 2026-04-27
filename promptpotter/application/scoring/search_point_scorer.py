@@ -180,6 +180,9 @@ class _LoopContext:
     # cached entry itself so display can show the original DEPR row before
     # the retry row is rendered.
     evicted_priors: dict[str, QueryResult]
+    # Persist the results-so-far after each fresh measurement. Cache hits do
+    # not call this — their on-disk row is unchanged.
+    persist_fresh: Callable[[list[QueryResult]], None]
 
 
 @dataclass
@@ -298,6 +301,7 @@ async def _process_fresh_sample(
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
     fire_on_measurement(result)
+    ctx.persist_fresh(state.results)
 
     if is_error_result(result):
         abort_reason = _classify_abort(result, state, ctx.session)
@@ -327,6 +331,7 @@ async def _run_query_loop(
     candidate_idx: int,
     n_total_candidates: int,
     search_memory: SearchMemory | None,
+    persist_fresh: Callable[[list[QueryResult]], None],
 ) -> QueryLoopResult:
     """Evaluate dataset samples, reusing prior results where available."""
     assert session.scorer is not None, "session.scorer required for scoring"
@@ -343,6 +348,7 @@ async def _run_query_loop(
         scorer_id=session.scorer_id,
         scorer_formula=session.scorer_formula,
         evicted_priors=evicted_priors,
+        persist_fresh=persist_fresh,
     )
 
     def _check_escalation() -> EscalationSignal | None:
@@ -416,11 +422,11 @@ async def score_search_point(
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
     """Evaluate a search point via backend with chain-addressed caching.
 
-    Two cache tiers (prior-result + per-node) share one prefix chain.
-    Results are persisted incrementally and again on completion; obs logging
-    fires on the final save.  ``KeyboardInterrupt`` is raised on graceful or
-    force stops so the caller can unwind without discarding partial work
-    (the incremental save already wrote it).
+    Two cache tiers (prior-result + per-node) share one prefix chain. Each
+    fresh measurement is persisted immediately so retried deprecated samples
+    and any in-progress baseline/candidate work survive a Ctrl+C. Cache hits
+    do not write — the on-disk row is unchanged. Obs logging fires on the
+    final completion save.
     """
     store = session.store
     backend_id = session.backend_id
@@ -434,10 +440,14 @@ async def score_search_point(
 
     prior_results: dict[str, QueryResult] = {}
     if store and backend_id:
+        from promptpotter.application.optimization.utils import is_deprecated
+
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         prior_results = cast(
             "dict[str, QueryResult]",
-            store.dataset_runs.load_reusable_results(backend_id, node_configs),
+            store.dataset_runs.load_reusable_results(
+                backend_id, node_configs, is_fatal=is_deprecated
+            ),
         )
 
     prior_results, evicted_priors = _filter_deprecated_priors(prior_results)
@@ -465,6 +475,14 @@ async def score_search_point(
         )
         store.dataset_runs.save(backend_id, run_id, run_data)
 
+    def _persist_fresh(results: list[QueryResult]) -> None:
+        if not (store and backend_id):
+            return
+        scores = compute_composite_score(
+            results, pipeline_schema, round_scorer=session.round_scorer
+        )
+        _save_run(results, scores)
+
     # Ensure Samples are registered on the SampleIndex before the auto-trigger
     # fires — on_measurement updates Sample.run_ids by id lookup.
     if session.sample_index is not None:
@@ -483,13 +501,14 @@ async def score_search_point(
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
         search_memory=search_memory,
+        persist_fresh=_persist_fresh,
     )
     results = batch.results
     escalation_signal = batch.escalation_signal
 
     if not batch.completed and not escalation_signal:
-        # Graceful/force stop — in-progress candidate is discarded; resume
-        # replays from trial JSON at candidate granularity.
+        # Graceful/force stop — partial state is already on disk via
+        # per-fresh-sample persist; just unwind.
         if batch.stop_reason in {"graceful", "force"}:
             raise KeyboardInterrupt()
         # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,

@@ -10,8 +10,6 @@ from __future__ import annotations
 from collections.abc import Mapping
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.shared.errors import is_error_result
-
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
@@ -47,32 +45,21 @@ def get_candidates(r: Mapping[str, Any], candidate_keys: list[str] | None = None
 
 
 def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
-    """Extract warning type strings from a single eval result."""
-    pd = result.get("pipeline_data") or {}
-    diag = pd.get("diagnostics") or {}
-    types: list[str] = []
-    for w in diag.get("warnings") or []:
-        if isinstance(w, dict):
-            types.append(f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}")
-        elif isinstance(w, str):
-            types.append(w)
-    if not types and is_error_result(result):
-        terminated = pd.get("terminated_at", "unknown")
-        types.append(f"{terminated}:error")
-    return types
+    """Extract every advisory + fatal code seen on this result.
+
+    Display and tracker callers want the full code list; classification is
+    handled separately by :func:`classify_result`.
+    """
+    from promptpotter.application.optimization.diagnostics import classify_result
+
+    return classify_result(result).all_codes
 
 
 def is_deprecated(result: Mapping[str, Any]) -> bool:
-    """True iff result carries any FATAL_WARNINGS code — a deprecated data point.
+    """True iff the classifier marked any fatal code — a deprecated data point."""
+    from promptpotter.application.optimization.diagnostics import classify_result
 
-    Closure over ``FATAL_WARNINGS``; ``shared/errors.is_deprecated_result``
-    is the parameterized form. Local import avoids the
-    ``elimination → utils → elimination`` module-load cycle.
-    """
-    from promptpotter.application.optimization.elimination import FATAL_WARNINGS
-    from promptpotter.shared.errors import is_deprecated_result
-
-    return is_deprecated_result(result, FATAL_WARNINGS)
+    return classify_result(result).is_fatal
 
 
 def update_query_tracker(

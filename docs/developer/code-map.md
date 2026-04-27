@@ -40,7 +40,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/nodes/l1/execute.py` |
-| `FATAL_WARNINGS` | `promptpotter/application/optimization/elimination.py` |
+| `classify_result` | `promptpotter/application/optimization/diagnostics.py` |
 | `L1CritiqueAgent` | `promptpotter/application/optimization/nodes/l1/critique.py` |
 | `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `l1_generate` | `promptpotter/application/optimization/nodes/l1/generate.py` |

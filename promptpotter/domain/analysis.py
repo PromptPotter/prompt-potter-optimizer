@@ -123,8 +123,8 @@ class RuntimeFailure:
 
     Sibling of ``ValidationFailure`` on the self-healing rail, but
     populated AFTER the candidate ran — from per-query degradation
-    evidence (e.g. a candidate with ``max_tokens=150`` that produces
-    ``empty_content_reasoning_fallback`` on 7/7 queries). Attributes
+    evidence (e.g. a candidate with ``max_tokens=150`` that classifies
+    as ``reasoning_budget_exhausted`` on 7/7 queries). Attributes
     the failure to the specific candidate that caused it, not the
     round, so winners are never penalised for losers' runtime issues.
 
@@ -137,7 +137,7 @@ class RuntimeFailure:
     """
 
     source: str  # e.g. "degradation_check" | "empty_output_check"
-    dominant_warning: str  # e.g. "llm_only:empty_content_reasoning_fallback"
+    dominant_warning: str  # e.g. "llm_only:reasoning_budget_exhausted"
     warning_types: dict[str, int]  # full histogram of warning types seen
     degraded_rate: float  # fraction of scored queries that degraded
     degraded_count: int

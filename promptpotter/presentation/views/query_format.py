@@ -8,8 +8,7 @@ columns, warning/rerun annotations). All other displays consume this via
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.elimination import FATAL_WARNINGS
-from promptpotter.application.optimization.utils import extract_warning_types
+from promptpotter.application.optimization.diagnostics import classify_result
 from promptpotter.domain.scoring import extract_display_answer
 from promptpotter.shared.errors import is_error_result
 
@@ -80,7 +79,7 @@ def _fmt_query_result(
 
     tt = pd.get("total_time")
 
-    if any(w in FATAL_WARNINGS for w in extract_warning_types(r)):
+    if classify_result(r).is_fatal:
         tag = "DEPR"
     elif r.get("hit"):
         tag = "HIT"
@@ -188,10 +187,8 @@ def _fmt_query_result(
             "entire stale-data ladder exhausted → still degraded; "
             "score counts but flag this candidate",
         )
-    elif r.get("degraded_observed") and not any(
-        w in FATAL_WARNINGS for w in extract_warning_types(r)
-    ):
-        # Fatal warnings kill the candidate on this same query (see
+    elif r.get("degraded_observed") and not classify_result(r).is_fatal:
+        # Fatal classifications kill the candidate on this same query (see
         # DegradationCheck fast-path). The "toward rerun" counter would
         # suggest "more data coming" — meaningless when the candidate is
         # already dead. The ⚠ warning line above tells the real story.

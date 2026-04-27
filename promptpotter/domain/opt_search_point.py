@@ -252,7 +252,7 @@ class OptSearchPoint(PromptTemplate):
     runtime_failures: list[RuntimeFailure] = Field(
         default_factory=list,
         description="Runtime-observed health failures on this candidate "
-        "(e.g. max_tokens=150 producing 100%% empty_content_reasoning_fallback "
+        "(e.g. max_tokens=150 classifying as 100%% reasoning_budget_exhausted "
         "on reasoning models). Sibling of validation_failures on the self-"
         "healing rail but populated AFTER the backend ran, not at parse time. "
         "Does not synthetic-0 — the real score stands — but flows to L2 as "

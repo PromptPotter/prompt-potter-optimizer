@@ -47,7 +47,7 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 |---|---|---|---|---|---|---|
 | 1 | **Validation skip** — `OptSearchPoint.memory.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `memory.validation_failures` | `application/optimization/nodes/l1/measure.py::score_candidates` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
-| 3 | **`DegradationCheck` — fatal fast-path** — latest query carries a `FATAL_WARNINGS` code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
+| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
 | 5 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
@@ -62,8 +62,17 @@ For each query, the scoring loop runs:
 
 Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. Fatal warnings beat any rate check; rate checks beat the Wilcoxon signed-rank gate.
 
-### `FATAL_WARNINGS` is a hardcoded invariant
+### `classify_result()` is a hardcoded invariant
 
-`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+The classifier in `application/optimization/diagnostics.py` derives fatal codes from the backend's neutral advisory (e.g. `llm_only:content_empty`) and the raw response shape (`finish_reason`, `reasoning` token count) carried in `pipeline_data.step_tokens.{node}`. Initial rule table:
 
-`FATAL_WARNINGS` does double duty: it drives mechanism 3 above (candidate elimination) **and** is the set used by `score_search_point::_filter_deprecated_priors` to evict cached entries on load and by `_compute_accuracy` to exclude deprecated rows from primary stats. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#fatal_warnings--hardcoded-invariant) for the three load-boundary effects and [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator framing.
+- `content_empty` + `finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`
+- `content_empty` + `finish_reason=length` + `reasoning_tokens = 0` → `output_truncated`
+- `content_empty` + any other `finish_reason` → `empty_response`
+- `*:content_filtered` → passthrough as fatal
+
+Fatal codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow the rule table (don't expose it as a tunable) when a new pattern proves equally conclusive.
+
+Legacy archive alias: rows captured before TermNorm renamed the advisory carry `llm_only:empty_content_reasoning_fallback`; the classifier maps that directly to `reasoning_budget_exhausted` so resume on old cycles still deprecates correctly.
+
+The classifier does triple duty: it drives mechanism 3 above (candidate elimination) **and** is consumed by `score_search_point::_filter_deprecated_priors` (cache eviction at load) and `_compute_accuracy` (primary-stats exclusion) — both via the `is_deprecated()` wrapper in `application/optimization/utils.py`. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification) for the three load-boundary effects and [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator framing.
