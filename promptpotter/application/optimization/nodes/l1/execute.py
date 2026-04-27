@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import logging
 from typing import TYPE_CHECKING
 
@@ -15,10 +14,8 @@ from promptpotter.application.optimization.nodes.l1.critique import (
 )
 from promptpotter.application.optimization.nodes.l1.generate import l1_generate
 from promptpotter.application.optimization.nodes.l1.score import l1_score
-from promptpotter.application.optimization.results import RoundResult
-from promptpotter.application.optimization.utils import update_query_tracker
-from promptpotter.application.scoring.metrics import compute_composite_score
-from promptpotter.domain.analysis import RuntimeFailure
+from promptpotter.application.optimization.pipeline import get_round_recorder
+from promptpotter.application.optimization.results import CandidateProposal, RoundResult
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 
 # Module-level import for test monkeypatching.
@@ -62,7 +59,7 @@ async def _generate_or_load_candidates(
     n_eval_queries: int = 0,
     *,
     obs: ObservabilityBridge | None = None,
-) -> list[dict]:
+) -> list[CandidateProposal]:
     """Load persisted candidates or generate fresh ones via LLM."""
     session = cycle.session
     config = cycle.config
@@ -91,17 +88,16 @@ async def _generate_or_load_candidates(
     )
 
     if session.cycle_id:
-        persisted = session.store.campaigns.load_round_candidates(
+        persisted_raw = session.store.campaigns.load_round_candidates(
             session.backend_id,
             session.cycle_id,
             round_num,
         )
-        if persisted is not None:
+        if persisted_raw is not None:
+            persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
             # llm_call never fires on this branch — synthesize l1_generate
             # so dashboard.json + round_NNNN.json don't miss the node.
-            from promptpotter.application.optimization.pipeline import get_round_recorder
-
             if _rr := get_round_recorder():
                 _rr.set_node(
                     "l1_generate",
@@ -147,7 +143,7 @@ async def _generate_or_load_candidates(
             session.backend_id,
             session.cycle_id,
             round_num,
-            candidates,
+            [cp.model_dump() for cp in candidates],
         )
 
     emit_phase(
@@ -164,33 +160,8 @@ async def _generate_or_load_candidates(
     return candidates
 
 
-async def _run_l1_critique(
-    scoring_result: L1ScoringResult,
-    round_num: int,
-    cycle: Cycle,
-) -> str:
-    """Run L1 critique phase on evaluation results. Returns formatted critique text."""
-    if not scoring_result.winner_results:
-        return ""
-
-    config = cycle.config
-    crit_llm = _llm_client.get_llm_client()
-    cctx = RoundSnapshot.from_round_state(
-        cycle,
-        scoring_result,
-        config,
-        cycle.session.pipeline_schema,
-        round_num=round_num,
-        search_memory_digest=(
-            cycle.search_memory.digest_for_l1_critique() if cycle.search_memory else None
-        ),
-    )
-    result = await run_l1_critique(cctx, crit_llm, model=config.optimizer_llm.model)
-    return format_l1_critique_for_prompt(result)
-
-
 async def _score_and_select(
-    candidates: list[dict],
+    candidates: list[CandidateProposal],
     round_num: int,
     cycle: Cycle,
     scoring_dataset: list[Sample],
@@ -214,34 +185,7 @@ async def _score_and_select(
         current_pipeline_params=cycle.current_sp.pipeline_params if cycle.current_sp else None,
     )
 
-    # Probe rounds need a baseline subset on the probe's queries — else a probe always looks like regression.
-    _baseline_acc = cycle.current_accuracy
-    _baseline_comp = cycle.current_composite
-    _baseline_results = cycle.current_results
-    if cycle.probe_next_round and cycle.current_results and session.pipeline_schema:
-        from typing import cast
-
-        from promptpotter.domain.scoring import QueryResult
-
-        _probe_queries = {s.query for s in scoring_dataset}
-        _subset = [r for r in cycle.current_results if r.get("query") in _probe_queries]
-        if _subset:
-            _subset_scores = compute_composite_score(
-                cast(list[QueryResult], _subset),
-                session.pipeline_schema,
-                round_scorer=session.round_scorer,
-            )
-            _baseline_acc = _subset_scores["accuracy"]
-            _baseline_comp = _subset_scores.get("composite", _baseline_acc)
-            _baseline_results = _subset
-
-    current_best = {
-        "accuracy": _baseline_acc,
-        "composite": _baseline_comp,
-        "prompt_fields": cycle.opt_sp.prompt_field_dict(),
-        "results": _baseline_results,
-        "label": f"round_{round_num}" if round_num > 0 else "baseline",
-    }
+    baseline = cycle.baseline_for_round(scoring_dataset, round_num)
 
     async with observed_node(
         f"l1_score_r{round_num}",
@@ -256,7 +200,7 @@ async def _score_and_select(
             cycle,
             candidates,
             scoring_dataset,
-            current_best,
+            baseline,
             pipeline_params=cycle.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
@@ -326,27 +270,31 @@ async def execute_round(
         degradation_checks=degradation_checks,
     )
 
-    scoring_result.l1_critique_text = await _run_l1_critique(scoring_result, round_num, cycle)
-    if obs and scoring_result.l1_critique_text:
+    critique_text = ""
+    if scoring_result.winner_results:
+        crit_llm = _llm_client.get_llm_client()
+        cctx = RoundSnapshot.from_round_state(
+            cycle,
+            scoring_result,
+            config,
+            session.pipeline_schema,
+            round_num=round_num,
+            search_memory_digest=(
+                cycle.search_memory.digest_for_l1_critique() if cycle.search_memory else None
+            ),
+        )
+        critique_result = await run_l1_critique(cctx, crit_llm, model=config.optimizer_llm.model)
+        critique_text = format_l1_critique_for_prompt(critique_result)
+    if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(
                 L1CritiqueWritten,
                 campaign_id=session.obs_campaign_id,
                 round_num=round_num,
-                l1_critique_text=scoring_result.l1_critique_text,
+                l1_critique_text=critique_text,
             )
 
-    cycle.opt_sp.l1_critique_text = scoring_result.l1_critique_text
-
-    if scoring_result.winner_results and session.pipeline_schema:
-        from promptpotter.application.scoring.metrics import compile_failure_analysis
-
-        cycle.opt_sp.failure_analysis = compile_failure_analysis(
-            scoring_result.winner_results,
-            session.pipeline_schema,
-        )
-    else:
-        cycle.opt_sp.failure_analysis = None
+    cycle.apply_round_outcome(scoring_result, critique_text)
 
     round_result = RoundResult(
         round=round_num,
@@ -367,30 +315,6 @@ async def execute_round(
         escalation_signal=scoring_result.escalation_signal,
         evaluators=scoring_result.winner_evaluators,
     )
-
-    # Aborted candidates also carry warnings — span all candidate results.
-    _all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
-    if _all_results:
-        update_query_tracker(cycle.opt_sp.warning_inventory, _all_results)
-
-    # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by
-    # source/warning/config) so L2 sees accumulated evidence across rounds.
-    def _rf_key(rf_dict: dict) -> tuple:
-        cfg = rf_dict.get("observed_config") or {}
-        return (
-            rf_dict.get("source", ""),
-            rf_dict.get("dominant_warning", ""),
-            json.dumps(cfg, sort_keys=True, default=str),
-        )
-
-    existing_keys = {_rf_key(rf.to_dict()) for rf in cycle.opt_sp.runtime_failures}
-    for cs in scoring_result.candidate_scores:
-        for rf_dict in cs.get("runtime_failures") or []:
-            k = _rf_key(rf_dict)
-            if k in existing_keys:
-                continue
-            existing_keys.add(k)
-            cycle.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
 
     if obs:
         with graceful("RoundEnd emit failed"):

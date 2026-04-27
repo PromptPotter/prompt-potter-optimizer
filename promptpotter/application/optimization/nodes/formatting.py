@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
+    from promptpotter.application.optimization.results import CandidateProposal
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 __all__ = [
@@ -265,18 +266,17 @@ def build_cross_candidate_diff(
     )
 
 
-def candidate_summaries(candidates: list[dict]) -> list[dict]:
+def candidate_summaries(proposals: list[CandidateProposal]) -> list[dict]:
     """Build compact per-candidate summary dicts for phase event data."""
     summaries = []
-    for i, c in enumerate(candidates):
-        pp_override = c.get("__pipeline_params_override__")
-        prompt_fields = {k: c[k] for k in PROMPT_STRING_FIELDS if c.get(k)}
+    for i, cp in enumerate(proposals):
+        prompt_fields = {k: getattr(cp.osp, k) for k in PROMPT_STRING_FIELDS if getattr(cp.osp, k)}
         summary: dict = {
             "idx": i,
-            "changes_description": c.get("changes_description", ""),
+            "changes_description": cp.osp.lineage.changes_description or "",
         }
-        if pp_override:
-            summary["pipeline_params_override"] = pp_override
+        if cp.node_overrides:
+            summary["pipeline_params_override"] = cp.node_overrides
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
         summaries.append(summary)

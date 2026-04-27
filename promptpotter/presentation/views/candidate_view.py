@@ -135,7 +135,7 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
     if scores.get("invalid"):
-        failures = scores.get("validation_failures") or []
+        failures = scores["validation_failures"]
         return IndividualSummary(
             status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",
@@ -165,7 +165,7 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
 
     detail_lines: list[str] = []
     if scores.get("elimination_stopped"):
-        elim_ctx = scores.get("elimination_context") or {}
+        elim_ctx = scores["elimination_context"]
         prior_label = elim_ctx.get("triggered_by_prior_label")
         detail_lines.append(format_elimination_summary(elim_ctx, prior_label))
 

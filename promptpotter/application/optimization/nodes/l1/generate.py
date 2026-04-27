@@ -8,8 +8,10 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
     assemble_inbox,
+    header_prefixes_for_layer,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
+from promptpotter.application.optimization.results import CandidateProposal
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm.client import LLMClientBase
@@ -127,37 +129,17 @@ def validate_overrides(
     return failures
 
 
-# Known inbox section headers — ordered by probability of being the culprit,
-# so the breakdown log highlights bloat sources in descending order.
-_INBOX_SECTION_HEADERS: tuple[str, ...] = (
-    "VALID PIPELINE NODES AND PARAMETERS",
-    "FAILURE ANALYSIS",
-    "HISTORICAL INTELLIGENCE:",
-    "CONTEXT:",
-    "PROBE ROUND",
-    "PIPELINE ISSUE:",
-    "DIRECTIVE:",
-    "CRITIQUE:",
-    "THINKING STYLES:",
-    "PLAN:",
-    "OUTPUT SCHEMA MUTATIONS",
-    "AVAILABLE MODELS",
-)
-
-
 def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
     """Per-section size of the rendered inbox, ordered by size desc."""
     if not inbox:
         return []
+    headers = header_prefixes_for_layer(Layer.L1)
     parts = inbox.split("\n\n")
     out: list[tuple[str, int]] = []
     for part in parts:
         if not part:
             continue
-        head = next(
-            (h for h in _INBOX_SECTION_HEADERS if part.startswith(h)),
-            "<unknown>",
-        )
+        head = next((h for h in headers if part.startswith(h)), "<unknown>")
         out.append((head, len(part)))
     out.sort(key=lambda x: -x[1])
     return out
@@ -250,7 +232,7 @@ async def l1_generate(
     model: str | None = None,
     obs: ObservabilityBridge | None = None,
     round_num: int = 0,
-) -> list[dict]:
+) -> list[CandidateProposal]:
     """Generate candidate variants via LLM meta-prompt; context read from cycle."""
     if n_variants <= 0:
         raise ValueError(f"n_variants must be >0, got {n_variants}")
@@ -285,7 +267,7 @@ async def l1_generate(
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 
-    population: list[dict] = []
+    population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
         pp_override = v.get("pipeline_params_override") or {}
         pp_override.pop("steps", None)  # LLM must not override pipeline composition
@@ -323,11 +305,7 @@ async def l1_generate(
         )
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
-        c_dict = child.prompt_field_dict()
-        c_dict["lineage"] = child.lineage.model_dump()
-        if node_overrides:
-            c_dict["__pipeline_params_override__"] = node_overrides
-        population.append(c_dict)
+        population.append(CandidateProposal(osp=child, node_overrides=node_overrides))
 
         if obs:
             with graceful("CandidateCreated emit failed"):

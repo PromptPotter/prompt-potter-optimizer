@@ -133,7 +133,7 @@ def _src_warning_inventory_l2(cycle: Cycle, t: InboxTransients) -> dict | None:
 def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | None:
     vfs: list[dict] = []
     for cs in t.candidate_scores or []:
-        vfs.extend(cs.get("validation_failures") or [])
+        vfs.extend(cs["validation_failures"])
     return vfs or None
 
 
@@ -166,9 +166,15 @@ def _r_plan(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
     return f"PLAN:\n{v}" if v else ""
 
 
-def _r_unused(_v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
-    """Sentinel for fields whose render is always supplied by ``_LABEL_BY_LAYER``."""
-    return ""
+def _r_l1_critique(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    return f"CRITIQUE:\n{v}" if v else ""
+
+
+def _r_l2_directive(v: Any, _cycle: Cycle, _t: InboxTransients, layer: Layer) -> str:
+    if not v:
+        return ""
+    label = "DIRECTIVE:" if layer is Layer.L1 else "PREVIOUS DIRECTIVE:"
+    return f"{label}\n{v}"
 
 
 def _r_failure_analysis(

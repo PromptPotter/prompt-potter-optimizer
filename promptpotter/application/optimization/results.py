@@ -5,8 +5,42 @@ from __future__ import annotations
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.analysis import EscalationSignal
+from promptpotter.domain.opt_search_point import OptSearchPoint
 
-__all__ = ["RoundResult", "RunResult"]
+__all__ = ["CandidateProposal", "RoundBaseline", "RoundResult", "RunResult"]
+
+
+class CandidateProposal(BaseModel):
+    """One LLM-proposed individual: an OptSearchPoint plus its node-param overrides.
+
+    Persisted between generate and score so resume can replay a round without
+    re-querying the LLM. The ``osp`` carries the prompt-field mutations and
+    lineage; ``node_overrides`` carries the LLM-proposed changes to non-prompt
+    pipeline params (deep-merged into the base ``pipeline_params`` at score time).
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    osp: OptSearchPoint
+    node_overrides: dict[str, dict] = Field(default_factory=dict)
+
+
+class RoundBaseline(BaseModel):
+    """The challenger candidates compete against — built once per round.
+
+    Carries the OSP directly (no dict→OSP roundtrip). On probe rounds the
+    accuracy/composite/results reflect the baseline's score *over the probe
+    subset*, not the full prior dataset.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    accuracy: float
+    composite: float
+    osp: OptSearchPoint
+    results: list[dict] = Field(default_factory=list)
+    label: str
+    evaluators: dict[str, float] = Field(default_factory=dict)
 
 
 class RoundResult(BaseModel):

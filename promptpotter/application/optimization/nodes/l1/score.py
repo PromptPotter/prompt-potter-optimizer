@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from promptpotter.application.campaign.decisions import record_decision
 from promptpotter.application.optimization.nodes.l1.measure import (
     parse_population,
     score_population,
 )
+from promptpotter.application.optimization.results import CandidateProposal, RoundBaseline
 from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -27,15 +29,12 @@ __all__ = ["L1ScoringResult", "l1_score", "select_fittest"]
 def select_fittest(
     population: list[OptSearchPoint],
     all_candidate_results: dict[str, list[QueryResult]],
-    current_best: dict[str, Any],
+    baseline: RoundBaseline,
     improvement_threshold: float,
     pipeline_schema: PipelineSchema | None = None,
     round_scorer: Any = None,
 ) -> dict[str, Any]:
     """Compare population and select the round winner (on fitness, not composite)."""
-    current_fitness = current_best["accuracy"]
-    current_composite = current_best["composite"]
-
     assert pipeline_schema is not None, "select_fittest requires pipeline_schema"
 
     individual_scores = {
@@ -48,12 +47,12 @@ def select_fittest(
         for c in population
     }
 
-    best_composite = current_composite
-    best_fitness = current_fitness
-    best_ps: OptSearchPoint = current_best["prompt_fields"]
-    best_results = current_best["results"]
-    best_label = current_best["label"]
-    best_evaluators: dict[str, float] = current_best.get("evaluators") or {}
+    best_composite = baseline.composite
+    best_fitness = baseline.accuracy
+    best_osp: OptSearchPoint = baseline.osp
+    best_results: list = list(baseline.results)
+    best_label = baseline.label
+    best_evaluators: dict[str, float] = dict(baseline.evaluators)
     winner_idx: int | None = None
 
     for idx, individual in enumerate(population):
@@ -62,31 +61,31 @@ def select_fittest(
         if ind_fitness > best_fitness:
             best_fitness = ind_fitness
             best_composite = ind_scores["composite"]
-            best_ps = individual
-            best_results = all_candidate_results[individual.lineage.id]
+            best_osp = individual
+            best_results = list(all_candidate_results[individual.lineage.id])
             best_label = individual.lineage.changes_description or individual.lineage.id[:12]
             best_evaluators = dict(ind_scores.get("evaluators") or {})
             winner_idx = idx
 
     return {
         "label": best_label,
-        "prompt_fields": best_ps,
+        "osp": best_osp,
         "accuracy": best_fitness,
         "composite": best_composite,
         "hits": sum(1 for r in best_results if r.get("hit")),
         "total": len(best_results),
         "results": best_results,
         "candidates_scored": len(population),
-        "improved": best_fitness > current_fitness + improvement_threshold,
+        "improved": best_fitness > baseline.accuracy + improvement_threshold,
         "winner_idx": winner_idx,
         "evaluators": best_evaluators,
     }
 
 
 class L1ScoringResult(BaseModel):
-    """Structured return value from l1_score()."""
+    """Structured return value from l1_score() — frozen."""
 
-    model_config = ConfigDict(arbitrary_types_allowed=True)
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     label: str
     winner_osp: OptSearchPoint
@@ -105,14 +104,13 @@ class L1ScoringResult(BaseModel):
     degraded_queries: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
     decisions: list[dict] = Field(default_factory=list)
-    l1_critique_text: str = ""
 
 
 async def l1_score(
     cycle: Cycle,
-    candidates: list[dict],
+    candidates: list[CandidateProposal],
     dataset: list,
-    current_best: dict[str, Any],
+    baseline: RoundBaseline,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
@@ -124,9 +122,6 @@ async def l1_score(
 ) -> L1ScoringResult:
     """Evaluate candidates and select the round winner."""
     session = cycle.session
-    cb = dict(current_best)
-    if isinstance(cb.get("prompt_fields"), dict):
-        cb["prompt_fields"] = OptSearchPoint.from_prompt_fields(cb["prompt_fields"])
 
     osp_population, merged_pp, overrides = parse_population(
         candidates,
@@ -161,13 +156,11 @@ async def l1_score(
     winner_entry = select_fittest(
         evaluated_population,
         all_candidate_results,
-        cb,
+        baseline,
         improvement_threshold,
         pipeline_schema=session.pipeline_schema,
         round_scorer=session.round_scorer,
     )
-
-    from promptpotter.application.campaign.decisions import record_decision
 
     w_idx = winner_entry["winner_idx"]
     winner_id = (
@@ -181,11 +174,11 @@ async def l1_score(
             "round_num": round_num,
         },
         winner_id,
-        data={"current_best_accuracy_at_record": cb["accuracy"]},
+        data={"current_best_accuracy_at_record": baseline.accuracy},
     )
 
     winner_pp = merged_pp[w_idx] if w_idx is not None else pipeline_params
-    winner_osp: OptSearchPoint = winner_entry["prompt_fields"]
+    winner_osp: OptSearchPoint = winner_entry["osp"]
     winner_results = winner_entry["results"]
     winner_dict = {
         **winner_osp.prompt_field_dict(),

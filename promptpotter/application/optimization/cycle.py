@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.results import RoundResult
+from promptpotter.application.optimization.results import RoundBaseline, RoundResult
+from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.search_point import JobSearchPoint
 
@@ -13,8 +15,21 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
+    from promptpotter.domain.scoring import QueryResult
     from promptpotter.domain.search_point import TaskDecomposition
+
+
+def _rf_dedup_key(rf_dict: dict) -> tuple:
+    cfg = rf_dict.get("observed_config") or {}
+    return (
+        rf_dict.get("source", ""),
+        rf_dict.get("dominant_warning", ""),
+        json.dumps(cfg, sort_keys=True, default=str),
+    )
+
 
 __all__ = ["Cycle", "EscalationState", "LayerCounter"]
 
@@ -249,6 +264,74 @@ class Cycle:
     def set_probe(self, flag: bool) -> None:
         """Mark whether the next round is a probe."""
         self.probe_next_round = flag
+
+    def apply_round_outcome(self, scoring_result: L1ScoringResult, critique_text: str) -> None:
+        """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.
+
+        Single mutation point for: l1_critique_text, failure_analysis,
+        warning_inventory (from all candidate results), runtime_failures
+        (deduped by source/warning/observed-config).
+        """
+        from promptpotter.application.optimization.utils import update_query_tracker
+        from promptpotter.application.scoring.metrics import compile_failure_analysis
+
+        schema = self.session.pipeline_schema if self.session is not None else None
+
+        self.opt_sp.l1_critique_text = critique_text
+
+        if scoring_result.winner_results and schema is not None:
+            self.opt_sp.failure_analysis = compile_failure_analysis(
+                scoring_result.winner_results, schema
+            )
+        else:
+            self.opt_sp.failure_analysis = None
+
+        # Aborted candidates also carry warnings — span all candidate results.
+        all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
+        if all_results:
+            update_query_tracker(self.opt_sp.warning_inventory, all_results)
+
+        existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
+        for cs in scoring_result.candidate_scores:
+            for rf_dict in cs["runtime_failures"]:
+                k = _rf_dedup_key(rf_dict)
+                if k in existing_keys:
+                    continue
+                existing_keys.add(k)
+                self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
+
+    def baseline_for_round(self, scoring_dataset: list[Sample], round_num: int) -> RoundBaseline:
+        """Build the round's baseline — probe-aware.
+
+        On a probe round, the previous winner's accuracy is recomputed over the
+        probe subset (probe queries are typically harder, so a probe round
+        without subset-rescore would always look like regression).
+        """
+        from promptpotter.application.scoring.metrics import compute_composite_score
+
+        schema = self.session.pipeline_schema if self.session is not None else None
+        accuracy = self.current_accuracy
+        composite = self.current_composite
+        results: list[dict] = list(self.current_results)
+        if self.probe_next_round and self.current_results and schema is not None:
+            probe_queries = {s.query for s in scoring_dataset}
+            subset = [r for r in self.current_results if r.get("query") in probe_queries]
+            if subset:
+                subset_scores = compute_composite_score(
+                    cast("list[QueryResult]", subset),
+                    schema,
+                    round_scorer=self.session.round_scorer,
+                )
+                accuracy = subset_scores["accuracy"]
+                composite = subset_scores.get("composite", accuracy)
+                results = subset
+        return RoundBaseline(
+            accuracy=accuracy,
+            composite=composite,
+            osp=self.opt_sp,
+            results=results,
+            label=f"round_{round_num}" if round_num > 0 else "baseline",
+        )
 
     def checkpoint(self, rr: RoundResult, round_num: int) -> dict[str, Any]:
         """Build the trial dict for ``campaign_store.add_trial`` — self-contained replay."""

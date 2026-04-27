@@ -1,27 +1,15 @@
 """Inbox registry — single declarative catalogue of optimizer-prompt inputs.
 
 Every L1/L2 prompt receives an ``{{inbox}}`` block assembled from the
-fields declared here. Each :class:`InboxField` owns:
-
-    * which layer(s) consume it,
-    * how to source its raw value from a :class:`Cycle` (+ per-call
-      :class:`InboxTransients`),
-    * how to render that value into a section string,
-    * the section label/header shown in each consuming layer,
-    * optional mutex membership for mutually-exclusive pairs (e.g.
-      ``l2_directive`` wins over ``l1_critique_text`` on L1 only).
+fields declared here. Each :class:`InboxField` owns: which layer(s) consume
+it, how to source its raw value from a :class:`Cycle` (+ per-call
+:class:`InboxTransients`), how to render that value into a section string,
+and the header prefix(es) that section starts with.
 
 :func:`assemble_inbox` is the one function callers need. It walks
-:data:`LAYER_ORDER` for the target layer, applies mutex resolution,
-drops empty sections, and joins the rest.
-
-:class:`Cycle` (from ``application/optimization/cycle.py``) is the read
-view — it holds ``opt_sp`` (per-cycle mutable state + ``memory``),
-``search_memory`` (cross-cycle aggregate), and ``session`` (infra,
-including ``pipeline_schema``). :class:`InboxTransients` carries the
-per-call inputs that have no persistent home
-(``pipeline_schema_text``, ``candidate_scores``,
-``escalation_check_result``, ``pipeline_params``, ``round_num``).
+:data:`LAYER_ORDER` for the target layer, sources values, renders them,
+and joins. On L1 the ``l2_directive`` replaces ``l1_critique_text`` when
+both are populated (L2's digested view supersedes the raw critique).
 
 The critique layer keeps its own assembler (see ``critique.py``) because
 its sections share cross-cutting state (``anomalies``, ``near_miss``).
@@ -34,7 +22,7 @@ from __future__ import annotations
 
 import enum
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.nodes._inbox_helpers import (
@@ -43,12 +31,13 @@ from promptpotter.application.optimization.nodes._inbox_helpers import (
     _r_escalation_section,
     _r_failure_analysis,
     _r_identity,
+    _r_l1_critique,
+    _r_l2_directive,
     _r_plan,
     _r_runtime_failures_l2,
     _r_search_memory_l1,
     _r_search_memory_l2,
     _r_task_context,
-    _r_unused,
     _r_validation_failures,
     _r_warning_inventory_l2,
     _src_escalation_alert,
@@ -112,8 +101,9 @@ class InboxField:
     render: Callable[[Any, Cycle, InboxTransients, Layer], str]
     retention: Retention
     docstring: str
-    # Per-layer mutex: fields sharing a (layer, group) pick the highest priority.
-    mutex: dict[Layer, tuple[str, int]] = field(default_factory=dict)
+    # Section header prefix(es) the renderer emits; observers (e.g. meta-prompt
+    # size logging) match against these to attribute bytes back to the field.
+    header_prefixes: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +120,11 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_identity,
         retention=Retention.CONFIG,
         docstring="Precomputed pipeline node/param catalogue — teaches L1 what it may tune.",
+        header_prefixes=(
+            "VALID PIPELINE NODES AND PARAMETERS",
+            "AVAILABLE MODELS",
+            "OUTPUT SCHEMA MUTATIONS",
+        ),
     ),
     InboxField(
         name="failure_analysis",
@@ -138,6 +133,7 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_failure_analysis,
         retention=Retention.TRANSIENT,
         docstring="Top-3 clustered failure patterns with example queries.",
+        header_prefixes=("FAILURE ANALYSIS",),
     ),
     InboxField(
         name="search_memory_l1",
@@ -146,6 +142,7 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_search_memory_l1,
         retention=Retention.SEARCH_MEMORY,
         docstring="Cross-campaign digest: failure clusters, dead queries, top axes / values.",
+        header_prefixes=("HISTORICAL INTELLIGENCE:",),
     ),
     InboxField(
         name="task_context",
@@ -154,6 +151,7 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_task_context,
         retention=Retention.OPT_SP,
         docstring="Structured domain context (read-only from L1's view; L2 edits).",
+        header_prefixes=("CONTEXT:",),
     ),
     InboxField(
         name="escalation_probe",
@@ -162,6 +160,7 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_escalation_probe,
         retention=Retention.MEMORY,
         docstring="Probe-round per-query warning dump — fires only when L2 requests a probe.",
+        header_prefixes=("PROBE ROUND",),
     ),
     InboxField(
         name="escalation_alert",
@@ -170,25 +169,26 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_escalation_alert,
         retention=Retention.MEMORY,
         docstring="Non-probe aggregated escalation alert — suppressed by an active l2_directive.",
+        header_prefixes=("PIPELINE ISSUE:",),
     ),
-    # Mutex pair on L1: directive wins over l1_critique when both populated.
+    # On L1 the directive replaces the critique when both are present (sliding window of 1).
     InboxField(
         name="l2_directive",
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l2_directive"),
-        render=_r_unused,  # rendered via _LABEL_BY_LAYER override per layer
+        render=_r_l2_directive,
         retention=Retention.MEMORY,
         docstring="L2's one-round guidance window; clears on improvement.",
-        mutex={Layer.L1: ("guidance", 2)},
+        header_prefixes=("DIRECTIVE:", "PREVIOUS DIRECTIVE:"),
     ),
     InboxField(
         name="l1_critique_text",
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l1_critique_text"),
-        render=_r_unused,  # rendered via _LABEL_BY_LAYER override per layer
+        render=_r_l1_critique,
         retention=Retention.MEMORY,
         docstring="Latest L1 critique output; L2 digests into a directive before L1 sees it.",
-        mutex={Layer.L1: ("guidance", 1)},
+        header_prefixes=("CRITIQUE:",),
     ),
     InboxField(
         name="plan",
@@ -197,6 +197,7 @@ INBOX: tuple[InboxField, ...] = (
         render=_r_plan,
         retention=Retention.OPT_SP,
         docstring="L3's strategic plan (read-only from L1's view).",
+        header_prefixes=("PLAN:",),
     ),
     # L2-only fields (section order preserved from legacy format_l2_intelligence)
     InboxField(
@@ -242,6 +243,15 @@ INBOX: tuple[InboxField, ...] = (
 )
 
 
+def header_prefixes_for_layer(layer: Layer) -> tuple[str, ...]:
+    """Section-header prefixes a layer's rendered inbox can emit (observer aid)."""
+    out: list[str] = []
+    for f in INBOX:
+        if layer in f.layers:
+            out.extend(f.header_prefixes)
+    return tuple(out)
+
+
 # ---------------------------------------------------------------------------
 # Per-layer order and per-layer label overrides for mutex-winning fields.
 # ---------------------------------------------------------------------------
@@ -271,48 +281,8 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
 }
 
 
-_LABEL_BY_LAYER: dict[tuple[Layer, str], str] = {
-    (Layer.L1, "l2_directive"): "DIRECTIVE:",
-    (Layer.L1, "l1_critique_text"): "CRITIQUE:",
-    (Layer.L2, "l1_critique_text"): "CRITIQUE:",
-    (Layer.L2, "l2_directive"): "PREVIOUS DIRECTIVE:",
-}
-
-
 def _by_name() -> dict[str, InboxField]:
     return {f.name: f for f in INBOX}
-
-
-def _render_one(f: InboxField, raw: Any, cycle: Cycle, t: InboxTransients, layer: Layer) -> str:
-    """Dispatch rendering — for labeled fields, use the per-layer label override."""
-    label = _LABEL_BY_LAYER.get((layer, f.name))
-    if label is not None:
-        return f"{label}\n{raw}" if raw else ""
-    return f.render(raw, cycle, t, layer)
-
-
-def _resolve_mutex(layer: Layer, raws: dict[str, Any]) -> dict[str, Any]:
-    """Keep only the highest-priority populated field per (layer, mutex_group)."""
-    by_name = _by_name()
-    groups: dict[str, list[tuple[int, str]]] = {}
-    for fname, raw in raws.items():
-        if not raw:
-            continue
-        mutex = by_name[fname].mutex.get(layer)
-        if mutex is None:
-            continue
-        group, pri = mutex
-        groups.setdefault(group, []).append((pri, fname))
-
-    drop: set[str] = set()
-    for members in groups.values():
-        if len(members) < 2:
-            continue
-        members.sort(reverse=True)  # highest priority first
-        for _pri, fname in members[1:]:
-            drop.add(fname)
-
-    return {k: v for k, v in raws.items() if k not in drop}
 
 
 def assemble_inbox(
@@ -325,7 +295,7 @@ def assemble_inbox(
     escalation_check_result: dict | None = None,
     pipeline_params: dict | None = None,
 ) -> str:
-    """Walk the registry for *layer*, resolve mutex, render, join.
+    """Walk the registry for *layer*, source, render, join.
 
     Reads persistent state from *cycle* (``cycle.opt_sp``,
     ``cycle.search_memory``, ``cycle.probe_next_round``,
@@ -354,18 +324,18 @@ def assemble_inbox(
         if raw:
             raws[fname] = raw
 
-    raws = _resolve_mutex(layer, raws)
+    # On L1 the L2 directive replaces the critique whenever both are present
+    # — the directive is L2's digested view of the critique (sliding window of 1).
+    if layer is Layer.L1 and "l2_directive" in raws:
+        raws.pop("l1_critique_text", None)
 
-    # Render in layer order, drop empty section strings.
-    sections: list[str] = []
-    for fname in order:
-        if fname not in raws:
-            continue
-        f = by_name[fname]
-        text = _render_one(f, raws[fname], cycle, t, layer)
-        if text:
-            sections.append(text)
-
+    sections = [
+        text
+        for fname in order
+        if fname in raws
+        for text in (by_name[fname].render(raws[fname], cycle, t, layer),)
+        if text
+    ]
     return "\n\n".join(sections)
 
 
@@ -377,4 +347,5 @@ __all__ = [
     "Layer",
     "Retention",
     "assemble_inbox",
+    "header_prefixes_for_layer",
 ]

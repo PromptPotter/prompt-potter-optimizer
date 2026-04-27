@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.campaign.decisions import record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
+from promptpotter.application.optimization.results import CandidateProposal
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.analysis import (
     EscalationSignal,
@@ -54,20 +55,18 @@ def _merge_pipeline_params(
 
 
 def parse_population(
-    variants: list[dict],
+    proposals: list[CandidateProposal],
     pipeline_params: dict | None,
     schema: PipelineSchema | None,
 ) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
-    """Normalize raw variants → OptSearchPoints + merged pp; attaches validation failures."""
+    """Project proposals → OptSearchPoints + merged pp; attaches validation failures."""
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
-    for c in variants:
-        override = c.get("__pipeline_params_override__")
+    for cp in proposals:
+        override = cp.node_overrides or None
         overrides.append(override)
-        osp = OptSearchPoint.from_prompt_fields(
-            {k: v for k, v in c.items() if k != "__pipeline_params_override__"},
-        )
+        osp = cp.osp
         if schema and override:
             failures = validate_overrides(override, schema)
             if failures:
@@ -99,8 +98,7 @@ def _build_score_report(
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
 ) -> dict:
-    """Build unified candidate score report dict."""
-    vfs = osp.validation_failures
+    """Build unified candidate score report dict — stable shape, defaults always present."""
     return {
         "candidate_id": osp.lineage.id,
         "changes_description": osp.lineage.changes_description or "",
@@ -115,10 +113,10 @@ def _build_score_report(
         "scored_queries": len(results),
         "expected_queries": len(dataset),
         "invalid": invalid,
-        **({"validation_failures": [vf.to_dict() for vf in vfs]} if vfs else {}),
-        **({"runtime_failures": [new_runtime_failure.to_dict()]} if new_runtime_failure else {}),
-        **({"resumed_from_cache": True} if resumed_from_cache else {}),
-        **({"elimination_context": elimination_context} if elimination_context else {}),
+        "resumed_from_cache": resumed_from_cache,
+        "validation_failures": [vf.to_dict() for vf in osp.validation_failures],
+        "runtime_failures": [new_runtime_failure.to_dict()] if new_runtime_failure else [],
+        "elimination_context": dict(elimination_context) if elimination_context else {},
     }
 
 
@@ -266,7 +264,7 @@ def _record_elimination_cut(
             ),
             None,
         )
-        if prior_label and isinstance(report.get("elimination_context"), dict):
+        if prior_label and report["elimination_context"]:
             report["elimination_context"]["triggered_by_prior_label"] = prior_label
 
     if decisions is not None:
