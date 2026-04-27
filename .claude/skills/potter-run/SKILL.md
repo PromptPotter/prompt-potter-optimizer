@@ -30,7 +30,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 - **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. Every command except `init` reads it; if the pointer matches the target, skip `init` and jump to the phase the session needs. Only `init` overwrites the pointer. `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
 - **Init is pure prep.** No backend scoring; baseline runs as phase 0 of `optimize`. There is no `--skip-baseline` flag.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
-- **Stop on 502s.** Halt, tell the user "Backend returning 502s — likely Groq rate-limiting. Check and restart." Don't retry.
+- **Stop when bounded retries exhaust.** `BackendClient.run_query()` auto-retries 429 (RFC 7231 Retry-After) and 5xx/transport errors with countdown backoff (5 attempts max). If a campaign still propagates 5xx after retries, halt and tell the user "Backend returning persistent 5xx — likely Groq upstream rate-limiting or outage. Check and restart." Don't loop on top of the client's loop.
 - **Never wipe project data without asking.** Spell out the full path first.
 - **Phases 0–0.5 are silent.** The Phase 0.7 outlook is the first thing the user sees — pick the tier that matches state + intent, don't stack sections.
 - **Treat defaults as correct.** Documented config (BBEH `campaign.json` vs notebook drift, notebook-driven entry, "don't run `set-task`" for BBEH) is expected state, not a warning. Warnings come from the anomaly allowlist in Phase 0.7 — nothing else.
@@ -47,6 +47,8 @@ Persistent configs decide behavior — the skill does not carry a parallel defau
 - `datasets/{name}/pipeline.json` — pipeline + model + caps
 - BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
 - Active session: `.promptpotter/active_session.json` → `campaigns/{cycle_id}/index.json` + `dashboard.json`
+
+Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live in [`reference/dataset-reasoning-matrix.md`](reference/dataset-reasoning-matrix.md). **Groq daily-volume swap:** `openai/gpt-oss-120b` is the canonical model; during dev the operator may flip the `pipeline.json` `model` field to `openai/gpt-oss-20b` when 120b daily volume is exhausted. Treat the field as a live operator knob, not a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies; operators override per-cycle via `campaign.json::pipeline_overrides`.
 
 Read these. Don't recommend parameter tweaks unless the user asks. Don't classify data volume ("minimal"/"substantial") or propose leaderboard picks unbidden.
 

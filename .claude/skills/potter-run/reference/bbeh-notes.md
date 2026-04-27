@@ -39,7 +39,7 @@ If asked "what hyperparameters are we using?", cite the notebook and flag that `
 
 ## Pipeline
 
-Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` via Groq, `max_tokens=32000`, `reasoning_effort=medium`. Both are load-bearing — reducing either risks empty-output when reasoning tokens eat the output budget.
+Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` via Groq (canonical) — operator may flip `model` to `openai/gpt-oss-20b` when 120b daily volume is exhausted (see [Groq daily-volume swap](dataset-reasoning-matrix.md#groq-daily-volume-model-swap)). No dataset-side `max_tokens` cap; `reasoning_effort=low` to stay clear of Groq's per-model output ceiling. Full per-dataset table: [`dataset-reasoning-matrix.md`](dataset-reasoning-matrix.md).
 
 ## Prerequisites
 
@@ -54,9 +54,9 @@ Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` vi
 
 `note` is conventionally `"unmeasured starting hyperparameters — pre-sweep"` so comparison tooling flags the number as a floor.
 
-## Known doc drift (2026-04-18)
+## Known doc drift (2026-04-27)
 
-- `datasets/bbeh/dataset.md`: "Per-task loop: 23 separate campaigns" — wrong, one global. `max_tokens: 16000` — `pipeline.json` actually sets 32000.
+- `datasets/bbeh/dataset.md`: "Per-task loop: 23 separate campaigns" — wrong, one global.
 - `datasets/bbeh/campaign.json`: diverges on `max_rounds`, `n_variants`, `sp_budget_ttest`, `l2_patience`, `l3_patience` — notebook's `build_campaign_config()` shadows it, safe to ignore for notebook runs. CLI path → flag and ask whether to sync first.
 
 ## "Empty predictions" bug (deferred)

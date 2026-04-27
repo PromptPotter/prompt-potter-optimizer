@@ -250,26 +250,59 @@ class BackendClient:
 
         client = self._get_http()
 
-        # 429 honor-Retry-After loop, bounded. Backend sets the header per RFC
-        # 7231; if it's missing or attempts run out, fall through to raise.
+        # Bounded retry with visible countdown. 429 honors RFC 7231 Retry-After;
+        # 5xx and transport errors fall back to exponential backoff (1, 2, 4, 8s).
+        # Other statuses (incl. 2xx and 4xx-non-429) exit the loop immediately.
+        resp: httpx.Response | None = None
         for attempt in range(MAX_429_ATTEMPTS):
-            resp = await client.post(
-                f"{self.base_url}/matches",
-                json=payload,
-                timeout=QUERY_TIMEOUT,
-            )
-            if resp.status_code != 429:
-                break
-            wait = parse_retry_after(resp.headers)
-            if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
-                break
-            logger.warning(
-                "Backend 429 (attempt %d/%d); waiting %.1fs",
-                attempt + 1,
-                MAX_429_ATTEMPTS,
-                wait,
-            )
-            await wait_with_countdown(wait + 1.0, "backend")
+            try:
+                resp = await client.post(
+                    f"{self.base_url}/matches",
+                    json=payload,
+                    timeout=QUERY_TIMEOUT,
+                )
+            except httpx.TransportError as exc:
+                if attempt == MAX_429_ATTEMPTS - 1:
+                    raise
+                wait_t = float(2**attempt)
+                logger.warning(
+                    "Backend transport error (attempt %d/%d): %s; waiting %.1fs",
+                    attempt + 1,
+                    MAX_429_ATTEMPTS,
+                    exc.__class__.__name__,
+                    wait_t,
+                )
+                await wait_with_countdown(wait_t, "backend connection")
+                continue
+
+            code = resp.status_code
+            if code == 429:
+                wait_h = parse_retry_after(resp.headers)
+                if wait_h is None or wait_h <= 0 or attempt == MAX_429_ATTEMPTS - 1:
+                    break
+                logger.warning(
+                    "Backend 429 (attempt %d/%d); waiting %.1fs",
+                    attempt + 1,
+                    MAX_429_ATTEMPTS,
+                    wait_h,
+                )
+                await wait_with_countdown(wait_h + 1.0, "backend")
+                continue
+
+            if 500 <= code < 600 and attempt < MAX_429_ATTEMPTS - 1:
+                wait_5 = float(2**attempt)
+                logger.warning(
+                    "Backend %d (attempt %d/%d); waiting %.1fs",
+                    code,
+                    attempt + 1,
+                    MAX_429_ATTEMPTS,
+                    wait_5,
+                )
+                await wait_with_countdown(wait_5, f"backend {code}")
+                continue
+
+            break
+        assert resp is not None  # loop invariant: set resp or raised TransportError
 
         if (
             resp.status_code == 400

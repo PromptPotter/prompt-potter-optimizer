@@ -38,9 +38,12 @@ string equality. Registered in
 ## Pipeline Notes
 
 - Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`
-- `max_tokens: 16000`, `reasoning_effort: "medium"` — both are necessary for
-  `gpt-oss-120b` on long BBEH prompts; reducing either risks empty-output
-  failures when hidden reasoning tokens consume the output budget
+- No dataset-side `max_tokens` cap — provider ceiling applies. `reasoning_effort: "low"`
+  is intentional: it keeps Groq's per-model output ceiling (~2048 on `gpt-oss-20b`)
+  from being consumed by the hidden reasoning trace before any visible token emerges.
+  See `task_description.md` for the trap and
+  [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md)
+  for the per-dataset matrix.
 - Optimization target: prompt template, `reasoning_effort`, `temperature`,
-  `max_tokens`
+  `max_tokens`. The optimizer can re-discover higher reasoning settings if they pay.
 - Per-task loop: 23 separate campaigns, one `cycle_id` per task

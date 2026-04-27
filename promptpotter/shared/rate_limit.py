@@ -12,9 +12,18 @@ import asyncio
 import sys
 import time
 
-__all__ = ["MAX_429_ATTEMPTS", "parse_retry_after", "wait_with_countdown"]
+__all__ = [
+    "DEPR_RETRY_COOLDOWN_SEC",
+    "MAX_429_ATTEMPTS",
+    "parse_retry_after",
+    "wait_with_countdown",
+]
 
 MAX_429_ATTEMPTS: int = 5
+# Brief visible cooldown between displaying a deprecated cache row and firing
+# the fresh remeasurement. Not a throttle — a signal so the operator sees the
+# retry happening instead of a 0.0s row jumping to a 20s call.
+DEPR_RETRY_COOLDOWN_SEC: float = 1.0
 _YELLOW = "\033[93m"
 _RESET = "\033[0m"
 

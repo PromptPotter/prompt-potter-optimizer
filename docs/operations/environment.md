@@ -60,6 +60,12 @@ LLM_MODEL=openai/gpt-oss-120b
 | `LANGFUSE_SECRET_KEY` | No | Langfuse cloud tracing |
 | `LANGFUSE_HOST` | No | Langfuse host URL |
 
+### Groq daily-volume model swap
+
+`openai/gpt-oss-120b` is the canonical default for all reasoning datasets. During development, when daily volume on `120b` is exhausted, swap the `model` field in the relevant `datasets/<name>/pipeline.json` to `openai/gpt-oss-20b` and keep iterating; flip back to `120b` for benchmarking / publication runs. Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — see [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md) for the full table. Most importantly, `bbeh` ships `reasoning_effort: low` so the smaller `20b` model doesn't burn its reasoning budget before emitting a visible answer.
+
+`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` node config — provider ceiling applies. Operators raise the cap per-cycle via `campaign.json::pipeline_overrides`, not by editing the dataset default.
+
 ---
 
 ## Entry-point quickstart

@@ -25,4 +25,4 @@ Solve one puzzle per task from the BIG-Bench Extra Hard benchmark and commit to 
 ## Notes
 
 - 23 subtasks with heterogeneous answer shapes means one default prompt must accommodate integers, words, and short phrases
-- `reasoning_effort` interacts strongly with `max_tokens` on Groq reasoning models — low `max_tokens` + medium/high `reasoning_effort` is the primary trap
+- `reasoning_effort` interacts strongly with `max_tokens` on Groq reasoning models — low `max_tokens` + medium/high `reasoning_effort` is the primary trap. Dataset default is `reasoning_effort: low` specifically to stay clear of it on Groq's smaller models (`gpt-oss-20b` enforces a ~2048-token output ceiling that the reasoning trace alone can exhaust). The optimizer can still mutate to higher effort settings when the model has headroom.

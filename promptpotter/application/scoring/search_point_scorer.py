@@ -290,6 +290,12 @@ async def _process_fresh_sample(
         display_cached["sample_id"] = sample.id
         if ctx.on_result is not None:
             ctx.on_result(display_cached, idx, dataset_len)
+        from promptpotter.shared.rate_limit import (
+            DEPR_RETRY_COOLDOWN_SEC,
+            wait_with_countdown,
+        )
+
+        await wait_with_countdown(DEPR_RETRY_COOLDOWN_SEC, "deprecated retry")
 
     result = await measure_sample(
         sample,

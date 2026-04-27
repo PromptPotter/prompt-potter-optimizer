@@ -10,11 +10,11 @@
       "type": "generation",
       "runtime": "backend",
       "node_role": "ranker",
-      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — the provider's own output ceiling applies so TPM reservations don't blow the per-minute bucket and real truncations surface to self-healing.",
+      "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies. reasoning_effort=low so the reasoning trace stays clear of Groq's per-model output ceiling on small models (the BBEH 'Extra Hard' puzzles otherwise burn the budget before any visible token emerges; see datasets/bbeh/task_description.md).",
       "config": {
         "model": "openai/gpt-oss-20b",
         "temperature": 0.0,
-        "reasoning_effort": "medium"
+        "reasoning_effort": "low"
       },
       "prompt_meta": {
         "family": "llm_only",
