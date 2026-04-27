@@ -1,11 +1,9 @@
-"""Notebook-only orchestration — needs ``print``/``tqdm``, can't live in application/."""
+"""Notebook-only orchestration — needs ``print``, can't live in application/."""
 
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
-
-from tqdm.auto import tqdm
+from typing import TYPE_CHECKING
 
 from promptpotter.application.campaign.campaign_setup import (
     Session,
@@ -33,8 +31,8 @@ from promptpotter.domain.scoring import split_scoring_block
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.presentation.views.completion import render_completion
 from promptpotter.presentation.views.display_primitives import BOLD, RESET, YELLOW
+from promptpotter.presentation.views.live_cli import CliDisplay
 from promptpotter.presentation.views.notebook_display import NotebookDisplay
-from promptpotter.presentation.views.query_format import _fmt_query_result
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -98,68 +96,32 @@ async def prepare_scoring_context_notebook(
     train_data: list | None,
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,
-    listener: Any | None = None,
 ) -> tuple[OptSearchPoint, list, list, list]:
-    """Notebook variant of ``prepare_scoring_context`` — wraps with tqdm + per-query print."""
+    """Notebook variant of ``prepare_scoring_context`` — adds tqdm + per-query lines via ``CliDisplay``."""
     scoring_formula: str | None = (
         split_scoring_block(campaign_config.scoring).per_query if campaign_config else None
     )
-    pbar: Any = None
-
-    class _NotebookBaselineListener:
-        def __init__(self, inner: Any | None) -> None:
-            self._inner = inner
-
-        def on_phase(self, event: Any) -> None:
-            if self._inner is not None:
-                self._inner.on_phase(event)
-
-        def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
-            nonlocal pbar
-            if pbar is None:
-                pbar = tqdm(total=qt or 1, desc="Baseline eval", unit="query")
-            else:
-                pbar.total = qt
-            if self._inner is not None:
-                self._inner.on_sample_started(ci, ct, qi, qt, query_text)
-
-        def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
-            tqdm.write(
-                _fmt_query_result(
-                    result,
-                    cached=bool(result.get("cached", False)),
-                    scoring_formula=scoring_formula,
-                )
-            )
-            if pbar is not None:
-                pbar.update(1)
-            if self._inner is not None:
-                self._inner.on_sample_scored(ci, ct, qi, qt, result)
-
-        def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-            if self._inner is not None:
-                self._inner.on_candidate_scored(idx, total, scores)
-
-        def on_round_complete(self, rr: Any, l1_stall_count: int) -> None:
-            if self._inner is not None:
-                self._inner.on_round_complete(rr, l1_stall_count)
+    n_samples = len(train_data) if train_data else 0
+    baseline_display = CliDisplay(
+        baseline_acc=0.0,
+        l1_patience=campaign_config.optimization.l1_patience if campaign_config else 1,
+        pipeline_schema=session.pipeline_schema,
+        scoring_formula=scoring_formula,
+        sp_budget_ttest=n_samples or 1,
+    )
 
     obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
 
-    try:
-        baseline, dataset, campaign_rounds, baseline_results = await _prepare_scoring_context(
-            session.experiment_extract,
-            train_data,
-            campaign_config,
-            pipeline_params=pipeline_params,
-            pipeline_schema=session.pipeline_schema,
-            svc=session,
-            listener=_NotebookBaselineListener(listener),
-            obs=obs,
-        )
-    finally:
-        if pbar is not None:
-            pbar.close()
+    baseline, dataset, campaign_rounds, baseline_results = await _prepare_scoring_context(
+        session.experiment_extract,
+        train_data,
+        campaign_config,
+        pipeline_params=pipeline_params,
+        pipeline_schema=session.pipeline_schema,
+        svc=session,
+        listener=baseline_display,
+        obs=obs,
+    )
 
     print(f"\nEvaluation data: {len(dataset)} queries")
     return baseline, dataset, campaign_rounds, baseline_results

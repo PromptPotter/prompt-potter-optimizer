@@ -66,8 +66,6 @@ def _render_init_enter(view: dict) -> str:
     l2 = "enabled" if view["l2_enabled"] else "disabled"
     l3 = "enabled" if view["l3_enabled"] else "disabled"
     lines.append(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    crit = "enabled" if view["critique_enabled"] else "disabled"
-    lines.append(_dbox_line(f"L1 Critique    {crit}"))
     lines.append(_dbox_bottom())
     return "\n".join(lines)
 

@@ -385,7 +385,6 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
 
     return CliDisplay(
         baseline_acc=baseline_acc,
-        max_rounds=opt.max_rounds or 999,
         l1_patience=opt.l1_patience,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         scoring_formula=scoring_formula,

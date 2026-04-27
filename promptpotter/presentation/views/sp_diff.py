@@ -72,30 +72,15 @@ def render_sp_diff(view: dict) -> str:
             return val
         return _get_code(val)
 
-    col_w = max(8, max(len(label) for label, _ in columns) + 2)
-    widest_inline = max(
-        (
-            len(d[k])
-            for k in diff_keys
-            for _, d in columns
-            if k in d and len(d[k]) <= _VAL_INLINE_MAX
-        ),
-        default=0,
-    )
-    col_w = max(col_w, widest_inline + 2)
     max_key = max(len(k) for k in diff_keys)
 
-    out: list[str] = []
-    r_label = f"Round {round_num}" if round_num is not None else "SPs"
-    out.append(_node_line(f"{CYAN}{r_label} SPs:{RESET}"))
-    hdr = f"{'':>{max_key}}  " + "".join(f"{label:<{col_w}}" for label, _ in columns)
-    out.append(_node_line(hdr))
-
+    # Build all cells first so column widths can be per-column instead of
+    # one global max — keeps narrow columns narrow when only one column has
+    # a long inline value.
     groups = group_diff_keys(diff_keys, node_param_keys)
+    rendered_groups: list[tuple[str, list[tuple[str, list[str]]]]] = []
     for node_name, group_keys in groups:
-        if node_name and len(groups) > 1:
-            sep = f"{'─── ' + node_name + ' ':─<{max_key + 2}}"
-            out.append(_node_line(f"{DIM}{sep}{RESET}"))
+        rows: list[tuple[str, list[str]]] = []
         for k in group_keys:
             cells: list[str] = []
             prev_val: str | None = None
@@ -103,7 +88,33 @@ def render_sp_diff(view: dict) -> str:
                 v = d.get(k)
                 cells.append(_cell(v, prev_val))
                 prev_val = v
-            row = f"{k:>{max_key}}  " + "".join(f"{c:<{col_w}}" for c in cells)
+            rows.append((k, cells))
+        rendered_groups.append((node_name, rows))
+
+    n_cols = len(columns)
+    col_w: list[int] = []
+    for ci in range(n_cols):
+        label_w = len(columns[ci][0])
+        cell_w = max(
+            (len(cells[ci]) for _, rows in rendered_groups for _, cells in rows),
+            default=0,
+        )
+        col_w.append(max(label_w, cell_w) + 2)
+
+    out: list[str] = []
+    r_label = f"Round {round_num}" if round_num is not None else "SPs"
+    out.append(_node_line(f"{CYAN}{r_label} SPs:{RESET}"))
+    hdr = f"{'':>{max_key}}  " + "".join(
+        f"{label:<{col_w[ci]}}" for ci, (label, _) in enumerate(columns)
+    )
+    out.append(_node_line(hdr))
+
+    for node_name, rows in rendered_groups:
+        if node_name and len(rendered_groups) > 1:
+            sep = f"{'─── ' + node_name + ' ':─<{max_key + 2}}"
+            out.append(_node_line(f"{DIM}{sep}{RESET}"))
+        for k, cells in rows:
+            row = f"{k:>{max_key}}  " + "".join(f"{c:<{col_w[ci]}}" for ci, c in enumerate(cells))
             out.append(_node_line(row))
 
     if legend:

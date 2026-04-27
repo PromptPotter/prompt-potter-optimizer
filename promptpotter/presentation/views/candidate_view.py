@@ -150,18 +150,14 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
     delta = acc - baseline_acc
     tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
 
-    if scores.get("escalation_aborted"):
+    aborted = bool(scores.get("escalation_aborted"))
+    if aborted:
         scored_q = scores.get("scored_queries", n)
         expected_q = scores.get("expected_queries", n)
         hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
-        return IndividualSummary(
-            status="aborted",
-            tag=tag,
-            body_line=f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}",
-            detail_lines=(),
-        )
-
-    body_line = f"{mutations_chunk}{hits}/{n} hits  vs baseline: {_fmt_delta(delta)}"
+    else:
+        hit_str = f"{hits}/{n} hits"
+    body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
     if scores.get("elimination_stopped"):
@@ -169,16 +165,27 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
         prior_label = elim_ctx.get("triggered_by_prior_label")
         detail_lines.append(format_elimination_summary(elim_ctx, prior_label))
 
+    # Composite + degraded share the bottom info rule — joined with two
+    # spaces so the box bottom carries both numbers in one line. Computed
+    # for every status (ok / aborted / eliminated) since the score report
+    # carries them regardless of why scoring stopped.
+    bottom_extras: list[str] = []
     comp = scores.get("composite")
     if comp is not None and comp != acc:
-        detail_lines.append(f"composite={comp:.4f}")
+        bottom_extras.append(f"composite={comp:.4f}")
     degraded = scores.get("degraded_queries", 0)
     if degraded:
-        detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+        bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+    if bottom_extras:
+        detail_lines.append("  ".join(bottom_extras))
 
-    status: Literal["ok", "eliminated"] = (
-        "eliminated" if scores.get("elimination_stopped") else "ok"
-    )
+    status: Literal["ok", "aborted", "eliminated"]
+    if aborted:
+        status = "aborted"
+    elif scores.get("elimination_stopped"):
+        status = "eliminated"
+    else:
+        status = "ok"
     return IndividualSummary(
         status=status,
         tag=tag,
