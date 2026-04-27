@@ -370,7 +370,7 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
     scoring_formula = split_scoring_block(campaign_config.scoring).per_query
     opt = campaign_config.optimization
 
-    from promptpotter.presentation.views.live_display import LiveDisplay
+    from promptpotter.presentation.views.live import LiveDisplay
 
     if getattr(args, "verbose", False):
         return LiveDisplay(
@@ -425,6 +425,14 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
     session.cycle_id = ctx.cycle_id
+
+    status = await session.backend_client.check_status()
+    if status.get("status") == "unreachable":
+        return CommandResult(
+            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
+            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
+        )
+
     pipeline_params = _apply_pipeline(session, campaign_config)
     train_data = session.queries or []
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
@@ -550,13 +558,13 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 async def cmd_results(args: argparse.Namespace) -> CommandResult:
     """Show campaign results, optionally save winner."""
     from promptpotter.application.campaign.utils import save_campaign_winner
-    from promptpotter.presentation.views import (
+    from promptpotter.presentation.views.live import render_progress_table
+    from promptpotter.presentation.views.reports import (
         collect_scoring_set_events,
         render_campaign_summary,
         render_flip_tracking,
         render_hard_sample_heatmap,
         render_lineage,
-        render_progress_table,
         render_scoring_set,
     )
 
@@ -706,7 +714,7 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
     ``index.json::final`` once a cycle finishes.
     """
     from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
-    from promptpotter.presentation.views import render_status
+    from promptpotter.presentation.views.reports import render_status
 
     ctx = load_session(args)
     session_dir = ctx.store.sessions.session_dir(ctx.session_id)

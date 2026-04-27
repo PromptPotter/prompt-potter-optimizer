@@ -558,7 +558,7 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
     if not session.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
-        from promptpotter.presentation.views import render_log_md
+        from promptpotter.presentation.views.reports import render_log_md
 
         store = session.store.campaigns
         index = store.load(session.backend_id, session.cycle_id)
