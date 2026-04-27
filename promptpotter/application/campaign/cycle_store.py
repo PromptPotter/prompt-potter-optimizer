@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store import Stores
 
 
@@ -64,10 +65,9 @@ def resolve_campaign_id(
 def bootstrap_cycle(
     config: CampaignConfig,
     session: Session,
-    baseline_render: str,
+    baseline_jsp: JobSearchPoint,
     baseline_accuracy: float,
     dataset: list,
-    active_steps: list[str],
     cycle_id_override: str | None,
     *,
     parent_session_id: str = "",
@@ -85,12 +85,7 @@ def bootstrap_cycle(
         return None, 0
     try:
         store = session.store.campaigns
-        resolved = cycle_id_override or cycle_config_identity(
-            config,
-            baseline_render,
-            dataset,
-            active_steps,
-        )
+        resolved = cycle_id_override or cycle_config_identity(baseline_jsp, dataset)
         if resume_from_round_override is not None:
             store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
         config_snapshot = config.model_dump(mode="json")

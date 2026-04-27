@@ -241,6 +241,59 @@ def build_parser() -> argparse.ArgumentParser:
 # ─────────────────────────────────────────────────────────────────────────────
 
 
+def _mint_session_and_cycle(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    cycle_id: str,
+    init_params: dict,
+    pipeline_params: dict,
+    active: list[str],
+    baseline,
+    dataset_count: int,
+) -> str:
+    """Mint session+cycle pair, write active pointer, return new session_id.
+
+    Shared by ``cmd_init`` and ``cmd_optimize``'s pipeline-divergence
+    auto-mint. ``init_params`` is copied verbatim into the new session
+    state, so callers (cmd_optimize) can reuse a prior session's
+    backend/dataset routing.
+    """
+    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
+
+    session_id = mint_session_id()
+    state = new_session_state(
+        init_params=dict(init_params),
+        campaign_config=campaign_config.model_dump(),
+        pipeline_params=pipeline_params,
+        active_steps=active,
+    )
+    state["baseline_prompt_fields"] = baseline.prompt_field_dict()
+    state["dataset_count"] = dataset_count
+    state["baseline_accuracy"] = 0.0
+
+    session.store.sessions.create(session_id, state)
+    session.store.sessions.ensure_narrative_files(session_id)
+    session.store.campaigns.create(
+        init_params["backend_id"],
+        cycle_id,
+        {"parent_session_id": session_id},
+    )
+    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
+    session.session_id = session_id
+    session.cycle_id = cycle_id
+    return session_id
+
+
+def _compute_cycle_id(session: Session, baseline, dataset: list) -> str:
+    """Derive ``cycle_<hash>`` from the baseline JobSearchPoint + dataset."""
+    from promptpotter.domain.cycle_identity import cycle_config_identity
+
+    base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
+    jsp = baseline.to_job_search_point(base_pipeline_params=base_pp, schema=session.pipeline_schema)
+    return cycle_config_identity(jsp, dataset)
+
+
 async def cmd_init(args: argparse.Namespace) -> CommandResult:
     """Initialize services, load datasets, configure pipeline, create session.
 
@@ -298,55 +351,30 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     baseline = load_cli_baseline(session)
     dataset = train_data
 
-    from promptpotter.domain.cycle_identity import cycle_hash_suffix
-
-    active_steps_for_hash = (
-        list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-    )
-    cycle_hash = cycle_hash_suffix(
+    cycle_id = _compute_cycle_id(session, baseline, dataset)
+    init_params = {
+        "backend_url": args.backend_url,
+        "backend_id": backend_id,
+        "experiment_id": args.experiment_id,
+        "dataset_name": dataset_name,
+    }
+    session_id = _mint_session_and_cycle(
+        session,
         campaign_config,
-        baseline.render(),
-        dataset,
-        active_steps_for_hash,
-    )
-
-    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
-
-    session_id = mint_session_id()
-    cycle_id = f"cycle_{cycle_hash}"
-
-    state = new_session_state(
-        init_params={
-            "backend_url": args.backend_url,
-            "backend_id": backend_id,
-            "experiment_id": args.experiment_id,
-            "dataset_name": dataset_name,
-        },
-        campaign_config=campaign_config.model_dump(),
+        cycle_id=cycle_id,
+        init_params=init_params,
         pipeline_params=pipeline_params,
-        active_steps=active,
+        active=active,
+        baseline=baseline,
+        dataset_count=len(dataset),
     )
-    state["baseline_prompt_fields"] = baseline.prompt_field_dict()
-    state["dataset_count"] = len(dataset)
-    state["baseline_accuracy"] = 0.0
-
-    session.store.sessions.create(session_id, state)
-    session.store.sessions.ensure_narrative_files(session_id)
-    session.store.campaigns.create(
-        backend_id,
-        cycle_id,
-        {"parent_session_id": session_id},
-    )
-    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
-    session.session_id = session_id
-    session.cycle_id = cycle_id
 
     return CommandResult(
         data={
             "session_id": session_id,
             "cycle_id": cycle_id,
             "backend_id": backend_id,
-            "phase": state["phase"],
+            "phase": "init",
             "dataset_count": len(dataset),
             "active_steps": active,
             "excluded_nodes": excluded,
@@ -424,6 +452,38 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     train_data = session.queries or []
 
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
+
+    # Pipeline divergence-detect: if pipeline.json (model, temperature, …),
+    # baseline prompt, or dataset changed since the active session was init'd,
+    # the recomputed cycle hash will no longer match the pointer's cycle_id.
+    # Auto-mint a fresh session+cycle so a model swap starts a new campaign
+    # root instead of silently mixing measurements from the old model.
+    minted_fresh = False
+    if ctx.cycle_id and resume_from_round is None:
+        baseline_now = load_cli_baseline(session)
+        expected_cycle_id = _compute_cycle_id(session, baseline_now, train_data)
+        if expected_cycle_id != ctx.cycle_id:
+            old_cycle_id = ctx.cycle_id
+            new_session_id = _mint_session_and_cycle(
+                session,
+                campaign_config,
+                cycle_id=expected_cycle_id,
+                init_params=ctx.init_params,
+                pipeline_params=pipeline_params,
+                active=list(pipeline_params.get("steps", [])),
+                baseline=baseline_now,
+                dataset_count=len(train_data),
+            )
+            ctx.session_id = new_session_id
+            ctx.cycle_id = expected_cycle_id
+            ctx.state = session.store.sessions.read(new_session_id) or ctx.state
+            minted_fresh = True
+            logger.info(
+                "Pipeline changed since init (was %s, now %s) — minted new cycle",
+                old_cycle_id,
+                expected_cycle_id,
+            )
+
     if resume_from_round is not None:
         if not ctx.cycle_id:
             raise ValueError(
@@ -432,9 +492,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         if resume_from_round < 0:
             raise ValueError(f"--from must be >= 0, got {resume_from_round}")
         logger.info("Resuming cycle %s from after round %d", ctx.cycle_id, resume_from_round)
-    else:
-        if ctx.cycle_id:
-            logger.info("Resuming cycle %s", ctx.cycle_id)
+    elif ctx.cycle_id and not minted_fresh:
+        logger.info("Resuming cycle %s", ctx.cycle_id)
 
     log_startup_summary(
         session,
@@ -547,7 +606,7 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
         render_flip_tracking,
         render_hard_sample_heatmap,
         render_lineage,
-        render_progress,
+        render_progress_table,
     )
 
     ctx = load_session(args)
@@ -568,7 +627,7 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
 
     human_parts = [render_campaign_summary(campaign_rounds)]
-    progress = render_progress(campaign_rounds)
+    progress = render_progress_table(campaign_rounds, framed=False)
     if progress:
         human_parts.append(progress)
     flips = render_flip_tracking(campaign_rounds)

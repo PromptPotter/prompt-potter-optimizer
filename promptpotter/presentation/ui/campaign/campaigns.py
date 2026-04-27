@@ -268,12 +268,11 @@ def show_experiment_dashboard(
         from promptpotter.domain.opt_search_point import OptSearchPoint
 
         try:
-            bl_rendered = ""
-            if baseline_prompt_fields:
-                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
             ps = session.pipeline_schema if session else None
-            active_steps = list(ps.active_steps) if ps else []
-            active_id = cycle_config_identity(campaign_config, bl_rendered, dataset, active_steps)
+            base_pp = ps.to_pipeline_params() if ps else {}
+            baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields or {})
+            baseline_jsp = baseline_osp.to_job_search_point(base_pipeline_params=base_pp, schema=ps)
+            active_id = cycle_config_identity(baseline_jsp, dataset)
         except Exception:
             logger.debug("Could not compute active campaign ID", exc_info=True)
 

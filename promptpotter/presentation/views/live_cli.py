@@ -149,10 +149,10 @@ class CliDisplay:
 
         self.current_round = rn or self.current_round
 
+        # L1_GENERATE header dropped — the L1_SCORE round header below
+        # already carries the candidate count, and the per-individual line
+        # (``ind 1/5 …``) prints under it. One header per round, not two.
         if phase == CampaignPhase.L1_GENERATE:
-            n_variants = event.data.get("n_variants") or event.data.get("n")
-            suffix = f"  (n={n_variants})" if n_variants else ""
-            self._write(f"→ R{self.current_round}/{self.max_rounds}  generate{suffix}")
             return
 
         if phase == CampaignPhase.L1_SCORE:
@@ -160,8 +160,8 @@ class CliDisplay:
             n_q = event.data.get("n_queries", 0)
             calls = n_cand * n_q
             self._write(
-                f"→ R{self.current_round}/{self.max_rounds}  evaluate  "
-                f"({n_cand} \u00d7 {n_q} = {calls} calls)"
+                f"→ R{self.current_round}/{self.max_rounds}  "
+                f"{n_cand} cands \u00d7 {n_q} q = {calls} calls"
             )
             return
 

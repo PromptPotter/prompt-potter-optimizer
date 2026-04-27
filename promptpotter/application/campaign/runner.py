@@ -370,26 +370,23 @@ async def run_optimization(
         if display is not None and hasattr(display, "set_baseline"):
             display.set_baseline(baseline.baseline_acc)
 
-    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
-
     if not session_id:
         from promptpotter.application.campaign.campaign_setup import auto_mint_session
-        from promptpotter.domain.cycle_identity import cycle_hash_suffix
+        from promptpotter.domain.cycle_identity import cycle_config_identity
 
         ps = baseline.baseline_ps
         baseline_prompt_fields = (
             ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
         )
-        baseline_render = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
+        baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
+        base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
+        baseline_jsp = baseline_osp.to_job_search_point(
+            base_pipeline_params=base_pp, schema=session.pipeline_schema
+        )
         session_id, minted_cycle_id = auto_mint_session(
             session,
             campaign_config,
-            cycle_hash=cycle_hash_suffix(
-                campaign_config,
-                baseline_render,
-                dataset,
-                active_steps,
-            ),
+            cycle_hash=cycle_config_identity(baseline_jsp, dataset).removeprefix("cycle_"),
             baseline_acc=baseline.baseline_acc,
             baseline_prompt_fields=baseline_prompt_fields,
             dataset_size=len(dataset),

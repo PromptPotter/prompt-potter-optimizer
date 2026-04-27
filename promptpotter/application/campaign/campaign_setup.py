@@ -415,14 +415,16 @@ async def init_optimization_loop(
         config=config,
     )
 
-    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
+    base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
+    baseline_jsp = baseline_osp.to_job_search_point(
+        base_pipeline_params=base_pp, schema=session.pipeline_schema
+    )
     resolved_cycle_id, resumed_from_round = bootstrap_cycle(
         config,
         session,
-        baseline_osp.render(),
+        baseline_jsp,
         baseline.baseline_acc,
         dataset,
-        active_steps,
         cycle_id,
         parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
