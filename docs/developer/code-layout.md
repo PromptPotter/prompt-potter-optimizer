@@ -66,14 +66,15 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
       journal.md / notes.md              # notebook ↔ Claude exchange
       control.json                       # HITL pause/resume
     campaigns/{cycle_id}/                # per-cycle: all artifacts for one optimization
-      index.json                         # campaign metadata + trial index
+      index.json                         # campaign metadata + trial index + final summary
       dashboard.json                     # live counters
+      log.md                             # rendered narrative digest (per-round + heatmap + winner)
       output.log                         # append-only HIT/MISS history
+      phase_events.jsonl                 # structured phase event stream
       trials/trial_NNNN.json             # resume source of truth
       candidates/round_NNNN.json         # pre-scoring checkpoint
       rounds/round_NNN.json              # per-round LLM action audit
-      events.jsonl                       # observability mirror (not read for state)
-      langfuse/                          # trace persistence
+      langfuse/                          # trace persistence (incl. events.jsonl mirror)
       prompts/{family}/{version}/        # rendered optimizer prompts
       archived/resumed_at_{ts}/          # mid-cycle rewind history
     library/                             # cross-cycle: shared reference data
@@ -84,7 +85,7 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
       restructure_cache.json
 ```
 
-Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`. For operator-level walkthrough of these files, see [../operations/persistence-and-state.md](../operations/persistence-and-state.md).
+Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`. For operator-level walkthrough of these files, see [../operations/persistence-and-state.md](../operations/persistence-and-state.md).
 
 ---
 

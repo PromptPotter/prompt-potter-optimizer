@@ -114,7 +114,7 @@ def build_hard_samples_artifact(
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
 ) -> dict:
-    """Build the ``hard_samples.json`` artifact dict from round observations.
+    """Build the hard-samples artifact dict from round observations.
 
     Fits Rasch on all observations (so θ_c and δ_s reflect the full evidence),
     then truncates the persisted axes to the top-K on the spec's sort contract.

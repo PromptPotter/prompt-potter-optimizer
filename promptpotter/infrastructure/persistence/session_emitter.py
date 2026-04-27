@@ -11,13 +11,12 @@ from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.infrastructure.persistence.control import ensure_control_file
-from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.results import RoundResult, RunResult
+    from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.phases import PhaseEvent
 
 # Injected callable returning the active RoundRecorder or None — keeps
@@ -42,8 +41,7 @@ CAMPAIGN_ARTIFACTS = {
     "index.json",
     "dashboard.json",
     "output.log",
-    "optimize_result.json",
-    "hard_samples.json",
+    "log.md",
     "phase_events.jsonl",
 }
 
@@ -191,7 +189,6 @@ class CampaignPersistenceEmitter:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
         self.log_path = campaign_dir / "output.log"
-        self.result_path = campaign_dir / "optimize_result.json"
         self.phase_events_path = campaign_dir / "phase_events.jsonl"
         self.session_dir = session_dir
         self._recorder_provider: RecorderProvider = recorder_provider or (lambda: None)
@@ -573,13 +570,6 @@ class CampaignPersistenceEmitter:
     def finalize(self, stop_reason: str) -> None:
         self.set_stop_reason(stop_reason)
         self._log_fh.close()
-
-    def write_result(self, result: RunResult) -> None:
-        write_json(self.result_path, result.model_dump(), default=str)
-
-    def write_hard_samples_artifact(self, artifact: dict) -> None:
-        # Build/empty-stub policy lives in application/intelligence; we just write.
-        write_json(self.campaign_dir / "hard_samples.json", artifact)
 
     # -- Internal --------------------------------------------------------------
 

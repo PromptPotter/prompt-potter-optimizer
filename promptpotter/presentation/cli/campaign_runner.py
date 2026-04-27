@@ -527,12 +527,12 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
 
-    result_path = campaign_dir / "optimize_result.json"
+    log_md_path = campaign_dir / "log.md"
     dashboard_path = campaign_dir / "dashboard.json"
     return CommandResult(
         data=cycle_result.model_dump(),
         human=(
-            f"Campaign: {cycle_result.cycle_id}\nDashboard: {dashboard_path}\nResult: {result_path}"
+            f"Campaign: {cycle_result.cycle_id}\nDashboard: {dashboard_path}\nDigest: {log_md_path}"
         ),
     )
 
@@ -582,16 +582,23 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     if prefix_events:
         human_parts.append(render_adaptive_prefix(prefix_events))
 
-    hard_samples_path = session.store.campaigns.campaign_dir(cycle_id) / "hard_samples.json"
-    if hard_samples_path.exists():
-        try:
-            heatmap = render_hard_sample_heatmap(
-                json.loads(hard_samples_path.read_text(encoding="utf-8"))
+    # Heatmap is embedded in log.md; recompute on the fly when the sorter ran.
+    hs_cfg = ctx.campaign_config.optimization.hard_sample_sorter
+    if hs_cfg.enabled and campaign_rounds:
+        from promptpotter.application.intelligence.hard_sample_sorter import (
+            build_hard_samples_artifact,
+        )
+        from promptpotter.application.optimization.results import RoundResult
+
+        with contextlib.suppress(ValueError, TypeError):
+            artifact = build_hard_samples_artifact(
+                [RoundResult.model_validate(r) for r in campaign_rounds],
+                cycle_id=cycle_id,
+                top_k_candidates=hs_cfg.top_k_candidates,
+                top_k_samples=hs_cfg.top_k_samples,
             )
-        except (OSError, json.JSONDecodeError):
-            heatmap = ""
-        if heatmap:
-            human_parts.append(heatmap)
+            if heatmap := render_hard_sample_heatmap(artifact):
+                human_parts.append(heatmap)
 
     if args.save:
         save_campaign_winner(
@@ -699,12 +706,14 @@ async def cmd_profile(args: argparse.Namespace) -> CommandResult:
 
 
 async def cmd_status(args: argparse.Namespace) -> CommandResult:
-    """Emit dashboard + control + last result.
+    """Emit dashboard + control + last-result snapshot.
 
     ``dashboard.json`` is the live single-source-of-truth (see
-    ``infrastructure/persistence/session_emitter.py``). JSON mode cats it
-    alongside ``control.json`` and ``optimize_result.json`` so a human can
-    ``jq`` the same shape; human mode delegates to ``render_status``.
+    ``infrastructure/persistence/session_emitter.py``); the final-run
+    summary (``best_accuracy``, ``stop_reason`` …) lives under
+    ``index.json::final`` once a cycle finishes. JSON mode cats both files
+    plus ``control.json`` so a human can ``jq`` the same shape; human mode
+    delegates to ``render_status``.
     """
     from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
     from promptpotter.presentation.views import render_status
@@ -724,7 +733,7 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
         sources.extend(
             [
                 ("dashboard", campaign_dir / "dashboard.json"),
-                ("optimize_result", campaign_dir / "optimize_result.json"),
+                ("index", campaign_dir / "index.json"),
             ]
         )
     for key, path in sources:
@@ -732,10 +741,11 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 payload[key] = json.loads(path.read_text(encoding="utf-8"))
 
+    final = (payload.get("index") or {}).get("final")
     human = render_status(
         payload.get("dashboard", {}),
         payload.get("control"),
-        payload.get("optimize_result"),
+        final,
     )
     return CommandResult(data=payload, human=human)
 

@@ -124,7 +124,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/three-layer
 
 ## Phase 5: Results
 
-`show-results` — best vs baseline, L1/L2/L3 activations, winner config. `--save` persists the winner. `optimize_result.json::stop_reason` → recovery path in `reference/troubleshooting.md`.
+`show-results` — best vs baseline, L1/L2/L3 activations, winner config. `--save` persists the winner. `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
 
 ---
 

@@ -132,6 +132,7 @@ async def _post_round(
                 session.cycle_id,
                 cycle.checkpoint(round_result, round_num),
             )
+        _write_log_md(session)
 
     if _rr := get_round_recorder():
         _rr.flush()
@@ -447,10 +448,6 @@ async def run_optimization(
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 
     finished_at = datetime.now(UTC).isoformat()
-    langfuse_trace_id = _finalize_run(
-        cycle, session, emitter, stop_reason, finished_at, campaign_config
-    )
-
     run_result = RunResult(
         rounds=cycle.rounds,
         n_rounds=len(cycle.rounds),
@@ -462,13 +459,11 @@ async def run_optimization(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
-        langfuse_trace_id=langfuse_trace_id,
         cycle_id=session.cycle_id,
         session_id=session_id or None,
         resumed_from_round=session.resumed_from_round,
     )
-    if emitter:
-        emitter.write_result(run_result)
+    _finalize_run(cycle, session, emitter, run_result, campaign_config)
     return run_result
 
 
@@ -476,54 +471,90 @@ def _finalize_run(
     cycle: Cycle,
     session: Session,
     emitter: CampaignPersistenceEmitter | None,
-    stop_reason: StopReason,
-    finished_at: str,
+    run_result: RunResult,
     campaign_config: CampaignConfig,
-) -> str | None:
-    """Mark cycle finished, end obs, write hard samples, finalize emitter; return cloud trace id."""
+) -> None:
+    """Mark cycle finished, fold the run summary into ``index.json::final``,
+    render ``log.md`` (with the hard-samples heatmap inlined when the sorter
+    ran), finalize the emitter. Mutates ``run_result.langfuse_trace_id``."""
+    stop_reason = run_result.stop_reason
     if session.cycle_id:
-        status = {
-            StopReason.USER_PAUSED: "paused",
-            StopReason.USER_STOPPED: "stopped",
-            StopReason.INTERRUPTED: "interrupted",
-        }.get(stop_reason, "completed")
+        status_map = {
+            str(StopReason.USER_PAUSED): "paused",
+            str(StopReason.USER_STOPPED): "stopped",
+            str(StopReason.INTERRUPTED): "interrupted",
+        }
         session.store.campaigns.mark_finished(
             session.backend_id,
             session.cycle_id,
-            status=status,
+            status=status_map.get(stop_reason, "completed"),
             stop_reason=stop_reason,
-            best_accuracy=cycle.best_accuracy,
-            best_round=cycle.best_round,
-            n_rounds=len(cycle.rounds),
-            finished_at=finished_at,
+            best_accuracy=run_result.best_accuracy,
+            best_round=run_result.best_round,
+            n_rounds=run_result.n_rounds,
+            finished_at=run_result.finished_at,
         )
+
     obs = session.obs
     if obs:
         obs.end_campaign(
             session.obs_campaign_id,
-            best_accuracy=cycle.best_accuracy,
-            n_rounds=len(cycle.rounds),
+            best_accuracy=run_result.best_accuracy,
+            n_rounds=run_result.n_rounds,
             stop_reason=stop_reason,
-            best_round=cycle.best_round,
+            best_round=run_result.best_round,
         )
+
+    run_result.langfuse_trace_id = (
+        None
+        if stop_reason == StopReason.INTERRUPTED or obs is None
+        else obs.get_langfuse_trace_id(session.obs_campaign_id)
+    )
+
+    if session.cycle_id:
+        with graceful("Final summary write failed"):
+            session.store.campaigns.update(
+                session.backend_id,
+                session.cycle_id,
+                {"final": run_result.model_dump(exclude={"rounds"}, mode="json")},
+            )
+
     if emitter:
         from promptpotter.application.intelligence.hard_sample_sorter import (
             build_hard_samples_artifact,
-            empty_artifact,
         )
 
         hs_cfg = campaign_config.optimization.hard_sample_sorter
+        artifact: dict | None = None
         if hs_cfg.enabled:
-            artifact = build_hard_samples_artifact(
-                cycle.rounds,
-                cycle_id=session.cycle_id,
-                top_k_candidates=hs_cfg.top_k_candidates,
-                top_k_samples=hs_cfg.top_k_samples,
-            )
-        else:
-            artifact = empty_artifact(cycle_id=session.cycle_id, disabled=True)
-        emitter.write_hard_samples_artifact(artifact)
+            with graceful("Hard-sample artifact build failed"):
+                artifact = build_hard_samples_artifact(
+                    cycle.rounds,
+                    cycle_id=session.cycle_id,
+                    top_k_candidates=hs_cfg.top_k_candidates,
+                    top_k_samples=hs_cfg.top_k_samples,
+                )
+        _write_log_md(session, hard_samples_artifact=artifact)
         emitter.finalize(stop_reason)
-    if stop_reason == StopReason.INTERRUPTED or obs is None:
-        return None
-    return obs.get_langfuse_trace_id(session.obs_campaign_id)
+
+
+def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
+    """Render ``campaigns/{cycle_id}/log.md`` from index + trials. Pure derived
+    view; wrapped in ``graceful()`` so a render bug never breaks the run."""
+    if not session.cycle_id or session.store is None:
+        return
+    with graceful("log.md render failed"):
+        from promptpotter.presentation.views import render_log_md
+
+        store = session.store.campaigns
+        index = store.load(session.backend_id, session.cycle_id)
+        if not index:
+            return
+        n_trials = int(index.get("n_trials", 0) or 0)
+        trials = (
+            store.load_trials_range(session.backend_id, session.cycle_id, 0, n_trials - 1)
+            if n_trials
+            else []
+        )
+        content = render_log_md(index, trials, hard_samples_artifact=hard_samples_artifact)
+        (store.campaign_dir(session.cycle_id) / "log.md").write_text(content, encoding="utf-8")

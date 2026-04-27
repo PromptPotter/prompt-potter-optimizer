@@ -66,6 +66,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     assert {
         "dashboard.json",
         "index.json",
+        "log.md",
         "phase_events.jsonl",
     } <= CAMPAIGN_ARTIFACTS
 
@@ -192,27 +193,29 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
     emitter.on_round_complete(round_result, l1_stall_count=0)
 
-    # Finalize — finalize_optimization_run builds the artifact and hands it
-    # to the emitter in production; mirror that flow here so the application
-    # layer owns the build/empty policy and infrastructure just writes.
-    from promptpotter.application.intelligence.hard_sample_sorter import empty_artifact
+    # Mirror runner._finalize_run: fold the run summary into index.json::final
+    # and render log.md from the index + trial dump.
+    from promptpotter.presentation.views import render_log_md
 
-    emitter.write_hard_samples_artifact(empty_artifact(cycle_id="cycle_test_001", disabled=True))
-    emitter.finalize("max_rounds")
-    emitter.write_result(
-        RunResult(
-            rounds=[round_result],
-            n_rounds=1,
-            best_accuracy=0.6,
-            best_round=0,
-            baseline_accuracy=0.5,
-            winner_prompt_fields={"instruction": "test"},
-            stop_reason="max_rounds",
-            started_at="2026-04-19T00:00:00+00:00",
-            finished_at="2026-04-19T00:01:00+00:00",
-            cycle_id="cycle_test_001",
-        )
+    final = RunResult(
+        rounds=[round_result],
+        n_rounds=1,
+        best_accuracy=0.6,
+        best_round=0,
+        baseline_accuracy=0.5,
+        winner_prompt_fields={"instruction": "test"},
+        stop_reason="max_rounds",
+        started_at="2026-04-19T00:00:00+00:00",
+        finished_at="2026-04-19T00:01:00+00:00",
+        cycle_id="cycle_test_001",
+    ).model_dump(exclude={"rounds"})
+    index_path = campaign_dir / "index.json"
+    index_data = json.loads(index_path.read_text(encoding="utf-8")) | {"final": final}
+    index_path.write_text(json.dumps(index_data), encoding="utf-8")
+    (campaign_dir / "log.md").write_text(
+        render_log_md(index_data, [round_result.model_dump()]), encoding="utf-8"
     )
+    emitter.finalize("max_rounds")
 
     missing_campaign = [a for a in CAMPAIGN_ARTIFACTS if not (campaign_dir / a).exists()]
     assert not missing_campaign, f"Campaign-tree parity violated — missing: {missing_campaign}"

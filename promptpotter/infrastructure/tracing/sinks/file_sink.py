@@ -1,4 +1,4 @@
-"""Per-cycle Langfuse shadow + events.jsonl + prompts under campaigns/{cycle_id}/."""
+"""Per-cycle Langfuse shadow + events.jsonl + prompts under campaigns/{cycle_id}/langfuse/."""
 
 from __future__ import annotations
 
@@ -63,7 +63,7 @@ class FileSink:
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = _utcnow_iso()
-        append_jsonl(self._scope_dir() / "events.jsonl", event)
+        append_jsonl(self._scope_dir() / "langfuse" / "events.jsonl", event)
 
     def _write_trace(
         self,

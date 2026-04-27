@@ -111,13 +111,14 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live_cli.py::CliDisplay`](promptpotter/presentation/views/live_cli.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
 
 3. **Drill into peer files in the same `campaigns/{cycle_id}/` directory when the dashboard isn't enough:**
+   - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
    - `output.log` — append-only HIT/MISS history (raw, ungrouped, fast to tail).
    - `phase_events.jsonl` — structured event trace, one JSON per line.
    - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
    - `candidates/round_NNNN.json` — full per-round node I/O including the L1 leaderboard with scores, eliminations, and change descriptions.
-   - `index.json` — campaign metadata + trial index.
+   - `index.json` — campaign metadata + trial index, plus the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
 
-`log.md` was deleted in this cycle — it duplicated dashboard.json + trials + candidates with no unique fields. For a narrative view of a finished round, read `trials/trial_NNNN.json` and `candidates/round_NNNN.json` directly, or run `python -m promptpotter show-results`.
+`optimize_result.json` and `hard_samples.json` were folded away this cycle: the final-run summary now lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md` instead of being its own file. Langfuse mirrors live under `campaigns/{cycle_id}/langfuse/` (including `langfuse/events.jsonl`); none of those are read for state reconstruction.
 
 **Alternatives to the dashboard.json-tail workflow:**
 

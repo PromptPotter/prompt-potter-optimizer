@@ -68,9 +68,11 @@ class HardSampleSorterConfig(BaseModel):
 
     Independent of ``AdaptivePrefixConfig`` — even when adaptive-prefix is
     off, the sorter fits its own Rasch posterior on accumulated observations
-    and emits ``hard_samples.json`` (θ_c-ranked candidates × δ_s-ranked
-    samples × hit/miss/unmeasured). Capped to top-K on disk; the full matrix
-    is recomputable on demand via ``build_hard_samples_artifact(rounds,
+    and emits a θ_c-ranked candidates × δ_s-ranked samples × hit/miss/unmeasured
+    matrix. The matrix is rendered inline into ``log.md`` as a
+    scroll-discoverable section (no longer persisted as a standalone
+    ``hard_samples.json`` file). Capped to top-K when rendered; the full
+    matrix is recomputable on demand via ``build_hard_samples_artifact(rounds,
     top_k_candidates=None, top_k_samples=None)``.
     """
 

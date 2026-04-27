@@ -18,6 +18,7 @@ from .formatting import (
     render_table,
 )
 from .hard_sample_heatmap import render_hard_sample_heatmap
+from .log_md import render_log_md
 from .phase_events import render_phase_event
 from .round_summary import render_patience_status, render_progress_table, render_round_stats
 from .rounds import (
@@ -37,6 +38,7 @@ __all__ = [
     "render_flip_tracking",
     "render_hard_sample_heatmap",
     "render_lineage",
+    "render_log_md",
     "render_markdown_box",
     "render_patience_status",
     "render_phase_event",

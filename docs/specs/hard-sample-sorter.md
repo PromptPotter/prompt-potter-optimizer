@@ -108,7 +108,7 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 
 ## Open questions
 
-- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives in `prefix_events`. Phase 2 decides whether to promote a full `hard_samples.json` to the per-cycle `CAMPAIGN_ARTIFACTS` set, or compute on-demand from accumulated observations. Either is cheap; the choice depends on whether the M10 webapp wants to serve it from disk or from a live fit.
+- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives in `prefix_events`. The end-of-cycle artifact is computed in `runner._finalize_run` and rendered inline into `log.md` (and on-the-fly in `show-results`). Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
 - **Cold cells.** Unmeasured cells have no Rasch estimate. Phase 2/3 may add a uniform-exploration tier that forces coverage of a small fraction of unmeasured cells before declaring the matrix stable. Out of scope in phase 1.
 
 ---

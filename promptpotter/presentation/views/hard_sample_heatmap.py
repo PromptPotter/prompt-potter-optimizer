@@ -1,9 +1,11 @@
 """Hard-sample-sorter ASCII heatmap renderer.
 
-Consumes the ``hard_samples.json`` artifact produced by
+Consumes the artifact produced by
 ``application/intelligence/hard_sample_sorter.build_hard_samples_artifact``.
-Same data powers the webapp heatmap — axes are precomputed per the spec's
-sort contract so this renderer never sorts.
+The artifact is rendered inline into ``log.md`` and returned by ``show-results``;
+it is no longer persisted as a standalone file. Same data powers the webapp
+heatmap — axes are precomputed per the spec's sort contract so this renderer
+never sorts.
 
 Shape (abridged — full schema in the builder):
 

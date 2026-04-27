@@ -22,7 +22,7 @@ To resume a campaign, run `python -m promptpotter optimize`. No need to `init` a
 Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id` + `final` summary block), `dashboard.json`, `log.md` (rendered narrative digest), `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
 Full tree:
@@ -36,14 +36,15 @@ Full tree:
       journal.md / notes.md            # notebook ↔ Claude exchange
       control.json                     # HITL pause/resume
     campaigns/{cycle_id}/              # per-cycle: all artifacts for one optimization
-      index.json                       # campaign metadata + trial index
+      index.json                       # campaign metadata + trial index + final summary block
       dashboard.json                   # live counters
+      log.md                           # rendered narrative digest (per-round + heatmap + winner)
       output.log                       # append-only HIT/MISS history
+      phase_events.jsonl               # structured phase event stream
       trials/trial_NNNN.json           # resume source of truth
       candidates/round_NNNN.json       # pre-scoring checkpoint
       rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated) + HITL snapshot
-      events.jsonl                     # observability mirror (not read for state)
-      langfuse/                        # trace persistence
+      langfuse/                        # trace persistence (incl. events.jsonl mirror — not read for state)
       prompts/{family}/{version}/      # rendered optimizer prompts
       archived/resumed_at_{ts}/        # mid-cycle rewind history
     library/                           # cross-cycle: shared reference data
@@ -54,7 +55,7 @@ Full tree:
       restructure_cache.json
 ```
 
-Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`.
+Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`.
 
 **Deprecated-sample eviction.** Entries in `library/dataset_runs/` carrying a fatal warning (any code in `FATAL_WARNINGS` — see `application/optimization/elimination.py`) are written normally so the trace record stays intact for forensic analysis, but they are evicted at load — never served as cache. The next encounter with that query gets a fresh backend call and the resulting `QueryResult` is tagged `retry_of_deprecated_cache`. Eviction is purely load-side, in `score_search_point::_filter_deprecated_priors`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the full operator-facing framing.
 
@@ -64,15 +65,17 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 | File | Updated | Content |
 |------|---------|---------|
-| `index.json` | Each phase transition | Config, phase, `pipeline_params`, `cycle_id`, `best_accuracy` |
+| `index.json` | Each phase transition + finalize | Config, phase, `pipeline_params`, `cycle_id`, `best_accuracy`, `trials[]`, `final` (winner + stop_reason on completion) |
 | `dashboard.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
+| `log.md` | Round-complete + finalize | Rendered narrative digest: status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner. Pure derived view — safe to delete and recompute. |
 | `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
+| `phase_events.jsonl` | Each phase event | One structured JSON per line; consumed by phase event renderer |
 | `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated); plus HITL snapshot |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
 | `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
 | `candidates/round_NNNN.json` | Each round's pre-scoring step | Generated candidate list checkpoint |
-| `events.jsonl` | Every observability event | Flat navigation log |
+| `langfuse/events.jsonl` | Every observability event | Flat navigation log (mirror — not read for state) |
 | `langfuse/` | During optimization | Trace/observation/score shadow + id-map `state.json` |
 | `prompts/` | When prompts render | Rendered optimizer prompts per family/version |
 
