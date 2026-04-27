@@ -152,7 +152,7 @@ Wave 4: Track 3 (benchmark results display)
 |------|-------|
 | Dataset loaders | `application/datasets/builder.py` |
 | Scoring | `domain/scoring.py` |
-| Export pipeline | `presentation/cli/` (was `cli/export_results.py`), `application/campaign/export.py`, `application/campaign/reporting.py` |
+| Export pipeline | _Deleted (2026-04-27); restore from git history when supplement work resumes._ |
 | FastAPI API | `presentation/api/` (was `main.py` + `routers/`) |
 | Benchmark methodology | `docs/research/benchmarks.md` |
 | Dataset configs | `datasets/hotpotqa/`, `datasets/gsm8k/`, `datasets/lca-termnorm/` |

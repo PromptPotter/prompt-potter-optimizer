@@ -203,7 +203,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
 
     # Mirror runner._finalize_run: fold the run summary into index.json::final
     # and render log.md from the index + trial dump.
-    from promptpotter.presentation.views import render_log_md
+    from promptpotter.presentation.views.reports import render_log_md
 
     final = RunResult(
         rounds=[round_result],

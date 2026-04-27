@@ -144,10 +144,9 @@ def _truncate_kv(items: list[tuple[str, str]], n_max: int = 5, val_max: int = 30
 
 
 def _render_init_enter(view: dict) -> str:
-    out: list[str] = []
-    for w in view.get("warnings") or []:
-        if not out:
-            out.append("")
+    warnings = view.get("warnings") or []
+    out = [""] if warnings else []
+    for w in warnings:
         out.append(f"{YELLOW}⚠ {BOLD}{w['title']}{RESET}")
         out.append(f"    {YELLOW}{w['detail']}{RESET}")
 
@@ -177,16 +176,16 @@ def _render_init_exit(view: dict) -> str:
     ]
     if crit := view.get("bootstrap_critique"):
         out.append(f"    {CYAN}Bootstrap L1 critique:{RESET} {crit}")
-    resumed = view.get("resumed_from_round", 0)
-    if resumed > 0:
-        parts: list[str] = []
-        for k, label in (
-            ("l1_critique_chars", "l1_critique={} chars"),
-            ("task_context_keys", "task_context={} keys"),
-            ("l2_round", "l2_round={}"),
-        ):
-            if v := view.get(k):
-                parts.append(label.format(v))
+    if resumed := view.get("resumed_from_round", 0):
+        parts = [
+            label.format(v)
+            for k, label in (
+                ("l1_critique_chars", "l1_critique={} chars"),
+                ("task_context_keys", "task_context={} keys"),
+                ("l2_round", "l2_round={}"),
+            )
+            if (v := view.get(k))
+        ]
         suffix = f"  ({', '.join(parts)})" if parts else ""
         out.append(f"    Resumed from round {resumed} ({resumed} rounds cached){suffix}")
     else:
@@ -242,12 +241,13 @@ def _render_l1_score_exit(view: dict) -> str:
         if board := _scoreboard(scores, winner_label, baseline_acc):
             out.append(board)
     elif scores:
-        ranked = sorted(
-            scores, key=lambda s: (s.get("composite") or s["accuracy"], s["accuracy"]), reverse=True
-        )
         parts = [
             f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
-            for s in ranked
+            for s in sorted(
+                scores,
+                key=lambda s: (s.get("composite") or s["accuracy"], s["accuracy"]),
+                reverse=True,
+            )
         ]
         out.append(f"  Scoreboard: {' | '.join(parts)}")
 
@@ -383,14 +383,14 @@ _RENDERERS: dict[str, Callable[[dict], str]] = {
     "l1_generate:exit": _render_l1_generate_exit,
     "l1_score:enter": _render_l1_score_enter,
     "l1_score:exit": _render_l1_score_exit,
-    "refine_strategy:enter": _render_refine_enter,
-    "refine_strategy:exit": _render_refine_exit,
-    "modify_plan:enter": _render_plan_enter,
-    "modify_plan:exit": _render_plan_exit,
     "escalation:enter": _render_escalation_enter,
     "escalation:exit": _render_escalation_exit,
+    "refine_strategy:enter": _render_refine_enter,
+    "refine_strategy:exit": _render_refine_exit,
     "probe_round:enter": _render_probe_enter,
     "probe_round:exit": _render_probe_exit,
+    "modify_plan:enter": _render_plan_enter,
+    "modify_plan:exit": _render_plan_exit,
 }
 
 
@@ -399,9 +399,7 @@ def render_phase_event(event_record: dict) -> str:
     phase = event_record.get("phase", "")
     event = event_record.get("event", "")
     view = event_record.get("view") or {}
-    renderer = _RENDERERS.get(f"{phase}:{event}")
-    if renderer is None:
-        # Unknown phase — still emit a one-liner so debugging is possible.
-        return f"  [{phase.upper()} {event}] {event_record.get('view', {})}"
-    rendered = renderer(view)
-    return rendered or ""
+    if renderer := _RENDERERS.get(f"{phase}:{event}"):
+        return renderer(view) or ""
+    # Unknown phase — still emit a one-liner so debugging is possible.
+    return f"  [{phase.upper()} {event}] {view}"

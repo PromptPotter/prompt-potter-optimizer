@@ -29,9 +29,9 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.scoring import split_scoring_block
 from promptpotter.infrastructure.tracing import ObservabilityBridge
-from promptpotter.presentation.views.completion import render_completion
 from promptpotter.presentation.views.display_primitives import BOLD, RESET, YELLOW
-from promptpotter.presentation.views.live_display import LiveDisplay
+from promptpotter.presentation.views.live import LiveDisplay
+from promptpotter.presentation.views.reports import render_completion
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
