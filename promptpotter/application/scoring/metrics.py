@@ -20,17 +20,18 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
+from promptpotter.domain.analysis import (
+    FailureAnalysis,
+    FailurePattern,
+    QueryDifficulty,
+    QueryProfile,
+)
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer, compile_round_scorer, extract_candidate_label
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.analysis import (
-        DifficultyClass,
-        FailureAnalysis,
-        FailurePattern,
-        QueryDifficulty,
-    )
+    from promptpotter.domain.analysis import DifficultyClass
     from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
@@ -346,8 +347,6 @@ def compile_failure_analysis(
     ``(gt_in_source, gt_in_ranked, terminated_at)`` key, and returns the top
     patterns ranked by failure count.
     """
-    from promptpotter.domain.analysis import FailureAnalysis, FailurePattern
-
     failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
     if not failures:
         return FailureAnalysis(total_failures=0, total_results=len(results))
@@ -388,8 +387,6 @@ def compile_query_difficulty(
     historical_results: Sequence[Sequence[Mapping[str, Any]]],
 ) -> QueryDifficulty:
     """Classify queries by hit rate across multiple evaluation rounds."""
-    from promptpotter.domain.analysis import QueryDifficulty, QueryProfile
-
     query_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:
         for r in round_results:

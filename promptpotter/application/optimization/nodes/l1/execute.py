@@ -13,9 +13,12 @@ from promptpotter.application.optimization.nodes.l1.critique import (
     format_l1_critique_for_prompt,
     run_l1_critique,
 )
+from promptpotter.application.optimization.nodes.l1.generate import l1_generate
+from promptpotter.application.optimization.nodes.l1.score import l1_score
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.application.optimization.utils import update_query_tracker
 from promptpotter.application.scoring.metrics import compute_composite_score
+from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 
 # Module-level import for test monkeypatching.
@@ -121,8 +124,6 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    from promptpotter.application.optimization.nodes.l1.generate import l1_generate
-
     client = _llm_client.get_llm_client()
     async with observed_node(
         f"l1_generate_r{round_num}",
@@ -198,8 +199,6 @@ async def _score_and_select(
     degradation_checks: list[DegradationCheck] | None = None,
 ) -> L1ScoringResult:
     """Evaluate candidates and select winner."""
-    from promptpotter.application.optimization.nodes.l1.score import l1_score
-
     session = cycle.session
     config = cycle.config
     opt = config.optimization
@@ -376,8 +375,6 @@ async def execute_round(
 
     # Mirror per-candidate RuntimeFailures onto outer opt_sp (dedup by
     # source/warning/config) so L2 sees accumulated evidence across rounds.
-    from promptpotter.domain.analysis import RuntimeFailure
-
     def _rf_key(rf_dict: dict) -> tuple:
         cfg = rf_dict.get("observed_config") or {}
         return (

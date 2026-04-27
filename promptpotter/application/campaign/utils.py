@@ -1,9 +1,4 @@
-"""Campaign lifecycle ops — operate on an already-created campaign.
-
-Save the winner, diff stored vs current config, resolve a cycle ID, apply
-stored overrides. No markdown rendering, no paper-ready export — those
-live in ``campaign/reporting.py`` and ``presentation/views/formatting.py``.
-"""
+"""Campaign lifecycle ops — save the winner, diff stored vs current config, apply stored overrides."""
 
 from __future__ import annotations
 
@@ -25,7 +20,6 @@ __all__ = [
     "apply_stored_overrides",
     "diff_campaign_config",
     "load_stored_campaign_config",
-    "resolve_active_campaign_id",
     "save_campaign_winner",
 ]
 
@@ -184,33 +178,3 @@ def load_stored_campaign_config(
     if not campaign:
         return None
     return campaign.get("config")
-
-
-def resolve_active_campaign_id(
-    campaign_config: CampaignConfig,
-    pipeline_schema: PipelineSchema | None,
-    baseline_prompt_fields: dict | None,
-    dataset: list[dict],
-) -> str | None:
-    """Compute the cycle ID matching the current config, or None on failure.
-
-    Used by display layer to detect which stored campaign matches the active
-    notebook/CLI configuration.
-    """
-    from promptpotter.domain.cycle_identity import cycle_config_identity
-    from promptpotter.domain.opt_search_point import OptSearchPoint
-
-    try:
-        bl_rendered = ""
-        if baseline_prompt_fields:
-            bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
-        active_steps = list(pipeline_schema.active_steps) if pipeline_schema else []
-        return cycle_config_identity(
-            campaign_config,
-            bl_rendered,
-            dataset,
-            active_steps,
-        )
-    except Exception:
-        logger.debug("Could not compute active campaign ID", exc_info=True)
-        return None

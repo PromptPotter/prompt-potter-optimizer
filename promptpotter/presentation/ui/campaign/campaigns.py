@@ -264,14 +264,18 @@ def show_experiment_dashboard(
     # --- Detect active campaign from current config ---
     active_id = None
     if campaign_config is not None and dataset is not None:
-        from promptpotter.application.campaign.utils import resolve_active_campaign_id
+        from promptpotter.domain.cycle_identity import cycle_config_identity
+        from promptpotter.domain.opt_search_point import OptSearchPoint
 
-        active_id = resolve_active_campaign_id(
-            campaign_config,
-            session.pipeline_schema if session else None,
-            baseline_prompt_fields,
-            dataset,
-        )
+        try:
+            bl_rendered = ""
+            if baseline_prompt_fields:
+                bl_rendered = OptSearchPoint.from_prompt_fields(baseline_prompt_fields).render()
+            ps = session.pipeline_schema if session else None
+            active_steps = list(ps.active_steps) if ps else []
+            active_id = cycle_config_identity(campaign_config, bl_rendered, dataset, active_steps)
+        except Exception:
+            logger.debug("Could not compute active campaign ID", exc_info=True)
 
     # --- Detail mode ---
     if full_id is not None:

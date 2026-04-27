@@ -6,6 +6,10 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign.decisions import record_decision
+from promptpotter.application.optimization.elimination import EliminationCheck
+from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
+from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.analysis import (
     EscalationSignal,
     EscalationTarget,
@@ -55,8 +59,6 @@ def parse_population(
     schema: PipelineSchema | None,
 ) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
     """Normalize raw variants → OptSearchPoints + merged pp; attaches validation failures."""
-    from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
-
     overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
@@ -252,8 +254,6 @@ def _record_elimination_cut(
     n_results: int,
 ) -> None:
     """Decorate report + append elimination_cut decision for divergence replay."""
-    from promptpotter.application.campaign.decisions import record_decision
-
     cr = signal.check_result
     trigger_idx = int(cr.get("triggered_by_prior", -1))
     if 0 <= trigger_idx < len(priors_at_test):
@@ -304,9 +304,6 @@ async def score_population(
     decisions: list[dict] | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each individual; dispatch over three exit paths (validation/cache/scored)."""
-    from promptpotter.application.optimization.elimination import EliminationCheck
-    from promptpotter.application.scoring.search_point_scorer import score_search_point
-
     session = cycle.session
     search_memory = cycle.search_memory
     obs_campaign_id = session.obs_campaign_id

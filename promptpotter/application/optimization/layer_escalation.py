@@ -6,19 +6,21 @@ import logging
 from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.campaign.decisions import record_decision
 from promptpotter.application.optimization.nodes.layer_transitions import (
     L2RefineStrategy,
     L3ModifyPlan,
     LayerTransition,
 )
-from promptpotter.domain.phases import PhaseEvent, emit_phase
+from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
+from promptpotter.infrastructure.llm import client as _llm_client
+from promptpotter.infrastructure.tracing import observed_node
 from promptpotter.infrastructure.tracing.events import LayerApplied
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
@@ -58,9 +60,6 @@ async def _run_transition(
     ctx: dict[str, Any] | None = None,
 ) -> Any:
     """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
-    from promptpotter.infrastructure.llm import client as _llm_client
-    from promptpotter.infrastructure.tracing import observed_node
-
     assert cycle.current_sp is not None
     ctx = {**(ctx or {}), "round_num": round_num}
     client = _llm_client.get_llm_client()
@@ -121,9 +120,6 @@ async def escalate_l2(
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
     """L1→L2 (and optional L2→L3) escalation; vanilla patience-exhausts → next layer / stop."""
-    from promptpotter.application.campaign.decisions import record_decision
-    from promptpotter.domain.phases import StopReason
-
     opt = config.optimization
     esc = cycle.escalation
     esc.l2.record_outcome(cycle.best_composite)

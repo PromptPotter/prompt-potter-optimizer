@@ -18,6 +18,7 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.application.scoring.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
+from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import QueryResult, Scorer, rescore_results
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -31,7 +32,6 @@ from promptpotter.shared.errors import (
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.intelligence.search_memory import SearchMemory
-    from promptpotter.domain.analysis import EscalationSignal
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -107,10 +107,8 @@ def _build_scoring_error_signal(
     """Build an ELIMINATE_CANDIDATE signal for a consecutive-error abort.
 
     Carries the error histogram + last seen error so the caller can mint a
-    RuntimeFailure. Uses lazy import to avoid a cycle with ``domain.analysis``.
+    RuntimeFailure.
     """
-    from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
-
     # Skip rows whose error is the abort-reason padding — those are synthetic
     # markers inserted after the cascade to bring results up to dataset length,
     # not the real backend failure that triggered it.
