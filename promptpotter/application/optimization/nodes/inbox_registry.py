@@ -3,8 +3,7 @@
 Every L1/L2 prompt receives an ``{{inbox}}`` block assembled from the
 fields declared here. Each :class:`InboxField` owns: which layer(s) consume
 it, how to source its raw value from a :class:`Cycle` (+ per-call
-:class:`InboxTransients`), how to render that value into a section string,
-and the header prefix(es) that section starts with.
+:class:`InboxTransients`), and how to render that value into a section string.
 
 :func:`assemble_inbox` is the one function callers need. It walks
 :data:`LAYER_ORDER` for the target layer, sources values, renders them,
@@ -21,42 +20,21 @@ block flows through this registry.
 from __future__ import annotations
 
 import enum
+from collections import Counter
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.nodes._inbox_helpers import (
-    _r_escalation_alert,
-    _r_escalation_probe,
-    _r_escalation_section,
-    _r_failure_analysis,
-    _r_identity,
-    _r_l1_critique,
-    _r_l2_directive,
-    _r_plan,
-    _r_runtime_failures_l2,
-    _r_search_memory_l1,
-    _r_search_memory_l2,
-    _r_task_context,
-    _r_validation_failures,
-    _r_warning_inventory_l2,
-    _src_escalation_alert,
-    _src_escalation_probe,
-    _src_escalation_section,
-    _src_failure_analysis,
-    _src_l1_search_memory,
-    _src_l2_search_memory,
-    _src_memory,
-    _src_pipeline_schema_text,
-    _src_plan,
-    _src_runtime_failures,
-    _src_task_context,
-    _src_validation_failures,
-    _src_warning_inventory_l2,
+from promptpotter.application.optimization.nodes.formatting import (
+    format_escalation_report,
+    format_runtime_failure_line,
+    format_search_memory_block,
+    summarize_warning_inventory,
 )
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.domain.analysis import FailureAnalysis
 
 
 class Layer(enum.StrEnum):
@@ -66,14 +44,21 @@ class Layer(enum.StrEnum):
     L2 = "L2"
 
 
-class Retention(enum.StrEnum):
-    """How a field's source value survives across rounds (docs-only)."""
+_L1_SM_LABELS: dict[str, str] = {
+    "failure_clusters": "Common failure patterns",
+    "dead_queries": "Dead queries (never hit)",
+    "top_axes": "High-impact axes",
+    "top_values": "Best-performing values",
+}
+_L2_SM_LABELS: dict[str, str] = {
+    "axis_rankings": "Axis impact rankings",
+    "bottleneck_distribution": "Bottleneck distribution",
+    "failure_group_insights": "Failure group x axis",
+    "persistent_failures": "Persistent failures",
+    "volatile_queries": "Volatile queries (oscillating)",
+}
 
-    MEMORY = "memory"  # flattened onto opt_sp — see OptSearchPoint.MEMORY_FIELDS
-    OPT_SP = "opt_sp"  # opt_sp.<top-level> — persisted on OptSearchPoint
-    TRANSIENT = "transient"  # computed per-round, not stored
-    CONFIG = "config"  # pipeline_schema / precomputed static text
-    SEARCH_MEMORY = "search_memory"  # cross-campaign aggregate
+_TASK_CONTEXT_SKIP = frozenset({"raw_description", "upstream_context", "downstream_context"})
 
 
 @dataclass(frozen=True)
@@ -91,6 +76,263 @@ class InboxTransients:
     pipeline_params: dict | None = None
 
 
+# ---------------------------------------------------------------------------
+# Source helpers — closures over (Cycle, InboxTransients).
+# ---------------------------------------------------------------------------
+
+
+def _src_memory(attr: str) -> Callable[[Cycle, InboxTransients], Any]:
+    def _read(cycle: Cycle, _t: InboxTransients) -> Any:
+        return getattr(cycle.opt_sp, attr) or None
+
+    return _read
+
+
+def _src_failure_analysis(cycle: Cycle, _t: InboxTransients) -> FailureAnalysis | None:
+    fa = cycle.opt_sp.failure_analysis
+    return fa if fa and fa.patterns else None
+
+
+def _src_escalation_probe(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
+    """Probe-round per-query warning block — fires only when probe AND journal present."""
+    if not cycle.probe_next_round:
+        return None
+    journal = cycle.opt_sp.escalation_journal
+    return journal or None
+
+
+def _src_escalation_alert(cycle: Cycle, _t: InboxTransients) -> list[dict] | None:
+    """Non-probe aggregated alert — suppressed by an active l2_directive."""
+    if cycle.probe_next_round:
+        return None
+    if cycle.opt_sp.l2_directive:
+        return None
+    journal = cycle.opt_sp.escalation_journal
+    return journal or None
+
+
+def _src_l1_search_memory(cycle: Cycle, _t: InboxTransients) -> dict[str, str] | None:
+    if cycle.search_memory is None:
+        return None
+    return cycle.search_memory.digest_for_l1_generate()
+
+
+def _src_l2_search_memory(cycle: Cycle, _t: InboxTransients) -> dict[str, str] | None:
+    if cycle.search_memory is None:
+        return None
+    return cycle.search_memory.digest_for_l2()
+
+
+def _src_escalation_section(cycle: Cycle, t: InboxTransients) -> str | None:
+    """L2 escalation report — from escalation_check_result + journal."""
+    if not t.escalation_check_result:
+        return None
+    schema = cycle.session.pipeline_schema if cycle.session is not None else None
+    text = format_escalation_report(
+        t.escalation_check_result,
+        cycle.opt_sp.escalation_journal or None,
+        t.pipeline_params,
+        pipeline_schema=schema,
+    )
+    return text or None
+
+
+def _src_warning_inventory_l2(cycle: Cycle, t: InboxTransients) -> dict | None:
+    """L2 fallback: per-query warning inventory when no escalation section."""
+    if _src_escalation_section(cycle, t):
+        return None
+    return cycle.opt_sp.warning_inventory or None
+
+
+def _src_validation_failures(_cycle: Cycle, t: InboxTransients) -> list[dict] | None:
+    vfs: list[dict] = []
+    for cs in t.candidate_scores or []:
+        vfs.extend(cs["validation_failures"])
+    return vfs or None
+
+
+# ---------------------------------------------------------------------------
+# Render helpers — closures receive (value, cycle, t, layer) and return str.
+# ---------------------------------------------------------------------------
+
+
+def _r_identity(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    return str(v) if v else ""
+
+
+def _r_task_context(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    # Drop raw_description (duplicates the dataset task_description.md) and
+    # upstream/downstream_context (already spliced into ``rendered_prompt``
+    # by ``OptSearchPoint._field_value``). Leaking them here would double-
+    # count the same text into the L1 meta-prompt.
+    lines = "\n".join(
+        f"  {k}: {val}" for k, val in v.items() if val and k not in _TASK_CONTEXT_SKIP
+    )
+    return f"CONTEXT:\n{lines}" if lines else ""
+
+
+def _r_plan(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    return f"PLAN:\n{v}" if v else ""
+
+
+def _r_l1_critique(v: Any, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    return f"CRITIQUE:\n{v}" if v else ""
+
+
+def _r_l2_directive(v: Any, _cycle: Cycle, _t: InboxTransients, layer: Layer) -> str:
+    if not v:
+        return ""
+    label = "DIRECTIVE:" if layer is Layer.L1 else "PREVIOUS DIRECTIVE:"
+    return f"{label}\n{v}"
+
+
+def _r_failure_analysis(
+    fa: FailureAnalysis, _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
+    if not fa or not fa.patterns:
+        return ""
+    lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
+    for i, pat in enumerate(fa.patterns[:2], 1):
+        lines.append(f"  {i}. {pat.name} — {pat.query_count} queries ({pat.fraction:.0%})")
+        if pat.example_queries:
+            ex = pat.example_queries[0][:60]
+            lines.append(f'     Example: "{ex}"')
+        sig = {
+            k: v for k, v in pat.signals.items() if k not in ("error", "degraded", "total_time_ms")
+        }
+        if sig:
+            sig_str = ", ".join(f"{k}={v}" for k, v in list(sig.items())[:2])
+            lines.append(f"     Signals: {sig_str}")
+    return "\n".join(lines)
+
+
+def _r_escalation_probe(
+    journal: list[dict], cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
+    lines = [
+        "PROBE ROUND: queries have recurring pipeline warnings. "
+        "Generate candidates that address pipeline robustness."
+    ]
+    warning_inventory = cycle.opt_sp.warning_inventory or None
+    if warning_inventory:
+        inv = summarize_warning_inventory(warning_inventory)
+        if inv:
+            lines.extend(["", inv])
+        step_counts: Counter[str] = Counter()
+        for entry in warning_inventory.values():
+            for wtype in entry.get("warnings", {}):
+                step_counts[wtype.split(":", 1)[0]] += 1
+        if step_counts:
+            dom_step, dom_count = step_counts.most_common(1)[0]
+            lines.append(f"\nDominant step: {dom_step} ({dom_count} warnings)")
+            tried = [ej for ej in journal if ej.get("problem_step") == dom_step][-3:]
+            if tried:
+                lines.append(f"Previous attempts at {dom_step}:")
+                lines.extend(
+                    f"  - {ej.get('degraded_rate', 0):.0%} degraded, {ej.get('warning_types', {})}"
+                    for ej in tried
+                )
+    return "\n".join(lines)
+
+
+def _r_escalation_alert(
+    journal: list[dict], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
+    latest = journal[-1]
+    alert = [
+        f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
+        f"degrade at {latest.get('problem_step', 'unknown')}. "
+        "Address pipeline instability."
+    ]
+    if len(journal) > 1:
+        alert.append(f"{len(journal)} prior attempts unresolved.")
+    if latest.get("warning_types"):
+        alert.append(f"Warnings: {latest['warning_types']}")
+    return "\n".join(alert)
+
+
+def _r_search_memory_l1(
+    v: dict[str, str], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
+    # Uses format_search_memory_block's "HISTORICAL INTELLIGENCE:" default header.
+    return format_search_memory_block(v, _L1_SM_LABELS)
+
+
+def _r_search_memory_l2(
+    v: dict[str, str], _cycle: Cycle, _t: InboxTransients, _layer: Layer
+) -> str:
+    return format_search_memory_block(v, _L2_SM_LABELS)
+
+
+def _r_escalation_section(v: str, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    # format_escalation_report returns text ending in "\n" already — preserve.
+    return v
+
+
+def _r_warning_inventory_l2(v: dict, _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    text = summarize_warning_inventory(v)
+    return (text + "\n") if text else ""
+
+
+def _r_validation_failures(v: list[dict], _cycle: Cycle, _t: InboxTransients, _layer: Layer) -> str:
+    lines = ["L1 VALIDATION FAILURES (prior round produced structurally invalid candidates):"]
+    for vf in v:
+        allowed = vf.get("allowed") or []
+        allowed_str = ", ".join(allowed[:5]) + (
+            f" (+{len(allowed) - 5} more)" if len(allowed) > 5 else ""
+        )
+        lines.append(
+            f"  ⚠ axis={vf.get('axis')} proposed={vf.get('value')!r} reason={vf.get('reason')}"
+        )
+        lines.append(f"    allowed: [{allowed_str}]")
+    lines.append(
+        "  ↳ Required L2 action: produce a directive that names the disallowed "
+        "value(s) explicitly and instructs L1 to choose only from the allowed "
+        'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
+        'propose any other value such as gpt-4o." Self-healing depends on the '
+        "directive being explicit."
+    )
+    return "\n".join(lines)
+
+
+def _r_runtime_failures_l2(v: list[dict], _cycle: Cycle, t: InboxTransients, _layer: Layer) -> str:
+    rfs_new = [rf for rf in v if rf.get("first_seen_round", 0) == t.round_num]
+    rfs_acc = [rf for rf in v if rf.get("first_seen_round", 0) != t.round_num]
+    lines = [
+        "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
+        "  (candidates ran but produced high warning rates; L2 must adjust "
+        "its own strategy — directive, task_context, optimizer_params — to "
+        "steer L1 away from the failing config region)",
+    ]
+    if rfs_new:
+        lines.append("")
+        lines.append("NEW (this round):")
+        for rf in rfs_new:
+            lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
+    if rfs_acc:
+        lines.append("")
+        lines.append(
+            f"ACCUMULATED (surviving from earlier rounds, {len(rfs_acc)} patterns — "
+            "L2's prior strategy adjustments did NOT reduce these):"
+        )
+        for rf in rfs_acc:
+            lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
+    lines.append("")
+    lines.append(
+        "  ↳ Required L2 action: this is L2 self-healing, not L1 correction. "
+        "Update your OWN outputs — tighten the directive to name the failing "
+        "config range, refine task_context with the discovered constraint, or "
+        "adjust optimizer_params (creativity, n_variants) to narrow L1's search "
+        "around the safe region. Do NOT just parrot 'don't use X' to L1 — "
+        'restructure the search. Example directive: "Reasoning models on this '
+        "task need max_tokens ≥ 2000 to emit a final answer; propose variants "
+        'only within that range." '
+        "If ACCUMULATED entries persist across multiple L2 attempts, L3 will "
+        "replan the pipeline itself next."
+    )
+    return "\n".join(lines)
+
+
 @dataclass(frozen=True)
 class InboxField:
     """Declarative spec for one piece of optimizer-prompt intelligence."""
@@ -99,11 +341,7 @@ class InboxField:
     layers: frozenset[Layer]
     source: Callable[[Cycle, InboxTransients], Any]
     render: Callable[[Any, Cycle, InboxTransients, Layer], str]
-    retention: Retention
     docstring: str
-    # Section header prefix(es) the renderer emits; observers (e.g. meta-prompt
-    # size logging) match against these to attribute bytes back to the field.
-    header_prefixes: tuple[str, ...] = ()
 
 
 # ---------------------------------------------------------------------------
@@ -116,60 +354,44 @@ INBOX: tuple[InboxField, ...] = (
     InboxField(
         name="pipeline_schema_text",
         layers=frozenset({Layer.L1}),
-        source=_src_pipeline_schema_text,
+        source=lambda _c, t: t.pipeline_schema_text or None,
         render=_r_identity,
-        retention=Retention.CONFIG,
         docstring="Precomputed pipeline node/param catalogue — teaches L1 what it may tune.",
-        header_prefixes=(
-            "VALID PIPELINE NODES AND PARAMETERS",
-            "AVAILABLE MODELS",
-            "OUTPUT SCHEMA MUTATIONS",
-        ),
     ),
     InboxField(
         name="failure_analysis",
         layers=frozenset({Layer.L1}),
         source=_src_failure_analysis,
         render=_r_failure_analysis,
-        retention=Retention.TRANSIENT,
         docstring="Top-3 clustered failure patterns with example queries.",
-        header_prefixes=("FAILURE ANALYSIS",),
     ),
     InboxField(
         name="search_memory_l1",
         layers=frozenset({Layer.L1}),
         source=_src_l1_search_memory,
         render=_r_search_memory_l1,
-        retention=Retention.SEARCH_MEMORY,
         docstring="Cross-campaign digest: failure clusters, dead queries, top axes / values.",
-        header_prefixes=("HISTORICAL INTELLIGENCE:",),
     ),
     InboxField(
         name="task_context",
         layers=frozenset({Layer.L1}),
-        source=_src_task_context,
+        source=lambda c, _t: c.opt_sp.task_context or None,
         render=_r_task_context,
-        retention=Retention.OPT_SP,
         docstring="Structured domain context (read-only from L1's view; L2 edits).",
-        header_prefixes=("CONTEXT:",),
     ),
     InboxField(
         name="escalation_probe",
         layers=frozenset({Layer.L1}),
         source=_src_escalation_probe,
         render=_r_escalation_probe,
-        retention=Retention.MEMORY,
         docstring="Probe-round per-query warning dump — fires only when L2 requests a probe.",
-        header_prefixes=("PROBE ROUND",),
     ),
     InboxField(
         name="escalation_alert",
         layers=frozenset({Layer.L1}),
         source=_src_escalation_alert,
         render=_r_escalation_alert,
-        retention=Retention.MEMORY,
         docstring="Non-probe aggregated escalation alert — suppressed by an active l2_directive.",
-        header_prefixes=("PIPELINE ISSUE:",),
     ),
     # On L1 the directive replaces the critique when both are present (sliding window of 1).
     InboxField(
@@ -177,27 +399,21 @@ INBOX: tuple[InboxField, ...] = (
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l2_directive"),
         render=_r_l2_directive,
-        retention=Retention.MEMORY,
         docstring="L2's one-round guidance window; clears on improvement.",
-        header_prefixes=("DIRECTIVE:", "PREVIOUS DIRECTIVE:"),
     ),
     InboxField(
         name="l1_critique_text",
         layers=frozenset({Layer.L1, Layer.L2}),
         source=_src_memory("l1_critique_text"),
         render=_r_l1_critique,
-        retention=Retention.MEMORY,
         docstring="Latest L1 critique output; L2 digests into a directive before L1 sees it.",
-        header_prefixes=("CRITIQUE:",),
     ),
     InboxField(
         name="plan",
         layers=frozenset({Layer.L1}),
-        source=_src_plan,
+        source=lambda c, _t: c.opt_sp.plan or None,
         render=_r_plan,
-        retention=Retention.OPT_SP,
         docstring="L3's strategic plan (read-only from L1's view).",
-        header_prefixes=("PLAN:",),
     ),
     # L2-only fields (section order preserved from legacy format_l2_intelligence)
     InboxField(
@@ -205,7 +421,6 @@ INBOX: tuple[InboxField, ...] = (
         layers=frozenset({Layer.L2}),
         source=_src_escalation_section,
         render=_r_escalation_section,
-        retention=Retention.TRANSIENT,
         docstring="Aggregated pipeline stability report — composed from escalation_check_result.",
     ),
     InboxField(
@@ -213,7 +428,6 @@ INBOX: tuple[InboxField, ...] = (
         layers=frozenset({Layer.L2}),
         source=_src_warning_inventory_l2,
         render=_r_warning_inventory_l2,
-        retention=Retention.MEMORY,
         docstring="Per-query warning breakdown — L2 fallback when no escalation section.",
     ),
     InboxField(
@@ -221,15 +435,13 @@ INBOX: tuple[InboxField, ...] = (
         layers=frozenset({Layer.L2}),
         source=_src_validation_failures,
         render=_r_validation_failures,
-        retention=Retention.TRANSIENT,
         docstring="L1 parse-time invariant violations — Rail 1 self-healing input.",
     ),
     InboxField(
         name="runtime_failures",
         layers=frozenset({Layer.L2}),
-        source=_src_runtime_failures,
+        source=lambda c, _t: [rf.to_dict() for rf in c.opt_sp.runtime_failures] or None,
         render=_r_runtime_failures_l2,
-        retention=Retention.MEMORY,
         docstring="Mid-eval degradation records — Rail 2 self-healing input for L2.",
     ),
     InboxField(
@@ -237,19 +449,9 @@ INBOX: tuple[InboxField, ...] = (
         layers=frozenset({Layer.L2}),
         source=_src_l2_search_memory,
         render=_r_search_memory_l2,
-        retention=Retention.SEARCH_MEMORY,
         docstring="Cross-campaign strategic digest: axis rankings, bottlenecks, correlations.",
     ),
 )
-
-
-def header_prefixes_for_layer(layer: Layer) -> tuple[str, ...]:
-    """Section-header prefixes a layer's rendered inbox can emit (observer aid)."""
-    out: list[str] = []
-    for f in INBOX:
-        if layer in f.layers:
-            out.extend(f.header_prefixes)
-    return tuple(out)
 
 
 # ---------------------------------------------------------------------------
@@ -345,7 +547,5 @@ __all__ = [
     "InboxField",
     "InboxTransients",
     "Layer",
-    "Retention",
     "assemble_inbox",
-    "header_prefixes_for_layer",
 ]

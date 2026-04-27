@@ -1,11 +1,11 @@
 """L2 (refine_strategy) / L3 (modify_plan) transitions for the 3-loop feedback cycle.
 
-``LayerTransition`` is the shared template method (load prompt → compile →
+``LayerTransition`` is the shared template (``run()`` = load prompt → compile →
 LLM call → parse → derive ``OptSearchPoint`` → ``TransitionResult``). Each
-subclass declares its prompt template, temperature, intelligence assembly,
-result construction, post-transition side-effects, and the per-layer
-``enter_payload`` / ``exit_payload`` / ``run_kwargs`` shapes consumed by the
-unified orchestrator in ``escalation._run_transition``.
+subclass declares its prompt template + temperature + phase as ClassVars, then
+provides ``assemble_intelligence``, ``build_result``, ``apply_side_effects``,
+``enter_payload`` and ``exit_payload`` — the per-layer hooks the unified
+orchestrator in ``layer_escalation._run_transition`` calls around the LLM step.
 """
 
 from __future__ import annotations
@@ -13,7 +13,6 @@ from __future__ import annotations
 import enum
 import json
 import logging
-from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
@@ -33,7 +32,6 @@ from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.search_point import TaskDecomposition
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
@@ -68,13 +66,14 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-class LayerTransition(ABC):
-    """Template method for an LLM-driven optimizer transition (L2 or L3).
+class LayerTransition:
+    """Base for an LLM-driven optimizer transition (L2 or L3).
 
-    Subclasses declare layer metadata as class-level constants and override
-    ``assemble_intelligence`` (prompt compile-vars) and ``build_result``
-    (``TransitionResult`` from the raw LLM JSON). ``run`` is the shared
-    template method: assemble → LLM → build result.
+    Subclasses set the four ClassVars (``layer``, ``template_name``,
+    ``default_temperature``, ``phase``) and override the five hooks
+    consumed by the orchestrator: ``assemble_intelligence``,
+    ``build_result``, ``apply_side_effects``, ``enter_payload``,
+    ``exit_payload``. ``run()`` is the shared LLM-call template.
     """
 
     layer: ClassVar[Literal["L2", "L3"]]
@@ -90,12 +89,14 @@ class LayerTransition(ABC):
         model: str | None = None,
         temperature: float | None = None,
         pipeline_params: dict | None = None,
-        **ctx: Any,
+        round_num: int = 0,
+        escalation_check_result: dict | None = None,
     ) -> TransitionResult:
         compile_vars = self.assemble_intelligence(
             cycle,
             pipeline_params=pipeline_params,
-            **ctx,
+            round_num=round_num,
+            escalation_check_result=escalation_check_result,
         )
         raw, prompt = await run_optimizer_node(
             template_name=self.template_name,
@@ -106,11 +107,16 @@ class LayerTransition(ABC):
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
-    @abstractmethod
-    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
-        """Build the compile-vars dict for the layer's prompt template."""
+    def assemble_intelligence(
+        self,
+        cycle: Cycle,
+        *,
+        pipeline_params: dict | None,
+        round_num: int,
+        escalation_check_result: dict | None,
+    ) -> dict:
+        raise NotImplementedError
 
-    @abstractmethod
     def build_result(
         self,
         raw: dict,
@@ -119,35 +125,16 @@ class LayerTransition(ABC):
         *,
         pipeline_params: dict | None,
     ) -> TransitionResult:
-        """Convert raw LLM JSON response into a ``TransitionResult``."""
+        raise NotImplementedError
 
-    @abstractmethod
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-        """Mutate ``Cycle`` post-transition (record escalation entry, reset counters, ...).
+        raise NotImplementedError
 
-        Called by the escalation orchestrator after ``cycle.adopt_transition``
-        has applied the result's OptSearchPoint + pipeline_params. Runs the
-        layer-specific tail (L2: l2_directive, probe-round decision; L3:
-        record_entry + reset_for_l3).
-        """
+    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
+        raise NotImplementedError
 
-    # --- Per-layer payload shapes consumed by the unified orchestrator. ---
-
-    @abstractmethod
-    def temperature(self, config: CampaignConfig) -> float:
-        """LLM sampling temperature for this layer (read from ``config``)."""
-
-    @abstractmethod
-    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
-        """Phase-event payload emitted *before* the transition runs."""
-
-    @abstractmethod
     def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-        """Phase-event payload emitted *after* the transition + side-effects run."""
-
-    @abstractmethod
-    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
-        """Extra kwargs forwarded into ``run()`` (and through to ``assemble_intelligence``)."""
+        raise NotImplementedError
 
 
 class L2RefineStrategy(LayerTransition):
@@ -158,7 +145,14 @@ class L2RefineStrategy(LayerTransition):
     default_temperature: ClassVar[float] = 0.3
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
 
-    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
+    def assemble_intelligence(
+        self,
+        cycle: Cycle,
+        *,
+        pipeline_params: dict | None,
+        round_num: int,
+        escalation_check_result: dict | None,
+    ) -> dict:
         opt_sp = cycle.opt_sp
         task_context_section = ""
         if opt_sp.task_context:
@@ -170,13 +164,14 @@ class L2RefineStrategy(LayerTransition):
                 + json.dumps(tc_display, indent=2)
             )
 
+        candidate_scores = cycle.rounds[-1].candidate_scores if cycle.rounds else []
         inbox = assemble_inbox(
             Layer.L2,
             cycle,
-            round_num=int(ctx.get("round_num", 0)),
-            candidate_scores=ctx.get("candidate_scores"),
-            escalation_check_result=ctx.get("escalation_check_result"),
-            pipeline_params=ctx.get("pipeline_params"),
+            round_num=round_num,
+            candidate_scores=candidate_scores,
+            escalation_check_result=escalation_check_result,
+            pipeline_params=pipeline_params,
         )
 
         return {
@@ -263,10 +258,7 @@ class L2RefineStrategy(LayerTransition):
             "L2 refine_strategy at round %d (l2_round=%d)", round_num, cycle.escalation.l2.round
         )
 
-    def temperature(self, config: CampaignConfig) -> float:
-        return config.optimization.l2_temperature
-
-    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
         return {
             "l2_round": cycle.escalation.l2.round,
             "l1_stall_count": cycle.escalation.l1_stall_count,
@@ -291,13 +283,6 @@ class L2RefineStrategy(LayerTransition):
             "l2_response": result.debug_response,
         }
 
-    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "candidate_scores": cycle.rounds[-1].candidate_scores if cycle.rounds else [],
-            "escalation_check_result": ctx.get("escalation_check_result"),
-            "round_num": ctx.get("round_num", 0),
-        }
-
 
 class L3ModifyPlan(LayerTransition):
     """L3: propose a new strategic plan + optional pipeline_params deltas."""
@@ -307,13 +292,28 @@ class L3ModifyPlan(LayerTransition):
     default_temperature: ClassVar[float] = 0.5
     phase: ClassVar[CampaignPhase] = CampaignPhase.MODIFY_PLAN
 
-    def assemble_intelligence(self, cycle: Cycle, **ctx: Any) -> dict:
+    def assemble_intelligence(
+        self,
+        cycle: Cycle,
+        *,
+        pipeline_params: dict | None,
+        round_num: int,
+        escalation_check_result: dict | None,
+    ) -> dict:
         opt_sp = cycle.opt_sp
-        pipeline_params = ctx.get("pipeline_params")
         pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
         search_memory = cycle.search_memory
-        l2_history = ctx.get("l2_history") or []
 
+        # L3's "l2_history" — synthetic single-entry summary of the most recent
+        # L2 round, sourced directly from cycle state.
+        l2_history = [
+            {
+                "l2_round": cycle.escalation.l2.round,
+                "optimizer_params": opt_sp.optimizer_params,
+                "accuracy_change": cycle.best_composite
+                - cycle.escalation.l3.best_composite_at_entry,
+            }
+        ]
         l2_summary = "\n".join(
             f"  L2 round {rd.get('l2_round', '?')}: "
             f"params={rd.get('parameters', {})}, "
@@ -391,10 +391,7 @@ class L3ModifyPlan(LayerTransition):
             "L3 modify_plan at round %d (l3_round=%d)", round_num, cycle.escalation.l3.round
         )
 
-    def temperature(self, config: CampaignConfig) -> float:
-        return config.optimization.l3_temperature
-
-    def enter_payload(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
+    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
         return {
             "l3_round": cycle.escalation.l3.round,
             "l2_stall_count": cycle.escalation.l2.stall_count,
@@ -407,16 +404,4 @@ class L3ModifyPlan(LayerTransition):
             "new_plan_preview": str(result.opt_search_point.plan)[:120],
             "changes_description": result.opt_search_point.lineage.changes_description or "",
             "pipeline_params_changed": result.pipeline_params is not None,
-        }
-
-    def run_kwargs(self, cycle: Cycle, ctx: dict[str, Any]) -> dict[str, Any]:
-        return {
-            "l2_history": [
-                {
-                    "l2_round": cycle.escalation.l2.round,
-                    "optimizer_params": cycle.opt_sp.optimizer_params,
-                    "accuracy_change": cycle.best_composite
-                    - cycle.escalation.l3.best_composite_at_entry,
-                }
-            ],
         }

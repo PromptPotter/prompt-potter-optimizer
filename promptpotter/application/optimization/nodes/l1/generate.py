@@ -3,12 +3,12 @@
 from __future__ import annotations
 
 import logging
+import re
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.nodes.inbox_registry import (
     Layer,
     assemble_inbox,
-    header_prefixes_for_layer,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.application.optimization.results import CandidateProposal
@@ -121,13 +121,15 @@ def validate_overrides(
     return failures
 
 
+_HEADER_RE = re.compile(r"^([A-Z][A-Z _]+)")
+
+
 def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
     """Input-side visibility for dedup work; output budgeting is the provider's job."""
     inbox = str(compile_vars.get("inbox", ""))
-    headers = header_prefixes_for_layer(Layer.L1)
     sections = sorted(
         (
-            (next((h for h in headers if p.startswith(h)), "<unknown>"), len(p))
+            ((m.group(1).rstrip() if (m := _HEADER_RE.match(p)) else "<unknown>"), len(p))
             for p in inbox.split("\n\n")
             if p
         ),

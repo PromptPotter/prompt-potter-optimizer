@@ -47,6 +47,9 @@ def build_escalation_entry(
     }
 
 
+_TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
+
+
 async def _run_transition(
     transition: LayerTransition,
     cycle: Cycle,
@@ -57,16 +60,15 @@ async def _run_transition(
     *,
     obs: ObservabilityBridge | None,
     obs_campaign_id: str,
-    ctx: dict[str, Any] | None = None,
+    escalation_check_result: dict | None = None,
 ) -> Any:
     """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
     assert cycle.current_sp is not None
-    ctx = {**(ctx or {}), "round_num": round_num}
     client = _llm_client.get_llm_client()
     current_pp = cycle.current_sp.pipeline_params
 
     emit_phase(
-        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle, ctx)
+        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle)
     )
     async with observed_node(
         f"{transition.template_name}_r{round_num}",
@@ -79,9 +81,10 @@ async def _run_transition(
             cycle,
             client,
             model=config.optimizer_llm.model,
-            temperature=transition.temperature(config),
+            temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer]),
             pipeline_params=current_pp,
-            **transition.run_kwargs(cycle, ctx),
+            round_num=round_num,
+            escalation_check_result=escalation_check_result,
         )
     cycle.adopt_transition(
         result.opt_search_point,
@@ -154,7 +157,7 @@ async def escalate_l2(
             on_phase,
             obs=obs,
             obs_campaign_id=obs_campaign_id,
-            ctx={"escalation_check_result": escalation_check_result},
+            escalation_check_result=escalation_check_result,
         )
         return None
 
