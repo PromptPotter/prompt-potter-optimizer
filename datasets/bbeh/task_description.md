@@ -26,3 +26,8 @@ Solve one puzzle per task from the BIG-Bench Extra Hard benchmark and commit to 
 
 - 23 subtasks with heterogeneous answer shapes means one default prompt must accommodate integers, words, and short phrases
 - `reasoning_effort` interacts strongly with `max_tokens` on Groq reasoning models — low `max_tokens` + medium/high `reasoning_effort` is the primary trap. Dataset default is `reasoning_effort: low` specifically to stay clear of it on Groq's smaller models (`gpt-oss-20b` enforces a ~2048-token output ceiling that the reasoning trace alone can exhaust). The optimizer can still mutate to higher effort settings when the model has headroom.
+
+## Constraints
+
+- The target model (`llm_only.model`) is pinned for this dataset and must not be proposed as a mutation by L1-generate. The single allowed value is `mistralai/mistral-small-3.2-24b-instruct` (see `datasets/bbeh/pipeline.json::available_models`). Provider is also pinned to `openrouter`.
+- L1 may freely mutate: `reasoning_effort`, `temperature`, `max_tokens`, and any prompt field (`persona`, `task_intent`, `problem_description`, `instruction`, `thinking_style`, `answer_format`).

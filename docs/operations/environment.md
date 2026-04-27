@@ -68,6 +68,13 @@ Provider selection lives on `CampaignConfig.optimizer_llm.provider` (in each dat
 
 `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` node config — provider ceiling applies. Operators raise the cap per-cycle via `campaign.json::pipeline_overrides`, not by editing the dataset default.
 
+### Provider swap notes (dev log)
+
+Operator dev notes — only useful when picking a model to iterate against. Benchmark / publication runs always go back to Groq `openai/gpt-oss-120b`.
+
+- **2026-04-27** — Groq developer plan suspended on this account, so iteration moved to OpenRouter. Quick latency probe (single-query feel test, not a benchmark): `mistralai/mistral-small-3.2-24b-instruct` was clearly the fastest of the cheap models tried; `google/gemini-2.5-flash` and the Qwen variants felt comparably slow. Switched both `datasets/bbeh/pipeline.json` (`llm_only.config.model` + `provider: openrouter`) and `datasets/bbeh/campaign.json` (`optimizer_llm`) to mistral-small for the next experimentation stage.
+- **Keep in mind when swapping again:** the target-layer model lives in `datasets/<name>/pipeline.json::llm_only.config` (and needs `provider` if it's not Groq); the optimizer-layer model lives in `datasets/<name>/campaign.json::optimizer_llm`. They're independent — flip them together when you're just changing inference vendor, separately when you're A/B-ing one layer.
+
 ---
 
 ## Entry-point quickstart
