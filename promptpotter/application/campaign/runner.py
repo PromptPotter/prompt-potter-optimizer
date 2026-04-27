@@ -47,8 +47,10 @@ __all__ = ["RunListener", "run_optimization"]
 
 class RunListener:
     """Fan-out to emitter + display sinks; ``__getattr__`` dispatches every
-    ``on_*`` callback to whichever sinks are present. ``on_checkpoint`` is
-    explicit because it returns a value rather than fanning out."""
+    ``on_*`` callback to whichever sinks are present. ``on_phase`` is
+    explicit so ``build_phase_view`` runs once on a shared ctx instead of
+    twice in parallel; ``on_checkpoint`` is explicit because it returns a
+    value rather than fanning out."""
 
     def __init__(
         self,
@@ -60,6 +62,17 @@ class RunListener:
         self.emitter = emitter
         self.display = display
         self.control = control
+        # Single phase-view ctx: build_phase_view is stateful — it both
+        # reads and writes — so both sinks must observe the *same* dict to
+        # read consistent baseline_accuracy / round_num / etc. in their
+        # other callbacks. We overwrite each sink's pre-existing ctx so
+        # later attribute reads (``self._phase_ctx[...]``) hit this shared
+        # instance.
+        self._phase_ctx: dict[str, Any] = {}
+        if emitter is not None:
+            emitter._phase_ctx = self._phase_ctx
+        if display is not None:
+            display._phase_ctx = self._phase_ctx
 
     @property
     def _sinks(self) -> tuple[Any, ...]:
@@ -74,6 +87,11 @@ class RunListener:
                 getattr(sink, name)(*args, **kwargs)
 
         return fan_out
+
+    def on_phase(self, event: Any) -> None:
+        view = build_phase_view(event, self._phase_ctx)
+        for sink in self._sinks:
+            sink.on_phase(event, view)
 
     def on_checkpoint(self, name: str) -> str | None:
         return self.control(name) if self.control is not None else None
@@ -438,7 +456,6 @@ async def run_optimization(
             baseline_accuracy=baseline.baseline_acc,
             resumed_from_round=session.resumed_from_round,
             recorder_provider=get_round_recorder,
-            phase_view_builder=build_phase_view,
         )
     cb.emitter = emitter
 

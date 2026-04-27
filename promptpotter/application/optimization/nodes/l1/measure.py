@@ -6,7 +6,7 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.decisions import record_decision
+from promptpotter.application.optimization.decisions import record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
 from promptpotter.application.optimization.results import CandidateProposal

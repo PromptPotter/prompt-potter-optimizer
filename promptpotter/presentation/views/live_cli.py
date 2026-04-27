@@ -43,7 +43,7 @@ class CliDisplay(LiveDisplay):
     # RunListener display protocol — bar lifecycle around shared base
     # ------------------------------------------------------------------
 
-    def on_phase(self, event: PhaseEvent) -> None:
+    def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
         if event.event == "exit":
             if event.phase == CampaignPhase.BASELINE:
                 self._close_pbar()
@@ -52,7 +52,7 @@ class CliDisplay(LiveDisplay):
                 self._close_pbar()
         elif event.event == "enter" and event.phase == CampaignPhase.BASELINE:
             self._in_baseline = True
-        super().on_phase(event)
+        super().on_phase(event, view)
 
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
         if self._in_baseline:

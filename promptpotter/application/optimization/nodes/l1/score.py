@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.application.campaign.decisions import record_decision
+from promptpotter.application.optimization.decisions import record_decision
 from promptpotter.application.optimization.nodes.l1.measure import (
     parse_population,
     score_population,

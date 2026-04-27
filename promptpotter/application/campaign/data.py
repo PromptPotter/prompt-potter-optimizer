@@ -44,7 +44,6 @@ def build_campaign_emitter(
     baseline_accuracy: float,
     resumed_from_round: int | None = None,
     recorder_provider: Any | None = None,
-    phase_view_builder: Any | None = None,
 ) -> Any:
     """Build the campaign persistence emitter from session + config. Single factory shared by CLI and runner."""
     from promptpotter.infrastructure.persistence.session_emitter import (
@@ -62,7 +61,6 @@ def build_campaign_emitter(
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         resumed_from_round=resumed_from_round,
         recorder_provider=recorder_provider,
-        phase_view_builder=phase_view_builder,
     )
 
 

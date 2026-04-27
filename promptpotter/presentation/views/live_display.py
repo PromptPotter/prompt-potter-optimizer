@@ -1,26 +1,22 @@
 """Shared live display — base ``RunListener`` adapter.
 
-One class, one rendering policy. Each callback builds the serializable
-view via ``build_phase_view`` (or reads it from the result dict), hands
-it to a renderer in ``presentation/views``, then writes the resulting
-string via ``self._write``. Subclasses override ``_write`` to route
-output (``tqdm.write`` for the CLI, ``print`` here by default) and may
-hook callbacks for surface-specific lifecycle (tqdm bars, Claude-notes
-exchange). Zero domain-model mutation, zero ANSI assembly here. The
-emitter writes the same JSON to disk independently.
+One class, one rendering policy. Phase events arrive with a precomputed
+``view`` dict from ``RunListener.on_phase`` (which calls
+``build_phase_view`` once on a shared ctx); other callbacks consume the
+result dict directly. Each callback hands the data to a renderer in
+``presentation/views`` and writes the resulting string via
+``self._write``. Subclasses override ``_write`` to route output
+(``tqdm.write`` for the CLI, ``print`` here by default) and may hook
+callbacks for surface-specific lifecycle (tqdm bars, Claude-notes
+exchange). Zero domain-model mutation, zero ANSI assembly here.
 """
 
 from __future__ import annotations
 
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.phase_views import build_phase_view
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.presentation.views.candidate_view import (
-    build_individual_summary,
-    fmt_individual_header,
-)
 from promptpotter.presentation.views.display_primitives import (
     _box_bottom,
     _box_bottom_info,
@@ -29,13 +25,15 @@ from promptpotter.presentation.views.display_primitives import (
     _node_bottom,
     _node_top,
 )
-from promptpotter.presentation.views.phase_events import render_phase_event
-from promptpotter.presentation.views.query_format import _fmt_query_result
-from promptpotter.presentation.views.round_summary import (
+from promptpotter.presentation.views.live_render import (
+    _fmt_query_result,
+    build_individual_summary,
+    fmt_individual_header,
     render_patience_status,
     render_progress_table,
     render_round_stats,
 )
+from promptpotter.presentation.views.phase_events import render_phase_event
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
@@ -61,12 +59,12 @@ class LiveDisplay:
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.query_counter = 0
-        # Per-cycle accumulator threaded through ``build_phase_view`` —
-        # parallel to the emitter's ``_phase_ctx``. Both observe the same
-        # event stream and converge on identical view dicts.
+        # Phase-view ctx accumulator. Initialised empty here; ``RunListener``
+        # overwrites this attribute at construction with its own shared dict
+        # so emitter + display read the same state machine.
         self._phase_ctx: dict[str, Any] = {}
-        # Mirrors the round number the emitter tracks; populated by
-        # ``build_phase_view`` as a side-effect on each event.
+        # Mirrors the round number tracked in ``_phase_ctx``; refreshed on
+        # each phase event.
         self._round_num = 0
 
     def _write(self, line: str) -> None:
@@ -82,8 +80,7 @@ class LiveDisplay:
     # RunListener display protocol
     # ------------------------------------------------------------------
 
-    def on_phase(self, event: PhaseEvent) -> None:
-        view = build_phase_view(event, self._phase_ctx)
+    def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
         if view is not None:
             record = {
                 "phase": event.phase,

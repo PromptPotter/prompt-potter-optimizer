@@ -372,10 +372,10 @@ async def init_optimization_loop(
     """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.cycle_store import bootstrap_cycle
-    from promptpotter.application.campaign.decisions import resume_with_divergence_check
     from promptpotter.application.datasets.builder import sample_dataset
     from promptpotter.application.intelligence.search_memory import SearchMemory
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.decisions import resume_with_divergence_check
     from promptpotter.application.optimization.elimination import build_degradation_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
     from promptpotter.domain.scoring import compile_round_scorer

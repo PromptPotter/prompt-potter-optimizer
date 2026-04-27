@@ -77,6 +77,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from types import SimpleNamespace
 
     from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.campaign.phase_views import build_phase_view
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.results import RoundResult, RunResult
     from promptpotter.domain.phases import PhaseEvent
@@ -103,6 +104,13 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         sp_budget_ttest=20,
     )
 
+    # ``RunListener`` would call ``build_phase_view`` once per event on a
+    # shared ctx and pass the result to each sink. Mirror that here.
+    phase_ctx: dict = {}
+
+    def fire(event: PhaseEvent) -> None:
+        emitter.on_phase(event, build_phase_view(event, phase_ctx))
+
     # Simulate a single round lifecycle.  The emitter only reads a handful of
     # fields off the ``env`` payload (cycle_id, scoring_dataset, obs,
     # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
@@ -114,7 +122,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         resumed_from_round=0,
         pipeline_schema=None,
     )
-    emitter.on_phase(
+    fire(
         PhaseEvent(
             phase="init",
             event="exit",
@@ -122,7 +130,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             data={"state": init_state, "env": init_env, "config": config},
         )
     )
-    emitter.on_phase(
+    fire(
         PhaseEvent(
             phase="l1_generate",
             event="enter",
@@ -130,15 +138,15 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             data={"round": 0},
         )
     )
-    emitter.on_phase(
+    fire(
         PhaseEvent(
             phase="l1_generate",
             event="exit",
             round=0,
-            data={"candidates": [{"pipeline_params_override": {}}]},
+            data={"candidates": [{"idx": 0, "pipeline_params_override": {}}]},
         )
     )
-    emitter.on_phase(
+    fire(
         PhaseEvent(
             phase="l1_score",
             event="enter",

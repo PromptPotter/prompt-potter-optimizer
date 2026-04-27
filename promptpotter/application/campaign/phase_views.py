@@ -191,7 +191,6 @@ def _l1_score_exit(d: dict, ctx: dict) -> dict:
                 "hits": int(s.get("hits", 0)),
                 "total": int(s.get("total", 0)),
                 "escalation_aborted": bool(s.get("escalation_aborted", False)),
-                "is_winner": bool(s.get("is_winner", False)),
             }
         )
     non_aborted = [s for s in scores if not s["escalation_aborted"]]

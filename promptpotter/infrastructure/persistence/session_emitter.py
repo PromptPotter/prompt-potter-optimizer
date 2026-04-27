@@ -23,10 +23,6 @@ if TYPE_CHECKING:
 # infrastructure from importing upward into application/optimization.
 RecorderProvider = Callable[[], Any]
 
-# Injected ``(PhaseEvent, ctx) -> dict | None`` builder for phase_events.jsonl
-# entries; ``None`` skips the append. Same upward-coupling avoidance.
-PhaseViewBuilder = Callable[["PhaseEvent", dict[str, Any]], dict[str, Any] | None]
-
 __all__ = [
     "CAMPAIGN_ARTIFACTS",
     "SESSION_ARTIFACTS",
@@ -186,7 +182,6 @@ class CampaignPersistenceEmitter:
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
         recorder_provider: RecorderProvider | None = None,
-        phase_view_builder: PhaseViewBuilder | None = None,
     ) -> None:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
@@ -194,10 +189,9 @@ class CampaignPersistenceEmitter:
         self.phase_events_path = campaign_dir / "phase_events.jsonl"
         self.session_dir = session_dir
         self._recorder_provider: RecorderProvider = recorder_provider or (lambda: None)
-        self._phase_view_builder: PhaseViewBuilder | None = phase_view_builder
-        # Per-cycle accumulator that replaces the old ``_CycleDisplayState`` —
-        # phase-view builders mutate this between events to thread cross-event
-        # state (baseline_accuracy, original_sp_flat, current_sp_flat, ...).
+        # Phase-view ctx accumulator. Initialised empty here; ``RunListener``
+        # overwrites this attribute at construction with its own shared dict
+        # so emitter + display read the same state machine.
         self._phase_ctx: dict[str, Any] = {}
         self._phase_event_seq: int = 0
 
@@ -251,7 +245,6 @@ class CampaignPersistenceEmitter:
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
         recorder_provider: RecorderProvider | None = None,
-        phase_view_builder: PhaseViewBuilder | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Build emitter, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
@@ -287,12 +280,11 @@ class CampaignPersistenceEmitter:
             resume_from=resume_from,
             cycle_id=cycle_id,
             recorder_provider=recorder_provider,
-            phase_view_builder=phase_view_builder,
         )
 
     # -- Callbacks -------------------------------------------------------------
 
-    def on_phase(self, event: PhaseEvent) -> None:
+    def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
         s = self._state
         s["phase"] = event.phase
         if event.round is not None:
@@ -317,14 +309,11 @@ class CampaignPersistenceEmitter:
             s["layer"] = _PHASE_TO_LAYER[phase]
 
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
-        self._persist_phase_event(event)
+        self._persist_phase_event(event, view)
         self._persist()
 
-    def _persist_phase_event(self, event: PhaseEvent) -> None:
-        """Append a phase_events.jsonl line; no-op without a builder."""
-        if self._phase_view_builder is None:
-            return
-        view = self._phase_view_builder(event, self._phase_ctx)
+    def _persist_phase_event(self, event: PhaseEvent, view: dict | None) -> None:
+        """Append a phase_events.jsonl line; no-op when view is None."""
         if view is None:
             return
         record = {
@@ -459,18 +448,14 @@ class CampaignPersistenceEmitter:
             f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str}{invalid_mark} ===\n"
         )
 
-        # Finalize the candidate's slot in the dashboard accumulator.
+        # Store the report verbatim — single source of truth shared with
+        # ``round_result.candidate_scores`` (same dict instance from
+        # ``_fire``). ``_build_l1_score_block`` projects to the
+        # dashboard/round_NNNN shape without a second copy of the keys.
         cand = self._current_round.setdefault("candidates", {}).setdefault(
             idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
         )
-        cand["scores"] = {
-            "accuracy": round(acc, 4),
-            "composite": round(comp, 4) if comp is not None else None,
-            "hits": int(hits),
-            "total": int(n),
-            "invalid": bool(scores.get("invalid", False)),
-            "validation_failures": scores.get("validation_failures") or [],
-        }
+        cand["scores"] = scores
         self._persist()
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
@@ -512,30 +497,29 @@ class CampaignPersistenceEmitter:
     ) -> dict[str, Any]:
         """l1_score block for dashboard/round_NNNN.json.
 
-        Round-complete (round_result given): authoritative candidate_scores +
-        is_winner/eliminated_at + full structured samples.
-        Live in-flight (round_result=None): samples compacted to one-liners
-        to keep dashboard.json from carrying 2 kB BBEH query strings.
+        Reads the full score report stored in ``cand['scores']`` by
+        ``on_candidate_scored`` and projects to dashboard shape. ``round_result``
+        is currently only used to switch sample rendering between live (compact
+        one-liners to keep dashboard.json from carrying 2 kB query strings)
+        and round-complete (full structured samples).
         """
         candidates = self._current_round.get("candidates") or {}
-        authoritative = list(round_result.candidate_scores or []) if round_result else []
         is_live = round_result is None
 
         input_candidates: list[dict[str, Any]] = []
         output_candidates: list[dict[str, Any]] = []
         for idx in sorted(candidates.keys()):
             cand = candidates[idx]
-            cs = authoritative[idx] if idx < len(authoritative) else {}
-            label = cand.get("label") or cs.get("changes_description") or cs.get("label") or ""
+            scores = cand.get("scores") or {}
+            label = cand.get("label") or scores.get("changes_description") or ""
             input_candidates.append(
                 {
                     "idx": idx,
                     "label": label,
-                    "changes_description": cs.get("changes_description") or label,
+                    "changes_description": scores.get("changes_description") or label,
                     "pp_override": cand.get("pp_override"),
                 }
             )
-            scores = cand.get("scores") or {}
             stats: dict[str, Any] = {
                 "accuracy": scores.get("accuracy"),
                 "composite": scores.get("composite"),
@@ -544,9 +528,6 @@ class CampaignPersistenceEmitter:
                 "invalid": scores.get("invalid", False),
                 "validation_failures": scores.get("validation_failures") or [],
             }
-            if not is_live:
-                stats["is_winner"] = bool(cs.get("is_winner", False))
-                stats["eliminated_at"] = cs.get("eliminated_at")
             samples = cand.get("samples") or []
             output_candidates.append(
                 {

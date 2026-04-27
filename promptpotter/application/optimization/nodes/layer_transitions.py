@@ -229,7 +229,7 @@ class L2RefineStrategy(LayerTransition):
         )
 
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-        from promptpotter.application.campaign.decisions import record_decision
+        from promptpotter.application.optimization.decisions import record_decision
 
         if result.task_context:
             cycle.opt_sp.task_context = result.task_context

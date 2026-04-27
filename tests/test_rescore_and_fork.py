@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from promptpotter.application.campaign.decisions import (
+from promptpotter.application.optimization.decisions import (
     REPLAYERS,
     _fork_at_divergence,
     replay_decisions,
