@@ -46,16 +46,18 @@ Create a `.env` file (see `.env.example`):
 
 ```
 GROQ_API_KEY=your_groq_api_key
-LLM_PROVIDER=groq
 LLM_MODEL=openai/gpt-oss-120b
 ```
+
+Provider selection lives on `CampaignConfig.optimizer_llm.provider` (in each dataset's `campaign.json`) — there is no env-var default. Set the API key for whichever providers you'll use.
 
 | Variable | Required | Description |
 |----------|----------|-------------|
 | `GROQ_API_KEY` | Yes (if using Groq) | Groq API key for optimizer LLM calls |
-| `OPENAI_API_KEY` | Yes (if using OpenAI) | OpenAI-compatible API key |
-| `LLM_PROVIDER` | Yes | `groq` or `openai` |
-| `LLM_MODEL` | Yes | Model identifier (e.g. `openai/gpt-oss-120b`) |
+| `OPENAI_API_KEY` | Yes (if using OpenAI) | OpenAI API key |
+| `ANTHROPIC_API_KEY` | Yes (if using Anthropic) | Anthropic API key |
+| `OPENROUTER_API_KEY` | Yes (if using OpenRouter) | OpenRouter API key (`sk-or-…`) |
+| `LLM_MODEL` | Yes | Default model identifier when `optimizer_llm.model` is null (e.g. `openai/gpt-oss-120b`) |
 | `LANGFUSE_PUBLIC_KEY` | No | Langfuse cloud tracing |
 | `LANGFUSE_SECRET_KEY` | No | Langfuse cloud tracing |
 | `LANGFUSE_HOST` | No | Langfuse host URL |

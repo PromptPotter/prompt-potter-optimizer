@@ -64,7 +64,7 @@ async def _run_transition(
 ) -> Any:
     """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
     assert cycle.current_sp is not None
-    client = _llm_client.get_llm_client()
+    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
     current_pp = cycle.current_sp.pipeline_params
 
     emit_phase(

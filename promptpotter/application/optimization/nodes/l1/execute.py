@@ -119,7 +119,7 @@ async def _generate_or_load_candidates(
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
-    client = _llm_client.get_llm_client()
+    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
     async with observed_node(
         f"l1_generate_r{round_num}",
         "llm/meta",
@@ -237,7 +237,7 @@ async def execute_round(
 
     critique_text = ""
     if scoring_result.winner_results:
-        crit_llm = _llm_client.get_llm_client()
+        crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
         cctx = RoundSnapshot.from_round_state(
             cycle,
             scoring_result,

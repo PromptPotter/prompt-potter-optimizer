@@ -23,11 +23,12 @@ Create a file called `.env` in the repo root, containing exactly:
 
 ```
 GROQ_API_KEY=your_key_here
-LLM_PROVIDER=groq
 LLM_MODEL=openai/gpt-oss-120b
 ```
 
 Any Groq-hosted model ID works; `openai/gpt-oss-120b` is the recommended default for optimizer calls. If you hit free-tier rate limits, try `meta-llama/llama-4-scout-17b-16e-instruct`.
+
+To use Anthropic, OpenAI, or OpenRouter instead of (or alongside) Groq, set the corresponding `*_API_KEY` and switch `optimizer_llm.provider` in your dataset's `campaign.json` to `"anthropic"`, `"openai"`, or `"openrouter"`. Provider selection is per-campaign — there is no env-var default.
 
 ## 4. Install
 

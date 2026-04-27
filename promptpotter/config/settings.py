@@ -26,12 +26,13 @@ class Settings(BaseSettings):
         """Parse ALLOWED_ORIGINS as comma-separated list."""
         return [origin.strip() for origin in self.ALLOWED_ORIGINS.split(",")]
 
-    # LLM Provider Settings
-    LLM_PROVIDER: str = "groq"  # "groq", "openai", or "anthropic"
+    # LLM provider keys. Provider selection is per-campaign on
+    # ``CampaignConfig.optimizer_llm.provider`` — there is no env-var default.
     LLM_MODEL: str = "openai/gpt-oss-120b"
     OPENAI_API_KEY: str = ""
     ANTHROPIC_API_KEY: str = ""
     GROQ_API_KEY: str = ""
+    OPENROUTER_API_KEY: str = ""
 
     # Per-provider tier caps (rolling 60s window). Left as None → no throttle.
     # Example: Groq free tier is 5 req/min + 8000 tokens/min for gpt-oss-120b.
@@ -41,6 +42,8 @@ class Settings(BaseSettings):
     OPENAI_TPM: int | None = None
     ANTHROPIC_RPM: int | None = None
     ANTHROPIC_TPM: int | None = None
+    OPENROUTER_RPM: int | None = None
+    OPENROUTER_TPM: int | None = None
 
     # Warn when an optimizer meta-prompt (L1/L2/L3/critique/restructure) exceeds
     # this input-token count. Our in-house threshold — signals "tune the node

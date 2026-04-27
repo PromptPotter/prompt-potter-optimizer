@@ -1,11 +1,16 @@
 """
 LLM client abstraction layer.
 
-Provides a unified interface via ``OpenAICompatibleClient`` (Groq default,
-OpenAI, Anthropic). Chat completions, JSON mode, token tracking. Retry and
-``Retry-After`` honoring are delegated to the provider SDKs (``max_retries``
-kwarg on ``AsyncOpenAI`` / ``AsyncAnthropic``). ``get_llm_client(provider)``
-returns a configured singleton.
+Providers: Groq, OpenAI, OpenRouter (via ``OpenAICompatibleClient`` over the
+``openai`` SDK with ``base_url`` swap) and Anthropic (via ``AnthropicClient``
+over the ``anthropic`` SDK). Chat completions, JSON mode, token tracking.
+Retry and ``Retry-After`` honoring are delegated to the provider SDKs
+(``max_retries`` kwarg on ``AsyncOpenAI`` / ``AsyncAnthropic``).
+
+Provider selection is always explicit — caller passes
+``get_llm_client(provider)``, typically sourced from
+``CampaignConfig.optimizer_llm.provider``. There is no auto-detection or
+env-var fallback.
 
 Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
 settings — see :mod:`promptpotter.infrastructure.llm.rate_limiter`.
@@ -15,6 +20,7 @@ import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
@@ -26,12 +32,6 @@ from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, estimate_tokens
 from promptpotter.shared.errors import RequestTooLargeError
 from promptpotter.shared.llm_parsing import try_parse_json
-
-# Provider defaults
-OPENAI_MAX_RETRIES: int = 5
-GROQ_MAX_RETRIES: int = 3
-GROQ_TIMEOUT: float = 60.0
-GROQ_BASE_URL: str = "https://api.groq.com/openai/v1"
 
 logger = logging.getLogger(__name__)
 
@@ -169,7 +169,7 @@ class OpenAICompatibleClient(LLMClientBase):
         self,
         api_key: str,
         base_url: str | None = None,
-        max_retries: int = OPENAI_MAX_RETRIES,
+        max_retries: int = 5,
         timeout: float | None = None,
         default_model: str | None = None,
         provider_name: str = "openai",
@@ -435,15 +435,6 @@ class AnthropicClient(LLMClientBase):
         )
 
 
-_llm_client: LLMClientBase | None = None
-
-_PLACEHOLDER_KEYS = {
-    "your_openai_api_key_here",
-    "your_anthropic_api_key_here",
-    "your_groq_api_key_here",
-}
-
-
 def _build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
     """Build a limiter. Configured caps pin; unconfigured slots self-tune from
     ``x-ratelimit-limit-*`` response headers on the first successful call."""
@@ -455,56 +446,63 @@ def _build_rate_limiter(rpm: int | None, tpm: int | None) -> RateLimiter:
     )
 
 
-def _make_groq_client() -> OpenAICompatibleClient:
+@dataclass(frozen=True)
+class ProviderSpec:
+    """Wiring for one OpenAI-compatible provider."""
+
+    display_name: str  # e.g. "Groq" — used in error messages + logs
+    api_key_attr: str  # settings field holding the API key
+    rpm_attr: str  # settings field for rolling RPM cap
+    tpm_attr: str  # settings field for rolling TPM cap
+    base_url: str | None = None  # None ⇒ SDK default (OpenAI)
+    max_retries: int = 5
+    timeout: float | None = None
+
+
+_OPENAI_COMPAT_SPECS: dict[str, ProviderSpec] = {
+    "groq": ProviderSpec(
+        "Groq",
+        "GROQ_API_KEY",
+        "GROQ_RPM",
+        "GROQ_TPM",
+        base_url="https://api.groq.com/openai/v1",
+        max_retries=3,
+        timeout=60.0,
+    ),
+    "openai": ProviderSpec(
+        "OpenAI",
+        "OPENAI_API_KEY",
+        "OPENAI_RPM",
+        "OPENAI_TPM",
+    ),
+    "openrouter": ProviderSpec(
+        "OpenRouter",
+        "OPENROUTER_API_KEY",
+        "OPENROUTER_RPM",
+        "OPENROUTER_TPM",
+        base_url="https://openrouter.ai/api/v1",
+    ),
+}
+
+
+def _make_openai_compat(spec: ProviderSpec) -> OpenAICompatibleClient:
     return OpenAICompatibleClient(
-        api_key=settings.GROQ_API_KEY,
-        base_url=GROQ_BASE_URL,
-        max_retries=GROQ_MAX_RETRIES,
-        timeout=GROQ_TIMEOUT,
-        provider_name="Groq",
-        rate_limiter=_build_rate_limiter(settings.GROQ_RPM, settings.GROQ_TPM),
+        api_key=getattr(settings, spec.api_key_attr),
+        base_url=spec.base_url,
+        max_retries=spec.max_retries,
+        timeout=spec.timeout,
+        provider_name=spec.display_name,
+        rate_limiter=_build_rate_limiter(
+            getattr(settings, spec.rpm_attr),
+            getattr(settings, spec.tpm_attr),
+        ),
     )
 
 
-def _make_openai_client() -> OpenAICompatibleClient:
-    return OpenAICompatibleClient(
-        api_key=settings.OPENAI_API_KEY,
-        max_retries=OPENAI_MAX_RETRIES,
-        provider_name="OpenAI",
-        rate_limiter=_build_rate_limiter(settings.OPENAI_RPM, settings.OPENAI_TPM),
-    )
-
-
-def _make_anthropic_client() -> "AnthropicClient":
+def _make_anthropic_client() -> AnthropicClient:
     return AnthropicClient(
         rate_limiter=_build_rate_limiter(settings.ANTHROPIC_RPM, settings.ANTHROPIC_TPM),
     )
-
-
-def _resolve_provider() -> str:
-    """Auto-detect LLM provider from settings + environment.
-
-    Priority: configured provider (if key exists) → first available key.
-    """
-    configured = getattr(settings, "LLM_PROVIDER", "").lower()
-    _candidates = [
-        ("groq", settings.GROQ_API_KEY),
-        ("anthropic", settings.ANTHROPIC_API_KEY),
-        ("openai", settings.OPENAI_API_KEY),
-    ]
-
-    def _has_key(key: str | None) -> bool:
-        return bool(key) and key not in _PLACEHOLDER_KEYS
-
-    # Configured provider takes priority
-    for name, key in _candidates:
-        if configured == name and _has_key(key):
-            return name
-    # Fallback: first available key
-    for name, key in _candidates:
-        if _has_key(key):
-            return name
-    return "mock"
 
 
 def _make_mock_client() -> LLMClientBase:
@@ -512,32 +510,30 @@ def _make_mock_client() -> LLMClientBase:
     try:
         from tests.mock_llm_client import MockLLMClient  # type: ignore[import-not-found]
     except ImportError as err:
-        raise ValueError(
-            "No LLM API keys configured and test mock unavailable. "
-            "Set GROQ_API_KEY, OPENAI_API_KEY, or ANTHROPIC_API_KEY."
-        ) from err
+        raise ValueError("Test mock unavailable outside the test environment.") from err
     return MockLLMClient()
 
 
+def _bind_openai_compat(spec: ProviderSpec) -> Callable[[], LLMClientBase]:
+    return lambda: _make_openai_compat(spec)
+
+
 _PROVIDER_FACTORIES: dict[str, Callable[[], LLMClientBase]] = {
-    "groq": _make_groq_client,
+    **{name: _bind_openai_compat(spec) for name, spec in _OPENAI_COMPAT_SPECS.items()},
     "anthropic": _make_anthropic_client,
-    "openai": _make_openai_client,
     "mock": _make_mock_client,
 }
 
 
-def get_llm_client(provider: str | None = None) -> LLMClientBase:
-    """Get the configured LLM client (auto-detects provider if not specified)."""
-    global _llm_client
+def get_llm_client(provider: str) -> LLMClientBase:
+    """Construct the LLM client for ``provider``.
 
-    if provider:
-        factory = _PROVIDER_FACTORIES.get(provider)
-        if factory is None:
-            raise ValueError(f"Unknown provider: {provider}")
-        return factory()
-
-    if _llm_client is None:
-        _llm_client = _PROVIDER_FACTORIES[_resolve_provider()]()
-
-    return _llm_client
+    Provider must be supplied explicitly — typically from
+    ``CampaignConfig.optimizer_llm.provider``. There is no auto-detection
+    or env-var fallback.
+    """
+    factory = _PROVIDER_FACTORIES.get(provider)
+    if factory is None:
+        valid = ", ".join(sorted(_PROVIDER_FACTORIES))
+        raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
+    return factory()
