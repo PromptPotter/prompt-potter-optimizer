@@ -28,7 +28,11 @@ from promptpotter.infrastructure.store.base import (
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
 from promptpotter.shared.llm_parsing import extract_parsed_json
-from promptpotter.shared.rate_limit import parse_retry_after, wait_with_countdown
+from promptpotter.shared.rate_limit import (
+    MAX_429_ATTEMPTS,
+    parse_retry_after,
+    wait_with_countdown,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -102,8 +106,9 @@ async def llm_call(
         "json_schema" if json_schema else merged["output_format"],
     )
 
-    # 429 retry loop: honor server Retry-After uncapped (Groq TPD windows can run minutes).
-    while True:
+    # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
+    # if missing or attempts run out, surface the SDK exception unchanged.
+    for attempt in range(MAX_429_ATTEMPTS):
         try:
             response = await llm_client.chat(
                 messages=messages,
@@ -118,13 +123,14 @@ async def llm_call(
             if getattr(exc, "status_code", None) != 429:
                 raise
             resp = getattr(exc, "response", None)
-            headers = getattr(resp, "headers", None) if resp is not None else None
-            wait = parse_retry_after(headers, str(exc))
-            if wait is None or wait <= 0:
+            wait = parse_retry_after(getattr(resp, "headers", None) if resp is not None else None)
+            if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
                 raise
             logger.warning(
-                "Rate limit hit on %s; waiting %.1fs before retry",
+                "Rate limit on %s (attempt %d/%d); waiting %.1fs",
                 node or "llm_call",
+                attempt + 1,
+                MAX_429_ATTEMPTS,
                 wait,
             )
             await wait_with_countdown(wait + 1.0, node or "optimizer")

@@ -201,6 +201,13 @@ def _error_result(
 def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     """Classify an HTTP error into a tagged message."""
     code = exc.response.status_code
+    if code == 429:
+        retry_after = exc.response.headers.get("Retry-After", "?")
+        body = (exc.response.text or "").strip()[:300]
+        return (
+            f"[{ErrorCategory.CLIENT}] HTTP 429 rate-limited "
+            f"(Retry-After={retry_after}s, attempts exhausted): {body!r}"
+        )
     if 400 <= code < 500:
         return f"[{ErrorCategory.CLIENT}] HTTP {code}: {exc} — Check pipeline configuration and request parameters."
     return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."

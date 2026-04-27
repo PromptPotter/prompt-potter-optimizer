@@ -13,7 +13,11 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.shared.rate_limit import parse_retry_after, wait_with_countdown
+from promptpotter.shared.rate_limit import (
+    MAX_429_ATTEMPTS,
+    parse_retry_after,
+    wait_with_countdown,
+)
 
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
@@ -246,11 +250,9 @@ class BackendClient:
 
         client = self._get_http()
 
-        # 429 wait-and-retry: TermNorm forwards Groq's rate-limit verbatim, so
-        # a backend 429 is typically a TPM/TPD window on the same account. Honor
-        # Retry-After (header, else Groq's "try again in Xm Ys" body) with a
-        # visible countdown; fall through to raise_for_status if unparseable.
-        while True:
+        # 429 honor-Retry-After loop, bounded. Backend sets the header per RFC
+        # 7231; if it's missing or attempts run out, fall through to raise.
+        for attempt in range(MAX_429_ATTEMPTS):
             resp = await client.post(
                 f"{self.base_url}/matches",
                 json=payload,
@@ -258,10 +260,15 @@ class BackendClient:
             )
             if resp.status_code != 429:
                 break
-            wait = parse_retry_after(resp.headers, resp.text)
-            if wait is None or wait <= 0:
+            wait = parse_retry_after(resp.headers)
+            if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
                 break
-            logger.warning("Backend rate limit hit; waiting %.1fs before retry", wait)
+            logger.warning(
+                "Backend 429 (attempt %d/%d); waiting %.1fs",
+                attempt + 1,
+                MAX_429_ATTEMPTS,
+                wait,
+            )
             await wait_with_countdown(wait + 1.0, "backend")
 
         if (
