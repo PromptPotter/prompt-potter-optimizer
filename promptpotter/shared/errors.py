@@ -142,6 +142,25 @@ def is_degraded(result: Mapping[str, Any]) -> bool:
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 
+def is_deprecated_result(result: Mapping[str, Any], fatal_codes: frozenset[str]) -> bool:
+    """True iff result carries any deprecated/fatal warning code.
+
+    Deprecated samples are not valid measurements (e.g. the LLM's reasoning
+    budget exhausted before it emitted a real answer). They must be excluded
+    from primary HIT/MISS statistics and never served from cache. Application
+    callers should use the closure wrapper ``is_deprecated`` in
+    ``application/optimization/utils.py`` rather than calling this directly.
+    """
+    pd = result.get("pipeline_data") or {}
+    for w in (pd.get("diagnostics") or {}).get("warnings") or []:
+        code = (
+            f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}" if isinstance(w, dict) else w
+        )
+        if code in fatal_codes:
+            return True
+    return False
+
+
 @contextmanager
 def graceful(msg: str, *, level: int = logging.WARNING):
     """Suppress non-interrupt exceptions with a log message.

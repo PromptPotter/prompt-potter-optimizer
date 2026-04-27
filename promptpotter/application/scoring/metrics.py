@@ -65,16 +65,31 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
 
 
 def _compute_accuracy(results: list[QueryResult]) -> dict:
-    """Base scalars: hits, total, accuracy, errors.
+    """Base scalars: hits, total, accuracy, errors, deprecated.
+
+    Deprecated samples (those carrying a ``FATAL_WARNINGS`` code) are not
+    valid measurements and are excluded from ``hits``, ``total``,
+    ``errors``, and the accuracy denominator. Their count surfaces as
+    ``deprecated`` for operator transparency.
 
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.
     """
-    total = len(results)
-    hits = sum(1 for r in results if r.get("hit"))
-    errors = sum(1 for r in results if is_error_result(r))
-    accuracy = sum(r.get("score", 0.0) for r in results) / total if total else 0.0
-    return {"hits": hits, "total": total, "accuracy": accuracy, "errors": errors}
+    from promptpotter.application.optimization.utils import is_deprecated
+
+    deprecated = sum(1 for r in results if is_deprecated(r))
+    valid = [r for r in results if not is_deprecated(r)]
+    total = len(valid)
+    hits = sum(1 for r in valid if r.get("hit"))
+    errors = sum(1 for r in valid if is_error_result(r))
+    accuracy = sum(r.get("score", 0.0) for r in valid) / total if total else 0.0
+    return {
+        "hits": hits,
+        "total": total,
+        "accuracy": accuracy,
+        "errors": errors,
+        "deprecated": deprecated,
+    }
 
 
 def count_failures(results: list[QueryResult]) -> int:
@@ -345,9 +360,14 @@ def compile_failure_analysis(
 
     Calls ``extract_sample_diagnostics()`` on each failing result, groups by
     ``(gt_in_source, gt_in_ranked, terminated_at)`` key, and returns the top
-    patterns ranked by failure count.
+    patterns ranked by failure count. Deprecated samples (fatal warnings)
+    are excluded so they don't pollute pattern groupings.
     """
-    failures = [r for r in results if not r.get("hit") and not is_error_result(r)]
+    from promptpotter.application.optimization.utils import is_deprecated
+
+    failures = [
+        r for r in results if not r.get("hit") and not is_error_result(r) and not is_deprecated(r)
+    ]
     if not failures:
         return FailureAnalysis(total_failures=0, total_results=len(results))
 
@@ -386,10 +406,18 @@ def compile_failure_analysis(
 def compile_query_difficulty(
     historical_results: Sequence[Sequence[Mapping[str, Any]]],
 ) -> QueryDifficulty:
-    """Classify queries by hit rate across multiple evaluation rounds."""
+    """Classify queries by hit rate across multiple evaluation rounds.
+
+    Deprecated samples (fatal warnings) are skipped so hit-rate
+    classification isn't biased by garbage measurements.
+    """
+    from promptpotter.application.optimization.utils import is_deprecated
+
     query_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:
         for r in round_results:
+            if is_deprecated(r):
+                continue
             q = r.get("query", "")
             if q:
                 query_hits[q].append(bool(r.get("hit")))

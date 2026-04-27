@@ -69,6 +69,10 @@ class RoundResult(BaseModel):
     # ``application/campaign/decisions.py``.
     decisions: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
+    # Count of samples discarded as deprecated (fatal warnings) on the
+    # round-winner's evaluation; excluded from hits/total/accuracy and
+    # surfaced in round summary for operator transparency.
+    deprecated: int = 0
     escalation_signal: EscalationSignal | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
     # Adaptive-prefix events emitted during this round (only populated

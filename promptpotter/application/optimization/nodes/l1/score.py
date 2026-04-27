@@ -12,7 +12,11 @@ from promptpotter.application.optimization.nodes.l1.measure import (
     score_population,
 )
 from promptpotter.application.optimization.results import CandidateProposal, RoundBaseline
-from promptpotter.application.scoring.metrics import compute_composite_score, count_degraded_queries
+from promptpotter.application.scoring.metrics import (
+    _compute_accuracy,
+    compute_composite_score,
+    count_degraded_queries,
+)
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.scoring import QueryResult
@@ -45,6 +49,7 @@ class L1ScoringResult(BaseModel):
     all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
     escalation_signal: EscalationSignal | None = None
     degraded_queries: int = 0
+    deprecated: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
     decisions: list[dict] = Field(default_factory=list)
 
@@ -128,6 +133,7 @@ async def l1_score(
         data={"current_best_accuracy_at_record": baseline.accuracy},
     )
 
+    base = _compute_accuracy(best_results)
     return L1ScoringResult(
         label=best_label,
         winner_osp=best_osp,
@@ -138,8 +144,8 @@ async def l1_score(
         winner_pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
         winner_accuracy=best_acc,
         winner_composite=best_comp,
-        hits=sum(1 for r in best_results if r.get("hit")),
-        total=len(best_results),
+        hits=base["hits"],
+        total=base["total"],
         improved=best_acc > baseline.accuracy + improvement_threshold,
         candidates_scored=len(evaluated),
         candidate_scores=candidate_scores,
@@ -147,6 +153,7 @@ async def l1_score(
         all_candidate_results=all_candidate_results,
         escalation_signal=escalation_signal,
         degraded_queries=count_degraded_queries(best_results),
+        deprecated=base["deprecated"],
         winner_evaluators=best_evals,
         decisions=decisions,
     )

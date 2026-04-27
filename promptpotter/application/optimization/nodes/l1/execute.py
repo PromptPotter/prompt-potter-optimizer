@@ -277,6 +277,7 @@ async def execute_round(
         candidate_scores=scoring_result.candidate_scores,
         decisions=list(scoring_result.decisions),
         degraded_queries=scoring_result.degraded_queries,
+        deprecated=scoring_result.deprecated,
         escalation_signal=scoring_result.escalation_signal,
         evaluators=scoring_result.winner_evaluators,
     )

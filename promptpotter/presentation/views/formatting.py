@@ -24,6 +24,9 @@ from promptpotter.presentation.views.display_primitives import (
     _box_bottom,
     _box_line,
     _box_top,
+    fmt_ci,
+    fmt_pct,
+    fmt_pvalue,
 )
 
 
@@ -52,35 +55,6 @@ __all__ = [
     "render_pipeline_overrides",
     "render_table",
 ]
-
-
-# ---------------------------------------------------------------------------
-# Primitive formatters — public, shared by views, dashboard, notebook UI
-# ---------------------------------------------------------------------------
-
-
-def fmt_pct(value: Any) -> str:
-    """Render a fraction in [0, 1] as ``"XX.X%"``; non-numerics → ``"-"``."""
-    try:
-        return f"{float(value):.1%}"
-    except (TypeError, ValueError):
-        return "-"
-
-
-def fmt_ci(lower: float, upper: float) -> str:
-    """Format a 95% CI bracket: ``[X.X%-Y.Y%]``."""
-    return f"[{lower:.1%}-{upper:.1%}]"
-
-
-def fmt_pvalue(p: float) -> str:
-    """Format a p-value with significance tier (***, **, *, ns)."""
-    if p < 0.001:
-        return "p<0.001 ***"
-    if p < 0.01:
-        return f"p={p:.3f} **"
-    if p < 0.05:
-        return f"p={p:.2f} *"
-    return f"p={p:.2f} (ns)"
 
 
 def render_pipeline_overrides(

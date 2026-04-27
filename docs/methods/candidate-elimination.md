@@ -65,3 +65,5 @@ Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* or
 ### `FATAL_WARNINGS` is a hardcoded invariant
 
 `FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+
+`FATAL_WARNINGS` does double duty: it drives mechanism 3 above (candidate elimination) **and** is the set used by `score_search_point::_filter_deprecated_priors` to evict cached entries on load and by `_compute_accuracy` to exclude deprecated rows from primary stats. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#fatal_warnings--hardcoded-invariant) for the three load-boundary effects and [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator framing.

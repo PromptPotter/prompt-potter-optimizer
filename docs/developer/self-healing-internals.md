@@ -111,7 +111,19 @@ Validation is the only one that fires *before* evaluation — it needs nothing b
 
 ## `FATAL_WARNINGS` — hardcoded invariant
 
-`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `application/optimization/elimination.py`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. The fast-path bypasses `min_queries` and `threshold` entirely. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+`FATAL_WARNINGS = frozenset({"llm_only:empty_content_reasoning_fallback"})` in `application/optimization/elimination.py`. These codes are deterministic for the whole config — one sighting proves the candidate is broken for every remaining query, so spending more backend calls to "confirm" is waste. Grow this set (don't expose it as a tunable) when a new warning proves equally conclusive.
+
+A fatal warning has **three** load-boundary effects:
+
+1. **Candidate elimination** — `DegradationCheck` fast-path in `application/optimization/elimination.py::DegradationCheck.evaluate` returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_queries` and `threshold` entirely.
+2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `dataset_runs.load_reusable_results` and drops every entry whose diagnostics carry a `FATAL_WARNINGS` member. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The dataset_run archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
+3. **Stats exclusion** — `_compute_accuracy` partitions deprecated rows into a separate `deprecated` count and excludes them from `hits`, `total`, `errors`, and the accuracy denominator. The display layer tags them `DEPR` instead of HIT/MISS, and the round summary appends `(N deprecated)` when any are present.
+
+### Deprecated samples — why this is not a fallback
+
+The exclusion is a **load-boundary filter**, not a score-time fallback: it removes known-invalid measurements from the cache and from the stats denominator before the scoring layer runs. Trace records continue to be archived (forensic value), only cache reuse and primary-stat aggregation are blocked. This is sanctioned alongside the `_score_candidates()` validation-failure synthetic-0 — see [`scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator-facing framing.
+
+If a query consistently hits a fatal warning, it will be re-measured every round and immediately eliminate the candidate via `DegradationCheck` on each attempt. That is correct behavior — frequent fatal warnings on the same query indicate a too-tight token budget on the active model.
 
 ---
 

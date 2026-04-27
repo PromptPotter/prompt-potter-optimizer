@@ -107,6 +107,10 @@ class QueryResultFull(QueryResult, total=False):
     switched_out: bool
     persistently_degraded: bool
 
+    # Deprecated-sample retry: set in search_point_scorer when a fresh
+    # measurement supersedes a cached entry that carried a fatal warning.
+    retry_of_deprecated_cache: bool
+
 
 # ---------------------------------------------------------------------------
 # Query runner protocol

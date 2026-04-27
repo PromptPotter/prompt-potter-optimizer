@@ -80,7 +80,9 @@ def _fmt_query_result(
 
     tt = pd.get("total_time")
 
-    if r.get("hit"):
+    if any(w in FATAL_WARNINGS for w in extract_warning_types(r)):
+        tag = "DEPR"
+    elif r.get("hit"):
         tag = "HIT"
     else:
         ranked = pd.get("ranked_candidates", [])
@@ -142,7 +144,15 @@ def _fmt_query_result(
                 msg = w["message"]
             line += f"\n{_ann_indent}{YELLOW}⚠ {w['step']}: {msg}{RESET}"
 
-    if r.get("retry_of_degraded"):
+    if r.get("retry_of_deprecated_cache"):
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            YELLOW,
+            "\U0001f504",
+            "cached fatal warning evicted → remeasured",
+        )
+    elif r.get("retry_of_degraded"):
         comp = r.get("rerun_comparison") or {}
         detail = f"; result: {comp['hit_change']}" if comp.get("hit_change") else ""
         if comp.get("rank_change"):
@@ -184,21 +194,22 @@ def _fmt_query_result(
             "entire stale-data ladder exhausted → still degraded; "
             "score counts but flag this candidate",
         )
-    elif r.get("degraded_observed"):
+    elif r.get("degraded_observed") and not any(
+        w in FATAL_WARNINGS for w in extract_warning_types(r)
+    ):
         # Fatal warnings kill the candidate on this same query (see
         # DegradationCheck fast-path). The "toward rerun" counter would
         # suggest "more data coming" — meaningless when the candidate is
         # already dead. The ⚠ warning line above tells the real story.
-        if not any(w in FATAL_WARNINGS for w in extract_warning_types(r)):
-            obs = r.get("degraded_obs_count", "?")
-            threshold = r.get("degraded_obs_threshold", "?")
-            line = _append_annotation(
-                line,
-                _ann_indent,
-                DIM,
-                "↩",
-                f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
-                f"trigger (not yet at threshold)",
-            )
+        obs = r.get("degraded_obs_count", "?")
+        threshold = r.get("degraded_obs_threshold", "?")
+        line = _append_annotation(
+            line,
+            _ann_indent,
+            DIM,
+            "↩",
+            f"pipeline warning observed; {obs}/{threshold} occurrences toward rerun "
+            f"trigger (not yet at threshold)",
+        )
 
     return line

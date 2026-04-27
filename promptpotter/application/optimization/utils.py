@@ -20,6 +20,7 @@ __all__ = [
     "candidate_keys_from_schema",
     "extract_warning_types",
     "get_candidates",
+    "is_deprecated",
     "update_query_tracker",
 ]
 
@@ -59,6 +60,19 @@ def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
         terminated = pd.get("terminated_at", "unknown")
         types.append(f"{terminated}:error")
     return types
+
+
+def is_deprecated(result: Mapping[str, Any]) -> bool:
+    """True iff result carries any FATAL_WARNINGS code — a deprecated data point.
+
+    Closure over ``FATAL_WARNINGS``; ``shared/errors.is_deprecated_result``
+    is the parameterized form. Local import avoids the
+    ``elimination → utils → elimination`` module-load cycle.
+    """
+    from promptpotter.application.optimization.elimination import FATAL_WARNINGS
+    from promptpotter.shared.errors import is_deprecated_result
+
+    return is_deprecated_result(result, FATAL_WARNINGS)
 
 
 def update_query_tracker(
