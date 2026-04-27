@@ -71,9 +71,9 @@ async def execute_stale_data_protocol(
     live on that single node — tunable via ``param_keys`` when PromptPotter
     self-optimizes.
 
-    Observation counts come from SearchMemory (``query_degradation_count``),
-    which ingests from dataset_runs at round boundaries. Within a round the
-    count is constant; no mutable state is passed through the scorer.
+    Observation counts come from ``search_memory.sample_index`` (degradation
+    tables ingested from dataset_runs at round boundaries). Within a round
+    the count is constant; no mutable state is passed through the scorer.
 
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step
     that resolved the query, or ``"exhausted"``.
@@ -93,7 +93,11 @@ async def execute_stale_data_protocol(
             trigger_count = cfg.get("rerun_trigger_count", 3)
             # Historical count through last SearchMemory refresh (previous round).
             # The current observation bumps the effective count by 1.
-            historical = search_memory.query_degradation_count(query) if search_memory else 0
+            historical = 0
+            if search_memory:
+                sid = search_memory.sample_index.id_for_query(query)
+                if sid is not None:
+                    historical = search_memory.sample_index.degradation_count(sid)
             effective_count = historical + 1
             if effective_count < trigger_count:
                 return {
@@ -133,7 +137,10 @@ async def execute_stale_data_protocol(
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
             if search_memory:
-                deg_rate = search_memory.query_degradation_rate(query)
+                sid = search_memory.sample_index.id_for_query(query)
+                deg_rate = (
+                    search_memory.sample_index.degradation_rate(sid) if sid is not None else 0.0
+                )
                 if deg_rate >= min_deg_rate:
                     result = {**cached_result, "cached": True, "switched_out": True}
                     return result, "sampleswitch"

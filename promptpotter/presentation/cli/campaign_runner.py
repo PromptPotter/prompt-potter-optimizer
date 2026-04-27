@@ -40,11 +40,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("promptpotter.presentation.cli")
 
 
-# ---------------------------------------------------------------------------
-# CommandResult — what every cmd_* returns
-# ---------------------------------------------------------------------------
-
-
 @dataclass
 class CommandResult:
     """``data`` is machine-readable; ``human`` is pre-rendered text. ``main()`` picks one."""
@@ -53,10 +48,6 @@ class CommandResult:
     human: str | None = None
 
 
-# ---------------------------------------------------------------------------
-# Service bootstrap — verbose toggle, init, pipeline configure, baseline load
-# ---------------------------------------------------------------------------
-
 _VERBOSE = False
 
 
@@ -64,10 +55,6 @@ def set_verbose(value: bool) -> None:
     """Toggle verbose mode. Called once from ``main()`` before dispatch."""
     global _VERBOSE
     _VERBOSE = value
-
-
-def _noop(*_: object, **__: object) -> None:
-    pass
 
 
 def _status_sink(msg: str) -> None:
@@ -119,22 +106,22 @@ async def init_services_cli(
     )
 
 
-def configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
-    """Configure pipeline, apply filtered schema to session. Returns pipeline_params."""
+def _configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
-    log = logger.info if _VERBOSE else _noop
-    return configure_and_apply_pipeline(session, campaign_config, log=log)
+    return configure_and_apply_pipeline(
+        session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
+    )
 
 
-def load_cli_baseline(session: Session):
-    """Load baseline prompt for the active session's pipeline schema."""
+def _load_baseline(session: Session):
     from promptpotter.application.campaign.data import load_baseline_prompt
 
-    prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
     return load_baseline_prompt(
         session.experiment_extract,
-        prompt_node_names=prompt_nodes,
+        prompt_node_names=session.pipeline_schema.prompt_node_names()
+        if session.pipeline_schema
+        else [],
         dataset_name=session.dataset_name,
     )
 
@@ -236,11 +223,6 @@ def build_parser() -> argparse.ArgumentParser:
     return parser
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Campaign lifecycle commands
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 def _mint_session_and_cycle(
     session: Session,
     campaign_config: CampaignConfig,
@@ -268,16 +250,15 @@ def _mint_session_and_cycle(
         pipeline_params=pipeline_params,
         active_steps=active,
     )
-    state["baseline_prompt_fields"] = baseline.prompt_field_dict()
-    state["dataset_count"] = dataset_count
-    state["baseline_accuracy"] = 0.0
-
+    state.update(
+        baseline_prompt_fields=baseline.prompt_field_dict(),
+        dataset_count=dataset_count,
+        baseline_accuracy=0.0,
+    )
     session.store.sessions.create(session_id, state)
     session.store.sessions.ensure_narrative_files(session_id)
     session.store.campaigns.create(
-        init_params["backend_id"],
-        cycle_id,
-        {"parent_session_id": session_id},
+        init_params["backend_id"], cycle_id, {"parent_session_id": session_id}
     )
     save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     session.session_id = session_id
@@ -300,11 +281,11 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     Pure prep: no backend calls, no baseline scoring. The baseline runs as
     phase 0 of ``optimize`` on the ``sp_budget_ttest`` slice.
     """
+    from promptpotter.application.campaign.config import load_campaign_config as _load_cfg
     from promptpotter.application.campaign.data import prepare_datasets
 
     file_config = load_campaign_config(args.config)
     dataset_name = args.dataset_name or file_config.get("dataset_name")
-
     if not dataset_name:
         from promptpotter.presentation.cli.session import no_dataset_hint
 
@@ -313,9 +294,9 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "TermNorm production experiment are no longer allowed.\n\n" + no_dataset_hint()
         )
 
-    # Auto-load the dataset's campaign.json when --config wasn't given.
-    # Without this, the session persists with scoring=null and default
-    # optimization knobs — the dataset's own file is the intended source of truth.
+    # Auto-load the dataset's campaign.json when --config wasn't given. Without this,
+    # the session persists with scoring=null and default optimization knobs — the
+    # dataset's own file is the intended source of truth.
     if not args.config:
         default_config_path = Path("datasets") / dataset_name / "campaign.json"
         if default_config_path.exists():
@@ -326,32 +307,25 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         backend_id=args.backend_id,
         experiment_id=args.experiment_id,
         dataset_name=dataset_name,
-        take_over=True,  # cmd_init always rewrites the pointer
+        take_over=True,
         tenant_id=getattr(args, "tenant", "default"),
     )
-    backend_id = session.backend_id  # may have been derived from dataset_name
-
-    from promptpotter.application.campaign.config import load_campaign_config as _load_cfg
+    backend_id = session.backend_id
 
     profile = session.store.backends.load_connector_profile(backend_id) or {}
-    raw_config = {**profile, **file_config}
-    campaign_config = _load_cfg(raw_config)
+    campaign_config = _load_cfg({**profile, **file_config})
 
-    pipeline_params = configure_pipeline(session, campaign_config)
+    pipeline_params = _configure_pipeline(session, campaign_config)
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = list(campaign_config.exclude_nodes)
 
-    train_data: list = []
     if args.excel_path:
-        ds_result = prepare_datasets(session.store, args.excel_path)
-        train_data = ds_result.train_data or []
-    elif session.queries:
-        train_data = session.queries
+        train_data = prepare_datasets(session.store, args.excel_path).train_data or []
+    else:
+        train_data = session.queries or []
 
-    baseline = load_cli_baseline(session)
-    dataset = train_data
-
-    cycle_id = _compute_cycle_id(session, baseline, dataset)
+    baseline = _load_baseline(session)
+    cycle_id = _compute_cycle_id(session, baseline, train_data)
     init_params = {
         "backend_url": args.backend_url,
         "backend_id": backend_id,
@@ -366,7 +340,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         pipeline_params=pipeline_params,
         active=active,
         baseline=baseline,
-        dataset_count=len(dataset),
+        dataset_count=len(train_data),
     )
 
     return CommandResult(
@@ -375,34 +349,27 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
             "cycle_id": cycle_id,
             "backend_id": backend_id,
             "phase": "init",
-            "dataset_count": len(dataset),
+            "dataset_count": len(train_data),
             "active_steps": active,
             "excluded_nodes": excluded,
         },
         human=(
             f"\nSession created: {session_id}\n"
             f"Cycle: {cycle_id}\n"
-            f"Dataset: {len(dataset)} queries (baseline runs in optimize phase 0)"
+            f"Dataset: {len(train_data)} queries (baseline runs in optimize phase 0)"
         ),
     )
 
 
-def _build_live_display(
-    args: argparse.Namespace,
-    *,
-    session,
-    campaign_config,
-    baseline_acc: float,
-):
+def _build_live_display(args: argparse.Namespace, *, session, campaign_config, baseline_acc: float):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
     from promptpotter.domain.scoring import split_scoring_block
     from promptpotter.presentation.views.display_primitives import set_display_tags
 
     set_display_tags(session.pipeline_schema)
     scoring_formula = split_scoring_block(campaign_config.scoring).per_query
-
     opt = campaign_config.optimization
-    max_rounds = opt.max_rounds or 999
+
     if getattr(args, "verbose", False):
         from promptpotter.presentation.ui.campaign.notebook_display import NotebookDisplay
 
@@ -418,12 +385,25 @@ def _build_live_display(
 
     return CliDisplay(
         baseline_acc=baseline_acc,
-        max_rounds=max_rounds,
+        max_rounds=opt.max_rounds or 999,
         l1_patience=opt.l1_patience,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         scoring_formula=scoring_formula,
         pipeline_schema=session.pipeline_schema,
     )
+
+
+_DIVERGENCE_HINT = (
+    "Checked decisions: round_winner, elimination_cut, "
+    "l2_escalation_trigger, l3_escalation_trigger. "
+    "(probe_round_commitment is recorded but not divergence-gated — "
+    "it depends on L2's LLM output, which is invariant under a "
+    "pure scorer swap.)\n\n"
+    "Rerun with `--fork-on-divergence` to branch a sibling cycle "
+    "here under the current scorer, revert "
+    "`campaign.json::scoring` to continue the original trajectory, "
+    "or pass `--no-divergence-check` to accept the divergence."
+)
 
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
@@ -441,30 +421,29 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
     from promptpotter.infrastructure.persistence.control import make_control_check
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
+    from promptpotter.shared.errors import ResumeDivergenceError
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
-
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
     session.cycle_id = ctx.cycle_id
-    pipeline_params = configure_pipeline(session, campaign_config)
+    pipeline_params = _configure_pipeline(session, campaign_config)
     train_data = session.queries or []
-
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
 
-    # Pipeline divergence-detect: if pipeline.json (model, temperature, …),
-    # baseline prompt, or dataset changed since the active session was init'd,
-    # the recomputed cycle hash will no longer match the pointer's cycle_id.
-    # Auto-mint a fresh session+cycle so a model swap starts a new campaign
-    # root instead of silently mixing measurements from the old model.
+    # Pipeline divergence-detect: if pipeline.json (model, temperature, …), baseline
+    # prompt, or dataset changed since the active session was init'd, the recomputed
+    # cycle hash will no longer match the pointer's cycle_id. Auto-mint a fresh
+    # session+cycle so a model swap starts a new campaign root instead of silently
+    # mixing measurements from the old model.
     minted_fresh = False
     if ctx.cycle_id and resume_from_round is None:
-        baseline_now = load_cli_baseline(session)
+        baseline_now = _load_baseline(session)
         expected_cycle_id = _compute_cycle_id(session, baseline_now, train_data)
         if expected_cycle_id != ctx.cycle_id:
             old_cycle_id = ctx.cycle_id
-            new_session_id = _mint_session_and_cycle(
+            ctx.session_id = _mint_session_and_cycle(
                 session,
                 campaign_config,
                 cycle_id=expected_cycle_id,
@@ -474,9 +453,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
                 baseline=baseline_now,
                 dataset_count=len(train_data),
             )
-            ctx.session_id = new_session_id
             ctx.cycle_id = expected_cycle_id
-            ctx.state = session.store.sessions.read(new_session_id) or ctx.state
+            ctx.state = session.store.sessions.read(ctx.session_id) or ctx.state
             minted_fresh = True
             logger.info(
                 "Pipeline changed since init (was %s, now %s) — minted new cycle",
@@ -507,10 +485,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     logger.info("Session: %s", session_dir)
     logger.info("Campaign: %s", campaign_dir)
 
-    # Build the emitter BEFORE baseline so the dashboard ticks through
-    # the BASELINE phase, not just the L1 rounds.  The emitter reads any
-    # prior dashboard.json for resume continuity; baseline accuracy is
-    # stamped later during the INIT exit phase.
+    # Build emitter + display BEFORE baseline so the dashboard ticks through the
+    # BASELINE phase and per-query output reaches the terminal. Without this, the
+    # CLI goes dark for the entire BASELINE phase.
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
     emitter = build_campaign_emitter(
         session,
@@ -520,26 +497,13 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         recorder_provider=get_round_recorder,
     )
     control_reader = make_control_check(session_dir)
-    listener = RunListener(emitter=emitter, control=control_reader)
-
-    # Build the display BEFORE baseline runs so baseline's per-query output
-    # reaches the terminal. Without this, ``listener.display`` is None during
-    # baseline, ``RunListener.on_sample_scored`` silently drops, and the CLI
-    # goes dark for the entire BASELINE phase. The post-baseline re-assignment
-    # keeps the display wired across the handoff into L1 (idempotent).
     display = _build_live_display(
-        args,
-        session=session,
-        campaign_config=campaign_config,
-        baseline_acc=pre_baseline_acc,
+        args, session=session, campaign_config=campaign_config, baseline_acc=pre_baseline_acc
     )
-    listener.display = display
+    listener = RunListener(emitter=emitter, display=display, control=control_reader)
 
     ctx.save_phase("optimizing")
-
     set_round_recorder(RoundRecorder(campaign_dir / "rounds"))
-
-    from promptpotter.shared.errors import ResumeDivergenceError
 
     try:
         cycle_result = await _orch_run_optimization(
@@ -567,31 +531,19 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
                 "recorded_outcome": div.recorded_outcome,
                 "current_outcome": div.current_outcome,
             },
-            human=(
-                f"{div}\n\n"
-                f"Checked decisions: round_winner, elimination_cut, "
-                f"l2_escalation_trigger, l3_escalation_trigger. "
-                f"(probe_round_commitment is recorded but not divergence-gated — "
-                f"it depends on L2's LLM output, which is invariant under a "
-                f"pure scorer swap.)\n\n"
-                f"Rerun with `--fork-on-divergence` to branch a sibling cycle "
-                f"here under the current scorer, revert "
-                f"`campaign.json::scoring` to continue the original trajectory, "
-                f"or pass `--no-divergence-check` to accept the divergence."
-            ),
+            human=f"{div}\n\n{_DIVERGENCE_HINT}",
         )
     finally:
         set_round_recorder(None)
 
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
-
-    log_md_path = campaign_dir / "log.md"
-    dashboard_path = campaign_dir / "dashboard.json"
     return CommandResult(
         data=cycle_result.model_dump(),
         human=(
-            f"Campaign: {cycle_result.cycle_id}\nDashboard: {dashboard_path}\nDigest: {log_md_path}"
+            f"Campaign: {cycle_result.cycle_id}\n"
+            f"Dashboard: {campaign_dir / 'dashboard.json'}\n"
+            f"Digest: {campaign_dir / 'log.md'}"
         ),
     )
 
@@ -618,28 +570,19 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
 
     latest = campaigns[-1]
     cycle_id = latest.get("campaign_id", "")
-    campaign_rounds = []
-    for i in range(latest.get("n_trials", 0)):
-        trial = session.store.campaigns.load_trial(ctx.backend_id, cycle_id, i)
-        if trial:
-            campaign_rounds.append(trial)
-
+    campaign_rounds = [
+        t
+        for i in range(latest.get("n_trials", 0))
+        if (t := session.store.campaigns.load_trial(ctx.backend_id, cycle_id, i)) is not None
+    ]
     best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
 
     human_parts = [render_campaign_summary(campaign_rounds)]
-    progress = render_progress_table(campaign_rounds, framed=False)
-    if progress:
-        human_parts.append(progress)
-    flips = render_flip_tracking(campaign_rounds)
-    if flips:
-        human_parts.append(flips)
-    lineage = render_lineage(campaign_rounds)
-    if lineage:
-        human_parts.append(lineage)
-
-    prefix_events = collect_prefix_events(campaign_rounds)
-    if prefix_events:
-        human_parts.append(render_adaptive_prefix(prefix_events))
+    for renderer in (render_progress_table, render_flip_tracking, render_lineage):
+        if rendered := renderer(campaign_rounds):
+            human_parts.append(rendered)
+    if events := collect_prefix_events(campaign_rounds):
+        human_parts.append(render_adaptive_prefix(events))
 
     # Heatmap is embedded in log.md; recompute on the fly when the sorter ran.
     hs_cfg = ctx.campaign_config.optimization.hard_sample_sorter
@@ -689,11 +632,6 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     )
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Auxiliary commands (HITL control, profile, status, task context)
-# ─────────────────────────────────────────────────────────────────────────────
-
-
 async def cmd_control(args: argparse.Namespace) -> CommandResult:
     """Write a HITL control signal to ``control.json``."""
     from promptpotter.infrastructure.store.base import write_json
@@ -731,8 +669,7 @@ async def cmd_profile(args: argparse.Namespace) -> CommandResult:
                 human="ERROR: No active session — run `init` first.",
             )
         backend_id = backend_id or state.get("init_params", {}).get("backend_id", "")
-        profile = state.get("campaign_config", {})
-        store.backends.save_connector_profile(backend_id, profile)
+        store.backends.save_connector_profile(backend_id, state.get("campaign_config", {}))
         return CommandResult(
             data={"saved": True, "backend_id": backend_id},
             human=f"Profile saved for '{backend_id}'.",
@@ -752,15 +689,12 @@ async def cmd_profile(args: argparse.Namespace) -> CommandResult:
             human=f"Profile '{backend_id}': {key} = {json.dumps(value)}",
         )
 
-    profile = store.backends.load_connector_profile(backend_id)
-    if not profile:
-        return CommandResult(
-            data={"backend_id": backend_id, "profile": None},
-            human=f"No connector profile for '{backend_id}'. Use --save or --set to create one.",
-        )
+    existing = store.backends.load_connector_profile(backend_id)
     return CommandResult(
-        data={"backend_id": backend_id, "profile": profile},
-        human=json.dumps(profile, indent=2, default=str),
+        data={"backend_id": backend_id, "profile": existing or None},
+        human=json.dumps(existing, indent=2, default=str)
+        if existing
+        else f"No connector profile for '{backend_id}'. Use --save or --set to create one.",
     )
 
 
@@ -770,9 +704,7 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
     ``dashboard.json`` is the live single-source-of-truth (see
     ``infrastructure/persistence/session_emitter.py``); the final-run
     summary (``best_accuracy``, ``stop_reason`` …) lives under
-    ``index.json::final`` once a cycle finishes. JSON mode cats both files
-    plus ``control.json`` so a human can ``jq`` the same shape; human mode
-    delegates to ``render_status``.
+    ``index.json::final`` once a cycle finishes.
     """
     from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
     from promptpotter.presentation.views import render_status
@@ -789,24 +721,20 @@ async def cmd_status(args: argparse.Namespace) -> CommandResult:
     }
     sources = [("control", session_dir / CONTROL_FILENAME)]
     if campaign_dir is not None:
-        sources.extend(
-            [
-                ("dashboard", campaign_dir / "dashboard.json"),
-                ("index", campaign_dir / "index.json"),
-            ]
-        )
+        sources += [
+            ("dashboard", campaign_dir / "dashboard.json"),
+            ("index", campaign_dir / "index.json"),
+        ]
     for key, path in sources:
         if path.exists():
             with contextlib.suppress(json.JSONDecodeError, OSError):
                 payload[key] = json.loads(path.read_text(encoding="utf-8"))
 
     final = (payload.get("index") or {}).get("final")
-    human = render_status(
-        payload.get("dashboard", {}),
-        payload.get("control"),
-        final,
+    return CommandResult(
+        data=payload,
+        human=render_status(payload.get("dashboard", {}), payload.get("control"), final),
     )
-    return CommandResult(data=payload, human=human)
 
 
 async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
@@ -817,7 +745,6 @@ async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
     )
 
     ctx = load_session(args)
-
     if args.task_file:
         task_description = Path(args.task_file).read_text(encoding="utf-8")
     elif args.task_text:
@@ -834,17 +761,15 @@ async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
         store_base_dir=session.store.base_dir if session.store else None,
         backend_id=session.backend_id,
     )
-    cache_tag = " (cached)" if was_cached else ""
-    logger.info("Task context decomposed%s: %d fields", cache_tag, len(task_context))
+    logger.info(
+        "Task context decomposed%s: %d fields",
+        " (cached)" if was_cached else "",
+        len(task_context),
+    )
 
     ctx.state["task_context"] = task_context.to_dict()
     ctx.save_phase("task-context")
     return CommandResult(data={"task_context": task_context.to_dict(), "cached": was_cached})
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Dispatch
-# ─────────────────────────────────────────────────────────────────────────────
 
 
 COMMANDS = {
@@ -861,8 +786,7 @@ COMMANDS = {
 def main() -> None:
     from promptpotter.shared.errors import RequestTooLargeError
 
-    parser = build_parser()
-    args = parser.parse_args()
+    args = build_parser().parse_args()
     set_verbose(bool(getattr(args, "verbose", False)))
 
     try:
