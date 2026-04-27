@@ -306,7 +306,7 @@ Wave 2: Track 3 (multi-dataset/pipeline) + Track 7 (config aggregate redesign) +
         final shape stable. Multi-dataset is prerequisite for meta-prompt evaluation on 2+ tasks.
 
 Wave 3: Track 4 (file-directory UI v0) + Track 1 (systematic improvements + final configs)
-        — parallel; UI draft happens in the new presentation/ui/ location, renders the Track 6 tree
+        — parallel; UI draft happens in the presentation/views/ renderer surface, renders the Track 6 tree
 
 Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
         — runs last; depends on Track 2 (hexagonal layout), Track 4
@@ -345,7 +345,7 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Campaign store | `promptpotter/infrastructure/store/campaign_store.py` |
 | CLI dashboard | `promptpotter/presentation/cli/campaign_runner.py` (show-status) |
 | Notebook | `notebooks/optimization_campaign.ipynb` |
-| UI layer | `promptpotter/presentation/ui/campaign/` |
+| Renderers | `promptpotter/presentation/views/` |
 
 ## Risks
 

@@ -45,11 +45,15 @@ try:
 except ImportError:
     pass
 
+from promptpotter.application.campaign.config import (  # noqa: E402
+    configure_and_apply_pipeline,
+    load_campaign_config,
+)
 from promptpotter.application.datasets.builder import DATASET_LOADERS  # noqa: E402
-from promptpotter.presentation.ui.campaign import (  # noqa: E402
-    configure_pipeline,
-    init_services,
-    prepare_scoring_context,
+from promptpotter.presentation.views.display_primitives import set_display_tags  # noqa: E402
+from promptpotter.presentation.views.notebook_run import (  # noqa: E402
+    init_notebook_session,
+    prepare_scoring_context_notebook,
     run_optimization_notebook,
 )
 from promptpotter.shared.errors import ActiveSessionMismatchError  # noqa: E402
@@ -70,7 +74,6 @@ def _build_config(
         "sp_budget_ttest": samples,
         "exclude_nodes": [],
         "pipeline_overrides": {},
-        "task_context": {"task_description": task_context},
         "optimization": {
             "l1_patience": patience,
             "max_rounds": rounds,
@@ -93,7 +96,6 @@ def _build_config(
             "temperature": 0.4,
             "max_tokens": 2000,
         },
-        "pipeline_params": None,
     }
 
 
@@ -138,7 +140,7 @@ async def _run(args: argparse.Namespace) -> int:
     print(f"[smoke] dataset runs: {project_dir / 'dataset_runs'}", flush=True)
 
     try:
-        session = await init_services(
+        session = await init_notebook_session(
             backend_url=args.backend_url,
             backend_id=args.dataset,
             dataset_name=args.dataset,
@@ -163,22 +165,25 @@ async def _run(args: argparse.Namespace) -> int:
         )
         return 4
 
-    campaign_config = _build_config(
-        args.dataset,
-        samples=args.samples,
-        variants=args.variants,
-        rounds=args.rounds,
-        patience=args.patience,
-        task_context=args.task_context,
+    campaign_config = load_campaign_config(
+        _build_config(
+            args.dataset,
+            samples=args.samples,
+            variants=args.variants,
+            rounds=args.rounds,
+            patience=args.patience,
+            task_context=args.task_context,
+        )
     )
-    pipeline_params = configure_pipeline(session, campaign_config)
+    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
+    set_display_tags(session.pipeline_schema)
 
     train_slice = (session.queries or [])[: args.samples]
     if not train_slice:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
-    _baseline_sp, dataset_obj, campaign_rounds, _ = await prepare_scoring_context(
+    _baseline_sp, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
         session,
         train_slice,
         campaign_config,

@@ -94,7 +94,7 @@ promptpotter/
 
 ## Entry Points (Maturity Order)
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; `presentation/ui/campaign/` is pure display.
+1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Notebook-specific listener (`NotebookDisplay`) and orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) live in `presentation/views/notebook_display.py` and `presentation/views/notebook_run.py`.
 2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
 3. **Claude skill `/potter-run`**: `.claude/skills/potter-run/SKILL.md` — operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
 4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api/` — currently read-only.

@@ -1,10 +1,11 @@
 """Notebook display — thin ``RunListener`` adapter.
 
-Each callback: build the serializable view via the application layer
-(``build_phase_view``) or read it from the result dict, hand it to the
-shared renderer in ``presentation/views``, ``print()`` the resulting
-string. Zero domain-model mutation, zero ANSI assembly here. The
-emitter writes the same JSON to disk independently.
+Sibling of ``views/live_cli.py::CliDisplay``. Each callback builds the
+serializable view via the application layer (``build_phase_view``) or
+reads it from the result dict, hands it to the shared renderer in
+``presentation/views``, then ``print()`` s the resulting string. Zero
+domain-model mutation, zero ANSI assembly here. The emitter writes the
+same JSON to disk independently.
 """
 
 from __future__ import annotations

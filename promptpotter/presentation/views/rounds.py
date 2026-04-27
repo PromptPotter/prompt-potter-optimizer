@@ -85,7 +85,7 @@ def render_campaign_summary(rounds: list[dict]) -> str:
 
 
 def render_flip_tracking(rounds: list[dict]) -> str:
-    """Baseline → final per-query flip delta. Empty string when < 2 rounds."""
+    """Baseline → final per-query flip delta. Empty string when < 2 rounds (caller falls back)."""
     if len(rounds) < 2:
         return ""
     base_r: list[dict[str, Any]] = rounds[0].get("results", []) or []

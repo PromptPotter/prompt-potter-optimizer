@@ -9,15 +9,19 @@ from typing import Any
 
 from shared_config import MODEL_ID, export_results
 
-from promptpotter.application.campaign.config import CampaignConfig, load_campaign_config
+from promptpotter.application.campaign.config import (
+    CampaignConfig,
+    configure_and_apply_pipeline,
+    load_campaign_config,
+)
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.presentation.ui.campaign import (
-    configure_pipeline,
-    init_services,
-    prepare_scoring_context,
+from promptpotter.domain.scoring import SCORING_FUNCTIONS
+from promptpotter.presentation.views.display_primitives import set_display_tags
+from promptpotter.presentation.views.notebook_run import (
+    init_notebook_session,
+    prepare_scoring_context_notebook,
     run_optimization_notebook,
 )
-from promptpotter.domain.scoring import SCORING_FUNCTIONS
 
 BBEH_TASK_DESCRIPTION = (
     "Solve a reasoning problem from BIG-Bench Extra Hard (BBEH), which spans 23 "
@@ -87,15 +91,16 @@ async def run_bbeh_campaign(
     print(f"GLOBAL OPTIMIZATION ({len(train_norm)} train samples)")
     print("=" * 60)
 
-    session = await init_services(backend_url=backend_url, dataset_name="bbeh")
+    session = await init_notebook_session(backend_url=backend_url, dataset_name="bbeh")
     campaign_config = build_campaign_config(
         max_rounds=max_rounds,
         n_variants=n_variants,
         sp_budget_ttest=sp_budget_ttest,
     )
-    pipeline_params = configure_pipeline(session, campaign_config)
+    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
+    set_display_tags(session.pipeline_schema)
 
-    _, dataset_obj, campaign_rounds, _ = await prepare_scoring_context(
+    _, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
         session,
         train_norm,
         campaign_config,

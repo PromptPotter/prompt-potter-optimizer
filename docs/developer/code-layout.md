@@ -107,7 +107,7 @@ Always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `shared/const
 
 Features land left → right.
 
-1. **Notebook** — `notebooks/optimization_campaign.ipynb`; `presentation/ui/campaign/` is pure display.
+1. **Notebook** — `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Notebook-specific listener and orchestration live in `presentation/views/notebook_display.py` and `presentation/views/notebook_run.py`.
 2. **CLI** — `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
 3. **Claude skill `/potter-run`** — `.claude/skills/potter-run/SKILL.md`. Operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
 4. **FastAPI** — `promptpotter/main.py` mounts `presentation/api/` — currently read-only.

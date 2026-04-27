@@ -106,7 +106,7 @@ async def init_services_cli(
     )
 
 
-def _configure_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
+def _apply_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
 
     return configure_and_apply_pipeline(
@@ -315,7 +315,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})
 
-    pipeline_params = _configure_pipeline(session, campaign_config)
+    pipeline_params = _apply_pipeline(session, campaign_config)
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = list(campaign_config.exclude_nodes)
 
@@ -371,7 +371,7 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
     opt = campaign_config.optimization
 
     if getattr(args, "verbose", False):
-        from promptpotter.presentation.ui.campaign.notebook_display import NotebookDisplay
+        from promptpotter.presentation.views.notebook_display import NotebookDisplay
 
         return NotebookDisplay(
             campaign_rounds=[],
@@ -428,7 +428,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
     session.cycle_id = ctx.cycle_id
-    pipeline_params = _configure_pipeline(session, campaign_config)
+    pipeline_params = _apply_pipeline(session, campaign_config)
     train_data = session.queries or []
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
 

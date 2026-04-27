@@ -10,6 +10,14 @@ per concept.
 from __future__ import annotations
 
 from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
+from .campaign_list import (
+    render_campaign_detail,
+    render_campaign_overview,
+    render_config_diff,
+    render_experiment_dashboard,
+    render_resume_hint,
+)
+from .completion import render_completion
 from .dashboard import render_dashboard, render_status
 from .formatting import (
     generate_supplemental,
@@ -20,6 +28,7 @@ from .formatting import (
 from .hard_sample_heatmap import render_hard_sample_heatmap
 from .log_md import render_log_md
 from .phase_events import render_phase_event
+from .preflight import render_preflight
 from .round_summary import render_patience_status, render_progress_table, render_round_stats
 from .rounds import (
     render_campaign_summary,
@@ -32,8 +41,13 @@ __all__ = [
     "collect_prefix_events",
     "generate_supplemental",
     "render_adaptive_prefix",
+    "render_campaign_detail",
+    "render_campaign_overview",
     "render_campaign_summary",
+    "render_completion",
+    "render_config_diff",
     "render_dashboard",
+    "render_experiment_dashboard",
     "render_flip_tracking",
     "render_hard_sample_heatmap",
     "render_lineage",
@@ -42,7 +56,9 @@ __all__ = [
     "render_patience_status",
     "render_phase_event",
     "render_pipeline_overrides",
+    "render_preflight",
     "render_progress_table",
+    "render_resume_hint",
     "render_round_stats",
     "render_sp_diff",
     "render_status",

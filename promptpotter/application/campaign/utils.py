@@ -10,6 +10,7 @@ from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
+    from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store import Stores
 
@@ -19,6 +20,7 @@ __all__ = [
     "ConfigDiff",
     "apply_stored_overrides",
     "diff_campaign_config",
+    "load_and_apply_experiment",
     "load_stored_campaign_config",
     "save_campaign_winner",
 ]
@@ -172,3 +174,19 @@ def load_stored_campaign_config(
     if not campaign:
         return None
     return campaign.get("config")
+
+
+def load_and_apply_experiment(
+    session: Session,
+    campaign_config: CampaignConfig,
+    experiment_id: str,
+    pipeline_params: dict | None = None,
+) -> tuple[CampaignConfig, dict | None]:
+    """Load stored experiment config + merge it into the current ``CampaignConfig``."""
+    stored_cfg = load_stored_campaign_config(session.store, session.backend_id, experiment_id)
+    if not stored_cfg:
+        return campaign_config, pipeline_params
+    campaign_config, pp_override = apply_stored_overrides(campaign_config, stored_cfg)
+    if pp_override:
+        pipeline_params = pp_override
+    return campaign_config, pipeline_params
