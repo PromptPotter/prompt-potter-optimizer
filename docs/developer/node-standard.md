@@ -3,7 +3,7 @@
 **Version:** 0.5.0
 **Status:** Describes what's in the tree.
 
-The optimizer loop itself — `l1_generate`, `critique`, `l2_refine_strategy`, `l3_modify_plan` — is built from nodes. So is every backend pipeline step. Anyone can write a new node; a JSON declaration is all that's needed to register it.
+The optimizer loop itself — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — is built from nodes. So is every backend pipeline step. Anyone can write a new node; a JSON declaration is all that's needed to register it.
 
 Built-in nodes cover the common cases: fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. For pipelines that need database-backed candidate assignment, PromptPotter ships a basic assignment pipe. In practice, most pipelines reduce to one or more LLM nodes — an LLM is a universal approximator and handles the majority of pipeline tasks.
 

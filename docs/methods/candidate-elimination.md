@@ -5,7 +5,7 @@
 At each optimization round, the system evolves *N* individuals (default *N* = 5) via an LLM meta-prompt.[^gen] Each individual's fitness is measured on a shared query set **Q** of size *K* (typically 50–500), producing a per-query score in [0, 1] aggregated as a mean composite score.[^scoring] The evaluation budget per round is *N* × *K* backend calls, which dominates wall-clock time. The population is pre-enumerated — there is no parameter space to search, only a fixed set to compare.
 
 [^gen]: `promptpotter/application/optimization/nodes/l1/generate.py::l1_generate()`.
-[^scoring]: `promptpotter/shared/scoring.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
+[^scoring]: `promptpotter/domain/scoring.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
 
 ## Individual elimination
 

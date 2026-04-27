@@ -139,7 +139,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 
 ## Roadmap
 
-M0–M8 complete. **M9 next** — stable config, hierarchy refactor, multi-dataset/pipeline, file-directory UI v0. **M10** — BBEH benchmarks, ablation studies, webapp read-only views. **M11** — multi-connector, webapp Phase 2. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**M11 is the headline** — multi-connector architecture (`ConnectorProtocol`, connector registry, second backend), competitor head-to-head, webapp Phase 2 (launch + live monitoring). M9 (stable config, hexagonal layout, multi-dataset, file-directory UI v0) and M10 (BBEH benchmarks, ablation, webapp read-only) are backbone work in front of M11, not destinations. M9 Tracks 2 + 7 are done; Tracks 1, 3, 4 in progress. M0–M8 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Testing
 

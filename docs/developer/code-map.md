@@ -23,7 +23,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `QueryRecord` | `promptpotter/application/intelligence/search_memory.py` |
 | `ReplayContext` | `promptpotter/application/campaign/decisions.py` |
 | `RoundResult` | `promptpotter/application/optimization/results.py` |
-| `RoundSnapshot` | `promptpotter/application/optimization/nodes/l1/critique_payload.py` |
+| `RoundSnapshot` | `promptpotter/application/optimization/nodes/l1/critique.py` |
 | `RuntimeFailure` | `promptpotter/domain/analysis.py` |
 | `Session` | `promptpotter/application/campaign/campaign_setup.py` |
 | `SearchMemory` | `promptpotter/application/intelligence/search_memory.py` |
@@ -53,7 +53,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `validate_overrides` | `promptpotter/application/optimization/nodes/l1/generate.py` |
 
-Meta-prompt template names (`l2_refine_strategy`, `l3_modify_plan`) are declared as `ClassVar[str]` on transition classes in `nodes/layer_transitions.py` and registered in `optimizer_pipeline.json` alongside the loop.
+Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[str]` on transition classes in `nodes/layer_transitions.py` and registered in `optimizer_pipeline.json` alongside the loop.
 
 ## Prompt scheme
 
@@ -69,11 +69,11 @@ Meta-prompt template names (`l2_refine_strategy`, `l3_modify_plan`) are declared
 
 | Symbol | Module |
 |--------|--------|
-| `compile_scorer` | `promptpotter/shared/scoring.py` |
+| `compile_scorer` | `promptpotter/domain/scoring.py` |
 | `compute_composite_score` | `promptpotter/application/scoring/metrics.py` |
 | `compute_pipeline_metrics` | `promptpotter/application/scoring/metrics.py` |
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py` |
-| `SCORING_FUNCTIONS` | `promptpotter/shared/scoring.py` |
+| `SCORING_FUNCTIONS` | `promptpotter/domain/scoring.py` |
 | `score_search_point` | `promptpotter/application/scoring/search_point_scorer.py` |
 | `zero_signal_filter` | `promptpotter/application/scoring/zero_signal_filter.py` |
 
@@ -106,7 +106,7 @@ Meta-prompt template names (`l2_refine_strategy`, `l3_modify_plan`) are declared
 | Symbol | Module |
 |--------|--------|
 | `render_dashboard` | `promptpotter/presentation/views/dashboard.py` |
-| `RunListener` | `promptpotter/application/campaign/callbacks.py` |
+| `RunListener` | `promptpotter/application/campaign/runner.py` |
 
 ## Configuration
 

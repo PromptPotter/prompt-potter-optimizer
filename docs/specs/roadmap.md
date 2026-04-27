@@ -1,28 +1,82 @@
 # Roadmap: PromptPotter Optimizer
 
 **Version:** 0.14.0
-**Date:** 2026-04-12
-**Status:** Active
+**Date:** 2026-04-27
+**Status:** Active — leading toward M11
 
 ---
+
+## Where we're heading
+
+**M11 is the headline.** Multi-connector architecture, competitor comparison, and the webapp Phase 2 are the pieces that turn PromptPotter from a single-backend research artifact into a product surface — and the publication that goes alongside. Everything in front of M11 is backbone work that exists to make M11 land cleanly.
+
+M9 (stable config + hexagonal layout + multi-dataset + file-directory view model) is the structural prep — the tenant seam, the connector-friendly layout, the view model the webapp consumes. M10 (BBEH benchmarks + ablation + webapp read-only) is the publication backbone — the numbers paragraph and the first webapp slice. Both feed M11; neither is the destination.
 
 ## Milestones
 
 | Milestone | Focus | Status |
 |-----------|-------|--------|
-| M0-M5 | Specifications, Foundation, Core Optimizer, Infrastructure, Observability | Complete |
-| M6 | PipelineSchema + Pipeline Composability | Complete (Wave 4 → M11) |
-| M7 | Optimizer-as-Pipeline | Complete |
-| Parity | Entry-Point Parity (Unified Persistence) | Complete |
-| M8 | Campaign Intelligence | Complete |
-| M9 | Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 | **Next** |
-| M10 | Publication Benchmarks, Ablation Studies, Webapp Read-Only | Future |
-| M11 | Multi-Connector, Competitor Comparison, Webapp Phase 2 | Future |
+| M11 | **Multi-Connector, Competitor Comparison, Webapp Phase 2** | **Headline — Future** |
 | M11+ | Backlog | Future |
+| M10 | Publication Benchmarks, Ablation Studies, Webapp Read-Only | Backbone (Future) |
+| M9 | Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 | Backbone (in progress — Tracks 2 + 7 done; Tracks 1, 3, 4 pending) |
+| M8 | Campaign Intelligence | Complete |
+| Parity | Entry-Point Parity (Unified Persistence) | Complete |
+| M7 | Optimizer-as-Pipeline | Complete |
+| M6 | PipelineSchema + Pipeline Composability | Complete (Wave 4 → M11) |
+| M0-M5 | Specifications, Foundation, Core Optimizer, Infrastructure, Observability | Complete |
 
-Archived specs (M0-M7, governance docs, old M9) live in git history.
+Archived specs (M0-M7, governance docs, old M9, M9 hierarchy refactor) live in `docs/specs/archive/` or git history.
 
 ---
+
+## M11: Multi-Connector, Competitor Comparison, Webapp Phase 2 -- Headline
+
+The destination. Three deliverables, one milestone:
+
+1. **Multi-connector architecture.** Abstract `BackendClient` into `ConnectorProtocol`, build a connector registry, make evaluation backend-agnostic, ship a query parser registry. Resolves the remaining TermNorm chokepoints (4, 5, 7, 10, 11, 12, 13) and the workflow nodes deferred from M6 Wave 4. A second backend connector lands in the same milestone to prove the abstraction holds up under a real second concrete shape.
+2. **Competitor comparison.** Publication picks up its head-to-head numbers — MIPROv2 reproduction if reviewers demand it, cited numbers otherwise. The BBEH backbone from M10 is the substrate; M11 is the pass that turns it into "vs. competitors" rather than "ours alone."
+3. **Webapp Phase 2.** Campaign launcher, live monitoring over WebSocket / SSE, API extensions for control. The M10 read-only views become a full operator surface.
+
+**Why headline now:** the loop is functionally complete, the backbone is most of the way landed, and the next thing that meaningfully changes what PromptPotter *is* — not just how it's tuned — is connector generalization. M9 and M10 are valuable because they make M11 cheaper, not because they're terminal goals.
+
+**Entry criteria:** M10 backbone landed (publication numbers + read-only webapp slice).
+
+**Exit gate:** Second backend connector runs through the same optimization workflow with parity tests. Competitor head-to-head published. Webapp can launch and monitor a campaign end-to-end.
+
+Full spec: [`m11-multi-connector.md`](m11-multi-connector.md)
+
+---
+
+## M11+: Backlog -- Future
+
+Polish, cost tracking, MCP server mode, multimodal, self-optimization, and everything in the [Backlog table](#backlog-unscheduled) below. Ships opportunistically after M11.
+
+Full spec: [`m11-plus-backlog.md`](m11-plus-backlog.md)
+
+---
+
+## Backbone work (in front of M11)
+
+The two milestones below exist to make M11 land cleanly. They are not the destination — they're the prep that turns M11 from a rewrite into a series of seam swaps.
+
+### M9: Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 -- Backbone (in progress)
+
+Structural prep for M11. Tracks 2 (hierarchy refactor) and 7 (config aggregate redesign) shipped — the codebase is now hexagonal and `Session` carries runtime context. Track 3 (multi-dataset / multi-pipeline) is the seam M11's ConnectorProtocol will sit alongside. Track 1 (stable optimizer meta-prompts) and Track 4 (file-directory view model) feed publication and the webapp respectively.
+
+Full spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md)
+
+### M10: Publication Benchmarks, Ablation Studies, Webapp Read-Only -- Backbone (publication)
+
+The numbers paragraph. Primary benchmark is BBEH (23 diverse reasoning tasks); GSM8K and AIME are saturated at `gpt-oss-120b` and stay secondary. Ablation studies (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, l1_critique on/off) on BBEH feed the paper's "method" section. The webapp gets its first real slice — read-only views consuming M9's file-directory view model via the FastAPI API. M11 then takes the same webapp shell and adds launching + live monitoring.
+
+Full spec: [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)
+
+---
+
+## Completed milestones
+
+The work below is done; it's listed for narrative continuity and as a pointer back to specs. M0–M5 ship dates, original specs, and decision rationale live in git history (with archived spec files at `docs/specs/archive/` for the ones that earned a permanent home).
 
 ## M6: PipelineSchema + Pipeline Composability -- Complete
 
@@ -32,7 +86,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## M7: Optimizer-as-Pipeline -- Complete
 
-5-node optimizer pipeline (l1_generate, l1_evaluate, l1_critique, l2_refine_strategy, l3_modify_plan) with `llm_call()` primitive, `observed_node()` tracing, OptSearchPoint consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: see git history (pre-`c94aaa83`).
+5-node optimizer pipeline (now `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `restructure` after subsequent renames) with `llm_call()` primitive, `observed_node()` tracing, `OptSearchPoint` consolidation, warning inventory, L2 probe rounds, l2_directive bridge. Spec: see git history (pre-`c94aaa83`).
 
 ---
 
@@ -50,9 +104,9 @@ Architecture: [`../concepts/search-memory.md`](../concepts/search-memory.md), [`
 
 ---
 
-## M9: Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0 -- Next
+## M9 detail: Backbone tracks
 
-M9 is foundation work. Four parallel tracks build the scaffolding that M10 and M11 then populate with benchmark results and a full webapp. The optimization loop is functionally complete but runs on proof-of-concept meta-prompts, lives in a flat service layout unsuited to multi-tenant / webapp expansion, assumes a single dataset/pipeline per campaign, and has no shared view model between notebook, CLI, and future webapp.
+Backbone work that prepares the codebase for M11. Four parallel tracks; Tracks 2 and 7 shipped, Tracks 1, 3, 4 pending. The optimization loop was functionally complete heading into M9 but ran on proof-of-concept meta-prompts, lived in a flat service layout unsuited to multi-tenant / webapp expansion, assumed a single dataset/pipeline per campaign, and had no shared view model between notebook, CLI, and future webapp.
 
 ### Track 1: Stable Optimizer Configuration
 
@@ -69,14 +123,14 @@ promptpotter/
 ├── domain/                 # pure models, no I/O, no logging
 │   ├── search_point.py     # JobSearchPoint, PromptTemplate, OptSearchPoint
 │   ├── pipeline.py         # PipelineSchema, PipelineNode, NodeOutputSchema
-│   ├── scoring.py          # ScoringEnv, RoundResult, composite formulas
+│   ├── scoring.py          # compile_scorer, SCORING_FUNCTIONS, RoundResult, composite formulas
 │   ├── campaign.py         # LoopState, RunConfig, RunListener
 │   └── tenant.py           # TenantContext (new — the multi-tenant seam)
 │
 ├── application/            # use cases / orchestration — no direct disk or network
 │   ├── campaign/           # lifecycle, runner, round_execution, setup
 │   ├── optimization/       # L1/L2/L3 pipeline, l1_critique, escalation, layer_transitions
-│   ├── search/             # search_memory (and dormant recon producers)
+│   ├── intelligence/       # search_memory, variant_library, adaptive_prefix, rasch
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │
 ├── infrastructure/         # adapters — all I/O lives here
@@ -95,15 +149,14 @@ promptpotter/
 │
 ├── shared/                 # leaf utilities — no domain or application deps
 │   ├── errors.py           # graceful(), PauseForReviewError
-│   ├── constants.py        # PROMPT_STRING_FIELDS
-│   └── scoring.py          # compile_scorer
+│   └── constants.py        # PROMPT_STRING_FIELDS
 │
 └── config/                 # settings, APP_VERSION, logging setup
 ```
 
 How and when this lands inside M9 is open. The target shape is the contract; execution order and commit granularity are decided during the track.
 
-Spec: [`m9-hierarchy-refactor.md`](m9-hierarchy-refactor.md)
+Spec (archived as DONE): [`archive/m9-hierarchy-refactor.md`](archive/m9-hierarchy-refactor.md)
 
 ### Track 3: Multi-Dataset / Multi-Pipeline Support
 
@@ -115,7 +168,7 @@ Draft the first non-notebook UI as a plain file-directory "view model" under the
 
 ### Track 7: Config Aggregate Redesign
 
-Collapse the three-object config mess (`LoopConfig`, `SessionEnv`, `LoopEnv`) into a clean lifecycle split: `CampaignConfig` (Pydantic, user-authored, persisted) + `SessionEnv` (runtime context) + `LoopEnv` (loop infrastructure, unchanged). Delete `LoopConfig` and its lossy `from_campaign_config()` bridge. Move derived `pipeline_params`, `recon_brief`, `session_id`, `project_root` onto `SessionEnv` so user config stops being mutated at runtime. Existing `campaign.json` files parse unchanged via a flat-or-nested validator. Full spec in [`m9-stable-config-and-scaffolding.md § Track 7`](m9-stable-config-and-scaffolding.md).
+**DONE.** Collapsed the three-object config mess into `CampaignConfig` (Pydantic, user-authored, persisted) + `Session` (runtime context, formerly `SessionEnv`) + `LoopEnv` (loop infrastructure, unchanged). `LoopConfig` and its lossy `from_campaign_config()` bridge deleted. Derived `pipeline_params`, `session_id`, `project_root` live on `Session`. Recon seams removed at the same time the recon path itself was archived (`recon-archive` git tag preserves the code). Full notes in [`m9-stable-config-and-scaffolding.md § Track 7`](m9-stable-config-and-scaffolding.md).
 
 **Entry criteria:** M8 exit gate passed.
 
@@ -125,9 +178,9 @@ Full spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffold
 
 ---
 
-## M10: Publication Benchmarks, Ablation Studies, Webapp Read-Only -- Future
+## M10 detail: Publication backbone
 
-First publication slice. **Primary benchmark: BBEH** (Big-Bench Extra Hard, 23 diverse reasoning tasks). GSM8K and AIME are effectively saturated at `gpt-oss-120b` and are deprioritized; they may still appear as secondary numbers if headroom is found. HotPotQA runs second as a multi-hop QA data point — pending a saturation check, it may also be deprioritized. Head-to-head infrastructure for BBEH already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) with CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks against the same model and split.
+**Primary benchmark: BBEH** (Big-Bench Extra Hard, 23 diverse reasoning tasks). GSM8K and AIME are effectively saturated at `gpt-oss-120b` and are deprioritized; they may still appear as secondary numbers if headroom is found. HotPotQA runs second as a multi-hop QA data point — pending a saturation check, it may also be deprioritized. Head-to-head infrastructure for BBEH already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) with CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks against the same model and split.
 
 Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, l1_critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
 
@@ -136,26 +189,6 @@ Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan
 **Exit gate:** BBEH results with statistical rigor (3 seeds, CIs) including head-to-head vs CAPO/GEPA/MIPROv2/BootstrapFewShot at identical model + split. HotPotQA saturation assessed (benchmarked if non-saturated). Ablation results complete. Webapp read-only views live. First publication figures generated.
 
 Full spec: [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)
-
----
-
-## M11: Multi-Connector, Competitor Comparison, Webapp Phase 2 -- Future
-
-Generalize beyond the current single-backend setup. Abstract `BackendClient` into `ConnectorProtocol`, connector registry, backend-agnostic evaluation, query parser registry. Resolves remaining chokepoints (4,5,7,10,11,12,13) and workflow nodes (from M6 Wave 4). Second backend connector demonstrates the abstraction. Publication gets competitor head-to-head (MIPROv2 reproduction if reviewers demand it, cited numbers otherwise). Webapp Phase 2: campaign launcher, live monitoring (WebSocket/SSE), API extensions for control.
-
-**Entry criteria:** M10 exit gate passed.
-
-**Exit gate:** Second backend connector runs through the same optimization workflow. Competitor comparison published. Webapp can launch and monitor a campaign end-to-end.
-
-Full spec: [`m11-multi-connector.md`](m11-multi-connector.md)
-
----
-
-## M11+: Backlog -- Future
-
-Polish, cost tracking, MCP server mode, multimodal, self-optimization, and everything in the Backlog table below. Ships opportunistically after M11.
-
-Full spec: [`m11-plus-backlog.md`](m11-plus-backlog.md)
 
 ---
 

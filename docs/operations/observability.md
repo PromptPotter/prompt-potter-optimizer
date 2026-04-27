@@ -33,6 +33,12 @@ If Langfuse was off when a campaign ran and you want to push historical traces u
 
 ---
 
+## MLflow sink
+
+Each round can optionally be logged as an MLflow run, gated by `settings.MLFLOW_ENABLED` (default `False`). Tracking URI points at `library/mlruns/` under the tenant root, and the experiment name is `{tenant_id}/{cycle_id}` so every cycle owns its own experiment. Implementation: `promptpotter/infrastructure/tracing/sinks/mlflow_sink.py`. The sink installs alongside the file and Langfuse sinks — no other observability surface changes when it's toggled. Turn it on by setting `MLFLOW_ENABLED=true` in `.env`.
+
+---
+
 ## Enabling Langfuse
 
 Install the extra:

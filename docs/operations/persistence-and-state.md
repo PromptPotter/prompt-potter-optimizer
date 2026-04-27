@@ -67,7 +67,7 @@ Prior evaluation results are replayed without calling the backend when a new pip
 | `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
 | `log.md` | Every optimization event | Sliding-window human dashboard: header (with HITL line) · CURRENT round · LAST COMPLETED round (critique + leaderboard + optimizer-node one-liners) · EARLIER (compact) · PER-QUERY DETAIL. Overwritten, not appended |
-| `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_refine_strategy/l3_modify_plan (when escalated); plus HITL snapshot |
+| `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated); plus HITL snapshot |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
 | `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
 | `candidates/round_NNNN.json` | Each round's pre-scoring step | Generated candidate list checkpoint |
@@ -85,7 +85,7 @@ Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseli
 
 Consolidated per-round view — one JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type), `hitl` (snapshot at round end). Node types:
 
-- `l1_generate`, `l1_critique`, `l2_refine_strategy`, `l3_modify_plan` — LLM meta-prompt calls. Each has `input.template_fields` (the canonical prompt-string fields from `PROMPT_STRING_FIELDS` plus `few_shot_examples`), `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
+- `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — LLM meta-prompt calls. Each has `input.template_fields` (the canonical prompt-string fields from `PROMPT_STRING_FIELDS` plus `few_shot_examples`), `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
 - `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid/validation_failures/is_winner/eliminated_at, and `output.candidates[*].samples` lists per-query outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
 
 ### `trials/trial_NNNN.json`

@@ -42,7 +42,7 @@ The first line is a structural fact about the candidate's configuration. The sec
 
 | Surface | Status | Location |
 |---|---|---|
-| Notebook | Implemented | `promptpotter/presentation/ui/campaign/display_callbacks.py` |
+| Notebook | Implemented | `promptpotter/presentation/ui/campaign/notebook_display.py` |
 | CLI | Adopt for `show-status` / `show-results` | `promptpotter/presentation/cli/` |
 | API | Return the `⚠ / ↳` pair as a structured pair in JSON so frontends render identically | `promptpotter/presentation/api/` |
 | Webapp | Planned | — |

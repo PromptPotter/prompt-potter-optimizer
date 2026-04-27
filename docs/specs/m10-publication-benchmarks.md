@@ -151,7 +151,7 @@ Wave 4: Track 3 (benchmark results display)
 | Area | Files (post-M9 hexagonal layout) |
 |------|-------|
 | Dataset loaders | `application/datasets/builder.py` |
-| Scoring | `shared/scoring.py` |
+| Scoring | `domain/scoring.py` |
 | Export pipeline | `presentation/cli/` (was `cli/export_results.py`), `application/campaign/export.py`, `application/campaign/reporting.py` |
 | FastAPI API | `presentation/api/` (was `main.py` + `routers/`) |
 | Benchmark methodology | `docs/research/benchmarks.md` |

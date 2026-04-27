@@ -24,15 +24,15 @@ M9 delivers the foundation. M10 populates it with benchmark results. M11 general
 
 ### Track 1: Stable Optimizer Configuration
 
-**Problem:** Meta-prompts in `promptpotter/config/optimizer_prompts/` are functional but proof-of-concept:
+**Problem:** Meta-prompts in `promptpotter/application/optimization/prompts/` are functional but proof-of-concept:
 
 | Prompt | File | Temperature | Max Tokens | State |
 |--------|------|-------------|------------|-------|
-| L1 Generate | `meta_scan_aware.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
+| L1 Generate | `l1_generate.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
 | L1 Critique | `l1_critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
-| L1 Critique (negative) | `l1_critique_negative.json` | 0.3 | 4096 | Fallback for low accuracy |
-| L2 Refine | `l2_refine_strategy.json` | 0.3 | 2048 | Working, clean layer transition |
-| L3 Replan | `l3_modify_plan.json` | 0.5 | 2048 | Working, strategic pivots |
+| L2 Context | `l2_context.json` | 0.3 | 2048 | Working, clean layer transition |
+| L3 Plan | `l3_plan.json` | 0.5 | 2048 | Working, strategic pivots |
+| Restructure | `restructure.json` | 0.3 | 4096 | One-time at cycle start |
 
 Current optimizer model: `openai/gpt-oss-120b` via Groq.
 
@@ -51,7 +51,7 @@ Current optimizer model: `openai/gpt-oss-120b` via Groq.
    | Optimizer cost | Total tokens spent on optimizer LLM calls | Lower |
 
 2. **Systematic improvements.** Prompt language refinement, temperature/max_tokens tuning per node, `thinking_style` variants, `answer_format` schema variations, model selection.
-3. **Final configs committed** to `promptpotter/config/optimizer_prompts/` with rationale. Feeds paper's "method" section.
+3. **Final configs committed** to `promptpotter/application/optimization/prompts/` with rationale. Feeds paper's "method" section.
 
 **Bootstrap cost mitigation:** Tune meta-prompts against **BBEH mini** (10/task train subset, seed=42 — same split as M10's head-to-head). Small sample, diverse reasoning tasks, known non-saturated at `gpt-oss-120b`. Reserve the full 3-seed protocol for M10's publication numbers. GSM8K and AIME are saturated at this model and are not useful signal for meta-prompt tuning; HotPotQA's saturation is unknown and decided in M10 Wave 1.
 
@@ -59,7 +59,7 @@ Current optimizer model: `openai/gpt-oss-120b` via Groq.
 
 ### Track 2: Hierarchy Refactor (Hexagonal Layout)
 
-See standalone spec: [`m9-hierarchy-refactor.md`](m9-hierarchy-refactor.md).
+See standalone spec (archived as DONE): [`archive/m9-hierarchy-refactor.md`](archive/m9-hierarchy-refactor.md).
 
 Shape `promptpotter/` into `domain / application / infrastructure / presentation / shared / config`. Move-only; fat-file splits deferred to follow-up specs. Tenant seam shaped (`domain/tenant.py` + optional `SessionEnv.tenant`) but not enforced.
 
@@ -205,6 +205,11 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 
 ### Track 7: Config Aggregate Redesign — **DONE**
 
+Shipped: `LoopConfig` deleted, `CampaignConfig` is Pydantic with nested sub-models, runtime context lives on `Session` (formerly `SessionEnv`). Recon seams (`ReconConfig`, `recon_brief`, `--from recon:<id>`, `recon_report.py`) were removed in the same branch when the recon path itself was archived; `application/recon/` is gone from `main` and preserved at the `recon-archive` git tag.
+
+<details>
+<summary>Original migration spec (kept for archaeology)</summary>
+
 **Problem:** Three objects carry state into the optimization loop and their boundaries are accidental:
 
 1. **`LoopConfig`** (`application/campaign/config.py`) — Pydantic, ~25 fields. Mixes user knobs (`l1_patience`, `creativity`, `elimination_alpha`, …) with runtime context (`session_id`, `backend_id`, `project_root`, `pipeline_schema`, `recon_brief`, `dataset_name`). Two lifecycles, one object.
@@ -286,6 +291,8 @@ LoopEnv  (per-run infrastructure, transient)
 | `model_validator` accepting legacy shape hides input errors | User typos land silently in "unknown section" | Validator raises `ValidationError` on unknown top-level keys; within sub-models Pydantic's `extra='forbid'` catches typos. |
 | `pipeline_params` off user config breaks notebook cells that inspect it | Notebook UX regressions not caught by tests | Add a smoke test that reads `session.pipeline_params` where `campaign_config["pipeline_params"]` was previously read. |
 
+</details>
+
 ---
 
 ## Wave Sequencing
@@ -329,10 +336,10 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 
 | Area | Files |
 |------|-------|
-| Meta-prompts | `promptpotter/config/optimizer_prompts/*.json` |
+| Meta-prompts | `promptpotter/application/optimization/prompts/*.json` |
 | Optimizer pipeline | `promptpotter/application/optimization/pipeline.py`, `optimizer_pipeline.json` |
 | LLM client | `promptpotter/infrastructure/llm/client.py` |
-| Scoring | `promptpotter/shared/scoring.py` |
+| Scoring | `promptpotter/domain/scoring.py` |
 | Dataset builder | `promptpotter/application/datasets/builder.py` |
 | Dataset store | `promptpotter/infrastructure/store/dataset_run_store.py` |
 | Session store | `promptpotter/infrastructure/store/session_store.py` |

@@ -4,7 +4,7 @@ Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `in
 
 ```
 promptpotter/
-├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, ScoringEnv — pure, no I/O
+├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema, scoring formula compile — pure, no I/O
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration (Session, RunListener, Decision records)
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
@@ -13,7 +13,7 @@ promptpotter/
 │   └── datasets/
 ├── infrastructure/  # backend/, store/, llm/, tracing/, persistence/
 ├── presentation/    # cli/, api/, ui/, views/ — thin per-surface adapters
-├── shared/          # leaf utilities (errors, constants, statistics, scoring formula compile)
+├── shared/          # leaf utilities (errors, constants, statistics)
 └── config/          # settings, APP_VERSION, logging
 ```
 
@@ -92,7 +92,7 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway for scoring archival and observability. Three early-exit paths live in `application/optimization/nodes/l1/measure.py::score_candidates` — full-run cache hit, validation-failure synthetic zero, and mid-evaluation escalation — detailed in [self-healing-internals.md](self-healing-internals.md).
 
-Per-node cache reuse happens inside `measure_sample()` in `application/scoring/sample_measurement.py`. The gateway accepts a `ScoringEnv` bundle (in `domain/scoring.py`) with backend client, store, backend id, pipeline schema, observer, and the compiled scorer.
+Per-node cache reuse happens inside `measure_sample()` in `application/scoring/sample_measurement.py`. `score_search_point` reads infrastructure (store, backend client, backend id, pipeline schema, observer, compiled scorer) directly off the `Session` argument; the previously separate `ScoringEnv` bundle was inlined when callers all converged on `Session`. The compiled scorer lives in `domain/scoring.py` (`compile_scorer`, `SCORING_FUNCTIONS`).
 
 ---
 
