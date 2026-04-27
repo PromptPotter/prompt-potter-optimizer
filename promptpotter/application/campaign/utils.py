@@ -32,20 +32,6 @@ class ConfigDiff:
     current: Any
 
 
-# Flat key → path on ``CampaignConfig``. Used by both ``apply_stored_overrides``
-# (write) and ``diff_campaign_config`` (read). Keys mirror ``HOT_UPDATEABLE_KEYS``.
-_CAMPAIGN_FIELDS: dict[str, tuple[str, ...]] = {
-    "max_rounds": ("optimization", "max_rounds"),
-    "l1_patience": ("optimization", "l1_patience"),
-    "n_variants": ("optimization", "n_variants"),
-    "creativity": ("optimization", "creativity"),
-    "improvement_threshold": ("optimization", "improvement_threshold"),
-    "model": ("optimizer_llm", "model"),
-    "sp_budget_ttest": ("sp_budget_ttest",),
-    "seed": ("optimization", "seed"),
-}
-
-
 def apply_stored_overrides(
     campaign_config: CampaignConfig,
     stored_cfg: dict,
@@ -57,14 +43,21 @@ def apply_stored_overrides(
     writing ``session.pipeline_params = pp``.
     """
     patch = campaign_config.model_dump()
-    for key, path in _CAMPAIGN_FIELDS.items():
-        val = stored_cfg.get(key)
-        if val is None:
-            continue
-        target = patch
-        for p in path[:-1]:
-            target = target.setdefault(p, {})
-        target[path[-1]] = val
+    opt = patch.setdefault("optimization", {})
+    for key in (
+        "max_rounds",
+        "l1_patience",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "seed",
+    ):
+        if (val := stored_cfg.get(key)) is not None:
+            opt[key] = val
+    if (model := stored_cfg.get("model")) is not None:
+        patch.setdefault("optimizer_llm", {})["model"] = model
+    if (sp := stored_cfg.get("sp_budget_ttest")) is not None:
+        patch["sp_budget_ttest"] = sp
     updated = CampaignConfig.model_validate(patch)
 
     stored_pp = stored_cfg.get("pipeline_params")
@@ -129,27 +122,28 @@ def save_campaign_winner(
     }
 
 
-def _read_current(config: CampaignConfig, path: tuple[str, ...]) -> Any:
-    value: Any = config
-    for p in path:
-        value = getattr(value, p, None)
-        if value is None:
-            return None
-    return value
-
-
 def diff_campaign_config(
     stored_config: dict,
     campaign_config: CampaignConfig,
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict[str, ConfigDiff]:
     """Compute parameter differences between stored and current campaign config."""
-    diffs: dict[str, ConfigDiff] = {}
-    for flat_key, path in _CAMPAIGN_FIELDS.items():
-        sv = stored_config.get(flat_key)
-        cv = _read_current(campaign_config, path)
-        if sv != cv:
-            diffs[flat_key] = ConfigDiff(stored=sv, current=cv)
+    opt = campaign_config.optimization
+    current = {
+        "max_rounds": opt.max_rounds,
+        "l1_patience": opt.l1_patience,
+        "n_variants": opt.n_variants,
+        "creativity": opt.creativity,
+        "improvement_threshold": opt.improvement_threshold,
+        "seed": opt.seed,
+        "model": campaign_config.optimizer_llm.model,
+        "sp_budget_ttest": campaign_config.sp_budget_ttest,
+    }
+    diffs: dict[str, ConfigDiff] = {
+        key: ConfigDiff(stored=stored_config.get(key), current=cv)
+        for key, cv in current.items()
+        if stored_config.get(key) != cv
+    }
 
     sp = stored_config.get("pipeline_params")
     cp = pipeline_schema.to_pipeline_params() if pipeline_schema else None

@@ -42,7 +42,6 @@ def build_campaign_emitter(
     campaign_config: CampaignConfig,
     *,
     baseline_accuracy: float,
-    dataset_count: int | None = None,
     resumed_from_round: int | None = None,
     recorder_provider: Any | None = None,
     phase_view_builder: Any | None = None,
@@ -53,21 +52,15 @@ def build_campaign_emitter(
     )
 
     opt = campaign_config.optimization
-    active_steps = list(session.pipeline_schema.active_steps) if session.pipeline_schema else []
     return CampaignPersistenceEmitter.for_session(
         baseline_accuracy,
         session.cycle_id,
         project_root=session.project_root,
         session_id=session.session_id,
-        max_rounds=opt.max_rounds or 999,
         l1_patience=opt.l1_patience,
-        active_nodes=active_steps,
-        model=campaign_config.optimizer_llm.model or "",
         n_variants=opt.n_variants,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         resumed_from_round=resumed_from_round,
-        dataset_count=dataset_count,
-        backend_id=session.backend_id,
         recorder_provider=recorder_provider,
         phase_view_builder=phase_view_builder,
     )

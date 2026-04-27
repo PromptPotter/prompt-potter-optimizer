@@ -22,7 +22,7 @@ To resume a campaign, run `python -m promptpotter optimize`. No need to `init` a
 Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, `events.jsonl`, prompts.
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
 Full tree:
@@ -38,7 +38,7 @@ Full tree:
     campaigns/{cycle_id}/              # per-cycle: all artifacts for one optimization
       index.json                       # campaign metadata + trial index
       dashboard.json                   # live counters
-      output.log / log.md
+      output.log                       # append-only HIT/MISS history
       trials/trial_NNNN.json           # resume source of truth
       candidates/round_NNNN.json       # pre-scoring checkpoint
       rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated) + HITL snapshot
@@ -66,7 +66,6 @@ Prior evaluation results are replayed without calling the backend when a new pip
 | `dashboard.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
 | `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
-| `log.md` | Every optimization event | Sliding-window human dashboard: header (with HITL line) · CURRENT round · LAST COMPLETED round (critique + leaderboard + optimizer-node one-liners) · EARLIER (compact) · PER-QUERY DETAIL. Overwritten, not appended |
 | `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated); plus HITL snapshot |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
 | `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |

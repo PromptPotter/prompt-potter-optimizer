@@ -1,10 +1,10 @@
 """Dashboard / status renderers — consume the slim ``dashboard.json``.
 
-``dashboard.json`` is the machine-readable live-state scalar file. The
-human-readable log (per-round narrative, per-query detail, optimizer
-node I/O) lives in ``log.md`` — that's the file to cat when you want to
-read what's happening. This renderer exists for ``show-status`` and
-shows only what ``dashboard.json`` carries.
+``dashboard.json`` is the machine-readable live-state scalar file. For
+narrative round views (per-round leaderboards, critiques, node I/O),
+read ``trials/trial_NNNN.json`` and ``candidates/round_NNNN.json``
+directly. This renderer exists for ``show-status`` and shows only what
+``dashboard.json`` carries.
 """
 
 from __future__ import annotations
@@ -76,8 +76,9 @@ def render_status(
 
     HITL signals are nested inside ``dashboard["hitl"]`` so the separate
     ``control`` arg is accepted but ignored (kept for caller shape). For
-    a narrative view of the run (round summary, critique, leaderboard,
-    optimizer node I/O, per-query detail), read ``log.md`` instead.
+    a narrative view of a finished round (summary, critique, leaderboard,
+    optimizer node I/O, per-query detail), read
+    ``trials/trial_NNNN.json`` and ``candidates/round_NNNN.json``.
     """
     del control
     parts = [render_dashboard(dashboard)]

@@ -102,11 +102,36 @@ promptpotter/
 
 Features land left → right. Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`; live-phase per-query output is notebook-only pending M9 Track 4.
 
+## Superuser Monitoring (live runs)
+
+The cleanest live-monitoring setup for an operator running `python -m promptpotter optimize`:
+
+1. **Open `campaigns/{cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, HITL signals, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence). Renderer: [`presentation/views/dashboard.py::render_dashboard()`](promptpotter/presentation/views/dashboard.py), also reachable via `python -m promptpotter show-status`.
+
+2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live_cli.py::CliDisplay`](promptpotter/presentation/views/live_cli.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
+
+3. **Drill into peer files in the same `campaigns/{cycle_id}/` directory when the dashboard isn't enough:**
+   - `output.log` — append-only HIT/MISS history (raw, ungrouped, fast to tail).
+   - `phase_events.jsonl` — structured event trace, one JSON per line.
+   - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
+   - `candidates/round_NNNN.json` — full per-round node I/O including the L1 leaderboard with scores, eliminations, and change descriptions.
+   - `index.json` — campaign metadata + trial index.
+
+`log.md` was deleted in this cycle — it duplicated dashboard.json + trials + candidates with no unique fields. For a narrative view of a finished round, read `trials/trial_NNNN.json` and `candidates/round_NNNN.json` directly, or run `python -m promptpotter show-results`.
+
+**Alternatives to the dashboard.json-tail workflow:**
+
+- **`/potter-run` skill** ([`.claude/skills/potter-run/SKILL.md`](.claude/skills/potter-run/SKILL.md)) — chat-driven operator session that preps configs, runs `optimize`, reads dashboard.json + trials between rounds, and summarizes. Combines well with the dashboard.json tail.
+- **Notebook** (`notebooks/optimization_campaign.ipynb`) — drives the same loop in-process; live-phase per-query rendering is currently notebook-only.
+- **Webapp** — minimal read-only dashboard planned on top of the FastAPI surface (`promptpotter/main.py`); zero code today.
+
+The HITL control file (`control.json`) lives in the **session** directory (`sessions/{session_id}/`), not the cycle directory — pause/resume/stop via `python -m promptpotter control pause|resume|stop` or by editing the file directly.
+
 **Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `log.md`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, events.jsonl, prompts.
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
 Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.

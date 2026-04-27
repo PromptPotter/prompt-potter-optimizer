@@ -68,7 +68,7 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
     campaigns/{cycle_id}/                # per-cycle: all artifacts for one optimization
       index.json                         # campaign metadata + trial index
       dashboard.json                     # live counters
-      output.log / log.md
+      output.log                         # append-only HIT/MISS history
       trials/trial_NNNN.json             # resume source of truth
       candidates/round_NNNN.json         # pre-scoring checkpoint
       rounds/round_NNN.json              # per-round LLM action audit

@@ -31,7 +31,6 @@ from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
     CampaignPhase,
-    PhaseEvent,
     StopLoop,
     StopReason,
     emit_phase,
@@ -47,9 +46,9 @@ __all__ = ["RunListener", "run_optimization"]
 
 
 class RunListener:
-    """Direct-dispatch listener: persistence emitter + optional display + control hook."""
-
-    __slots__ = ("control", "display", "emitter")
+    """Fan-out to emitter + display sinks; ``__getattr__`` dispatches every
+    ``on_*`` callback to whichever sinks are present. ``on_checkpoint`` is
+    explicit because it returns a value rather than fanning out."""
 
     def __init__(
         self,
@@ -62,52 +61,22 @@ class RunListener:
         self.display = display
         self.control = control
 
-    def on_phase(self, event: PhaseEvent) -> None:
-        if self.emitter is not None:
-            self.emitter.on_phase(event)
-        if self.display is not None:
-            self.display.on_phase(event)
+    @property
+    def _sinks(self) -> tuple[Any, ...]:
+        return tuple(s for s in (self.emitter, self.display) if s is not None)
 
-    def on_candidate_started(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pp_override: dict | None,
-    ) -> None:
-        if self.emitter is not None:
-            self.emitter.on_candidate_started(idx, total, changes_description, pp_override)
-        if self.display is not None:
-            self.display.on_candidate_started(idx, total, changes_description, pp_override)
+    def __getattr__(self, name: str) -> Callable[..., None]:
+        if not name.startswith("on_"):
+            raise AttributeError(name)
 
-    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        if self.emitter is not None:
-            self.emitter.on_candidate_scored(idx, total, scores)
-        if self.display is not None:
-            self.display.on_candidate_scored(idx, total, scores)
+        def fan_out(*args: Any, **kwargs: Any) -> None:
+            for sink in self._sinks:
+                getattr(sink, name)(*args, **kwargs)
 
-    def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
-        if self.emitter is not None:
-            self.emitter.on_sample_started(ci, ct, qi, qt, query_text)
-        if self.display is not None:
-            self.display.on_sample_started(ci, ct, qi, qt, query_text)
-
-    def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
-        if self.emitter is not None:
-            self.emitter.on_sample_scored(ci, ct, qi, qt, result)
-        if self.display is not None:
-            self.display.on_sample_scored(ci, ct, qi, qt, result)
-
-    def on_round_complete(self, rr: RoundResult, l1_stall_count: int) -> None:
-        if self.emitter is not None:
-            self.emitter.on_round_complete(rr, l1_stall_count)
-        if self.display is not None:
-            self.display.on_round_complete(rr, l1_stall_count)
+        return fan_out
 
     def on_checkpoint(self, name: str) -> str | None:
-        if self.control is not None:
-            return self.control(name)
-        return None
+        return self.control(name) if self.control is not None else None
 
 
 async def _escalate_or_stop(
@@ -469,7 +438,6 @@ async def run_optimization(
             session,
             campaign_config,
             baseline_accuracy=baseline.baseline_acc,
-            dataset_count=len(session.scoring_dataset) if session.scoring_dataset else None,
             resumed_from_round=session.resumed_from_round,
             recorder_provider=get_round_recorder,
             phase_view_builder=build_phase_view,

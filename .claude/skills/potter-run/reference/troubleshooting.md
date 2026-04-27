@@ -9,8 +9,8 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `[CLIENT]` | Bad request (invalid params, missing fields) | Check command flags and config |
 | `[SERVER]` | Backend error (500, timeout) | Check backend status: `curl -s {url}/status` |
 | `[CONNECTION]` | Can't reach backend | Is the backend running? Check URL and port |
-| `[PIPELINE]` | Pipeline execution error (node failure) | Check `campaign_log.md` for node-level details |
-| `[UNKNOWN]` | Unclassified | Read full error + `campaign_output.log` |
+| `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `trials/trial_NNNN.json` and `candidates/round_NNNN.json` for node-level details |
+| `[UNKNOWN]` | Unclassified | Read full error + `output.log` |
 
 ## Stop Reason → Recovery
 
@@ -20,7 +20,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `perfect_score` | 100% accuracy achieved | Done. Run `results --save` to persist the winner. |
 | `max_rounds` | Hit maximum round limit | May need more rounds (`max_rounds` in config) or L2/L3 intervention. |
 | `interrupted` | Ctrl+C during optimization | Resume with `optimize`. State was checkpointed. |
-| `escalation_abort` | Backend degradation too severe for L2 to fix | Read `campaign_log.md` for degradation details. May need backend fix. |
+| `escalation_abort` | Backend degradation too severe for L2 to fix | Read `output.log` and the latest `trials/trial_NNNN.json` for degradation details. May need backend fix. |
 | `l2_patience_exhausted` | L2 tried `l2_patience` times, no improvement | Consider manual task_context changes or different scan axes. |
 | `l3_patience_exhausted` | All three layers exhausted | Optimization has converged. Review results for best achieved. |
 | `hard_cap_reached` | Hit absolute round limit (100) | Very rare. Review if L2/L3 is cycling without progress. |
@@ -28,15 +28,17 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `user_paused` | User sent `control --pause` | `control --resume` to continue, `control --stop` to end. |
 | `user_stopped` | User sent `control --stop` | Campaign ended. Run `results` to see what was achieved. |
 
-## Reading campaign_log.md
+## Reading run state
 
-This is the primary diagnostic tool. It's a structured markdown log with sections per phase:
+The primary diagnostic surfaces (all under `campaigns/{cycle_id}/`):
 
-- **Init section**: baseline accuracy, active pipeline, dataset count
-- **Round sections**: per-round accuracy, winner config, L1 critique summary, L2/L3 escalation notes
-- **Completion section**: final accuracy, stop reason, total rounds
+- **`dashboard.json`** — live scalar state (phase, round, candidate, baseline / best / current accuracy, in-flight query, HITL signals, current_round node I/O).
+- **`trials/trial_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, l2_directive, escalation state.
+- **`candidates/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O.
+- **`output.log`** — append-only HIT/MISS history (raw, ungrouped, fast to tail).
+- **`phase_events.jsonl`** — structured event trace, one JSON per line.
 
-Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts.
+Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts. Run `python -m promptpotter show-status` for a rendered view of `dashboard.json`.
 
 ## Stall Recovery Strategies
 

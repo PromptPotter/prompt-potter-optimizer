@@ -92,7 +92,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## Parity: Entry-Point Parity -- Complete
 
-Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log`, `log.md` (per-cycle) plus `session.json`, `journal.md`, `notes.md`, `control.json` (per-session). `FileControlSurface` extracted for bidirectional control. Parity tests enforce both artifact sets. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
+Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log`, `phase_events.jsonl` (per-cycle) plus `session.json`, `journal.md`, `notes.md`, `control.json` (per-session). `FileControlSurface` extracted for bidirectional control. Parity tests enforce both artifact sets. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
 
 ---
 

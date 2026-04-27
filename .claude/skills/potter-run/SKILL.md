@@ -104,7 +104,7 @@ Skip only if the user says to.
 
 ## Phase 4: Optimize
 
-**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phases 0–2, then let them launch. On their return, read `log.md` + `dashboard.json` and summarize per round:
+**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phases 0–2, then let them launch. On their return, read `dashboard.json` (live state) + the latest `trials/trial_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
 
 ```
 ROUND {N} COMPLETE
@@ -116,7 +116,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** via `show-status` or `dashboard.json`. Diagnose via `log.md` (round summary) and `output.log` (per-query HIT/MISS). Control via `control --pause|--resume|--stop` or edit `control.json`.
+**Monitor** via `show-status` or `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `candidates/round_NNNN.json` (per-candidate node I/O), and `output.log` (per-query HIT/MISS). Control via `control --pause|--resume|--stop` or edit `control.json`.
 
 **Incremental persistence.** Every query lands in `library/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
@@ -134,7 +134,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/three-layer
 - **Defer to configs.** Report what's on disk; don't second-guess the configured hyperparameters, data volume, or pipeline choice unless the user asks.
 - Interpret results, don't dump CLI output.
 - **Kill command is situational** — surface `tasklist | findstr python → taskkill //F //PID <pid>` only when recommending a long-running launch in *this* turn.
-- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → check `log.md` in the campaign dir.
+- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → check `output.log` and the latest `trials/trial_NNNN.json` in the campaign dir.
 - Respect user-specified timeouts/stop methods exactly; ask before assuming.
 
 ---

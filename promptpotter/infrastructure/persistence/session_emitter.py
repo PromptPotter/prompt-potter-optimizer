@@ -1,4 +1,4 @@
-"""Campaign session emitter — live dashboard + audit log writer."""
+"""Campaign session emitter — live dashboard.json + output.log writer."""
 
 from __future__ import annotations
 
@@ -11,11 +11,6 @@ from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.infrastructure.persistence.control import ensure_control_file
-from promptpotter.infrastructure.persistence.dashboard_md import (
-    fmt_sample_line,
-    render_dashboard_md,
-    round_summary_from_trial,
-)
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
@@ -47,7 +42,6 @@ CAMPAIGN_ARTIFACTS = {
     "index.json",
     "dashboard.json",
     "output.log",
-    "log.md",
     "optimize_result.json",
     "hard_samples.json",
     "phase_events.jsonl",
@@ -133,56 +127,47 @@ def _make_initial_state(
     }
 
 
-def _round_summary_from_round_result(
-    rr: RoundResult, current_round: dict[str, Any]
-) -> dict[str, Any]:
-    """Build dashboard round_summary; same schema as ``round_summary_from_trial``."""
-    candidates = current_round.get("candidates") or {}
-    leaderboard: list[dict[str, Any]] = []
-    # Prefer authoritative RoundResult scores; fall back to live accumulator.
-    scored = list(rr.candidate_scores or [])
-    if scored:
-        for idx, cs in enumerate(scored):
-            cand = candidates.get(idx, {})
-            leaderboard.append(
-                {
-                    "idx": idx,
-                    "accuracy": float(cs.get("accuracy", 0.0)),
-                    "hits": int(cs.get("hits", 0)),
-                    "total": int(cs.get("total", 0)),
-                    "label": cs.get("changes_description")
-                    or cand.get("label")
-                    or cs.get("label")
-                    or "",
-                    "is_winner": bool(cs.get("is_winner", False)),
-                    "eliminated_at": cs.get("eliminated_at"),
-                }
-            )
-    else:
-        for idx in sorted(candidates.keys()):
-            c = candidates[idx]
-            s = c.get("scores") or {}
-            leaderboard.append(
-                {
-                    "idx": idx,
-                    "accuracy": float(s.get("accuracy", 0.0)),
-                    "hits": int(s.get("hits", 0)),
-                    "total": int(s.get("total", 0)),
-                    "label": c.get("label") or "",
-                    "is_winner": False,
-                    "eliminated_at": None,
-                }
-            )
+# Per-query terminator badge for the compact ``fmt_sample_line`` rendering;
+# unmapped nodes render as the first two characters of the node name.
+_NODE_BADGES: dict[str, str] = {
+    "llm_only": "ai",
+    "llm_ranking": "ai",
+    "entity_profiling": "ai",
+    "cache_lookup": "cache",
+    "fuzzy_matching": "fz",
+    "token_matching": "tk",
+    "web_search": "ws",
+}
 
-    return {
-        "round": rr.round,
-        "accuracy": float(rr.accuracy),
-        "hits": int(rr.hits),
-        "total": int(rr.total),
-        "winner_label": rr.label or "",
-        "improved": bool(rr.improved),
-        "leaderboard": leaderboard,
-    }
+
+def _trim(text: str, n: int) -> str:
+    t = str(text or "").replace("\n", " ").strip()
+    return t if len(t) <= n else t[: n - 1] + "…"
+
+
+def fmt_sample_line(s: dict[str, Any]) -> str:
+    """One compact line per query for ``dashboard.json::current_round.nodes
+    .l1_score.output.candidates[].samples`` — keeps the live dashboard
+    scannable instead of bloating it with full ~2 kB query strings."""
+    qi = int(s.get("qi", 0))
+    hit = bool(s.get("hit"))
+    cached = bool(s.get("cached"))
+    time_s = float(s.get("time_s") or 0.0)
+    badge = _NODE_BADGES.get(s.get("terminated_at") or "", (s.get("terminated_at") or "?")[:2])
+    cache_icon = "📖" if cached else " "
+    mark = "HIT " if hit else "MISS"
+    query = _trim(s.get("query") or "", 42)
+    pred = _trim(s.get("prediction") or "", 28)
+    gt = _trim(s.get("ground_truth") or "", 20)
+    in_tok = s.get("input_tokens")
+    out_tok = s.get("output_tokens")
+    tok_seg = ""
+    if in_tok is not None or out_tok is not None:
+        tok_seg = f" in={in_tok if in_tok is not None else '-'} out={out_tok if out_tok is not None else '-'}"
+    return (
+        f"  {time_s:4.1f}s #{qi:03d} {mark} [{badge}]{cache_icon}"
+        f"{tok_seg} -> '{pred}' gt:'{gt}' q:'{query}'"
+    )
 
 
 class CampaignPersistenceEmitter:
@@ -195,23 +180,17 @@ class CampaignPersistenceEmitter:
         campaign_dir: Path,
         session_dir: Path,
         *,
-        max_rounds: int,
         l1_patience: int,
-        active_nodes: list[str],
-        model: str,
         n_variants: int,
         sp_budget_ttest: int,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
-        dataset_count: int | None = None,
-        backend_id: str | None = None,
         recorder_provider: RecorderProvider | None = None,
         phase_view_builder: PhaseViewBuilder | None = None,
     ) -> None:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
         self.log_path = campaign_dir / "output.log"
-        self.log_md_path = campaign_dir / "log.md"
         self.result_path = campaign_dir / "optimize_result.json"
         self.phase_events_path = campaign_dir / "phase_events.jsonl"
         self.session_dir = session_dir
@@ -235,18 +214,7 @@ class CampaignPersistenceEmitter:
         self._round_start = time.monotonic()
         self._query_start: float | None = None
 
-        # Setup info — kept off dashboard.json; rendered in log.md header.
-        self._max_rounds = max_rounds
-        self._model = model
-        self._active_nodes = list(active_nodes)
-        self._dataset_count = dataset_count
-        self._backend_id = backend_id
-
-        # ``_current_round`` accumulates the in-flight round; ``_round_history``
-        # holds completed summaries (oldest-first), rebuilt from trials/ on resume.
         self._current_round: dict[str, Any] = {"round": 0, "candidates": {}}
-        self._round_history: list[dict[str, Any]] = []
-        self._rehydrate_history_from_disk()
 
         self._persist()
 
@@ -279,22 +247,17 @@ class CampaignPersistenceEmitter:
         *,
         project_root: str,
         session_id: str,
-        max_rounds: int,
         l1_patience: int,
-        active_nodes: list[str],
-        model: str,
         n_variants: int,
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
-        dataset_count: int | None = None,
-        backend_id: str | None = None,
         recorder_provider: RecorderProvider | None = None,
         phase_view_builder: PhaseViewBuilder | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Build emitter, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
-        On ``--from N`` rewind, dashboard counters past the surviving trials
-        are clamped to avoid phantom rounds."""
+        On ``--from N`` rewind, the ``best`` counter past the surviving trials
+        is clamped to avoid a phantom value."""
         if not (project_root and session_id and cycle_id):
             return None
 
@@ -311,10 +274,6 @@ class CampaignPersistenceEmitter:
             except (json.JSONDecodeError, OSError):
                 resume_from = None
 
-        # On a mid-cycle rewind, ``best`` might reference a round that got
-        # invalidated. The _rehydrate_history_from_disk step on the emitter
-        # repopulates _round_history from surviving trials/ — recomputing
-        # best from that is the source of truth, so clamp it here.
         if resume_from is not None and resumed_from_round is not None:
             completed = max(resumed_from_round - 1, 0)
             if completed == 0:
@@ -323,16 +282,11 @@ class CampaignPersistenceEmitter:
         return cls(
             campaign_dir,
             session_dir,
-            max_rounds=max_rounds,
             l1_patience=l1_patience,
-            active_nodes=active_nodes,
-            model=model,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
             resume_from=resume_from,
             cycle_id=cycle_id,
-            dataset_count=dataset_count,
-            backend_id=backend_id,
             recorder_provider=recorder_provider,
             phase_view_builder=phase_view_builder,
         )
@@ -542,11 +496,6 @@ class CampaignPersistenceEmitter:
         # runner.py flush() — produces one consolidated rounds/round_NNNN.json.
         self._deposit_round_recorder_state(round_result)
 
-        # Flush in-flight round into history (RoundResult.candidate_scores is
-        # authoritative; fall back to accumulator if empty).
-        self._round_history.append(
-            _round_summary_from_round_result(round_result, self._current_round)
-        )
         self._current_round = {"round": round_result.round + 1, "candidates": {}}
         self._persist()
 
@@ -679,31 +628,3 @@ class CampaignPersistenceEmitter:
             json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
-        self._write_dashboard_md()
-
-    def _write_dashboard_md(self) -> None:
-        content = render_dashboard_md(
-            self.campaign_dir,
-            self._state,
-            self._current_round,
-            self._round_history,
-            max_rounds=self._max_rounds,
-            model=self._model,
-            active_nodes=self._active_nodes,
-            dataset_count=self._dataset_count,
-            backend_id=self._backend_id,
-            elapsed_s=time.monotonic() - self._workflow_start,
-        )
-        self.log_md_path.write_text(content, encoding="utf-8")
-
-    def _rehydrate_history_from_disk(self) -> None:
-        # Rebuild round history from trials/ so EARLIER + LAST COMPLETED survive restart.
-        trials_dir = self.campaign_dir / "trials"
-        if not trials_dir.exists():
-            return
-        for path in sorted(trials_dir.glob("trial_*.json")):
-            try:
-                data = json.loads(path.read_text(encoding="utf-8"))
-            except (json.JSONDecodeError, OSError):
-                continue
-            self._round_history.append(round_summary_from_trial(data))

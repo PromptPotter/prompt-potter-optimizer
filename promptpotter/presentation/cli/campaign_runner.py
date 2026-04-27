@@ -457,7 +457,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         session,
         campaign_config,
         baseline_accuracy=pre_baseline_acc,
-        dataset_count=ctx.state["dataset_count"],
         resumed_from_round=resume_from_round,
         recorder_provider=get_round_recorder,
     )

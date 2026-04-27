@@ -415,9 +415,3 @@ class CampaignStore(EntityStore):
                 "Deleted cached candidates for round %d (escalation invalidation)",
                 round_num,
             )
-
-    # log.md is owned exclusively by CampaignPersistenceEmitter — see
-    # infrastructure/persistence/session_emitter.py and dashboard_md.py.
-    # No store-level append/load accessors: appending from multiple
-    # writers was the source of the duplicate-header bug the sliding-
-    # window dashboard replaced.

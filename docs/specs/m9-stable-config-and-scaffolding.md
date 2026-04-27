@@ -150,7 +150,6 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 │   ├── dashboard.json                   # live counters
 │   ├── events.jsonl                     # human navigation log
 │   ├── output.log                       # per-query audit
-│   ├── log.md                           # round-by-round summary
 │   ├── recon.json                       # this campaign's scan result (was recon_results.json)
 │   ├── index.json                       # cycle metadata + trial index + parent_session_id
 │   ├── prompts/{family}/{version}/      # rendered optimizer prompts

@@ -97,10 +97,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     emitter = CampaignPersistenceEmitter(
         campaign_dir,
         session_dir,
-        max_rounds=5,
         l1_patience=3,
-        active_nodes=[],
-        model="",
         n_variants=5,
         sp_budget_ttest=20,
     )
