@@ -19,67 +19,95 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-def render_progress_table(campaign_rounds: list[dict]) -> str:
+def render_progress_table(
+    rounds: list[dict],
+    window: int = 8,
+    *,
+    framed: bool = True,
+) -> str:
     """Round-over-round trajectory table: accuracy, composite, rolling avg, trend, plateau.
 
-    ``campaign_rounds`` items must have at minimum ``round``, ``accuracy``.
-    ``composite`` is optional; column appears only when it differs from
+    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``;
+    ``composite`` is optional and only adds a column when it differs from
     accuracy in at least one round.
+
+    ``framed=True`` (default) wraps each line in ``_node_line()`` for
+    box-drawing terminals (live CLI / notebook live view). ``framed=False``
+    emits plain text with a ``PROGRESS`` title for ``show-results`` and
+    other plain-text reports.
     """
-    lines: list[str] = []
-    _accs: list[float] = []
+    if not rounds:
+        return "" if framed else "No rounds to display."
+
+    def wrap(s: str) -> str:
+        return _node_line(s) if framed else s
+
     has_comp = any(
-        rd.get("composite") is not None and rd.get("composite") != rd["accuracy"]
-        for rd in campaign_rounds
+        rd.get("composite") is not None and rd.get("composite") != (rd.get("accuracy") or 0)
+        for rd in rounds
     )
+
+    row_rnd_w = 5 if framed else 7
+    row_comp_w = 9 if framed else 10
+    trend_w = 8 if framed else 10
+    plateau_step = "+0.0%  <-- plateau" if framed else "+0.0% plateau"
+
     if has_comp:
-        lines.append(
-            _node_line(
-                f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-                f" {'Rolling Avg':>13s} {'Trend':>8s}"
-            )
+        header = (
+            f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+            f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
         )
     else:
-        lines.append(
-            _node_line(f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>8s}")
-        )
+        header = f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
 
-    for rd in campaign_rounds:
-        acc = rd["accuracy"]
-        _accs.append(acc)
-        window_slice = _accs[-8:]
-        rolling = sum(window_slice) / len(window_slice)
-        if len(_accs) <= 1:
+    lines: list[str] = []
+    if framed:
+        lines.append(wrap(header))
+    else:
+        lines.append("\nPROGRESS")
+        lines.append(f"\n  {header}")
+
+    accs: list[float] = []
+    for rd in rounds:
+        acc = rd.get("accuracy") or 0
+        accs.append(acc)
+        rolling = sum(accs[-window:]) / len(accs[-window:])
+        if len(accs) <= 1:
             trend = "-"
         else:
-            d = acc - _accs[-2]
+            d = acc - accs[-2]
             if abs(d) < 0.001:
-                trend = "+0.0%  <-- plateau"
+                trend = plateau_step
             elif d > 0:
                 trend = f"+{d:.1%}"
             else:
                 trend = f"{d:.1%}"
-        rl = "G" if rd.get("round") == "grid" else str(rd["round"])
+        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
         if has_comp:
-            comp = rd.get("composite", acc)
-            lines.append(
-                _node_line(f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}")
+            comp = rd.get("composite") or acc
+            row = (
+                f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f}"
+                f" {rolling:>12.1%}  {trend}"
             )
         else:
-            lines.append(_node_line(f"  {rl:<5s} {acc:>8.1%} {rolling:>12.1%}  {trend}"))
+            row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {rolling:>12.1%}  {trend}"
+        lines.append(wrap(row))
 
-    if len(_accs) >= 3:
-        recent = _accs[-3:]
-        recent_avg = sum(recent) / len(recent)
-        if all(abs(a - recent_avg) < 0.005 for a in recent):
-            lines.append(
-                _node_line(
-                    f"{YELLOW}-- Plateau: rolling avg stable at"
-                    f" {recent_avg:.1%} for 3 rounds{RESET}"
+    if len(accs) >= 3:
+        recent_avg = sum(accs[-3:]) / 3
+        if all(abs(a - recent_avg) < 0.005 for a in accs[-3:]):
+            if framed:
+                lines.append(
+                    wrap(
+                        f"{YELLOW}-- Plateau: rolling avg stable at"
+                        f" {recent_avg:.1%} for 3 rounds{RESET}"
+                    )
                 )
-            )
+            else:
+                lines.append(f"  -- Plateau: rolling avg stable at {recent_avg:.1%} for 3 rounds")
 
-    lines.append(_node_line(""))
+    if framed:
+        lines.append(wrap(""))
     return "\n".join(lines)
 
 

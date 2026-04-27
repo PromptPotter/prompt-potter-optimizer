@@ -13,7 +13,7 @@ from promptpotter.presentation.views import (
     render_campaign_summary,
     render_flip_tracking,
     render_lineage,
-    render_progress,
+    render_progress_table,
 )
 from promptpotter.presentation.views.display_primitives import (
     BLUE,
@@ -69,7 +69,7 @@ from .setup import (
 
 
 def show_progress(campaign_rounds: list, window: int = 8) -> None:
-    print(render_progress(campaign_rounds, window=window))
+    print(render_progress_table(campaign_rounds, window=window, framed=False))
 
 
 def show_campaign_summary(campaign_rounds: list) -> None:

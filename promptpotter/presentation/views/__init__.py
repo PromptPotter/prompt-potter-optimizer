@@ -25,7 +25,6 @@ from .rounds import (
     render_campaign_summary,
     render_flip_tracking,
     render_lineage,
-    render_progress,
 )
 from .sp_diff import render_sp_diff
 
@@ -43,7 +42,6 @@ __all__ = [
     "render_patience_status",
     "render_phase_event",
     "render_pipeline_overrides",
-    "render_progress",
     "render_progress_table",
     "render_round_stats",
     "render_sp_diff",
