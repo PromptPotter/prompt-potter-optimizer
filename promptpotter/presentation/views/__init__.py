@@ -9,7 +9,6 @@ per concept.
 
 from __future__ import annotations
 
-from .adaptive_prefix import collect_prefix_events, render_adaptive_prefix
 from .campaign_list import (
     render_campaign_detail,
     render_campaign_overview,
@@ -35,12 +34,12 @@ from .rounds import (
     render_flip_tracking,
     render_lineage,
 )
+from .scoring_set import collect_scoring_set_events, render_scoring_set
 from .sp_diff import render_sp_diff
 
 __all__ = [
-    "collect_prefix_events",
+    "collect_scoring_set_events",
     "generate_supplemental",
-    "render_adaptive_prefix",
     "render_campaign_detail",
     "render_campaign_overview",
     "render_campaign_summary",
@@ -60,6 +59,7 @@ __all__ = [
     "render_progress_table",
     "render_resume_hint",
     "render_round_stats",
+    "render_scoring_set",
     "render_sp_diff",
     "render_status",
     "render_table",

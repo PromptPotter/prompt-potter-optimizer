@@ -19,8 +19,8 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.adaptive_prefix import build_observations
 from promptpotter.application.intelligence.rasch import fit_rasch
+from promptpotter.application.intelligence.scoring_set import build_observations
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import Observation, RaschPosterior

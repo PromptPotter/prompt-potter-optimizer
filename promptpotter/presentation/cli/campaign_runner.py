@@ -552,13 +552,13 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     """Show campaign results, optionally save winner."""
     from promptpotter.application.campaign.utils import save_campaign_winner
     from promptpotter.presentation.views import (
-        collect_prefix_events,
-        render_adaptive_prefix,
+        collect_scoring_set_events,
         render_campaign_summary,
         render_flip_tracking,
         render_hard_sample_heatmap,
         render_lineage,
         render_progress_table,
+        render_scoring_set,
     )
 
     ctx = load_session(args)
@@ -581,8 +581,8 @@ async def cmd_results(args: argparse.Namespace) -> CommandResult:
     for renderer in (render_progress_table, render_flip_tracking, render_lineage):
         if rendered := renderer(campaign_rounds):
             human_parts.append(rendered)
-    if events := collect_prefix_events(campaign_rounds):
-        human_parts.append(render_adaptive_prefix(events))
+    if events := collect_scoring_set_events(campaign_rounds):
+        human_parts.append(render_scoring_set(events))
 
     # Heatmap is embedded in log.md; recompute on the fly when the sorter ran.
     hs_cfg = ctx.campaign_config.optimization.hard_sample_sorter

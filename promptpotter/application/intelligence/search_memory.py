@@ -320,14 +320,9 @@ class SearchMemory:
         self,
         state: Any,
         session: Any,
-        config: Any,
         round_num: int,
-        full_dataset: list[Any],
     ) -> None:
-        """Per-round hook: refresh, persist, recompute correlations, adapt the scoring set."""
-        from promptpotter.application.intelligence.scoring_set_adaptation import adapt_scoring_set
-        from promptpotter.application.scoring.metrics import compile_query_difficulty
-
+        """Per-round hook: refresh, persist, recompute correlations."""
         if (
             session.store
             and session.backend_id
@@ -350,21 +345,6 @@ class SearchMemory:
             base = Path(session.store.base_dir) / "library"
             self.save(base / "search_memory.json")
             self.sample_index.save(base / "sample_index.json")
-
-        if round_num < 2:
-            return
-        hist = [r.results for r in state.rounds if r.results]
-        if len(hist) < 3:
-            return
-        qd = compile_query_difficulty(hist)
-        session.scoring_dataset, info = adapt_scoring_set(
-            session.scoring_dataset,
-            qd,
-            full_dataset,
-            seed=config.optimization.seed + round_num,
-        )
-        if not info.get("unchanged"):
-            logger.info("Adaptive scoring-set: %s", info)
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):

@@ -8,7 +8,7 @@ PromptPotter emits structured trace events for every optimizer LLM call, every b
 
 Every observability event is appended to `campaigns/{cycle_id}/langfuse/events.jsonl`. This is a pure mirror — nothing reads it for state reconstruction; it's there for debugging and post-hoc inspection. Each line is a JSON object with phase, event type, round, and payload.
 
-Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`, `zero_signal_filter`, `adaptive_prefix`) emit `enter` / `exit` pairs. Mid-phase events carry whatever the emitter chose to include.
+Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`, `zero_signal_filter`, `scoring_set`) emit `enter` / `exit` pairs. Mid-phase events carry whatever the emitter chose to include.
 
 For the allowlist of phase events and what each emits, see [../developer/information-flow.md](../developer/information-flow.md).
 

@@ -8,7 +8,7 @@
 
 The exploration/exploitation sample-selection policy in [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md) already fits a Rasch IRT posterior on every campaign, producing two first-class per-item quantities:
 
-- **`δ_s`** — per-sample difficulty. Surfaces today only as a top-5 compact field inside `prefix_events`.
+- **`δ_s`** — per-sample difficulty. Surfaces today only as a top-5 compact `hardness_top` list inside each round's `scoring_set_events` entry, persisted as a field in `campaigns/{cycle_id}/trials/trial_NNNN.json`.
 - **`θ_c`** — per-candidate ability. Surfaces today only inside the same Rasch fit, not exposed anywhere.
 
 These two arrays, plus the raw `(candidate_id, sample_id) → hit` matrix they are fit on, are the core outputs of a **standalone capability that stands on its own outside the optimizer**: feed it a dataset and a handful of candidate prompts, get back a difficulty-ranked sample list and a candidate×sample performance matrix. That is useful even to users who never want the full L1/L2/L3 loop. It is also a natural product surface — "point PromptPotter's sorter at your dataset and tell me which samples are genuinely hard and which prompts handle them" — sellable independently from the optimization engine.
@@ -29,7 +29,7 @@ Nothing else. No rendering. No CLI. No new persisted artifact. The primitive exi
 
 ### Phase 2 — CLI + notebook ASCII heatmap
 
-Intermediate checkpoint. At round boundaries (or on `show-results`), print a compact ASCII heatmap of the candidate×sample matrix. Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lands as a new `presentation/views/hard_sample_heatmap.py` alongside `adaptive_prefix.py`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
+Intermediate checkpoint. At round boundaries (or on `show-results`), print a compact ASCII heatmap of the candidate×sample matrix. Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lands as a new `presentation/views/hard_sample_heatmap.py` alongside `presentation/views/scoring_set.py`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
 
 ### Phase 3 — webapp heatmap
 
@@ -90,7 +90,7 @@ worst          └────────────────────�
 - Miss (measured and failed). Renderer choice: `▒` block, red.
 - Unmeasured (`matrix.get(...) is None`). Renderer choice: `░` light block, grey.
 
-The expected visual is red concentrated at bottom-left (worst candidates on hardest samples) and green concentrated at top-right (best candidates on easiest samples). Grey increases on the margins where the adaptive-prefix policy hasn't asked that cell yet — the unmeasured mass is a direct visual of the exploration/exploitation frontier.
+The expected visual is red concentrated at bottom-left (worst candidates on hardest samples) and green concentrated at top-right (best candidates on easiest samples). Grey increases on the margins where the scoring-set evolution policy hasn't asked that cell yet — the unmeasured mass is a direct visual of the exploration/exploitation frontier.
 
 The ASCII renderer (phase 2) must gracefully downgrade wide matrices: cap the visible X-axis at the top-K hardest samples, pass the remainder to a truncation footer (`... +N easier samples elided`). Candidate axis stays uncapped for the common small-N case.
 
@@ -102,13 +102,13 @@ Two-sentence positioning:
 
 > Every optimizer that evaluates `K` candidates on `N` samples produces a `K × N` hit matrix as a byproduct. The hard-sample-sorter makes that matrix — plus its Rasch-derived difficulty ranking — the primary output rather than a discarded intermediate, giving users a data-quality / dataset-curation tool that works even when they don't want the full optimization loop.
 
-Licensing / packaging / pricing are out of scope for this spec; record here only as the product-framing reason the capability gets its own module and doc rather than living inside `adaptive_prefix.py`.
+Licensing / packaging / pricing are out of scope for this spec; record here only as the product-framing reason the capability gets its own module and doc rather than living inside `scoring_set.py`.
 
 ---
 
 ## Open questions
 
-- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives in `prefix_events`. The end-of-cycle artifact is computed in `runner._finalize_run` and rendered inline into `log.md` (and on-the-fly in `show-results`). Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
+- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `trials/trial_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md` (and on-the-fly in `show-results`); no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
 - **Cold cells.** Unmeasured cells have no Rasch estimate. Phase 2/3 may add a uniform-exploration tier that forces coverage of a small fraction of unmeasured cells before declaring the matrix stable. Out of scope in phase 1.
 
 ---
@@ -116,6 +116,6 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 ## References
 
 - Methods doc: [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md)
-- Adaptive-prefix mechanism: `promptpotter/application/intelligence/adaptive_prefix.py`
+- Scoring-set evolution mechanism: `promptpotter/application/intelligence/scoring_set.py`
 - Rasch posterior: `promptpotter/application/intelligence/rasch.py::RaschPosterior`
 - Downstream webapp home (phase 3): [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)

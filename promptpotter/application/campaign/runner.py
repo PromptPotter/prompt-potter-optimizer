@@ -144,7 +144,7 @@ async def _post_round(
         raise StopLoop(StopReason.USER_STOPPED)
 
     if cycle.search_memory:
-        cycle.search_memory.on_round_complete(cycle, session, config, round_num, dataset)
+        cycle.search_memory.on_round_complete(cycle, session, round_num)
         # Prune always-hit/always-miss queries from the active set.
         zsf = config.optimization.zero_signal_filter_enabled
         dataset_name = session.dataset_name
@@ -176,34 +176,34 @@ async def _post_round(
                         dataset_name=dataset_name,
                     )
 
-    # Rasch + KG swap of the active scoring prefix.
-    ap_cfg = config.optimization.adaptive_prefix
-    if ap_cfg.enabled and cycle.rounds:
-        from promptpotter.application.intelligence.adaptive_prefix import (
-            build_prefix_event,
-            evolve_prefix,
+    # Rasch + KG swap of the active scoring set.
+    ss_cfg = config.optimization.scoring_set
+    if ss_cfg.enabled and cycle.rounds:
+        from promptpotter.application.intelligence.scoring_set import (
+            build_scoring_set_event,
+            evolve_scoring_set,
         )
 
-        with graceful("AdaptivePrefix evolve failed"):
-            ap_result = evolve_prefix(
+        with graceful("ScoringSet evolve failed"):
+            ss_result = evolve_scoring_set(
                 full_dataset=dataset,
-                current_prefix=session.scoring_dataset,
+                current_scoring_set=session.scoring_dataset,
                 rounds=cycle.rounds,
-                config=ap_cfg,
+                config=ss_cfg,
                 elimination_n_min=config.optimization.elimination_n_min,
             )
-            if ap_result.swapped_in or ap_result.swapped_out:
-                session.scoring_dataset[:] = ap_result.new_prefix
-                event = build_prefix_event(round_num=round_num, result=ap_result)
-                round_result.prefix_events.append(event)
+            if ss_result.swapped_in or ss_result.swapped_out:
+                session.scoring_dataset[:] = ss_result.new_scoring_set
+                event = build_scoring_set_event(round_num=round_num, result=ss_result)
+                round_result.scoring_set_events.append(event)
                 emit_phase(
                     cb.on_phase,
-                    "adaptive_prefix",
+                    "scoring_set",
                     "evolved",
                     round=round_num,
                     swapped_out=event["swapped_out"],
                     swapped_in=event["swapped_in"],
-                    new_prefix_size=event["new_prefix_size"],
+                    new_scoring_set_size=event["new_scoring_set_size"],
                 )
 
     if cycle.current_accuracy >= 1.0:

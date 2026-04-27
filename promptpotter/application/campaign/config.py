@@ -16,12 +16,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "AdaptivePrefixConfig",
     "CampaignConfig",
     "HardSampleSorterConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
     "PreflightWarning",
+    "ScoringSetConfig",
     "compute_preflight_metrics",
     "configure_and_apply_pipeline",
     "create_llm_client",
@@ -30,14 +30,14 @@ __all__ = [
 ]
 
 
-class AdaptivePrefixConfig(BaseModel):
-    """Round-level adaptive sample-prefix selection (Rasch + KG).
+class ScoringSetConfig(BaseModel):
+    """Round-level scoring-set evolution (Rasch + KG).
 
-    Off by default — when ``enabled`` is false the prefix is the static
-    ``sample_dataset(dataset, sp_budget_ttest)`` it has always been. When
-    on, ``AdaptivePrefix.evolve()`` runs after each round, refits Rasch on
-    accumulated observations, and swaps low-info samples (narrow CI on
-    δ_s) for high-KG samples not currently in the prefix.
+    Off by default — when ``enabled`` is false the scoring set is the
+    static ``sample_dataset(dataset, sp_budget_ttest)`` it has always
+    been. When on, ``evolve_scoring_set()`` runs after each round, refits
+    Rasch on accumulated observations, and swaps low-info samples (narrow
+    CI on δ_s) out for high-KG samples not currently in the scoring set.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -52,10 +52,10 @@ class AdaptivePrefixConfig(BaseModel):
         0.01,
         description="Swap-in threshold: minimum sample KG to be eligible.",
     )
-    max_swaps_per_round: int = Field(3, description="Cap on prefix churn per round.")
-    min_prefix_size: int | None = Field(
+    max_swaps_per_round: int = Field(3, description="Cap on scoring-set churn per round.")
+    min_scoring_set_size: int | None = Field(
         None,
-        description="Floor on prefix size (None → derive from elimination_n_min).",
+        description="Floor on scoring-set size (None → derive from elimination_n_min).",
     )
     cold_start_prior_sigma: float = Field(
         1.5,
@@ -66,7 +66,7 @@ class AdaptivePrefixConfig(BaseModel):
 class HardSampleSorterConfig(BaseModel):
     """Hard-sample-sorter artifact at campaign finalize.
 
-    Independent of ``AdaptivePrefixConfig`` — even when adaptive-prefix is
+    Independent of ``ScoringSetConfig`` — even when scoring-set evolution is
     off, the sorter fits its own Rasch posterior on accumulated observations
     and emits a θ_c-ranked candidates × δ_s-ranked samples × hit/miss/unmeasured
     matrix. The matrix is rendered inline into ``log.md`` as a
@@ -126,7 +126,7 @@ class OptimizationConfig(BaseModel):
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
 
-    adaptive_prefix: AdaptivePrefixConfig = Field(default_factory=AdaptivePrefixConfig)
+    scoring_set: ScoringSetConfig = Field(default_factory=ScoringSetConfig)
     hard_sample_sorter: HardSampleSorterConfig = Field(default_factory=HardSampleSorterConfig)
 
 

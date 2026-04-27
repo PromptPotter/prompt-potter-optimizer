@@ -107,7 +107,7 @@ class EscalationState:
 class Cycle:
     """Mutable orchestration state for the feedback cycle round loop."""
 
-    # None default keeps dataclass field-ordering valid for test/adaptive-prefix isolation; active loop dereferences without guards.
+    # None default keeps dataclass field-ordering valid for test isolation; active loop dereferences without guards.
     session: Session = None  # type: ignore[assignment]
     config: CampaignConfig = None  # type: ignore[assignment]
 
@@ -353,5 +353,7 @@ class Cycle:
             "evaluators": dict(rr.evaluators),
             **self.escalation.to_checkpoint_dict(),
             "opt_search_point": self.opt_sp.model_dump(),
-            **({"prefix_events": list(rr.prefix_events)} if rr.prefix_events else {}),
+            **(
+                {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}
+            ),
         }

@@ -1,10 +1,10 @@
-"""Rasch fit numerical correctness + AdaptivePrefix mutation safety.
+"""Rasch fit numerical correctness + scoring-set evolution mutation safety.
 
 Two contracts:
   1. Rasch joint MLE recovers known θ/δ on synthetic Bernoulli data.
-  2. evolve_prefix() preserves min_prefix_size, is a no-op when disabled,
-     and mutates exclusively the scoring slice (round-boundary mutation
-     invariant).
+  2. evolve_scoring_set() preserves min_scoring_set_size, is a no-op when
+     disabled, and mutates exclusively the scoring slice (round-boundary
+     mutation invariant).
 """
 
 from __future__ import annotations
@@ -12,13 +12,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from promptpotter.application.campaign.config import AdaptivePrefixConfig
-from promptpotter.application.intelligence.adaptive_prefix import evolve_prefix
+from promptpotter.application.campaign.config import ScoringSetConfig
 from promptpotter.application.intelligence.rasch import (
     Observation,
     fit_rasch,
     knowledge_gradient,
 )
+from promptpotter.application.intelligence.scoring_set import evolve_scoring_set
 from promptpotter.application.optimization.results import RoundResult
 from promptpotter.domain.sample import Sample
 
@@ -103,39 +103,39 @@ def _make_round(round_idx: int, candidate_results: dict[str, list[dict]]) -> Rou
     )
 
 
-def test_evolve_prefix_respects_min_prefix_size() -> None:
-    # Tiny prefix at the floor → swap-out must yield zero, returning current.
-    prefix = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(4)]
+def test_evolve_scoring_set_respects_min_size() -> None:
+    # Tiny scoring set at the floor → swap-out must yield zero, returning current.
+    scoring_set = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(4)]
     extra = [Sample(id=10 + i, query=f"q{10 + i}", ground_truth="g") for i in range(5)]
-    full = prefix + extra
+    full = scoring_set + extra
 
-    # Many candidates measuring all prefix samples consistently → narrow δ SE
-    # → swap-out would be eligible, but min_prefix_size==4 must block it.
+    # Many candidates measuring all scoring-set samples consistently → narrow δ SE
+    # → swap-out would be eligible, but min_scoring_set_size==4 must block it.
     candidate_results = {
-        f"c{ci}": [{"sample_id": s.id, "hit": True} for s in prefix] for ci in range(8)
+        f"c{ci}": [{"sample_id": s.id, "hit": True} for s in scoring_set] for ci in range(8)
     }
     rounds = [_make_round(0, candidate_results)]
 
-    cfg = AdaptivePrefixConfig(
+    cfg = ScoringSetConfig(
         enabled=True,
-        swap_out_delta_se=10.0,  # extremely permissive — every prefix sample qualifies
+        swap_out_delta_se=10.0,  # extremely permissive — every scoring-set sample qualifies
         swap_in_kg_threshold=0.0,
         max_swaps_per_round=10,
     )
-    out = evolve_prefix(
+    out = evolve_scoring_set(
         full_dataset=full,
-        current_prefix=prefix,
+        current_scoring_set=scoring_set,
         rounds=rounds,
         config=cfg,
-        elimination_n_min=4,  # floor matches len(prefix)
+        elimination_n_min=4,  # floor matches len(scoring_set)
     )
-    assert len(out.new_prefix) >= 4
-    # No prefix sample dropped below the floor.
-    assert {s.id for s in out.new_prefix} >= {s.id for s in prefix} - {-1}
+    assert len(out.new_scoring_set) >= 4
+    # No scoring-set sample dropped below the floor.
+    assert {s.id for s in out.new_scoring_set} >= {s.id for s in scoring_set} - {-1}
 
 
 @pytest.mark.parametrize("enabled", [True, False])
-def test_evolve_prefix_does_not_mutate_inputs(enabled: bool) -> None:
+def test_evolve_scoring_set_does_not_mutate_inputs(enabled: bool) -> None:
     samples = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(6)]
     snapshot = list(samples)
     rounds = [
@@ -144,10 +144,10 @@ def test_evolve_prefix_does_not_mutate_inputs(enabled: bool) -> None:
             {f"c{ci}": [{"sample_id": s.id, "hit": True} for s in samples] for ci in range(3)},
         )
     ]
-    cfg = AdaptivePrefixConfig(enabled=enabled)
-    evolve_prefix(
+    cfg = ScoringSetConfig(enabled=enabled)
+    evolve_scoring_set(
         full_dataset=samples,
-        current_prefix=samples,
+        current_scoring_set=samples,
         rounds=rounds,
         config=cfg,
         elimination_n_min=4,

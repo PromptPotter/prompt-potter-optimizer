@@ -1,4 +1,9 @@
-"""Round-level adaptive sample-prefix evolution via Rasch + KG."""
+"""Round-level scoring-set evolution via Rasch + KG.
+
+Between rounds, swap understood samples (low δ_s SE) out of the active
+scoring set in favor of high-Knowledge-Gradient samples — exploration /
+exploitation on which sample IDs are in play next round.
+"""
 
 from __future__ import annotations
 
@@ -14,20 +19,20 @@ from promptpotter.application.intelligence.rasch import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import AdaptivePrefixConfig
+    from promptpotter.application.campaign.config import ScoringSetConfig
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["EvolveResult", "build_observations", "build_prefix_event", "evolve_prefix"]
+__all__ = ["EvolveResult", "build_observations", "build_scoring_set_event", "evolve_scoring_set"]
 
 
 @dataclass
 class EvolveResult:
-    """Outcome of one ``evolve_prefix()`` call."""
+    """Outcome of one ``evolve_scoring_set()`` call."""
 
-    new_prefix: list[Sample]
+    new_scoring_set: list[Sample]
     swapped_out: list[Sample] = field(default_factory=list)
     swapped_in: list[Sample] = field(default_factory=list)
     rasch: RaschPosterior | None = None
@@ -58,38 +63,38 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 
 def _select_swap_outs(
     posterior: RaschPosterior,
-    prefix_sample_ids: set[int],
-    config: AdaptivePrefixConfig,
-    min_prefix_size: int,
+    scoring_set_sample_ids: set[int],
+    config: ScoringSetConfig,
+    min_scoring_set_size: int,
     max_swaps: int,
 ) -> list[int]:
-    """Samples in the prefix whose δ_s SE is below the swap-out threshold.
+    """Samples in the scoring set whose δ_s SE is below the swap-out threshold.
 
     Sorted ascending by SE (most-understood first). Capped at
-    ``max_swaps`` and bounded by ``min_prefix_size`` floor.
+    ``max_swaps`` and bounded by ``min_scoring_set_size`` floor.
     """
     candidates = []
-    for sid in prefix_sample_ids:
+    for sid in scoring_set_sample_ids:
         se = posterior.delta_se.get(sid)
         if se is None:
             continue
         if se <= config.swap_out_delta_se:
             candidates.append((se, sid))
     candidates.sort()  # smallest SE first
-    max_removable = max(0, len(prefix_sample_ids) - min_prefix_size)
+    max_removable = max(0, len(scoring_set_sample_ids) - min_scoring_set_size)
     take = min(len(candidates), max_swaps, max_removable)
     return [sid for _, sid in candidates[:take]]
 
 
 def _select_swap_ins(
     posterior: RaschPosterior,
-    prefix_sample_ids: set[int],
+    scoring_set_sample_ids: set[int],
     full_dataset: list[Sample],
     surviving_candidates: list[str],
-    config: AdaptivePrefixConfig,
+    config: ScoringSetConfig,
     n_slots: int,
 ) -> list[int]:
-    """Samples not in the prefix, ranked by max-over-candidates KG.
+    """Samples not in the scoring set, ranked by max-over-candidates KG.
 
     Only considers samples already observed at least once (have a δ_s
     estimate). Cold sampling — pulling never-measured samples in via KG —
@@ -101,7 +106,7 @@ def _select_swap_ins(
 
     scored: list[tuple[float, int]] = []
     for s in full_dataset:
-        if s.id in prefix_sample_ids:
+        if s.id in scoring_set_sample_ids:
             continue
         if s.id not in posterior.delta:
             continue
@@ -114,7 +119,7 @@ def _select_swap_ins(
     return [sid for _, sid in scored[:n_slots]]
 
 
-def build_prefix_event(
+def build_scoring_set_event(
     *,
     round_num: int,
     result: EvolveResult,
@@ -147,35 +152,35 @@ def build_prefix_event(
         "reason": result.reason,
         "swapped_out": [int(s.id) for s in result.swapped_out],
         "swapped_in": [int(s.id) for s in result.swapped_in],
-        "new_prefix_size": len(result.new_prefix),
+        "new_scoring_set_size": len(result.new_scoring_set),
         "rasch": rasch_summary,
         "hardness_top": hardness,
     }
 
 
-def evolve_prefix(
+def evolve_scoring_set(
     full_dataset: list[Sample],
-    current_prefix: list[Sample],
+    current_scoring_set: list[Sample],
     rounds: list[RoundResult],
-    config: AdaptivePrefixConfig,
+    config: ScoringSetConfig,
     *,
     elimination_n_min: int,
     surviving_candidates: list[str] | None = None,
 ) -> EvolveResult:
-    """Decide the next round's prefix. Pure — no I/O, no mutation of inputs.
+    """Decide the next round's scoring set. Pure — no I/O, no mutation of inputs.
 
     When the feature is disabled, when there are no completed rounds yet,
     or when the dataset has nothing left to swap in, returns the current
-    prefix unchanged with ``reason`` populated for telemetry.
+    scoring set unchanged with ``reason`` populated for telemetry.
     """
     if not config.enabled:
-        return EvolveResult(new_prefix=list(current_prefix), reason="disabled")
+        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="disabled")
     if not rounds:
-        return EvolveResult(new_prefix=list(current_prefix), reason="no_rounds_yet")
+        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_rounds_yet")
 
     observations = build_observations(rounds)
     if not observations:
-        return EvolveResult(new_prefix=list(current_prefix), reason="no_observations")
+        return EvolveResult(new_scoring_set=list(current_scoring_set), reason="no_observations")
 
     posterior = fit_rasch(
         observations,
@@ -185,15 +190,19 @@ def evolve_prefix(
     if surviving_candidates is None:
         surviving_candidates = list(posterior.theta.keys())
 
-    min_prefix = config.min_prefix_size if config.min_prefix_size is not None else elimination_n_min
-    prefix_ids = {s.id for s in current_prefix}
+    min_size = (
+        config.min_scoring_set_size
+        if config.min_scoring_set_size is not None
+        else elimination_n_min
+    )
+    scoring_set_ids = {s.id for s in current_scoring_set}
 
     swap_out_ids = _select_swap_outs(
-        posterior, prefix_ids, config, min_prefix, config.max_swaps_per_round
+        posterior, scoring_set_ids, config, min_size, config.max_swaps_per_round
     )
     swap_in_ids = _select_swap_ins(
         posterior,
-        prefix_ids,
+        scoring_set_ids,
         full_dataset,
         surviving_candidates,
         config,
@@ -204,7 +213,7 @@ def evolve_prefix(
     k = min(len(swap_out_ids), len(swap_in_ids))
     if k == 0:
         return EvolveResult(
-            new_prefix=list(current_prefix),
+            new_scoring_set=list(current_scoring_set),
             rasch=posterior,
             reason="no_viable_swap",
         )
@@ -213,19 +222,19 @@ def evolve_prefix(
 
     out_ids_set = set(swap_out_ids)
     by_id = {s.id: s for s in full_dataset}
-    new_prefix = [s for s in current_prefix if s.id not in out_ids_set]
+    new_scoring_set = [s for s in current_scoring_set if s.id not in out_ids_set]
     swapped_in_samples = [by_id[sid] for sid in swap_in_ids if sid in by_id]
-    new_prefix.extend(swapped_in_samples)
-    swapped_out_samples = [s for s in current_prefix if s.id in out_ids_set]
+    new_scoring_set.extend(swapped_in_samples)
+    swapped_out_samples = [s for s in current_scoring_set if s.id in out_ids_set]
 
     logger.info(
-        "AdaptivePrefix: round-end swap of %d sample(s). out=%s in=%s",
+        "ScoringSet: round-end swap of %d sample(s). out=%s in=%s",
         k,
         [s.id for s in swapped_out_samples],
         [s.id for s in swapped_in_samples],
     )
     return EvolveResult(
-        new_prefix=new_prefix,
+        new_scoring_set=new_scoring_set,
         swapped_out=swapped_out_samples,
         swapped_in=swapped_in_samples,
         rasch=posterior,

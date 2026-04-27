@@ -130,7 +130,7 @@ promptpotter/
 ├── application/            # use cases / orchestration — no direct disk or network
 │   ├── campaign/           # lifecycle, runner, round_execution, setup
 │   ├── optimization/       # L1/L2/L3 pipeline, l1_critique, escalation, layer_transitions
-│   ├── intelligence/       # search_memory, variant_library, adaptive_prefix, rasch
+│   ├── intelligence/       # search_memory, variant_library, scoring_set, rasch
 │   └── scoring/            # search_point_scorer, sample_measurement, metrics
 │
 ├── infrastructure/         # adapters — all I/O lives here

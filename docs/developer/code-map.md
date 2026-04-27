@@ -81,7 +81,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 
 | Symbol | Module |
 |--------|--------|
-| `adaptive_prefix` | `promptpotter/application/intelligence/adaptive_prefix.py` |
+| `scoring_set` | `promptpotter/application/intelligence/scoring_set.py` |
 | `rasch` | `promptpotter/application/intelligence/rasch.py` |
 | `sample_index` | `promptpotter/application/intelligence/sample_index.py` |
 | `SearchMemory.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/search_memory.py` |
