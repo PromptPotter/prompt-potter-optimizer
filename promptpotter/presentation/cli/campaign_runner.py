@@ -370,10 +370,10 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
     scoring_formula = split_scoring_block(campaign_config.scoring).per_query
     opt = campaign_config.optimization
 
-    if getattr(args, "verbose", False):
-        from promptpotter.presentation.views.notebook_display import NotebookDisplay
+    from promptpotter.presentation.views.live_display import LiveDisplay
 
-        return NotebookDisplay(
+    if getattr(args, "verbose", False):
+        return LiveDisplay(
             campaign_rounds=[],
             baseline_acc=baseline_acc,
             l1_patience=opt.l1_patience,
@@ -381,9 +381,7 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
             store=session.store,
             scoring_formula=scoring_formula,
         )
-    from promptpotter.presentation.views.live_cli import CliDisplay
-
-    return CliDisplay(
+    return LiveDisplay(
         baseline_acc=baseline_acc,
         l1_patience=opt.l1_patience,
         sp_budget_ttest=campaign_config.sp_budget_ttest,

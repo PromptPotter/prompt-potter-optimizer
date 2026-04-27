@@ -9,10 +9,7 @@ from promptpotter.presentation.views.display_primitives import (
     GREEN,
     RESET,
     YELLOW,
-    _dbox_bottom,
-    _dbox_line,
-    _dbox_sep,
-    _dbox_top,
+    _dbox_block,
 )
 from promptpotter.presentation.views.formatting import render_pipeline_overrides
 
@@ -37,28 +34,24 @@ def render_completion(
         else f"{GREEN}{BOLD}OPTIMIZATION COMPLETE{RESET}"
     )
 
-    lines: list[str] = ["", _dbox_top(), _dbox_line(title), _dbox_sep()]
-    lines.append(
-        _dbox_line(
-            f"Rounds       {result.n_rounds:<15d}"
-            f"Best         {best_round['accuracy']:.1%}"
-            f" (round {best_round['round']})"
-        )
-    )
-    lines.append(_dbox_line(f"Stop reason  {result.stop_reason}"))
+    fields: list[str] = [
+        f"Rounds       {result.n_rounds:<15d}"
+        f"Best         {best_round['accuracy']:.1%} (round {best_round['round']})",
+        f"Stop reason  {result.stop_reason}",
+    ]
     if interrupted:
-        lines.append(_dbox_line("Resume: re-run this cell -- rounds auto-restore"))
+        fields.append("Resume: re-run this cell -- rounds auto-restore")
     if result.cycle_id:
-        lines.append(_dbox_line(f"Cycle ID     {result.cycle_id}"))
+        fields.append(f"Cycle ID     {result.cycle_id}")
     if result.session_id:
-        lines.append(_dbox_line(f"Session      {result.session_id}"))
+        fields.append(f"Session      {result.session_id}")
     if result.langfuse_trace_id:
-        lines.append(_dbox_line(f"Langfuse     {result.langfuse_trace_id}"))
-    lines.append(_dbox_bottom())
+        fields.append(f"Langfuse     {result.langfuse_trace_id}")
 
-    overrides_block = render_pipeline_overrides(result.winner_pipeline_params, pipeline_schema)
-    if overrides_block:
-        lines.append("")
-        lines.append(overrides_block)
+    out = ["", _dbox_block(title, *fields)]
 
-    return "\n".join(lines)
+    if overrides_block := render_pipeline_overrides(result.winner_pipeline_params, pipeline_schema):
+        out.append("")
+        out.append(overrides_block)
+
+    return "\n".join(out)

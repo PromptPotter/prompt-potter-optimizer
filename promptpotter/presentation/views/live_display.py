@@ -1,18 +1,21 @@
-"""Shared live display — base ``RunListener`` adapter.
+"""Shared live display — ``RunListener`` adapter for CLI + notebook.
 
 One class, one rendering policy. Phase events arrive with a precomputed
 ``view`` dict from ``RunListener.on_phase`` (which calls
 ``build_phase_view`` once on a shared ctx); other callbacks consume the
 result dict directly. Each callback hands the data to a renderer in
 ``presentation/views`` and writes the resulting string via
-``self._write``. Subclasses override ``_write`` to route output
-(``tqdm.write`` for the CLI, ``print`` here by default) and may hook
-callbacks for surface-specific lifecycle (tqdm bars, Claude-notes
-exchange). Zero domain-model mutation, zero ANSI assembly here.
+``self._write``.
+
+Surface differentiation via constructor flags, not subclasses:
+- ``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel)
+- ``store`` provided → enables ``note()`` / ``render_claude_notes()`` /
+  ``render_journal()`` (notebook ↔ Claude exchange channel)
 """
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -38,10 +41,64 @@ from promptpotter.presentation.views.phase_events import render_phase_event
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.infrastructure.store import Stores
+
+
+class _BarTracker:
+    """tqdm bar lifecycle driven by ``RunListener`` events. Optional helper."""
+
+    def __init__(self, sp_budget_ttest: int) -> None:
+        self.budget = sp_budget_ttest
+        self._pbar: Any = None
+        self._cand_idx: int = -1
+        self._in_baseline: bool = False
+
+    def close(self) -> None:
+        if self._pbar is not None:
+            self._pbar.close()
+            self._pbar = None
+        self._cand_idx = -1
+
+    def write(self, line: str) -> None:
+        from tqdm.auto import tqdm
+
+        tqdm.write(line)
+
+    def on_phase(self, event: PhaseEvent) -> None:
+        if event.event == "exit":
+            if event.phase == CampaignPhase.BASELINE:
+                self.close()
+                self._in_baseline = False
+            elif event.phase == CampaignPhase.L1_SCORE:
+                self.close()
+        elif event.event == "enter" and event.phase == CampaignPhase.BASELINE:
+            self._in_baseline = True
+
+    def on_sample_started(self, ci: int, ct: int, qt: int) -> None:
+        from tqdm.auto import tqdm
+
+        if self._in_baseline:
+            if self._pbar is None:
+                self._pbar = tqdm(
+                    total=qt or 1, desc="  baseline", unit="q", leave=False, ncols=60
+                )
+            return
+        if ci != self._cand_idx:
+            self.close()
+            self._cand_idx = ci
+            # Bar tops out at sp_budget_ttest; early t-test elimination leaves
+            # it partially filled — which is the signal, not a bug.
+            self._pbar = tqdm(
+                total=self.budget, desc=f"  cand {ci + 1}/{ct}", unit="q", leave=False, ncols=60
+            )
+
+    def on_sample_scored(self) -> None:
+        if self._pbar is not None:
+            self._pbar.update(1)
 
 
 class LiveDisplay:
-    """Live ``RunListener`` adapter — base for notebook + CLI surfaces."""
+    """Live ``RunListener`` adapter — CLI + notebook share this one class."""
 
     def __init__(
         self,
@@ -51,6 +108,8 @@ class LiveDisplay:
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list | None = None,
+        store: Stores | None = None,
+        sp_budget_ttest: int | None = None,
     ) -> None:
         self.baseline_acc = baseline_acc
         self.l1_patience = l1_patience
@@ -63,13 +122,15 @@ class LiveDisplay:
         # overwrites this attribute at construction with its own shared dict
         # so emitter + display read the same state machine.
         self._phase_ctx: dict[str, Any] = {}
-        # Mirrors the round number tracked in ``_phase_ctx``; refreshed on
-        # each phase event.
         self._round_num = 0
+        self._store = store
+        self._bars = _BarTracker(sp_budget_ttest) if sp_budget_ttest is not None else None
 
     def _write(self, line: str) -> None:
-        """Output sink — subclasses override for ``tqdm.write`` etc."""
-        print(line, flush=True)
+        if self._bars is not None:
+            self._bars.write(line)
+        else:
+            print(line, flush=True)
 
     def set_baseline(self, fresh: float) -> None:
         """Post-baseline rewire — replace pre-baseline placeholder."""
@@ -81,6 +142,8 @@ class LiveDisplay:
     # ------------------------------------------------------------------
 
     def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
+        if self._bars is not None:
+            self._bars.on_phase(event)
         if view is not None:
             record = {
                 "phase": event.phase,
@@ -88,8 +151,7 @@ class LiveDisplay:
                 "round": event.round,
                 "view": view,
             }
-            rendered = render_phase_event(record)
-            if rendered:
+            if rendered := render_phase_event(record):
                 self._write(rendered)
         self._round_num = self._phase_ctx.get("round_num", self._round_num)
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
@@ -106,7 +168,8 @@ class LiveDisplay:
     ) -> None:
         # Per-query output renders after the result lands; the emitter's
         # dashboard.json surfaces the in-flight state.
-        pass
+        if self._bars is not None:
+            self._bars.on_sample_started(cand_idx, n_cands, n_queries)
 
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
@@ -121,6 +184,8 @@ class LiveDisplay:
                 scoring_formula=self.scoring_formula,
             )
         )
+        if self._bars is not None:
+            self._bars.on_sample_scored()
 
     def on_candidate_started(
         self,
@@ -129,9 +194,15 @@ class LiveDisplay:
         changes_description: str,
         pp_override: dict | None,
     ) -> None:
+        # Close any still-open bar (e.g. final query of prior candidate) so
+        # the header lands above the fresh bar.
+        if self._bars is not None:
+            self._bars.close()
         self._write(fmt_individual_header(idx, total, changes_description, pp_override))
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+        if self._bars is not None:
+            self._bars.close()
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
@@ -148,6 +219,8 @@ class LiveDisplay:
             self._write(f"  {_box_bottom(width=w)}")
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
+        if self._bars is not None:
+            self._bars.close()
         self.query_counter = 0
         self._phase_ctx["l1_stall_count"] = l1_stall_count
 
@@ -172,8 +245,7 @@ class LiveDisplay:
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
-        stats = render_round_stats(round_result, self.pipeline_schema)
-        if stats:
+        if stats := render_round_stats(round_result, self.pipeline_schema):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
@@ -182,3 +254,42 @@ class LiveDisplay:
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())
+
+    # ------------------------------------------------------------------
+    # Notebook ↔ Claude exchange channel (active when ``store`` is set)
+    # ------------------------------------------------------------------
+
+    def _resolve_session_dir(self) -> Path:
+        from promptpotter.infrastructure.store import read_active_pointer
+
+        if self._store is None:
+            raise RuntimeError("note()/render_*() require store=; pass it to LiveDisplay.")
+        _, sid, _cid = read_active_pointer()
+        if not sid:
+            raise RuntimeError(
+                "No active session - run init/auto-mint before calling "
+                "display.note() or display.render_claude_notes()."
+            )
+        return self._store.sessions.session_dir(sid)
+
+    def note(self, action: str, body: str = "") -> None:
+        """Append a narrative note to ``journal.md`` for Claude."""
+        from promptpotter.infrastructure.persistence.session_emitter import append_journal
+
+        append_journal(self._resolve_session_dir(), action, body)
+
+    def render_claude_notes(self) -> None:
+        """Render ``notes.md`` inline so Claude's notes appear in a cell."""
+        from promptpotter.infrastructure.persistence.session_emitter import read_claude_notes
+        from promptpotter.presentation.views.formatting import render_markdown_box
+
+        content = read_claude_notes(self._resolve_session_dir()).rstrip()
+        print(render_markdown_box("CLAUDE NOTES", content, "(no claude notes yet)"))
+
+    def render_journal(self) -> None:
+        """Render ``journal.md`` inline - mirror of notes."""
+        from promptpotter.presentation.views.formatting import render_markdown_box
+
+        path = self._resolve_session_dir() / "journal.md"
+        content = path.read_text(encoding="utf-8").rstrip() if path.exists() else ""
+        print(render_markdown_box("JOURNAL", content, "(no journal entries yet)"))

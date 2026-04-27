@@ -31,8 +31,7 @@ from promptpotter.domain.scoring import split_scoring_block
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.presentation.views.completion import render_completion
 from promptpotter.presentation.views.display_primitives import BOLD, RESET, YELLOW
-from promptpotter.presentation.views.live_cli import CliDisplay
-from promptpotter.presentation.views.notebook_display import NotebookDisplay
+from promptpotter.presentation.views.live_display import LiveDisplay
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
@@ -97,12 +96,12 @@ async def prepare_scoring_context_notebook(
     campaign_config: CampaignConfig | None = None,
     pipeline_params: dict | None = None,
 ) -> tuple[OptSearchPoint, list, list, list]:
-    """Notebook variant of ``prepare_scoring_context`` — adds tqdm + per-query lines via ``CliDisplay``."""
+    """Notebook variant of ``prepare_scoring_context`` — adds tqdm + per-query lines via ``LiveDisplay``."""
     scoring_formula: str | None = (
         split_scoring_block(campaign_config.scoring).per_query if campaign_config else None
     )
     n_samples = len(train_data) if train_data else 0
-    baseline_display = CliDisplay(
+    baseline_display = LiveDisplay(
         baseline_acc=0.0,
         l1_patience=campaign_config.optimization.l1_patience if campaign_config else 1,
         pipeline_schema=session.pipeline_schema,
@@ -138,13 +137,13 @@ async def run_optimization_notebook(
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
 ) -> tuple[list, RunResult | None]:
-    """Run optimization with ``NotebookDisplay``. Prints final completion box."""
+    """Run optimization with ``LiveDisplay``. Prints final completion box."""
     from promptpotter.application.campaign.cycle_store import resolve_campaign_id
 
     bl = extract_campaign_baseline(campaign_rounds)
     baseline_acc = bl.baseline_acc
 
-    display = NotebookDisplay(
+    display = LiveDisplay(
         campaign_rounds=campaign_rounds,
         baseline_acc=baseline_acc,
         l1_patience=campaign_config.optimization.l1_patience,

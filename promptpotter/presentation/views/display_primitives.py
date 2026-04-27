@@ -59,8 +59,6 @@ DIM = "\033[2m"
 RED = "\033[31m"
 GREEN = "\033[32m"
 YELLOW = "\033[33m"
-BLUE = "\033[34m"
-MAGENTA = "\033[35m"
 CYAN = "\033[36m"
 
 # Display geometry — single source of truth for terminal widths
@@ -70,93 +68,95 @@ _W = BOX_WIDTH  # internal alias
 _NW = NODE_FRAME_WIDTH
 
 
-def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
-    """Single-line top: ``┌─ label ───── label_right ─┐``."""
-    inner = width - 4  # minus ┌─ prefix and ─┐ suffix
+def _h_rule_labeled(
+    lc: str, rc: str, label: str = "", label_right: str = "", *, width: int = _W, fill: str = "─"
+) -> str:
+    """Horizontal rule with embedded labels: ``LC─ label ───── label_right ─RC``."""
+    inner = width - 4
     left = f" {label} " if label else ""
     right = f" {label_right} " if label_right else ""
-    fill = inner - len(left) - len(right)
-    return f"┌─{left}{'─' * max(fill, 1)}{right}─┐"
+    pad = inner - _visible_len(left) - _visible_len(right)
+    return f"{lc}{fill}{left}{fill * max(pad, 1)}{right}{fill}{rc}"
+
+
+def _h_rule(lc: str, rc: str, *, width: int = _W, fill: str = "─") -> str:
+    """Plain horizontal rule: ``LC───...───RC``."""
+    return f"{lc}{fill * (width - 2)}{rc}"
+
+
+def _h_text(lw: str, rw: str, text: str, *, width: int = _W) -> str:
+    """Content line walled with ``LW`` / ``RW``: ``LW  text ...  RW``."""
+    inner = width - 4
+    pad = max(inner - _visible_len(text), 0)
+    return f"{lw}  {text}{' ' * pad}{rw}"
+
+
+def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
+    return _h_rule_labeled("┌", "┐", label, label_right, width=width)
 
 
 def _box_bottom(width: int = _W) -> str:
-    """Single-line bottom: ``└───...───┘``."""
-    return f"└{'─' * (width - 2)}┘"
+    return _h_rule("└", "┘", width=width)
 
 
 def _box_bottom_info(text: str, width: int = _W) -> str:
-    """Bottom frame with embedded text: ``└─ text ───...───┘``."""
-    inner = width - 4
-    label = f" {text} " if text else ""
-    fill = max(inner - _visible_len(label), 0)
-    return f"└─{label}{'─' * fill}─┘"
+    return _h_rule_labeled("└", "┘", text, width=width)
 
 
 def _box_line(text: str, width: int = _W) -> str:
-    """Single-line content: ``│  text ...  │``."""
-    inner = width - 4
-    pad = max(inner - _visible_len(text), 0)
-    return f"│  {text}{' ' * pad}│"
+    return _h_text("│", "│", text, width=width)
 
 
 def _dbox_top(width: int = _W) -> str:
-    """Double-line top: ``╔═══...═══╗``."""
-    return f"╔{'═' * (width - 2)}╗"
+    return _h_rule("╔", "╗", width=width, fill="═")
 
 
 def _dbox_bottom(width: int = _W) -> str:
-    """Double-line bottom: ``╚═══...═══╝``."""
-    return f"╚{'═' * (width - 2)}╝"
+    return _h_rule("╚", "╝", width=width, fill="═")
 
 
 def _dbox_sep(width: int = _W) -> str:
-    """Double-line separator: ``╠═══...═══╣``."""
-    return f"╠{'═' * (width - 2)}╣"
+    return _h_rule("╠", "╣", width=width, fill="═")
 
 
 def _dbox_line(text: str, width: int = _W) -> str:
-    """Double-line content: ``║  text ...  ║``."""
-    inner = width - 4
-    pad = max(inner - _visible_len(text), 0)
-    return f"║  {text}{' ' * pad}║"
-
-
-def _dotted_line(label: str = "", width: int = _W) -> str:
-    """Dotted separator: ``┄┄┄ label ┄┄┄...┄┄┄``."""
-    if label:
-        pad = width - len(label) - 2
-        left = pad // 2
-        right = pad - left
-        return f"{'┄' * left} {label} {'┄' * right}"
-    return "┄" * width
+    return _h_text("║", "║", text, width=width)
 
 
 def _fmt_delta(val: float) -> str:
     """Format accuracy delta with color: green positive, red negative, yellow zero."""
     if abs(val) < 0.001:
         return f"{YELLOW}+0.0%{RESET}"
-    if val > 0:
-        return f"{GREEN}{val:+.1%}{RESET}"
-    return f"{RED}{val:+.1%}{RESET}"
+    color = GREEN if val > 0 else RED
+    return f"{color}{val:+.1%}{RESET}"
 
 
 def _node_top(label: str, label_right: str = "", width: int = _NW) -> str:
-    """Node entry banner: ``├─ LABEL ──────── label_right ─┤``."""
-    inner = width - 4
-    left = f" {label} " if label else ""
-    right = f" {label_right} " if label_right else ""
-    fill = inner - len(left) - len(right)
-    return f"├─{left}{'─' * max(fill, 1)}{right}─┤"
+    return _h_rule_labeled("├", "┤", label, label_right, width=width)
 
 
 def _node_bottom(width: int = _NW) -> str:
-    """Node closing rule: ``├──────...──────┤``."""
-    return f"├{'─' * (width - 2)}┤"
+    return _h_rule("├", "┤", width=width)
 
 
 def _node_line(text: str) -> str:
-    """Indented node content: ``│  text``."""
     return f"│  {text}"
+
+
+def _node_block(label: str, *lines: str, label_right: str = "") -> str:
+    """Render a node block: ``├─ LABEL ─┤`` + content lines + ``├──┤``."""
+    parts = [_node_top(label, label_right)]
+    parts.extend(_node_line(line) for line in lines)
+    parts.append(_node_bottom())
+    return "\n".join(parts)
+
+
+def _dbox_block(title: str, *lines: str) -> str:
+    """Render a double-box block with title header and content lines."""
+    parts = [_dbox_top(), _dbox_line(title), _dbox_sep()]
+    parts.extend(_dbox_line(line) for line in lines)
+    parts.append(_dbox_bottom())
+    return "\n".join(parts)
 
 
 def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
@@ -172,16 +172,9 @@ def _round_rule(label: str, label_right: str = "", width: int = _NW) -> str:
     return f"{rule}\n{inner}\n{rule}"
 
 
-def _pp_val(v) -> str:
-    """Format a pipeline param value for display.
-
-    No truncation — callers decide when to use legend codes instead.
-    """
-    if isinstance(v, float):
-        return f"{v:g}"
-    if isinstance(v, (dict, list)):
-        return str(v)
-    return str(v)
+def _pp_val(v: object) -> str:
+    """Format a pipeline param value for display (no truncation)."""
+    return f"{v:g}" if isinstance(v, float) else str(v)
 
 
 def _scoreboard(
@@ -197,74 +190,39 @@ def _scoreboard(
     if not candidate_scores:
         return ""
 
-    def _sort_key(s):
-        return (s.get("composite", s["accuracy"]), s["accuracy"])
-
-    ranked = sorted(candidate_scores, key=_sort_key, reverse=True)
+    ranked = sorted(
+        candidate_scores,
+        key=lambda s: (s.get("composite", s["accuracy"]), s["accuracy"]),
+        reverse=True,
+    )
     w = 78
-
-    lines = []
-    lines.append(f"  {_box_top('SCOREBOARD', width=w)}")
-
     has_composite = any(
         s.get("composite") is not None and s.get("composite") != s["accuracy"] for s in ranked
     )
-    if has_composite:
-        hdr = (
-            f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}"
-            f"  {'Composite':>9s}  {'Delta':>7s}"
-        )
-    else:
-        hdr = f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}  {'Delta':>7s}"
-    lines.append(f"  {_box_line(hdr, width=w)}")
+
+    comp_hdr = f"  {'Composite':>9s}" if has_composite else ""
+    hdr = f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}{comp_hdr}  {'Delta':>7s}"
+    lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
         label = s.get("label", f"C{i}")[:8]
         acc = s["accuracy"]
-        hits = s.get("hits", 0)
-        total = s.get("total", 0)
-        ci_lo, ci_hi = wilson_ci(hits, total)
-        ci_str = fmt_ci(ci_lo, ci_hi)
+        ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
         delta = acc - baseline_accuracy
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
         aborted = s.get("escalation_aborted", False)
-        is_winner = label == winner_label and not aborted
-        winner_mark = f"  {GREEN}{BOLD}*{RESET}" if is_winner else ""
         if aborted:
             winner_mark = f"  {YELLOW}(aborted){RESET}"
-
-        if has_composite:
-            comp = s.get("composite", acc)
-            row = (
-                f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}"
-                f"   {comp:>8.4f}   {delta_str:>7s}{winner_mark}"
-            )
+        elif label == winner_label:
+            winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
-            row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}   {delta_str:>7s}{winner_mark}"
-
+            winner_mark = ""
+        comp_part = f"   {s.get('composite', acc):>8.4f}" if has_composite else ""
+        row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
         lines.append(f"  {_box_line(row, width=w)}")
 
     lines.append(f"  {_box_bottom(width=w)}")
     return "\n".join(lines)
-
-
-def _print_interrupt_banner(
-    operation: str,
-    *,
-    completed: str = "",
-    saved: str = "",
-    resume_hint: str = "",
-) -> None:
-    """Print a consistent [INTERRUPTED] banner for notebook cell interrupts."""
-    print(f"\n{'=' * 70}")
-    print(f"  {YELLOW}{BOLD}[INTERRUPTED]{RESET} {operation}")
-    if completed:
-        print(f"  Completed: {completed}")
-    if saved:
-        print(f"  Saved: {saved}")
-    if resume_hint:
-        print(f"  Resume: {resume_hint}")
-    print(f"{'=' * 70}")
 
 
 # Display tags — populated from _build_display_tags() at init.

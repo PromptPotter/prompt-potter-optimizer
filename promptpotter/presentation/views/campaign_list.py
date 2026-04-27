@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json as _json
 import logging
 from typing import TYPE_CHECKING
 
@@ -21,8 +20,6 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
 
 __all__ = [
-    "render_campaign_detail",
-    "render_campaign_overview",
     "render_config_diff",
     "render_experiment_dashboard",
     "render_resume_hint",
@@ -84,77 +81,6 @@ def _format_campaign_summary(
         updated = campaign["updated_at"][:16].replace("T", " ")
         out.append(f"    updated: {updated}")
     return out
-
-
-def render_campaign_detail(
-    store: Stores,
-    backend_id: str,
-    campaign_id: str,
-) -> str:
-    """Full config block for one campaign (copy-pasteable)."""
-    campaign = store.campaigns.load(backend_id, campaign_id)
-    if campaign is None:
-        return f"Campaign {campaign_id} not found."
-
-    status = campaign["status"]
-    n = campaign["n_trials"]
-    best = f"{campaign['best_accuracy']:.1%}"
-    base = f"{campaign['baseline_accuracy']:.1%}"
-    updated = campaign["updated_at"][:16].replace("T", " ")
-
-    lines = [
-        "",
-        f"CAMPAIGN: {campaign_id}",
-        "=" * 72,
-        f"  Status: {status}  |  Rounds: {n}  |  Best: {best}  |  Baseline: {base}",
-        f"  Updated: {updated}",
-    ]
-
-    cfg = campaign.get("config", {})
-    if cfg:
-        lines.append("")
-        lines.append("  Config (copy to campaign_config):")
-        for k in (
-            "max_rounds",
-            "l1_patience",
-            "n_variants",
-            "creativity",
-            "improvement_threshold",
-            "model",
-            "sp_budget_ttest",
-            "seed",
-        ):
-            if k in cfg:
-                lines.append(f"    {k}: {cfg[k]}")
-        pp = cfg.get("pipeline_params")
-        if pp:
-            lines.append(f"    pipeline_params: {_json.dumps(pp, indent=6)}")
-
-    lines.append("=" * 72)
-    return "\n".join(lines)
-
-
-def render_campaign_overview(
-    store: Stores,
-    backend_id: str,
-    *,
-    active_id: str | None = None,
-) -> str:
-    """Table of all campaigns with inline config (most recent first)."""
-    campaigns = store.campaigns.list_all(backend_id)
-
-    if not campaigns:
-        return "No campaigns found."
-
-    lines = ["", f"CAMPAIGNS ({backend_id})", "=" * 72]
-    for c in sorted(campaigns, key=lambda x: x["updated_at"], reverse=True):
-        lines.extend(_format_campaign_summary(store, backend_id, c, show_updated=True))
-        lines.append("")
-
-    lines.append("=" * 72)
-    lines.append(f'{len(campaigns)} campaign(s) — pass campaign_id="cycle_..." to see full config')
-    lines.append("")
-    return "\n".join(lines)
 
 
 def render_config_diff(

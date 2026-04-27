@@ -21,12 +21,9 @@ from promptpotter.presentation.views.display_primitives import (
     GREEN,
     RESET,
     YELLOW,
-    _dbox_bottom,
-    _dbox_line,
-    _dbox_sep,
-    _dbox_top,
+    _dbox_block,
     _fmt_delta,
-    _node_bottom,
+    _node_block,
     _node_line,
     _node_top,
     _round_rule,
@@ -35,10 +32,6 @@ from promptpotter.presentation.views.display_primitives import (
 from promptpotter.presentation.views.formatting import fmt_pvalue
 
 __all__ = ["render_phase_event"]
-
-
-def _truncate(s: str, n: int) -> str:
-    return s if len(s) <= n else s[: n - 3] + "..."
 
 
 # --- SearchPoint diff renderer (inlined from former sp_diff.py) ------------
@@ -62,14 +55,8 @@ def render_sp_diff(view: dict) -> str:
     node_param_keys = view.get("node_param_keys")
     round_num = view.get("round_num")
 
-    all_keys: set[str] = set()
-    for _, d in columns:
-        all_keys.update(d.keys())
-    diff_keys: list[str] = []
-    for k in sorted(all_keys):
-        vals = [d.get(k) for _, d in columns]
-        if len(set(vals)) > 1:
-            diff_keys.append(k)
+    all_keys = {k for _, d in columns for k in d}
+    diff_keys = sorted(k for k in all_keys if len({d.get(k) for _, d in columns}) > 1)
     if not diff_keys:
         return ""
 
@@ -147,55 +134,59 @@ def render_sp_diff(view: dict) -> str:
     return "\n".join(out)
 
 
-def _render_init_enter(view: dict) -> str:
-    lines: list[str] = []
-    warnings = view.get("warnings") or []
-    if warnings:
-        lines.append("")
-        for w in warnings:
-            lines.append(f"{YELLOW}⚠ {BOLD}{w['title']}{RESET}")
-            lines.append(f"    {YELLOW}{w['detail']}{RESET}")
+def _truncate_kv(items: list[tuple[str, str]], n_max: int = 5, val_max: int = 30) -> str:
+    """Render ``[(k, v), ...]`` as ``"k=v, k=v, ..., +N more"`` with value truncation."""
+    parts = [
+        f"{k}={v if len(v) <= val_max else v[: val_max - 3] + '...'}" for k, v in items[:n_max]
+    ]
+    extra = len(items) - n_max
+    return ", ".join(parts) + (f", +{extra} more" if extra > 0 else "")
 
-    lines.append("")
-    lines.append(_dbox_top())
-    lines.append(_dbox_line(f"{BOLD}FEEDBACK CYCLE STARTING{RESET}"))
-    lines.append(_dbox_sep())
+
+def _render_init_enter(view: dict) -> str:
+    out: list[str] = []
+    for w in view.get("warnings") or []:
+        if not out:
+            out.append("")
+        out.append(f"{YELLOW}⚠ {BOLD}{w['title']}{RESET}")
+        out.append(f"    {YELLOW}{w['detail']}{RESET}")
+
     max_rounds = view["max_rounds"] or 999
-    lines.append(_dbox_line(f"Max rounds     {max_rounds!s:<15s}Patience    {view['patience']}"))
-    lines.append(_dbox_line(f"Candidates     {view['n_variants']}"))
-    sample_label = f"{view['sp_budget_ttest']} of {view['dataset_size']}"
-    lines.append(_dbox_line(f"Sample size    {sample_label}"))
-    mde = view["mde"]
-    mde_line = f"Min detectable {YELLOW}±{mde:.1%}{RESET} (α=0.05, 80% power)"  # noqa: RUF001
-    lines.append(_dbox_line(mde_line))
-    lines.append(_dbox_line(f"Model          {view['model']}"))
     l2 = "enabled" if view["l2_enabled"] else "disabled"
     l3 = "enabled" if view["l3_enabled"] else "disabled"
-    lines.append(_dbox_line(f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}"))
-    lines.append(_dbox_bottom())
-    return "\n".join(lines)
+    out.append("")
+    out.append(
+        _dbox_block(
+            f"{BOLD}FEEDBACK CYCLE STARTING{RESET}",
+            f"Max rounds     {max_rounds!s:<15s}Patience    {view['patience']}",
+            f"Candidates     {view['n_variants']}",
+            f"Sample size    {view['sp_budget_ttest']} of {view['dataset_size']}",
+            f"Min detectable {YELLOW}±{view['mde']:.1%}{RESET} (α=0.05, 80% power)",  # noqa: RUF001
+            f"Model          {view['model']}",
+            f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}",
+        )
+    )
+    return "\n".join(out)
 
 
 def _render_init_exit(view: dict) -> str:
-    cycle_id = view["cycle_id_short"]
-    samples = view["samples"]
     obs = "ON" if view["obs_on"] else "OFF"
-    out: list[str] = [
+    out = [
         f"  {GREEN}✓{RESET} Initialized  baseline={view['baseline_acc']:.1%}  "
-        f"cycle={cycle_id}  samples={samples}  obs={obs}"
+        f"cycle={view['cycle_id_short']}  samples={view['samples']}  obs={obs}"
     ]
-    crit = view.get("bootstrap_critique") or ""
-    if crit:
+    if crit := view.get("bootstrap_critique"):
         out.append(f"    {CYAN}Bootstrap L1 critique:{RESET} {crit}")
     resumed = view.get("resumed_from_round", 0)
     if resumed > 0:
-        parts = []
-        if view.get("l1_critique_chars"):
-            parts.append(f"l1_critique={view['l1_critique_chars']} chars")
-        if view.get("task_context_keys"):
-            parts.append(f"task_context={view['task_context_keys']} keys")
-        if view.get("l2_round"):
-            parts.append(f"l2_round={view['l2_round']}")
+        parts: list[str] = []
+        for k, label in (
+            ("l1_critique_chars", "l1_critique={} chars"),
+            ("task_context_keys", "task_context={} keys"),
+            ("l2_round", "l2_round={}"),
+        ):
+            if v := view.get(k):
+                parts.append(label.format(v))
         suffix = f"  ({', '.join(parts)})" if parts else ""
         out.append(f"    Resumed from round {resumed} ({resumed} rounds cached){suffix}")
     else:
@@ -204,43 +195,40 @@ def _render_init_exit(view: dict) -> str:
 
 
 def _render_l1_generate_enter(view: dict) -> str:
-    r = view["round"]
-    max_rounds = view["max_rounds"] or 999
     crit = "YES" if view["has_l1_critique"] else "NO"
-
-    out: list[str] = [
-        "",
-        _round_rule(
-            f"ROUND {r}/{max_rounds}",
-            f"patience {view['l1_stall_count']}/{view['patience']}",
-        ),
-        "",
-        _node_top("GENERATE"),
-        _node_line(f"Current best    {view['current_acc']:.1%}"),
-        _node_line(f"Prompt          {view['prompt_preview']}"),
-        _node_line(
-            f"Candidates      {view['n_variants']}   "
-            f"Creativity: {view['creativity']}   Critique: {crit}"
-        ),
-        _node_line(f"Model           {view['model']}"),
-        _node_bottom(),
-    ]
-    return "\n".join(out)
+    return "\n".join(
+        [
+            "",
+            _round_rule(
+                f"ROUND {view['round']}/{view['max_rounds'] or 999}",
+                f"patience {view['l1_stall_count']}/{view['patience']}",
+            ),
+            "",
+            _node_block(
+                "GENERATE",
+                f"Current best    {view['current_acc']:.1%}",
+                f"Prompt          {view['prompt_preview']}",
+                f"Candidates      {view['n_variants']}   "
+                f"Creativity: {view['creativity']}   Critique: {crit}",
+                f"Model           {view['model']}",
+            ),
+        ]
+    )
 
 
 def _render_l1_generate_exit(view: dict) -> str:
-    n = view["n_candidates"]
     src = "loaded from disk" if view["source"] == "disk" else "from LLM"
-    out = [f"  {GREEN}✓{RESET} {n} candidates generated ({src})", ""]
-    out.append(render_sp_diff(view["sp_diff"]))
-    return "\n".join(line for line in out if line is not None)
+    return "\n".join(
+        [
+            f"  {GREEN}✓{RESET} {view['n_candidates']} candidates generated ({src})",
+            "",
+            render_sp_diff(view["sp_diff"]),
+        ]
+    )
 
 
 def _render_l1_score_enter(view: dict) -> str:
-    n_cand = view["n_candidates"]
-    n_q = view["n_queries"]
-    n_calls = view["n_calls"]
-    label = f"{n_cand} × {n_q} = {n_calls} calls"  # noqa: RUF001
+    label = f"{view['n_candidates']} × {view['n_queries']} = {view['n_calls']} calls"  # noqa: RUF001
     return "\n" + _node_top("EVALUATE", label)
 
 
@@ -251,19 +239,16 @@ def _render_l1_score_exit(view: dict) -> str:
 
     out: list[str] = []
     if len(scores) > 3:
-        board = _scoreboard(scores, winner_label, baseline_acc)
-        if board:
+        if board := _scoreboard(scores, winner_label, baseline_acc):
             out.append(board)
     elif scores:
         ranked = sorted(
-            scores,
-            key=lambda s: (s.get("composite") or s["accuracy"], s["accuracy"]),
-            reverse=True,
+            scores, key=lambda s: (s.get("composite") or s["accuracy"], s["accuracy"]), reverse=True
         )
-        parts: list[str] = []
-        for s in ranked:
-            ab = " (aborted)" if s["escalation_aborted"] else ""
-            parts.append(f"{s['label']}={s['accuracy']:.1%}{ab}")
+        parts = [
+            f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
+            for s in ranked
+        ]
         out.append(f"  Scoreboard: {' | '.join(parts)}")
 
     w_acc = view["winner_accuracy"]
@@ -271,33 +256,31 @@ def _render_l1_score_exit(view: dict) -> str:
     comp_tag = f"  composite={w_comp:.4f}" if w_comp is not None and w_comp != w_acc else ""
 
     if view["improved"]:
-        delta = view["delta"]
         p = view.get("p_value")
         sig_tag = f"  {fmt_pvalue(p)}" if p is not None else ""
         out.append(
             f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {w_acc:.1%}"
-            f" (was {baseline_acc:.1%}, {_fmt_delta(delta)}){comp_tag}{sig_tag}"
+            f" (was {baseline_acc:.1%}, {_fmt_delta(view['delta'])}){comp_tag}{sig_tag}"
             f"  ->  next: {view['next_action']}"
         )
     else:
         out.append(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate {w_acc:.1%}{comp_tag}")
 
-    crit = (view.get("l1_critique_text") or "").replace("\n", " ").strip()
-    if crit:
+    if crit := (view.get("l1_critique_text") or "").replace("\n", " ").strip():
         out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")
     return "\n".join(out)
 
 
 def _render_escalation_enter(view: dict) -> str:
-    out = [
-        "",
-        _node_top("ESCALATION", f"{view['check_name']} → {view['target']}"),
-        _node_line(f"{YELLOW}Degraded: {view['degraded_rate']:.0%} of queries{RESET}"),
+    extras = [
+        f"{wt}: {count} occurrences" for wt, count in (view.get("warning_types") or {}).items()
     ]
-    for wt, count in (view.get("warning_types") or {}).items():
-        out.append(_node_line(f"{wt}: {count} occurrences"))
-    out.append(_node_bottom())
-    return "\n".join(out)
+    return "\n" + _node_block(
+        "ESCALATION",
+        f"{YELLOW}Degraded: {view['degraded_rate']:.0%} of queries{RESET}",
+        *extras,
+        label_right=f"{view['check_name']} → {view['target']}",
+    )
 
 
 def _render_escalation_exit(view: dict) -> str:
@@ -305,114 +288,90 @@ def _render_escalation_exit(view: dict) -> str:
     if not classifications:
         return ""
     out = [f"  {CYAN}Warning classifications:{RESET}"]
-    for c in classifications:
-        out.append(f"    {c['warning_type']}: {c['status']}")
+    out.extend(f"    {c['warning_type']}: {c['status']}" for c in classifications)
     return "\n".join(out)
 
 
 def _render_refine_enter(view: dict) -> str:
-    out = [
-        "",
-        _node_top("L2 REFINE CONTEXT", f"L2 round {view['l2_round']}"),
-        _node_line(
-            f"L1 stalled {view['l1_stall_count']} rounds  |  "
-            f"acc={view['current_acc']:.1%}  best={view['best_acc']:.1%}"
-        ),
-    ]
     params = view.get("current_params") or {}
-    if params:
-        items = list(params.items())
-        parts: list[str] = []
-        for k, v in items[:5]:
-            vs = v if len(v) <= 30 else v[:27] + "..."
-            parts.append(f"{k}={vs}")
-        extra = len(items) - 5
-        params_str = ", ".join(parts)
-        if extra > 0:
-            params_str += f", +{extra} more"
-        out.append(_node_line(f"Current params: {params_str}"))
-    else:
-        out.append(_node_line("Current params: (none)"))
-    out.append(_node_line("LLM analyzing failure patterns..."))
-    out.append(_node_bottom())
-    return "\n".join(out)
+    params_line = (
+        f"Current params: {_truncate_kv(list(params.items()))}"
+        if params
+        else "Current params: (none)"
+    )
+    return "\n" + _node_block(
+        "L2 REFINE CONTEXT",
+        f"L1 stalled {view['l1_stall_count']} rounds  |  "
+        f"acc={view['current_acc']:.1%}  best={view['best_acc']:.1%}",
+        params_line,
+        "LLM analyzing failure patterns...",
+        label_right=f"L2 round {view['l2_round']}",
+    )
 
 
 def _render_refine_exit(view: dict) -> str:
-    n_changes = view["param_changes_count"]
     tc = f", {GREEN}task_context updated{RESET}" if view["task_context_changed"] else ""
     action = view["action"]
     probe = f", {CYAN}action={action}{RESET}" if action != "continue" else ""
-    desc = view.get("changes_description", "") or ""
-    out: list[str] = [f"  {GREEN}✓{RESET} L2 decision: {n_changes} param changes{tc}{probe}"]
-    if desc:
+    out = [f"  {GREEN}✓{RESET} L2 decision: {view['param_changes_count']} param changes{tc}{probe}"]
+    if desc := (view.get("changes_description", "") or ""):
         out.append(f"    {desc}")
-    warned = view.get("warned_queries", 0)
-    top_w = view.get("top_warning", "")
-    if warned:
+    if warned := view.get("warned_queries", 0):
+        top_w = view.get("top_warning", "")
         out.append(
             f"    {YELLOW}⚠ {warned} queries with recurring pipeline warnings ({top_w}){RESET}"
         )
 
-    l2_prompt = view.get("l2_prompt", "") or ""
-    if l2_prompt:
+    if l2_prompt := (view.get("l2_prompt", "") or ""):
         out.append(f"\n  {CYAN}--- L2 PROMPT (sent to LLM) ---{RESET}")
-        for line in l2_prompt.split("\n"):
-            out.append(f"  {CYAN}│{RESET} {line}")
+        out.extend(f"  {CYAN}│{RESET} {line}" for line in l2_prompt.split("\n"))
         out.append(f"  {CYAN}--- END PROMPT ---{RESET}")
 
-    l2_resp = view.get("l2_response_json")
-    if l2_resp is not None:
+    if (l2_resp := view.get("l2_response_json")) is not None:
         out.append(f"\n  {CYAN}--- L2 RESPONSE (raw JSON) ---{RESET}")
-        formatted = json.dumps(l2_resp, indent=2)
-        for line in formatted.split("\n")[:40]:
-            out.append(f"  {CYAN}│{RESET} {line}")
+        out.extend(
+            f"  {CYAN}│{RESET} {line}" for line in json.dumps(l2_resp, indent=2).split("\n")[:40]
+        )
         out.append(f"  {CYAN}--- END RESPONSE ---{RESET}")
     return "\n".join(out)
 
 
 def _render_probe_enter(view: dict) -> str:
-    n = view["n_probe_queries"]
     queries = view.get("probe_queries") or []
-    out = [
-        "",
-        _node_top("PROBE ROUND", f"{n} queries"),
-        _node_line("Testing warned queries with new settings..."),
-    ]
-    for q in queries[:5]:
-        out.append(_node_line(f"  {q[:70]}"))
+    extras = [f"  {q[:70]}" for q in queries[:5]]
     if len(queries) > 5:
-        out.append(_node_line(f"  ... +{len(queries) - 5} more"))
-    out.append(_node_bottom())
-    return "\n".join(out)
+        extras.append(f"  ... +{len(queries) - 5} more")
+    return "\n" + _node_block(
+        "PROBE ROUND",
+        "Testing warned queries with new settings...",
+        *extras,
+        label_right=f"{view['n_probe_queries']} queries",
+    )
 
 
 def _render_probe_exit(view: dict) -> str:
     n = view["n_probed"]
+    if not n:
+        return f"  {YELLOW}⚡ Probe: no matching queries found{RESET}"
     hits = view["probe_hits"]
-    if n:
-        rate = hits / n
-        color = GREEN if rate > 0.5 else YELLOW
-        return f"  {color}⚡ Probe: {hits}/{n} hits ({rate:.0%}){RESET}"
-    return f"  {YELLOW}⚡ Probe: no matching queries found{RESET}"
+    rate = hits / n
+    color = GREEN if rate > 0.5 else YELLOW
+    return f"  {color}⚡ Probe: {hits}/{n} hits ({rate:.0%}){RESET}"
 
 
 def _render_plan_enter(view: dict) -> str:
-    out = [
-        "",
-        _node_top("L3 MODIFY PLAN", f"L3 round {view['l3_round']}"),
-        _node_line(f"L2 stalled {view['l2_stall_count']} rounds"),
-        _node_line(f"Current plan: {view['current_plan_preview']}"),
-        _node_line("LLM designing new strategy..."),
-        _node_bottom(),
-    ]
-    return "\n".join(out)
+    return "\n" + _node_block(
+        "L3 MODIFY PLAN",
+        f"L2 stalled {view['l2_stall_count']} rounds",
+        f"Current plan: {view['current_plan_preview']}",
+        "LLM designing new strategy...",
+        label_right=f"L3 round {view['l3_round']}",
+    )
 
 
 def _render_plan_exit(view: dict) -> str:
     out = [f"  {GREEN}✓{RESET} New plan: {view['new_plan_preview']}"]
-    desc = view.get("changes_description", "") or ""
-    if desc:
+    if desc := (view.get("changes_description", "") or ""):
         out.append(f"    {desc}")
     return "\n".join(out)
 
