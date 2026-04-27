@@ -8,7 +8,6 @@ promptpotter/
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration (Session, RunListener, Decision records)
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
-│   ├── recon/         # TEMPLATE — dormant sensitivity-scan archive, preserved for future revival
 │   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library, adaptive_prefix
 │   ├── scoring/       # score_search_point gateway, measure_sample, stale-data protocol
 │   └── datasets/

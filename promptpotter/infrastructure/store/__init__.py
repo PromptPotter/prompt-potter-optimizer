@@ -5,7 +5,6 @@ from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import (
     BackendStore,
-    PlanStore,
     Stores,
     build_stores,
     clear_active_pointer,
@@ -18,7 +17,6 @@ __all__ = [
     "BackendStore",
     "CampaignStore",
     "DatasetRunStore",
-    "PlanStore",
     "SessionStore",
     "Stores",
     "build_stores",

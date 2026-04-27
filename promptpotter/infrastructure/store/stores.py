@@ -1,4 +1,4 @@
-"""Concrete store implementations — BackendStore, PlanStore, ``Stores`` bundle."""
+"""Concrete store implementations — BackendStore, ``Stores`` bundle."""
 
 from __future__ import annotations
 
@@ -7,11 +7,10 @@ import logging
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from promptpotter.domain.backend import BackendConnection, Execution
 from promptpotter.infrastructure.store.base import (
-    EntityStore,
     read_json,
     read_json_optional,
     validate_path_component,
@@ -26,104 +25,6 @@ logger = logging.getLogger(__name__)
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_PROJECTS_ROOT = _REPO_ROOT / ".promptpotter" / "projects"
 DEFAULT_TENANT_ID = "default"
-
-
-@dataclass
-class ReusablePlanMatch:
-    """Result of a smart-search plan reuse lookup.
-
-    ``data`` is the raw on-disk plan dict (ready for ``deserialize_adaptive_recon_plan``).
-    ``kind`` tells the caller how to post-process it:
-
-    - ``complete``  — scan finished; reuse ``recon_results.axis_profiles`` directly.
-    - ``partial``   — scan interrupted; caller rebuilds profiles from ``recon_results.rows``.
-    - ``sibling``   — another plan with matching variant_library_hash had scan data;
-                       reuse its baseline/diagnostic/profiles under the current ``plan_id``.
-    - ``diagnostic_only`` — plan existed but has no usable scan data.
-    """
-
-    kind: Literal["complete", "partial", "sibling", "diagnostic_only"]
-    data: dict[str, Any]
-
-
-class PlanStore(EntityStore):
-    """File I/O for smart search plan persistence and resume.
-
-    Tenant-global: plans live under ``library/recon_plans/`` regardless of
-    ``backend_id``. The ``backend_id`` parameter is preserved on public
-    methods for call-site stability but is ignored for path construction.
-    """
-
-    def __init__(self, base_dir: Path):
-        # base_dir is tenant root; plans nest under library/recon_plans/
-        super().__init__(base_dir, "recon_plans")
-
-    def _entity_dir(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / "recon_plans"
-
-    def list_all(self, backend_id: str) -> list[dict[str, Any]]:
-        """Return summary metadata for all smart search plans on disk."""
-        plans_dir = self._entity_dir(backend_id)
-        if not plans_dir.exists():
-            return []
-        results = []
-        for path in sorted(plans_dir.glob("ssplan_*.json")):
-            data = read_json(path)
-            config = data.get("config", {})
-            scan = data.get("recon_results", {})
-            results.append(
-                {
-                    "plan_id": data["plan_id"],
-                    "status": data["status"],
-                    "n_diagnostic": config.get("n_diagnostic", "?"),
-                    "max_rounds": config.get("max_rounds", "?"),
-                    "n_axis_profiles": len(scan.get("axis_profiles", [])),
-                    "variant_library_hash": data.get("variant_library_hash", ""),
-                }
-            )
-        return results
-
-    def find_reusable_plan(self, backend_id: str, plan_id: str) -> ReusablePlanMatch | None:
-        """Look up a reusable plan for ``plan_id``.
-
-        Preference order: complete scan for this exact plan_id → partial scan
-        for this plan_id → sibling plan with matching ``variant_library_hash``
-        and scan data → diagnostic-only fallback. Returns ``None`` if no plan
-        is on disk for ``plan_id``.
-        """
-        existing = self.load(backend_id, plan_id)
-        if existing is None:
-            return None
-
-        status = existing.get("status", "?")
-        scan = existing.get("recon_results") or {}
-        if status in ("scan_complete", "search_complete") and scan:
-            return ReusablePlanMatch(kind="complete", data=existing)
-        if status == "scan_partial" and scan:
-            return ReusablePlanMatch(kind="partial", data=existing)
-
-        vl_hash = existing.get("variant_library_hash", "")
-        current_n_diag = existing.get("config", {}).get("n_diagnostic", 6)
-        siblings = [
-            s
-            for s in self.list_all(backend_id)
-            if s["plan_id"] != plan_id
-            and s["status"] in ("scan_complete", "search_complete")
-            and s.get("variant_library_hash") == vl_hash
-            and s.get("n_axis_profiles", 0) > 0
-        ]
-        if siblings:
-            siblings.sort(
-                key=lambda s: (
-                    s.get("n_diagnostic") != current_n_diag,
-                    s["status"] != "scan_complete",
-                )
-            )
-            sib_data = self.load(backend_id, siblings[0]["plan_id"])
-            if sib_data is not None:
-                return ReusablePlanMatch(kind="sibling", data=sib_data)
-
-        return ReusablePlanMatch(kind="diagnostic_only", data=existing)
 
 
 class BackendStore:
@@ -462,7 +363,6 @@ class Stores:
     sessions: SessionStore
     campaigns: CampaignStore
     dataset_runs: DatasetRunStore
-    recon_plans: PlanStore
 
 
 def build_stores(
@@ -489,5 +389,4 @@ def build_stores(
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         dataset_runs=DatasetRunStore(tenant_dir),
-        recon_plans=PlanStore(tenant_dir),
     )

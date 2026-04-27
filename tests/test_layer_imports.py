@@ -37,8 +37,6 @@ def _layer(rel_posix: str) -> str | None:
         return "intelligence"
     if "/application/optimization/" in rel_posix:
         return "optimization"
-    if "/application/recon/" in rel_posix:
-        return "recon"  # dormant — exempt from rules
     if "/application/" in rel_posix:
         return "application"
     if "/infrastructure/" in rel_posix:
@@ -56,8 +54,6 @@ def _target_layer(module: str) -> str | None:
         return "intelligence"
     if module.startswith("promptpotter.application.optimization"):
         return "optimization"
-    if module.startswith("promptpotter.application.recon"):
-        return "recon"
     if module.startswith("promptpotter.application"):
         return "application"
     if module.startswith("promptpotter.infrastructure"):
@@ -103,14 +99,14 @@ def _scan_violations() -> set[tuple[str, str]]:
     for path in ROOT.rglob("*.py"):
         rel = path.relative_to(ROOT.parent).as_posix()
         src_layer = _layer(rel)
-        if src_layer in (None, "recon"):
+        if src_layer is None:
             continue
         tree = ast.parse(path.read_text(encoding="utf-8"))
         visitor = _RuntimeImports()
         visitor.visit(tree)
         for module in visitor.modules:
             tgt_layer = _target_layer(module)
-            if tgt_layer in (None, "recon"):
+            if tgt_layer is None:
                 continue
             if _is_violation(src_layer, tgt_layer):
                 found.add((rel, module))

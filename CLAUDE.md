@@ -6,7 +6,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 PromptPotter is an **LLM-driven program evolution** system for prompts and pipelines. Given a dataset + an LLM pipeline endpoint, each round it evolves a population of candidate configurations through a 3-layer loop: **L1** (generate population → measure fitness → critique), **L2** (refine the search neighbourhood on stall), **L3** (replan the meta-strategy when L2 stalls). Four LLM nodes: `restructure` (one-time), `l1` (`l1_generate` + `l1_critique` sub-phases), `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
 
-**`application/recon/` is DORMANT but not frozen.** The sensitivity-scan / recon pass has zero callers in the active loop today (no CLI subcommand, no UI wrapper, no L1 parameter, no `CampaignConfig` field references it). It will be reactivated as the **second UI feature after M11+**. Until then it carries no runtime cost, but **mechanical refactors that ripple through the codebase (renames, signature changes, API migrations) MUST update recon too** so it stays compilable and ready to revive. Don't *invest* in recon (no new features, no rewrites for their own sake), but don't carve exceptions around it either — keep it on the same lint/type/test rails as everything else.
+**Recon archived.** The sensitivity-scan / recon pass had no callers in the active loop and was deleted from `main` to stop paying the update tax on every cross-cutting refactor. Code is preserved at the `recon-archive` git tag; restore with `git checkout recon-archive -- promptpotter/application/recon/`. Last design notes: `docs/specs/m9-stable-config-and-scaffolding.md` (Track 7 post-ship note).
 
 **Self-healing optimization — two rails.** Failures attach to the individual that produced them (per-individual `OptSearchPoint.memory`), never to the round. Rail 1 (`ValidationFailure`, pre-fitness): L2 teaches L1 what not to propose. Rail 2 (`RuntimeFailure`, mid-fitness): L2 adjusts its own strategy; L3 replans if the pattern persists. Full mechanics in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
 
@@ -70,7 +70,6 @@ promptpotter/
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, l1_critique, llm_call, restructure
-│   ├── recon/         # TEMPLATE — dormant sensitivity-scan archive, preserved for future revival
 │   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library
 │   ├── scoring/       # score_search_point gateway
 │   └── datasets/
@@ -115,7 +114,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 ## Key Patterns
 
 - **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/campaign/campaign_setup.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
-- **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore, PlanStore).
+- **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.
 - **HITL pause**: runtime via `control.json::requested_state` (`pause` / `resume` / `stop`, CLI: `python -m promptpotter control pause`); the optimizer reads at the `after_round` checkpoint and raises `PauseForReviewError`. No static config flag.

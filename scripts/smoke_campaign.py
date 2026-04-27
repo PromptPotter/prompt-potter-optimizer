@@ -68,7 +68,6 @@ def _build_config(
         "dataset_name": dataset,
         "scoring": _infer_scoring(dataset),
         "sp_budget_ttest": samples,
-        "recon_sample_size": samples,
         "exclude_nodes": [],
         "pipeline_overrides": {},
         "task_context": {"task_description": task_context},
