@@ -20,66 +20,9 @@ from promptpotter.domain.scoring import QueryResult
 if TYPE_CHECKING:
     from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 
-__all__ = ["L1ScoringResult", "l1_score", "select_fittest"]
-
-
-def select_fittest(
-    population: list[OptSearchPoint],
-    all_candidate_results: dict[str, list[QueryResult]],
-    baseline: RoundBaseline,
-    improvement_threshold: float,
-    pipeline_schema: PipelineSchema | None = None,
-    round_scorer: Any = None,
-) -> dict[str, Any]:
-    """Compare population and select the round winner (on fitness, not composite)."""
-    assert pipeline_schema is not None, "select_fittest requires pipeline_schema"
-
-    individual_scores = {
-        c.lineage.id: compute_composite_score(
-            all_candidate_results[c.lineage.id],
-            pipeline_schema,
-            opt_sp=c,
-            round_scorer=round_scorer,
-        )
-        for c in population
-    }
-
-    best_composite = baseline.composite
-    best_fitness = baseline.accuracy
-    best_osp: OptSearchPoint = baseline.osp
-    best_results: list = list(baseline.results)
-    best_label = baseline.label
-    best_evaluators: dict[str, float] = dict(baseline.evaluators)
-    winner_idx: int | None = None
-
-    for idx, individual in enumerate(population):
-        ind_scores = individual_scores[individual.lineage.id]
-        ind_fitness = ind_scores["accuracy"]
-        if ind_fitness > best_fitness:
-            best_fitness = ind_fitness
-            best_composite = ind_scores["composite"]
-            best_osp = individual
-            best_results = list(all_candidate_results[individual.lineage.id])
-            best_label = individual.lineage.changes_description or individual.lineage.id[:12]
-            best_evaluators = dict(ind_scores.get("evaluators") or {})
-            winner_idx = idx
-
-    return {
-        "label": best_label,
-        "osp": best_osp,
-        "accuracy": best_fitness,
-        "composite": best_composite,
-        "hits": sum(1 for r in best_results if r.get("hit")),
-        "total": len(best_results),
-        "results": best_results,
-        "candidates_scored": len(population),
-        "improved": best_fitness > baseline.accuracy + improvement_threshold,
-        "winner_idx": winner_idx,
-        "evaluators": best_evaluators,
-    }
+__all__ = ["L1ScoringResult", "l1_score"]
 
 
 class L1ScoringResult(BaseModel):
@@ -120,20 +63,18 @@ async def l1_score(
     elimination_alpha: float = 0.2,
     round_num: int = 0,
 ) -> L1ScoringResult:
-    """Evaluate candidates and select the round winner."""
+    """Evaluate candidates and select the round winner (compares fitness, not composite)."""
     session = cycle.session
+    schema = session.pipeline_schema
+    assert schema is not None, "l1_score requires pipeline_schema"
 
-    osp_population, merged_pp, overrides = parse_population(
-        candidates,
-        pipeline_params,
-        session.pipeline_schema,
-    )
+    osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
     decisions: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,
         merged_pp,
-        overrides,
+        candidates,
         dataset,
         degradation_checks=degradation_checks,
         callbacks=callbacks,
@@ -148,58 +89,64 @@ async def l1_score(
         for cs in candidate_scores
         if cs.get("escalation_aborted") and not cs.get("elimination_stopped")
     }
-    evaluated_population = [
+    evaluated = [
         ind
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
-    winner_entry = select_fittest(
-        evaluated_population,
-        all_candidate_results,
-        baseline,
-        improvement_threshold,
-        pipeline_schema=session.pipeline_schema,
-        round_scorer=session.round_scorer,
-    )
+    best_acc = baseline.accuracy
+    best_comp = baseline.composite
+    best_osp: OptSearchPoint = baseline.osp
+    best_results: list = list(baseline.results)
+    best_label = baseline.label
+    best_evals: dict[str, float] = dict(baseline.evaluators)
+    winner_idx: int | None = None
+    for idx, ind in enumerate(evaluated):
+        s = compute_composite_score(
+            all_candidate_results[ind.lineage.id],
+            schema,
+            opt_sp=ind,
+            round_scorer=session.round_scorer,
+        )
+        if s["accuracy"] > best_acc:
+            best_acc = s["accuracy"]
+            best_comp = s["composite"]
+            best_osp = ind
+            best_results = list(all_candidate_results[ind.lineage.id])
+            best_label = ind.lineage.changes_description or ind.lineage.id[:12]
+            best_evals = dict(s.get("evaluators") or {})
+            winner_idx = idx
 
-    w_idx = winner_entry["winner_idx"]
-    winner_id = (
-        evaluated_population[w_idx].lineage.id if w_idx is not None and evaluated_population else ""
-    )
     record_decision(
         decisions,
         "round_winner",
         {
-            "candidate_ids": [ind.lineage.id for ind in evaluated_population],
+            "candidate_ids": [ind.lineage.id for ind in evaluated],
             "round_num": round_num,
         },
-        winner_id,
+        evaluated[winner_idx].lineage.id if winner_idx is not None and evaluated else "",
         data={"current_best_accuracy_at_record": baseline.accuracy},
     )
 
-    winner_pp = merged_pp[w_idx] if w_idx is not None else pipeline_params
-    winner_osp: OptSearchPoint = winner_entry["osp"]
-    winner_results = winner_entry["results"]
-    winner_dict = {
-        **winner_osp.prompt_field_dict(),
-        "lineage": winner_osp.lineage.model_dump(),
-    }
     return L1ScoringResult(
-        label=winner_entry["label"],
-        winner_osp=winner_osp,
-        winner_prompt_fields=winner_dict,
-        winner_pipeline_params=winner_pp,
-        winner_accuracy=winner_entry["accuracy"],
-        winner_composite=winner_entry["composite"],
-        hits=winner_entry["hits"],
-        total=winner_entry["total"],
-        improved=winner_entry["improved"],
-        candidates_scored=winner_entry["candidates_scored"],
+        label=best_label,
+        winner_osp=best_osp,
+        winner_prompt_fields={
+            **best_osp.prompt_field_dict(),
+            "lineage": best_osp.lineage.model_dump(),
+        },
+        winner_pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
+        winner_accuracy=best_acc,
+        winner_composite=best_comp,
+        hits=sum(1 for r in best_results if r.get("hit")),
+        total=len(best_results),
+        improved=best_acc > baseline.accuracy + improvement_threshold,
+        candidates_scored=len(evaluated),
         candidate_scores=candidate_scores,
-        winner_results=winner_results,
+        winner_results=best_results,
         all_candidate_results=all_candidate_results,
         escalation_signal=escalation_signal,
-        degraded_queries=count_degraded_queries(winner_results),
-        winner_evaluators=winner_entry["evaluators"],
+        degraded_queries=count_degraded_queries(best_results),
+        winner_evaluators=best_evals,
         decisions=decisions,
     )

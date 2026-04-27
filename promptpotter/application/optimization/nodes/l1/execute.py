@@ -34,7 +34,6 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.elimination import DegradationCheck
-    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -160,19 +159,27 @@ async def _generate_or_load_candidates(
     return candidates
 
 
-async def _score_and_select(
-    candidates: list[CandidateProposal],
-    round_num: int,
+async def execute_round(
     cycle: Cycle,
+    round_num: int,
     scoring_dataset: list[Sample],
     callbacks: RunListener,
-    obs: ObservabilityBridge | None = None,
     degradation_checks: list[DegradationCheck] | None = None,
-) -> L1ScoringResult:
-    """Evaluate candidates and select winner."""
+) -> RoundResult:
+    """Execute one L1 round: generate → score+select → critique → persist to memory."""
     session = cycle.session
     config = cycle.config
     opt = config.optimization
+    obs = session.obs
+    if obs:
+        with graceful("RoundStart emit failed"):
+            obs.emit(RoundStart(campaign_id=session.obs_campaign_id, round_num=round_num))
+
+    candidates = await _generate_or_load_candidates(
+        round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
+    )
+
+    assert cycle.current_sp is not None
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -182,11 +189,9 @@ async def _score_and_select(
         n_queries=len(scoring_dataset),
         current_best_accuracy=cycle.current_accuracy,
         improvement_threshold=opt.improvement_threshold,
-        current_pipeline_params=cycle.current_sp.pipeline_params if cycle.current_sp else None,
+        current_pipeline_params=cycle.current_sp.pipeline_params,
     )
-
     baseline = cycle.baseline_for_round(scoring_dataset, round_num)
-
     async with observed_node(
         f"l1_score_r{round_num}",
         "scoring",
@@ -195,7 +200,6 @@ async def _score_and_select(
         campaign_id=session.obs_campaign_id,
         round_num=round_num,
     ):
-        assert cycle.current_sp is not None
         scoring_result = await l1_score(
             cycle,
             candidates,
@@ -209,19 +213,16 @@ async def _score_and_select(
             elimination_alpha=opt.elimination_alpha,
             round_num=round_num,
         )
-
         if obs and scoring_result.candidate_scores:
-            winner_id = str(scoring_result.winner_prompt_fields.get("id") or "")
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
                     campaign_id=session.obs_campaign_id,
                     round_num=round_num,
-                    winner_candidate_id=winner_id,
+                    winner_candidate_id=str(scoring_result.winner_prompt_fields.get("id") or ""),
                     winner_accuracy=scoring_result.winner_accuracy,
                     improved=scoring_result.improved,
                 )
-
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -232,42 +233,6 @@ async def _score_and_select(
         winner_composite=scoring_result.winner_composite,
         improved=scoring_result.improved,
         candidate_scores=scoring_result.candidate_scores,
-    )
-
-    return scoring_result
-
-
-async def execute_round(
-    cycle: Cycle,
-    round_num: int,
-    scoring_dataset: list[Sample],
-    callbacks: RunListener,
-    degradation_checks: list[DegradationCheck] | None = None,
-) -> RoundResult:
-    """Execute one L1 round: generate → score+select → critique → persist to memory."""
-    session = cycle.session
-    config = cycle.config
-    obs = session.obs
-    if obs:
-        with graceful("RoundStart emit failed"):
-            obs.emit(RoundStart(campaign_id=session.obs_campaign_id, round_num=round_num))
-
-    candidates = await _generate_or_load_candidates(
-        round_num,
-        cycle,
-        callbacks.on_phase,
-        n_eval_queries=len(scoring_dataset),
-        obs=obs,
-    )
-
-    scoring_result = await _score_and_select(
-        candidates,
-        round_num,
-        cycle,
-        scoring_dataset,
-        callbacks,
-        obs=obs,
-        degradation_checks=degradation_checks,
     )
 
     critique_text = ""

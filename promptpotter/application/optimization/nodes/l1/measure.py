@@ -58,14 +58,12 @@ def parse_population(
     proposals: list[CandidateProposal],
     pipeline_params: dict | None,
     schema: PipelineSchema | None,
-) -> tuple[list[OptSearchPoint], list[dict | None], list[dict | None]]:
+) -> tuple[list[OptSearchPoint], list[dict | None]]:
     """Project proposals → OptSearchPoints + merged pp; attaches validation failures."""
-    overrides: list[dict | None] = []
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
     for cp in proposals:
         override = cp.node_overrides or None
-        overrides.append(override)
         osp = cp.osp
         if schema and override:
             failures = validate_overrides(override, schema)
@@ -81,7 +79,7 @@ def parse_population(
                     )
         osp_list.append(osp)
         merged.append(_merge_pipeline_params(pipeline_params, override, schema))
-    return osp_list, merged, overrides
+    return osp_list, merged
 
 
 def _build_score_report(
@@ -120,38 +118,14 @@ def _build_score_report(
     }
 
 
-def _handle_validation_skip(
-    osp_c: OptSearchPoint,
-    override: dict | None,
-    dataset: list,
-) -> tuple[list[QueryResult], dict]:
-    """Synthetic-0 short-circuit for invalid candidates — no backend call."""
-    results: list[QueryResult] = []
-    scores: dict[str, Any] = {
-        "accuracy": 0.0,
-        "composite": 0.0,
-        "hits": 0,
-        "total": 0,
-        "errors": 0,
-        "invalid": True,
-    }
-    report = _build_score_report(osp_c, override, scores, results, dataset, invalid=True)
-    return results, report
-
-
-def _handle_cache_hit(
-    osp_c: OptSearchPoint,
-    override: dict | None,
-    results: list[QueryResult],
-    scores: dict,
-    dataset: list,
-    elim_check: Any,
-) -> dict:
-    """Full-run cache hit — register with elim_check and build replay report."""
-    elim_check.register_completed(
-        [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
-    )
-    return _build_score_report(osp_c, override, scores, results, dataset, resumed_from_cache=True)
+_INVALID_SCORES: dict[str, Any] = {
+    "accuracy": 0.0,
+    "composite": 0.0,
+    "hits": 0,
+    "total": 0,
+    "errors": 0,
+    "invalid": True,
+}
 
 
 def _handle_scored_candidate(
@@ -179,39 +153,36 @@ def _handle_scored_candidate(
         )
 
     new_rf: RuntimeFailure | None = None
-    candidate_label = osp_c.lineage.changes_description or ""
-    if elimination_stopped and signal is not None and signal.check_name == "degradation":
+    rf_kind = (
+        "degradation_check"
+        if elimination_stopped and signal is not None and signal.check_name == "degradation"
+        else "scoring_error_abort"
+        if scoring_error_abort
+        else None
+    )
+    if rf_kind and signal is not None:
         cr = signal.check_result
-        dominant = cr.get("dominant_warning", "unknown:unknown")
-        problem_node = dominant.split(":")[0] if ":" in dominant else ""
-        observed_node_cfg = (merged_pp_i or {}).get(problem_node, {})
+        dc = int(cr.get("degraded_count", 0))
+        te = int(cr.get("total_evaluated", len(results)))
+        if rf_kind == "degradation_check":
+            dominant = cr.get("dominant_warning", "unknown:unknown")
+            node_cfg = (merged_pp_i or {}).get(dominant.split(":", 1)[0], {})
+            rate = float(cr.get("degraded_rate", 0.0))
+        else:
+            dominant = str(cr.get("dominant_warning") or "scoring_error")
+            node_cfg = merged_pp_i or {}
+            rate = (dc / te) if te else 0.0
         new_rf = RuntimeFailure(
-            source="degradation_check",
+            source=rf_kind,
             dominant_warning=dominant,
             warning_types=dict(cr.get("warning_types") or {}),
-            degraded_rate=float(cr.get("degraded_rate", 0.0)),
-            degraded_count=int(cr.get("degraded_count", 0)),
-            total_evaluated=int(cr.get("total_evaluated", len(results))),
-            observed_config=dict(observed_node_cfg),
+            degraded_rate=rate,
+            degraded_count=dc,
+            total_evaluated=te,
+            observed_config=dict(node_cfg),
             first_seen_round=round_num,
-            candidate_label=candidate_label,
+            candidate_label=osp_c.lineage.changes_description or "",
         )
-    elif scoring_error_abort and signal is not None:
-        cr = signal.check_result
-        degraded_count = int(cr.get("degraded_count", 0))
-        total_evaluated = int(cr.get("total_evaluated", len(results)))
-        new_rf = RuntimeFailure(
-            source="scoring_error_abort",
-            dominant_warning=str(cr.get("dominant_warning") or "scoring_error"),
-            warning_types=dict(cr.get("warning_types") or {}),
-            degraded_rate=(degraded_count / total_evaluated) if total_evaluated else 0.0,
-            degraded_count=degraded_count,
-            total_evaluated=total_evaluated,
-            observed_config=dict(merged_pp_i or {}),
-            first_seen_round=round_num,
-            candidate_label=candidate_label,
-        )
-    if new_rf is not None:
         osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
 
     elim_ctx: dict | None = None
@@ -291,7 +262,7 @@ async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
     merged_pp: list[dict | None],
-    candidate_overrides: list[dict | None],
+    proposals: list[CandidateProposal],
     dataset: list,
     *,
     degradation_checks: list | None = None,
@@ -303,77 +274,75 @@ async def score_population(
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Evaluate each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
-    search_memory = cycle.search_memory
-    obs_campaign_id = session.obs_campaign_id
+    obs = session.obs
+    n = len(population)
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[dict] = []
     escalation_signal: EscalationSignal | None = None
-    n_individuals = len(population)
-    obs = session.obs
-
     elim_check = EliminationCheck(
-        n_min=elimination_n_min,
-        alpha=elimination_alpha,
-        n_queries=len(dataset),
+        n_min=elimination_n_min, alpha=elimination_alpha, n_queries=len(dataset)
     )
 
     def _fire(idx: int, report: dict) -> None:
         candidate_scores.append(report)
-        callbacks.on_candidate_scored(idx, n_individuals, report)
+        callbacks.on_candidate_scored(idx, n, report)
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
                     CandidateScored,
-                    campaign_id=obs_campaign_id,
+                    campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     candidate_idx=idx,
                     report=report,
                 )
 
     for idx, osp_c in enumerate(population):
-        override = candidate_overrides[idx]
-        callbacks.on_candidate_started(
-            idx, n_individuals, osp_c.lineage.changes_description or "", override
-        )
+        override = proposals[idx].node_overrides or None
+        callbacks.on_candidate_started(idx, n, osp_c.lineage.changes_description or "", override)
 
         # Path 1 — validation-skip synthetic-0.
         if osp_c.validation_failures:
-            results, report = _handle_validation_skip(osp_c, override, dataset)
-            all_candidate_results[osp_c.lineage.id] = results
-            _fire(idx, report)
+            all_candidate_results[osp_c.lineage.id] = []
+            _fire(
+                idx,
+                _build_score_report(osp_c, override, _INVALID_SCORES, [], dataset, invalid=True),
+            )
             continue
 
-        sp = osp_c.to_job_search_point(
-            base_pipeline_params=merged_pp[idx],
-            schema=session.pipeline_schema,
-        )
-
-        all_checks = [*(degradation_checks or []), elim_check]
-
         def _on_result(r, qi, qt, _ci=idx):
-            callbacks.on_sample_scored(_ci, n_individuals, qi, qt, r)
+            callbacks.on_sample_scored(_ci, n, qi, qt, r)
 
         def _on_start(qtxt, qi, qt, _ci=idx):
-            callbacks.on_sample_started(_ci, n_individuals, qi, qt, qtxt)
+            callbacks.on_sample_started(_ci, n, qi, qt, qtxt)
 
         results, scores, was_cached, signal = await score_search_point(
-            sp,
+            osp_c.to_job_search_point(
+                base_pipeline_params=merged_pp[idx], schema=session.pipeline_schema
+            ),
             dataset,
             session,
             label=f"candidate_{idx}",
             on_result=_on_result,
             on_start=_on_start,
-            degradation_checks=all_checks or None,
+            degradation_checks=[*(degradation_checks or []), elim_check],
             candidate_idx=idx,
-            n_total_candidates=n_individuals,
-            search_memory=search_memory,
+            n_total_candidates=n,
+            search_memory=cycle.search_memory,
         )
         all_candidate_results[osp_c.lineage.id] = results
 
-        # Path 2 — full-run cache replay
+        # Path 2 — full-run cache replay.
         if was_cached:
-            _fire(idx, _handle_cache_hit(osp_c, override, results, scores, dataset, elim_check))
+            elim_check.register_completed(
+                [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+            )
+            _fire(
+                idx,
+                _build_score_report(
+                    osp_c, override, scores, results, dataset, resumed_from_cache=True
+                ),
+            )
             continue
 
         # Path 3 — scored. Snapshot priors BEFORE helper registers this candidate.

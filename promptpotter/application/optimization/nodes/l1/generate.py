@@ -93,35 +93,27 @@ def validate_overrides(
     """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0."""
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
-    allowed_models_set = set(allowed_models)
     for node_name, node_params in node_overrides.items():
         if not isinstance(node_params, dict):
             continue
-        if allowed_models_set:
-            proposed_model = node_params.get("model")
-            if proposed_model is not None and proposed_model not in allowed_models_set:
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.model",
-                        value=str(proposed_model),
-                        allowed=allowed_models,
-                        reason="not_in_available_models",
-                    )
-                )
         node = pipeline_schema.get_node(node_name)
-        if node is None or not node.param_allowed_values:
-            continue
-        for param, allowed in node.param_allowed_values.items():
-            if param == "model":
-                continue  # handled above against available_models
-            if param not in node_params:
-                continue
-            proposed = node_params[param]
-            if proposed not in allowed:
+        node_allowed = (node.param_allowed_values if node else None) or {}
+        for param, value in node_params.items():
+            if param == "model" and allowed_models:
+                if value is not None and value not in allowed_models:
+                    failures.append(
+                        ValidationFailure(
+                            axis=f"{node_name}.model",
+                            value=str(value),
+                            allowed=allowed_models,
+                            reason="not_in_available_models",
+                        )
+                    )
+            elif (allowed := node_allowed.get(param)) and value not in allowed:
                 failures.append(
                     ValidationFailure(
                         axis=f"{node_name}.{param}",
-                        value=str(proposed),
+                        value=str(value),
                         allowed=list(allowed),
                         reason="not_in_param_allowed_values",
                     )
@@ -129,41 +121,25 @@ def validate_overrides(
     return failures
 
 
-def _split_inbox_sections(inbox: str) -> list[tuple[str, int]]:
-    """Per-section size of the rendered inbox, ordered by size desc."""
-    if not inbox:
-        return []
-    headers = header_prefixes_for_layer(Layer.L1)
-    parts = inbox.split("\n\n")
-    out: list[tuple[str, int]] = []
-    for part in parts:
-        if not part:
-            continue
-        head = next((h for h in headers if part.startswith(h)), "<unknown>")
-        out.append((head, len(part)))
-    out.sort(key=lambda x: -x[1])
-    return out
-
-
 def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
-    # Input-side visibility for dedup work; output budgeting is the provider's job.
-    total_chars = len(meta_prompt)
-    rendered = str(compile_vars.get("rendered_prompt", ""))
+    """Input-side visibility for dedup work; output budgeting is the provider's job."""
     inbox = str(compile_vars.get("inbox", ""))
-    skeleton_chars = total_chars - len(rendered) - len(inbox)
-    est_input_tokens = total_chars // 4
-    inbox_sections = _split_inbox_sections(inbox)
-    section_summary = " | ".join(f"{head}={size}" for head, size in inbox_sections[:6])
+    headers = header_prefixes_for_layer(Layer.L1)
+    sections = sorted(
+        (
+            (next((h for h in headers if p.startswith(h)), "<unknown>"), len(p))
+            for p in inbox.split("\n\n")
+            if p
+        ),
+        key=lambda x: -x[1],
+    )
+    summary = " | ".join(f"{h}={s}" for h, s in sections[:6])
     logger.info(
-        "L1 meta-prompt R%d: %d chars (~%d input tokens) | "
-        "rendered_prompt=%d inbox=%d skeleton=%d | inbox sections: %s",
+        "L1 R%d meta-prompt: %d chars (inbox=%d) | %s",
         round_num,
-        total_chars,
-        est_input_tokens,
-        len(rendered),
+        len(meta_prompt),
         len(inbox),
-        skeleton_chars,
-        section_summary,
+        summary,
     )
 
 
