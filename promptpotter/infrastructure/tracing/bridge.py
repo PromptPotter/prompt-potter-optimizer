@@ -36,6 +36,7 @@ from promptpotter.infrastructure.tracing.events import (
 )
 from promptpotter.infrastructure.tracing.sinks.file_sink import FileSink
 from promptpotter.infrastructure.tracing.sinks.langfuse_sink import LangfuseSink
+from promptpotter.infrastructure.tracing.sinks.mlflow_sink import MLflowSink
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -84,12 +85,14 @@ class ObservabilityBridge:
         *,
         file_sink: FileSink,
         langfuse_sink: LangfuseSink | None,
+        mlflow_sink: MLflowSink | None = None,
     ) -> None:
         from promptpotter.config.settings import settings
 
         self._enabled: bool = settings.OBS_ENABLED
         self._file = file_sink
         self._langfuse = langfuse_sink
+        self._mlflow = mlflow_sink
 
     @classmethod
     def from_settings(
@@ -99,6 +102,8 @@ class ObservabilityBridge:
         *,
         langfuse: LangfuseLogger | None = None,
     ) -> ObservabilityBridge:
+        from promptpotter.config.settings import settings
+
         file_sink = FileSink(store_base_dir, backend_id)
         lf_sink: LangfuseSink | None = None
         if langfuse is None:
@@ -110,7 +115,8 @@ class ObservabilityBridge:
                     lf_sink = LangfuseSink(store_base_dir, backend_id, lf)
         elif langfuse.enabled:
             lf_sink = LangfuseSink(store_base_dir, backend_id, langfuse)
-        return cls(file_sink=file_sink, langfuse_sink=lf_sink)
+        mlflow_sink = MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None
+        return cls(file_sink=file_sink, langfuse_sink=lf_sink, mlflow_sink=mlflow_sink)
 
     @classmethod
     def file_only(
@@ -118,9 +124,12 @@ class ObservabilityBridge:
         store_base_dir: str | Path,
         backend_id: str,
     ) -> ObservabilityBridge:
+        from promptpotter.config.settings import settings
+
         return cls(
             file_sink=FileSink(store_base_dir, backend_id),
             langfuse_sink=None,
+            mlflow_sink=MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None,
         )
 
     def emit(self, event: Event) -> None:
@@ -129,14 +138,16 @@ class ObservabilityBridge:
         method = _DISPATCH.get(type(event))
         if method is None:
             return
-        fn = getattr(self._file, method, None)
-        if fn is not None:
-            with graceful(f"file sink {method} failed on {type(event).__name__}"):
-                fn(event)
-        if self._langfuse is not None:
-            fn = getattr(self._langfuse, method, None)
+        for label, sink in (
+            ("file", self._file),
+            ("langfuse", self._langfuse),
+            ("mlflow", self._mlflow),
+        ):
+            if sink is None:
+                continue
+            fn = getattr(sink, method, None)
             if fn is not None:
-                with graceful(f"langfuse {method} failed on {type(event).__name__}"):
+                with graceful(f"{label} sink {method} failed on {type(event).__name__}"):
                     fn(event)
 
     def emit_write_point(

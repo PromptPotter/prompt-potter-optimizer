@@ -1,4 +1,4 @@
-"""Per-cycle Langfuse shadow + events.jsonl + prompts + (opt-in) MLflow under campaigns/{cycle_id}/."""
+"""Per-cycle Langfuse shadow + events.jsonl + prompts under campaigns/{cycle_id}/."""
 
 from __future__ import annotations
 
@@ -45,15 +45,12 @@ def _utcnow_iso() -> str:
 
 
 class FileSink:
-    """Append-only Langfuse-style file log + per-cycle MLflow runs (opt-in)."""
+    """Append-only Langfuse-style file log per cycle."""
 
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
         self._tenant_root = Path(store_base_dir)
-        self._tenant_id = self._tenant_root.name
-        self._library_dir = self._tenant_root / "library"
         self._backend_id = backend_id
         self._cycle_id: str | None = None
-        self._mlflow_initialized = False
         self._campaign_traces: dict[str, str] = {}
         self._round_obs_ids: dict[tuple[str, int], tuple[str, str]] = {}
         self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
@@ -62,7 +59,7 @@ class FileSink:
         if self._cycle_id:
             return self._tenant_root / "campaigns" / self._cycle_id
         # Orphan fallback for out-of-campaign file_only() emits.
-        return self._library_dir / "obs"
+        return self._tenant_root / "library" / "obs"
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = _utcnow_iso()
@@ -147,46 +144,6 @@ class FileSink:
         if metadata_extra:
             obs_data.setdefault("metadata", {}).update(metadata_extra)
         write_json(obs_path, obs_data)
-
-    # --- MLflow (opt-in via MLFLOW_ENABLED) ---
-
-    def _log_mlflow_run(self, event: RoundEnd) -> None:
-        from promptpotter.config.settings import settings
-
-        if not settings.MLFLOW_ENABLED or not self._cycle_id:
-            return
-        import mlflow
-
-        if not self._mlflow_initialized:
-            tracking_uri = (self._library_dir / "mlruns").resolve().as_uri()
-            mlflow.set_tracking_uri(tracking_uri)
-            mlflow.set_experiment(name=f"{self._tenant_id}/{self._cycle_id}")
-            self._mlflow_initialized = True
-
-        params: dict[str, str] = {
-            "round": str(event.round_num),
-            "temperature": str(event.temperature),
-        }
-        if event.model:
-            params["model"] = event.model
-        if event.n_variants:
-            params["n_variants"] = str(event.n_variants)
-
-        metrics = {
-            "accuracy": event.accuracy,
-            "hits": float(event.hits),
-            "total": float(event.total),
-        }
-        tags = {
-            "improved": str(event.improved).lower(),
-            "next_action": event.next_action,
-            "winner_prompt_fields_id": event.winner_prompt_fields_id,
-        }
-
-        with mlflow.start_run(run_name=f"round_{event.round_num}"):
-            mlflow.log_params(params)
-            mlflow.log_metrics(metrics)
-            mlflow.set_tags(tags)
 
     # Fields per event-class mirrored into events.jsonl.
     _WRITE_POINT_FIELDS: ClassVar[dict[type, tuple[str, tuple[str, ...]]]] = {
@@ -405,8 +362,6 @@ class FileSink:
                     meta_extra,
                 )
             self._write_score(trace_id, "accuracy", event.accuracy)
-
-        self._log_mlflow_run(event)
 
         log_entry: dict[str, Any] = {
             "event": "round_complete",
