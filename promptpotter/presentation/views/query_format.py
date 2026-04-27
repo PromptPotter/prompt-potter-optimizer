@@ -68,7 +68,7 @@ def _fmt_query_result(
     raw_pred = r.get("predicted") or ""
     pred = extract_display_answer(raw_pred, scoring_formula)[:30]
     gt = (r.get("ground_truth") or "").strip()[:30]
-    q = ((r.get("query") or "").replace("\n", " ").strip())[:40]
+    q = ((r.get("query") or "").replace("\n", " ").strip())[:15]
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")
@@ -121,6 +121,8 @@ def _fmt_query_result(
                 step = ""
 
     indent = prefix if prefix else ""
+    if r.get("retry_of_deprecated_cache"):
+        indent = f"{indent}\U0001f504 "
 
     time_col = f"{tt:5.1f}s" if tt is not None else "     "
     sid = r.get("sample_id")
@@ -144,15 +146,7 @@ def _fmt_query_result(
                 msg = w["message"]
             line += f"\n{_ann_indent}{YELLOW}⚠ {w['step']}: {msg}{RESET}"
 
-    if r.get("retry_of_deprecated_cache"):
-        line = _append_annotation(
-            line,
-            _ann_indent,
-            YELLOW,
-            "\U0001f504",
-            "cached fatal warning evicted → remeasured",
-        )
-    elif r.get("retry_of_degraded"):
+    if r.get("retry_of_degraded"):
         comp = r.get("rerun_comparison") or {}
         detail = f"; result: {comp['hit_change']}" if comp.get("hit_change") else ""
         if comp.get("rank_change"):

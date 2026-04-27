@@ -27,7 +27,7 @@ Some traces describe measurements that are not valid observations — the backen
 A deprecated sample has three effects at the **load boundary**:
 
 - **Excluded from primary statistics.** `hits`, `total`, `errors`, and the accuracy denominator are all computed over the *valid* rows only. The `deprecated` count surfaces alongside so the operator sees how many samples were attempted-but-discarded.
-- **Evicted from cache.** When a prior dataset_run is loaded, deprecated entries are filtered out before any cache hit logic runs. The query falls through to a fresh backend call rather than replaying the known-bad measurement. Fresh re-measurements are tagged `retry_of_deprecated_cache` so the display can show the eviction.
+- **Evicted from cache.** When a prior dataset_run is loaded, deprecated entries are filtered out before any cache hit logic runs. The query falls through to a fresh backend call rather than replaying the known-bad measurement. Fresh re-measurements are tagged `retry_of_deprecated_cache` and prefixed with 🔄 in the per-query view.
 - **Tagged `DEPR` in the per-query view.** Not a HIT, not a MISS — a third class. Round summaries print `hits/total (N deprecated)` so the smaller denominator is never silently shrinking.
 
 The trace itself stays in `library/dataset_runs/` — the archive is the forensic record of what the backend actually returned, even when the measurement was unusable. Eviction and exclusion live one layer up, on the path from disk to the optimizer's view of "valid observations."

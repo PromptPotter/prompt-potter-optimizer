@@ -145,17 +145,19 @@ def _build_scoring_error_signal(
 
 def _filter_deprecated_priors(
     prior_results: dict[str, QueryResult],
-) -> tuple[dict[str, QueryResult], set[str]]:
-    """Drop deprecated-warning entries from prior-results cache.
+) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
+    """Split prior-results cache into kept and evicted (deprecated) entries.
 
-    Returns ``(kept, evicted_queries)``. Evicted queries fall through to a
-    fresh backend call so the optimizer doesn't keep replaying a known-bad
-    measurement. The dataset_run archive on disk is left intact — eviction
-    is purely a load-side filter.
+    Returns ``(kept, evicted)``. Evicted queries fall through to a fresh
+    backend call so the optimizer doesn't keep replaying a known-bad
+    measurement; the evicted entries themselves are returned (not just their
+    keys) so the display can show the original cached row before the retry.
+    The dataset_run archive on disk is left intact — eviction is purely a
+    load-side filter.
     """
     from promptpotter.application.optimization.utils import is_deprecated
 
-    evicted = {q for q, r in prior_results.items() if is_deprecated(r)}
+    evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}
     kept = {q: r for q, r in prior_results.items() if q not in evicted}
     return kept, evicted
 
@@ -174,7 +176,10 @@ class _LoopContext:
     scorer: Scorer  # narrowed from session.scorer (asserted non-None on construction)
     scorer_id: str
     scorer_formula: str | None
-    evicted_queries: set[str]  # queries whose prior-cache entry was a deprecated sample
+    # Queries whose prior-cache entry was a deprecated sample — value is the
+    # cached entry itself so display can show the original DEPR row before
+    # the retry row is rendered.
+    evicted_priors: dict[str, QueryResult]
 
 
 @dataclass
@@ -269,14 +274,27 @@ async def _process_fresh_sample(
     check_escalation: Callable[[], EscalationSignal | None],
     fire_on_measurement: Callable[[QueryResult], None],
 ) -> _SampleOutcome:
-    """Backend-measure one sample, classify errors, check escalation."""
+    """Backend-measure one sample, classify errors, check escalation.
+
+    When the query had a deprecated prior, render the original cached row
+    (rescored under the active scorer) before the fresh measurement so the
+    operator sees the broken DEPR row immediately above its retry.
+    """
+    if (cached_deprecated := ctx.evicted_priors.get(sample.query)) is not None:
+        display_cached = _materialize_cached(
+            cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
+        )
+        display_cached["sample_id"] = sample.id
+        if ctx.on_result is not None:
+            ctx.on_result(display_cached, idx, dataset_len)
+
     result = await measure_sample(
         sample,
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
     )
     result = await _maybe_recover_degraded(result, sample, ctx)
-    if sample.query in ctx.evicted_queries:
+    if sample.query in ctx.evicted_priors:
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
     fire_on_measurement(result)
@@ -302,7 +320,7 @@ async def _run_query_loop(
     *,
     run_id: str,
     prior_results: dict[str, QueryResult],
-    evicted_queries: set[str],
+    evicted_priors: dict[str, QueryResult],
     on_result: Callable[[QueryResult, int, int], None] | None,
     on_start: Callable[[str, int, int], None] | None,
     degradation_checks: list | None,
@@ -324,7 +342,7 @@ async def _run_query_loop(
         scorer=session.scorer,
         scorer_id=session.scorer_id,
         scorer_formula=session.scorer_formula,
-        evicted_queries=evicted_queries,
+        evicted_priors=evicted_priors,
     )
 
     def _check_escalation() -> EscalationSignal | None:
@@ -422,11 +440,11 @@ async def score_search_point(
             store.dataset_runs.load_reusable_results(backend_id, node_configs),
         )
 
-    prior_results, evicted_queries = _filter_deprecated_priors(prior_results)
-    if evicted_queries:
+    prior_results, evicted_priors = _filter_deprecated_priors(prior_results)
+    if evicted_priors:
         logger.info(
             "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
-            len(evicted_queries),
+            len(evicted_priors),
         )
 
     display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
@@ -458,7 +476,7 @@ async def score_search_point(
         session,
         run_id=run_id,
         prior_results=prior_results,
-        evicted_queries=evicted_queries,
+        evicted_priors=evicted_priors,
         on_result=on_result,
         on_start=on_start,
         degradation_checks=degradation_checks,
