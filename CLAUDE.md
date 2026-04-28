@@ -128,6 +128,8 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 - **Notebook** (`notebooks/optimization_campaign.ipynb`) — drives the same loop in-process; live-phase per-query rendering is currently notebook-only.
 - **Webapp** — minimal read-only dashboard planned on top of the FastAPI surface (`promptpotter/main.py`); zero code today.
 
+**Composite-score steering** (operator hot-swap): drop `campaigns/{cycle_id}/scoring_steer.json` with `{"per_round": "..."}` and the next round-end recompiles `session.round_scorer` against the new formula. Validation happens before the swap so a typo leaves state untouched. The default formula already includes a 5%-weighted `prompt_compactness` term that linearly penalizes prompts past 4 000 chars; crank the weight via the steer file when prompts grow round-over-round. Full playbook: [`docs/operations/improvement-tracking.md`](docs/operations/improvement-tracking.md).
+
 **Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by `optimize`. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
@@ -179,7 +181,7 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 
 **Developer (implementation)**: [`code-layout.md`](docs/developer/code-layout.md), [`information-flow.md`](docs/developer/information-flow.md), [`measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md), [`node-standard.md`](docs/developer/node-standard.md), [`prompt-scheme-internals.md`](docs/developer/prompt-scheme-internals.md), [`axis-index-internals.md`](docs/developer/axis-index-internals.md), [`self-healing-internals.md`](docs/developer/self-healing-internals.md), [`display-conventions.md`](docs/developer/display-conventions.md), [`code-map.md`](docs/developer/code-map.md)
 
-**Operations**: [`cli-reference.md`](docs/operations/cli-reference.md), [`environment.md`](docs/operations/environment.md), [`backend-integration.md`](docs/operations/backend-integration.md), [`persistence-and-state.md`](docs/operations/persistence-and-state.md), [`rewind-and-fork.md`](docs/operations/rewind-and-fork.md), [`observability.md`](docs/operations/observability.md)
+**Operations**: [`cli-reference.md`](docs/operations/cli-reference.md), [`environment.md`](docs/operations/environment.md), [`backend-integration.md`](docs/operations/backend-integration.md), [`persistence-and-state.md`](docs/operations/persistence-and-state.md), [`rewind-and-fork.md`](docs/operations/rewind-and-fork.md), [`improvement-tracking.md`](docs/operations/improvement-tracking.md), [`observability.md`](docs/operations/observability.md)
 
 **Methods**: [`candidate-elimination.md`](docs/methods/candidate-elimination.md), [`exploration-exploitation.md`](docs/methods/exploration-exploitation.md)
 

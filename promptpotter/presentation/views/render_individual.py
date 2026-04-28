@@ -9,6 +9,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+from promptpotter.presentation.views.composite_render import (
+    compact_display_enabled,
+    render_composite_inline,
+    render_composite_oneliner,
+)
 from promptpotter.presentation.views.display_primitives import (
     CYAN,
     DIM,
@@ -93,10 +98,10 @@ class IndividualSummary:
       ``cand k/N``.
     - ``body_line`` — the mutations + hits + delta line; the notebook
       renders it as an inner box line, the CLI as an indented second line.
-    - ``detail_lines`` — ordered extras (elimination summary, composite,
-      degraded count, or validation-failure entries); rendered inline by
-      both displays, with the notebook folding the last entry into the
-      bottom info rule when possible.
+    - ``detail_lines`` — ordered extras (elimination summary, the 1-line
+      composite-with-Δ render, degraded-count tag, or validation-failure
+      entries); rendered inline by both displays, with the last entry
+      folded onto the bottom info rule by callers that support it.
     """
 
     status: Literal["ok", "invalid", "aborted", "eliminated"]
@@ -120,7 +125,12 @@ def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSummary:
+def build_individual_summary(
+    scores: dict,
+    baseline_acc: float,
+    *,
+    baseline_composite: float | None = None,
+) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
     Single source of truth for what the CLI and notebook show per candidate.
@@ -128,6 +138,17 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
     exclusive flag semantics (invalid never runs the backend; aborted and
     eliminated are mutually exclusive by construction in
     ``_handle_scored_candidate``).
+
+    Per-candidate composite render is intentionally 1 line —
+    ``composite=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
+    don't dump 60 lines of identical formula text into the terminal. The
+    formula + per-evaluator breakdown lands once per round in the round
+    summary block. ``PROMPTPOTTER_COMPACT_DISPLAY=1`` reverts to the
+    legacy ``composite=0.4f`` bottom rule (only when composite ≠ accuracy).
+
+    *baseline_composite* anchors the Δ against the campaign's first-round
+    composite — even at deep rounds the operator sees how far the run
+    has come from origin. ``None`` collapses to the no-Δ form.
     """
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
@@ -163,19 +184,26 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
         prior_label = elim_ctx.get("triggered_by_prior_label")
         detail_lines.append(format_elimination_summary(elim_ctx, prior_label))
 
-    # Composite + degraded share the bottom info rule — joined with two
-    # spaces so the box bottom carries both numbers in one line. Computed
-    # for every status (ok / aborted / eliminated) since the score report
-    # carries them regardless of why scoring stopped.
-    bottom_extras: list[str] = []
     comp = scores.get("composite")
-    if comp is not None and comp != acc:
-        bottom_extras.append(f"composite={comp:.4f}")
     degraded = scores.get("degraded_queries", 0)
-    if degraded:
-        bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
-    if bottom_extras:
-        detail_lines.append("  ".join(bottom_extras))
+
+    # Two render modes:
+    #   - compact (env var set): legacy single-line bottom rule,
+    #     ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
+    #   - default: 1-line composite-with-Δ as a detail line; degraded
+    #     count joins as a separate detail. Box bottom stays plain.
+    if comp is not None and not compact_display_enabled():
+        detail_lines.append(render_composite_oneliner(comp, baseline=baseline_composite))
+        if degraded:
+            detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+    else:
+        bottom_extras: list[str] = []
+        if comp is not None and comp != acc:
+            bottom_extras.append(render_composite_inline(comp))
+        if degraded:
+            bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+        if bottom_extras:
+            detail_lines.append("  ".join(bottom_extras))
 
     status: Literal["ok", "aborted", "eliminated"]
     if aborted:

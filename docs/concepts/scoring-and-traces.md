@@ -58,3 +58,74 @@ Every decision record splits into two halves:
 If the user wants the new scoring policy to continue, `fork` mints a new cycle rooted at the divergence point with a pointer back to its parent. Trials up to the divergence round are copied into the new tree; the shared trace data stays in place. The old cycle is left untouched. From the fork point forward, the new cycle makes its decisions under the current scorer; the old cycle remains the record of what happened under the original one.
 
 See [../operations/rewind-and-fork.md](../operations/rewind-and-fork.md) for how to run fork and the mechanical differences from rewind.
+
+---
+
+## Composite score and improvement tracking
+
+The scorer split above is per-query: each trace gets a `score` and a `hit` under the active per-query formula. The **composite** is one level up — a single per-round number that combines accuracy with health, latency, recall, and prompt verbosity into a comparable scalar. It is what the operator watches to answer "is this round better than the last?"
+
+The composite is **recorded, not gating**. Round-winner selection compares candidates on per-query accuracy (the user's scoring function); composite is displayed and persisted alongside so a win that came with hidden costs — three errors that cancelled out a higher hit rate, a 4× latency blow-up, a doubled prompt — surfaces in the leaderboard rather than going invisible.
+
+### The default formula
+
+When `campaign.json::scoring` declares no `per_round` formula, the default is:
+
+```
+0.65 * accuracy
++ 0.15 * health        # mean of (1 - error_rate, 1 - degraded_rate, 1 - runtime_failure_rate)
++ 0.10 * latency_norm  # 1 - mean_latency_ms / 10_000
++ 0.05 * recall        # source_recall / candidate_recall / cache_hit_rate, averaged over what applies
++ 0.05 * prompt_compactness  # 1 - len(rendered_prompt) / 4_000
+```
+
+Every term is in `[0, 1]` and the weights sum to `1.0`. A round of 100% accuracy with no errors, no latency, no retrieval misses, and a short prompt scores `1.0`.
+
+### Short-code legend
+
+Live surfaces (CLI bottom rule, `dashboard.json::composite_formula_short`) abbreviate the formula so the 5 terms fit a 70-character node frame:
+
+```
+0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
+```
+
+| Code | Stands for | How it's built |
+| --- | --- | --- |
+| `acc` | `accuracy` | Mean per-query score across the round |
+| `H`   | `health` (synthesized) | Mean of `(1 - error_rate)`, `(1 - degraded_rate)`, `(1 - runtime_failure_rate)` |
+| `lat` | `latency_norm` | `1 - mean_latency_ms / 10_000` |
+| `R`   | `recall` (synthesized) | Mean of `source_recall` / `candidate_recall` / `cache_hit_rate` for whichever apply |
+| `pc`  | `prompt_compactness` | `1 - len(rendered_prompt) / 4_000` |
+
+`acc`, `lat`, `pc` resolve to single registry evaluators directly. `H` and `R` are synthesized aggregates whose component evaluators (`error_rate`, `degraded_rate`, `source_recall`, etc.) appear individually in every candidate's `stats.evaluators` dict in `dashboard.json`. After every candidate scores, `dashboard.json::composite_formula_short` re-inlines the resolved values as `code|value` pairs (e.g. `0.65*acc|0.667 + 0.15*H|0.972 + ...`) so an operator tailing the file reads the formula and its inputs in one line — no separate legend needed at runtime.
+
+`log.md` and the round-end 3-line block carry the unabbreviated formula and full evaluator names, so the short codes only matter for live surfaces.
+
+### Verbosity penalty
+
+`prompt_compactness` is the term that punishes overly verbose prompt templates. It reads `len(opt_sp.render())` — the rendered string that goes onto `pipeline_params[prompt_node]["prompt"]` — and returns `1 - length / PROMPT_BUDGET_CHARS` clamped to `[0, 1]`. The default budget is 4 000 characters (~1 000 tokens), a comfortable ceiling for a well-decomposed 8-field prompt; longer prompts push the term toward zero.
+
+Two reasons this is a soft term, not a hard reject:
+
+- A 4 200-char prompt isn't broken — it just costs slightly more for slightly more guidance. A linear curve degrades the term gracefully so a small overage gets a small penalty, not a cliff.
+- The 5% default weight is intentionally small. It moves the composite by `0.025` between a 4 000-char prompt and a 0-char prompt, which is enough to break ties but not enough to dominate accuracy. Operators who want a stronger penalty (e.g. paying for tokens out-of-pocket) crank the weight; operators who don't care set it to zero.
+
+To change the weight, override `campaign.json::scoring`:
+
+```json
+{"scoring": {"per_round": "0.5 * accuracy + 0.3 * prompt_compactness + 0.2 * latency_norm"}}
+```
+
+To mark prompts above a hard threshold instead of a continuous penalty, build a step function:
+
+```
+0.7 * accuracy + 0.3 * (0 if prompt_compactness < 0.5 else 1)
+```
+
+### Interactive steering
+
+Long runs sometimes reveal that the formula's weights are wrong — the operator wants a stronger verbosity penalty after seeing prompts grow round-over-round, or to flip from accuracy-only to a composite that values latency. The cycle's per-round formula can be hot-swapped without restarting: drop a JSON file at `campaigns/{cycle_id}/scoring_steer.json` with `{"per_round": "..."}`, and the next round-end consumes it. The compile-and-validate step happens before the swap, so a typo (an undefined evaluator name, a syntax error) leaves the running formula intact and the file untouched for the operator to fix.
+
+The steer file is per-cycle (different cycles can carry different formulas) and per-round formula only (per-query steering is intentionally not supported via this seam — changing the per-query scorer mid-run rewrites recorded `hit`/`score` semantics and triggers divergence-replay, which the operator should opt into via `optimize --fork-on-divergence`).
+
+See [../operations/improvement-tracking.md](../operations/improvement-tracking.md) for the operator playbook.

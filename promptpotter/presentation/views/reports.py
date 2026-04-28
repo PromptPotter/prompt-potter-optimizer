@@ -15,6 +15,7 @@ import json
 import logging
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.presentation.views.composite_render import render_composite_block
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     GREEN,
@@ -176,6 +177,13 @@ def render_log_md(
             parts.append(f"- {label}: {v}")
     parts += ["", "## Rounds", ""]
 
+    # Per-round formula source: stored on index.json::final at finalize.
+    # log.md is the permanent record so it carries the FULL formula
+    # (allowed to wrap), with full evaluator names. The 3-line short form
+    # is for live surfaces only.
+    formula = final.get("scorer_round_formula")
+    baseline_composite = final.get("baseline_composite")
+
     if not trials:
         parts += ["_No rounds yet._", ""]
     for trial in trials:
@@ -188,11 +196,21 @@ def render_log_md(
             "",
             f"- improved: **{'yes' if trial.get('improved') else 'no'}**",
             f"- hits: {trial.get('hits', 0)}/{trial.get('total', 0)}",
+            f"- composite: `{trial.get('composite', 0.0) or 0.0:.4f}`",
         ]
         if changes := (lineage.get("changes_description") or "").strip():
             parts.append(f"- changes: {changes}")
         if directive := (osp.get("l2_directive") or "").strip():
             parts.append(f"- L2 directive: {directive}")
+        composite_block = render_composite_block(
+            trial.get("composite", 0.0) or 0.0,
+            dict(trial.get("evaluators") or {}),
+            formula,
+            baseline=baseline_composite,
+            use_short_names=False,
+        )
+        if composite_block:
+            parts += ["", "```", *composite_block, "```"]
         if critique := (osp.get("l1_critique_text") or "").strip():
             parts += ["", "> " + critique.replace("\n", "\n> ")]
         parts.append("")

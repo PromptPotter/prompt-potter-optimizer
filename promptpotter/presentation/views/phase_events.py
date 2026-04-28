@@ -13,6 +13,10 @@ import json
 from collections.abc import Callable
 
 from promptpotter.application.optimization.sp_diff_view import group_diff_keys
+from promptpotter.presentation.views.composite_render import (
+    compact_display_enabled,
+    render_composite_block,
+)
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
@@ -252,7 +256,18 @@ def _render_l1_score_exit(view: dict) -> str:
 
     w_acc = view["winner_accuracy"]
     w_comp = view.get("winner_composite")
-    comp_tag = f"  composite={w_comp:.4f}" if w_comp is not None and w_comp != w_acc else ""
+    formula_full = view.get("composite_formula")
+    formula_short = view.get("composite_formula_short")
+    formula = formula_short or formula_full
+    # Inline composite tag: only in compact mode (env-var) or when no
+    # formula is resolvable. Default mode prints the 3-line composite
+    # block under the verdict line.
+    show_inline = compact_display_enabled() or not formula
+    comp_tag = (
+        f"  composite={w_comp:.4f}"
+        if show_inline and w_comp is not None and w_comp != w_acc
+        else ""
+    )
 
     if view["improved"]:
         p = view.get("p_value")
@@ -264,6 +279,16 @@ def _render_l1_score_exit(view: dict) -> str:
         )
     else:
         out.append(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate {w_acc:.1%}{comp_tag}")
+
+    if not show_inline and w_comp is not None:
+        for line in render_composite_block(
+            w_comp,
+            view.get("winner_evaluators"),
+            formula,
+            baseline=view.get("baseline_composite"),
+            use_short_names=bool(formula_short),
+        ):
+            out.append(f"  {line}")
 
     if crit := (view.get("l1_critique_text") or "").replace("\n", " ").strip():
         out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")

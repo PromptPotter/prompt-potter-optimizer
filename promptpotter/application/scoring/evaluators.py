@@ -29,12 +29,20 @@ DataType = Literal["NUMERIC", "BOOLEAN"]
 # Latency budget for ``latency_norm``: ≥ budget → 0.0, ≤ 0 → 1.0.
 LATENCY_BUDGET_MS = 10_000.0
 
+# Prompt-length budget for ``prompt_compactness``: ≥ budget → 0.0, ≤ 0 → 1.0.
+# 4 000 chars ≈ 1 000 tokens — a comfortable ceiling for a well-decomposed
+# 8-field prompt. Operators who want a different ceiling override the
+# weight or the formula in ``campaign.json::scoring``.
+PROMPT_BUDGET_CHARS = 4_000
+
 
 __all__ = [
     "LATENCY_BUDGET_MS",
+    "PROMPT_BUDGET_CHARS",
     "Evaluator",
     "all_evaluators",
     "default_per_round_formula",
+    "default_per_round_formula_short",
     "materialize_query_values",
     "materialize_round_values",
 ]
@@ -217,6 +225,28 @@ def compute_pipeline_compactness(*, schema: PipelineSchema, **_: Any) -> float:
     return max(0.0, 1.0 - (n - 1) / (worst - 1))
 
 
+def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
+    """Shorter rendered prompts score higher; ``len(opt_sp.render()) >= budget`` → 0.0.
+
+    Reads the candidate's full rendered prompt (the same string that goes
+    onto ``pipeline_params[prompt_node]["prompt"]``). Returns 1.0 when the
+    candidate is missing or the prompt is empty so this evaluator never
+    masks a real signal — operators see "1.0 (vacuous)" rather than a
+    spurious penalty.
+
+    The 4 000-char budget is a soft ceiling; the curve is linear so the
+    composite term degrades gracefully rather than cliff-edging at the
+    threshold. To mark prompts above a hard threshold, build a per-round
+    formula like ``... + 0.10 * (1 if prompt_compactness > 0.5 else 0)``.
+    """
+    if opt_sp is None or not hasattr(opt_sp, "render"):
+        return 1.0
+    rendered = opt_sp.render() or ""
+    if not rendered:
+        return 1.0
+    return max(0.0, 1.0 - len(rendered) / PROMPT_BUDGET_CHARS)
+
+
 # ---------------------------------------------------------------------------
 # Registry + materializers.
 # ---------------------------------------------------------------------------
@@ -315,6 +345,16 @@ _REGISTRY: list[Evaluator] = [
         scope="per_round",
         compute=compute_pipeline_compactness,
     ),
+    Evaluator(
+        name="prompt_compactness",
+        description=(
+            "1 - len(rendered_prompt) / PROMPT_BUDGET_CHARS — shorter prompts score "
+            "higher (≤ budget → 1.0, ≥ budget → 0.0). Penalizes overly verbose "
+            "prompt templates in the composite score."
+        ),
+        scope="per_round",
+        compute=compute_prompt_compactness,
+    ),
 ]
 
 
@@ -376,7 +416,15 @@ def materialize_query_values(
 
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """Default per-round formula: 0.7*accuracy + 0.15*health + 0.10*latency_norm + 0.05*recall."""
+    """Default per-round formula: ``0.65*accuracy + 0.15*health + 0.10*latency_norm
+    + 0.05*recall + 0.05*prompt_compactness``.
+
+    The ``prompt_compactness`` term is a small but visible verbosity penalty
+    that nudges the optimizer toward shorter prompts at near-equal accuracy.
+    Operators who want a stronger or weaker penalty override the formula
+    via ``campaign.json::scoring`` (or interactively via ``scoring_steer.json``
+    — see ``docs/operations/improvement-tracking.md``).
+    """
     recall_names: list[str] = []
     for display_name, ev, _node in _concrete_round_entries(schema):
         if ev.node_type in ("candidate_source", "ranker", "cache"):
@@ -390,4 +438,28 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
 
     health_expr = "(((1 - error_rate) + (1 - degraded_rate) + (1 - runtime_failure_rate)) / 3)"
 
-    return f"0.7 * accuracy + 0.15 * {health_expr} + 0.10 * latency_norm + 0.05 * {recall_expr}"
+    return (
+        f"0.65 * accuracy + 0.15 * {health_expr} + 0.10 * latency_norm "
+        f"+ 0.05 * {recall_expr} + 0.05 * prompt_compactness"
+    )
+
+
+def default_per_round_formula_short(schema: PipelineSchema) -> str:
+    """One-line abbreviation of the default per-round formula.
+
+    Sub-expressions collapsed to single letters (``H`` for health, ``R``
+    for recall) so the round-level live render fits in a 70-char node
+    frame at full evaluator names. The legend is rendered alongside the
+    block when needed.
+
+    Returns the same string shape as ``default_per_round_formula`` only
+    when *schema* would otherwise produce the standard 5-term default.
+    Custom formulas (``campaign.json::scoring``) bypass this helper —
+    operators see their literal formula, wrapped if too long.
+    """
+    has_recall = any(
+        ev.node_type in ("candidate_source", "ranker", "cache")
+        for _name, ev, _node in _concrete_round_entries(schema)
+    )
+    recall_token = "R" if has_recall else "acc"
+    return f"0.65*acc + 0.15*H + 0.10*lat + 0.05*{recall_token} + 0.05*pc"

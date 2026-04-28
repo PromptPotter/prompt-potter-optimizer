@@ -18,12 +18,17 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.presentation.views.composite_render import (
+    compact_display_enabled,
+    render_composite_block,
+)
 from promptpotter.presentation.views.display_primitives import (
     _box_bottom,
     _box_bottom_info,
     _box_line,
     _box_top,
     _node_bottom,
+    _node_line,
     _node_top,
 )
 from promptpotter.presentation.views.phase_events import render_phase_event
@@ -69,6 +74,13 @@ class LiveDisplay:
         self._round_num = 0
         self._store = store
         self._bars = _BarTracker(sp_budget_ttest) if sp_budget_ttest is not None else None
+        # Composite-render context — read by ``on_candidate_scored`` for the
+        # per-candidate baseline anchor and by ``on_round_complete`` for the
+        # 3-line composite block. Populated from L1_SCORE:exit views and
+        # mutated on ``scoring_steer:applied``. ``RunListener`` wires its
+        # shared ctx onto ``self._phase_ctx`` after construction so the
+        # display sees the same dict the phase-view builder writes to.
+        self._phase_ctx: dict = {}
 
     def _write(self, line: str) -> None:
         if self._bars is not None:
@@ -115,6 +127,12 @@ class LiveDisplay:
             and event.data["env"].resumed_from_round > 0
         ):
             del self.campaign_rounds[self.initial_len :]
+        # Mirror an interactive-steer formula swap onto the shared phase
+        # ctx so the next round's renderers print the new formula.
+        if event.phase == "scoring_steer" and event.event == "applied":
+            new_formula = event.data.get("formula")
+            if new_formula:
+                self._phase_ctx["composite_formula"] = new_formula
 
     def on_sample_started(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, query_text: str
@@ -158,7 +176,9 @@ class LiveDisplay:
             self._bars.close()
         w = 66
         label = f"C{idx + 1}"
-        summary = build_individual_summary(scores, self.baseline_acc)
+        baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
+        baseline_comp = self._phase_ctx.get("baseline_composite")
+        summary = build_individual_summary(scores, baseline_acc, baseline_composite=baseline_comp)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -196,6 +216,23 @@ class LiveDisplay:
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
+        # Composite block — full mode only. 3-line render: composite +
+        # baseline anchor (line 1), abbreviated formula (line 2), short-
+        # name evaluator values (line 3). Anchored to the campaign
+        # baseline so operators see how far the run came from origin.
+        # Short formula is None for custom user formulas — fall back to
+        # full text and accept the wrap.
+        formula_short = self._phase_ctx.get("composite_formula_short")
+        formula_full = self._phase_ctx.get("composite_formula")
+        if (formula_short or formula_full) and not compact_display_enabled():
+            for line in render_composite_block(
+                round_result.composite,
+                dict(round_result.evaluators),
+                formula_short or formula_full,
+                baseline=self._phase_ctx.get("baseline_composite"),
+                use_short_names=bool(formula_short),
+            ):
+                self._write(_node_line(line))
         if stats := render_round_stats(round_result, self.pipeline_schema):
             for line in stats.split("\n"):
                 if line:

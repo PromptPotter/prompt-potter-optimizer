@@ -21,6 +21,7 @@ from promptpotter.application.optimization.layer_escalation import (
 )
 from promptpotter.application.optimization.nodes.l1 import execute_round
 from promptpotter.application.optimization.results import RoundResult, RunResult
+from promptpotter.application.scoring.scoring_steer import apply_steer_file
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -55,6 +56,11 @@ class RunListener:
         self.emitter = emitter
         self.display = display
         self._phase_ctx: dict[str, Any] = {}
+        # Share the same ctx with the display so its on_round_complete /
+        # on_candidate_scored hooks can read composite-formula and
+        # baseline-composite without going through view dicts.
+        if display is not None and hasattr(display, "_phase_ctx"):
+            display._phase_ctx = self._phase_ctx
 
     @property
     def _sinks(self) -> tuple[Any, ...]:
@@ -145,6 +151,13 @@ async def _post_round(
 
     if _rr := session.round_recorder:
         _rr.flush()
+
+    # Operator-driven composite-score steering: hot-swap the per-round
+    # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
+    # Sits before the round-boundary mutation block so the next round's
+    # candidates are evaluated under the new formula.
+    with graceful("Scoring steer apply failed"):
+        apply_steer_file(session, round_num, cb.on_phase)
 
     if cycle.axes:
         cycle.axes.on_round_complete(cycle, session, round_num)
@@ -529,10 +542,30 @@ def _finalize_run(
 
     if session.cycle_id:
         with graceful("Final summary write failed"):
+            from promptpotter.application.scoring.evaluators import (
+                default_per_round_formula,
+                default_per_round_formula_short,
+            )
+
+            schema = session.pipeline_schema
+            if session.scorer_round_formula:
+                formula_full: str | None = session.scorer_round_formula
+                formula_short: str | None = None
+            elif schema is not None:
+                formula_full = default_per_round_formula(schema)
+                formula_short = default_per_round_formula_short(schema)
+            else:
+                formula_full = None
+                formula_short = None
+            baseline_composite = cycle.baseline_composite
+            final_block = run_result.model_dump(exclude={"rounds"}, mode="json")
+            final_block["scorer_round_formula"] = formula_full
+            final_block["scorer_round_formula_short"] = formula_short
+            final_block["baseline_composite"] = baseline_composite
             session.store.campaigns.update(
                 session.backend_id,
                 session.cycle_id,
-                {"final": run_result.model_dump(exclude={"rounds"}, mode="json")},
+                {"final": final_block},
             )
 
     if emitter:

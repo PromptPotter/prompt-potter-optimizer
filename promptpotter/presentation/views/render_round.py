@@ -26,9 +26,10 @@ def render_progress_table(
 ) -> str:
     """Round-over-round trajectory table: accuracy, composite, rolling avg, trend, plateau.
 
-    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``;
-    ``composite`` is optional and only adds a column when it differs from
-    accuracy in at least one round.
+    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
+    The ``Composite`` column is always shown so the operator never has to
+    wonder whether composite was hidden because it equalled accuracy on
+    every round so far.
 
     ``framed=True`` (default) wraps each line in ``_node_line()`` for
     box-drawing terminals (live CLI / notebook live view). ``framed=False``
@@ -40,23 +41,15 @@ def render_progress_table(
     def wrap(s: str) -> str:
         return _node_line(s) if framed else s
 
-    has_comp = any(
-        rd.get("composite") is not None and rd.get("composite") != (rd.get("accuracy") or 0)
-        for rd in rounds
-    )
-
     row_rnd_w = 5 if framed else 7
     row_comp_w = 9 if framed else 10
     trend_w = 8 if framed else 10
     plateau_step = "+0.0%  <-- plateau" if framed else "+0.0% plateau"
 
-    if has_comp:
-        header = (
-            f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-            f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
-        )
-    else:
-        header = f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
+    header = (
+        f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+        f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
+    )
 
     lines: list[str] = []
     if framed:
@@ -81,14 +74,8 @@ def render_progress_table(
             else:
                 trend = f"{d:.1%}"
         rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        if has_comp:
-            comp = rd.get("composite") or acc
-            row = (
-                f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f}"
-                f" {rolling:>12.1%}  {trend}"
-            )
-        else:
-            row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {rolling:>12.1%}  {trend}"
+        comp = rd.get("composite") if rd.get("composite") is not None else acc
+        row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f} {rolling:>12.1%}  {trend}"
         lines.append(wrap(row))
 
     if len(accs) >= 3:

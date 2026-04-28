@@ -11,6 +11,7 @@ from typing import IO, TYPE_CHECKING, Any
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.infrastructure.store.campaign_store import root_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
+from promptpotter.shared.composite_formula import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
@@ -69,6 +70,16 @@ def _make_initial_state(
         "baseline": r.get("baseline", 0.0),
         "best": r.get("best", 0.0),
         "current_acc": 0.0,
+        # Active per-round composite formula — set on INIT:exit and on
+        # ``scoring_steer:applied``. Visible at the top of dashboard.json
+        # so an operator tailing the file always sees what's scoring the
+        # current round. ``composite_formula_short`` is the short form
+        # WITH the latest candidate's resolved values inlined as
+        # ``code|value`` (e.g. ``0.65*acc|0.667 + 0.15*H|0.972 + ...``)
+        # so the formula is self-describing — no separate legend lookup.
+        # See ``docs/operations/improvement-tracking.md`` for the legend.
+        "composite_formula": r.get("composite_formula"),
+        "composite_formula_short": r.get("composite_formula_short"),
         "cycle_id": cycle_id,
         # Cumulative counters
         "degraded_count": 0,
@@ -172,6 +183,12 @@ class CampaignPersistenceEmitter:
         self._round_start = time.monotonic()
         self._query_start: float | None = None
 
+        # Bare short-form formula template (set on INIT:exit). On every
+        # candidate score we re-inline the candidate's resolved
+        # evaluator values into this template and write the result onto
+        # ``self._state["composite_formula_short"]``.
+        self._short_formula_template: str | None = None
+
         self._current_round: dict[str, Any] = {"round": 0, "candidates": {}}
 
         self._persist()
@@ -267,6 +284,23 @@ class CampaignPersistenceEmitter:
             s["baseline"] = cycle.current_accuracy
             self._patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self._patience_max}"
+            if view is not None:
+                s["composite_formula"] = view.get("composite_formula")
+                # Stash the bare short-form template so subsequent
+                # candidate scores can re-inline fresh values without
+                # losing the structure.
+                self._short_formula_template = view.get("composite_formula_short")
+                s["composite_formula_short"] = self._short_formula_template
+        elif phase == "scoring_steer" and event.event == "applied":
+            # Operator-driven hot-swap: mirror the new formula onto the
+            # top-level scalar so the next dashboard tail shows it.
+            new_formula = data.get("formula")
+            if new_formula:
+                s["composite_formula"] = new_formula
+                # Custom formulas render verbatim — no short form, no
+                # value inlining (operator authored it, they read it).
+                self._short_formula_template = None
+                s["composite_formula_short"] = None
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s["round"] = data.get("round", s["round"])
             self._round_start = time.monotonic()
@@ -428,6 +462,16 @@ class CampaignPersistenceEmitter:
         comp = scores.get("composite")
 
         s["current_acc"] = round(acc, 4)
+        # Inline this candidate's resolved evaluator values into the
+        # short-form formula so the top of dashboard.json reads
+        # ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` instead of needing a
+        # legend lookup. Skipped when the operator authored a custom
+        # formula (no template) — it renders verbatim in
+        # ``composite_formula``.
+        if self._short_formula_template:
+            s["composite_formula_short"] = inline_short_formula_values(
+                self._short_formula_template, scores.get("evaluators")
+            )
 
         comp_str = f"  composite={comp:.3f}" if comp is not None else ""
         invalid_mark = "  INVALID" if scores.get("invalid") else ""
@@ -506,9 +550,31 @@ class CampaignPersistenceEmitter:
                     "pp_override": cand.get("pp_override"),
                 }
             )
+            cand_evaluators = dict(scores.get("evaluators") or {})
             stats: dict[str, Any] = {
                 "accuracy": scores.get("accuracy"),
                 "composite": scores.get("composite"),
+                # Active formula at the moment this candidate was scored
+                # — pairs the composite number with what produced it so
+                # an operator reading the searchpoint's score never has
+                # to scroll up to the top of dashboard.json to find it.
+                "composite_formula": self._state.get("composite_formula"),
+                # Per-candidate value-inlined short formula —
+                # ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for THIS
+                # candidate's evaluator values. The top-level scalar
+                # carries the latest candidate's version; this field
+                # carries the per-candidate snapshot, so a finished
+                # round records every candidate's resolved formula.
+                "composite_formula_short": inline_short_formula_values(
+                    self._short_formula_template, cand_evaluators
+                ),
+                # Resolved evaluator values that fed the formula —
+                # ``accuracy``, ``latency_norm``, ``error_rate``,
+                # ``prompt_compactness``, etc. Use these to read what
+                # each short code (``acc``, ``H``, ``lat``, ``R``,
+                # ``pc``) resolved to for this candidate. Legend lives
+                # in ``docs/operations/improvement-tracking.md``.
+                "evaluators": cand_evaluators,
                 "hits": scores.get("hits"),
                 "total": scores.get("total"),
                 "invalid": scores.get("invalid", False),
