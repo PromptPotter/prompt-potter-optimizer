@@ -1,8 +1,8 @@
 # M9: Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0
 
-**Version:** 0.1.0
-**Date:** 2026-04-12
-**Status:** Track 7 shipped 2026-04-19 (convergence-efficiency); other tracks ongoing
+**Version:** 0.2.0
+**Date:** 2026-04-28
+**Status:** Complete (2026-04-28). Tracks 2, 3, 6, 7 shipped; Tracks 4 and 5 superseded by cleaner outcomes (renderer unification via `LiveDisplay` + artifact tree; recon archival eliminated the third seed source). Track 1 (optimizer-prompt tuning) lifted to M10.
 **Depends on:** M8 Campaign Intelligence (Complete)
 
 > **Post-ship note (2026-04-19).** Track 7 shipped with `ReconConfig` + `SessionEnv.recon_brief` wired through so the recon path kept working. A follow-up cleanup on the same branch removed those seams along with the CLI `recon`/`show-recon` subcommands, the notebook UI wrappers, and the `recon_brief` parameter through L1. `application/recon/` remains as a dormant code archive (see CLAUDE.md).
@@ -11,51 +11,17 @@
 
 ## Context
 
-M9 is foundation work. The optimization loop (L1/L2/L3) is functionally complete through M8 with SearchMemory cross-campaign intelligence, but four gaps block publication and production:
+M9 is foundation work. The optimization loop (L1/L2/L3) is functionally complete through M8 with SearchMemory cross-campaign intelligence, but three gaps block publication and production:
 
-1. **Meta-prompts are proof-of-concept.** `promptpotter/config/optimizer_prompts/` are functional but untuned. They were developed against a multi-node retrieval pipeline and need systematic evaluation before any benchmark number is meaningful.
-2. **Flat service layout.** `promptpotter/services/` mixes orchestration with I/O and has files up to 37KB. A multi-tenant webapp lands on top of this as duplication or leakage.
-3. **Single dataset/pipeline assumption.** Nothing in store paths or campaign state cleanly distinguishes HotPotQA from GSM8K from TermNorm running in the same project.
-4. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Artifact-write parity is closed (`run_optimization` auto-mints a session+cycle pair when the caller passes `session_id=""`, so notebook/smoke/future-API produce the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`); **view-model unification remains** — Track 4 below.
+1. **Flat service layout.** `promptpotter/services/` mixes orchestration with I/O and has files up to 37KB. A multi-tenant webapp lands on top of this as duplication or leakage.
+2. **Single dataset/pipeline assumption.** Nothing in store paths or campaign state cleanly distinguishes HotPotQA from GSM8K from TermNorm running in the same project.
+3. **No shared view model across entry points.** Notebook renders from in-memory state. CLI dashboard polls live state. The future webapp would be a third independent renderer. Artifact-write parity is closed (`run_optimization` auto-mints a session+cycle pair when the caller passes `session_id=""`, so notebook/smoke/future-API produce the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`); **view-model unification remains** — Track 4 below.
 
-M9 delivers the foundation. M10 populates it with benchmark results. M11 generalizes the connector.
+> **Stable optimizer-prompt configuration moved to M10** — see [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md). The "tune the four optimizer meta-prompts" track was lifted out of M9 in favor of a dedicated milestone with a behavior-ledger framework, a `rounds_to_95` headline metric, and a manual-iteration cadence. M9 is now infrastructure-only.
+
+M9 delivers the foundation. M10 tunes the optimizer prompts on top of it. M11 populates the foundation with benchmark results. M12 generalizes the connector.
 
 ## Tracks
-
-### Track 1: Stable Optimizer Configuration
-
-**Problem:** Meta-prompts in `promptpotter/application/optimization/prompts/` are functional but proof-of-concept:
-
-| Prompt | File | Temperature | Max Tokens | State |
-|--------|------|-------------|------------|-------|
-| L1 Generate | `l1_generate.json` | 0.7 | 8192 | Working, tuned for multi-node pipeline references |
-| L1 Critique | `l1_critique.json` | 0.3 | 4096 | Working, extensive stat assembly |
-| L2 Context | `l2_context.json` | 0.3 | 2048 | Working, clean layer transition |
-| L3 Plan | `l3_plan.json` | 0.5 | 2048 | Working, strategic pivots |
-| Restructure | `restructure.json` | 0.3 | 4096 | One-time at cycle start |
-
-Current optimizer model: `openai/gpt-oss-120b` via Groq.
-
-**Approach:** Generic prompts adapt via `task_context` injection — no task-specific sets. The `problem_description` and `instruction` fields use template variables; task details flow through `task_context`.
-
-**Deliverables:**
-
-1. **Evaluation protocol.** Second-order metrics measured at campaign level:
-
-   | Metric | What It Measures | Better = |
-   |--------|-----------------|----------|
-   | Rounds to convergence | How quickly optimizer finds a good prompt | Lower |
-   | Final accuracy | Best accuracy achieved | Higher |
-   | L2/L3 escalation frequency | How often L1 stalls and needs meta-intervention | Lower |
-   | Candidate diversity | Variety of generated candidates per round | Higher (avoids mode collapse) |
-   | Optimizer cost | Total tokens spent on optimizer LLM calls | Lower |
-
-2. **Systematic improvements.** Prompt language refinement, temperature/max_tokens tuning per node, `thinking_style` variants, `answer_format` schema variations, model selection.
-3. **Final configs committed** to `promptpotter/application/optimization/prompts/` with rationale. Feeds paper's "method" section.
-
-**Bootstrap cost mitigation:** Tune meta-prompts against **BBEH mini** (10/task train subset, seed=42 — same split as M10's head-to-head). Small sample, diverse reasoning tasks, known non-saturated at `gpt-oss-120b`. Reserve the full 3-seed protocol for M10's publication numbers. GSM8K and AIME are saturated at this model and are not useful signal for meta-prompt tuning; HotPotQA's saturation is unknown and decided in M10 Wave 1.
-
-**Risk:** Multi-node meta-prompts on LLM-only tasks — pipeline references are irrelevant for benchmarks. Mitigation: generic prompts via `task_context` injection.
 
 ### Track 2: Hierarchy Refactor (Hexagonal Layout)
 
@@ -63,60 +29,41 @@ See standalone spec (archived as DONE): [`archive/m9-hierarchy-refactor.md`](arc
 
 Shape `promptpotter/` into `domain / application / infrastructure / presentation / shared / config`. Move-only; fat-file splits deferred to follow-up specs. Tenant seam shaped (`domain/tenant.py` + optional `SessionEnv.tenant`) but not enforced.
 
-### Track 3: Multi-Dataset / Multi-Pipeline Support
+### Track 3: Multi-Dataset / Multi-Pipeline Support — **DONE (outcome met; spec deliverables superseded by Track 6)**
 
-**Problem:** A project today implicitly assumes one dataset and one pipeline per backend. Multi-dataset benchmark work (HotPotQA + GSM8K + TermNorm sharing a project) needs dataset/pipeline to be first-class identifiers in campaign state, store paths, and the active-session pointer.
+**Outcome:** Five datasets coexist as peers under `datasets/` (`lca-termnorm/`, `bbeh/`, `gsm8k/`, `hotpotqa/`, `aime_2025/`), each with its own `campaign.json`, `pipeline.json`, `prompts/`, and `task_description.md`. The original deliverable shape (path components for dataset/pipeline, five-field active-session pointer, separate `pipeline_name` field, `--pipeline` CLI flag) was abandoned in favor of Track 6's cleaner two-tree + content-hash cycle identity.
 
-**Deliverables:**
+**What shipped:**
 
-1. `dataset_name` and `pipeline_name` become required fields on campaign state and session env, propagated through `SessionEnv`.
-2. Store paths extend to `{backend_id}/{dataset}/{pipeline}/campaigns/{cycle_id}/...`. Legacy paths migrate or coexist (decision open).
-3. `active_session.json` carries `{backend_id, dataset_name, pipeline_name, session_id}`.
-4. CLI commands accept `--dataset` and `--pipeline` overrides; default comes from the active session.
-5. Two datasets demonstrably coexist (`datasets/lca-termnorm/` + one benchmark dataset) in a single project store without collision.
+1. `dataset_name` lives on `Session` (`application/campaign/campaign_setup.py`) and `CampaignConfig` (`application/campaign/config.py`). `pipeline_name` is **not** a separate field — pipeline identity is carried by `pipeline_schema.name` + `JobSearchPoint.content_hash(dataset)` (truncated, `cycle_` prefix).
+2. Store layout is `{tenant_id}/campaigns/{cycle_id}/` flat — datasets and pipelines became identity inputs to `cycle_id` instead of path components. Cleaner outcome than the originally-planned `{backend_id}/{dataset}/{pipeline}/...` nesting.
+3. `active_session.json` carries `{tenant_id, session_id, cycle_id}` (`infrastructure/store/stores.py:312`). Backend, dataset, and pipeline identity are reconstructed from `session.json` state and the live `pipeline.json`. `cmd_optimize` recomputes the cycle hash on every run; if it differs, a fresh session+cycle auto-mints before baseline runs.
+4. CLI: `--dataset-name` exists on `init` (`presentation/cli/campaign_runner.py`). `--pipeline` was not built — pipeline selected by editing `datasets/{name}/pipeline.json`; revisit in M12 when the connector swap motivates it.
+5. Multi-dataset coexistence demonstrated across five datasets including TermNorm + BBEH.
 
-**Open decisions during the track:** migration vs coexistence for legacy data.
+**Closed deliverables (drop or defer):** `pipeline_name` separate field — covered by content-hash identity; `--pipeline` CLI flag — defer to M12; five-field `active_session.json` payload — closed as covered by `session.json` state.
 
-### Track 4: File-Directory UI v0 (Webapp Preparation)
+### Track 4: File-Directory UI v0 (Webapp Preparation) — **DONE (renderer unified; the literal `views/` subtree was abandoned)**
 
-**Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model. (Artifact-write parity is closed — `run_optimization` auto-mints a session when `session_id=""`. Track 4 is about renderer unification only.)
+**Outcome:** Renderer unification happened. There is no `sessions/{session_id}/views/` subtree — instead, the existing `campaigns/{cycle_id}/` artifact tree (`dashboard.json` + `log.md` + `trials/`) became the shared view model, and `LiveDisplay` (`promptpotter/presentation/views/live.py`) became the shared renderer that both CLI and notebook call. Same outcome as the spec's intent (one render path, one view model, future webapp can read both), different layout.
 
-**Approach:** Instead of each entry point building its own render pipeline, the session writes a flat file-directory "view model" to disk. The CLI's live terminal output, the notebook, and the eventual webapp all read from the same files. The first cut mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. Think: what a human sees when they `cd` into the session folder and `cat` a few files. (Note: post-trim, the CLI has no read commands — operators read state by opening artifacts in their editor. The view model serves the live terminal output, the notebook, and the webapp.)
+**What shipped:**
 
-**Deliverables:**
+1. Shared view model lives at `campaigns/{cycle_id}/` rather than under sessions: `dashboard.json` (live counters, in-flight payload, per-round node I/O snapshot), `log.md` (derived markdown digest, regenerated on every round-complete + finalize), `index.json` (campaign metadata + final block), `trials/trial_NNNN.json` (per-round optimizer checkpoint). For forked cycles, `dashboard.json` + `output.log` bind to the family root cycle so a single tail covers the whole family.
+2. Mix of small JSON + Markdown matches the spec's format intent. Append-only `output.log` for raw HIT/MISS history; pure-render `log.md` (safe to delete and recompute).
+3. `LiveDisplay` is the single renderer. CLI uses it (`presentation/cli/campaign_runner.py`); notebook uses it (`presentation/views/notebook_run.py`). No parallel render pipelines.
+4. Notebook orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) is a thin wrapper around the shared `_run_optimization` + `LiveDisplay`. Renderer divergence closed.
+5. Webapp-reads contract documented informally in `CLAUDE.md § Superuser Monitoring`. **A frozen view-schema doc is deferred to M11** as the webapp's first entry-criterion.
 
-1. A file-directory view model under `sessions/{session_id}/views/` (exact path open). Content is a superset of what the notebook currently displays: round summary, candidate leaderboard, current trajectory, L1 critique text, active SearchPoint.
-2. Format TBD during the track — likely a mix of small JSON files for structured data and pre-rendered Markdown snippets for human-readable dashboards. Open: temp vs permanent files, rolling vs append-only.
-3. CLI live output (during `optimize`) and the notebook both read from the view directory — no parallel render pipelines.
-4. Notebook output becomes a thin renderer that reads the view directory. This closes the remaining notebook ↔ CLI parity gap (renderer divergence); artifact-write parity is already closed via the `run_optimization` auto-mint.
-5. Documented "this is what the future webapp reads" contract. M10 Track 3 picks up from here.
+**Closed deliverables (drop):** `sessions/{session_id}/views/` subtree — abandoned in favor of the artifact tree as view model.
 
-**Intentionally open:** exact file layout, whether intermediate/temp views exist alongside permanent ones, how to version the view schema. Decided during the track via agile iteration — write the files, look at them, adjust.
+**Non-goal:** pretty HTML, React, or any JS. That's M11/M12.
 
-**Non-goal:** pretty HTML, React, or any JS. That's M10/M11.
+### Track 5: CLI Unification — Unified Seed Sources — **SUPERSEDED**
 
-### Track 5: CLI Unification — Unified Seed Sources (post-trim)
+**Status:** Superseded by Track 7's recon archival. The typed three-value vocabulary (`fresh` / `resume` / `recon`) collapsed to two real seed sources after recon was deleted from `main`: fresh-default (no flag = load baseline from `datasets/{name}/prompts/`) and `--from <int>` resume (`presentation/cli/campaign_runner.py`). With only two values, a typed `--from` vocabulary buys nothing. Cross-cycle lineage shipped separately as `--fork-on-divergence` (see `docs/operations/rewind-and-fork.md`).
 
-**Status:** The original "collapse `init` + `optimize`" framing was retired when the CLI was trimmed to two write verbs. `init` and `optimize` are now the entire CLI; no `set-task`, `show-results`, `show-status`, `control`, or `profile` to fold in. `set-task` was absorbed into `init` (auto-decompose from `datasets/<name>/task_description.md`). What remains worth doing is the seed-source unification.
-
-**Problem:** There are multiple ways a cycle can start, surfaced through different flags and implicit behaviors:
-
-- Fresh baseline from `datasets/{name}/prompts/` (implicit, default)
-- Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/operations/rewind-and-fork.md`)
-- Recon-brief-seeded start (implicit, lives in session state — recon is currently archived; see CLAUDE.md)
-
-All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is now a supported primitive via `optimize --fork-on-divergence`; the trigger and mechanics are documented in `optimization.md § Decision records and resume-divergence replay`.
-
-**Deliverables:**
-
-1. **Unified `--from` / `--seed` argument** on `optimize` with a typed vocabulary covering the real starting conditions:
-   - `--from fresh` (default) — load baseline prompt from `datasets/{name}/prompts/`
-   - `--from resume[:<round>]` — resume the active cycle; optional `:<round>` rewinds within it (current `optimize --from <int>` behavior, generalized)
-   - `--from recon:<recon_id>` — recon-brief-seeded (when recon is restored from the archive)
-   One concept, one knob, discoverable in `--help`.
-2. **Notebook + API parity.** The notebook's `run_optimization_notebook()` and FastAPI's `/api/v1/campaigns` routes both need to accept the unified seed vocabulary.
-
-**Non-goal:** reshaping what the loop itself does. This is a CLI / entry-point refactor — the L1→L2→L3 mechanics are untouched. Cross-cycle lineage (fork) is a supported primitive wired to the resume-divergence mechanism; see `optimization.md § Decision records and resume-divergence replay`.
+**What replaced it:** The CLI is two write verbs (`init` + `optimize`) with `--from <ROUND>` for in-cycle rewind and `--fork-on-divergence` for sibling cycles. Notebook reaches parity through the shared `run_optimization` orchestration in `presentation/views/notebook_run.py`. FastAPI parity is deferred to M11/M12 webapp work.
 
 ---
 
@@ -190,7 +137,7 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 **Sequencing:** Wave 1, alongside Track 2. Both are foundational move-only work; other tracks build on both. Track 4 (file-directory UI v0) should render the *new* tree, not rework around the old one later. Track 5 (CLI unification) needs the two-tree layout in place to know where `init` writes session state versus where `optimize` writes campaign state.
 
 **Non-goals:**
-- The webapp itself — that's M10+. This plan builds the filesystem the webapp will read.
+- The webapp itself — that's M11/M12. This plan builds the filesystem the webapp will read.
 - Cross-tenant sharing of datasets or backends. Datasets stay per-tenant. If multi-tenant sharing is needed later, add a `library/` sibling to `projects/` at `.promptpotter/` root.
 - Touching what the optimization loop does — purely a persistence / layout refactor.
 
@@ -295,12 +242,12 @@ Wave 1: Track 2 (hierarchy refactor, move-only) + Track 6 (directory reorg, move
         — parallel; both foundational. Track 4's UI should target the post-reorg tree,
         and Track 5's init+optimize collapse depends on Track 6's two-tree layout.
 
-Wave 2: Track 3 (multi-dataset/pipeline) + Track 7 (config aggregate redesign) + Track 1 (meta-prompt eval protocol)
+Wave 2: Track 3 (multi-dataset/pipeline) + Track 7 (config aggregate redesign)
         — parallel; Track 3 and Track 7 both reshape SessionEnv — landing together keeps its
-        final shape stable. Multi-dataset is prerequisite for meta-prompt evaluation on 2+ tasks.
+        final shape stable.
 
-Wave 3: Track 4 (file-directory UI v0) + Track 1 (systematic improvements + final configs)
-        — parallel; UI draft happens in the presentation/views/ renderer surface, renders the Track 6 tree
+Wave 3: Track 4 (file-directory UI v0)
+        — UI draft happens in the presentation/views/ renderer surface, renders the Track 6 tree
 
 Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
         — runs last; depends on Track 2 (hexagonal layout), Track 4
@@ -315,21 +262,19 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 
 ## Exit Criteria
 
-- [ ] Stable meta-prompts documented with rationale, committed to `promptpotter/config/optimizer_prompts/`
-- [ ] Hexagonal layout in place; all tests green; no `from promptpotter.services` imports remain
-- [ ] `TenantContext` importable from `promptpotter.domain.tenant`; `SessionEnv.tenant` exists
-- [ ] Multi-dataset/pipeline working on at least two datasets in a single project store
-- [ ] File-directory UI v0 readable by a human browsing the session folder; CLI live output and notebook both render from it
-- [ ] Unified `optimize --from {fresh,resume[:<round>],recon:<id>}` seed vocabulary; notebook + API accept the same vocabulary (post-trim CLI is just `init` + `optimize`)
-- [ ] Three-tree layout in place: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`), and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; campaigns and sessions cleanly separated with parity tests for both sets
-- [ ] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models; runtime fields (`session_id`, `project_root`, `recon_brief`, `pipeline_params`) live on `SessionEnv`; no service mutates user config; legacy `campaign.json` files parse unchanged
-- [ ] `CLAUDE.md` Architecture section updated to reflect new hierarchy
+- [x] Hexagonal layout in place; all tests green; no `from promptpotter.services` imports remain
+- [x] `TenantContext` importable from `promptpotter.domain.tenant`; `Session.tenant` exists (`SessionEnv` was renamed to `Session` in Track 7)
+- [x] Multi-dataset coexistence demonstrated across five datasets (`lca-termnorm`, `bbeh`, `gsm8k`, `hotpotqa`, `aime_2025`); pipeline identity carried by `pipeline_schema.name` + `JobSearchPoint.content_hash`, not as a path component
+- [x] Renderer unification: `LiveDisplay` (`promptpotter/presentation/views/live.py`) is the shared renderer; CLI live output and notebook both call it; the artifact tree (`campaigns/{cycle_id}/dashboard.json` + `log.md` + `trials/`) is the shared view model. Frozen webapp-reads schema doc deferred to M11
+- [x] Seed sources collapsed to two after recon archival: fresh-default and `--from <int>` resume. Typed three-value `--from` vocabulary not built — moot. `--fork-on-divergence` covers cross-cycle lineage
+- [x] Three-tree layout: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`; family-root cycles also carry `dashboard.json` + `output.log` shared with their forks), and `library/` (all cross-run reference). Tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`. `CAMPAIGN_ARTIFACTS` further split into `ROOT_TELEMETRY_ARTIFACTS` + `PER_CYCLE_AUDIT_ARTIFACTS`; parity enforced by `tests/test_artifact_parity.py`
+- [x] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models (`OptimizationConfig`, `OptimizerLLMConfig`, `ScoringSetConfig`, `HardSampleSorterConfig`) + `extra='forbid'`; runtime fields live on `Session`; `configure_and_apply_pipeline` writes to `session.pipeline_params` not `campaign_config`; all on-disk `campaign.json` files use the nested shape (legacy flat-form `model_validator` not built — no flat-form configs exist in practice)
+- [x] `CLAUDE.md` Architecture section updated to reflect new hierarchy
 
 ## Key Existing Code
 
 | Area | Files |
 |------|-------|
-| Meta-prompts | `promptpotter/application/optimization/prompts/*.json` |
 | Optimizer pipeline | `promptpotter/application/optimization/pipeline.py`, `optimizer_pipeline.json` |
 | LLM client | `promptpotter/infrastructure/llm/client.py` |
 | Scoring | `promptpotter/domain/scoring.py` |
@@ -345,8 +290,6 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
-| Meta-prompt bootstrap cost | 15K+ LLM calls per variant at full size | Tune on BBEH mini (10/task train, 230 samples); full 3-seed protocol deferred to M10 |
-| Multi-node meta-prompts on LLM-only tasks | Pipeline references irrelevant for benchmarks | Generic prompts via `task_context` injection |
 | Hierarchy refactor touches every file | High churn, merge risk | Move-only (no splits). Single-commit-per-step. Tree compiles between steps |
 | View model over-design | Architectural astronautics before there's a real consumer | Agile: write files, look at them, adjust. Mirror notebook exactly in v0 |
 | Multi-dataset path migration | Legacy data becomes inaccessible | Decide migration vs coexistence early in the track; document the rule |

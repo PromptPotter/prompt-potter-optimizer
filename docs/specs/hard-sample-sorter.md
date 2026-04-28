@@ -1,6 +1,6 @@
 # Spec: Hard-Sample Sorter
 
-**Status:** Phase 1 (seed). Phases 2 and 3 unscheduled; ship opportunistically alongside M10 webapp work.
+**Status:** Phase 1 (seed). Phases 2 and 3 unscheduled; ship opportunistically alongside M11 webapp work.
 
 ---
 
@@ -33,7 +33,7 @@ Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matr
 
 ### Phase 3 — webapp heatmap
 
-Belongs under the **M10 webapp read-only track** (see [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)). Visual design + interactions decided there, not here. Consumes the same phase-1 primitive via the FastAPI read-only API. This spec deliberately does not pre-decide color tokens, zoom, filters, or hover behavior — those age badly without a live UI shell.
+Belongs under the **M11 webapp read-only track** (see [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)). Visual design + interactions decided there, not here. Consumes the same phase-1 primitive via the FastAPI read-only API. This spec deliberately does not pre-decide color tokens, zoom, filters, or hover behavior — those age badly without a live UI shell.
 
 ---
 
@@ -118,4 +118,4 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 - Methods doc: [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md)
 - Scoring-set evolution mechanism: `promptpotter/application/intelligence/scoring_set.py`
 - Rasch posterior: `promptpotter/application/intelligence/rasch.py::RaschPosterior`
-- Downstream webapp home (phase 3): [`m10-publication-benchmarks.md`](m10-publication-benchmarks.md)
+- Downstream webapp home (phase 3): [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)

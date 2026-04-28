@@ -68,7 +68,7 @@ class _SessionGuard:
     backend doesn't need a session, a ``None`` guard disables the rail.
 
     This is internal to ``client.py`` — a future ``ConnectorProtocol``
-    (M11 Track 1) can cleanly take over this seam without touching the
+    (M12 Track 1) can cleanly take over this seam without touching the
     callers of ``BackendClient.init_session``.
     """
 

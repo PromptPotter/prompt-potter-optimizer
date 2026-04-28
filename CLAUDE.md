@@ -97,7 +97,7 @@ promptpotter/
 2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/`.
 3. **Claude skill `/potter-run`**: `.claude/skills/potter-run/SKILL.md` — operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
 4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
-5. **Next.js webapp** (planned M10/M11): zero code today; consumes FastAPI API.
+5. **Next.js webapp** (planned M11/M12): zero code today; consumes FastAPI API.
 
 Features land left → right. Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`; live-phase per-query output is notebook-only pending M9 Track 4.
 
@@ -166,7 +166,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 
 ## Roadmap
 
-**M11 is the headline** — multi-connector architecture (`ConnectorProtocol`, connector registry, second backend), competitor head-to-head, webapp Phase 2 (launch + live monitoring). M9 (stable config, hexagonal layout, multi-dataset, file-directory UI v0) and M10 (BBEH benchmarks, ablation, webapp read-only) are backbone work in front of M11, not destinations. M9 Tracks 2 + 7 are done; Tracks 1, 3, 4 in progress. M0–M8 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**M12 is the headline** — multi-connector architecture (`ConnectorProtocol`, connector registry, second backend), competitor head-to-head, webapp Phase 2 (launch + live monitoring). **M10 (prompt-iteration framework + L1-generate tuning, targeting ≥95% in ≤5 rounds) is the next active milestone**; it doubles as the L4 partial implementation (most of self-optimization's credit-assignment infrastructure, operated manually — see [`docs/specs/m12-plus-backlog.md § Self-optimization`](docs/specs/m12-plus-backlog.md)). M11 (BBEH benchmarks, ablation, webapp read-only) follows. Both are backbone work in front of M12, not destinations. M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Testing
 
@@ -186,4 +186,4 @@ Minimal suite — only stable contracts tested. No volume tests, no O(n) complex
 
 **Research**: [`benchmarks.md`](docs/research/benchmarks.md), [`metrics.md`](docs/research/metrics.md), [`related-work.md`](docs/research/related-work.md)
 
-**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9, M10, M11, M11+), archived (M8, old M9)
+**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9, M10, M11, M12, M12+), archived (M8, old M9)

@@ -40,4 +40,4 @@ Together, the four separate three concerns: *how good* (Acc), *how much of what'
 | adv-CoT      | Llama-3-8B  |   —   | —     | —      | —   |
 | PromptPotter | Llama-3-8B  |   —   | —     | —      | —   |
 
-Filled from `results_*.json` after M10 runs complete. See [`benchmarks.md`](benchmarks.md) for the evaluation protocol and dataset specs.
+Filled from `results_*.json` after M11 runs complete. See [`benchmarks.md`](benchmarks.md) for the evaluation protocol and dataset specs.

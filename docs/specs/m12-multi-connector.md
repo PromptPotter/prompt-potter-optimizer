@@ -1,20 +1,20 @@
-# M11: Multi-Connector, Competitor Comparison, Webapp Phase 2
+# M12: Multi-Connector, Competitor Comparison, Webapp Phase 2
 
-**Version:** 0.1.0
-**Date:** 2026-04-12
+**Version:** 0.2.0
+**Date:** 2026-04-28
 **Status:** Planned
-**Depends on:** M10 (Publication Benchmarks, Ablation Studies, Webapp Read-Only)
+**Depends on:** M11 (Publication Benchmarks, Ablation Studies, Webapp Read-Only)
 
 ---
 
 ## Context
 
-M10 delivered the first benchmark results, ablations, and a read-only webapp on top of M9's hexagonal foundation. M11 generalizes the connector, closes the publication with a competitor head-to-head, and upgrades the webapp from read-only browser to live control surface.
+M11 delivered the first benchmark results, ablations, and a read-only webapp on top of M9's hexagonal foundation and M10's tuned optimizer-prompts. M12 generalizes the connector, closes the publication with a competitor head-to-head, and upgrades the webapp from read-only browser to live control surface.
 
-Three gaps M11 closes:
+Three gaps M12 closes:
 
 1. **Single-backend assumption.** `BackendClient` is still concrete. Six chokepoints (4, 5, 7, 10, 11, 12, 13) remain from M6. A second backend would require copy-paste today.
-2. **Publication lacks competitor comparison.** M10 produces PromptPotter numbers; M11 adds cited competitors (or MIPROv2 reproduction if reviewers object) for a complete main results table.
+2. **Publication lacks competitor comparison.** M11 produces PromptPotter numbers; M12 adds cited competitors (or MIPROv2 reproduction if reviewers object) for a complete main results table.
 3. **Webapp is read-only.** No campaign launch, no live progress, no control.
 
 ## Tracks
@@ -34,7 +34,7 @@ Three gaps M11 closes:
 
 ### Track 2: Competitor Comparison (Publication Closure)
 
-**Problem:** M10 filled PromptPotter's rows in the main results table. Competitor rows are still empty.
+**Problem:** M11 filled PromptPotter's rows in the main results table. Competitor rows are still empty.
 
 **Competitive landscape:**
 
@@ -49,7 +49,7 @@ Three gaps M11 closes:
 **Deliverables:**
 
 1. **Cited numbers** — all competitors filled in the main results table with paper references. Clearly labeled "cited" vs "ours".
-2. **MIPROv2 reproduction (optional, defensive)** — if reviewers object to cited-only comparison, reproduce MIPROv2 locally on HotPotQA via its well-packaged library. Use same model + same dataset split as M10 Track 1.
+2. **MIPROv2 reproduction (optional, defensive)** — if reviewers object to cited-only comparison, reproduce MIPROv2 locally on HotPotQA via its well-packaged library. Use same model + same dataset split as M11 Track 1.
 3. **Cost/efficiency scatter plot** — optimizer LLM calls vs accuracy gain, positioning PromptPotter against Promptomatix and PromptWizard.
 4. **Final paper draft** — results section complete end to end.
 
@@ -57,7 +57,7 @@ Three gaps M11 closes:
 
 ### Track 3: Webapp Phase 2 (Launcher + Live Monitoring)
 
-**Problem:** M10's webapp is read-only. Users can browse campaigns but can't start or control them.
+**Problem:** M11's webapp is read-only. Users can browse campaigns but can't start or control them.
 
 **API extensions:**
 
@@ -73,7 +73,7 @@ Three gaps M11 closes:
 3. **Control panel** — pause / resume / stop buttons wired to the control surface.
 4. **Polish + deployment** — production build config, Docker Compose (FastAPI + webapp), environment configuration.
 
-**Multi-tenant hook-up:** M11 is also the right moment to activate the `TenantContext` seam shaped in M9. Auth middleware populates it; `infrastructure/store/` starts enforcing `{tenant_id}/...` path prefixes. Whitelabel becomes viable.
+**Multi-tenant hook-up:** M12 is also the right moment to activate the `TenantContext` seam shaped in M9. Auth middleware populates it; `infrastructure/store/` starts enforcing `{tenant_id}/...` path prefixes. Whitelabel becomes viable.
 
 ---
 
@@ -95,7 +95,7 @@ Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPRO
 
 ## Entry Criteria
 
-- M10 exit gate passed
+- M11 exit gate passed
 - Stable benchmark numbers for PromptPotter in `docs/research/benchmarks.md`
 - Webapp read-only views live
 
@@ -116,16 +116,16 @@ Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPRO
 | Backend client | `infrastructure/backend/client.py` (was `services/backend_client.py`) |
 | Query parsing | `infrastructure/backend/client.py::split_query_parts` |
 | Pipeline discovery | `infrastructure/backend/client.py::fetch_pipeline` |
-| Tenant seam | `domain/tenant.py` + `SessionEnv.tenant` (M9 shaped, M11 enforced) |
+| Tenant seam | `domain/tenant.py` + `SessionEnv.tenant` (M9 shaped, M12 enforced) |
 | FastAPI API | `presentation/api/` |
-| Webapp | `webapp/` (M10 MVP) |
+| Webapp | `webapp/` (M11 MVP) |
 
 ## Risks
 
 | Risk | Impact | Mitigation |
 |------|--------|------------|
 | Second connector is a toy | Abstraction looks theoretical | Pick a real target (new backend or meaningful LLM-only connector) |
-| MIPROv2 reproduction cost | Full benchmark re-run | Only if reviewers object; use M10 infrastructure |
+| MIPROv2 reproduction cost | Full benchmark re-run | Only if reviewers object; use M11 infrastructure |
 | Webapp control surface races | Pause/resume during in-flight L1 batches | Reuse `FileControlSurface` + graceful interrupt from Parity milestone |
 | Multi-tenant activation breaks existing data | Path prefix changes orphan legacy campaigns | Migration plan before activation; default tenant for legacy |
 | Publication gets stuck on model version | Cited numbers use different models | Document exact model version in reproducibility manifest |

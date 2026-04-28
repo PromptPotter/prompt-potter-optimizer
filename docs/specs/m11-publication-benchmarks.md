@@ -1,21 +1,21 @@
-# M10: Publication Benchmarks, Ablation Studies, Webapp Read-Only
+# M11: Publication Benchmarks, Ablation Studies, Webapp Read-Only
 
-**Version:** 0.2.0
-**Date:** 2026-04-12
+**Version:** 0.3.0
+**Date:** 2026-04-28
 **Status:** Planned
-**Depends on:** M9 (Stable Config, Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0)
+**Depends on:** M10 (Prompt-Iteration Framework + L1-generate Tuning), M9 (Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0, Config Aggregate)
 
 ---
 
 ## Context
 
-M9 delivered the foundation: stable meta-prompts, hexagonal layout, multi-dataset/pipeline support, and a file-directory view model that both CLI and notebook render from. M10 populates that foundation with the first publication-grade results and the first real webapp pass.
+M9 delivered the structural foundation: hexagonal layout, multi-dataset/pipeline support, and a file-directory view model that both CLI and notebook render from. M10 followed with a configured optimizer-prompt set tuned to converge in ≤5 rounds. M11 populates that foundation with the first publication-grade results and the first real webapp pass.
 
-Three gaps M10 closes:
+Three gaps M11 closes:
 
 1. **Zero benchmark results.** The methodology exists (`docs/research/benchmarks.md`), the export pipeline is built. No PromptPotter campaigns have been run against the head-to-head infrastructure yet.
 2. **Ablations are undone.** The paper's "which layer contributes what" story is unproven.
-3. **No webapp.** The M9 file-directory view model is readable by humans but has no pixel UI. M10 puts the first pass on top.
+3. **No webapp.** The M9 file-directory view model is readable by humans but has no pixel UI. M11 puts the first pass on top.
 
 ### Benchmark Priority Pivot (2026-04-12)
 
@@ -57,7 +57,7 @@ Preliminary probing showed GSM8K and AIME 2025 are effectively **saturated** at 
 
 Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head) and produces a row in the ablation table documented in the publication figures spec. BBEH's 23-task structure also enables a per-task ablation breakdown — which layers help on which reasoning categories — a differentiator competitors can't easily produce.
 
-**Bonus (optional, feeds M11 publication push):** OptSearchPoint refinement — advanced L1/L2/L3 strategies surfaced by ablation findings. Keep scope tight; main goal is the table, not new features.
+**Bonus (optional, feeds M12 publication push):** OptSearchPoint refinement — advanced L1/L2/L3 strategies surfaced by ablation findings. Keep scope tight; main goal is the table, not new features.
 
 ### Track 2b: Zero-Signal Sample Filter Refinement
 
@@ -75,7 +75,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 4. **Degradation-canary role for always-hit.** Re-examine the symmetric treatment. Always-hit queries have value as regression signals; exclusion may be the wrong action even when they're zero-signal for *candidate ranking*. Possibly split the two branches: always-miss → excluded outright, always-hit → demoted to probation + used as canary.
 5. **Ablation row.** Add a "zero-signal filter on vs off" row to the Track 2 ablation table on BBEH. Confirms the feature actually earns its place before it lands in the paper.
 
-**Why this matters for M10.** BBEH runs will be the first campaigns where the filter sees serious mileage across diverse reasoning tasks. If the v0 implementation is leaving signal on the table (or worse, removing degradation canaries), M10 is when that'll become visible — better to refine it inside M10's measurement discipline than ship the paper with a known-rudimentary mechanism.
+**Why this matters for M11.** BBEH runs will be the first campaigns where the filter sees serious mileage across diverse reasoning tasks. If the v0 implementation is leaving signal on the table (or worse, removing degradation canaries), M11 is when that'll become visible — better to refine it inside M11's measurement discipline than ship the paper with a known-rudimentary mechanism.
 
 ### Track 3: Webapp Read-Only Views (MVP)
 
@@ -91,7 +91,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 4. **Trial inspector** — prompt diff view, per-query results table, failure analysis display.
 5. **Benchmark results display** — comparison tables from `docs/research/benchmarks.md` data (populated in Track 1), interactive convergence plots.
 
-**Out of scope (M11):** campaign launcher, live monitoring (WebSocket/SSE), API extensions for control, polish/deployment.
+**Out of scope (M12):** campaign launcher, live monitoring (WebSocket/SSE), API extensions for control, polish/deployment.
 
 ### Track 4: Publication Figures Design
 
@@ -129,8 +129,8 @@ Wave 4: Track 3 (benchmark results display)
 
 ## Entry Criteria
 
+- M10 exit gate passed (optimizer prompts converge in ≤5 rounds on at least two pipelines)
 - M9 exit gate passed
-- Stable meta-prompts committed
 - Hexagonal layout in place
 - Multi-dataset/pipeline working
 - File-directory UI v0 readable
@@ -166,6 +166,6 @@ Wave 4: Track 3 (benchmark results display)
 | BBEH difficulty produces flat results | All methods score near-random, no separation | Run PromptPotter probe before committing to 3-seed rigor; adjust sample size or switch to BBEH-full if mini is too small |
 | HotPotQA also saturated | Publication loses multi-hop QA data point | Saturation probe is Wave 1; decision recorded early. Acceptable to publish BBEH-only if the story is strong |
 | Head-to-head Colab drift | CAPO/GEPA/MIPROv2 notebook results not reproducible later | Pin library versions in notebooks; archive `results_*.json` next to the notebook |
-| Webapp scope creep | Unbounded frontend work | MVP only. Launcher + live monitoring is M11. Ship read-only first |
+| Webapp scope creep | Unbounded frontend work | MVP only. Launcher + live monitoring is M12. Ship read-only first |
 | View model schema churn | M9's v0 too unstable to render against | Lock the schema at M9 exit; webapp depends on frozen contract |
 | Ablation results weaken the story | Layers not actually helpful | Publish honestly; re-scope Track 2 bonus if L2/L3 look weak |

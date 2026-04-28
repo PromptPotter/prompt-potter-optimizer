@@ -1,15 +1,15 @@
-# M11+: Backlog
+# M12+: Backlog
 
-**Version:** 0.1.0
-**Date:** 2026-04-12
+**Version:** 0.2.0
+**Date:** 2026-04-28
 **Status:** Unscheduled
-**Depends on:** M11 (Multi-Connector, Competitor Comparison, Webapp Phase 2)
+**Depends on:** M12 (Multi-Connector, Competitor Comparison, Webapp Phase 2)
 
 ---
 
 ## Context
 
-M11+ is the opportunistic bucket. Items here ship after M11 as user demand, time, and research interest dictate. Nothing here is blocking. Each item is a candidate for its own spec when picked up.
+M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time, and research interest dictate. Nothing here is blocking. Each item is a candidate for its own spec when picked up.
 
 ## Items
 
@@ -31,20 +31,20 @@ M11+ is the opportunistic bucket. Items here ship after M11 as user demand, time
 | Item | Notes |
 |------|-------|
 | Multimodal / non-text modalities | RNAseq, X-ray, image, audio. Requires modality-specific evaluation, dataset formats, scoring functions |
-| Pipeline variant comparison | Compare pipelines (not just searchpoints within a pipeline). Needs ConnectorProtocol from M11 |
+| Pipeline variant comparison | Compare pipelines (not just searchpoints within a pipeline). Needs ConnectorProtocol from M12 |
 | Non-prompt targets | Optimize scoring functions, fuzzy matchers, retrieval queries, GA settings — not just prompt strings |
 | Evolutionary operators | Population-based search (GA / DE) as an alternative to critique-guided generation |
 | MCP server mode | Expose PromptPotter as MCP tools to Claude Code and other MCP clients |
-| Self-optimization | PromptPotter optimizes its own meta-prompts recursively. The final proof-of-method. **Mechanical groundwork landed (2026-04-12):** all 5 meta-prompts (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `restructure`) are fully-decomposed `PromptTemplate` instances under `application/optimization/prompts/`, and the `potter_traces` dataset loader (`application/datasets/trace_dataset.py`) emits `{round_context → next_directive → score_delta}` rows from archived campaigns. **Remaining blockers:** (1) credit assignment / outer-loop cost — no cheap proxy reward for a meta-prompt, so every outer trial is otherwise an entire inner campaign; need a trusted replay surrogate. (2) "PromptPotter-as-backend" adapter — a thin shim exposing `POST /match` that internally invokes L1/l1_critique/L2/L3 against a fixed trace-replay fixture, plus a `pipeline.json` describing those nodes. **Suggested wedge:** start with the l1_critique node alone — smallest I/O surface, offline-scorable via "did the directive predict the axis the next round moved on." See [`../developer/prompt-scheme-internals.md § Optimizer meta-prompts`](../developer/prompt-scheme-internals.md#optimizer-meta-prompts); the `potter_traces` loader lives at `application/datasets/trace_dataset.py` (cited earlier in this entry) |
+| Self-optimization (L4) — completion | PromptPotter optimizes its own meta-prompts recursively. The final proof-of-method. **M10 ships the partial implementation** — see [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md). M10 closes the bulk of blocker (1) (credit assignment) by validating `proxy_lift_corr` (round-1 lift vs full-cycle outcome, Spearman), shipping `optimize --sweep` as the cheap-trial mechanism (1 scored round + 1 unscored generation peek), exposing programmatic conformance signal via behavior checks, and emitting per-cycle structured features via `review.md` + `L1Stats`. **Pre-M10 mechanical groundwork (landed 2026-04-12):** all 5 meta-prompts (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`, `restructure`) are fully-decomposed `PromptTemplate` instances; `potter_traces` dataset loader at `application/datasets/trace_dataset.py` emits `{round_context → next_directive → score_delta}` rows from archived campaigns. **Residual blocker for M12+ to close:** the "PromptPotter-as-backend" adapter — a thin shim exposing `POST /match` that internally invokes L1/l1_critique/L2/L3 against a fixed trace-replay fixture, plus a `pipeline.json` describing those nodes. **Suggested wedge:** start with the l1_critique node alone — smallest I/O surface, offline-scorable via "did the directive predict the axis the next round moved on." See [`../developer/prompt-scheme-internals.md § Optimizer meta-prompts`](../developer/prompt-scheme-internals.md#optimizer-meta-prompts) |
 | Model comparison matrix | Same benchmark across multiple target LLMs |
 | Web scrape ablation | Quality vs cost/latency tradeoff for backends that do web retrieval |
-| Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on M9's `TenantContext` + M11's enforcement |
+| Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on M9's `TenantContext` + M12's enforcement |
 
 ### Research Extensions
 
 | Item | Notes |
 |------|-------|
-| Further OptSearchPoint refinement | Advanced L1/L2/L3 strategies surfaced during M10 ablations |
+| Further OptSearchPoint refinement | Advanced L1/L2/L3 strategies surfaced during M11 ablations |
 | Diminishing returns detector | Critique (anomaly flag) + L2 (strategic context) — signal when optimization is plateauing |
 | Candidate diversity monitor | L2 — detect mode collapse in candidate generation |
 | Query improvement attribution | Critique (this-round) + L2 (cross-round patterns) — track which prompt changes drove which query flips |
@@ -56,4 +56,4 @@ M11+ is the opportunistic bucket. Items here ship after M11 as user demand, time
 
 ## Prioritization
 
-None. M11+ items are pulled based on user demand, research direction, and who's asking. When an item becomes hot, promote it to its own spec in `docs/specs/`.
+None. M12+ items are pulled based on user demand, research direction, and who's asking. When an item becomes hot, promote it to its own spec in `docs/specs/`.

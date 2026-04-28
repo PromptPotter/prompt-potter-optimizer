@@ -2,7 +2,7 @@
 
 ## Priority (2026-04-12)
 
-1. **BBEH (primary)** — the M10 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).
+1. **BBEH (primary)** — the M11 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).
 2. **HotPotQA (secondary, pending saturation probe)** — multi-hop QA data point. Probe first; run fully only if non-saturated.
 3. **GSM8K, AIME 2025 (deprioritized)** — effectively saturated at `gpt-oss-120b`. Cite published numbers for context; run only if a future probe reveals headroom (e.g., under a smaller or constrained model setup).
 
@@ -24,7 +24,7 @@ Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a 
 | Format | `{"task": str, "input": str, "target": str, "mini": int}` |
 | Paper | [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025) |
 
-**Head-to-head infrastructure:** [`bbeh-comparison/`](bbeh-comparison/) contains Colab notebooks (`bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) running CAPO, GEPA, MIPROv2, and BootstrapFewShot against the identical `gpt-oss-120b` model and identical 10/task train + 10/task test split (seed=42). PromptPotter runs via its own CLI producing the same JSON output schema. This is the M10 primary benchmark.
+**Head-to-head infrastructure:** [`bbeh-comparison/`](bbeh-comparison/) contains Colab notebooks (`bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) running CAPO, GEPA, MIPROv2, and BootstrapFewShot against the identical `gpt-oss-120b` model and identical 10/task train + 10/task test split (seed=42). PromptPotter runs via its own CLI producing the same JSON output schema. This is the M11 primary benchmark.
 
 #### Reading BBEH results
 
@@ -52,7 +52,7 @@ Multi-hop question answering over Wikipedia paragraphs. Requires reasoning acros
 | Metrics | Token F1, Exact Match (EM) |
 | Format | `{"question": str, "answer": str, "context": list[list]}` |
 
-Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M10 Wave 1.**
+Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown — probe scheduled in M11 Wave 1.**
 
 #### HotPotQA SOTA reference
 
@@ -149,7 +149,7 @@ The bbeh-comparison harness is deliberately scoped to **prompt-optimization peer
 
 **Model:** gpt-oss-120b via Groq | **Split:** 10/task train, 10/task test, seed=42 | **Scoring:** Exact match, macro-average across 23 tasks
 
-<!-- Filled from results_*.json after M10 runs complete -->
+<!-- Filled from results_*.json after M11 runs complete -->
 
 | Method | Overall | Source |
 |--------|---------|--------|
