@@ -6,7 +6,7 @@ import copy
 import logging
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.decisions import record_decision
+from promptpotter.application.optimization.decisions import Decision, record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -218,7 +218,7 @@ def _record_elimination_cut(
     priors_at_test: list[str],
     candidate_scores: list[dict],
     report: dict,
-    decisions: list[dict] | None,
+    decisions: list[Decision] | None,
     round_num: int,
     n_results: int,
 ) -> None:
@@ -270,7 +270,7 @@ async def score_population(
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
     round_num: int = 0,
-    decisions: list[dict] | None = None,
+    decisions: list[Decision] | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session

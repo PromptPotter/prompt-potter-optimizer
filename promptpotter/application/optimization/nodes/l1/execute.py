@@ -263,7 +263,7 @@ async def execute_round(
         all_candidate_results=dict(scoring_result.all_candidate_results),
         candidates_scored=scoring_result.candidates_scored,
         candidate_scores=scoring_result.candidate_scores,
-        decisions=list(scoring_result.decisions),
+        decisions=[d.to_dict() for d in scoring_result.decisions],
         degraded_queries=scoring_result.degraded_queries,
         deprecated=scoring_result.deprecated,
         escalation_signal=scoring_result.escalation_signal,

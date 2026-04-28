@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.application.optimization.decisions import record_decision
+from promptpotter.application.optimization.decisions import Decision, record_decision
 from promptpotter.application.optimization.nodes.l1.measure import (
     parse_population,
     score_population,
@@ -51,7 +51,7 @@ class L1ScoringResult(BaseModel):
     degraded_queries: int = 0
     deprecated: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
-    decisions: list[dict] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)
 
 
 async def l1_score(
@@ -74,7 +74,7 @@ async def l1_score(
     assert schema is not None, "l1_score requires pipeline_schema"
 
     osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
-    decisions: list[dict] = []
+    decisions: list[Decision] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,

@@ -135,7 +135,7 @@ def _persist_round(
 ) -> None:
     """Flush pending decisions onto the round, write trial + log.md, flush recorder."""
     if cycle.pending_decisions:
-        round_result.decisions.extend(cycle.flush_decisions())
+        round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
 
     if session.cycle_id:
         with graceful("Round checkpoint failed"):
