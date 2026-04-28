@@ -3,8 +3,9 @@
 ANSI color codes, box-drawing helpers, scoreboard, interrupt banner,
 display-tag module state, and small numeric helpers (``_pp_val``,
 ``_fmt_delta``). Higher-level renderers consuming these primitives live
-in ``live_helpers`` (per-query / per-candidate / per-round formatters
-and the tqdm bar tracker).
+in sibling modules: ``render_query`` (per-query line),
+``render_individual`` (per-candidate summary), ``render_round``
+(round-level rollups), and ``progress_bar`` (tqdm bar tracker).
 
 Depends only on ``shared`` utilities and ``views.formatting`` (for
 ``fmt_ci``).

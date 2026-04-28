@@ -338,7 +338,7 @@ def resume_with_divergence_check(
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
     """Rescore prior trials under the active scorer; halt or fork on divergence."""
-    from promptpotter.domain.scoring import rescore_results
+    from promptpotter.application.scoring.formula import rescore_results
     from promptpotter.shared.errors import ResumeDivergenceError
 
     assert session.scorer is not None, "session.scorer required for divergence replay"

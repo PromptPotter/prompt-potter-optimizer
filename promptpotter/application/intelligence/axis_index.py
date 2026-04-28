@@ -26,7 +26,8 @@ from promptpotter.application.intelligence.sample_index import (
     QueryRecord,
     SampleIndex,
 )
-from promptpotter.domain.scoring import Scorer, rescore_results
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.domain.scoring import Scorer
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores

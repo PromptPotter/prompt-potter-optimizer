@@ -5,8 +5,9 @@ Surface differentiation via constructor flags, not subclasses:
 - ``store`` provided → enables ``note()`` / ``render_claude_notes()`` /
   ``render_journal()`` (notebook ↔ Claude exchange channel)
 
-Per-query / per-candidate / per-round formatters live in
-``live_helpers.py`` — this file is just the listener orchestration.
+Per-query / per-candidate / per-round formatters live in sibling modules
+(``render_query``, ``render_individual``, ``render_round``,
+``progress_bar``) — this file is just the listener orchestration.
 Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
 """
 
@@ -25,16 +26,18 @@ from promptpotter.presentation.views.display_primitives import (
     _node_bottom,
     _node_top,
 )
-from promptpotter.presentation.views.live_helpers import (
-    _BarTracker,
-    _fmt_query_result,
+from promptpotter.presentation.views.phase_events import render_phase_event
+from promptpotter.presentation.views.progress_bar import _BarTracker
+from promptpotter.presentation.views.render_individual import (
     build_individual_summary,
     fmt_individual_header,
+)
+from promptpotter.presentation.views.render_query import _fmt_query_result
+from promptpotter.presentation.views.render_round import (
     render_patience_status,
     render_progress_table,
     render_round_stats,
 )
-from promptpotter.presentation.views.phase_events import render_phase_event
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult

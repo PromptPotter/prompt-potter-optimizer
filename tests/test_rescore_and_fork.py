@@ -10,7 +10,7 @@ from promptpotter.application.optimization.decisions import (
     _fork_at_divergence,
     replay_decisions,
 )
-from promptpotter.domain.scoring import compile_scorer, rescore_results
+from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.infrastructure.store.stores import build_stores
 
 

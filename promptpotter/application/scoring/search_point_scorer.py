@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.builder import build_dataset_run_data
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.application.scoring.sample_measurement import (
     _error_result,
@@ -19,7 +20,7 @@ from promptpotter.application.scoring.stale_data import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
-from promptpotter.domain.scoring import QueryResult, Scorer, rescore_results
+from promptpotter.domain.scoring import QueryResult, Scorer
 from promptpotter.shared.errors import (
     ErrorCategory,
     error_category,

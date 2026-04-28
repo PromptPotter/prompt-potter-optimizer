@@ -14,7 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.domain.scoring import extract_candidate_label
+from promptpotter.application.scoring.formula import extract_candidate_label
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:

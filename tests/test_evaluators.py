@@ -8,6 +8,7 @@ from promptpotter.application.scoring.evaluators import (
     all_evaluators,
     materialize_round_values,
 )
+from promptpotter.application.scoring.formula import compile_round_scorer
 from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.domain.pipeline_schema import (
     NodeType,
@@ -15,7 +16,6 @@ from promptpotter.domain.pipeline_schema import (
     PipelineNode,
     PipelineSchema,
 )
-from promptpotter.domain.scoring import compile_round_scorer
 
 # ---------------------------------------------------------------------------
 # Fixtures

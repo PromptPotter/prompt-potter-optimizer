@@ -15,7 +15,7 @@ from promptpotter.application.campaign.config import (
     load_campaign_config,
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
-from promptpotter.domain.scoring import SCORING_FUNCTIONS
+from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.presentation.views.display_primitives import set_display_tags
 from promptpotter.presentation.views.notebook_run import (
     init_notebook_session,

@@ -101,7 +101,7 @@ def populate_session_scoring(
     source: str = "optimization_loop",
 ) -> None:
     """Attach the scoring block onto ``session`` (mutates in place)."""
-    from promptpotter.domain.scoring import (
+    from promptpotter.application.scoring.formula import (
         auto_scorer_id,
         compile_round_scorer,
         compile_scorer,
@@ -379,8 +379,8 @@ async def init_optimization_loop(
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.decisions import resume_with_divergence_check
     from promptpotter.application.optimization.elimination import build_degradation_checks
+    from promptpotter.application.scoring.formula import compile_round_scorer
     from promptpotter.domain.phases import CampaignPhase, emit_phase
-    from promptpotter.domain.scoring import compile_round_scorer
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
     opt = config.optimization

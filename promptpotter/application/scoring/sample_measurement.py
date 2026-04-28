@@ -276,7 +276,7 @@ async def measure_sample(
         query_evaluators = materialize_query_values(pipeline_schema, result)  # type: ignore[arg-type]
         if query_evaluators:
             pd["evaluators"] = query_evaluators
-        from promptpotter.domain.scoring import rescore_results
+        from promptpotter.application.scoring.formula import rescore_results
 
         assert session.scorer is not None, "session.scorer required for measurement"
         rescore_results(

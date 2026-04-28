@@ -396,7 +396,7 @@ async def run_optimization(
     if cycle_id:
         session.cycle_id = cycle_id
 
-    from promptpotter.domain.scoring import split_scoring_block
+    from promptpotter.application.scoring.formula import split_scoring_block
 
     scoring_spec = split_scoring_block(campaign_config.scoring)
 

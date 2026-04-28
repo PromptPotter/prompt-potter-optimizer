@@ -20,6 +20,7 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
+from promptpotter.application.scoring.formula import compile_round_scorer, extract_candidate_label
 from promptpotter.domain.analysis import (
     FailureAnalysis,
     FailurePattern,
@@ -27,7 +28,7 @@ from promptpotter.domain.analysis import (
     QueryProfile,
 )
 from promptpotter.domain.pipeline_schema import NodeType
-from promptpotter.domain.scoring import RoundScorer, compile_round_scorer, extract_candidate_label
+from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:

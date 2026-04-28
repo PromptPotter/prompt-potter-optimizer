@@ -388,7 +388,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 
 def _build_live_display(args: argparse.Namespace, *, session, campaign_config, baseline_acc: float):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
-    from promptpotter.domain.scoring import split_scoring_block
+    from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.presentation.views.display_primitives import set_display_tags
 
     set_display_tags(session.pipeline_schema)

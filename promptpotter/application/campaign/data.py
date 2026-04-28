@@ -199,9 +199,9 @@ async def prepare_scoring_context(
     ):
         return baseline, dataset, campaign_rounds, baseline_results
 
+    from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
     from promptpotter.domain.phases import CampaignPhase, emit_phase
-    from promptpotter.domain.scoring import split_scoring_block
     from promptpotter.shared.errors import graceful
 
     session: Session = svc

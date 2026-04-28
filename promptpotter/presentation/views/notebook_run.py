@@ -21,13 +21,13 @@ from promptpotter.application.campaign.runner import (
     run_optimization as _run_optimization,
 )
 from promptpotter.application.optimization.results import RunResult
+from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-from promptpotter.domain.scoring import split_scoring_block
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.presentation.views.display_primitives import BOLD, RESET, YELLOW
 from promptpotter.presentation.views.live import LiveDisplay
