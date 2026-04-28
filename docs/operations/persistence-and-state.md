@@ -23,7 +23,7 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
 
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange).
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts. Within a campaign dir, files split into two bands: **root telemetry** (live observability stream — `dashboard.json`, `output.log`, `phase_events.jsonl`) lives at the **family root** cycle (the cycle with no `parent_cycle_id`), so all forks of a family share one continuous stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/`) lives in each individual cycle's dir.
-- `{tenant_id}/library/` — **the measurement archive** (database core, cross-cycle, cross-session, cross-tenant): every measurement ever taken plus shared reference (datasets, backends, search_memory, aliases). Concept doc: [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md).
+- `{tenant_id}/library/` — **the measurement archive** (database core, cross-cycle, cross-session, cross-tenant): every measurement ever taken plus shared reference (datasets, backends, aliases). Concept doc: [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md).
 
 Full tree:
 
@@ -58,8 +58,8 @@ Full tree:
       measurements.json                # archive index (denormalized read-side projection)
       samples.json                     # SampleIndex: per-sample derived state
       backends/{backend_id}/           # backend profile + datasets
-      search_memory.json               # axis-side digest view (Phase 2 → axes.json)
       prompt_aliases.json
+      # AxisIndex (axis-side digest view) is in-memory only — rebuilt from the archive every refresh.
 ```
 
 **Why split this way?** Telemetry is *temporal* — a stream that flows through whichever fork is currently active. Anchoring it at the family root means a single `tail dashboard.json` covers every fork without chasing dirs. Audit is *structural* — frozen records keyed by the cycle that produced them. Each cycle owns its own and the parent stays intact when you fork.

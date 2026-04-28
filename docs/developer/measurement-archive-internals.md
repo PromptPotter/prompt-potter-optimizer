@@ -22,7 +22,7 @@ Concept overview in [`../concepts/measurement-archive.md`](../concepts/measureme
 | `save(backend_id, run_id, data)` | Write a batch detail file + upsert the index entry (filelocked). Idempotent on repeat content_hash. |
 | `load_by_id(backend_id, run_id) -> dict \| None` | Direct file load by `run_id`, no index scan. |
 | `list_all(backend_id) -> list[dict]` | Index entries (summaries, no items). |
-| `load_since(backend_id, seen_ids) -> Iterator[(run_id, detail)]` | Yields `(run_id, detail)` for every batch whose `run_id` is not in `seen_ids`. Used by `SearchMemory.refresh`. |
+| `load_since(backend_id, seen_ids) -> Iterator[(run_id, detail)]` | Yields `(run_id, detail)` for every batch whose `run_id` is not in `seen_ids`. Used by `AxisIndex.refresh` (sample side). |
 | `find_by_node_configs(backend_id, spec) -> list[(entry, match_len)]` | Cache-reuse lookup — positional prefix-exact, sorted by match length desc. |
 | `load_reusable_results(backend_id, spec, is_fatal=None) -> dict[query, item]` | Built on top of `find_by_node_configs`. Returns per-query item dict for prior batches sharing a config prefix. |
 | `measurements_for_sample(backend_id, sample_id, *, run_ids=None) -> list[Measurement]` | Sample-keyed retrieval. When `run_ids` is given (typically `Sample.run_ids`), skips the index scan. |
@@ -174,4 +174,4 @@ The index is a denormalized read-side projection — `node_configs` is duplicate
 - [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md) — concept overview.
 - [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) — full tenant-tree reference.
 - [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md) — write path.
-- [`search-memory-internals.md`](search-memory-internals.md) — the digest layer that consumes the archive (Phase 2 rebuild target).
+- [`axis-index-internals.md`](axis-index-internals.md) — the digest layer that consumes the archive (in-memory derived view).

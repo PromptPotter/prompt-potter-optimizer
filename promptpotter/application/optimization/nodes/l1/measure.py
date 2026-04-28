@@ -328,7 +328,7 @@ async def score_population(
             degradation_checks=[*(degradation_checks or []), elim_check],
             candidate_idx=idx,
             n_total_candidates=n,
-            search_memory=cycle.search_memory,
+            axes=cycle.axes,
         )
         all_candidate_results[osp_c.lineage.id] = results
 

@@ -17,9 +17,9 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
 from promptpotter.application.optimization.nodes.formatting import (
+    format_axis_digest_block,
     format_pipeline_section,
     format_runtime_failures_for_l3,
-    format_search_memory_block,
     warning_summary,
 )
 from promptpotter.application.optimization.nodes.inbox_registry import (
@@ -303,7 +303,7 @@ class L3ModifyPlan(LayerTransition):
     ) -> dict:
         opt_sp = cycle.opt_sp
         pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
-        search_memory = cycle.search_memory
+        axes = cycle.axes
 
         # L3's "l2_history" — synthetic single-entry summary of the most recent
         # L2 round, sourced directly from cycle state.
@@ -335,8 +335,8 @@ class L3ModifyPlan(LayerTransition):
             "runtime_failures_section": (
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
             ),
-            "inbox": format_search_memory_block(
-                search_memory.digest_for_l3() if search_memory is not None else None,
+            "inbox": format_axis_digest_block(
+                axes.digest_for_l3() if axes is not None else None,
                 {
                     "axis_rankings": "Axis impact rankings",
                     "bottleneck_distribution": "Bottleneck distribution",

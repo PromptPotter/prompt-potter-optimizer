@@ -17,7 +17,7 @@ from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.intelligence.axis_index import AxisIndex
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)
@@ -62,7 +62,7 @@ async def execute_stale_data_protocol(
     session: Session,
     *,
     pipeline_params: dict | None = None,
-    search_memory: SearchMemory | None = None,
+    axes: AxisIndex | None = None,
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
@@ -71,7 +71,7 @@ async def execute_stale_data_protocol(
     live on that single node — tunable via ``param_keys`` when PromptPotter
     self-optimizes.
 
-    Observation counts come from ``search_memory.sample_index`` (degradation
+    Observation counts come from ``axes.sample_index`` (degradation
     tables ingested from the measurement archive at round boundaries). Within a round
     the count is constant; no mutable state is passed through the scorer.
 
@@ -91,13 +91,13 @@ async def execute_stale_data_protocol(
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
             trigger_count = cfg.get("rerun_trigger_count", 3)
-            # Historical count through last SearchMemory refresh (previous round).
+            # Historical count through last AxisIndex refresh (previous round).
             # The current observation bumps the effective count by 1.
             historical = 0
-            if search_memory:
-                sid = search_memory.sample_index.id_for_query(query)
+            if axes:
+                sid = axes.sample_index.id_for_query(query)
                 if sid is not None:
-                    historical = search_memory.sample_index.degradation_count(sid)
+                    historical = axes.sample_index.degradation_count(sid)
             effective_count = historical + 1
             if effective_count < trigger_count:
                 return {
@@ -136,11 +136,9 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
-            if search_memory:
-                sid = search_memory.sample_index.id_for_query(query)
-                deg_rate = (
-                    search_memory.sample_index.degradation_rate(sid) if sid is not None else 0.0
-                )
+            if axes:
+                sid = axes.sample_index.id_for_query(query)
+                deg_rate = axes.sample_index.degradation_rate(sid) if sid is not None else 0.0
                 if deg_rate >= min_deg_rate:
                     result = {**cached_result, "cached": True, "switched_out": True}
                     return result, "sampleswitch"

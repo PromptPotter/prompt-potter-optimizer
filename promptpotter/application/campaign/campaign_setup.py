@@ -371,11 +371,11 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, search memory."""
+    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
     from promptpotter.application.campaign.config import run_preflight_checks
     from promptpotter.application.campaign.cycle_store import bootstrap_cycle
     from promptpotter.application.datasets.builder import sample_dataset
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.intelligence.axis_index import AxisIndex
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.decisions import resume_with_divergence_check
     from promptpotter.application.optimization.elimination import build_degradation_checks
@@ -474,14 +474,13 @@ async def init_optimization_loop(
             session.backend_id, baseline.instruction, baseline_osp.render()
         )
 
-    search_memory = SearchMemory.ensure_for(
+    cycle.axes = AxisIndex.ensure_for(
         session.store,
         session.backend_id,
         scorer=session.scorer,
         scorer_id=session.scorer_id,
         scorer_formula=session.scorer_formula,
     )
-    cycle.search_memory = search_memory
 
     if resolved_cycle_id:
         session.cycle_id = resolved_cycle_id

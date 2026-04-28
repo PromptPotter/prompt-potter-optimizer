@@ -72,7 +72,7 @@ class SampleIndex:
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
         self._degradation_counts: dict[int, int] = defaultdict(int)
         self._flips: list[dict[str, Any]] = []
-        # Reverse lookup for legacy string-keyed APIs on SearchMemory.
+        # Reverse lookup for legacy string-keyed APIs on AxisIndex.
         self._query_to_id: dict[str, int] = {}
         # Cache for derived query records; cleared on ingest.
         self._cache_records: list[QueryRecord] | None = None

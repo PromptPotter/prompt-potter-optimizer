@@ -21,9 +21,9 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.nodes.formatting import (
+    format_axis_digest_block,
     format_escalation_report,
     format_runtime_failure_line,
-    format_search_memory_block,
     summarize_warning_inventory,
 )
 
@@ -38,13 +38,13 @@ class Layer(enum.StrEnum):
     L2 = "L2"
 
 
-_L1_SM_LABELS: dict[str, str] = {
+_L1_AXIS_LABELS: dict[str, str] = {
     "failure_clusters": "Common failure patterns",
     "dead_queries": "Dead queries (never hit)",
     "top_axes": "High-impact axes",
     "top_values": "Best-performing values",
 }
-_L2_SM_LABELS: dict[str, str] = {
+_L2_AXIS_LABELS: dict[str, str] = {
     "axis_rankings": "Axis impact rankings",
     "bottleneck_distribution": "Bottleneck distribution",
     "failure_group_insights": "Failure group x axis",
@@ -86,11 +86,11 @@ def _section_failure_analysis(cycle: Cycle, **_: object) -> str:
     return "\n".join(lines)
 
 
-def _section_search_memory_l1(cycle: Cycle, **_: object) -> str:
-    if cycle.search_memory is None:
+def _section_axes_l1(cycle: Cycle, **_: object) -> str:
+    if cycle.axes is None:
         return ""
-    digest = cycle.search_memory.digest_for_l1_generate()
-    return format_search_memory_block(digest, _L1_SM_LABELS) if digest else ""
+    digest = cycle.axes.digest_for_l1_generate()
+    return format_axis_digest_block(digest, _L1_AXIS_LABELS) if digest else ""
 
 
 def _section_task_context(cycle: Cycle, **_: object) -> str:
@@ -290,11 +290,11 @@ def _section_runtime_failures(cycle: Cycle, *, round_num: int = 0, **_: object) 
     return "\n".join(lines)
 
 
-def _section_search_memory_l2(cycle: Cycle, **_: object) -> str:
-    if cycle.search_memory is None:
+def _section_axes_l2(cycle: Cycle, **_: object) -> str:
+    if cycle.axes is None:
         return ""
-    digest = cycle.search_memory.digest_for_l2()
-    return format_search_memory_block(digest, _L2_SM_LABELS) if digest else ""
+    digest = cycle.axes.digest_for_l2()
+    return format_axis_digest_block(digest, _L2_AXIS_LABELS) if digest else ""
 
 
 # ---------------------------------------------------------------------------
@@ -305,7 +305,7 @@ def _section_search_memory_l2(cycle: Cycle, **_: object) -> str:
 _SECTIONS: dict[str, Callable[..., str]] = {
     "pipeline_schema_text": _section_pipeline_schema_text,
     "failure_analysis": _section_failure_analysis,
-    "search_memory_l1": _section_search_memory_l1,
+    "axes_l1": _section_axes_l1,
     "task_context": _section_task_context,
     "escalation_probe": _section_escalation_probe,
     "escalation_alert": _section_escalation_alert,
@@ -316,7 +316,7 @@ _SECTIONS: dict[str, Callable[..., str]] = {
     "warning_inventory": _section_warning_inventory,
     "validation_failures": _section_validation_failures,
     "runtime_failures": _section_runtime_failures,
-    "search_memory_l2": _section_search_memory_l2,
+    "axes_l2": _section_axes_l2,
 }
 
 
@@ -324,7 +324,7 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
     Layer.L1: (
         "pipeline_schema_text",
         "failure_analysis",
-        "search_memory_l1",
+        "axes_l1",
         "task_context",
         "escalation_probe",
         "escalation_alert",
@@ -339,7 +339,7 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
         "l2_directive",
         "validation_failures",
         "runtime_failures",
-        "search_memory_l2",
+        "axes_l2",
     ),
 }
 
@@ -357,7 +357,7 @@ def assemble_inbox(
     """Walk the registry for *layer*, render each section, drop empties, join.
 
     Reads persistent state from *cycle* (``cycle.opt_sp``,
-    ``cycle.search_memory``, ``cycle.probe_next_round``,
+    ``cycle.axes``, ``cycle.probe_next_round``,
     ``cycle.session.pipeline_schema``). Transient per-call inputs ride
     along as kwargs.
 

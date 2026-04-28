@@ -14,7 +14,7 @@ from promptpotter.domain.search_point import JobSearchPoint
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.intelligence.axis_index import AxisIndex
     from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
@@ -124,7 +124,7 @@ class Cycle:
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
     probe_next_round: bool = False
-    search_memory: SearchMemory | None = None
+    axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
 
     # Flushed into the next trial's ``decisions`` list before ``campaign_store.add_trial``.

@@ -1,8 +1,19 @@
-"""SearchMemory — digest + derived-view façade over SampleIndex (axis side)."""
+"""AxisIndex — derived axis-keyed view over the MeasurementArchive.
+
+Phase 2 of the measurement-archive rework: this object replaces the former
+``SearchMemory``. The axis side is a *pure derivation* of
+``MeasurementArchive.list_all()`` plus the per-sample :class:`SampleIndex`,
+so it owns no persistence — every ``refresh()`` rebuilds ``_axis_values``
+from the archive index. The sample side stays watermarked + persisted on
+``SampleIndex`` (which is not a pure derivation).
+
+The class hosts the digest API consumed by L1/L2/L3 prompts. Names are
+unchanged across the rebuild — ``digest_for_l1_generate`` / ``_l1_critique``
+/ ``_l2`` / ``_l3`` are stable LLM-context surfaces.
+"""
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
@@ -52,8 +63,19 @@ def _collect(*items: tuple[str, str | None]) -> dict[str, str] | None:
     return out or None
 
 
-class SearchMemory:
-    """Materialized view over historical evaluation data (axis side)."""
+class AxisIndex:
+    """Derived axis-keyed view over the MeasurementArchive.
+
+    Holds two collaborating pieces:
+
+    * ``sample_index`` — per-sample state (its own persistence at
+      ``library/samples.json``).
+    * ``_axis_values`` — axis → value → list[accuracy], rebuilt from the
+      archive index on every :meth:`refresh`. No persistence.
+
+    Failure-group × axis correlations are recomputed on every refresh —
+    cheap at current scale and avoids drift from a throttle.
+    """
 
     def __init__(self, sample_index: SampleIndex | None = None) -> None:
         self.sample_index: SampleIndex = sample_index or SampleIndex()
@@ -233,11 +255,16 @@ class SearchMemory:
 
     # ----- failure-group correlation -----
 
-    def _recompute_failure_group_correlations(self) -> bool:
-        """Recompute failure-group × axis deltas from current hits/axis values."""
+    def _recompute_failure_group_correlations(self) -> None:
+        """Recompute failure-group × axis deltas from current hits/axis values.
+
+        Always overwrites ``_axis_failure_group_deltas`` (including resetting
+        to ``{}`` when no clusters are present).
+        """
         clusters = self.sample_index.failure_clusters(5)
         if not clusters:
-            return False
+            self._axis_failure_group_deltas = {}
+            return
 
         # Map each failure mode to the full set of sample_ids whose dominant mode matches.
         # cluster.example_queries only carries the top few; scan every sample's
@@ -258,7 +285,8 @@ class SearchMemory:
                 groups[mode] = sids
 
         if not groups:
-            return False
+            self._axis_failure_group_deltas = {}
+            return
 
         def _hit_rate(sids: set[int]) -> float:
             rates = [sum(h) / len(h) for sid in sids if (h := self.sample_index.hits(sid))]
@@ -278,12 +306,9 @@ class SearchMemory:
                 if corr > 0.005:
                     new_deltas.setdefault(axis, {})[group_name] = round(corr, 4)
 
-        if new_deltas and new_deltas != self._axis_failure_group_deltas:
-            self._axis_failure_group_deltas = new_deltas
-            return True
-        return False
+        self._axis_failure_group_deltas = new_deltas
 
-    # ----- ingest / refresh / persist -----
+    # ----- ingest / refresh -----
 
     def refresh(
         self,
@@ -293,24 +318,45 @@ class SearchMemory:
         scorer_id: str = "none",
         scorer_formula: str | None = None,
     ) -> bool:
-        """Incrementally update from new dataset runs; True if anything was added."""
+        """Rebuild axis side from the archive; incrementally update sample side.
+
+        Sample side: incremental, watermarked — walk
+        ``archive.load_since(watermark)``, rescore items via
+        ``rescore_results``, ingest into ``sample_index``, mark watermark.
+        Returns ``True`` when at least one new run was ingested into the
+        sample side (callers use this to decide whether to persist
+        ``samples.json``).
+
+        Axis side: full rebuild every call — walk ``archive.list_all()``
+        (the index already carries ``pipeline_params`` and
+        ``scores.accuracy``, no detail load needed). Failure-group
+        correlations are recomputed unconditionally afterwards.
+        """
         added = 0
         for run_id, detail in store.archive.load_since(backend_id, self.sample_index._watermark):
             if scorer is not None:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
-            self._ingest_run(detail)
             self.sample_index.ingest_run(detail)
             self.sample_index.mark_watermark(run_id)
             added += 1
-        if not added:
-            return False
+
+        # Axis side: rebuild from the archive index. Cheap and stateless —
+        # no detail load needed because the index entries already carry
+        # ``pipeline_params`` and ``scores.accuracy``.
+        new_axis_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        for entry in store.archive.list_all(backend_id):
+            self._fold_entry(new_axis_values, entry)
+        self._axis_values = new_axis_values
         self._cache_axis_impacts = {}
-        logger.debug(
-            "SearchMemory refreshed: %d new runs (total watermark: %d)",
-            added,
-            len(self.sample_index._watermark),
-        )
-        return True
+        self._recompute_failure_group_correlations()
+
+        if added:
+            logger.debug(
+                "AxisIndex refreshed: %d new runs (total watermark: %d)",
+                added,
+                len(self.sample_index._watermark),
+            )
+        return added > 0
 
     def on_round_complete(
         self,
@@ -318,7 +364,7 @@ class SearchMemory:
         session: Any,
         round_num: int,
     ) -> None:
-        """Per-round hook: refresh, persist, recompute correlations."""
+        """Per-round hook: refresh and persist the sample side."""
         if (
             session.store
             and session.backend_id
@@ -330,16 +376,7 @@ class SearchMemory:
                 scorer_formula=session.scorer_formula,
             )
         ):
-            if (
-                round_num > 0
-                and round_num % 5 == 0
-                and self._recompute_failure_group_correlations()
-            ):
-                logger.info(
-                    "SearchMemory: recomputed failure group correlations at round %d", round_num
-                )
             base = Path(session.store.base_dir) / "library"
-            self.save(base / "search_memory.json")
             self.sample_index.save(base / "samples.json")
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
@@ -356,19 +393,6 @@ class SearchMemory:
         if flips:
             logger.debug("Round %d: %d query flips recorded", round_num, flips)
 
-    def save(self, path: Path) -> None:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(
-            json.dumps(
-                {
-                    "axis_values": {a: dict(v) for a, v in self._axis_values.items()},
-                    "axis_failure_group_deltas": self._axis_failure_group_deltas,
-                },
-                indent=2,
-            ),
-            encoding="utf-8",
-        )
-
     @classmethod
     def ensure_for(
         cls,
@@ -377,46 +401,39 @@ class SearchMemory:
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
-    ) -> SearchMemory | None:
-        """Load + refresh; ``None`` when ``store`` or ``backend_id`` is missing."""
+    ) -> AxisIndex | None:
+        """Load ``SampleIndex`` from disk, build a fresh ``AxisIndex``, refresh once.
+
+        Returns ``None`` when ``store`` or ``backend_id`` is missing.
+        Persists ``samples.json`` after the refresh; never writes an axis-side file.
+        """
         if not (store and backend_id):
             return None
         base = Path(store.base_dir) / "library"
         sample_index = SampleIndex.load(base / "samples.json")
-        mem = cls.load(base / "search_memory.json", sample_index=sample_index)
-        if mem.refresh(
+        idx = cls(sample_index=sample_index)
+        if idx.refresh(
             store, backend_id, scorer=scorer, scorer_id=scorer_id, scorer_formula=scorer_formula
         ):
-            mem.save(base / "search_memory.json")
-            mem.sample_index.save(base / "samples.json")
-        return mem
+            idx.sample_index.save(base / "samples.json")
+        return idx
 
-    @classmethod
-    def load(cls, path: Path, sample_index: SampleIndex | None = None) -> SearchMemory:
-        mem = cls(sample_index=sample_index)
-        if not path.exists():
-            return mem
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Failed to load SearchMemory from %s — starting fresh", path)
-            return mem
-        for axis, vals in data.get("axis_values", {}).items():
-            for v, accs in vals.items():
-                mem._axis_values[axis][v] = accs
-        mem._axis_failure_group_deltas = data.get("axis_failure_group_deltas", {})
-        return mem
+    # ----- helpers -----
 
-    def _ingest_run(self, detail: dict[str, Any]) -> None:
-        """Ingest axis-side state from a measurement-archive entry."""
-        accuracy = detail.get("scores", {}).get("accuracy", 0.0)
-        for node_name, node_config in (detail.get("pipeline_params") or {}).items():
+    @staticmethod
+    def _fold_entry(
+        axis_values: dict[str, dict[str, list[float]]],
+        entry: dict[str, Any],
+    ) -> None:
+        """Fold one archive index entry's pipeline_params + accuracy into ``axis_values``."""
+        accuracy = entry.get("scores", {}).get("accuracy", 0.0)
+        for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():
                     axis = f"{node_name}.{param}" if node_name else param
-                    self._axis_values[axis][_value_preview(value)].append(accuracy)
+                    axis_values[axis][_value_preview(value)].append(accuracy)
             else:
-                self._axis_values[node_name][_value_preview(node_config)].append(accuracy)
+                axis_values[node_name][_value_preview(node_config)].append(accuracy)
 
     def _compute_axis_impact(
         self,

@@ -8,7 +8,7 @@ dataset at round boundaries, physically moves such queries into the
 the *next* round loads the smaller active set.
 
 No LLM, no statistics beyond Bernoulli-variance gating.  Uses
-``SearchMemory.dead_queries()`` which already tracks per-query hit
+``AxisIndex.sample_index.dead()`` which already tracks per-query hit
 sequences.  Off by default — enable via ``CampaignConfig.optimization.zero_signal_filter_*``.
 """
 
@@ -18,7 +18,7 @@ import logging
 from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.intelligence.axis_index import AxisIndex
     from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
@@ -30,7 +30,7 @@ def apply_zero_signal_exclusions(
     *,
     store: Stores,
     dataset_name: str,
-    memory: SearchMemory,
+    axes: AxisIndex,
     active_dataset: list,
     min_observations: int,
     campaign_id: str = "",
@@ -43,7 +43,7 @@ def apply_zero_signal_exclusions(
     The caller is responsible for surfacing the result to the UI
     (``RunListener.on_phase`` or similar).
     """
-    dead = memory.sample_index.dead(min_observations=min_observations)
+    dead = axes.sample_index.dead(min_observations=min_observations)
     if not dead:
         return []
 

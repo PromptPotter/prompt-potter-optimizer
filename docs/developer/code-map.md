@@ -8,26 +8,26 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 
 | Symbol | Module |
 |--------|--------|
-| `AxisImpact` | `promptpotter/application/intelligence/search_memory.py` |
+| `AxisImpact` | `promptpotter/application/intelligence/axis_index.py` |
 | `CampaignConfig` | `promptpotter/application/campaign/config.py` |
 | `Cycle` | `promptpotter/application/optimization/cycle.py` |
 | `Decision` | `promptpotter/application/campaign/decisions.py` |
 | `Divergence` | `promptpotter/application/campaign/decisions.py` |
-| `FailureCluster` | `promptpotter/application/intelligence/search_memory.py` |
+| `FailureCluster` | `promptpotter/application/intelligence/axis_index.py` |
 | `JobSearchPoint` | `promptpotter/domain/search_point.py` |
 | `OptSearchPoint` | `promptpotter/domain/opt_search_point.py` |
 | `OptimizationConfig` | `promptpotter/application/campaign/config.py` |
 | `PipelineNode` | `promptpotter/domain/pipeline_schema.py` |
 | `PipelineSchema` | `promptpotter/domain/pipeline_schema.py` |
 | `PromptTemplate` | `promptpotter/domain/opt_search_point.py` |
-| `QueryRecord` | `promptpotter/application/intelligence/search_memory.py` |
+| `QueryRecord` | `promptpotter/application/intelligence/axis_index.py` |
 | `ReplayContext` | `promptpotter/application/campaign/decisions.py` |
 | `RoundResult` | `promptpotter/application/optimization/results.py` |
 | `RuntimeFailure` | `promptpotter/domain/analysis.py` |
 | `Session` | `promptpotter/application/campaign/campaign_setup.py` |
-| `SearchMemory` | `promptpotter/application/intelligence/search_memory.py` |
+| `AxisIndex` | `promptpotter/application/intelligence/axis_index.py` |
 | `ValidationFailure` | `promptpotter/domain/analysis.py` |
-| `ValueRecord` | `promptpotter/application/intelligence/search_memory.py` |
+| `ValueRecord` | `promptpotter/application/intelligence/axis_index.py` |
 
 ## Optimization loop
 
@@ -59,7 +59,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | Symbol | Module |
 |--------|--------|
 | `mutate` | `promptpotter/domain/opt_search_point.py` |
-| `format_search_memory_block` | `promptpotter/application/optimization/nodes/formatting.py` |
+| `format_axis_digest_block` | `promptpotter/application/optimization/nodes/formatting.py` |
 | `PROMPT_STRING_FIELDS` | `promptpotter/shared/constants.py` |
 | `PromptTemplate.render` | `promptpotter/domain/opt_search_point.py` |
 | `to_job_search_point` | `promptpotter/domain/opt_search_point.py` |
@@ -83,7 +83,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `scoring_set` | `promptpotter/application/intelligence/scoring_set.py` |
 | `rasch` | `promptpotter/application/intelligence/rasch.py` |
 | `sample_index` | `promptpotter/application/intelligence/sample_index.py` |
-| `SearchMemory.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/search_memory.py` |
+| `AxisIndex.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/axis_index.py` |
 | `variant_library` | `promptpotter/application/intelligence/variant_library.py` |
 
 ## Infrastructure
@@ -126,7 +126,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `.promptpotter/active_session.json` | `{tenant_id, session_id, cycle_id}` pointer |
 | `.promptpotter/projects/{tenant}/sessions/{session_id}/` | Per-session workspace (journal, notes, control) |
 | `.promptpotter/projects/{tenant}/campaigns/{cycle_id}/` | Per-cycle artifacts (index, dashboard, trials, candidates, rounds, events, langfuse, prompts) |
-| `.promptpotter/projects/{tenant}/library/` | The measurement archive (database core) — measurements/, samples.json, search_memory.json, backends, datasets |
+| `.promptpotter/projects/{tenant}/library/` | The measurement archive (database core) — measurements/, samples.json, backends, datasets |
 | `datasets/{name}/campaign.json` | Campaign hyperparameters per dataset |
 | `datasets/{name}/pipeline.json` | Pipeline + model + caps per dataset |
 | `datasets/{name}/prompts/{node}.json` | Canonical starting `PromptTemplate` JSON |

@@ -8,7 +8,7 @@ promptpotter/
 ├── application/
 │   ├── campaign/    # campaign lifecycle + thin orchestration (Session, RunListener, Decision records)
 │   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, critique, llm_call, restructure
-│   ├── intelligence/  # SHARED materialized view — SearchMemory, variant_library, scoring_set
+│   ├── intelligence/  # SHARED materialized view — AxisIndex, variant_library, scoring_set
 │   ├── scoring/       # score_search_point gateway, measure_sample, stale-data protocol
 │   └── datasets/
 ├── infrastructure/  # backend/, store/, llm/, tracing/, persistence/
@@ -84,7 +84,6 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
       measurements.json                  # archive index (denormalized read-side projection)
       samples.json                       # SampleIndex: per-sample derived state
       backends/{backend_id}/             # backend profile + datasets
-      search_memory.json                 # axis-side digest view (Phase 2 → axes.json)
       prompt_aliases.json
 ```
 

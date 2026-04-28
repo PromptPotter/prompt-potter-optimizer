@@ -11,7 +11,7 @@ If you want to know what PromptPotter has learned, you read the archive.
 Three things use accumulated data:
 
 1. The **optimizer loop** reuses prior measurements as cache (skip backend calls when an identical config already ran a sample). This is the cache-reuse path.
-2. **LLM digests** project the archive into short text strings injected into L1/L2/L3 prompts (`SearchMemory.digest_for_*` today; `AxisIndex` after Phase 2).
+2. **LLM digests** project the archive into short text strings injected into L1/L2/L3 prompts (`AxisIndex.digest_for_*`).
 3. **Operators / webapp / scripts** want direct, structured access — *"what did we measure for sample 42?"*, *"every measurement under model X?"*
 
 (1) and (2) used to dominate; (3) had no first-class API. The archive concept exposes (3) directly. (1) and (2) are now derived views over the same store.
@@ -38,9 +38,10 @@ Both return `list[Measurement]` — the same denormalized row type. They compose
 │   ├── {run_id}.json          ← one batch = one config × dataset pass
 │   └── ...
 ├── measurements.json          ← index over the batches
-├── samples.json               ← SampleIndex: per-sample derived state
-└── search_memory.json         ← (kept Phase 1; replaced by axes.json in Phase 2)
+└── samples.json               ← SampleIndex: per-sample derived state
 ```
+
+`AxisIndex` (axis-keyed digest layer) is in-memory only — rebuilt from the archive on every refresh, no on-disk file.
 
 Each `measurements/{run_id}.json` carries:
 
@@ -88,7 +89,7 @@ A run matches iff for every `(node, subdict)` in the predicate, the run's `node_
 - **Write**: every `score_search_point()` call appends one batch to `measurements/{run_id}.json` via `MeasurementArchive.save(...)`. Content-hash collision means upsert (replaces), not duplicate.
 - **Read for cache reuse**: `score_search_point()` calls `load_reusable_results(node_configs, ...)` — a positional-prefix-exact lookup that returns a `dict[query → QueryResult]` for the active config. Skips the backend on hit.
 - **Read for discovery**: operators / scripts call `measurements_for_sample(...)` / `measurements_for_config(...)` — see above.
-- **Read for digests**: `SearchMemory.refresh()` walks new entries via `load_since(...)` and folds axis-side stats into its in-memory tables. Phase 2 will rebuild this on top of the retrieval API rather than maintaining its own ingestion path.
+- **Read for digests**: `AxisIndex.refresh()` walks new entries via `load_since(...)` for the sample side, then rebuilds the axis side from `list_all(...)` in memory. Pure derivation — no parallel persistence.
 
 ## Relationship to cache reuse
 
@@ -106,11 +107,11 @@ Same archive, same matcher primitive, two viewpoints.
 - **Not a cache.** The cache is the archive viewed in `prefix_exact` mode. There is no separate runtime cache (no `IntermediateCache` class — that was an aspirational note that never landed).
 - **Not the optimizer's working state.** That's `OptSearchPoint` + per-cycle `campaigns/{cycle_id}/trials/`.
 - **Not session metadata.** Sessions / journals / dashboards live under `sessions/{session_id}/` and `campaigns/{cycle_id}/`.
-- **Not the LLM-digest layer.** `SearchMemory` sits *on top of* the archive, projecting it into prompt-injectable text. Phase 2 will rename this to `AxisIndex` and rebuild it as a view rather than a parallel ingestion.
+- **Not the LLM-digest layer.** `AxisIndex` sits *on top of* the archive — a pure derived view that projects it into prompt-injectable text.
 
 ## See also
 
 - [`docs/developer/measurement-archive-internals.md`](../developer/measurement-archive-internals.md) — `Measurement` dataclass, predicate semantics, file layout.
 - [`docs/operations/persistence-and-state.md`](../operations/persistence-and-state.md) — full tenant-tree reference, including non-archive surfaces (sessions, campaigns).
 - [`docs/concepts/scoring-and-traces.md`](scoring-and-traces.md) — how measurements are written: rescore-on-load, decision-replay, fork.
-- [`docs/concepts/search-memory.md`](search-memory.md) — the digest layer that consumes the archive.
+- [`docs/concepts/axis-index.md`](axis-index.md) — the digest layer that consumes the archive.

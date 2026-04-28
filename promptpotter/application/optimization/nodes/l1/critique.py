@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, cast
 from promptpotter.application.optimization.nodes.formatting import (
     build_cross_candidate_diff,
     build_trajectory_report,
-    format_search_memory_block,
+    format_axis_digest_block,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.application.optimization.utils import (
@@ -38,7 +38,7 @@ __all__ = [
 _PROMPT_BLOAT_CHARS = 3000
 _RF_CFG_AXES = ("model", "temperature", "max_tokens", "reasoning_effort")
 
-_CRITIQUE_SM_LABELS = {
+_CRITIQUE_AXIS_LABELS = {
     "discriminating_queries": "Discriminating queries",
     "failure_clusters": "Failure clusters",
     "tractability": "Query tractability",
@@ -55,13 +55,13 @@ async def run_l1_critique(
     llm_client: LLMClientBase,
     *,
     round_num: int,
-    search_memory_digest: dict | None = None,
+    axis_digest: dict | None = None,
     model: str | None = None,
     recorder: RoundRecorder | None = None,
 ) -> dict:
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict."""
     sections = _assemble_l1_critique_sections(
-        cycle, scoring_result, schema, round_num=round_num, sm_digest=search_memory_digest
+        cycle, scoring_result, schema, round_num=round_num, axis_digest=axis_digest
     )
     result, prompt = await run_optimizer_node(
         template_name="l1_critique",
@@ -387,7 +387,7 @@ def _assemble_l1_critique_sections(
     schema: PipelineSchema | None,
     *,
     round_num: int,
-    sm_digest: dict | None,
+    axis_digest: dict | None,
 ) -> str:
     """Assemble the L1 critique meta-prompt sections in canonical order."""
     results = scoring_result.winner_results
@@ -412,9 +412,9 @@ def _assemble_l1_critique_sections(
         sections.insert(1, _section_anomaly_flags(anomalies))
 
     sections.append(
-        format_search_memory_block(
-            sm_digest,
-            _CRITIQUE_SM_LABELS,
+        format_axis_digest_block(
+            axis_digest,
+            _CRITIQUE_AXIS_LABELS,
             header="## HISTORICAL INTELLIGENCE",
         )
     )

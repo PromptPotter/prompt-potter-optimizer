@@ -18,11 +18,11 @@ __all__ = [
     "build_trajectory_report",
     "candidate_summaries",
     "extract_runtime_failure_fields",
+    "format_axis_digest_block",
     "format_escalation_report",
     "format_pipeline_section",
     "format_runtime_failure_line",
     "format_runtime_failures_for_l3",
-    "format_search_memory_block",
     "summarize_warning_inventory",
     "warning_summary",
 ]
@@ -52,18 +52,18 @@ def format_pipeline_section(
     return "\n".join(lines) + "\n"
 
 
-def format_search_memory_block(
-    sm_digest: dict | None,
+def format_axis_digest_block(
+    digest: dict | None,
     key_labels: dict[str, str],
     *,
     header: str = "HISTORICAL INTELLIGENCE:",
 ) -> str:
-    """Build HISTORICAL INTELLIGENCE block from search memory digest dict."""
-    if not sm_digest:
+    """Build HISTORICAL INTELLIGENCE block from an AxisIndex digest dict."""
+    if not digest:
         return ""
     lines = [header]
     for key, label in key_labels.items():
-        val = sm_digest.get(key)
+        val = digest.get(key)
         if val:
             lines.append(f"  {label}: {val}")
     return "\n".join(lines) if len(lines) > 1 else ""

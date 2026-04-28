@@ -146,8 +146,8 @@ async def _post_round(
     if _rr := session.round_recorder:
         _rr.flush()
 
-    if cycle.search_memory:
-        cycle.search_memory.on_round_complete(cycle, session, round_num)
+    if cycle.axes:
+        cycle.axes.on_round_complete(cycle, session, round_num)
         # Prune always-hit/always-miss queries from the active set.
         zsf = config.optimization.zero_signal_filter_enabled
         dataset_name = session.dataset_name
@@ -156,7 +156,7 @@ async def _post_round(
                 excluded = apply_zero_signal_exclusions(
                     store=session.store,
                     dataset_name=dataset_name,
-                    memory=cycle.search_memory,
+                    axes=cycle.axes,
                     active_dataset=dataset,
                     min_observations=config.optimization.zero_signal_filter_min_observations,
                     campaign_id=session.cycle_id or "",
@@ -265,8 +265,8 @@ async def _run_round_loop(
             )
             cycle.record_round(round_result, round_num)
 
-            if cycle.search_memory and len(cycle.rounds) >= 2:
-                cycle.search_memory.record_flips_from_rounds(cycle.rounds, round_num)
+            if cycle.axes and len(cycle.rounds) >= 2:
+                cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
 
             if is_probe:
                 cycle.set_probe(False)

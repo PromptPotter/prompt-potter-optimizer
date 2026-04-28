@@ -1,7 +1,7 @@
 """Tests for zero-signal sample filtering.
 
 Covers the three moving parts:
-- ``SearchMemory.dead_queries()`` with the ``min_observations`` gate.
+- ``SampleIndex.dead()`` with the ``min_observations`` gate.
 - ``BackendStore.exclude_dataset_items()`` / ``restore_dataset_items()``.
 - ``apply_zero_signal_exclusions()`` end-to-end sweep.
 """
@@ -10,8 +10,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+from promptpotter.application.intelligence.axis_index import AxisIndex
 from promptpotter.application.intelligence.sample_index import SampleIndex
-from promptpotter.application.intelligence.search_memory import SearchMemory
 from promptpotter.application.scoring.zero_signal_filter import (
     apply_zero_signal_exclusions,
 )
@@ -19,18 +19,18 @@ from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
 
 
-def _seed_memory(hits: dict[str, list[bool]]) -> SearchMemory:
-    """Seed a SearchMemory (via SampleIndex) with synthetic hit histories."""
+def _seed_axes(hits: dict[str, list[bool]]) -> AxisIndex:
+    """Seed an AxisIndex (via SampleIndex) with synthetic hit histories."""
     idx = SampleIndex()
     for i, (query, seq) in enumerate(hits.items()):
         sample = Sample(id=i, query=query, ground_truth=f"gt_{i}")
         idx.register(sample)
         idx._hits[i] = list(seq)
-    return SearchMemory(sample_index=idx)
+    return AxisIndex(sample_index=idx)
 
 
 def test_dead_queries_respects_min_observations() -> None:
-    mem = _seed_memory(
+    axes = _seed_axes(
         {
             "fresh_miss": [False] * 3,  # always miss, only 3 obs → filtered out
             "proven_miss": [False] * 6,  # always miss, 6 obs → dead
@@ -39,11 +39,11 @@ def test_dead_queries_respects_min_observations() -> None:
         }
     )
 
-    dead = mem.sample_index.dead(min_observations=5)
+    dead = axes.sample_index.dead(min_observations=5)
     dead_qs = {r.query for r in dead}
     assert dead_qs == {"proven_miss", "proven_hit"}
 
-    miss_only = mem.sample_index.dead(min_observations=5, include_always_hit=False)
+    miss_only = axes.sample_index.dead(min_observations=5, include_always_hit=False)
     assert {r.query for r in miss_only} == {"proven_miss"}
 
 
@@ -86,7 +86,7 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
     ]
     store.backends.save_dataset("train", samples)
 
-    memory = _seed_memory(
+    axes = _seed_axes(
         {
             "always_miss": [False] * 6,
             "always_hit": [True] * 6,
@@ -98,7 +98,7 @@ def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) ->
     excluded = apply_zero_signal_exclusions(
         store=store,
         dataset_name="train",
-        memory=memory,
+        axes=axes,
         active_dataset=active,
         min_observations=5,
         campaign_id="cyc_test",

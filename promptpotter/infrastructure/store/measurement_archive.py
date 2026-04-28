@@ -198,7 +198,7 @@ class MeasurementArchive:
         """Yield ``(run_id, detail)`` for runs whose ``run_id`` is not in ``seen_ids``.
 
         Skips runs whose detail file is missing. Encapsulates the index-scan +
-        per-run load that derived views (e.g. SearchMemory) used to do by hand.
+        per-run load that derived views (e.g. AxisIndex) used to do by hand.
         """
         for entry in self.list_all(backend_id):
             run_id = entry["run_id"]

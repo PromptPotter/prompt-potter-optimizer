@@ -31,7 +31,7 @@ from promptpotter.shared.errors import (
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.search_memory import SearchMemory
+    from promptpotter.application.intelligence.axis_index import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 
@@ -172,7 +172,7 @@ class _LoopContext:
     prior_results: dict[str, QueryResult]
     on_result: Callable[[QueryResult, int, int], None] | None
     on_start: Callable[[str, int, int], None] | None
-    search_memory: SearchMemory | None
+    axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scorer (asserted non-None on construction)
     scorer_id: str
     scorer_formula: str | None
@@ -215,7 +215,7 @@ async def _maybe_recover_degraded(
         cast(dict[str, Any], result),
         ctx.session,
         pipeline_params=ctx.search_point.pipeline_params,
-        search_memory=ctx.search_memory,
+        axes=ctx.axes,
     )
     return cast(QueryResult, recovered)
 
@@ -336,7 +336,7 @@ async def _run_query_loop(
     degradation_checks: list | None,
     candidate_idx: int,
     n_total_candidates: int,
-    search_memory: SearchMemory | None,
+    axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryResult]], None],
 ) -> QueryLoopResult:
     """Evaluate dataset samples, reusing prior results where available."""
@@ -349,7 +349,7 @@ async def _run_query_loop(
         prior_results=prior_results,
         on_result=on_result,
         on_start=on_start,
-        search_memory=search_memory,
+        axes=axes,
         scorer=session.scorer,
         scorer_id=session.scorer_id,
         scorer_formula=session.scorer_formula,
@@ -424,7 +424,7 @@ async def score_search_point(
     degradation_checks: list | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
-    search_memory: SearchMemory | None = None,
+    axes: AxisIndex | None = None,
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
     """Evaluate a search point via backend with chain-addressed caching.
 
@@ -504,7 +504,7 @@ async def score_search_point(
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
-        search_memory=search_memory,
+        axes=axes,
         persist_fresh=_persist_fresh,
     )
     results = batch.results
