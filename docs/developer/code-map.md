@@ -111,8 +111,8 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | Symbol | Module | Notes |
 |--------|--------|-------|
 | `APP_VERSION` | `promptpotter/config/settings.py` | Single source for version string |
-| `CAMPAIGN_ARTIFACTS` | `promptpotter/infrastructure/persistence/session_emitter.py` | Allowlist enforced by `tests/test_artifact_parity.py` |
-| `SESSION_ARTIFACTS` | `promptpotter/infrastructure/persistence/session_emitter.py` | Per-session (non-cycle) artifact allowlist |
+| `CAMPAIGN_ARTIFACTS` | `tests/test_artifact_parity.py` | Per-cycle artifact allowlist; test owns + enforces |
+| `SESSION_ARTIFACTS` | `tests/test_artifact_parity.py` | Per-session artifact allowlist; test owns + enforces |
 | `DATASET_LOADERS` | `promptpotter/application/datasets/builder.py` | Dataset loader registry |
 
 ---

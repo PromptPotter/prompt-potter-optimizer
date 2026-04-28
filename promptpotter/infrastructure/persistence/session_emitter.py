@@ -19,30 +19,10 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
 __all__ = [
-    "CAMPAIGN_ARTIFACTS",
-    "SESSION_ARTIFACTS",
     "CampaignPersistenceEmitter",
     "append_journal",
     "read_claude_notes",
 ]
-
-
-# Per-cycle artifacts under ``campaigns/{cycle_id}/``.
-CAMPAIGN_ARTIFACTS = {
-    "index.json",
-    "dashboard.json",
-    "output.log",
-    "log.md",
-    "phase_events.jsonl",
-}
-
-# Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
-# is owned by SessionStore; the emitter ensures the rest exist from mint.
-SESSION_ARTIFACTS = {
-    "session.json",
-    "journal.md",
-    "notes.md",
-}
 
 
 # Keep in sync with ``LayerTransition.phase`` / ``.layer``.

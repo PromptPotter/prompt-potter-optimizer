@@ -5,6 +5,10 @@ If any artifact in CAMPAIGN_ARTIFACTS or SESSION_ARTIFACTS is missing
 after the emitter lifecycle, this test fails.  Sessions and campaigns
 are separate trees; a campaign records its parent session via
 ``index.json::parent_session_id``.
+
+The artifact sets are owned by this test — they were never read by
+production code, only by these assertions. New artifacts produced by
+``CampaignPersistenceEmitter`` need an entry here.
 """
 
 from __future__ import annotations
@@ -14,10 +18,22 @@ from pathlib import Path
 
 import pytest
 
-from promptpotter.infrastructure.persistence.session_emitter import (
-    CAMPAIGN_ARTIFACTS,
-    SESSION_ARTIFACTS,
-)
+# Per-cycle artifacts under ``campaigns/{cycle_id}/``.
+CAMPAIGN_ARTIFACTS = {
+    "index.json",
+    "dashboard.json",
+    "output.log",
+    "log.md",
+    "phase_events.jsonl",
+}
+
+# Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
+# is owned by SessionStore; the emitter ensures the rest exist from mint.
+SESSION_ARTIFACTS = {
+    "session.json",
+    "journal.md",
+    "notes.md",
+}
 
 
 @pytest.fixture

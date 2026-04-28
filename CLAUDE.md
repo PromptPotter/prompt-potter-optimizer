@@ -81,7 +81,7 @@ promptpotter/
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts go in `CAMPAIGN_ARTIFACTS` (per-cycle, in `campaigns/{cycle_id}/`) or `SESSION_ARTIFACTS` (per-session, in `sessions/{session_id}/`); `tests/test_artifact_parity.py` enforces both sets.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. The allowlists for new artifacts (`CAMPAIGN_ARTIFACTS` per-cycle in `campaigns/{cycle_id}/`, `SESSION_ARTIFACTS` per-session in `sessions/{session_id}/`) live in `tests/test_artifact_parity.py` — the test owns the contract and enforces both sets.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 

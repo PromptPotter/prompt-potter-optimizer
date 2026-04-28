@@ -27,7 +27,7 @@ For the canonical symbol → file index, see [code-map.md](code-map.md).
 
 PromptPotter separates three kinds of output. Each kind has exactly one owner; violations are caught in tests.
 
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. New artifacts go in `CAMPAIGN_ARTIFACTS` (per-cycle, in `campaigns/{cycle_id}/`) or `SESSION_ARTIFACTS` (per-session, in `sessions/{session_id}/`); `tests/test_artifact_parity.py` enforces both allowlists.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. The allowlists for new artifacts (`CAMPAIGN_ARTIFACTS` per-cycle in `campaigns/{cycle_id}/`, `SESSION_ARTIFACTS` per-session in `sessions/{session_id}/`) live in `tests/test_artifact_parity.py` — the test owns the contract and enforces both sets.
 - **Display** (per-entry-point) — caller passes a `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — file-based control surface (CLI) or kernel interrupt (notebook). MUST NOT write campaign artifacts.
 
