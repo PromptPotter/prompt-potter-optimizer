@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.rate_limiter import RateLimiter
+from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, RateLimitReservation
 from promptpotter.shared.errors import RequestTooLargeError
 from promptpotter.shared.llm_parsing import try_parse_json
 
@@ -65,11 +65,41 @@ def _parse_int_header(headers: Any, key: str) -> int | None:
         return None
 
 
-def _discover_tier_caps(headers: Any) -> tuple[int | None, int | None]:
-    """Extract ``(rpm, tpm)`` from standard OpenAI/Groq rate-limit headers."""
-    rpm = _parse_int_header(headers, "x-ratelimit-limit-requests")
-    tpm = _parse_int_header(headers, "x-ratelimit-limit-tokens")
-    return rpm, tpm
+async def _acquire_reservation(
+    rate_limiter: RateLimiter | None,
+    messages: list[dict[str, str]],
+    max_tokens: int | None,
+    provider_name: str,
+) -> RateLimitReservation | None:
+    """Block until ``messages`` fits the rolling window; returns ``None`` when no limiter is set."""
+    if rate_limiter is None:
+        return None
+    return await rate_limiter.acquire_with_estimation(
+        messages, max_tokens, provider_name=provider_name
+    )
+
+
+def _apply_discovered_caps(
+    rate_limiter: RateLimiter | None,
+    headers: Any,
+    *,
+    rpm_header: str,
+    tpm_header: str,
+) -> None:
+    """Self-tune the limiter from the provider's rate-limit response headers (no-op without limiter)."""
+    if rate_limiter is None:
+        return
+    rpm = _parse_int_header(headers, rpm_header)
+    tpm = _parse_int_header(headers, tpm_header)
+    rate_limiter.apply_discovered(rpm, tpm)
+
+
+# Standard OpenAI/Groq rate-limit header keys.
+_OPENAI_RPM_HEADER = "x-ratelimit-limit-requests"
+_OPENAI_TPM_HEADER = "x-ratelimit-limit-tokens"
+# Anthropic uses its own header naming.
+_ANTHROPIC_RPM_HEADER = "anthropic-ratelimit-requests-limit"
+_ANTHROPIC_TPM_HEADER = "anthropic-ratelimit-tokens-limit"
 
 
 def _raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
@@ -241,12 +271,8 @@ class OpenAICompatibleClient(LLMClientBase):
         # Proactive tier check + throttle. If the configured TPM cap can never
         # fit this request, fail fast before any network call. Otherwise block
         # until sending it stays within the rolling-window budget.
-        reservation = (
-            await self._rate_limiter.acquire_with_estimation(
-                messages, max_tokens, provider_name=self._provider_name
-            )
-            if self._rate_limiter is not None
-            else None
+        reservation = await _acquire_reservation(
+            self._rate_limiter, messages, max_tokens, self._provider_name
         )
 
         # SDK's own ``max_retries`` handles 408/409/429/5xx + Retry-After.
@@ -263,9 +289,12 @@ class OpenAICompatibleClient(LLMClientBase):
                 return recovered
             raise
 
-        if self._rate_limiter is not None:
-            discovered_rpm, discovered_tpm = _discover_tier_caps(raw.headers)
-            self._rate_limiter.apply_discovered(discovered_rpm, discovered_tpm)
+        _apply_discovered_caps(
+            self._rate_limiter,
+            raw.headers,
+            rpm_header=_OPENAI_RPM_HEADER,
+            tpm_header=_OPENAI_TPM_HEADER,
+        )
 
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
@@ -395,12 +424,8 @@ class AnthropicClient(LLMClientBase):
         if system_message:
             request_params["system"] = system_message
 
-        reservation = (
-            await self._rate_limiter.acquire_with_estimation(
-                messages, max_tokens, provider_name="Anthropic"
-            )
-            if self._rate_limiter is not None
-            else None
+        reservation = await _acquire_reservation(
+            self._rate_limiter, messages, max_tokens, "Anthropic"
         )
 
         raw = await client.messages.with_raw_response.create(**request_params)
@@ -409,10 +434,12 @@ class AnthropicClient(LLMClientBase):
         total = response.usage.input_tokens + response.usage.output_tokens
         if reservation is not None:
             reservation.close(total)
-        if self._rate_limiter is not None:
-            rpm = _parse_int_header(raw.headers, "anthropic-ratelimit-requests-limit")
-            tpm = _parse_int_header(raw.headers, "anthropic-ratelimit-tokens-limit")
-            self._rate_limiter.apply_discovered(rpm, tpm)
+        _apply_discovered_caps(
+            self._rate_limiter,
+            raw.headers,
+            rpm_header=_ANTHROPIC_RPM_HEADER,
+            tpm_header=_ANTHROPIC_TPM_HEADER,
+        )
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
         parsed = (
