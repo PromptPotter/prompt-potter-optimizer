@@ -24,7 +24,7 @@ from promptpotter.application.intelligence.scoring_set import build_observations
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.rasch import Observation, RaschPosterior
-    from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.domain.results import RoundResult
 
 __all__ = [
     "ARTIFACT_SCHEMA_VERSION",

@@ -9,7 +9,6 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimization.decisions import record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
-from promptpotter.application.optimization.results import CandidateProposal
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.analysis import (
     EscalationSignal,
@@ -18,6 +17,7 @@ from promptpotter.domain.analysis import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful

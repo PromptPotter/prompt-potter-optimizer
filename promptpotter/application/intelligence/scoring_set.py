@@ -20,7 +20,7 @@ from promptpotter.application.intelligence.rasch import (
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.config import ScoringSetConfig
-    from promptpotter.application.optimization.results import RoundResult
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
 
 logger = logging.getLogger(__name__)

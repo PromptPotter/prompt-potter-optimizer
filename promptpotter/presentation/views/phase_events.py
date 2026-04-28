@@ -13,10 +13,6 @@ import json
 from collections.abc import Callable
 
 from promptpotter.application.optimization.sp_diff_view import group_diff_keys
-from promptpotter.presentation.views.composite_render import (
-    compact_display_enabled,
-    render_composite_block,
-)
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
@@ -33,6 +29,10 @@ from promptpotter.presentation.views.display_primitives import (
     _scoreboard,
 )
 from promptpotter.presentation.views.formatting import fmt_pvalue
+from promptpotter.shared.composite_render import (
+    compact_display_enabled,
+    render_composite_block,
+)
 
 __all__ = ["render_phase_event"]
 

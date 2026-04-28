@@ -19,7 +19,7 @@ from promptpotter.application.intelligence.rasch import (
     knowledge_gradient,
 )
 from promptpotter.application.intelligence.scoring_set import evolve_scoring_set
-from promptpotter.application.optimization.results import RoundResult
+from promptpotter.domain.results import RoundResult
 from promptpotter.domain.sample import Sample
 
 

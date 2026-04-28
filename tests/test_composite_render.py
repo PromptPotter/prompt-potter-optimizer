@@ -14,12 +14,12 @@ Pinned invariants:
 
 from __future__ import annotations
 
-from promptpotter.presentation.views.composite_render import (
+from promptpotter.shared.composite_formula import inline_short_formula_values
+from promptpotter.shared.composite_render import (
     extract_evaluator_names,
     render_composite_block,
     render_composite_oneliner,
 )
-from promptpotter.shared.composite_formula import inline_short_formula_values
 
 
 def test_block_is_three_lines_with_formula_and_named_evaluators() -> None:

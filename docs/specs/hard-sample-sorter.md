@@ -29,7 +29,7 @@ Nothing else. No rendering. No CLI. No new persisted artifact. The primitive exi
 
 ### Phase 2 — CLI + notebook ASCII heatmap
 
-Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `presentation/views/reports.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
+Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `application/campaign/log_md.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
 
 ### Phase 3 — webapp heatmap
 

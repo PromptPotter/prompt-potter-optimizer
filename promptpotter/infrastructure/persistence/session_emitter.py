@@ -15,8 +15,8 @@ from promptpotter.shared.composite_formula import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.phases import PhaseEvent
+    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
 __all__ = [

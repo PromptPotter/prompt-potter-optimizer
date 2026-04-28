@@ -13,6 +13,7 @@ from promptpotter.application.campaign.campaign_setup import (
 )
 from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
+from promptpotter.application.campaign.log_md import render_log_md
 from promptpotter.application.campaign.phase_views import build_phase_view
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.layer_escalation import (
@@ -20,7 +21,6 @@ from promptpotter.application.optimization.layer_escalation import (
     escalate_l2,
 )
 from promptpotter.application.optimization.nodes.l1 import execute_round
-from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.scoring.scoring_steer import apply_steer_file
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
@@ -31,6 +31,7 @@ from promptpotter.domain.phases import (
     StopReason,
     emit_phase,
 )
+from promptpotter.domain.results import RoundResult, RunResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
@@ -600,8 +601,6 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
     if not session.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
-        from promptpotter.presentation.views.reports import render_log_md
-
         store = session.store.campaigns
         index = store.load(session.backend_id, session.cycle_id)
         if not index:

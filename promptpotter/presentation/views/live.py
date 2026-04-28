@@ -18,10 +18,6 @@ from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.presentation.views.composite_render import (
-    compact_display_enabled,
-    render_composite_block,
-)
 from promptpotter.presentation.views.display_primitives import (
     _box_bottom,
     _box_bottom_info,
@@ -43,10 +39,14 @@ from promptpotter.presentation.views.render_round import (
     render_progress_table,
     render_round_stats,
 )
+from promptpotter.shared.composite_render import (
+    compact_display_enabled,
+    render_composite_block,
+)
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.store import Stores
 
 

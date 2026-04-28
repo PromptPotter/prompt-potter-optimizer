@@ -13,8 +13,8 @@ from promptpotter.application.optimization.nodes.l1.critique import (
 )
 from promptpotter.application.optimization.nodes.l1.generate import l1_generate
 from promptpotter.application.optimization.nodes.l1.score import l1_score
-from promptpotter.application.optimization.results import CandidateProposal, RoundResult
 from promptpotter.domain.phases import CampaignPhase, emit_phase
+from promptpotter.domain.results import CandidateProposal, RoundResult
 
 # Module-level import for test monkeypatching.
 from promptpotter.infrastructure.llm import client as _llm_client

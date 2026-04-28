@@ -14,8 +14,8 @@ from promptpotter.presentation.views.display_primitives import (
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import RoundResult
 
 
 def render_progress_table(

@@ -6,9 +6,9 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.results import RoundBaseline, RoundResult
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:

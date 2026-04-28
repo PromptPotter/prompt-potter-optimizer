@@ -11,7 +11,6 @@ from promptpotter.application.optimization.nodes.l1.measure import (
     parse_population,
     score_population,
 )
-from promptpotter.application.optimization.results import CandidateProposal, RoundBaseline
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     compute_composite_score,
@@ -19,6 +18,7 @@ from promptpotter.application.scoring.metrics import (
 )
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.results import CandidateProposal, RoundBaseline
 from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:

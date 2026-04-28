@@ -9,11 +9,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
-from promptpotter.presentation.views.composite_render import (
-    compact_display_enabled,
-    render_composite_inline,
-    render_composite_oneliner,
-)
 from promptpotter.presentation.views.display_primitives import (
     CYAN,
     DIM,
@@ -23,6 +18,11 @@ from promptpotter.presentation.views.display_primitives import (
     _pp_val,
 )
 from promptpotter.presentation.views.formatting import fmt_ci, fmt_pvalue
+from promptpotter.shared.composite_render import (
+    compact_display_enabled,
+    render_composite_inline,
+    render_composite_oneliner,
+)
 from promptpotter.shared.statistics import wilson_ci
 
 

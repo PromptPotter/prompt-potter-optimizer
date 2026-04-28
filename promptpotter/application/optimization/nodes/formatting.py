@@ -9,8 +9,8 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.results import CandidateProposal
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import CandidateProposal
 
 __all__ = [
     "TrajectoryReport",
