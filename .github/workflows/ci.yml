@@ -19,7 +19,7 @@ jobs:
           cache: pip
 
       - name: Install dependencies
-        run: pip install -e ".[dev]"
+        run: pip install -e ".[stats,dev]"
 
       - name: Lint
         run: ruff check promptpotter/ tests/

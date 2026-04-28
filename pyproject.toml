@@ -104,6 +104,7 @@ disallow_untyped_defs = false
 
 [[tool.mypy.overrides]]
 module = [
+    "anthropic.*",
     "langfuse.*",
     "mlflow.*",
     "scalar_fastapi.*",
