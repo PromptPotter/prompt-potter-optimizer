@@ -1,6 +1,6 @@
 # CLI Reference
 
-Every subcommand, flag, and a worked example. The CLI provides a terminal-based interface for HITL (human-in-the-loop) prompt optimization. Each subcommand persists its output under `{tenant_id}/campaigns/{cycle_id}/`, so progress survives interrupts and the workflow can be resumed at any step.
+The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening the on-disk artifact tree (`sessions/{id}/`, `campaigns/{cycle_id}/`) — `dashboard.json` for live state, `log.md` for the digest, `index.json` for the final summary including `stop_reason`. Stop with Ctrl+C (first finishes in-flight and saves; second force-quits) — there is no mid-run pause/resume.
 
 ```bash
 python -m promptpotter [--tenant <id>] <subcommand> [options]
@@ -15,18 +15,13 @@ For the active-session pointer and state files, see [persistence-and-state.md](p
 ## Subcommand sequence
 
 ```
-init ──→ [set-task] ──→ optimize ──→ show-results ──→ export
+init ──→ optimize
 ```
 
-Steps in brackets are optional. Minimum viable workflow: `init` then `optimize`.
-
-| Step | Command | What it does | Reads from |
-|------|---------|-------------|------------|
-| 1 | `init` | Connect to backend, configure pipeline (baseline deferred) | Config file |
-| 2 | `set-task` | Decompose a task description into structured domain context | `init_params` |
-| 3 | `optimize` | Run L1/L2/L3 optimization cycle | All above |
-| 4 | `show-results` | Show summary, optionally save winner to backend | Campaign cycles |
-| 5 | `export` | Generate supplemental materials or JSON | Campaign data |
+| Step | Command | What it does |
+|------|---------|-------------|
+| 1 | `init` | Create session+cycle for a dataset. Decomposes `datasets/<name>/task_description.md` once when present. |
+| 2 | `optimize` | Run the optimization loop against the active session. |
 
 ---
 
@@ -42,7 +37,9 @@ Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `e
 
 Produces the campaign directory — see [persistence-and-state.md](persistence-and-state.md) for its contents.
 
-**Init flags:**
+If `datasets/<name>/task_description.md` exists, `init` decomposes it once into `task_context` and stores it on the session — `optimize` reads it from there. The `--task-file` and `--task-text` flags override the dataset's default for ad-hoc cases. Result is disk-cached, so re-`init` against the same dataset is free.
+
+**Flags:**
 
 | Flag | Purpose |
 |---|---|
@@ -50,115 +47,70 @@ Produces the campaign directory — see [persistence-and-state.md](persistence-a
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
 | `--dataset-name` | Override dataset name from config |
 | `--config` | Campaign config JSON file |
+| `--task-file` | Override `datasets/<name>/task_description.md` |
+| `--task-text` | Override `datasets/<name>/task_description.md` inline |
 
 Rewinding within an active cycle is not done here — see [rewind-and-fork.md](rewind-and-fork.md). `init` handles registration/setup only.
-
----
-
-## set-task
-
-```bash
-python -m promptpotter set-task \
-    --task-file description.txt
-```
-
-Passes a plain-text task description through LLM decomposition to produce structured `task_context` fields (problem_description, success_criteria, domain_vocabulary). These feed L2 context refinement.
 
 ---
 
 ## optimize
 
 ```bash
-# Resume: run the loop from the active session's current state.
+# Default: resume from the latest completed round of the active cycle.
 python -m promptpotter optimize
 
 # Rewind: resume the active cycle from after a specific round N.
 python -m promptpotter optimize --from <round>
 ```
 
-Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). Use `control --stop` or Ctrl+C to pause gracefully — state is checkpointed between rounds and resumes from the last completed round.
+Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds`). Stop with Ctrl+C — state is checkpointed between rounds and resumes from the last completed round on the next run.
 
 `--from <round>` rewinds the active cycle to after round N and resumes in-place. Same `cycle_id`, not a new campaign. See [rewind-and-fork.md](rewind-and-fork.md) for full mechanics.
 
 While `optimize` runs, the live in-flight round's per-node I/O (l1_generate, l1_critique, l1_score with per-sample lines and stats) mirrors into `campaigns/{cycle_id}/dashboard.json::current_round`; each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Full shape in [persistence-and-state.md § `rounds/round_NNNN.json`](persistence-and-state.md#roundsround_nnnnjson).
 
----
+**Flags:**
 
-## show-results
-
-```bash
-python -m promptpotter show-results
-python -m promptpotter show-results --save  # save winner to backend
-```
-
-Renders the best configuration found — prompt fields, pipeline parameters, accuracy achieved vs. baseline, which layer (L1/L2/L3) produced it, how many rounds it took. `--save` persists the winner to the backend as the default.
+| Flag | Purpose |
+|---|---|
+| `--from <round>` | Rewind the active cycle to after round N before resuming |
+| `--no-divergence-check` | On resume, rescore but skip the decision-replay halt |
+| `--fork-on-divergence` | On divergence, mint a sibling cycle (with `parent_cycle_id`) and re-run the divergent round under the current scorer |
 
 ---
 
-## control
+## Reading state
 
-```bash
-# Pause a running campaign
-python -m promptpotter control --pause
+There is no read CLI. Open the artifact tree directly:
 
-# Resume a paused campaign
-python -m promptpotter control --resume
-
-# Stop a running campaign
-python -m promptpotter control --stop
-```
-
-Bidirectional control lives in `control.json` (a sibling of `dashboard.json`). You can also edit it directly: set `requested_state` to `"pause"`, `"resume"`, or `"stop"`.
-
----
-
-## Export commands
-
-Generate paper-ready supplemental materials from completed campaigns:
-
-```bash
-# Supplemental materials as markdown (tables, CI, significance, reproducibility)
-python -m promptpotter export supplemental \
-    --backend-id local --output supplemental.md
-
-# Structured JSON for paper repositories
-python -m promptpotter export json \
-    --backend-id local --output paper_results.json
-
-# Export specific campaigns only
-python -m promptpotter export supplemental \
-    --backend-id local \
-    --campaigns campaign_001,campaign_002 \
-    --output supplemental.md
-```
-
-See [../research/benchmarks.md](../research/benchmarks.md) for the full benchmark methodology and result table format.
+| File | Purpose |
+|---|---|
+| `campaigns/<cycle_id>/dashboard.json` | Live scalar state during a run (phase, round, candidate, in-flight payload, per-round node I/O) |
+| `campaigns/<cycle_id>/log.md` | Per-round digest, regenerated on every round-complete and at finalize |
+| `campaigns/<cycle_id>/index.json` | Campaign metadata + `final` block (best/baseline/stop_reason/winner) once finished |
+| `campaigns/<cycle_id>/output.log` | Append-only HIT/MISS history, fast to tail |
+| `campaigns/<cycle_id>/phase_events.jsonl` | Structured event trace, one JSON per line |
+| `campaigns/<cycle_id>/trials/trial_NNNN.json` | Per-round optimizer checkpoint (critique, l2_directive, escalation state) |
+| `campaigns/<cycle_id>/rounds/round_NNNN.json` | Per-round node I/O |
 
 ---
 
 ## Worked example
 
-A complete workflow from initialization to export:
-
 ```bash
-# 1. Initialize session against a running backend
+# 1. Initialize against a running backend. task_description.md is auto-loaded.
 python -m promptpotter init \
     --backend-url http://127.0.0.1:8000 \
     --config datasets/lca-termnorm/campaign.json
 
-# 2. (Optional) Add domain context
-python -m promptpotter set-task \
-    --task-file my_task_description.txt
-
-# 3. Run optimization (full loop — default)
+# 2. Run optimization. Ctrl+C to stop; re-run to resume.
 python -m promptpotter optimize
 
-# 4. View results
-python -m promptpotter show-results
-
-# 5. Export for paper
-python -m promptpotter export supplemental \
-    --backend-id local --output supplemental.md
+# 3. Read state by opening files in your editor:
+#    campaigns/<cycle_id>/dashboard.json   (live)
+#    campaigns/<cycle_id>/log.md           (digest)
+#    campaigns/<cycle_id>/index.json       (final summary, incl. stop_reason)
 ```
 
 ---

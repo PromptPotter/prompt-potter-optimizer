@@ -92,7 +92,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## Parity: Entry-Point Parity -- Complete
 
-Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log`, `phase_events.jsonl` (per-cycle) plus `session.json`, `journal.md`, `notes.md`, `control.json` (per-session). `FileControlSurface` extracted for bidirectional control. Parity tests enforce both artifact sets. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
+Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log`, `phase_events.jsonl` (per-cycle) plus `session.json`, `journal.md`, `notes.md` (per-session). Parity tests enforce both artifact sets. Stop control is via Ctrl+C (CLI) or kernel interrupt (notebook); the file-based `control.json` mechanism was retired alongside the `control` / `show-status` / `show-results` CLI commands. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
 
 ---
 
@@ -148,7 +148,7 @@ promptpotter/
 │       └── formatters/     # display, phase_display, reporting helpers
 │
 ├── shared/                 # leaf utilities — no domain or application deps
-│   ├── errors.py           # graceful(), PauseForReviewError
+│   ├── errors.py           # graceful()
 │   └── constants.py        # PROMPT_STRING_FIELDS
 │
 └── config/                 # settings, APP_VERSION, logging setup

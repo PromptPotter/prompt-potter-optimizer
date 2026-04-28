@@ -1,6 +1,6 @@
 # Campaign Lifecycle
 
-A narrative walkthrough of one complete optimization session — from `init` to `show-results` — phase by phase. Companion to [three-layer-loop.md](three-layer-loop.md), which covers the mechanics in more depth.
+A narrative walkthrough of one complete optimization session — from `init` to a finished cycle — phase by phase. Companion to [three-layer-loop.md](three-layer-loop.md), which covers the mechanics in more depth.
 
 ---
 
@@ -8,7 +8,7 @@ A narrative walkthrough of one complete optimization session — from `init` to 
 
 `init` is pure preparation. It loads your starting prompt and dataset, computes a cycle identifier from them, and creates the campaign artifact directory. No backend calls happen. It is safe to Ctrl+C at this stage — nothing has been written to the backend or the evaluation archive.
 
-After `init` completes, a pointer to the active campaign is written to the active-session file. Every subsequent command (`optimize`, `show-results`, `show-status`) reads this pointer to know which campaign it's working on.
+After `init` completes, a pointer to the active campaign is written to the active-session file. `optimize` reads this pointer to know which campaign it's working on; reads of campaign state happen by opening the on-disk artifact tree directly.
 
 ---
 
@@ -96,7 +96,7 @@ A campaign stops when any of these conditions is met:
 
 The first Ctrl+C finishes the in-flight backend call and saves the current state, then stops. A second Ctrl+C force-quits immediately.
 
-After the campaign stops, `show-results` reads the trial history and renders the best configuration found — the prompt fields, the pipeline parameters, and the accuracy it achieved. `show-status` gives a live dashboard while the campaign is running.
+After the campaign stops, the best configuration is in `index.json::final::winner`; the per-round digest is in `log.md`; live state during a run is in `dashboard.json`. Open these in your editor — there is no CLI read command.
 
 ---
 

@@ -72,13 +72,11 @@ The top line is a fact. The bottom line is the response. You don't need to do an
 
 ## Where the final results land
 
-When a campaign finishes (or you stop it), the best-scoring candidate is recorded in the campaign directory under `.promptpotter/`. Run `python -m promptpotter show-results` (or ask Claude via `/potter-run`) to see:
+When a campaign finishes (or you stop it), the best-scoring candidate is recorded in the campaign directory under `.promptpotter/`. Open the artifacts directly:
 
-- The best prompt fields and pipeline parameters found
-- The accuracy it achieved vs. the baseline
-- Which layer (L1/L2/L3) produced it
-- How many rounds it took
+- `campaigns/<cycle_id>/log.md` — the rendered per-round digest, regenerated at every round-complete and at finalize. Contains status, per-round critique / L2 directive / changes, hard-samples heatmap, and final winner.
+- `campaigns/<cycle_id>/index.json::final` — the structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`.
 
-To save the winner back to your backend as the default configuration, add `--save`.
+The same per-query data renders live to the terminal during `optimize`, so you usually see the run unfold without needing to open files.
 
 Next: [Troubleshooting](05-troubleshooting.md).

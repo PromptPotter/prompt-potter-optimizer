@@ -39,16 +39,7 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PauseForReviewError", "execute_round"]
-
-
-class PauseForReviewError(Exception):
-    """Raised when HITL mode pauses the loop at the after_round checkpoint."""
-
-    def __init__(self, candidates: list[dict], round_num: int) -> None:
-        self.candidates = candidates
-        self.round_num = round_num
-        super().__init__(f"Paused: {len(candidates)} candidates (round {round_num})")
+__all__ = ["execute_round"]
 
 
 async def _generate_or_load_candidates(

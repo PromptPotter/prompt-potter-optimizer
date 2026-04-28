@@ -69,12 +69,11 @@ class RoundRecorder:
         # ``"round"`` tag so the reader can tell which round produced it.
         self._sticky_nodes: dict[str, dict[str, Any]] = {}
         self._l1_score: dict[str, Any] | None = None
-        self._hitl: dict[str, Any] | None = None
         self._started_at: str = ""
 
     def begin_round(self, round_num: int) -> None:
         """Start recording a new round. Discards any pending node data."""
-        if self._nodes or self._l1_score or self._hitl:
+        if self._nodes or self._l1_score:
             logger.warning(
                 "RoundRecorder: unflushed state from round %d discarded",
                 self._current_round,
@@ -82,7 +81,6 @@ class RoundRecorder:
         self._current_round = round_num
         self._nodes = {}
         self._l1_score = None
-        self._hitl = None
         self._started_at = datetime.now(UTC).isoformat()
 
     def rehydrate_sticky(self) -> None:
@@ -153,10 +151,6 @@ class RoundRecorder:
         """Deposit the scoring-phase block built by the session emitter."""
         self._l1_score = block
 
-    def set_hitl(self, block: dict[str, Any]) -> None:
-        """Deposit the HITL snapshot built by the session emitter."""
-        self._hitl = block
-
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
         """Return a sticky snapshot of phase-keyed node blocks.
 
@@ -181,7 +175,7 @@ class RoundRecorder:
         in ``trials/trial_NNNN.json`` via ``_checkpoint_round`` — this
         file is not the place for that data.
         """
-        if not self._nodes and self._l1_score is None and self._hitl is None:
+        if not self._nodes and self._l1_score is None:
             return None
 
         self.rounds_dir.mkdir(parents=True, exist_ok=True)
@@ -205,8 +199,6 @@ class RoundRecorder:
             "finished_at": datetime.now(UTC).isoformat(),
             "nodes": nodes_ordered,
         }
-        if self._hitl is not None:
-            payload["hitl"] = self._hitl
 
         write_json(path, payload, default=str)
         logger.debug(
@@ -218,5 +210,4 @@ class RoundRecorder:
 
         self._nodes = {}
         self._l1_score = None
-        self._hitl = None
         return path

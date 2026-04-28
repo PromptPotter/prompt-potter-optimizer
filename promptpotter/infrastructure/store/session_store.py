@@ -51,9 +51,6 @@ class SessionStore:
     def notes_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "notes.md"
 
-    def control_path(self, session_id: str) -> Path:
-        return self.session_dir(session_id) / "control.json"
-
     # -- Session CRUD ---------------------------------------------------------
 
     def create(self, session_id: str, state: dict[str, Any]) -> Path:

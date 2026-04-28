@@ -17,28 +17,27 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | Stop Reason | What Happened | What to Do |
 |-------------|---------------|------------|
 | `patience_exhausted` | L1 stalled, L2/L3 couldn't improve further | Normal convergence. Check results — this is usually a good outcome. |
-| `perfect_score` | 100% accuracy achieved | Done. Run `results --save` to persist the winner. |
+| `perfect_score` | 100% accuracy achieved | Done. Winner is in `index.json::final::winner_prompt_fields`. |
 | `max_rounds` | Hit maximum round limit | May need more rounds (`max_rounds` in config) or L2/L3 intervention. |
 | `interrupted` | Ctrl+C during optimization | Resume with `optimize`. State was checkpointed. |
 | `escalation_abort` | Backend degradation too severe for L2 to fix | Read `output.log` and the latest `trials/trial_NNNN.json` for degradation details. May need backend fix. |
 | `l2_patience_exhausted` | L2 tried `l2_patience` times, no improvement | Consider manual task_context changes or different scan axes. |
 | `l3_patience_exhausted` | All three layers exhausted | Optimization has converged. Review results for best achieved. |
 | `hard_cap_reached` | Hit absolute round limit (100) | Very rare. Review if L2/L3 is cycling without progress. |
-| `paused_for_review` | HITL pause after L1 generate | Review candidates, then `optimize` to continue. |
-| `user_paused` | User sent `control --pause` | `control --resume` to continue, `control --stop` to end. |
-| `user_stopped` | User sent `control --stop` | Campaign ended. Run `results` to see what was achieved. |
 
 ## Reading run state
 
 The primary diagnostic surfaces (all under `campaigns/{cycle_id}/`):
 
-- **`dashboard.json`** — live scalar state (phase, round, candidate, baseline / best / current accuracy, in-flight query, HITL signals, current_round node I/O).
+- **`dashboard.json`** — live scalar state (phase, round, candidate, baseline / best / current accuracy, in-flight query, current_round node I/O).
+- **`log.md`** — rendered narrative digest, regenerated at each round-complete and at finalize. Contains status, per-round critique / L2 directive / changes, hard-samples heatmap, and final winner.
+- **`index.json`** — campaign metadata + trial index + `final` block (winner, baseline, stop_reason).
 - **`trials/trial_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, l2_directive, escalation state.
 - **`candidates/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O.
 - **`output.log`** — append-only HIT/MISS history (raw, ungrouped, fast to tail).
 - **`phase_events.jsonl`** — structured event trace, one JSON per line.
 
-Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts. Run `python -m promptpotter show-status` for a rendered view of `dashboard.json`.
+Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts. Open `dashboard.json` in your editor for live state.
 
 ## Stall Recovery Strategies
 

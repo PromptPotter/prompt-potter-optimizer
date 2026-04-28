@@ -9,7 +9,7 @@ Where PromptPotter writes everything, the active-session pointer, and what each 
 PromptPotter remembers which campaign you're working on via an **active session pointer** at `.promptpotter/active_session.json`. This stores `{tenant_id, session_id, cycle_id}` — like a browser's active tab.
 
 - **`init`** creates a new cycle and sets it as active (overwrites the pointer).
-- **Every other command** (`optimize`, `show-status`, `show-results`, `set-task`, `control`) operates on the active cycle automatically — no flags needed.
+- **`optimize`** operates on the active cycle automatically — no flags needed.
 - **`--session <id>`** overrides the active pointer for a single command.
 - **`--backend-id`** is auto-derived from `dataset_name` in the config when not explicitly passed.
 
@@ -21,7 +21,7 @@ To resume a campaign, run `python -m promptpotter optimize`. No need to `init` a
 
 Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 
-- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals).
+- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange).
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id` + `final` summary block), `dashboard.json`, `log.md` (rendered narrative digest), `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
@@ -34,7 +34,6 @@ Full tree:
     sessions/{session_id}/             # per-session: operator workspace
       session.json                     # session metadata
       journal.md / notes.md            # notebook ↔ Claude exchange
-      control.json                     # HITL pause/resume
     campaigns/{cycle_id}/              # per-cycle: all artifacts for one optimization
       index.json                       # campaign metadata + trial index + final summary block
       dashboard.json                   # live counters
@@ -43,7 +42,7 @@ Full tree:
       phase_events.jsonl               # structured phase event stream
       trials/trial_NNNN.json           # resume source of truth
       candidates/round_NNNN.json       # pre-scoring checkpoint
-      rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated) + HITL snapshot
+      rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated)
       langfuse/                        # trace persistence (incl. events.jsonl mirror — not read for state)
       prompts/{family}/{version}/      # rendered optimizer prompts
       archived/resumed_at_{ts}/        # mid-cycle rewind history
@@ -68,10 +67,9 @@ Prior evaluation results are replayed without calling the backend when a new pip
 | `index.json` | Each phase transition + finalize | Config, phase, `pipeline_params`, `cycle_id`, `best_accuracy`, `trials[]`, `final` (winner + stop_reason on completion) |
 | `dashboard.json` | Every optimization event | Live state: round, baseline, best, candidates, counters |
 | `log.md` | Round-complete + finalize | Rendered narrative digest: status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner. Pure derived view — safe to delete and recompute. |
-| `control.json` | Pause / resume / stop signals | HITL control surface (bidirectional) |
 | `output.log` | Append per eval query | Raw eval output (ANSI-stripped) |
 | `phase_events.jsonl` | Each phase event | One structured JSON per line; consumed by phase event renderer |
-| `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated); plus HITL snapshot |
+| `rounds/round_NNNN.json` | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated) |
 | `journal.md` / `notes.md` | Notebook ↔ CLI exchange | User narrative and Claude notes |
 | `trials/trial_NNNN.json` | Each completed round | Serialized `OptSearchPoint` for resume |
 | `candidates/round_NNNN.json` | Each round's pre-scoring step | Generated candidate list checkpoint |
@@ -83,11 +81,11 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`, `hitl` (nested: `requested_state`, `pause_point`, `stop_reason`). For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
+Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. The post-mortem `stop_reason` is written to `index.json::final::stop_reason` at finalize, not to the live dashboard. For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
 
 ### `rounds/round_NNNN.json`
 
-Consolidated per-round view — one JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type), `hitl` (snapshot at round end). Node types:
+Consolidated per-round view — one JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type). Node types:
 
 - `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — LLM meta-prompt calls. Each has `input.template_fields` (the canonical prompt-string fields from `PROMPT_STRING_FIELDS` plus `few_shot_examples`), `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
 - `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid/validation_failures, and `output.candidates[*].samples` lists per-query outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
@@ -95,10 +93,6 @@ Consolidated per-round view — one JSON object per node that ran. Fields: `roun
 ### `trials/trial_NNNN.json`
 
 The resume source of truth. Each completed round writes its serialized `OptSearchPoint` here. On resume, `Cycle.restore_from_trial` rehydrates the exact optimizer state — no separate write-ahead log. You can edit a trial by hand between runs to modify optimizer state; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`.
-
-### `control.json`
-
-Bidirectional HITL control. `requested_state` ∈ `{"pause", "resume", "stop"}`. Checked between queries (~5–10s lag); respect the setting and write back when processed.
 
 ---
 

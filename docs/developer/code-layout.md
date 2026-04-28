@@ -64,7 +64,6 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
     sessions/{session_id}/               # per-session: operator workspace
       session.json                       # session metadata
       journal.md / notes.md              # notebook ↔ Claude exchange
-      control.json                       # HITL pause/resume
     campaigns/{cycle_id}/                # per-cycle: all artifacts for one optimization
       index.json                         # campaign metadata + trial index + final summary
       dashboard.json                     # live counters
@@ -108,7 +107,7 @@ Always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `shared/const
 Features land left → right.
 
 1. **Notebook** — `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Notebook-specific listener and orchestration live in `presentation/views/notebook_display.py` and `presentation/views/notebook_run.py`.
-2. **CLI** — `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
+2. **CLI** — `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/` artifacts directly; see CLAUDE.md for the mental-model framing.
 3. **Claude skill `/potter-run`** — `.claude/skills/potter-run/SKILL.md`. Operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
 4. **FastAPI** — `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
 5. **Next.js webapp** — planned; zero code today.

@@ -16,8 +16,9 @@ Sections:
 4. tqdm bar lifecycle helper (``_BarTracker``)
 5. ``LiveDisplay`` — the listener class.
 
-``render_progress_table`` is also called by post-hoc CLI ``show-results``;
-the rest is live-only.
+All of this renders during a live ``optimize`` run. Post-hoc reads happen
+by opening ``campaigns/<cycle_id>/log.md`` directly — there is no CLI
+read command.
 """
 
 from __future__ import annotations
@@ -445,8 +446,7 @@ def render_progress_table(
 
     ``framed=True`` (default) wraps each line in ``_node_line()`` for
     box-drawing terminals (live CLI / notebook live view). ``framed=False``
-    emits plain text with a ``PROGRESS`` title for ``show-results`` and
-    other plain-text reports.
+    emits plain text with a ``PROGRESS`` title for plain-text reports.
     """
     if not rounds:
         return "" if framed else "No rounds to display."

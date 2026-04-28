@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.infrastructure.persistence.control import ensure_control_file
 from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
 from promptpotter.shared.errors import is_degraded
@@ -47,7 +46,6 @@ SESSION_ARTIFACTS = {
     "session.json",
     "journal.md",
     "notes.md",
-    "control.json",
 }
 
 
@@ -84,8 +82,6 @@ def _make_initial_state(
 ) -> dict[str, Any]:
     """Build the scalar-only dashboard dict (no setup/derived fields)."""
     r = resume_from or {}
-    # Mirror prior ``requested_state`` but reset stop/pause — fresh run.
-    prior_hitl = r.get("hitl") or {}
     return {
         # Execution markers
         "phase": "init",
@@ -111,13 +107,6 @@ def _make_initial_state(
         "wallclock_serialized_at": None,
         "n_variants": n_variants,
         "sp_budget_ttest": sp_budget_ttest,
-        # ``requested_state`` mirrors control.json; pause_point/stop_reason
-        # are written by the loop on halt. See ``_snapshot_hitl``.
-        "hitl": {
-            "requested_state": prior_hitl.get("requested_state", "running"),
-            "pause_point": None,
-            "stop_reason": None,
-        },
     }
 
 
@@ -212,7 +201,6 @@ class CampaignPersistenceEmitter:
         self._persist()
 
         session_dir.mkdir(parents=True, exist_ok=True)
-        ensure_control_file(session_dir)
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
@@ -484,12 +472,11 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def _deposit_round_recorder_state(self, round_result: RoundResult) -> None:
-        """Hand l1_score block + HITL snapshot to the active recorder."""
+        """Hand l1_score block to the active recorder."""
         recorder = self._recorder_provider()
         if recorder is None:
             return
         recorder.set_l1_score(self._build_l1_score_block(round_result))
-        recorder.set_hitl(self._snapshot_hitl())
 
     def _build_l1_score_block(
         self,
@@ -544,40 +531,14 @@ class CampaignPersistenceEmitter:
 
     # -- Lifecycle -------------------------------------------------------------
 
-    def set_stop_reason(self, reason: str | None, pause_point: str | None = None) -> None:
-        hitl = self._state.setdefault("hitl", {})
-        hitl["stop_reason"] = reason
-        hitl["pause_point"] = pause_point
-        self._persist()
-
-    def finalize(self, stop_reason: str) -> None:
-        self.set_stop_reason(stop_reason)
+    def finalize(self) -> None:
         self._log_fh.close()
 
     # -- Internal --------------------------------------------------------------
 
-    def _snapshot_hitl(self) -> dict[str, Any]:
-        """Consolidated HITL block. ``requested_state`` mirrors control.json
-        (silent fallback to last-known on missing/malformed — control.json
-        may be briefly absent during hand-edits)."""
-        existing = self._state.get("hitl") or {}
-        snapshot = {
-            "requested_state": existing.get("requested_state", "running"),
-            "pause_point": existing.get("pause_point"),
-            "stop_reason": existing.get("stop_reason"),
-        }
-        control_path = self.session_dir / "control.json"
-        try:
-            control = json.loads(control_path.read_text(encoding="utf-8"))
-        except (FileNotFoundError, json.JSONDecodeError, OSError):
-            return snapshot
-        snapshot["requested_state"] = control.get("requested_state", snapshot["requested_state"])
-        return snapshot
-
     def _persist(self) -> None:
         # Direct write — dashboard.json is display-only; readers tolerate
         # partial reads and the file is rewritten on the next callback.
-        self._state["hitl"] = self._snapshot_hitl()
 
         # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
         round_idx = self._current_round.get("round", self._state.get("round", 0))

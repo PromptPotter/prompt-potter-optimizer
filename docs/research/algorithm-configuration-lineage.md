@@ -26,7 +26,7 @@ PromptPotter's sequential elimination (paired Wilcoxon signed-rank + Holm-Bonfer
 | Runtime / cost metric | Scoring formula output |
 | Racing test | Wilcoxon signed-rank, Holm-Bonferroni correction |
 | Sampling model | L1 generator (LLM) + L1-critique-guided L2/L3 |
-| Termination | `sp_budget_ttest` budget, convergence, or HITL pause |
+| Termination | `sp_budget_ttest` budget, convergence, or operator interrupt (Ctrl+C) |
 
 `pipeline_params` optimization is the closest direct analogue to classical algorithm configuration — node parameters are exactly the kind of numerical/categorical knobs irace was built for. The 8-field prompt decomposition is the prompt-native extension: each field is a semantic parameter that the L1→L2→L3 critique loop mutates. That critique loop is the one piece irace lacks — irace's sampling models are numerical (truncated normals, discrete distributions); it has no notion of "reflect on why this configuration failed and propose a better one." Conversely, PromptPotter lacks irace's formal guarantees on configuration-space coverage and its convergence proofs.
 

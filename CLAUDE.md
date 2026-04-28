@@ -33,13 +33,12 @@ python -m pytest tests/ -k "test_name"        # single test
 # Run API server
 uvicorn promptpotter.main:app --port 8001 --reload
 
-# CLI workflow
+# CLI workflow — only two write verbs.
 python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json
-python -m promptpotter set-task --task-file datasets/lca-termnorm/task_description.md
-python -m promptpotter optimize             # full loop
-python -m promptpotter show-results
-python -m promptpotter show-status          # live dashboard
+python -m promptpotter optimize             # full loop; Ctrl+C to stop
 ```
+
+**CLI mental model.** The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening the on-disk artifact tree (`sessions/{id}/`, `campaigns/{cycle_id}/`) — `dashboard.json` for live state, `log.md` for the digest, `index.json` for the final summary including `stop_reason`. Stop with Ctrl+C (first finishes in-flight and saves; second force-quits) — there is no mid-run pause/resume.
 
 CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pytest`. All must pass.
 
@@ -95,7 +94,7 @@ promptpotter/
 ## Entry Points (Maturity Order)
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Notebook-specific listener (`NotebookDisplay`) and orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) live in `presentation/views/notebook_display.py` and `presentation/views/notebook_run.py`.
-2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → [set-task] → optimize → show-results`.
+2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/`.
 3. **Claude skill `/potter-run`**: `.claude/skills/potter-run/SKILL.md` — operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
 4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
 5. **Next.js webapp** (planned M10/M11): zero code today; consumes FastAPI API.
@@ -106,7 +105,7 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 The cleanest live-monitoring setup for an operator running `python -m promptpotter optimize`:
 
-1. **Open `campaigns/{cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, HITL signals, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence). Renderer: [`presentation/views/dashboard.py::render_dashboard()`](promptpotter/presentation/views/dashboard.py), also reachable via `python -m promptpotter show-status`.
+1. **Open `campaigns/{cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence).
 
 2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live_cli.py::CliDisplay`](promptpotter/presentation/views/live_cli.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
 
@@ -126,12 +125,10 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 - **Notebook** (`notebooks/optimization_campaign.ipynb`) — drives the same loop in-process; live-phase per-query rendering is currently notebook-only.
 - **Webapp** — minimal read-only dashboard planned on top of the FastAPI surface (`promptpotter/main.py`); zero code today.
 
-The HITL control file (`control.json`) lives in the **session** directory (`sessions/{session_id}/`), not the cycle directory — pause/resume/stop via `python -m promptpotter control pause|resume|stop` or by editing the file directly.
-
-**Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by every other command. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
+**Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by `optimize`. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
-- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange), `control.json` (HITL signals). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
+- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
@@ -142,8 +139,7 @@ Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persis
 - **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/campaign/campaign_setup.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores (BackendStore, SessionStore, CampaignStore, DatasetRunStore).
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
-- **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits.
-- **HITL pause**: runtime via `control.json::requested_state` (`pause` / `resume` / `stop`, CLI: `python -m promptpotter control pause`); the optimizer reads at the `after_round` checkpoint and raises `PauseForReviewError`. No static config flag.
+- **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. There is no mid-run pause/resume — re-running `optimize` resumes from the latest completed round.
 - **Optimizer LLM calls**: all go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
 - **Cycle identity**: cycle hash is the baseline `JobSearchPoint`'s `content_hash(dataset)` (truncated, `cycle_` prefix). `JobSearchPoint.pipeline_params` already carries the active-steps list + per-node target-layer config (model, temperature, max_tokens, …) and `content_hash` folds in the rendered prompt + dataset, so changing the target LLM, prompt, pipeline composition, or dataset starts a new cycle root. Loop-control / strategy knobs on `CampaignConfig` (max_rounds, optimizer-LLM, patience, n_variants, …) are not part of `JobSearchPoint` and are excluded. `cmd_optimize` recomputes the hash from the live `pipeline.json` on every run; if it differs from the active session pointer's `cycle_id`, a fresh session+cycle is auto-minted before baseline runs. See `cycle_config_identity()` in `domain/cycle_identity.py` and `_compute_cycle_id()` in `presentation/cli/campaign_runner.py`.
 - **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set. Sequential elimination early-stops inferior candidates via the Wilcoxon signed-rank test.

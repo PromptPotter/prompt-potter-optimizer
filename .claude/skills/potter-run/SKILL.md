@@ -10,17 +10,12 @@ Optional dataset name (e.g. `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`). If om
 
 ## CLI Reference
 
-All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the active pointer.
+The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly. Stop with Ctrl+C (first finishes in-flight, second force-quits) — there is no mid-run pause/resume.
 
 | Command | Purpose |
 |---------|---------|
-| `init` | Connect + configure (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`) |
-| `set-task` | Decompose task description (`--task-file` / `--task-text`) |
-| `optimize` | Run L1/L2/L3 loop |
-| `control` | `--pause` / `--resume` / `--stop` — checked between queries (~5–10s lag) |
-| `show-status` | Live dashboard + session state |
-| `show-results` | Summary (`--save` persists winner to backend) |
-| `export <format>` | Post-campaign export (`--backend-id`, `-o <file>`) |
+| `init` | Create session+cycle (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`). Auto-decomposes `datasets/<name>/task_description.md` if present; override via `--task-file` / `--task-text`. |
+| `optimize` | Run L1/L2/L3 loop. Resume-by-default; `--from <round>` to rewind. |
 
 ---
 
@@ -33,7 +28,7 @@ All commands: `python -m promptpotter <cmd>`. `--session <id>` overrides the act
 - **Stop when bounded retries exhaust.** `BackendClient.run_query()` auto-retries 429 (RFC 7231 Retry-After) and 5xx/transport errors with countdown backoff (5 attempts max). If a campaign still propagates 5xx after retries, halt and tell the user "Backend returning persistent 5xx — likely Groq upstream rate-limiting or outage. Check and restart." Don't loop on top of the client's loop.
 - **Never wipe project data without asking.** Spell out the full path first.
 - **Phases 0–0.5 are silent.** The Phase 0.7 outlook is the first thing the user sees — pick the tier that matches state + intent, don't stack sections.
-- **Treat defaults as correct.** Documented config (BBEH `campaign.json` vs notebook drift, notebook-driven entry, "don't run `set-task`" for BBEH) is expected state, not a warning. Warnings come from the anomaly allowlist in Phase 0.7 — nothing else.
+- **Treat defaults as correct.** Documented config (BBEH `campaign.json` vs notebook drift, notebook-driven entry, BBEH inline `task_context`) is expected state, not a warning. Warnings come from the anomaly allowlist in Phase 0.7 — nothing else.
 - **Notebook ↔ Claude channel.** Every session has `journal.md` (user narrative) and `notes.md` (your structured notes, tags `[FYI]` / `[RECOMMEND]` / `[BLOCKER]`). Read the journal to pick up intent; append to `notes.md` via Write/Edit so `display.render_claude_notes()` can surface it back.
 
 ---
@@ -82,7 +77,7 @@ If the user's intent is genuinely ambiguous ("should I resume or start over?"), 
 - Recent `dataset_runs/*.json` show empty `predicted` strings (BBEH regression)
 - `ActiveSessionMismatchError` on `init_services()`
 
-Surface anomalies as a one-line flag at the top, then the normal outlook. Never warn about documented config (notebook-driven datasets, `campaign.json` ↔ notebook drift, "don't run `set-task`" for BBEH, data volume) — that's expected state.
+Surface anomalies as a one-line flag at the top, then the normal outlook. Never warn about documented config (notebook-driven datasets, `campaign.json` ↔ notebook drift, BBEH inline `task_context`, data volume) — that's expected state.
 
 ---
 
@@ -94,19 +89,11 @@ Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess.
 python -m promptpotter init {flags from dataset.md}
 ```
 
-Foreground, 30s timeout. If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
-
-## Phase 2: Task context
-
-```bash
-python -m promptpotter set-task --task-file datasets/{dataset}/task_description.md
-```
-
-Skip only if the user says to.
+Foreground, 30s timeout. `init` auto-decomposes `datasets/{name}/task_description.md` if present (override via `--task-file` / `--task-text`). If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
 
 ## Phase 4: Optimize
 
-**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phases 0–2, then let them launch. On their return, read `dashboard.json` (live state) + the latest `trials/trial_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
+**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phase 0 + 1, then let them launch. On their return, read `dashboard.json` (live state) + the latest `trials/trial_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
 
 ```
 ROUND {N} COMPLETE
@@ -118,7 +105,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** via `show-status` or `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `candidates/round_NNNN.json` (per-candidate node I/O), and `output.log` (per-query HIT/MISS). Control via `control --pause|--resume|--stop` or edit `control.json`.
+**Monitor** by tailing `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `candidates/round_NNNN.json` (per-candidate node I/O), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
 
 **Incremental persistence.** Every query lands in `library/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
@@ -126,7 +113,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/three-layer
 
 ## Phase 5: Results
 
-`show-results` — best vs baseline, L1/L2/L3 activations, winner config. `--save` persists the winner. `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
+Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
 
 ---
 

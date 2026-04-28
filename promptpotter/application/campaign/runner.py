@@ -20,10 +20,7 @@ from promptpotter.application.optimization.layer_escalation import (
     build_escalation_entry,
     escalate_l2,
 )
-from promptpotter.application.optimization.nodes.l1 import (
-    PauseForReviewError,
-    execute_round,
-)
+from promptpotter.application.optimization.nodes.l1 import execute_round
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
@@ -49,19 +46,16 @@ class RunListener:
     """Fan-out to emitter + display sinks; ``__getattr__`` dispatches every
     ``on_*`` callback to whichever sinks are present. ``on_phase`` is
     explicit so ``build_phase_view`` runs once on a shared ctx instead of
-    twice in parallel; ``on_checkpoint`` is explicit because it returns a
-    value rather than fanning out."""
+    twice in parallel."""
 
     def __init__(
         self,
         *,
         emitter: Any = None,
         display: Any = None,
-        control: Callable[[str], str | None] | None = None,
     ) -> None:
         self.emitter = emitter
         self.display = display
-        self.control = control
         # Single phase-view ctx: build_phase_view is stateful — it both
         # reads and writes — so both sinks must observe the *same* dict to
         # read consistent baseline_accuracy / round_num / etc. in their
@@ -93,9 +87,6 @@ class RunListener:
         for sink in self._sinks:
             sink.on_phase(event, view)
 
-    def on_checkpoint(self, name: str) -> str | None:
-        return self.control(name) if self.control is not None else None
-
 
 async def _escalate_or_stop(
     cycle: Cycle,
@@ -113,7 +104,6 @@ async def _escalate_or_stop(
         session.pipeline_schema,
         round_num,
         cb.on_phase,
-        on_checkpoint=cb.on_checkpoint,
         obs=session.obs,
         obs_campaign_id=session.obs_campaign_id,
         escalation_check_result=escalation_check_result,
@@ -154,12 +144,6 @@ async def _post_round(
 
     if _rr := get_round_recorder():
         _rr.flush()
-
-    _ctrl = cb.on_checkpoint("after_round")
-    if _ctrl == "pause":
-        raise PauseForReviewError([], round_num)
-    if _ctrl == "stop":
-        raise StopLoop(StopReason.USER_STOPPED)
 
     if cycle.search_memory:
         cycle.search_memory.on_round_complete(cycle, session, round_num)
@@ -339,9 +323,6 @@ async def _run_round_loop(
 
     except StopLoop as sl:
         return sl.reason
-    except PauseForReviewError as pause:
-        logger.info("HITL: paused at round %d.", pause.round_num)
-        return StopReason.USER_PAUSED
     except (KeyboardInterrupt, asyncio.CancelledError):
         logger.warning("Optimization interrupted at round %d.", len(cycle.rounds))
         return StopReason.INTERRUPTED
@@ -358,7 +339,6 @@ async def run_optimization(
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
     display: Any = None,
-    control: Callable[[str], str | None] | None = None,
     langfuse_session_id: str | None = None,
     cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
@@ -426,7 +406,7 @@ async def run_optimization(
     else:
         resolved_task_context = TaskDecomposition()
 
-    cb = listener if listener is not None else RunListener(display=display, control=control)
+    cb = listener if listener is not None else RunListener(display=display)
 
     cycle = await init_optimization_loop(
         baseline,
@@ -494,8 +474,6 @@ def _finalize_run(
     stop_reason = run_result.stop_reason
     if session.cycle_id:
         status_map = {
-            str(StopReason.USER_PAUSED): "paused",
-            str(StopReason.USER_STOPPED): "stopped",
             str(StopReason.INTERRUPTED): "interrupted",
         }
         session.store.campaigns.mark_finished(
@@ -549,7 +527,7 @@ def _finalize_run(
                     top_k_samples=hs_cfg.top_k_samples,
                 )
         _write_log_md(session, hard_samples_artifact=artifact)
-        emitter.finalize(stop_reason)
+        emitter.finalize()
 
 
 def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:

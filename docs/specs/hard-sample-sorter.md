@@ -29,7 +29,7 @@ Nothing else. No rendering. No CLI. No new persisted artifact. The primitive exi
 
 ### Phase 2 — CLI + notebook ASCII heatmap
 
-Intermediate checkpoint. At round boundaries (or on `show-results`), print a compact ASCII heatmap of the candidate×sample matrix. Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lands as a new `presentation/views/hard_sample_heatmap.py` alongside `presentation/views/scoring_set.py`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
+Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `presentation/views/reports.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
 
 ### Phase 3 — webapp heatmap
 
@@ -108,7 +108,7 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 
 ## Open questions
 
-- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `trials/trial_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md` (and on-the-fly in `show-results`); no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
+- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `trials/trial_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md`; no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
 - **Cold cells.** Unmeasured cells have no Rasch estimate. Phase 2/3 may add a uniform-exploration tier that forces coverage of a small fraction of unmeasured cells before declaring the matrix stable. Out of scope in phase 1.
 
 ---

@@ -62,7 +62,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     fixed key must land in the expected set. Prevents a file from being
     written into both trees."""
     assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
-    assert {"journal.md", "notes.md", "session.json", "control.json"} <= SESSION_ARTIFACTS
+    assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
     assert {
         "dashboard.json",
         "index.json",
@@ -223,7 +223,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     (campaign_dir / "log.md").write_text(
         render_log_md(index_data, [round_result.model_dump()]), encoding="utf-8"
     )
-    emitter.finalize("max_rounds")
+    emitter.finalize()
 
     missing_campaign = [a for a in CAMPAIGN_ARTIFACTS if not (campaign_dir / a).exists()]
     assert not missing_campaign, f"Campaign-tree parity violated — missing: {missing_campaign}"

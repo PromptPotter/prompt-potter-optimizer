@@ -75,19 +75,19 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 4. CLI commands accept `--dataset` and `--pipeline` overrides; default comes from the active session.
 5. Two datasets demonstrably coexist (`datasets/lca-termnorm/` + one benchmark dataset) in a single project store without collision.
 
-**Open decisions during the track:** migration vs coexistence for legacy data, how `show-status` aggregates across datasets.
+**Open decisions during the track:** migration vs coexistence for legacy data.
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation)
 
 **Problem:** Three entry points (notebook, CLI, FastAPI) and a fourth coming (webapp). Notebook renders from in-memory state; CLI dashboard polls live state; webapp would be a third independent renderer. No shared view model. (Artifact-write parity is closed — `run_optimization` auto-mints a session when `session_id=""`. Track 4 is about renderer unification only.)
 
-**Approach:** Instead of each entry point building its own render pipeline, the session writes a flat file-directory "view model" to disk. The CLI, the notebook, and the eventual webapp all read from the same files. The first cut mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. Think: what a human sees when they `cd` into the session folder and `cat` a few files.
+**Approach:** Instead of each entry point building its own render pipeline, the session writes a flat file-directory "view model" to disk. The CLI's live terminal output, the notebook, and the eventual webapp all read from the same files. The first cut mirrors exactly what the Jupyter notebook already displays — vanilla, no new information surfaces. Think: what a human sees when they `cd` into the session folder and `cat` a few files. (Note: post-trim, the CLI has no read commands — operators read state by opening artifacts in their editor. The view model serves the live terminal output, the notebook, and the webapp.)
 
 **Deliverables:**
 
 1. A file-directory view model under `sessions/{session_id}/views/` (exact path open). Content is a superset of what the notebook currently displays: round summary, candidate leaderboard, current trajectory, L1 critique text, active SearchPoint.
 2. Format TBD during the track — likely a mix of small JSON files for structured data and pre-rendered Markdown snippets for human-readable dashboards. Open: temp vs permanent files, rolling vs append-only.
-3. CLI `show-status` becomes a thin renderer that reads the view directory and pretty-prints. No live-state polling.
+3. CLI live output (during `optimize`) and the notebook both read from the view directory — no parallel render pipelines.
 4. Notebook output becomes a thin renderer that reads the view directory. This closes the remaining notebook ↔ CLI parity gap (renderer divergence); artifact-write parity is already closed via the `run_optimization` auto-mint.
 5. Documented "this is what the future webapp reads" contract. M10 Track 3 picks up from here.
 
@@ -95,31 +95,26 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **Non-goal:** pretty HTML, React, or any JS. That's M10/M11.
 
-### Track 5: CLI Unification — Collapse `init` + `optimize`, Unify Seed Sources
+### Track 5: CLI Unification — Unified Seed Sources (post-trim)
 
-**Problem:** `init` and `optimize` are two CLI verbs for what is conceptually one workflow. Nobody runs `init` alone — it sets up a session and sits there; `optimize` is always the next command. The split is an implementation artifact (session creation vs loop execution), not a user-facing distinction.
+**Status:** The original "collapse `init` + `optimize`" framing was retired when the CLI was trimmed to two write verbs. `init` and `optimize` are now the entire CLI; no `set-task`, `show-results`, `show-status`, `control`, or `profile` to fold in. `set-task` was absorbed into `init` (auto-decompose from `datasets/<name>/task_description.md`). What remains worth doing is the seed-source unification.
 
-On top of that, there are three ways a cycle can start, scattered across different flags and implicit behaviors:
+**Problem:** There are multiple ways a cycle can start, surfaced through different flags and implicit behaviors:
 
 - Fresh baseline from `datasets/{name}/prompts/` (implicit, default)
 - Resume from last checkpoint in the active session (`optimize` with no args, or `optimize --from <round>` to rewind within the active cycle — see `docs/operations/rewind-and-fork.md`)
-- Recon-brief-seeded start (implicit, lives in session state)
+- Recon-brief-seeded start (implicit, lives in session state — recon is currently archived; see CLAUDE.md)
 
 All three are "where does the baseline `OptSearchPoint` come from?" but each one is surfaced differently. Fork-across-cycles (new `cycle_id`, parent pointer, independent trajectory) is now a supported primitive via `optimize --fork-on-divergence`; the trigger and mechanics are documented in `optimization.md § Decision records and resume-divergence replay`.
 
-**Why now (M9, not earlier):** Doing this as a standalone change would thrash the notebook UI layer, the API routers, and the active-session-pointer semantics for a gain that's mostly aesthetic. M9's stable-config / hierarchy / file-directory UI refactor is already touching all of these surfaces — Track 5 is cheap when it rides on top of Tracks 2 + 4, and expensive if it lands on its own.
-
 **Deliverables:**
 
-1. **Single loop verb.** Collapse `init` + `optimize` into one command. Working name: `run` (or keep `optimize` and remove `init` as a standalone verb — decided during the track). Creates the session if needed, then runs the loop. The three-command invocation `init → set-task → optimize` collapses to one (with `set-task` staying as an orthogonal concern, optionally merged via flag).
-2. **Unified `--from` / `--seed` argument** with a typed vocabulary covering the three real starting conditions:
+1. **Unified `--from` / `--seed` argument** on `optimize` with a typed vocabulary covering the real starting conditions:
    - `--from fresh` (default) — load baseline prompt from `datasets/{name}/prompts/`
    - `--from resume[:<round>]` — resume the active cycle; optional `:<round>` rewinds within it (current `optimize --from <int>` behavior, generalized)
-   - `--from recon:<recon_id>` — recon-brief-seeded (currently implicit from session state)
+   - `--from recon:<recon_id>` — recon-brief-seeded (when recon is restored from the archive)
    One concept, one knob, discoverable in `--help`.
-3. **Notebook + API parity.** The notebook's `run_optimization_notebook()` and FastAPI's `/api/v1/campaigns` routes both need to accept the unified seed vocabulary. This is the part that would thrash the other entry points if done in isolation — M9 Track 4's shared view model and Track 2's hexagonal layout make it tractable.
-
-**Sequencing:** Runs in Wave 3 or later, after Track 2 (hexagonal layout) and Track 4 (file-directory UI v0) are in place. Depends on the active-session pointer semantics being stable, which Track 4 clarifies.
+2. **Notebook + API parity.** The notebook's `run_optimization_notebook()` and FastAPI's `/api/v1/campaigns` routes both need to accept the unified seed vocabulary.
 
 **Non-goal:** reshaping what the loop itself does. This is a CLI / entry-point refactor — the L1→L2→L3 mechanics are untouched. Cross-cycle lineage (fork) is a supported primitive wired to the resume-divergence mechanism; see `optimization.md § Decision records and resume-divergence replay`.
 
@@ -141,8 +136,7 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 ├── sessions/{session_id}/
 │   ├── session.json                     # operator metadata
 │   ├── journal.md                       # user narrative (notebook ↔ Claude exchange)
-│   ├── notes.md                         # Claude notes
-│   └── control.json                     # HITL signal
+│   └── notes.md                         # Claude notes
 ├── campaigns/{cycle_id}/
 │   ├── trials/trial_{round:04d}.json    # resume WAL (state)
 │   ├── candidates/round_{round:04d}.json # pre-scoring checkpoint (state)
@@ -325,9 +319,9 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 - [ ] Hexagonal layout in place; all tests green; no `from promptpotter.services` imports remain
 - [ ] `TenantContext` importable from `promptpotter.domain.tenant`; `SessionEnv.tenant` exists
 - [ ] Multi-dataset/pipeline working on at least two datasets in a single project store
-- [ ] File-directory UI v0 readable by a human browsing the session folder; CLI `show-status` and notebook both render from it
-- [ ] Single loop verb (`init` + `optimize` collapsed); unified `--from {fresh,resume[:<round>],recon:<id>}` seed vocabulary; notebook + API accept the same vocabulary
-- [ ] Three-tree layout in place: `sessions/{session_id}/` (per-session metadata + journal/notes/control), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`), and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; campaigns and sessions cleanly separated with parity tests for both sets
+- [ ] File-directory UI v0 readable by a human browsing the session folder; CLI live output and notebook both render from it
+- [ ] Unified `optimize --from {fresh,resume[:<round>],recon:<id>}` seed vocabulary; notebook + API accept the same vocabulary (post-trim CLI is just `init` + `optimize`)
+- [ ] Three-tree layout in place: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`), and `library/` (all cross-run reference); tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`; campaigns and sessions cleanly separated with parity tests for both sets
 - [ ] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models; runtime fields (`session_id`, `project_root`, `recon_brief`, `pipeline_params`) live on `SessionEnv`; no service mutates user config; legacy `campaign.json` files parse unchanged
 - [ ] `CLAUDE.md` Architecture section updated to reflect new hierarchy
 
@@ -343,7 +337,7 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Dataset store | `promptpotter/infrastructure/store/dataset_run_store.py` |
 | Session store | `promptpotter/infrastructure/store/session_store.py` |
 | Campaign store | `promptpotter/infrastructure/store/campaign_store.py` |
-| CLI dashboard | `promptpotter/presentation/cli/campaign_runner.py` (show-status) |
+| CLI live output | `promptpotter/presentation/cli/campaign_runner.py`, `promptpotter/presentation/views/live.py` |
 | Notebook | `notebooks/optimization_campaign.ipynb` |
 | Renderers | `promptpotter/presentation/views/` |
 

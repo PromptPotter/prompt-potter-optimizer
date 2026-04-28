@@ -117,7 +117,6 @@ async def escalate_l2(
     pipeline_schema: Any,
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
-    on_checkpoint: Callable[[str], str | None] | None = None,
     obs: ObservabilityBridge | None = None,
     obs_campaign_id: str = "",
     escalation_check_result: dict | None = None,

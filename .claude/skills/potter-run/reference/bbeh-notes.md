@@ -6,7 +6,7 @@ Source of truth: `notebooks/bbeh_potter.ipynb`. `datasets/bbeh/dataset.md` and `
 
 Authored and launched from the notebook — it owns what CLI doesn't: HF `BBEH/bbeh` load via `shared_config.py::load_and_split()`, `{input,target}` → `{query,ground_truth}` normalisation, per-task test eval of the global winner across 23 tasks, and `results_potter.json` export.
 
-**Resume via CLI works**: `run_optimization_notebook` auto-mints a session+cycle pair and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`. So `python -m promptpotter optimize` resumes an interrupted notebook run via the active pointer. Post-hoc renderers (`show-status` / `show-results`) are shared.
+**Resume via CLI works**: `run_optimization_notebook` auto-mints a session+cycle pair and claims `.promptpotter/active_session.json` with the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`. So `python -m promptpotter optimize` resumes an interrupted notebook run via the active pointer. State reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly — no CLI read commands.
 
 Default with no active BBEH session → open the notebook. With an active BBEH campaign dir on disk → confirm which surface the user wants.
 
@@ -33,7 +33,7 @@ N_VARIANTS = 4
 SP_BUDGET_TTEST = 15
 ```
 
-Also: `l2_patience=5`, `l3_patience=3`, `creativity=0.7`, `improvement_threshold=0.01`, `seed=42`. Notebook injects `task_context` inline — **do not run `set-task`** for BBEH.
+Also: `l2_patience=5`, `l3_patience=3`, `creativity=0.7`, `improvement_threshold=0.01`, `seed=42`. The notebook injects `task_context` inline — for BBEH, no separate task-decompose step happens (and CLI `init` won't auto-decompose because the BBEH dataset directory has no `task_description.md`).
 
 If asked "what hyperparameters are we using?", cite the notebook and flag that `datasets/bbeh/campaign.json` is out of sync.
 

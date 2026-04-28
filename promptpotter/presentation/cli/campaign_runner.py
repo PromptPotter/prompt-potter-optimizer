@@ -1,4 +1,10 @@
-"""CLI campaign runner — argparse schema, every ``cmd_*``, COMMANDS, ``main()``.
+"""CLI entry point — argparse schema, ``cmd_init`` + ``cmd_optimize``, ``main()``.
+
+The CLI is two write verbs: ``init`` creates a session+cycle, ``optimize`` runs
+a campaign against it. Reads happen by opening the on-disk artifact tree
+(``sessions/{id}/``, ``campaigns/{cycle_id}/``) — ``dashboard.json`` for live
+state, ``log.md`` for the digest, ``index.json`` for the final summary
+including ``stop_reason``. Stop with Ctrl+C — there is no mid-run pause/resume.
 
 ``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
 """
@@ -7,7 +13,6 @@ from __future__ import annotations
 
 import argparse
 import asyncio
-import contextlib
 import json
 import logging
 import sys
@@ -126,20 +131,13 @@ def _load_baseline(session: Session):
     )
 
 
-# Signal name → ``control.json`` (key, value). Source of truth for both the
-# ``control`` subparser ``choices=`` list and ``cmd_control`` dispatch.
-SIGNAL_ACTIONS: dict[str, tuple[str, str | bool]] = {
-    "pause": ("requested_state", "pause"),
-    "resume": ("requested_state", "resume"),
-    "stop": ("requested_state", "stop"),
-}
-
-
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for every CLI subcommand. Pure data."""
+    """Argparse schema for ``init`` + ``optimize``. Pure data."""
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
-        description="CLI campaign runner for PromptPotter optimization",
+        description="PromptPotter optimization CLI — init creates a session+cycle, "
+        "optimize runs a campaign against it. Reads happen by opening the artifact "
+        "tree (sessions/{id}/, campaigns/{cycle_id}/) directly.",
     )
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
@@ -161,19 +159,25 @@ def build_parser() -> argparse.ArgumentParser:
     )
     sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("init", help="Initialize services and create session")
+    p_init = sub.add_parser("init", help="Create session+cycle for a dataset")
     p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
     p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
     p_init.add_argument("--dataset-name", default=None)
     p_init.add_argument("--excel-path", default=None)
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")
+    p_init.add_argument(
+        "--task-file",
+        default=None,
+        help="Override datasets/<name>/task_description.md",
+    )
+    p_init.add_argument(
+        "--task-text",
+        default=None,
+        help="Override datasets/<name>/task_description.md inline",
+    )
 
-    p_tc = sub.add_parser("set-task", help="Decompose and set task description")
-    p_tc.add_argument("--task-file", default=None)
-    p_tc.add_argument("--task-text", default=None)
-
-    p_opt = sub.add_parser("optimize", help="Run optimization loop")
+    p_opt = sub.add_parser("optimize", help="Run optimization loop on the active session")
     p_opt.add_argument(
         "--from",
         dest="resume_from_round",
@@ -196,29 +200,6 @@ def build_parser() -> argparse.ArgumentParser:
         help="On divergence, mint a sibling cycle (with parent_cycle_id) "
         "and re-run the divergent round under the current scorer.",
     )
-
-    p_ctl = sub.add_parser("control", help="Write control signal to dashboard")
-    p_ctl.add_argument(
-        "signal",
-        choices=list(SIGNAL_ACTIONS.keys()),
-        help="Signal to send to the running optimizer",
-    )
-
-    p_prof = sub.add_parser("profile", help="Manage backend profile (per-backend defaults)")
-    p_prof.add_argument("--backend-id", default="local")
-    prof_mode = p_prof.add_mutually_exclusive_group()
-    prof_mode.add_argument(
-        "--show", action="store_true", default=True, help="Show profile (default)"
-    )
-    prof_mode.add_argument(
-        "--save", action="store_true", help="Save active session config as profile"
-    )
-    prof_mode.add_argument("--set", nargs=2, metavar=("KEY", "VALUE"), help="Set a profile field")
-
-    p_res = sub.add_parser("show-results", help="Show results and optionally save")
-    p_res.add_argument("--save", action="store_true")
-
-    sub.add_parser("show-status", help="Emit raw JSON dashboard state")
 
     return parser
 
@@ -275,11 +256,63 @@ def _compute_cycle_id(session: Session, baseline, dataset: list) -> str:
     return cycle_config_identity(jsp, dataset)
 
 
+async def _maybe_decompose_task(
+    session: Session,
+    campaign_config: CampaignConfig,
+    session_id: str,
+    *,
+    dataset_name: str,
+    task_file: str | None,
+    task_text: str | None,
+) -> None:
+    """Decompose task description once at session-creation time.
+
+    ``datasets/{name}/task_description.md`` is the canonical source;
+    ``--task-file`` and ``--task-text`` override for ad-hoc cases. Result
+    is disk-cached, so re-init against the same dataset is free.
+    """
+    from promptpotter.application.campaign.config import create_llm_client
+    from promptpotter.application.optimization.pipeline import decompose_task_context
+
+    if task_file:
+        task_description = Path(task_file).read_text(encoding="utf-8")
+    elif task_text:
+        task_description = task_text
+    else:
+        default_task_path = Path("datasets") / dataset_name / "task_description.md"
+        if not default_task_path.exists():
+            return
+        task_description = default_task_path.read_text(encoding="utf-8")
+
+    if not task_description:
+        return
+
+    llm_client, model = create_llm_client(campaign_config)
+    task_context, _consultation, was_cached = await decompose_task_context(
+        task_description,
+        llm_client,
+        model,
+        store_base_dir=session.store.base_dir if session.store else None,
+        backend_id=session.backend_id,
+    )
+    logger.info(
+        "Task context decomposed%s: %d fields",
+        " (cached)" if was_cached else "",
+        len(task_context),
+    )
+    state = session.store.sessions.read(session_id) or {}
+    state["task_context"] = task_context.to_dict()
+    session.store.sessions.update(session_id, state)
+
+
 async def cmd_init(args: argparse.Namespace) -> CommandResult:
     """Initialize services, load datasets, configure pipeline, create session.
 
     Pure prep: no backend calls, no baseline scoring. The baseline runs as
-    phase 0 of ``optimize`` on the ``sp_budget_ttest`` slice.
+    phase 0 of ``optimize`` on the ``sp_budget_ttest`` slice. If
+    ``datasets/<name>/task_description.md`` exists (or ``--task-file`` /
+    ``--task-text`` is given), the task description is decomposed once and
+    stored on the session — ``optimize`` reads it from there.
     """
     from promptpotter.application.campaign.config import load_campaign_config as _load_cfg
     from promptpotter.application.campaign.data import prepare_datasets
@@ -343,6 +376,15 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         dataset_count=len(train_data),
     )
 
+    await _maybe_decompose_task(
+        session,
+        campaign_config,
+        session_id,
+        dataset_name=dataset_name,
+        task_file=args.task_file,
+        task_text=args.task_text,
+    )
+
     return CommandResult(
         data={
             "session_id": session_id,
@@ -404,7 +446,9 @@ _DIVERGENCE_HINT = (
 
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
-    """Run optimization loop. Dashboard is dashboard.json in the cycle dir."""
+    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
+    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
+    """
     from promptpotter.application.campaign.data import build_campaign_emitter
     from promptpotter.application.campaign.runner import (
         RunListener,
@@ -416,7 +460,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         get_round_recorder,
         set_round_recorder,
     )
-    from promptpotter.infrastructure.persistence.control import make_control_check
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
     from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -501,11 +544,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         resumed_from_round=resume_from_round,
         recorder_provider=get_round_recorder,
     )
-    control_reader = make_control_check(session_dir)
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, baseline_acc=pre_baseline_acc
     )
-    listener = RunListener(emitter=emitter, display=display, control=control_reader)
+    listener = RunListener(emitter=emitter, display=display)
 
     ctx.save_phase("optimizing")
     recorder = RoundRecorder(campaign_dir / "rounds")
@@ -522,7 +564,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             task_context=ctx.task_context,
             session_id=ctx.session_id,
             display=display,
-            control=control_reader,
             cycle_id=ctx.cycle_id,
             resume_from_round_override=resume_from_round,
             emitter=emitter,
@@ -555,238 +596,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
 
 
-async def cmd_results(args: argparse.Namespace) -> CommandResult:
-    """Show campaign results, optionally save winner."""
-    from promptpotter.application.campaign.utils import save_campaign_winner
-    from promptpotter.presentation.views.live import render_progress_table
-    from promptpotter.presentation.views.reports import (
-        collect_scoring_set_events,
-        render_campaign_summary,
-        render_flip_tracking,
-        render_hard_sample_heatmap,
-        render_lineage,
-        render_scoring_set,
-    )
-
-    ctx = load_session(args)
-    session = await init_services_cli(**ctx.init_params)
-
-    campaigns = session.store.campaigns.list_all(ctx.backend_id)
-    if not campaigns:
-        return CommandResult(data={"error": "no_campaigns"}, human="No campaigns found.")
-
-    latest = campaigns[-1]
-    cycle_id = latest.get("campaign_id", "")
-    campaign_rounds = [
-        t
-        for i in range(latest.get("n_trials", 0))
-        if (t := session.store.campaigns.load_trial(ctx.backend_id, cycle_id, i)) is not None
-    ]
-    best = max(campaign_rounds, key=lambda r: r.get("accuracy", 0)) if campaign_rounds else {}
-
-    human_parts = [render_campaign_summary(campaign_rounds)]
-    for renderer in (render_progress_table, render_flip_tracking, render_lineage):
-        if rendered := renderer(campaign_rounds):
-            human_parts.append(rendered)
-    if events := collect_scoring_set_events(campaign_rounds):
-        human_parts.append(render_scoring_set(events))
-
-    # Heatmap is embedded in log.md; recompute on the fly when the sorter ran.
-    hs_cfg = ctx.campaign_config.optimization.hard_sample_sorter
-    if hs_cfg.enabled and campaign_rounds:
-        from promptpotter.application.intelligence.hard_sample_sorter import (
-            build_hard_samples_artifact,
-        )
-        from promptpotter.application.optimization.results import RoundResult
-
-        with contextlib.suppress(ValueError, TypeError):
-            artifact = build_hard_samples_artifact(
-                [RoundResult.model_validate(r) for r in campaign_rounds],
-                cycle_id=cycle_id,
-                top_k_candidates=hs_cfg.top_k_candidates,
-                top_k_samples=hs_cfg.top_k_samples,
-            )
-            if heatmap := render_hard_sample_heatmap(artifact):
-                human_parts.append(heatmap)
-
-    if args.save:
-        save_campaign_winner(
-            campaign_rounds,
-            ctx.campaign_config,
-            session.store,
-            ctx.backend_id,
-            campaign_id=ctx.state.get("experiment_id", ""),
-        )
-        human_parts.append("Winner saved.")
-
-    return CommandResult(
-        data={
-            "cycle_id": cycle_id,
-            "n_rounds": len(campaign_rounds),
-            "best_accuracy": best.get("accuracy", 0),
-            "best_round": best.get("round"),
-            "baseline_accuracy": ctx.state.get("baseline_accuracy", 0),
-            "rounds": [
-                {
-                    "round": r.get("round"),
-                    "accuracy": r.get("accuracy", 0),
-                    "label": r.get("label", ""),
-                }
-                for r in campaign_rounds
-            ],
-        },
-        human="\n".join(human_parts),
-    )
-
-
-async def cmd_control(args: argparse.Namespace) -> CommandResult:
-    """Write a HITL control signal to ``control.json``."""
-    from promptpotter.infrastructure.store.base import write_json
-
-    ctx = load_session(args)
-    control_path = ctx.store.sessions.control_path(ctx.session_id)
-    if not control_path.exists():
-        sys.exit(f"ERROR: No {control_path.name} — run 'optimize' first.")
-
-    control = json.loads(control_path.read_text(encoding="utf-8"))
-    key, value = SIGNAL_ACTIONS[args.signal]
-    control[key] = value
-    write_json(control_path, control)
-
-    return CommandResult(
-        data={"signal": args.signal, "control": control},
-        human=f"Control: {args.signal} requested.",
-    )
-
-
-async def cmd_profile(args: argparse.Namespace) -> CommandResult:
-    """Manage connector profile — persistent per-backend defaults."""
-    from promptpotter.infrastructure.store import build_stores, read_active_pointer
-
-    store = build_stores(tenant_id=getattr(args, "tenant", "default"))
-    backend_id = args.backend_id
-
-    if args.save:
-        _tid, pointer_sid, _cid = read_active_pointer()
-        sid = getattr(args, "session", None) or pointer_sid
-        state = store.sessions.read(sid) if sid else None
-        if not state:
-            return CommandResult(
-                data={"saved": False, "error": "no_active_session"},
-                human="ERROR: No active session — run `init` first.",
-            )
-        backend_id = backend_id or state.get("init_params", {}).get("backend_id", "")
-        store.backends.save_connector_profile(backend_id, state.get("campaign_config", {}))
-        return CommandResult(
-            data={"saved": True, "backend_id": backend_id},
-            human=f"Profile saved for '{backend_id}'.",
-        )
-
-    if args.set:
-        key, raw_value = args.set
-        try:
-            value = json.loads(raw_value)
-        except json.JSONDecodeError:
-            value = raw_value
-        profile = store.backends.load_connector_profile(backend_id) or {}
-        profile[key] = value
-        store.backends.save_connector_profile(backend_id, profile)
-        return CommandResult(
-            data={"backend_id": backend_id, "key": key, "value": value},
-            human=f"Profile '{backend_id}': {key} = {json.dumps(value)}",
-        )
-
-    existing = store.backends.load_connector_profile(backend_id)
-    return CommandResult(
-        data={"backend_id": backend_id, "profile": existing or None},
-        human=json.dumps(existing, indent=2, default=str)
-        if existing
-        else f"No connector profile for '{backend_id}'. Use --save or --set to create one.",
-    )
-
-
-async def cmd_status(args: argparse.Namespace) -> CommandResult:
-    """Emit dashboard + control + last-result snapshot.
-
-    ``dashboard.json`` is the live single-source-of-truth (see
-    ``infrastructure/persistence/session_emitter.py``); the final-run
-    summary (``best_accuracy``, ``stop_reason`` …) lives under
-    ``index.json::final`` once a cycle finishes.
-    """
-    from promptpotter.infrastructure.persistence.control import CONTROL_FILENAME
-    from promptpotter.presentation.views.reports import render_status
-
-    ctx = load_session(args)
-    session_dir = ctx.store.sessions.session_dir(ctx.session_id)
-    campaign_dir = ctx.store.campaigns.campaign_dir(ctx.cycle_id) if ctx.cycle_id else None
-
-    payload: dict[str, Any] = {
-        "session_id": ctx.session_id,
-        "cycle_id": ctx.cycle_id,
-        "backend_id": ctx.backend_id,
-        "phase": ctx.state["phase"],
-    }
-    sources = [("control", session_dir / CONTROL_FILENAME)]
-    if campaign_dir is not None:
-        sources += [
-            ("dashboard", campaign_dir / "dashboard.json"),
-            ("index", campaign_dir / "index.json"),
-        ]
-    for key, path in sources:
-        if path.exists():
-            with contextlib.suppress(json.JSONDecodeError, OSError):
-                payload[key] = json.loads(path.read_text(encoding="utf-8"))
-
-    final = (payload.get("index") or {}).get("final")
-    return CommandResult(
-        data=payload,
-        human=render_status(payload.get("dashboard", {}), payload.get("control"), final),
-    )
-
-
-async def cmd_task_context(args: argparse.Namespace) -> CommandResult:
-    """Decompose task description into structured domain context."""
-    from promptpotter.application.campaign.config import create_llm_client
-    from promptpotter.application.optimization.pipeline import (
-        decompose_task_context as _svc_decompose,
-    )
-
-    ctx = load_session(args)
-    if args.task_file:
-        task_description = Path(args.task_file).read_text(encoding="utf-8")
-    elif args.task_text:
-        task_description = args.task_text
-    else:
-        sys.exit("ERROR: Provide --task-file or --task-text")
-
-    session = await init_services_cli(**ctx.init_params)
-    llm_client, model = create_llm_client(ctx.campaign_config)
-    task_context, _consultation, was_cached = await _svc_decompose(
-        task_description,
-        llm_client,
-        model,
-        store_base_dir=session.store.base_dir if session.store else None,
-        backend_id=session.backend_id,
-    )
-    logger.info(
-        "Task context decomposed%s: %d fields",
-        " (cached)" if was_cached else "",
-        len(task_context),
-    )
-
-    ctx.state["task_context"] = task_context.to_dict()
-    ctx.save_phase("task-context")
-    return CommandResult(data={"task_context": task_context.to_dict(), "cached": was_cached})
-
-
 COMMANDS = {
     "init": cmd_init,
-    "set-task": cmd_task_context,
     "optimize": cmd_optimize,
-    "control": cmd_control,
-    "profile": cmd_profile,
-    "show-results": cmd_results,
-    "show-status": cmd_status,
 }
 
 
