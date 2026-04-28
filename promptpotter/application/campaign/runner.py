@@ -165,9 +165,9 @@ async def _post_round(
             cycle.axes.refresh(
                 session.store,
                 session.backend_id,
-                scorer=session.scorer,
-                scorer_id=session.scorer_id,
-                scorer_formula=session.scorer_formula,
+                scorer=session.scoring.scorer,
+                scorer_id=session.scoring.scorer_id,
+                scorer_formula=session.scoring.scorer_formula,
             )
         # Prune always-hit/always-miss queries from the active set.
         zsf = config.optimization.zero_signal_filter_enabled
@@ -184,8 +184,8 @@ async def _post_round(
                 )
                 if excluded:
                     excl_q = {e["query"] for e in excluded}
-                    session.scoring_dataset[:] = [
-                        s for s in session.scoring_dataset if s.query not in excl_q
+                    session.scoring.scoring_dataset[:] = [
+                        s for s in session.scoring.scoring_dataset if s.query not in excl_q
                     ]
                     always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
                     emit_phase(
@@ -211,13 +211,13 @@ async def _post_round(
         with graceful("ScoringSet evolve failed"):
             ss_result = evolve_scoring_set(
                 full_dataset=dataset,
-                current_scoring_set=session.scoring_dataset,
+                current_scoring_set=session.scoring.scoring_dataset,
                 rounds=cycle.rounds,
                 config=ss_cfg,
                 elimination_n_min=config.optimization.elimination_n_min,
             )
             if ss_result.swapped_in or ss_result.swapped_out:
-                session.scoring_dataset[:] = ss_result.new_scoring_set
+                session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
                 event = build_scoring_set_event(round_num=round_num, result=ss_result)
                 round_result.scoring_set_events.append(event)
                 emit_phase(
@@ -261,7 +261,8 @@ async def _run_round_loop(
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:
-                round_eval_data, round_checks = session.scoring_dataset, session.degradation_checks
+                round_eval_data = session.scoring.scoring_dataset
+                round_checks = session.scoring.degradation_checks
 
             logger.debug(
                 "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
@@ -560,8 +561,8 @@ def _finalize_run(
             )
 
             schema = session.pipeline_schema
-            if session.scorer_round_formula:
-                formula_full: str | None = session.scorer_round_formula
+            if session.scoring.scorer_round_formula:
+                formula_full: str | None = session.scoring.scorer_round_formula
                 formula_short: str | None = None
             elif schema is not None:
                 formula_full = default_per_round_formula(schema)

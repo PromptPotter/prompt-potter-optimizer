@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "ScoringContext",
     "Session",
     "auto_mint_session",
     "init_optimization_loop",
@@ -46,6 +47,32 @@ __all__ = [
     "new_session_state",
     "populate_session_scoring",
 ]
+
+
+@dataclass
+class ScoringContext:
+    """Per-cycle scoring policy + the active scoring set.
+
+    The compiled per-query ``scorer`` and per-round ``round_scorer`` plus
+    their source formulas (kept for audit + the interactive
+    ``scoring_steer.json`` hot-swap), the active ``scoring_dataset``
+    slice, the ``sample_index`` digest, and the ``degradation_checks``
+    that travel with the scoring set. All eight fields are populated
+    after Session is built, in ``populate_session_scoring`` and
+    ``init_optimization_loop`` — Session is constructed before the
+    active config's scoring block compiles.
+    """
+
+    scorer: Scorer | None = None
+    scorer_id: str = "none"
+    scorer_formula: str | None = None
+    round_scorer: RoundScorer | None = None
+    # ``None`` = registry default; otherwise the formula string — kept so
+    # ``scoring_steer.json`` can record what it replaced.
+    scorer_round_formula: str | None = None
+    scoring_dataset: list[Sample] = field(default_factory=list)
+    sample_index: SampleIndex | None = None
+    degradation_checks: list[DegradationCheck] = field(default_factory=list)
 
 
 @dataclass
@@ -69,24 +96,13 @@ class Session:
     pipeline_params: dict = field(default_factory=dict)
 
     obs_campaign_id: str = ""
-    scoring_dataset: list[Sample] = field(default_factory=list)
-    degradation_checks: list[DegradationCheck] = field(default_factory=list)
     resumed_from_round: int = 0
 
     obs: ObservabilityBridge | None = None
     round_recorder: RoundRecorder | None = None
-    # Populated after bootstrap — Session is built before the active config's scoring block compiles.
-    scorer: Scorer | None = None
-    scorer_id: str = "none"
-    scorer_formula: str | None = None
-    round_scorer: RoundScorer | None = None
-    # Source string for the active per-round formula. Tracked alongside
-    # ``round_scorer`` so the interactive ``scoring_steer.json`` hot-swap
-    # can record what it replaced. ``None`` = registry default.
-    scorer_round_formula: str | None = None
+    scoring: ScoringContext = field(default_factory=ScoringContext)
     max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
-    sample_index: SampleIndex | None = None
     source: str = ""
     stop_check: Callable[[], bool] | None = None
 
@@ -118,13 +134,13 @@ def populate_session_scoring(
     session.source = source
     session.max_consecutive_errors = max_consecutive_errors
     session.stale_data_load_protocol = stale_data_load_protocol
-    session.scorer = compile_scorer(scoring_formula)
-    session.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
-    session.scorer_formula = scoring_formula
-    session.round_scorer = (
+    session.scoring.scorer = compile_scorer(scoring_formula)
+    session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
+    session.scoring.scorer_formula = scoring_formula
+    session.scoring.round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
-    session.scorer_round_formula = scoring_round_formula
+    session.scoring.scorer_round_formula = scoring_round_formula
 
 
 def new_session_state(
@@ -482,16 +498,16 @@ async def init_optimization_loop(
     cycle.axes = AxisIndex.ensure_for(
         session.store,
         session.backend_id,
-        scorer=session.scorer,
-        scorer_id=session.scorer_id,
-        scorer_formula=session.scorer_formula,
+        scorer=session.scoring.scorer,
+        scorer_id=session.scoring.scorer_id,
+        scorer_formula=session.scoring.scorer_formula,
     )
 
     if resolved_cycle_id:
         session.cycle_id = resolved_cycle_id
     session.obs_campaign_id = obs_campaign_id
-    session.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
-    session.degradation_checks = build_degradation_checks(config)
+    session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
+    session.scoring.degradation_checks = build_degradation_checks(config)
     session.resumed_from_round = resumed_from_round
 
     emit_phase(

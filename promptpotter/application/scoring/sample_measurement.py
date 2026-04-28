@@ -278,12 +278,12 @@ async def measure_sample(
             pd["evaluators"] = query_evaluators
         from promptpotter.application.scoring.formula import rescore_results
 
-        assert session.scorer is not None, "session.scorer required for measurement"
+        assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"
         rescore_results(
             [result],  # type: ignore[list-item]
-            session.scorer,
-            session.scorer_id,
-            session.scorer_formula,
+            session.scoring.scorer,
+            session.scoring.scorer_id,
+            session.scoring.scorer_formula,
         )
         return result  # type: ignore[return-value]
     except httpx.HTTPStatusError as exc:

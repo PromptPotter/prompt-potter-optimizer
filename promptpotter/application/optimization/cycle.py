@@ -323,7 +323,7 @@ class Cycle:
                 subset_scores = compute_composite_score(
                     cast("list[QueryResult]", subset),
                     schema,
-                    round_scorer=self.session.round_scorer,
+                    round_scorer=self.session.scoring.round_scorer,
                 )
                 accuracy = subset_scores["accuracy"]
                 composite = subset_scores.get("composite", accuracy)

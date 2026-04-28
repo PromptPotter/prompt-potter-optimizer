@@ -173,7 +173,7 @@ class _LoopContext:
     on_result: Callable[[QueryResult, int, int], None] | None
     on_start: Callable[[str, int, int], None] | None
     axes: AxisIndex | None
-    scorer: Scorer  # narrowed from session.scorer (asserted non-None on construction)
+    scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
     scorer_formula: str | None
     # Queries whose prior-cache entry was a deprecated sample — value is the
@@ -335,7 +335,7 @@ async def _run_query_loop(
     persist_fresh: Callable[[list[QueryResult]], None],
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available."""
-    assert session.scorer is not None, "session.scorer required for scoring"
+    assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
     state = _LoopState(results=[])
     ctx = _LoopContext(
         search_point=search_point,
@@ -344,9 +344,9 @@ async def _run_query_loop(
         on_result=on_result,
         on_start=on_start,
         axes=axes,
-        scorer=session.scorer,
-        scorer_id=session.scorer_id,
-        scorer_formula=session.scorer_formula,
+        scorer=session.scoring.scorer,
+        scorer_id=session.scoring.scorer_id,
+        scorer_formula=session.scoring.scorer_formula,
         evicted_priors=evicted_priors,
         persist_fresh=persist_fresh,
     )
@@ -470,15 +470,15 @@ async def score_search_point(
         if not (store and backend_id):
             return
         scores = compute_composite_score(
-            results, pipeline_schema, round_scorer=session.round_scorer
+            results, pipeline_schema, round_scorer=session.scoring.round_scorer
         )
         _save_run(results, scores)
 
     # Pre-register Samples so the SampleIndex carries primitives for any
     # query that lands. ``Sample.run_ids`` accumulates later, when
     # ``AxisIndex.refresh`` ingests this run from the archive.
-    if session.sample_index is not None:
-        session.sample_index.register_many(dataset)
+    if session.scoring.sample_index is not None:
+        session.scoring.sample_index.register_many(dataset)
 
     batch = await _run_query_loop(
         search_point,
@@ -513,7 +513,9 @@ async def score_search_point(
             n_total_candidates=n_total_candidates,
         )
 
-    scores = compute_composite_score(results, pipeline_schema, round_scorer=session.round_scorer)
+    scores = compute_composite_score(
+        results, pipeline_schema, round_scorer=session.scoring.round_scorer
+    )
 
     _save_run(results, scores)
     if store and backend_id:

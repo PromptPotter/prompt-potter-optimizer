@@ -145,7 +145,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         emitter.on_phase(event, build_phase_view(event, phase_ctx))
 
     # Simulate a single round lifecycle.  The emitter only reads a handful of
-    # fields off the ``env`` payload (cycle_id, scoring_dataset, obs,
+    # fields off the ``env`` payload (cycle_id, scoring.scoring_dataset, obs,
     # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
     # Cycle requires session+config; the emitter doesn't read them off
     # ``init_state`` here, so SimpleNamespace stand-ins are fine.
@@ -156,7 +156,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
     init_env = SimpleNamespace(
         cycle_id="cycle_test_001",
-        scoring_dataset=[],
+        scoring=SimpleNamespace(scoring_dataset=[]),
         obs=None,
         resumed_from_round=0,
         pipeline_schema=None,

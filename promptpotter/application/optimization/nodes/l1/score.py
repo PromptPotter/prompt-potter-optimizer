@@ -111,7 +111,7 @@ async def l1_score(
             all_candidate_results[ind.lineage.id],
             schema,
             opt_sp=ind,
-            round_scorer=session.round_scorer,
+            round_scorer=session.scoring.round_scorer,
         )
         if s["accuracy"] > best_acc:
             best_acc = s["accuracy"]

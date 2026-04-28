@@ -108,7 +108,7 @@ def _init_exit(d: dict, ctx: dict) -> dict:
             ctx["original_sp_flat"][field_name] = str(value)
 
     cycle_id_short = (session.cycle_id or "?")[:12]
-    samples = len(session.scoring_dataset)
+    samples = len(session.scoring.scoring_dataset)
     obs_on = session.obs is not None
     crit = cycle.opt_sp.l1_critique_text or ""
     bootstrap_critique = _truncate(crit.replace("\n", " ").strip(), 80)

@@ -225,7 +225,7 @@ async def prepare_scoring_context(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
-    # populate_session_scoring overwrites session.scorer/source; loop repopulates before round 1.
+    # populate_session_scoring overwrites session.scoring/source; loop repopulates before round 1.
     prior_schema = session.pipeline_schema
     if pipeline_schema is not None:
         session.pipeline_schema = pipeline_schema
