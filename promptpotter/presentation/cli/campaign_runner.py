@@ -439,10 +439,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.campaign.runner import (
         run_optimization as _orch_run_optimization,
     )
-    from promptpotter.application.optimization.pipeline import (
-        get_round_recorder,
-        set_round_recorder,
-    )
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
     from promptpotter.shared.errors import ResumeDivergenceError
 
@@ -516,14 +512,19 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     # Build emitter + display BEFORE baseline so the dashboard ticks through the
     # BASELINE phase and per-query output reaches the terminal. Without this, the
-    # CLI goes dark for the entire BASELINE phase.
+    # CLI goes dark for the entire BASELINE phase. Recorder is built first so the
+    # emitter can hold a direct reference (no callback indirection).
+    recorder = RoundRecorder(campaign_dir / "rounds")
+    recorder.rehydrate_sticky()
+    session.round_recorder = recorder
+
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
     emitter = build_campaign_emitter(
         session,
         campaign_config,
         baseline_accuracy=pre_baseline_acc,
         resumed_from_round=resume_from_round,
-        recorder_provider=get_round_recorder,
+        recorder=recorder,
     )
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, baseline_acc=pre_baseline_acc
@@ -531,9 +532,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     listener = RunListener(emitter=emitter, display=display)
 
     ctx.save_phase("optimizing")
-    recorder = RoundRecorder(campaign_dir / "rounds")
-    recorder.rehydrate_sticky()
-    set_round_recorder(recorder)
 
     try:
         cycle_result = await _orch_run_optimization(
@@ -562,8 +560,6 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             },
             human=f"{div}\n\n{_DIVERGENCE_HINT}",
         )
-    finally:
-        set_round_recorder(None)
 
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")

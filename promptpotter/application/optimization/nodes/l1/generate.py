@@ -240,6 +240,7 @@ async def l1_generate(
         model=model,
         temperature=creativity,
         json_schema=output_schema,
+        recorder=cycle.session.round_recorder if cycle.session is not None else None,
     )
     _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
 

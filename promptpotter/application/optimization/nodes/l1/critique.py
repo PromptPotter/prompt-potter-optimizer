@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import logging
 from collections import Counter
-from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.optimization.nodes.formatting import (
@@ -21,18 +20,17 @@ from promptpotter.application.scoring.metrics import extract_sample_diagnostics,
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
     from promptpotter.infrastructure.llm.client import LLMClientBase
+    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
     from .score import L1ScoringResult
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "RoundSnapshot",
     "format_l1_critique_for_prompt",
     "run_l1_critique",
 ]
@@ -50,116 +48,33 @@ _CRITIQUE_SM_LABELS = {
 }
 
 
-@dataclass
-class RoundSnapshot:
-    """Bundles current-round results + round history for critique diagnostics."""
-
-    results: list[QueryResult]
-    accuracy: float
-    composite: float = 0.0
-    degraded_queries: int = 0
-
-    round_history: list[dict] = field(default_factory=list)
-    current_round: int = 0
-    l1_stall_count: int = 0
-    best_accuracy: float = 0.0
-    best_round: int = -1
-
-    pipeline_params: dict | None = None
-
-    candidate_keys: list[str] = field(default_factory=list)
-    pipeline_schema: PipelineSchema | None = None
-
-    search_memory_digest: dict | None = None
-    round_analysis: dict[str, str] = field(default_factory=dict)
-
-    runtime_failures: list[dict] = field(default_factory=list)
-
-    # Size (chars) of the current-best prompt — surfaced to the critique so
-    # it can flag bloat drift and prompt L1 to compress on the next round.
-    current_prompt_chars: int = 0
-
-    @classmethod
-    def from_round_state(
-        cls,
-        cycle: Cycle,
-        scoring_result: L1ScoringResult,
-        config: CampaignConfig,
-        schema: PipelineSchema | None,
-        *,
-        round_num: int,
-        search_memory_digest: dict | None = None,
-    ) -> RoundSnapshot:
-        """Build snapshot; round-local analysis (trajectory, cross-candidate diff) lives on its own field, not mutated onto the SearchMemory digest."""
-        round_analysis: dict[str, str] = {}
-        diff = build_cross_candidate_diff(
-            cast(list[dict], scoring_result.winner_results),
-            cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
-            scoring_result.candidate_scores,
-        )
-        if diff:
-            round_analysis["cross_candidate_diff"] = diff
-        trajectory = build_trajectory_report(cycle.rounds)
-        if trajectory and trajectory.classification != "healthy":
-            round_analysis["trajectory"] = f"{trajectory.classification}: {trajectory.description}"
-
-        return cls(
-            results=scoring_result.winner_results,
-            accuracy=scoring_result.winner_accuracy,
-            composite=scoring_result.winner_composite,
-            degraded_queries=scoring_result.degraded_queries,
-            round_history=[
-                {
-                    "round": r.round,
-                    "accuracy": r.accuracy,
-                    "composite": r.composite,
-                    "pipeline_params": r.pipeline_params,
-                    "degraded": getattr(r, "degraded_queries", 0),
-                    "n_candidates": len(r.candidate_scores),
-                }
-                for r in cycle.rounds
-            ],
-            current_round=round_num,
-            l1_stall_count=cycle.escalation.l1_stall_count,
-            best_accuracy=cycle.best_accuracy,
-            best_round=cycle.best_round,
-            pipeline_params=(cycle.current_sp.pipeline_params if cycle.current_sp else None),
-            candidate_keys=candidate_keys_from_schema(schema),
-            pipeline_schema=schema,
-            search_memory_digest=search_memory_digest,
-            round_analysis=round_analysis,
-            runtime_failures=[
-                {
-                    "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[
-                        :60
-                    ],
-                    **rf,
-                }
-                for cs in scoring_result.candidate_scores
-                for rf in cs["runtime_failures"]
-            ],
-            current_prompt_chars=len(cycle.opt_sp.render()),
-        )
-
-
 async def run_l1_critique(
-    ctx: RoundSnapshot,
+    cycle: Cycle,
+    scoring_result: L1ScoringResult,
+    schema: PipelineSchema | None,
     llm_client: LLMClientBase,
+    *,
+    round_num: int,
+    search_memory_digest: dict | None = None,
     model: str | None = None,
+    recorder: RoundRecorder | None = None,
 ) -> dict:
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict."""
-    sections = _assemble_l1_critique_sections(ctx)
+    sections = _assemble_l1_critique_sections(
+        cycle, scoring_result, schema, round_num=round_num, sm_digest=search_memory_digest
+    )
     result, prompt = await run_optimizer_node(
         template_name="l1_critique",
         compile_vars={"inbox": sections},
         llm_client=llm_client,
         model=model,
+        recorder=recorder,
     )
     logger.info(
         "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",
         len(prompt),
-        ctx.current_round + 1,
-        ctx.accuracy,
+        round_num + 1,
+        scoring_result.winner_accuracy,
     )
     return result
 
@@ -181,32 +96,39 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
     return "\n".join(parts)
 
 
-def _section_scoring_summary(ctx: RoundSnapshot) -> str:
+def _section_scoring_summary(
+    scoring_result: L1ScoringResult,
+    cycle: Cycle,
+    round_num: int,
+    prompt_chars: int,
+) -> str:
+    n_results = len(scoring_result.winner_results)
     lines = [
         "## SCORING SUMMARY",
-        f"Accuracy: {ctx.accuracy:.1%} | Composite: {ctx.composite:.4f} | "
-        f"Degraded: {ctx.degraded_queries}/{len(ctx.results)}",
-        f"Round {ctx.current_round} | L1 stall count: {ctx.l1_stall_count} | "
-        f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
+        f"Accuracy: {scoring_result.winner_accuracy:.1%} | "
+        f"Composite: {scoring_result.winner_composite:.4f} | "
+        f"Degraded: {scoring_result.degraded_queries}/{n_results}",
+        f"Round {round_num} | L1 stall count: {cycle.escalation.l1_stall_count} | "
+        f"Best so far: {cycle.best_accuracy:.1%} (round {cycle.best_round})",
     ]
-    if ctx.current_prompt_chars:
+    if prompt_chars:
         bloat = (
             " — prompt is bloated; favour compression in priority_fix"
-            if ctx.current_prompt_chars > _PROMPT_BLOAT_CHARS
+            if prompt_chars > _PROMPT_BLOAT_CHARS
             else ""
         )
-        lines.append(f"Current prompt size: {ctx.current_prompt_chars} chars{bloat}")
+        lines.append(f"Current prompt size: {prompt_chars} chars{bloat}")
     return "\n".join(lines)
 
 
-def _section_pipeline_health(ctx: RoundSnapshot) -> str:
-    total = len(ctx.results)
+def _section_pipeline_health(results: list[QueryResult]) -> str:
+    total = len(results)
     if not total:
         return ""
     web_warning_count = 0
     termination: Counter[str] = Counter()
     error_count = 0
-    for r in ctx.results:
+    for r in results:
         pd = r.get("pipeline_data") or {}
         diag = pd.get("diagnostics") or {}
         if diag.get("warnings"):
@@ -224,11 +146,19 @@ def _section_pipeline_health(ctx: RoundSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _section_runtime_failures(ctx: RoundSnapshot) -> str:
-    if not ctx.runtime_failures:
+def _section_runtime_failures(scoring_result: L1ScoringResult) -> str:
+    failures = [
+        {
+            "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[:60],
+            **rf,
+        }
+        for cs in scoring_result.candidate_scores
+        for rf in cs["runtime_failures"]
+    ]
+    if not failures:
         return ""
     by_warning: dict[str, list[dict]] = {}
-    for e in ctx.runtime_failures:
+    for e in failures:
         by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
     lines = ["## RUNTIME FAILURES THIS ROUND (Rail 2 — treat as hard constraints)"]
     for dom in sorted(by_warning):
@@ -248,17 +178,19 @@ def _section_runtime_failures(ctx: RoundSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _section_rank_analysis(ctx: RoundSnapshot) -> tuple[str, set[str]]:
+def _section_rank_analysis(
+    results: list[QueryResult], candidate_keys: list[str] | None
+) -> tuple[str, set[str]]:
     """Return (section_text, near_miss_query_set). Failure-details consumes nm_queries."""
-    candidate_keys = ctx.candidate_keys or None
+    keys = candidate_keys or None
     rank_map: dict[int, int | None] = {
-        i: find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
-        for i, r in enumerate(ctx.results)
+        i: find_rank(get_candidates(r, keys), r.get("ground_truth", ""))
+        for i, r in enumerate(results)
         if not is_error_result(r)
     }
     rank_buckets = {"1": 0, "2-5": 0, "6-10": 0, "11-20": 0, "not_found": 0}
     near_misses: list[dict] = []
-    for i, r in enumerate(ctx.results):
+    for i, r in enumerate(results):
         if is_error_result(r):
             continue
         rank = rank_map.get(i)
@@ -280,7 +212,7 @@ def _section_rank_analysis(ctx: RoundSnapshot) -> tuple[str, set[str]]:
             rank_buckets["not_found"] += 1
     nm_queries = {nm["query"] for nm in near_misses}
 
-    n_valid = sum(1 for r in ctx.results if not is_error_result(r))
+    n_valid = sum(1 for r in results if not is_error_result(r))
     if not n_valid:
         return "", nm_queries
     lines = [
@@ -302,10 +234,11 @@ def _section_rank_analysis(ctx: RoundSnapshot) -> tuple[str, set[str]]:
     return "\n".join(lines), nm_queries
 
 
-def _section_round_evolution(ctx: RoundSnapshot) -> tuple[str, list[str]]:
+def _section_round_evolution(cycle: Cycle) -> tuple[str, list[str]]:
     """Return (section_text, anomalies). Plateau detection emits a [MEDIUM] flag."""
     anomalies: list[str] = []
-    if not ctx.round_history:
+    rounds = cycle.rounds
+    if not rounds:
         return "", anomalies
     lines = [
         "## ROUND EVOLUTION",
@@ -313,18 +246,18 @@ def _section_round_evolution(ctx: RoundSnapshot) -> tuple[str, list[str]]:
     ]
     prev_acc: float | None = None
     plateau_count = 0
-    for rh in ctx.round_history:
-        acc = rh.get("accuracy", 0.0)
+    for r in rounds:
+        acc = r.accuracy
         delta = acc - prev_acc if prev_acc is not None else 0.0
         lines.append(
-            f"  {rh.get('round', '?'):>5}  {acc:>7.1%}  {delta:>+6.1%}  "
-            f"{rh.get('degraded', 0):>8}  {rh.get('n_candidates', 0):>10}"
+            f"  {r.round:>5}  {acc:>7.1%}  {delta:>+6.1%}  "
+            f"{getattr(r, 'degraded_queries', 0):>8}  {len(r.candidate_scores):>10}"
         )
         plateau_count = plateau_count + 1 if abs(delta) < 0.01 else 0
         prev_acc = acc
-    for i in range(1, len(ctx.round_history)):
-        prev_pp = ctx.round_history[i - 1].get("pipeline_params") or {}
-        curr_pp = ctx.round_history[i].get("pipeline_params") or {}
+    for i in range(1, len(rounds)):
+        prev_pp = rounds[i - 1].pipeline_params or {}
+        curr_pp = rounds[i].pipeline_params or {}
         changed = {
             k
             for k in set(prev_pp) | set(curr_pp)
@@ -332,9 +265,7 @@ def _section_round_evolution(ctx: RoundSnapshot) -> tuple[str, list[str]]:
         }
         if changed:
             lines.append(
-                f"  Round {ctx.round_history[i - 1].get('round')}→"
-                f"{ctx.round_history[i].get('round')}: "
-                f"{', '.join(sorted(changed))}"
+                f"  Round {rounds[i - 1].round}→{rounds[i].round}: {', '.join(sorted(changed))}"
             )
     if plateau_count >= 2:
         anomalies.append(
@@ -343,9 +274,9 @@ def _section_round_evolution(ctx: RoundSnapshot) -> tuple[str, list[str]]:
     return "\n".join(lines), anomalies
 
 
-def _section_query_categories(ctx: RoundSnapshot) -> str:
+def _section_query_categories(results: list[QueryResult]) -> str:
     step_counts: Counter[str] = Counter()
-    for r in ctx.results:
+    for r in results:
         if r.get("hit") or is_error_result(r):
             continue
         pd = r.get("pipeline_data") or {}
@@ -358,11 +289,16 @@ def _section_query_categories(ctx: RoundSnapshot) -> str:
     return "\n".join(lines)
 
 
-def _section_failure_details(ctx: RoundSnapshot, nm_queries: set[str]) -> str:
-    candidate_keys = ctx.candidate_keys or None
+def _section_failure_details(
+    results: list[QueryResult],
+    candidate_keys: list[str] | None,
+    schema: PipelineSchema | None,
+    nm_queries: set[str],
+) -> str:
+    keys = candidate_keys or None
     failures = [
         r
-        for r in ctx.results
+        for r in results
         if not r.get("hit") and not is_error_result(r) and r.get("query", "") not in nm_queries
     ]
     if not failures:
@@ -371,13 +307,13 @@ def _section_failure_details(ctx: RoundSnapshot, nm_queries: set[str]) -> str:
     for r in failures[:8]:
         pd = r.get("pipeline_data") or {}
         gt = r.get("ground_truth", "?")
-        rank = find_rank(get_candidates(r, candidate_keys), gt)
+        rank = find_rank(get_candidates(r, keys), gt)
         rank_str = f"rank {rank}" if rank else "not in candidates"
         diag = pd.get("diagnostics") or {}
         warn = "degraded" if diag.get("warnings") else ""
         diag_str = ""
-        if ctx.pipeline_schema:
-            sd = extract_sample_diagnostics(r, ctx.pipeline_schema)
+        if schema:
+            sd = extract_sample_diagnostics(r, schema)
             sig_parts = [
                 f"{k}={sd[k]}" for k in ("gt_in_source", "gt_in_ranked", "terminated_at") if k in sd
             ]
@@ -391,8 +327,8 @@ def _section_failure_details(ctx: RoundSnapshot, nm_queries: set[str]) -> str:
     return "\n".join(lines)
 
 
-def _section_successes(ctx: RoundSnapshot) -> str:
-    successes = [r for r in ctx.results if r.get("hit")]
+def _section_successes(results: list[QueryResult]) -> str:
+    successes = [r for r in results if r.get("hit")]
     if not successes:
         return ""
     lines = [f"## SUCCESSES ({len(successes)} queries)"]
@@ -411,24 +347,28 @@ def _section_anomaly_flags(anomalies: list[str]) -> str:
     )
 
 
-def _section_this_round(ctx: RoundSnapshot) -> str:
-    if not ctx.round_analysis:
-        return ""
+def _section_this_round(scoring_result: L1ScoringResult, cycle: Cycle) -> str:
     parts: list[str] = []
-    if traj := ctx.round_analysis.get("trajectory"):
-        parts.append(f"  [TRAJECTORY] {traj}")
-    if diff := ctx.round_analysis.get("cross_candidate_diff"):
+    diff = build_cross_candidate_diff(
+        cast(list[dict], scoring_result.winner_results),
+        cast("dict[str, list[dict]]", scoring_result.all_candidate_results),
+        scoring_result.candidate_scores,
+    )
+    trajectory = build_trajectory_report(cycle.rounds)
+    if trajectory and trajectory.classification != "healthy":
+        parts.append(f"  [TRAJECTORY] {trajectory.classification}: {trajectory.description}")
+    if diff:
         parts.append(f"  MISSED OPPORTUNITIES:\n{diff}")
     return "## THIS ROUND\n" + "\n".join(parts) if parts else ""
 
 
-def _section_available_schema_mutations(ctx: RoundSnapshot) -> str:
-    if not ctx.pipeline_schema:
+def _section_available_schema_mutations(schema: PipelineSchema | None) -> str:
+    if not schema:
         return ""
     cap_lines = [
         f"  {node.name} has mutable output_schema"
         f" (current fields: {', '.join(node.output_schema.fields)})"
-        for node in ctx.pipeline_schema.nodes
+        for node in schema.nodes
         if node.output_schema and node.output_schema.fields and "output_schema" in node.param_keys
     ]
     if not cap_lines:
@@ -441,33 +381,44 @@ def _section_available_schema_mutations(ctx: RoundSnapshot) -> str:
     )
 
 
-def _assemble_l1_critique_sections(ctx: RoundSnapshot) -> str:
+def _assemble_l1_critique_sections(
+    cycle: Cycle,
+    scoring_result: L1ScoringResult,
+    schema: PipelineSchema | None,
+    *,
+    round_num: int,
+    sm_digest: dict | None,
+) -> str:
     """Assemble the L1 critique meta-prompt sections in canonical order."""
-    rank_text, nm_queries = _section_rank_analysis(ctx)
-    evolution_text, anomalies = _section_round_evolution(ctx)
+    results = scoring_result.winner_results
+    candidate_keys = candidate_keys_from_schema(schema)
+    prompt_chars = len(cycle.opt_sp.render())
+
+    rank_text, nm_queries = _section_rank_analysis(results, candidate_keys)
+    evolution_text, anomalies = _section_round_evolution(cycle)
 
     sections: list[str] = [
-        _section_scoring_summary(ctx),
-        _section_pipeline_health(ctx),
-        _section_runtime_failures(ctx),
+        _section_scoring_summary(scoring_result, cycle, round_num, prompt_chars),
+        _section_pipeline_health(results),
+        _section_runtime_failures(scoring_result),
         rank_text,
         evolution_text,
-        _section_query_categories(ctx),
-        _section_failure_details(ctx, nm_queries),
-        _section_successes(ctx),
+        _section_query_categories(results),
+        _section_failure_details(results, candidate_keys, schema, nm_queries),
+        _section_successes(results),
     ]
     # Anomaly flags slot in just below the summary so the LLM sees them early.
-    if ctx.results and anomalies:
+    if results and anomalies:
         sections.insert(1, _section_anomaly_flags(anomalies))
 
     sections.append(
         format_search_memory_block(
-            ctx.search_memory_digest,
+            sm_digest,
             _CRITIQUE_SM_LABELS,
             header="## HISTORICAL INTELLIGENCE",
         )
     )
-    sections.append(_section_this_round(ctx))
-    sections.append(_section_available_schema_mutations(ctx))
+    sections.append(_section_this_round(scoring_result, cycle))
+    sections.append(_section_available_schema_mutations(schema))
 
     return "\n\n".join(s for s in sections if s)

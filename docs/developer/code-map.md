@@ -23,7 +23,6 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `QueryRecord` | `promptpotter/application/intelligence/search_memory.py` |
 | `ReplayContext` | `promptpotter/application/campaign/decisions.py` |
 | `RoundResult` | `promptpotter/application/optimization/results.py` |
-| `RoundSnapshot` | `promptpotter/application/optimization/nodes/l1/critique.py` |
 | `RuntimeFailure` | `promptpotter/domain/analysis.py` |
 | `Session` | `promptpotter/application/campaign/campaign_setup.py` |
 | `SearchMemory` | `promptpotter/application/intelligence/search_memory.py` |

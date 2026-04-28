@@ -8,13 +8,11 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.nodes.l1.critique import (
-    RoundSnapshot,
     format_l1_critique_for_prompt,
     run_l1_critique,
 )
 from promptpotter.application.optimization.nodes.l1.generate import l1_generate
 from promptpotter.application.optimization.nodes.l1.score import l1_score
-from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import CandidateProposal, RoundResult
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 
@@ -88,7 +86,7 @@ async def _generate_or_load_candidates(
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
             # llm_call never fires on this branch — synthesize l1_generate
             # so dashboard.json + round_NNNN.json don't miss the node.
-            if _rr := get_round_recorder():
+            if _rr := session.round_recorder:
                 _rr.set_node(
                     "l1_generate",
                     {
@@ -229,17 +227,18 @@ async def execute_round(
     critique_text = ""
     if scoring_result.winner_results:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
-        cctx = RoundSnapshot.from_round_state(
+        critique_result = await run_l1_critique(
             cycle,
             scoring_result,
-            config,
             session.pipeline_schema,
+            crit_llm,
             round_num=round_num,
             search_memory_digest=(
                 cycle.search_memory.digest_for_l1_critique() if cycle.search_memory else None
             ),
+            model=config.optimizer_llm.model,
+            recorder=session.round_recorder,
         )
-        critique_result = await run_l1_critique(cctx, crit_llm, model=config.optimizer_llm.model)
         critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):

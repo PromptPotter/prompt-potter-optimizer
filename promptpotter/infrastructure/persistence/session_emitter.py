@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import json
 import time
-from collections.abc import Callable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
@@ -17,10 +16,7 @@ from promptpotter.shared.errors import is_degraded
 if TYPE_CHECKING:
     from promptpotter.application.optimization.results import RoundResult
     from promptpotter.domain.phases import PhaseEvent
-
-# Injected callable returning the active RoundRecorder or None — keeps
-# infrastructure from importing upward into application/optimization.
-RecorderProvider = Callable[[], Any]
+    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
 __all__ = [
     "CAMPAIGN_ARTIFACTS",
@@ -170,18 +166,14 @@ class CampaignPersistenceEmitter:
         sp_budget_ttest: int,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
-        recorder_provider: RecorderProvider | None = None,
+        recorder: RoundRecorder | None = None,
     ) -> None:
         self.campaign_dir = campaign_dir
         self.state_path = campaign_dir / "dashboard.json"
         self.log_path = campaign_dir / "output.log"
         self.phase_events_path = campaign_dir / "phase_events.jsonl"
         self.session_dir = session_dir
-        self._recorder_provider: RecorderProvider = recorder_provider or (lambda: None)
-        # Phase-view ctx accumulator. Initialised empty here; ``RunListener``
-        # overwrites this attribute at construction with its own shared dict
-        # so emitter + display read the same state machine.
-        self._phase_ctx: dict[str, Any] = {}
+        self._recorder = recorder
         self._phase_event_seq: int = 0
 
         self._patience_max: int = l1_patience
@@ -232,7 +224,7 @@ class CampaignPersistenceEmitter:
         n_variants: int,
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
-        recorder_provider: RecorderProvider | None = None,
+        recorder: RoundRecorder | None = None,
     ) -> CampaignPersistenceEmitter | None:
         """Build emitter, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
@@ -267,7 +259,7 @@ class CampaignPersistenceEmitter:
             sp_budget_ttest=sp_budget_ttest,
             resume_from=resume_from,
             cycle_id=cycle_id,
-            recorder_provider=recorder_provider,
+            recorder=recorder,
         )
 
     # -- Callbacks -------------------------------------------------------------
@@ -475,10 +467,9 @@ class CampaignPersistenceEmitter:
 
     def _deposit_round_recorder_state(self, round_result: RoundResult) -> None:
         """Hand l1_score block to the active recorder."""
-        recorder = self._recorder_provider()
-        if recorder is None:
+        if self._recorder is None:
             return
-        recorder.set_l1_score(self._build_l1_score_block(round_result))
+        self._recorder.set_l1_score(self._build_l1_score_block(round_result))
 
     def _build_l1_score_block(
         self,
@@ -545,9 +536,8 @@ class CampaignPersistenceEmitter:
         # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
         round_idx = self._current_round.get("round", self._state.get("round", 0))
         nodes: dict[str, Any] = {}
-        recorder = self._recorder_provider()
-        if recorder is not None:
-            nodes.update(recorder.snapshot_nodes())
+        if self._recorder is not None:
+            nodes.update(self._recorder.snapshot_nodes())
         if self._current_round.get("candidates"):
             nodes["l1_score"] = self._build_l1_score_block()
         ordered: dict[str, Any] = {}

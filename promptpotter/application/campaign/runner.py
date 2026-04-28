@@ -20,7 +20,6 @@ from promptpotter.application.optimization.layer_escalation import (
     escalate_l2,
 )
 from promptpotter.application.optimization.nodes.l1 import execute_round
-from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
@@ -42,9 +41,10 @@ __all__ = ["RunListener", "run_optimization"]
 
 
 class RunListener:
-    """Fan-out to emitter + display sinks. ``on_phase`` is special-cased so
-    ``build_phase_view`` runs once on a shared ctx instead of twice in
-    parallel."""
+    """Fan-out to emitter + display sinks. Owns the phase-view ctx so
+    ``build_phase_view`` (stateful — reads/writes ctx) runs once with a
+    consistent state machine. ``l1_stall_count`` lands in ctx on
+    ``on_round_complete`` so the next ``l1_generate:enter`` view sees it."""
 
     def __init__(
         self,
@@ -54,17 +54,7 @@ class RunListener:
     ) -> None:
         self.emitter = emitter
         self.display = display
-        # Single phase-view ctx: build_phase_view is stateful — it both
-        # reads and writes — so both sinks must observe the *same* dict to
-        # read consistent baseline_accuracy / round_num / etc. in their
-        # other callbacks. We overwrite each sink's pre-existing ctx so
-        # later attribute reads (``self._phase_ctx[...]``) hit this shared
-        # instance.
         self._phase_ctx: dict[str, Any] = {}
-        if emitter is not None:
-            emitter._phase_ctx = self._phase_ctx
-        if display is not None:
-            display._phase_ctx = self._phase_ctx
 
     @property
     def _sinks(self) -> tuple[Any, ...]:
@@ -76,6 +66,7 @@ class RunListener:
             sink.on_phase(event, view)
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
+        self._phase_ctx["l1_stall_count"] = l1_stall_count
         for sink in self._sinks:
             sink.on_round_complete(round_result, l1_stall_count)
 
@@ -152,7 +143,7 @@ async def _post_round(
             )
         _write_log_md(session)
 
-    if _rr := get_round_recorder():
+    if _rr := session.round_recorder:
         _rr.flush()
 
     if cycle.search_memory:
@@ -262,7 +253,7 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            if _rr := get_round_recorder():
+            if _rr := session.round_recorder:
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
@@ -445,7 +436,7 @@ async def run_optimization(
             campaign_config,
             baseline_accuracy=baseline.baseline_acc,
             resumed_from_round=session.resumed_from_round,
-            recorder_provider=get_round_recorder,
+            recorder=session.round_recorder,
         )
     cb.emitter = emitter
 

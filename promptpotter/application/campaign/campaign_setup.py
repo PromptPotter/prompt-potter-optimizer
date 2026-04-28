@@ -32,6 +32,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
@@ -73,6 +74,7 @@ class Session:
     resumed_from_round: int = 0
 
     obs: ObservabilityBridge | None = None
+    round_recorder: RoundRecorder | None = None
     # Populated after bootstrap — Session is built before the active config's scoring block compiles.
     scorer: Scorer | None = None
     scorer_id: str = "none"

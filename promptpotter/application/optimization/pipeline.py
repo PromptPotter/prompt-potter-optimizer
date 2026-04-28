@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import contextvars
 import functools
 import hashlib
 import json
@@ -62,21 +61,6 @@ def get_optimizer_schema() -> PipelineSchema:
 
 _LLM_DEFAULTS = {"temperature": 0.0, "output_format": "text"}
 
-_recorder_var: contextvars.ContextVar[RoundRecorder | None] = contextvars.ContextVar(
-    "round_recorder",
-    default=None,
-)
-
-
-def set_round_recorder(recorder: RoundRecorder | None) -> None:
-    """Wire the round recorder for LLM trace capture. None = disable."""
-    _recorder_var.set(recorder)
-
-
-def get_round_recorder() -> RoundRecorder | None:
-    """Return the active round recorder (for non-LLM actions)."""
-    return _recorder_var.get()
-
 
 async def llm_call(
     llm_client: LLMClientBase,
@@ -86,6 +70,7 @@ async def llm_call(
     config: dict | None = None,
     trace_meta: dict | None = None,
     json_schema: dict | None = None,
+    recorder: RoundRecorder | None = None,
     **overrides,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides."""
@@ -147,8 +132,7 @@ async def llm_call(
         )
     )
 
-    _recorder = _recorder_var.get()
-    if _recorder is not None:
+    if recorder is not None:
         response_data: dict | str
         try:
             response_data = json.loads(response.content)
@@ -171,7 +155,7 @@ async def llm_call(
             action.update(trace_meta)
         else:
             action["messages"] = messages
-        _recorder.add_action(action)
+        recorder.add_action(action)
 
     return response
 
@@ -185,6 +169,7 @@ async def run_optimizer_node(
     temperature: float = 0.0,
     json_schema: dict | None = None,
     user_content: str | None = None,
+    recorder: RoundRecorder | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text)."""
     template = load_optimizer_prompt(template_name)
@@ -203,6 +188,7 @@ async def run_optimizer_node(
         model=model,
         temperature=temperature,
         json_schema=json_schema,
+        recorder=recorder,
         trace_meta={
             "template_name": template_name,
             "template_fields": template.prompt_field_dict(),

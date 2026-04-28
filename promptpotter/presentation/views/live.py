@@ -13,7 +13,7 @@ Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
@@ -63,10 +63,6 @@ class LiveDisplay:
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.query_counter = 0
-        # Phase-view ctx accumulator. Initialised empty here; ``RunListener``
-        # overwrites this attribute at construction with its own shared dict
-        # so emitter + display read the same state machine.
-        self._phase_ctx: dict[str, Any] = {}
         self._round_num = 0
         self._store = store
         self._bars = _BarTracker(sp_budget_ttest) if sp_budget_ttest is not None else None
@@ -80,7 +76,6 @@ class LiveDisplay:
     def set_baseline(self, fresh: float) -> None:
         """Post-baseline rewire — replace pre-baseline placeholder."""
         self.baseline_acc = fresh
-        self._phase_ctx["baseline_accuracy"] = fresh
 
     # --- RunListener display protocol ---------------------------------
 
@@ -96,7 +91,19 @@ class LiveDisplay:
             }
             if rendered := render_phase_event(record):
                 self._write(rendered)
-        self._round_num = self._phase_ctx.get("round_num", self._round_num)
+            # Track the running baseline directly from view dicts. INIT:exit
+            # carries the post-baseline accuracy; L1_SCORE:exit promotes the
+            # round winner to baseline when it improved.
+            if event.phase == CampaignPhase.INIT and event.event == "exit":
+                self.baseline_acc = view.get("baseline_acc", self.baseline_acc)
+            elif (
+                event.phase == CampaignPhase.L1_SCORE
+                and event.event == "exit"
+                and view.get("improved")
+            ):
+                self.baseline_acc = view.get("winner_accuracy", self.baseline_acc)
+        if event.round is not None:
+            self._round_num = event.round
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.query_counter = 0
         if (
@@ -148,8 +155,7 @@ class LiveDisplay:
             self._bars.close()
         w = 66
         label = f"C{idx + 1}"
-        baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        summary = build_individual_summary(scores, baseline_acc)
+        summary = build_individual_summary(scores, self.baseline_acc)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -165,7 +171,6 @@ class LiveDisplay:
         if self._bars is not None:
             self._bars.close()
         self.query_counter = 0
-        self._phase_ctx["l1_stall_count"] = l1_stall_count
 
         self.campaign_rounds.append(
             {
