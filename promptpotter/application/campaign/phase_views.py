@@ -20,24 +20,32 @@ def _truncate(s: str, max_len: int) -> str:
     return s[: max_len - 3] + "..."
 
 
-def _resolve_composite_formula(session: Any) -> str | None:
-    """Return the active per-round formula string for renderers.
+def _resolve_composite_formulas(session: Any) -> tuple[str | None, str | None]:
+    """Return ``(full, short)`` per-round formula strings for renderers.
 
-    Source-of-truth chain: an explicit ``Session.scorer_round_formula``
-    (set when ``campaign.json::scoring`` carries a ``per_round`` block, or
-    after a ``scoring_steer.json`` swap) wins; otherwise the registry
-    default for the active pipeline schema. ``None`` when neither is
-    resolvable — renderers fall back to a "(formula unavailable)" line.
+    ``full`` is the literal formula — explicit ``Session.scorer_round_formula``
+    when set (custom block in ``campaign.json::scoring`` or hot-swapped via
+    ``scoring_steer.json``), otherwise ``default_per_round_formula(schema)``.
+
+    ``short`` is the abbreviated one-liner, populated only when the active
+    formula matches the registry default (so renderers can fit a 3-line
+    block at 70-char width). ``None`` for custom formulas — callers fall
+    back to the full text and accept the wrap.
     """
+    schema = getattr(session, "pipeline_schema", None)
     explicit = getattr(session, "scorer_round_formula", None)
     if explicit:
-        return explicit
-    schema = getattr(session, "pipeline_schema", None)
+        # Custom formula: render verbatim. No abbreviation — operator
+        # authored it, they read it.
+        return explicit, None
     if schema is None:
-        return None
-    from promptpotter.application.scoring.evaluators import default_per_round_formula
+        return None, None
+    from promptpotter.application.scoring.evaluators import (
+        default_per_round_formula,
+        default_per_round_formula_short,
+    )
 
-    return default_per_round_formula(schema)
+    return default_per_round_formula(schema), default_per_round_formula_short(schema)
 
 
 def _init_enter(d: dict, ctx: dict) -> dict:
@@ -87,7 +95,10 @@ def _init_exit(d: dict, ctx: dict) -> dict:
     cycle = d["state"]
     session = d["env"]
     ctx["baseline_accuracy"] = cycle.current_accuracy
-    ctx["composite_formula"] = _resolve_composite_formula(session)
+    ctx["baseline_composite"] = getattr(cycle, "current_composite", cycle.current_accuracy)
+    full, short = _resolve_composite_formulas(session)
+    ctx["composite_formula"] = full
+    ctx["composite_formula_short"] = short
 
     prompt_fields = cycle.opt_sp.prompt_field_dict()
     overlays: dict[str, str] = {}
@@ -250,6 +261,8 @@ def _l1_score_exit(d: dict, ctx: dict) -> dict:
         "next_action": action,
         "l1_critique_text": d.get("l1_critique_text", "") or "",
         "composite_formula": ctx.get("composite_formula"),
+        "composite_formula_short": ctx.get("composite_formula_short"),
+        "baseline_composite": ctx.get("baseline_composite"),
     }
 
 

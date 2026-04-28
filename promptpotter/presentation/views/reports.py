@@ -412,10 +412,12 @@ def render_log_md(
             parts.append(f"- {label}: {v}")
     parts += ["", "## Rounds", ""]
 
-    # Per-round formula source: scoring_round_formula stored on
-    # index.json::final at finalize. None when the default formula was in
-    # use; render_composite_block then prints "(formula unavailable)".
+    # Per-round formula source: stored on index.json::final at finalize.
+    # log.md is the permanent record so it carries the FULL formula
+    # (allowed to wrap), with full evaluator names. The 3-line short form
+    # is for live surfaces only.
     formula = final.get("scorer_round_formula")
+    baseline_composite = final.get("baseline_composite")
 
     if not trials:
         parts += ["_No rounds yet._", ""]
@@ -435,12 +437,12 @@ def render_log_md(
             parts.append(f"- changes: {changes}")
         if directive := (osp.get("l2_directive") or "").strip():
             parts.append(f"- L2 directive: {directive}")
-        # Composite block: formula + per-evaluator values, fenced as a
-        # code block so the alignment survives any markdown renderer.
         composite_block = render_composite_block(
             trial.get("composite", 0.0) or 0.0,
             dict(trial.get("evaluators") or {}),
             formula,
+            baseline=baseline_composite,
+            use_short_names=False,
         )
         if composite_block:
             parts += ["", "```", *composite_block, "```"]

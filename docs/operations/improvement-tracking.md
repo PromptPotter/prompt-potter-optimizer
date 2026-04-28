@@ -38,24 +38,29 @@ The optimizer state itself carries a compact mirror: `OptSearchPoint.round_histo
 
 ## Reading the composite block
 
-Every per-candidate box, every L1_SCORE summary, every round summary, and every `log.md` round section now print a uniform composite block that names the formula and shows each evaluator value:
+Composite rendering is split across two surfaces by line budget — per-candidate boxes stay terse, round-level surfaces carry the full breakdown.
+
+**Per-candidate (1 line, printed N=`n_variants`×/round)** — composite + Δ from the campaign's baseline composite, so even at deep rounds the operator sees how far the run has come from origin:
 
 ```
-composite = 0.3667
-formula:  0.65 * accuracy + 0.15 * (((1 - error_rate) + (1 -
-          degraded_rate) + (1 - runtime_failure_rate)) / 3) +
-          0.10 * latency_norm + 0.05 * accuracy + 0.05 *
-          prompt_compactness
-  accuracy=0.167              error_rate=0.000
-  degraded_rate=0.000         runtime_failure_rate=0.000
-  latency_norm=0.985          prompt_compactness=0.998
+composite=0.6042  (Δ+0.1030 vs baseline 0.5012)
 ```
 
-The block lists every named evaluator that appears in the formula, in first-appearance order, paired across two columns. Builtins (`min`, `max`, `log`) and bare numbers are filtered out — only registered evaluator names show. Sub-expressions like the health term are not decomposed; you see the formula text plus the inputs, and can do the per-term math from there.
+**Round summary, L1_SCORE:exit, log.md (3 lines, printed 1×/round)** — composite anchor, formula, named evaluator values. Live surfaces use abbreviated names so the block fits a 70-char node frame:
 
-When the formula is unset (rare — typically means rendering before init completes), the block collapses to `composite = 0.3667 (formula unavailable)`.
+```
+composite = 0.6042   baseline=0.5012  Δ+0.1030
+formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
+  acc=0.667  err=0.000  degr=0.083  rf=0.000  lat=0.965  pc=0.812
+```
 
-**`PROMPTPOTTER_COMPACT_DISPLAY=1`** in the environment reverts the live CLI / notebook surfaces to the legacy single-line `composite=0.4f` bottom rule (only when composite ≠ accuracy). `log.md` is unaffected — the digest is the operator's permanent record and always carries the full block.
+The short formula expands the registry default. `H` is the health term `((1-error_rate) + (1-degraded_rate) + (1-runtime_failure_rate)) / 3`; `R` is the average of applicable recall evaluators. Custom formulas (`campaign.json::scoring`) are rendered verbatim — operators authored them, they read them — and may wrap to more than 3 lines.
+
+`log.md` is the permanent record and always carries the **full** formula text plus full evaluator names. This is the source of truth when reviewing a finished cycle, regardless of what the live terminal showed.
+
+When the formula is unset (rare — rendering before init completes), the block collapses to `composite = 0.6042  (formula unavailable)`.
+
+**`PROMPTPOTTER_COMPACT_DISPLAY=1`** in the environment reverts the live CLI / notebook surfaces to the legacy single-line `composite=0.4f` bottom rule (only when composite ≠ accuracy). `log.md` is unaffected.
 
 ---
 

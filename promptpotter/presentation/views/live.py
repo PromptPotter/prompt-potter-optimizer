@@ -34,6 +34,7 @@ from promptpotter.presentation.views.composite_render import (
     compact_display_enabled,
     render_composite_block,
     render_composite_inline,
+    render_composite_oneliner,
 )
 from promptpotter.presentation.views.display_primitives import (
     _DISPLAY_TAGS,
@@ -334,21 +335,16 @@ class IndividualSummary:
       ``cand k/N``.
     - ``body_line`` — the mutations + hits + delta line; the notebook
       renders it as an inner box line, the CLI as an indented second line.
-    - ``detail_lines`` — ordered extras (elimination summary, optional
-      compact-mode composite + degraded count, or validation-failure
-      entries); rendered inline by both displays, with the notebook
-      folding the last entry into the bottom info rule when possible.
-    - ``composite_lines`` — full-mode composite block (composite value +
-      formula text + named-evaluator pairs). Empty in compact mode and
-      when no formula is resolvable. When non-empty, callers render
-      these as ordinary box lines (no bottom-info-rule fold).
+    - ``detail_lines`` — ordered extras (elimination summary, the 1-line
+      composite-with-Δ render, degraded-count tag, or validation-failure
+      entries); rendered inline by both displays, with the last entry
+      folded onto the bottom info rule by callers that support it.
     """
 
     status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
-    composite_lines: tuple[str, ...] = ()
 
 
 def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
@@ -370,7 +366,7 @@ def build_individual_summary(
     scores: dict,
     baseline_acc: float,
     *,
-    formula: str | None = None,
+    baseline_composite: float | None = None,
 ) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
@@ -380,12 +376,16 @@ def build_individual_summary(
     eliminated are mutually exclusive by construction in
     ``_handle_scored_candidate``).
 
-    *formula* is the active per-round formula string — when provided and
-    ``PROMPTPOTTER_COMPACT_DISPLAY`` is unset, drives a multi-line
-    composite block (composite value + formula + named evaluator pairs)
-    on ``composite_lines``. In compact mode (env-var set) or when
-    *formula* is None, falls back to the legacy single-line
-    ``composite=0.4f`` bottom rule shown only when composite ≠ accuracy.
+    Per-candidate composite render is intentionally 1 line —
+    ``composite=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
+    don't dump 60 lines of identical formula text into the terminal. The
+    formula + per-evaluator breakdown lands once per round in the round
+    summary block. ``PROMPTPOTTER_COMPACT_DISPLAY=1`` reverts to the
+    legacy ``composite=0.4f`` bottom rule (only when composite ≠ accuracy).
+
+    *baseline_composite* anchors the Δ against the campaign's first-round
+    composite — even at deep rounds the operator sees how far the run
+    has come from origin. ``None`` collapses to the no-Δ form.
     """
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
@@ -425,17 +425,12 @@ def build_individual_summary(
     degraded = scores.get("degraded_queries", 0)
 
     # Two render modes:
-    #   - compact (env var set, or no formula): legacy single-line bottom
-    #     rule, ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
-    #   - full: composite_lines carry the multi-line block (composite +
-    #     formula + named evaluators). Degraded gets its own detail line
-    #     so the box bottom is a plain rule.
-    composite_lines: tuple[str, ...] = ()
-    if comp is not None and not compact_display_enabled() and formula:
-        # Box wraps content at width-4 (two walls + two-space pad). Per-
-        # candidate boxes are 66 wide → 62 chars content room.
-        block = render_composite_block(comp, scores.get("evaluators"), formula, width=62)
-        composite_lines = tuple(block)
+    #   - compact (env var set): legacy single-line bottom rule,
+    #     ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
+    #   - default: 1-line composite-with-Δ as a detail line; degraded
+    #     count joins as a separate detail. Box bottom stays plain.
+    if comp is not None and not compact_display_enabled():
+        detail_lines.append(render_composite_oneliner(comp, baseline=baseline_composite))
         if degraded:
             detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
     else:
@@ -459,7 +454,6 @@ def build_individual_summary(
         tag=tag,
         body_line=body_line,
         detail_lines=tuple(detail_lines),
-        composite_lines=composite_lines,
     )
 
 
@@ -818,29 +812,18 @@ class LiveDisplay:
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        formula = self._phase_ctx.get("composite_formula")
-        summary = build_individual_summary(scores, baseline_acc, formula=formula)
+        baseline_comp = self._phase_ctx.get("baseline_composite")
+        summary = build_individual_summary(scores, baseline_acc, baseline_composite=baseline_comp)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
             self._write(f"  {_box_line(summary.body_line, width=w)}")
-        # Full mode (composite_lines populated): all detail_lines render as
-        # plain box lines, then composite block as box lines, then a flat
-        # bottom rule. Compact mode keeps the legacy "fold last detail onto
-        # bottom-info" rule.
-        if summary.composite_lines:
-            for line in summary.detail_lines:
-                self._write(f"  {_box_line(line, width=w)}")
-            for line in summary.composite_lines:
-                self._write(f"  {_box_line(line, width=w)}")
-            self._write(f"  {_box_bottom(width=w)}")
+        for line in summary.detail_lines[:-1]:
+            self._write(f"  {_box_line(line, width=w)}")
+        if summary.detail_lines:
+            self._write(f"  {_box_bottom_info(summary.detail_lines[-1], width=w)}")
         else:
-            for line in summary.detail_lines[:-1]:
-                self._write(f"  {_box_line(line, width=w)}")
-            if summary.detail_lines:
-                self._write(f"  {_box_bottom_info(summary.detail_lines[-1], width=w)}")
-            else:
-                self._write(f"  {_box_bottom(width=w)}")
+            self._write(f"  {_box_bottom(width=w)}")
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         if self._bars is not None:
@@ -869,15 +852,21 @@ class LiveDisplay:
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
-        # Composite block — full mode only. The per-round formula + the
-        # winner's per-evaluator values, so the operator sees what drove
-        # the round's composite without opening the trial JSON.
-        formula = self._phase_ctx.get("composite_formula")
-        if formula and not compact_display_enabled():
+        # Composite block — full mode only. 3-line render: composite +
+        # baseline anchor (line 1), abbreviated formula (line 2), short-
+        # name evaluator values (line 3). Anchored to the campaign
+        # baseline so operators see how far the run came from origin.
+        # Short formula is None for custom user formulas — fall back to
+        # full text and accept the wrap.
+        formula_short = self._phase_ctx.get("composite_formula_short")
+        formula_full = self._phase_ctx.get("composite_formula")
+        if (formula_short or formula_full) and not compact_display_enabled():
             for line in render_composite_block(
                 round_result.composite,
                 dict(round_result.evaluators),
-                formula,
+                formula_short or formula_full,
+                baseline=self._phase_ctx.get("baseline_composite"),
+                use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
         if stats := render_round_stats(round_result, self.pipeline_schema):

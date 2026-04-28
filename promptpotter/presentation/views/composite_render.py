@@ -1,17 +1,23 @@
-"""Composite-score rendering primitive — single source of truth for what the
-operator sees about composite at any surface.
+"""Composite-score rendering primitives — single source of truth.
 
 The composite is a weighted aggregate of named evaluators (see
-``application/scoring/evaluators.py``); without seeing the formula and the
-per-term values, the operator can't tell *why* composite moved when accuracy
-didn't. This module renders one canonical block — composite + formula text +
-named evaluator values — embedded by every live surface (per-candidate box,
-L1_SCORE:exit summary, round summary, log.md).
+``application/scoring/evaluators.py``); without seeing the inputs the
+operator can't tell *why* composite moved when accuracy didn't. This
+module renders the operator-facing forms that surfaces share:
 
-``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to today's
-terse output (a single ``composite=0.4f`` line, only when composite differs
-from accuracy). ``log.md`` is unaffected — the digest is the operator's
-permanent record and always carries the full block.
+- ``render_composite_oneliner`` — 1 line for the per-candidate box.
+  Anchors progress against the campaign baseline so even at deep rounds
+  the operator sees how far the run has come from origin.
+- ``render_composite_block`` — 3-line block for round-level surfaces
+  (round summary, L1_SCORE:exit, log.md fenced section). Composite +
+  trajectory anchor on line 1; formula on line 2; named evaluator
+  values on line 3. Width-honest: short evaluator names are used when
+  ``use_short_names`` is set so the values line fits 70-char inner
+  width on the node frame.
+
+``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to the
+legacy single-line ``composite=0.4f`` bottom rule (only when composite
+≠ accuracy). ``log.md`` always carries the full block.
 
 Pure functions; no I/O, no Session, no logging side-effects.
 """
@@ -36,8 +42,7 @@ _FORMULA_BUILTINS = {
     "sqrt",
     "exp",
     "pow",
-    # Python keywords that show up in step-function formulas via the
-    # `if/else` ternary — never an evaluator name.
+    # Step-function ternary keywords that show up in custom formulas.
     "if",
     "else",
     "and",
@@ -47,13 +52,33 @@ _FORMULA_BUILTINS = {
     "False",
 }
 
+# Short codes used by ``render_composite_block`` when ``use_short_names``
+# is enabled. Names not in this map fall back to themselves so user-
+# defined evaluators still surface — only the registry-known ones get
+# squeezed into short codes for the round-level live frame.
+SHORT_NAMES: dict[str, str] = {
+    "accuracy": "acc",
+    "error_rate": "err",
+    "degraded_rate": "degr",
+    "runtime_failure_rate": "rf",
+    "latency_norm": "lat",
+    "prompt_compactness": "pc",
+    "pipeline_compactness": "ppl",
+    "source_recall": "src",
+    "candidate_recall": "cand",
+    "cache_hit_rate": "cache",
+    "mean_retrieval_shortfall": "retr",
+}
+
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 __all__ = [
+    "SHORT_NAMES",
     "compact_display_enabled",
     "extract_evaluator_names",
     "render_composite_block",
     "render_composite_inline",
+    "render_composite_oneliner",
 ]
 
 
@@ -66,11 +91,8 @@ def compact_display_enabled() -> bool:
 def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     """Return evaluator names present in *formula*, in first-appearance order.
 
-    Only names that also appear in *available* are returned. Builtins and
-    bare numbers are filtered out by the intersection with *available* and
-    by the explicit builtin set, so a formula like
-    ``0.5*accuracy + log(1 + latency_norm)`` returns
-    ``["accuracy", "latency_norm"]``.
+    Only names that also appear in *available* are returned. Builtins,
+    bare numbers, and `if/else` keywords are filtered out.
     """
     seen: set[str] = set()
     out: list[str] = []
@@ -88,29 +110,29 @@ def render_composite_inline(composite: float) -> str:
     return f"composite={composite:.4f}"
 
 
-def _wrap(text: str, prefix: str, continuation: str, width: int) -> list[str]:
-    """Wrap *text* across multiple lines preserving *prefix* / *continuation* indents.
+def render_composite_oneliner(composite: float, baseline: float | None = None) -> str:
+    """Per-candidate / per-row 1-line composite render.
 
-    Word-aware: splits on whitespace, re-joins greedily up to *width*. The
-    first line carries *prefix*; continuation lines carry *continuation*.
-    Used so the formula text wraps cleanly inside the box width without
-    truncation.
+    Anchors against the campaign baseline so the operator sees how far
+    the run has come from origin even at round 50. ``baseline=None``
+    (e.g. before init has fired) collapses to ``composite=0.6042``.
     """
-    inner = max(width - max(len(prefix), len(continuation)), 20)
-    words = text.split()
-    if not words:
-        return [prefix.rstrip()]
+    if baseline is None:
+        return f"composite={composite:.4f}"
+    delta = composite - baseline
+    return f"composite={composite:.4f}  (Δ{delta:+.4f} vs baseline {baseline:.4f})"
 
-    lines: list[str] = []
-    current = words[0]
-    for word in words[1:]:
-        if len(current) + 1 + len(word) <= inner:
-            current = f"{current} {word}"
-        else:
-            lines.append(current)
-            current = word
-    lines.append(current)
-    return [f"{prefix}{lines[0]}", *(f"{continuation}{rest}" for rest in lines[1:])]
+
+def _pairs_line(
+    names: list[str],
+    evaluators: dict[str, float],
+    *,
+    use_short_names: bool,
+) -> str:
+    """Format the values line: ``name1=val  name2=val  ...`` with chosen labels."""
+    if use_short_names:
+        return "  ".join(f"{SHORT_NAMES.get(n, n)}={evaluators[n]:.3f}" for n in names)
+    return "  ".join(f"{n}={evaluators[n]:.3f}" for n in names)
 
 
 def render_composite_block(
@@ -118,43 +140,65 @@ def render_composite_block(
     evaluators: dict[str, float] | None,
     formula: str | None,
     *,
-    width: int = 66,
+    baseline: float | None = None,
+    width: int = 70,
+    use_short_names: bool = False,
+    legend: str | None = None,
 ) -> list[str]:
-    """Render the composite block: value + formula + named evaluator pairs.
+    """3-line round-level composite block.
 
-    Output shape (returned as a list of plain strings; callers wrap with
-    box rules / box lines as appropriate):
+    Layout:
+        line 1: ``composite = X.XXXX   baseline=Y.YYYY  Δ+0.103``
+        line 2: ``formula:  <formula>``
+        line 3: ``name1=val  name2=val  ...``  (named evaluators present in
+                 the formula, full names by default; short codes when
+                 ``use_short_names`` is set)
 
-        composite = 0.3667
-        formula:  0.65*accuracy + 0.15*((1-error_rate)+...)
-                  + 0.05*prompt_compactness
-          accuracy=0.167          latency_norm=0.985
-          error_rate=0.000        degraded_rate=0.000
-          prompt_compactness=0.998
+    *legend* (optional) appends a 4th line ``  legend: <text>`` so callers
+    can name the abbreviations they used in *formula*. Skipped when None.
 
-    Falls back to a single-line ``composite=0.3667 (formula unavailable)``
-    when *formula* is None / empty. *evaluators* may be None — the values
-    section is then dropped, only composite + formula text show.
+    Falls back to a single line ``composite=0.6042 (formula unavailable)``
+    when *formula* is None / empty.
+
+    *width* is informational only — used by callers to decide whether to
+    request short names; the function does NOT wrap. If the values line
+    exceeds *width*, it overflows and the caller must pick a wider frame
+    or set ``use_short_names=True``.
     """
+    # Line 1: composite + trajectory anchor
+    line1 = f"composite = {composite:.4f}"
+    if baseline is not None:
+        delta = composite - baseline
+        line1 += f"   baseline={baseline:.4f}  Δ{delta:+.4f}"
+
     if not formula:
-        return [f"composite = {composite:.4f}  (formula unavailable)"]
+        return [f"{line1}  (formula unavailable)"]
 
-    lines = [f"composite = {composite:.4f}"]
-    lines.extend(_wrap(formula, prefix="formula:  ", continuation="          ", width=width))
+    # Line 2: formula text (literal — caller chose short or full)
+    line2 = f"formula:  {formula}"
 
+    # Line 3 (+ optional legend): named evaluator values.
+    #
+    # Full-names mode: list evaluators that literally appear in the formula
+    # text (so a custom formula's namespace gets displayed).
+    #
+    # Short-names mode: the formula carries codes (``acc``, ``H``, ``R``)
+    # that don't match registry full names — list every evaluator from the
+    # dict with its short code. Operator sees the full input vector; the
+    # formula text above tells them which codes apply.
     if not evaluators:
-        return lines
+        return [line1, line2]
 
-    names = extract_evaluator_names(formula, set(evaluators))
+    if use_short_names:
+        names = list(evaluators.keys())
+    else:
+        names = extract_evaluator_names(formula, set(evaluators))
+
     if not names:
-        return lines
+        return [line1, line2]
 
-    pairs = [f"{name}={evaluators[name]:.3f}" for name in names]
-    # Two columns. The wider column drives padding so values align.
-    col_w = max(len(p) for p in pairs) + 2
-    for i in range(0, len(pairs), 2):
-        left = pairs[i].ljust(col_w)
-        right = pairs[i + 1] if i + 1 < len(pairs) else ""
-        lines.append(f"  {left}{right}".rstrip())
-
-    return lines
+    line3 = f"  {_pairs_line(names, evaluators, use_short_names=use_short_names)}"
+    out = [line1, line2, line3]
+    if legend:
+        out.append(f"  legend: {legend}")
+    return out

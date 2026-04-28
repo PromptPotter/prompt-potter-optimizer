@@ -120,6 +120,10 @@ class Cycle:
     best_composite: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
+    # Frozen at ``start()`` — the baseline composite that anchors the
+    # campaign's "origin" for trajectory rendering. Lets renderers print
+    # ``Δ from baseline=0.5012`` even at deep rounds.
+    baseline_composite: float = 0.0
 
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
@@ -176,6 +180,7 @@ class Cycle:
             best_composite=composite,
             best_sp=sp,
             opt_sp=opt_sp,
+            baseline_composite=composite,
         )
         cycle.session = session
         cycle.config = config

@@ -257,10 +257,12 @@ def _render_l1_score_exit(view: dict) -> str:
 
     w_acc = view["winner_accuracy"]
     w_comp = view.get("winner_composite")
-    formula = view.get("composite_formula")
+    formula_full = view.get("composite_formula")
+    formula_short = view.get("composite_formula_short")
+    formula = formula_short or formula_full
     # Inline composite tag: only in compact mode (env-var) or when no
-    # formula is resolvable. Full mode prints a multi-line block under
-    # the verdict line so the operator sees per-evaluator values.
+    # formula is resolvable. Default mode prints the 3-line composite
+    # block under the verdict line.
     show_inline = compact_display_enabled() or not formula
     comp_tag = (
         f"  composite={w_comp:.4f}"
@@ -280,7 +282,13 @@ def _render_l1_score_exit(view: dict) -> str:
         out.append(f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate {w_acc:.1%}{comp_tag}")
 
     if not show_inline and w_comp is not None:
-        for line in render_composite_block(w_comp, view.get("winner_evaluators"), formula):
+        for line in render_composite_block(
+            w_comp,
+            view.get("winner_evaluators"),
+            formula,
+            baseline=view.get("baseline_composite"),
+            use_short_names=bool(formula_short),
+        ):
             out.append(f"  {line}")
 
     if crit := (view.get("l1_critique_text") or "").replace("\n", " ").strip():

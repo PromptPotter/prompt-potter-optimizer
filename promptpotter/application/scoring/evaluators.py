@@ -42,6 +42,7 @@ __all__ = [
     "Evaluator",
     "all_evaluators",
     "default_per_round_formula",
+    "default_per_round_formula_short",
     "materialize_query_values",
     "materialize_round_values",
 ]
@@ -441,3 +442,24 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
         f"0.65 * accuracy + 0.15 * {health_expr} + 0.10 * latency_norm "
         f"+ 0.05 * {recall_expr} + 0.05 * prompt_compactness"
     )
+
+
+def default_per_round_formula_short(schema: PipelineSchema) -> str:
+    """One-line abbreviation of the default per-round formula.
+
+    Sub-expressions collapsed to single letters (``H`` for health, ``R``
+    for recall) so the round-level live render fits in a 70-char node
+    frame at full evaluator names. The legend is rendered alongside the
+    block when needed.
+
+    Returns the same string shape as ``default_per_round_formula`` only
+    when *schema* would otherwise produce the standard 5-term default.
+    Custom formulas (``campaign.json::scoring``) bypass this helper —
+    operators see their literal formula, wrapped if too long.
+    """
+    has_recall = any(
+        ev.node_type in ("candidate_source", "ranker", "cache")
+        for _name, ev, _node in _concrete_round_entries(schema)
+    )
+    recall_token = "R" if has_recall else "acc"
+    return f"0.65*acc + 0.15*H + 0.10*lat + 0.05*{recall_token} + 0.05*pc"
