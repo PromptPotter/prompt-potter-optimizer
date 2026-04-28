@@ -359,16 +359,19 @@ async def run_optimization(
     listener: RunListener | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
-    session_id: str = "",
     display: Any = None,
     langfuse_session_id: str | None = None,
-    cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
     emitter: CampaignPersistenceEmitter | None = None,
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
 ) -> RunResult:
-    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult."""
+    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
+
+    ``session.session_id`` / ``session.cycle_id`` carry the active ids;
+    callers set them before calling. When ``session.session_id`` is empty
+    (notebook entry path), this auto-mints a fresh session+cycle.
+    """
     started_at = datetime.now(UTC).isoformat()
 
     if baseline is None:
@@ -390,7 +393,7 @@ async def run_optimization(
         if display is not None and hasattr(display, "set_baseline"):
             display.set_baseline(baseline.baseline_acc)
 
-    if not session_id:
+    if not session.session_id:
         from promptpotter.application.campaign.campaign_setup import auto_mint_session
         from promptpotter.domain.cycle_identity import cycle_config_identity
 
@@ -403,7 +406,7 @@ async def run_optimization(
         baseline_jsp = baseline_osp.to_job_search_point(
             base_pipeline_params=base_pp, schema=session.pipeline_schema
         )
-        session_id, minted_cycle_id = auto_mint_session(
+        new_session_id, minted_cycle_id = auto_mint_session(
             session,
             campaign_config,
             cycle_hash=cycle_config_identity(baseline_jsp, dataset).removeprefix("cycle_"),
@@ -412,10 +415,9 @@ async def run_optimization(
             dataset_size=len(dataset),
             experiment_id=experiment_id,
         )
-        cycle_id = cycle_id or minted_cycle_id
-    session.session_id = session_id
-    if cycle_id:
-        session.cycle_id = cycle_id
+        session.session_id = new_session_id
+        if not session.cycle_id:
+            session.cycle_id = minted_cycle_id
 
     from promptpotter.application.scoring.formula import split_scoring_block
 
@@ -444,7 +446,7 @@ async def run_optimization(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
         langfuse_session_id=langfuse_session_id,
-        cycle_id=cycle_id,
+        cycle_id=session.cycle_id or None,
         resume_from_round_override=resume_from_round_override,
         experiment_id=experiment_id or "",
         session=session,
@@ -501,7 +503,7 @@ async def run_optimization(
         started_at=started_at,
         finished_at=finished_at,
         cycle_id=session.cycle_id,
-        session_id=session_id or None,
+        session_id=session.session_id or None,
         resumed_from_round=session.resumed_from_round,
     )
     _finalize_run(cycle, session, emitter, run_result, campaign_config)

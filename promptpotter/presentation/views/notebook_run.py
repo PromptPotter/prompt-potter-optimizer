@@ -173,6 +173,11 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
+    if resolved_cycle_id:
+        session.cycle_id = resolved_cycle_id
+    if session_id:
+        session.session_id = session_id
+
     result = await _run_optimization(
         dataset,
         campaign_config,
@@ -180,10 +185,8 @@ async def run_optimization_notebook(
         session=session,
         experiment_id=experiment_id,
         task_context=task_context,
-        session_id=session_id,
         display=display,
         langfuse_session_id=langfuse_session_id,
-        cycle_id=resolved_cycle_id,
     )
 
     if not campaign_rounds:
