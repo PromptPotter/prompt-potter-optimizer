@@ -103,7 +103,7 @@ class LayerTransition:
             llm_client=llm_client,
             model=model,
             temperature=self.default_temperature if temperature is None else temperature,
-            recorder=cycle.session.round_recorder,
+            recorder=cycle.session.state.round_recorder,
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 

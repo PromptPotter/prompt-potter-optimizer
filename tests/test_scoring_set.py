@@ -152,5 +152,5 @@ def test_evolve_scoring_set_does_not_mutate_inputs(enabled: bool) -> None:
         config=cfg,
         elimination_n_min=4,
     )
-    # Inputs untouched — caller is responsible for mutating session.scoring_dataset.
+    # Inputs untouched — caller is responsible for mutating session.scoring.scoring_dataset.
     assert samples == snapshot

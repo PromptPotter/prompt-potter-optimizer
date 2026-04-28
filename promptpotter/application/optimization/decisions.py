@@ -346,29 +346,30 @@ def resume_with_divergence_check(
     from promptpotter.application.scoring.formula import rescore_results
     from promptpotter.shared.errors import ResumeDivergenceError
 
-    assert session.scorer is not None, "session.scorer required for divergence replay"
+    sc = session.scoring
+    assert sc.scorer is not None, "session.scoring.scorer required for divergence replay"
     prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)
     for t in prior:
         rescore_results(
             list(t.get("results") or []),
-            session.scorer,
-            session.scorer_id,
-            session.scorer_formula,
+            sc.scorer,
+            sc.scorer_id,
+            sc.scorer_formula,
         )
         for items in (t.get("all_candidate_results") or {}).values():
             rescore_results(
                 list(items or []),
-                session.scorer,
-                session.scorer_id,
-                session.scorer_formula,
+                sc.scorer,
+                sc.scorer_id,
+                sc.scorer_formula,
             )
 
     baseline_results_rescored = list(cycle.current_results or [])
     rescore_results(
         baseline_results_rescored,
-        session.scorer,
-        session.scorer_id,
-        session.scorer_formula,
+        sc.scorer,
+        sc.scorer_id,
+        sc.scorer_formula,
     )
 
     if not skip_divergence_check:
@@ -408,7 +409,7 @@ def resume_with_divergence_check(
                 recorded_outcome=div.recorded_outcome,
                 current_outcome=div.current_outcome,
                 diagnostics={
-                    "scorer_id": session.scorer_id,
+                    "scorer_id": sc.scorer_id,
                     "fork_hint": (
                         "rerun `optimize --fork-on-divergence` to branch a new "
                         "cycle here under the current scorer"

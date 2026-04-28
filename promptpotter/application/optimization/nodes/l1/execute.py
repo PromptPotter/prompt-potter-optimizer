@@ -75,10 +75,10 @@ async def _generate_or_load_candidates(
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
 
-    if session.cycle_id:
+    if session.state.cycle_id:
         persisted_raw = session.store.campaigns.load_round_candidates(
             session.backend_id,
-            session.cycle_id,
+            session.state.cycle_id,
             round_num,
         )
         if persisted_raw is not None:
@@ -86,7 +86,7 @@ async def _generate_or_load_candidates(
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
             # llm_call never fires on this branch — synthesize l1_generate
             # so dashboard.json + round_NNNN.json don't miss the node.
-            if _rr := session.round_recorder:
+            if _rr := session.state.round_recorder:
                 _rr.set_node(
                     "l1_generate",
                     {
@@ -113,7 +113,7 @@ async def _generate_or_load_candidates(
         f"l1_generate_r{round_num}",
         "llm/meta",
         obs=obs,
-        campaign_id=session.obs_campaign_id,
+        campaign_id=session.state.obs_campaign_id,
         round_num=round_num,
     ):
         candidates = await l1_generate(
@@ -126,10 +126,10 @@ async def _generate_or_load_candidates(
             round_num=round_num,
         )
 
-    if session.cycle_id:
+    if session.state.cycle_id:
         session.store.campaigns.save_round_candidates(
             session.backend_id,
-            session.cycle_id,
+            session.state.cycle_id,
             round_num,
             [cp.model_dump() for cp in candidates],
         )
@@ -159,10 +159,10 @@ async def execute_round(
     session = cycle.session
     config = cycle.config
     opt = config.optimization
-    obs = session.obs
+    obs = session.state.obs
     if obs:
         with graceful("RoundStart emit failed"):
-            obs.emit(RoundStart(campaign_id=session.obs_campaign_id, round_num=round_num))
+            obs.emit(RoundStart(campaign_id=session.state.obs_campaign_id, round_num=round_num))
 
     candidates = await _generate_or_load_candidates(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
@@ -186,7 +186,7 @@ async def execute_round(
         "scoring",
         obs=obs,
         obs_type="span",
-        campaign_id=session.obs_campaign_id,
+        campaign_id=session.state.obs_campaign_id,
         round_num=round_num,
     ):
         scoring_result = await l1_score(
@@ -206,7 +206,7 @@ async def execute_round(
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
-                    campaign_id=session.obs_campaign_id,
+                    campaign_id=session.state.obs_campaign_id,
                     round_num=round_num,
                     winner_candidate_id=str(scoring_result.winner_prompt_fields.get("id") or ""),
                     winner_accuracy=scoring_result.winner_accuracy,
@@ -236,14 +236,14 @@ async def execute_round(
             crit_llm,
             round_num=round_num,
             model=config.optimizer_llm.model,
-            recorder=session.round_recorder,
+            recorder=session.state.round_recorder,
         )
         critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(
                 L1CritiqueWritten,
-                campaign_id=session.obs_campaign_id,
+                campaign_id=session.state.obs_campaign_id,
                 round_num=round_num,
                 l1_critique_text=critique_text,
             )
@@ -275,7 +275,7 @@ async def execute_round(
         with graceful("RoundEnd emit failed"):
             obs.emit(
                 RoundEnd(
-                    campaign_id=session.obs_campaign_id,
+                    campaign_id=session.state.obs_campaign_id,
                     round_num=round_num,
                     accuracy=scoring_result.winner_accuracy,
                     hits=scoring_result.hits,
@@ -293,7 +293,7 @@ async def execute_round(
             w_osp = scoring_result.winner_osp
             obs.emit(
                 PromptVersion(
-                    campaign_id=session.obs_campaign_id,
+                    campaign_id=session.state.obs_campaign_id,
                     round_num=round_num,
                     prompt_fields_id=w_osp.lineage.id,
                     rendered_prompt=w_osp.render(),

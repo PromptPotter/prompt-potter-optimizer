@@ -2,12 +2,12 @@
 
 Guards two invariants:
 
-1. A valid ``scoring_steer.json`` replaces ``session.round_scorer`` and is
-   archived to ``scoring_steer.applied.{ts}.json`` so the next round-end
-   does not re-apply it.
+1. A valid ``scoring_steer.json`` replaces ``session.scoring.round_scorer``
+   and is archived to ``scoring_steer.applied.{ts}.json`` so the next
+   round-end does not re-apply it.
 2. An invalid file (broken formula, undefined name) does NOT corrupt
-   ``session.round_scorer``; the file is left in place for the operator
-   to fix.
+   ``session.scoring.round_scorer``; the file is left in place for the
+   operator to fix.
 """
 
 from __future__ import annotations
@@ -32,11 +32,12 @@ def _make_session(tmp_path: Path) -> SimpleNamespace:
     cycle_dir.mkdir(parents=True)
     campaigns = SimpleNamespace(campaign_dir=lambda _cid: cycle_dir)
     store = SimpleNamespace(campaigns=campaigns)
+    state = SimpleNamespace(cycle_id=cycle_id)
+    scoring = SimpleNamespace(round_scorer=None, scorer_round_formula=None)
     return SimpleNamespace(
-        cycle_id=cycle_id,
+        state=state,
         store=store,
-        round_scorer=None,
-        scorer_round_formula=None,
+        scoring=scoring,
         _cycle_dir=cycle_dir,
     )
 
@@ -53,10 +54,12 @@ def test_valid_steer_swaps_round_scorer_and_archives_file(tmp_path: Path) -> Non
     )
 
     assert applied == "0.5 * accuracy + 0.5 * latency_norm"
-    assert callable(session.round_scorer)
+    assert callable(session.scoring.round_scorer)
     # Quick sanity: the new scorer evaluates against the registry namespace.
-    assert session.round_scorer({"accuracy": 1.0, "latency_norm": 1.0}) == pytest.approx(1.0)
-    assert session.scorer_round_formula == applied
+    assert session.scoring.round_scorer({"accuracy": 1.0, "latency_norm": 1.0}) == pytest.approx(
+        1.0
+    )
+    assert session.scoring.scorer_round_formula == applied
 
     # File archived, not left in place.
     assert not (session._cycle_dir / "scoring_steer.json").exists()
@@ -74,15 +77,15 @@ def test_invalid_steer_leaves_state_untouched(tmp_path: Path) -> None:
 
     session = _make_session(tmp_path)
     sentinel = object()
-    session.round_scorer = sentinel
-    session.scorer_round_formula = "original"
+    session.scoring.round_scorer = sentinel
+    session.scoring.scorer_round_formula = "original"
     _write_steer(session._cycle_dir, {"per_round": "nonexistent_evaluator * 1.0"})
 
     applied = apply_steer_file(session, round_num=0, on_phase=None)
 
     assert applied is None
-    assert session.round_scorer is sentinel  # exact identity preserved
-    assert session.scorer_round_formula == "original"
+    assert session.scoring.round_scorer is sentinel  # exact identity preserved
+    assert session.scoring.scorer_round_formula == "original"
     assert (session._cycle_dir / "scoring_steer.json").exists()  # left for operator
 
 
@@ -91,7 +94,7 @@ def test_no_steer_file_is_noop(tmp_path: Path) -> None:
 
     session = _make_session(tmp_path)
     sentinel = object()
-    session.round_scorer = sentinel
+    session.scoring.round_scorer = sentinel
 
     assert apply_steer_file(session, round_num=0, on_phase=None) is None
-    assert session.round_scorer is sentinel
+    assert session.scoring.round_scorer is sentinel

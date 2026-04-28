@@ -9,7 +9,7 @@ to a composite that values latency. Killing the run, editing
 This module gives the operator a file-drop hot-swap. Drop a JSON file at
 ``campaigns/{cycle_id}/scoring_steer.json`` with a ``{"per_round": "..."}``
 formula. After the next round completes (in :func:`_post_round`), the
-file is consumed: the formula compiles, ``session.round_scorer`` is
+file is consumed: the formula compiles, ``session.scoring.round_scorer`` is
 replaced, the file is renamed to ``scoring_steer.applied.{ts}.json`` for
 audit, and a phase event is emitted.
 
@@ -84,10 +84,10 @@ def apply_steer_file(
     re-apply it. On failure the file is left in place so the operator
     can fix the formula and let it apply on the next round.
     """
-    if not session.cycle_id or session.store is None:
+    if not session.state.cycle_id or session.store is None:
         return None
 
-    cycle_dir = session.store.campaigns.campaign_dir(session.cycle_id)
+    cycle_dir = session.store.campaigns.campaign_dir(session.state.cycle_id)
     steer_path = cycle_dir / STEER_FILENAME
     if not steer_path.exists():
         return None
@@ -102,7 +102,7 @@ def apply_steer_file(
         return None
 
     # Compile + smoke-eval against a small known namespace so a typo
-    # surfaces before we corrupt ``session.round_scorer``. The eval uses
+    # surfaces before we corrupt ``session.scoring.round_scorer``. The eval uses
     # accuracy=0.5 + every namespace name registered in the evaluators
     # registry so undefined-name typos surface as NameError.
     try:
@@ -121,9 +121,9 @@ def apply_steer_file(
         )
         return None
 
-    prev_formula = getattr(session, "scorer_round_formula", None)
-    session.round_scorer = scorer
-    session.scorer_round_formula = formula
+    prev_formula = session.scoring.scorer_round_formula
+    session.scoring.round_scorer = scorer
+    session.scoring.scorer_round_formula = formula
 
     archive = cycle_dir / _archive_name(datetime.now(UTC))
     try:

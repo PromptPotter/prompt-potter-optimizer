@@ -107,13 +107,13 @@ def _init_exit(d: dict, ctx: dict) -> dict:
             overlays[field_name] = str(value)
             ctx["original_sp_flat"][field_name] = str(value)
 
-    cycle_id_short = (session.cycle_id or "?")[:12]
-    samples = len(session.scoring_dataset)
-    obs_on = session.obs is not None
+    cycle_id_short = (session.state.cycle_id or "?")[:12]
+    samples = len(session.scoring.scoring_dataset)
+    obs_on = session.state.obs is not None
     crit = cycle.opt_sp.l1_critique_text or ""
     bootstrap_critique = _truncate(crit.replace("\n", " ").strip(), 80)
 
-    resumed = session.resumed_from_round
+    resumed = session.state.resumed_from_round
     return {
         "baseline_acc": cycle.current_accuracy,
         "cycle_id_short": cycle_id_short,

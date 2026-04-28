@@ -163,7 +163,7 @@ class CampaignPersistenceEmitter:
         # Forks share one continuous dashboard / output.log stream; per-fork
         # audit (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
         # stays in each cycle's own dir, written through dynamic
-        # ``session.cycle_id`` paths.
+        # ``session.state.cycle_id`` paths.
         self.root_dir = root_dir
         self.state_path = root_dir / "dashboard.json"
         self.log_path = root_dir / "output.log"
@@ -277,7 +277,7 @@ class CampaignPersistenceEmitter:
             cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
-            s["cycle_id"] = loop_env.cycle_id
+            s["cycle_id"] = loop_env.state.cycle_id
             s["baseline"] = cycle.current_accuracy
             self._patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self._patience_max}"

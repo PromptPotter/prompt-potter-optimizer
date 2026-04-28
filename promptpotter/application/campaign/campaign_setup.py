@@ -39,6 +39,8 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CampaignState",
+    "ScoringContext",
     "Session",
     "auto_mint_session",
     "init_optimization_loop",
@@ -49,9 +51,63 @@ __all__ = [
 
 
 @dataclass
-class Session:
-    """Session-scoped identity + wire-up + loop-cycle infra + scoring."""
+class ScoringContext:
+    """Per-cycle scoring policy + the active scoring set.
 
+    The compiled per-query ``scorer`` and per-round ``round_scorer`` plus
+    their source formulas (kept for audit + the interactive
+    ``scoring_steer.json`` hot-swap), the active ``scoring_dataset``
+    slice, the ``sample_index`` digest, and the ``degradation_checks``
+    that travel with the scoring set. All eight fields are populated
+    after Session is built, in ``populate_session_scoring`` and
+    ``init_optimization_loop`` — Session is constructed before the
+    active config's scoring block compiles.
+    """
+
+    scorer: Scorer | None = None
+    scorer_id: str = "none"
+    scorer_formula: str | None = None
+    round_scorer: RoundScorer | None = None
+    # ``None`` = registry default; otherwise the formula string — kept so
+    # ``scoring_steer.json`` can record what it replaced.
+    scorer_round_formula: str | None = None
+    scoring_dataset: list[Sample] = field(default_factory=list)
+    sample_index: SampleIndex | None = None
+    degradation_checks: list[DegradationCheck] = field(default_factory=list)
+
+
+@dataclass
+class CampaignState:
+    """Per-cycle mutable state — bound when ``init_optimization_loop`` fires.
+
+    ``cycle_id`` and ``obs_campaign_id`` flip on fork; ``obs`` and
+    ``round_recorder`` rebind to the new fork's directories.
+    ``resumed_from_round`` records where the loop picked up.
+    Wiring stays directly on ``Session`` and is shared across all
+    cycles minted under one Session lifetime.
+    """
+
+    cycle_id: str = ""
+    obs_campaign_id: str = ""
+    resumed_from_round: int = 0
+    obs: ObservabilityBridge | None = None
+    round_recorder: RoundRecorder | None = None
+
+
+@dataclass
+class Session:
+    """Session-scoped identity + wire-up + loop-cycle infra + scoring.
+
+    Field groups (top-down):
+    - Wiring: store + backend client + pipeline schema/params + dataset
+      (set at ``init_services`` time; mostly immutable thereafter).
+    - ``session_id`` + ``experiment_id``: session-stable identity.
+    - ``state``: per-cycle mutable bundle (``CampaignState``).
+    - ``scoring``: per-cycle scoring policy (``ScoringContext``).
+    - Runtime config + lifecycle hook.
+    """
+
+    # -- Wiring ----------------------------------------------------------
     store: Stores
     backend_id: str
     experiment_id: str
@@ -63,31 +119,22 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
     dataset_name: str | None = None
-    session_id: str = ""
-    cycle_id: str = ""
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
 
-    obs_campaign_id: str = ""
-    scoring_dataset: list[Sample] = field(default_factory=list)
-    degradation_checks: list[DegradationCheck] = field(default_factory=list)
-    resumed_from_round: int = 0
+    # -- Identity --------------------------------------------------------
+    session_id: str = ""
 
-    obs: ObservabilityBridge | None = None
-    round_recorder: RoundRecorder | None = None
-    # Populated after bootstrap — Session is built before the active config's scoring block compiles.
-    scorer: Scorer | None = None
-    scorer_id: str = "none"
-    scorer_formula: str | None = None
-    round_scorer: RoundScorer | None = None
-    # Source string for the active per-round formula. Tracked alongside
-    # ``round_scorer`` so the interactive ``scoring_steer.json`` hot-swap
-    # can record what it replaced. ``None`` = registry default.
-    scorer_round_formula: str | None = None
+    # -- Per-cycle bundles ----------------------------------------------
+    state: CampaignState = field(default_factory=CampaignState)
+    scoring: ScoringContext = field(default_factory=ScoringContext)
+
+    # -- Runtime config --------------------------------------------------
     max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
-    sample_index: SampleIndex | None = None
     source: str = ""
+
+    # -- Lifecycle hook --------------------------------------------------
     stop_check: Callable[[], bool] | None = None
 
 
@@ -114,17 +161,17 @@ def populate_session_scoring(
     session.experiment_id = experiment_id or (
         cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
     )
-    session.obs = obs
+    session.state.obs = obs
     session.source = source
     session.max_consecutive_errors = max_consecutive_errors
     session.stale_data_load_protocol = stale_data_load_protocol
-    session.scorer = compile_scorer(scoring_formula)
-    session.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
-    session.scorer_formula = scoring_formula
-    session.round_scorer = (
+    session.scoring.scorer = compile_scorer(scoring_formula)
+    session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
+    session.scoring.scorer_formula = scoring_formula
+    session.scoring.round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
-    session.scorer_round_formula = scoring_round_formula
+    session.scoring.scorer_round_formula = scoring_round_formula
 
 
 def new_session_state(
@@ -191,120 +238,102 @@ def auto_mint_session(
     return session_id, cycle_id
 
 
-async def init_services(
-    backend_url: str = DEFAULT_BACKEND_URL,
-    backend_id: str = "",
-    experiment_id: str = DEFAULT_EXPERIMENT_ID,
-    project_root: Path | None = None,
-    dataset_name: str | None = None,
-    on_status: Callable[[str], None] | None = None,
-    take_over: bool = False,
-    tenant_id: str = "default",
-) -> Session:
-    """Init store, client, pipeline schema, scoring data. Refuses tenant drift unless take_over=True."""
-    from promptpotter.application.datasets.builder import DATASET_LOADERS, samples_from_dicts
-    from promptpotter.application.pipeline_discovery import parse_pipeline_response
+def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str], None]) -> None:
+    """Refuse tenant drift unless ``take_over=True``; clears pointer when taking over.
+
+    The smoke tool / notebook is sessionless by design (M9 gap), so when
+    taking over we clear the pointer entirely rather than writing a
+    partial one that downstream ``load_session()`` would mis-resolve.
+    """
     from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
     from promptpotter.shared.errors import ActiveSessionMismatchError
 
-    def status(msg: str) -> None:
-        if on_status:
-            on_status(msg)
-
-    if not backend_id:
-        backend_id = dataset_name or DEFAULT_BACKEND_ID
-    if project_root is None:
-        # campaign/campaign_setup.py → services → promptpotter → repo_root
-        project_root = Path(__file__).resolve().parent.parent.parent.parent
-
-    store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
-
-    # Tenant-drift guardrail. The smoke tool / notebook is sessionless by design
-    # (M9 gap), so when taking over we clear the pointer entirely rather than
-    # writing a partial one that downstream load_session() would mis-resolve.
     active_tid, active_sid, _ = read_active_pointer()
-    if active_tid and active_tid != tenant_id:
-        if not take_over:
-            raise ActiveSessionMismatchError(
-                active_tenant_id=active_tid,
-                active_session_id=active_sid,
-                requested_tenant_id=tenant_id,
-            )
-        clear_active_pointer()
-        status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
+    if not (active_tid and active_tid != tenant_id):
+        return
+    if not take_over:
+        raise ActiveSessionMismatchError(
+            active_tenant_id=active_tid,
+            active_session_id=active_sid,
+            requested_tenant_id=tenant_id,
+        )
+    clear_active_pointer()
+    status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
-    pipeline_schema: PipelineSchema | None = None
+
+async def _resolve_pipeline_schema(
+    client: BackendClient,
+    project_root: Path,
+    dataset_name: str | None,
+    status: Callable[[str], None],
+) -> PipelineSchema | None:
+    """Resolve the active pipeline schema: static ``datasets/{name}/pipeline.json`` first,
+    fall back to the backend's ``GET /pipeline``.  Returns ``None`` when both fail."""
+    from promptpotter.application.pipeline_discovery import parse_pipeline_response
+
     if dataset_name:
         cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
         if cfg_path.exists():
             try:
-                pipeline_schema = parse_pipeline_response(
-                    json.loads(cfg_path.read_text(encoding="utf-8"))
-                )
-                status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
+                schema = parse_pipeline_response(json.loads(cfg_path.read_text(encoding="utf-8")))
+                status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
+                return schema
             except Exception as exc:
                 logger.warning("Failed to parse static pipeline.json: %s", exc)
-                pipeline_schema = None
 
-    client = BackendClient(backend_url)
-    status(f"Backend: {backend_url}")
+    try:
+        schema = parse_pipeline_response(await client.fetch_pipeline())
+        status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
+        return schema
+    except (KeyboardInterrupt, asyncio.CancelledError):
+        raise
+    except Exception as exc:
+        logger.info("Could not fetch pipeline schema: %s", exc)
+        status("Pipeline: unavailable")
+        return None
 
-    if not pipeline_schema:
-        try:
-            pipeline_schema = parse_pipeline_response(await client.fetch_pipeline())
-            status(f"Pipeline: {pipeline_schema.name} ({len(pipeline_schema.nodes)} nodes)")
-        except (KeyboardInterrupt, asyncio.CancelledError):
-            raise
-        except Exception as exc:
-            logger.info("Could not fetch pipeline schema: %s", exc)
-            status("Pipeline: unavailable")
-            pipeline_schema = None
 
-    if not store.backends.get(backend_id):
-        store.backends.register(
-            BackendConnection(
-                id=backend_id,
-                name=pipeline_schema.name if pipeline_schema else "Unknown",
-                backend_type="backend" if pipeline_schema else "unknown",
-                base_url=backend_url,
-            )
+def _load_dataset_into_session(
+    session: Session, dataset_name: str, status: Callable[[str], None]
+) -> None:
+    """Populate ``session.queries`` + ``session.index_terms`` from the dataset store
+    (or the ``DATASET_LOADERS`` registry on first use). Raises when neither resolves."""
+    from promptpotter.application.datasets.builder import DATASET_LOADERS, samples_from_dicts
+
+    ds = session.store.backends.load_dataset(dataset_name)
+    if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
+        status(f"Loading dataset '{dataset_name}' from registry ...")
+        loader_items = DATASET_LOADERS[dataset_name]()
+        session.store.backends.save_dataset(dataset_name, loader_items)
+        ds = {"items": loader_items}
+
+    if not (ds and ds.get("items")):
+        status(f"Dataset '{dataset_name}' not available")
+        raise ValueError(
+            f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
+            f"Add a loader to DATASET_LOADERS in dataset_builder.py."
         )
 
-    base = Session(
-        store=store,
-        backend_id=backend_id,
-        experiment_id=experiment_id,
-        backend_client=client,
-        pipeline_schema=pipeline_schema,
-        synced=False,
-        dataset_name=dataset_name,
-        tenant=TenantContext(tenant_id=tenant_id),
-        project_root=str(store.base_dir),
-    )
+    items = ds["items"]
+    valid = [item for item in items if item.get("query") and item.get("ground_truth")]
+    session.queries = samples_from_dicts(valid)
+    session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
+    status(f"Dataset: {dataset_name} ({len(items)} queries)")
 
-    if dataset_name:
-        ds = base.store.backends.load_dataset(dataset_name)
-        if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
-            status(f"Loading dataset '{dataset_name}' from registry ...")
-            loader_items = DATASET_LOADERS[dataset_name]()
-            base.store.backends.save_dataset(dataset_name, loader_items)
-            ds = {"items": loader_items}
 
-        if not (ds and ds.get("items")):
-            status(f"Dataset '{dataset_name}' not available")
-            raise ValueError(
-                f"Dataset {dataset_name!r} not found in DatasetStore or DATASET_LOADERS. "
-                f"Add a loader to DATASET_LOADERS in dataset_builder.py."
-            )
+async def _sync_and_extract_experiment(
+    session: Session,
+    backend_url: str,
+    experiment_id: str,
+    status: Callable[[str], None],
+) -> None:
+    """Populate ``session.queries`` + ``session.index_terms`` + ``experiment_extract`` from
+    the experiment trace. Auto-syncs from the backend if the on-disk extract is missing
+    or trace-less. Logs a warning + returns silently when no data is available."""
+    from promptpotter.application.datasets.builder import samples_from_dicts
 
-        items = ds["items"]
-        valid = [item for item in items if item.get("query") and item.get("ground_truth")]
-        base.queries = samples_from_dicts(valid)
-        base.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
-        status(f"Dataset: {dataset_name} ({len(items)} queries)")
-        return base
-
-    extract = base.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
+    backend_id = session.backend_id
+    extract = session.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
     has_traces = bool(extract and extract.get("runs") and extract["runs"][0].get("traces"))
 
     if not extract or not has_traces:
@@ -312,10 +341,10 @@ async def init_services(
         logger.info("%s — syncing from %s ...", reason, backend_url)
         status(f"Syncing experiment {experiment_id} ...")
         try:
-            extract = await client.sync_experiment(
-                base.store, backend_id, experiment_id, include_traces=True
+            extract = await session.backend_client.sync_experiment(
+                session.store, backend_id, experiment_id, include_traces=True
             )
-            base.synced = True
+            session.synced = True
             status("Sync complete")
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
@@ -329,11 +358,11 @@ async def init_services(
             "Downstream calls will fail until data is synced or datasets are loaded."
         )
         status("WARNING: No experiment data available")
-        return base
+        return
 
     from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS
 
-    schema_key = base.pipeline_schema.name.lower() if base.pipeline_schema else ""
+    schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
     if extractor:
         queries, index_terms = extractor(extract)
@@ -351,44 +380,83 @@ async def init_services(
     exp_name = extract.get("experiment", {}).get("name", experiment_id)
     status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
-    base.queries = samples_from_dicts(queries)
-    base.experiment_extract = extract
-    base.index_terms = index_terms
-    return base
+    session.queries = samples_from_dicts(queries)
+    session.experiment_extract = extract
+    session.index_terms = index_terms
 
 
-async def init_optimization_loop(
-    baseline: CampaignBaseline,
-    dataset: list[Sample],
+async def init_services(
+    backend_url: str = DEFAULT_BACKEND_URL,
+    backend_id: str = "",
+    experiment_id: str = DEFAULT_EXPERIMENT_ID,
+    project_root: Path | None = None,
+    dataset_name: str | None = None,
+    on_status: Callable[[str], None] | None = None,
+    take_over: bool = False,
+    tenant_id: str = "default",
+) -> Session:
+    """Init store, client, pipeline schema, scoring data. Refuses tenant drift unless ``take_over=True``."""
+
+    def status(msg: str) -> None:
+        if on_status:
+            on_status(msg)
+
+    if not backend_id:
+        backend_id = dataset_name or DEFAULT_BACKEND_ID
+    if project_root is None:
+        # campaign/campaign_setup.py → services → promptpotter → repo_root
+        project_root = Path(__file__).resolve().parent.parent.parent.parent
+
+    store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
+    _apply_tenant_guard(tenant_id, take_over, status)
+
+    client = BackendClient(backend_url)
+    status(f"Backend: {backend_url}")
+
+    pipeline_schema = await _resolve_pipeline_schema(client, project_root, dataset_name, status)
+
+    if not store.backends.get(backend_id):
+        store.backends.register(
+            BackendConnection(
+                id=backend_id,
+                name=pipeline_schema.name if pipeline_schema else "Unknown",
+                backend_type="backend" if pipeline_schema else "unknown",
+                base_url=backend_url,
+            )
+        )
+
+    session = Session(
+        store=store,
+        backend_id=backend_id,
+        experiment_id=experiment_id,
+        backend_client=client,
+        pipeline_schema=pipeline_schema,
+        synced=False,
+        dataset_name=dataset_name,
+        tenant=TenantContext(tenant_id=tenant_id),
+        project_root=str(store.base_dir),
+    )
+
+    if dataset_name:
+        _load_dataset_into_session(session, dataset_name, status)
+    else:
+        await _sync_and_extract_experiment(session, backend_url, experiment_id, status)
+    return session
+
+
+async def _emit_preflight_and_init_session(
     config: CampaignConfig,
-    *,
+    dataset: list[Sample],
     cb: RunListener,
-    task_context: TaskDecomposition,
-    scoring_formula: str | None,
-    scoring_round_formula: str | None,
-    scorer_id: str,
-    no_divergence_check: bool,
-    fork_on_divergence: bool,
-    langfuse_session_id: str | None,
-    cycle_id: str | None,
-    resume_from_round_override: int | None,
-    experiment_id: str,
     session: Session,
-    started_at: str,
-) -> Cycle:
-    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
-    from promptpotter.application.campaign.config import run_preflight_checks
-    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
-    from promptpotter.application.datasets.builder import sample_dataset
-    from promptpotter.application.intelligence.axis_index import AxisIndex
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.decisions import resume_with_divergence_check
-    from promptpotter.application.optimization.elimination import build_degradation_checks
-    from promptpotter.application.scoring.formula import compile_round_scorer
-    from promptpotter.domain.phases import CampaignPhase, emit_phase
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+) -> None:
+    """Run preflight checks, emit ``INIT.enter``, and call backend init_session.
 
-    opt = config.optimization
+    Side-effects only.
+    """
+    from promptpotter.application.campaign.config import run_preflight_checks
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
+
     preflight_warnings = run_preflight_checks(config, dataset)
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -404,9 +472,31 @@ async def init_optimization_loop(
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
+
+
+def _build_cycle_and_bootstrap(
+    baseline: CampaignBaseline,
+    task_context: TaskDecomposition,
+    scoring_round_formula: str | None,
+    session: Session,
+    config: CampaignConfig,
+    dataset: list[Sample],
+    cycle_id: str | None,
+    resume_from_round_override: int | None,
+) -> tuple[Cycle, OptSearchPoint, str | None, int]:
+    """Build the baseline ``OptSearchPoint`` + ``Cycle.start`` and bootstrap cycle storage.
+
+    Returns ``(cycle, baseline_osp, resolved_cycle_id, resumed_from_round)``.
+    The ``baseline_osp`` is returned so the resume/fork stage can register
+    its prompt alias without re-deriving it. Raises ``ValueError`` when
+    ``baseline.baseline_ps`` is missing — required for OSP construction.
+    """
+    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.scoring.formula import compile_round_scorer
+
     if baseline.baseline_ps is None:
         raise ValueError("baseline.baseline_ps is required; run baseline scoring first.")
-
     baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
     baseline_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
@@ -436,7 +526,31 @@ async def init_optimization_loop(
         parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
     )
+    return cycle, baseline_osp, resolved_cycle_id, resumed_from_round
 
+
+def _start_observability_and_scoring(
+    session: Session,
+    config: CampaignConfig,
+    baseline: CampaignBaseline,
+    dataset: list[Sample],
+    *,
+    resolved_cycle_id: str | None,
+    started_at: str,
+    langfuse_session_id: str | None,
+    experiment_id: str,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None,
+    scorer_id: str,
+) -> tuple[str, ObservabilityBridge | None]:
+    """Start the ObservabilityBridge for this cycle and populate scoring on ``session``.
+
+    Returns ``(obs_campaign_id, obs)``. ``obs`` may be ``None`` when the
+    bridge can't be built (no project_root/backend_id, or graceful failure).
+    """
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
+
+    opt = config.optimization
     obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
         session.project_root,
@@ -447,7 +561,6 @@ async def init_optimization_loop(
         obs_campaign_id=obs_campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
-
     populate_session_scoring(
         session,
         obs=obs,
@@ -459,6 +572,24 @@ async def init_optimization_loop(
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
     )
+    return obs_campaign_id, obs
+
+
+def _apply_resume_fork(
+    session: Session,
+    cycle: Cycle,
+    baseline: CampaignBaseline,
+    baseline_osp: OptSearchPoint,
+    resolved_cycle_id: str | None,
+    resumed_from_round: int,
+    *,
+    no_divergence_check: bool,
+    fork_on_divergence: bool,
+) -> tuple[str | None, int]:
+    """Replay decisions on resume; fork on divergence when configured. Register the
+    baseline prompt alias. Returns the (possibly rebound) ``(cycle_id, resumed_from_round)``.
+    """
+    from promptpotter.application.optimization.decisions import resume_with_divergence_check
 
     if resumed_from_round > 0 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
@@ -478,21 +609,40 @@ async def init_optimization_loop(
         session.store.archive.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()
         )
+    return resolved_cycle_id, resumed_from_round
+
+
+def _finalize_loop_state(
+    cycle: Cycle,
+    session: Session,
+    config: CampaignConfig,
+    dataset: list[Sample],
+    cb: RunListener,
+    *,
+    resolved_cycle_id: str | None,
+    obs_campaign_id: str,
+    resumed_from_round: int,
+) -> None:
+    """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
+    from promptpotter.application.datasets.builder import sample_dataset
+    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.optimization.elimination import build_degradation_checks
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     cycle.axes = AxisIndex.ensure_for(
         session.store,
         session.backend_id,
-        scorer=session.scorer,
-        scorer_id=session.scorer_id,
-        scorer_formula=session.scorer_formula,
+        scorer=session.scoring.scorer,
+        scorer_id=session.scoring.scorer_id,
+        scorer_formula=session.scoring.scorer_formula,
     )
 
     if resolved_cycle_id:
-        session.cycle_id = resolved_cycle_id
-    session.obs_campaign_id = obs_campaign_id
-    session.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
-    session.degradation_checks = build_degradation_checks(config)
-    session.resumed_from_round = resumed_from_round
+        session.state.cycle_id = resolved_cycle_id
+    session.state.obs_campaign_id = obs_campaign_id
+    session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
+    session.scoring.degradation_checks = build_degradation_checks(config)
+    session.state.resumed_from_round = resumed_from_round
 
     emit_phase(
         cb.on_phase,
@@ -502,5 +652,75 @@ async def init_optimization_loop(
         env=session,
         config=config,
         dataset=dataset,
+    )
+
+
+async def init_optimization_loop(
+    baseline: CampaignBaseline,
+    dataset: list[Sample],
+    config: CampaignConfig,
+    *,
+    cb: RunListener,
+    task_context: TaskDecomposition,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None,
+    scorer_id: str,
+    no_divergence_check: bool,
+    fork_on_divergence: bool,
+    langfuse_session_id: str | None,
+    cycle_id: str | None,
+    resume_from_round_override: int | None,
+    experiment_id: str,
+    session: Session,
+    started_at: str,
+) -> Cycle:
+    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
+    await _emit_preflight_and_init_session(config, dataset, cb, session)
+
+    cycle, baseline_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+        baseline,
+        task_context,
+        scoring_round_formula,
+        session,
+        config,
+        dataset,
+        cycle_id,
+        resume_from_round_override,
+    )
+
+    obs_campaign_id, _obs = _start_observability_and_scoring(
+        session,
+        config,
+        baseline,
+        dataset,
+        resolved_cycle_id=resolved_cycle_id,
+        started_at=started_at,
+        langfuse_session_id=langfuse_session_id,
+        experiment_id=experiment_id,
+        scoring_formula=scoring_formula,
+        scoring_round_formula=scoring_round_formula,
+        scorer_id=scorer_id,
+    )
+
+    resolved_cycle_id, resumed_from_round = _apply_resume_fork(
+        session,
+        cycle,
+        baseline,
+        baseline_osp,
+        resolved_cycle_id,
+        resumed_from_round,
+        no_divergence_check=no_divergence_check,
+        fork_on_divergence=fork_on_divergence,
+    )
+
+    _finalize_loop_state(
+        cycle,
+        session,
+        config,
+        dataset,
+        cb,
+        resolved_cycle_id=resolved_cycle_id,
+        obs_campaign_id=obs_campaign_id,
+        resumed_from_round=resumed_from_round,
     )
     return cycle

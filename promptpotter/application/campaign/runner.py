@@ -112,12 +112,167 @@ async def _escalate_or_stop(
         session.pipeline_schema,
         round_num,
         cb.on_phase,
-        obs=session.obs,
-        obs_campaign_id=session.obs_campaign_id,
+        obs=session.state.obs,
+        obs_campaign_id=session.state.obs_campaign_id,
         escalation_check_result=escalation_check_result,
     )
     if stop:
         raise StopLoop(stop)
+
+
+def _advance_l1_stall(cycle: Cycle, round_result: RoundResult, cb: RunListener) -> None:
+    """Bump (or reset) the L1 stall counter, clear volatile state on improvement, fan out."""
+    cycle.escalation.l1_stall_count = (
+        0 if round_result.improved else cycle.escalation.l1_stall_count + 1
+    )
+    if round_result.improved:
+        cycle.opt_sp.clear_volatile()
+    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
+
+
+def _persist_round(
+    cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
+) -> None:
+    """Flush pending decisions onto the round, write trial + log.md, flush recorder."""
+    if cycle.pending_decisions:
+        round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
+
+    if session.state.cycle_id:
+        with graceful("Round checkpoint failed"):
+            session.store.campaigns.add_trial(
+                session.backend_id,
+                session.state.cycle_id,
+                cycle.checkpoint(round_result, round_num),
+            )
+        _write_log_md(session)
+
+    if _rr := session.state.round_recorder:
+        _rr.flush()
+
+
+def _refresh_axes_and_filter(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    dataset: list[Sample],
+    round_num: int,
+    cb: RunListener,
+) -> None:
+    """Refresh AxisIndex from the archive, then prune zero-signal queries when enabled.
+
+    The zero-signal filter is round-boundary mutation #1: it physically
+    moves always-hit/always-miss queries to ``datasets/{name}.json::excluded``
+    once an axis has ≥ N observations, and drops them from the active
+    scoring set in memory.
+    """
+    if not cycle.axes:
+        return
+
+    if session.store and session.backend_id:
+        cycle.axes.refresh(
+            session.store,
+            session.backend_id,
+            scorer=session.scoring.scorer,
+            scorer_id=session.scoring.scorer_id,
+            scorer_formula=session.scoring.scorer_formula,
+        )
+
+    zsf = config.optimization.zero_signal_filter_enabled
+    dataset_name = session.dataset_name
+    if not (zsf and dataset_name and session.store is not None):
+        return
+
+    with graceful("Zero-signal filter failed"):
+        excluded = apply_zero_signal_exclusions(
+            store=session.store,
+            dataset_name=dataset_name,
+            axes=cycle.axes,
+            active_dataset=dataset,
+            min_observations=config.optimization.zero_signal_filter_min_observations,
+            campaign_id=session.state.cycle_id or "",
+        )
+        if not excluded:
+            return
+        excl_q = {e["query"] for e in excluded}
+        session.scoring.scoring_dataset[:] = [
+            s for s in session.scoring.scoring_dataset if s.query not in excl_q
+        ]
+        always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
+        emit_phase(
+            cb.on_phase,
+            "zero_signal_filter",
+            "applied",
+            round=round_num,
+            count=len(excluded),
+            always_miss=always_miss,
+            always_hit=len(excluded) - always_miss,
+            examples=[e["query"] for e in excluded[:3]],
+            dataset_name=dataset_name,
+        )
+
+
+def _evolve_scoring_set_if_enabled(
+    cycle: Cycle,
+    round_result: RoundResult,
+    round_num: int,
+    dataset: list[Sample],
+    config: CampaignConfig,
+    session: Session,
+    cb: RunListener,
+) -> None:
+    """Round-boundary mutation #2: Rasch + KG swap on the active scoring set.
+
+    Off by default. Trades understood samples for high-info samples in
+    ``session.scoring.scoring_dataset`` (in-memory only — never disk).
+    """
+    ss_cfg = config.optimization.scoring_set
+    if not (ss_cfg.enabled and cycle.rounds):
+        return
+
+    from promptpotter.application.intelligence.scoring_set import (
+        build_scoring_set_event,
+        evolve_scoring_set,
+    )
+
+    with graceful("ScoringSet evolve failed"):
+        ss_result = evolve_scoring_set(
+            full_dataset=dataset,
+            current_scoring_set=session.scoring.scoring_dataset,
+            rounds=cycle.rounds,
+            config=ss_cfg,
+            elimination_n_min=config.optimization.elimination_n_min,
+        )
+        if not (ss_result.swapped_in or ss_result.swapped_out):
+            return
+        session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
+        event = build_scoring_set_event(round_num=round_num, result=ss_result)
+        round_result.scoring_set_events.append(event)
+        emit_phase(
+            cb.on_phase,
+            "scoring_set",
+            "evolved",
+            round=round_num,
+            swapped_out=event["swapped_out"],
+            swapped_in=event["swapped_in"],
+            new_scoring_set_size=event["new_scoring_set_size"],
+        )
+
+
+async def _check_stop_or_escalate(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    round_num: int,
+    cb: RunListener,
+) -> None:
+    """Raise ``StopLoop`` on perfect/patience, or trigger L2 escalation when stalled."""
+    if cycle.current_accuracy >= 1.0:
+        raise StopLoop(StopReason.PERFECT)
+    if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
+        if not config.optimization.enable_l2:
+            raise StopLoop(StopReason.PATIENCE)
+        await _escalate_or_stop(cycle, config, session, round_num, cb)
+        cycle.escalation.l1_stall_count = 0
 
 
 async def _post_round(
@@ -130,28 +285,8 @@ async def _post_round(
     cb: RunListener,
 ) -> None:
     """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
-    cycle.escalation.l1_stall_count = (
-        0 if round_result.improved else cycle.escalation.l1_stall_count + 1
-    )
-    if round_result.improved:
-        cycle.opt_sp.clear_volatile()
-
-    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
-
-    if cycle.pending_decisions:
-        round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
-
-    if session.cycle_id:
-        with graceful("Round checkpoint failed"):
-            session.store.campaigns.add_trial(
-                session.backend_id,
-                session.cycle_id,
-                cycle.checkpoint(round_result, round_num),
-            )
-        _write_log_md(session)
-
-    if _rr := session.round_recorder:
-        _rr.flush()
+    _advance_l1_stall(cycle, round_result, cb)
+    _persist_round(cycle, round_result, round_num, session)
 
     # Operator-driven composite-score steering: hot-swap the per-round
     # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
@@ -160,83 +295,9 @@ async def _post_round(
     with graceful("Scoring steer apply failed"):
         apply_steer_file(session, round_num, cb.on_phase)
 
-    if cycle.axes:
-        if session.store and session.backend_id:
-            cycle.axes.refresh(
-                session.store,
-                session.backend_id,
-                scorer=session.scorer,
-                scorer_id=session.scorer_id,
-                scorer_formula=session.scorer_formula,
-            )
-        # Prune always-hit/always-miss queries from the active set.
-        zsf = config.optimization.zero_signal_filter_enabled
-        dataset_name = session.dataset_name
-        if zsf and dataset_name and session.store is not None:
-            with graceful("Zero-signal filter failed"):
-                excluded = apply_zero_signal_exclusions(
-                    store=session.store,
-                    dataset_name=dataset_name,
-                    axes=cycle.axes,
-                    active_dataset=dataset,
-                    min_observations=config.optimization.zero_signal_filter_min_observations,
-                    campaign_id=session.cycle_id or "",
-                )
-                if excluded:
-                    excl_q = {e["query"] for e in excluded}
-                    session.scoring_dataset[:] = [
-                        s for s in session.scoring_dataset if s.query not in excl_q
-                    ]
-                    always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
-                    emit_phase(
-                        cb.on_phase,
-                        "zero_signal_filter",
-                        "applied",
-                        round=round_num,
-                        count=len(excluded),
-                        always_miss=always_miss,
-                        always_hit=len(excluded) - always_miss,
-                        examples=[e["query"] for e in excluded[:3]],
-                        dataset_name=dataset_name,
-                    )
-
-    # Rasch + KG swap of the active scoring set.
-    ss_cfg = config.optimization.scoring_set
-    if ss_cfg.enabled and cycle.rounds:
-        from promptpotter.application.intelligence.scoring_set import (
-            build_scoring_set_event,
-            evolve_scoring_set,
-        )
-
-        with graceful("ScoringSet evolve failed"):
-            ss_result = evolve_scoring_set(
-                full_dataset=dataset,
-                current_scoring_set=session.scoring_dataset,
-                rounds=cycle.rounds,
-                config=ss_cfg,
-                elimination_n_min=config.optimization.elimination_n_min,
-            )
-            if ss_result.swapped_in or ss_result.swapped_out:
-                session.scoring_dataset[:] = ss_result.new_scoring_set
-                event = build_scoring_set_event(round_num=round_num, result=ss_result)
-                round_result.scoring_set_events.append(event)
-                emit_phase(
-                    cb.on_phase,
-                    "scoring_set",
-                    "evolved",
-                    round=round_num,
-                    swapped_out=event["swapped_out"],
-                    swapped_in=event["swapped_in"],
-                    new_scoring_set_size=event["new_scoring_set_size"],
-                )
-
-    if cycle.current_accuracy >= 1.0:
-        raise StopLoop(StopReason.PERFECT)
-    if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
-        if not config.optimization.enable_l2:
-            raise StopLoop(StopReason.PATIENCE)
-        await _escalate_or_stop(cycle, config, session, round_num, cb)
-        cycle.escalation.l1_stall_count = 0
+    _refresh_axes_and_filter(cycle, config, session, dataset, round_num, cb)
+    _evolve_scoring_set_if_enabled(cycle, round_result, round_num, dataset, config, session, cb)
+    await _check_stop_or_escalate(cycle, config, session, round_num, cb)
 
 
 async def _run_round_loop(
@@ -249,8 +310,8 @@ async def _run_round_loop(
     """Execute the round loop: generate → score → escalate → stop."""
     opt = config.optimization
     hard_cap = opt.hard_cap
-    round_num = session.resumed_from_round
-    clean_rounds = session.resumed_from_round
+    round_num = session.state.resumed_from_round
+    clean_rounds = session.state.resumed_from_round
     max_rounds = opt.max_rounds or 999
 
     try:
@@ -261,7 +322,8 @@ async def _run_round_loop(
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:
-                round_eval_data, round_checks = session.scoring_dataset, session.degradation_checks
+                round_eval_data = session.scoring.scoring_dataset
+                round_checks = session.scoring.degradation_checks
 
             logger.debug(
                 "Round %d (clean=%d/%d, acc=%.3f, stall=%d/%d%s)",
@@ -274,7 +336,7 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            if _rr := session.round_recorder:
+            if _rr := session.state.round_recorder:
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
@@ -327,10 +389,10 @@ async def _run_round_loop(
                     )
                 elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
                     raise StopLoop(StopReason.ABORT)
-                if session.cycle_id:
+                if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
                         session.backend_id,
-                        session.cycle_id,
+                        session.state.cycle_id,
                         round_num + 1,
                     )
                 emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
@@ -359,16 +421,19 @@ async def run_optimization(
     listener: RunListener | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
-    session_id: str = "",
     display: Any = None,
     langfuse_session_id: str | None = None,
-    cycle_id: str | None = None,
     resume_from_round_override: int | None = None,
     emitter: CampaignPersistenceEmitter | None = None,
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
 ) -> RunResult:
-    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult."""
+    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
+
+    ``session.session_id`` / ``session.state.cycle_id`` carry the active ids;
+    callers set them before calling. When ``session.session_id`` is empty
+    (notebook entry path), this auto-mints a fresh session+cycle.
+    """
     started_at = datetime.now(UTC).isoformat()
 
     if baseline is None:
@@ -390,7 +455,7 @@ async def run_optimization(
         if display is not None and hasattr(display, "set_baseline"):
             display.set_baseline(baseline.baseline_acc)
 
-    if not session_id:
+    if not session.session_id:
         from promptpotter.application.campaign.campaign_setup import auto_mint_session
         from promptpotter.domain.cycle_identity import cycle_config_identity
 
@@ -403,7 +468,7 @@ async def run_optimization(
         baseline_jsp = baseline_osp.to_job_search_point(
             base_pipeline_params=base_pp, schema=session.pipeline_schema
         )
-        session_id, minted_cycle_id = auto_mint_session(
+        new_session_id, minted_cycle_id = auto_mint_session(
             session,
             campaign_config,
             cycle_hash=cycle_config_identity(baseline_jsp, dataset).removeprefix("cycle_"),
@@ -412,10 +477,9 @@ async def run_optimization(
             dataset_size=len(dataset),
             experiment_id=experiment_id,
         )
-        cycle_id = cycle_id or minted_cycle_id
-    session.session_id = session_id
-    if cycle_id:
-        session.cycle_id = cycle_id
+        session.session_id = new_session_id
+        if not session.state.cycle_id:
+            session.state.cycle_id = minted_cycle_id
 
     from promptpotter.application.scoring.formula import split_scoring_block
 
@@ -430,7 +494,7 @@ async def run_optimization(
 
     cb = listener if listener is not None else RunListener(display=display)
 
-    pre_loop_cycle_id = session.cycle_id
+    pre_loop_cycle_id = session.state.cycle_id
 
     cycle = await init_optimization_loop(
         baseline,
@@ -444,7 +508,7 @@ async def run_optimization(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
         langfuse_session_id=langfuse_session_id,
-        cycle_id=cycle_id,
+        cycle_id=session.state.cycle_id or None,
         resume_from_round_override=resume_from_round_override,
         experiment_id=experiment_id or "",
         session=session,
@@ -452,20 +516,22 @@ async def run_optimization(
     )
 
     # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
-    # minted a new fork cycle and updated ``session.cycle_id``. The emitter
+    # minted a new fork cycle and updated ``session.state.cycle_id``. The emitter
     # is family-root-anchored so its telemetry paths stay correct, but the
     # ``RoundRecorder`` writes ``.cache/rounds/round_NNN.json`` per cycle and
     # must be rebuilt to point at the fork's own dir. Output.log gets a
     # banner so the operator can see the cutover inline.
-    forked = pre_loop_cycle_id and session.cycle_id and pre_loop_cycle_id != session.cycle_id
-    if forked and session.cycle_id and session.store is not None:
+    forked = (
+        pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
+    )
+    if forked and session.state.cycle_id and session.store is not None:
         from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
         new_rounds_dir = (
-            session.store.campaigns.campaign_dir(session.cycle_id) / ".cache" / "rounds"
+            session.store.campaigns.campaign_dir(session.state.cycle_id) / ".cache" / "rounds"
         )
-        session.round_recorder = RoundRecorder(new_rounds_dir)
-        session.round_recorder.rehydrate_sticky()
+        session.state.round_recorder = RoundRecorder(new_rounds_dir)
+        session.state.round_recorder.rehydrate_sticky()
 
     if emitter is None:
         from promptpotter.application.campaign.data import build_campaign_emitter
@@ -474,15 +540,15 @@ async def run_optimization(
             session,
             campaign_config,
             baseline_accuracy=baseline.baseline_acc,
-            resumed_from_round=session.resumed_from_round,
-            recorder=session.round_recorder,
+            resumed_from_round=session.state.resumed_from_round,
+            recorder=session.state.round_recorder,
         )
-    elif forked and session.cycle_id and pre_loop_cycle_id:
-        emitter._recorder = session.round_recorder
+    elif forked and session.state.cycle_id and pre_loop_cycle_id:
+        emitter._recorder = session.state.round_recorder
         emitter.log_fork(
             old_cycle_id=pre_loop_cycle_id,
-            new_cycle_id=session.cycle_id,
-            from_round=session.resumed_from_round or 0,
+            new_cycle_id=session.state.cycle_id,
+            from_round=session.state.resumed_from_round or 0,
         )
     cb.emitter = emitter
 
@@ -500,9 +566,9 @@ async def run_optimization(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
-        cycle_id=session.cycle_id,
-        session_id=session_id or None,
-        resumed_from_round=session.resumed_from_round,
+        cycle_id=session.state.cycle_id,
+        session_id=session.session_id or None,
+        resumed_from_round=session.state.resumed_from_round,
     )
     _finalize_run(cycle, session, emitter, run_result, campaign_config)
     return run_result
@@ -519,13 +585,13 @@ def _finalize_run(
     render ``log.md`` (with the hard-samples heatmap inlined when the sorter
     ran), finalize the emitter. Mutates ``run_result.langfuse_trace_id``."""
     stop_reason = run_result.stop_reason
-    if session.cycle_id:
+    if session.state.cycle_id:
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
         }
         session.store.campaigns.mark_finished(
             session.backend_id,
-            session.cycle_id,
+            session.state.cycle_id,
             status=status_map.get(stop_reason, "completed"),
             stop_reason=stop_reason,
             best_accuracy=run_result.best_accuracy,
@@ -534,10 +600,10 @@ def _finalize_run(
             finished_at=run_result.finished_at,
         )
 
-    obs = session.obs
+    obs = session.state.obs
     if obs:
         obs.end_campaign(
-            session.obs_campaign_id,
+            session.state.obs_campaign_id,
             best_accuracy=run_result.best_accuracy,
             n_rounds=run_result.n_rounds,
             stop_reason=stop_reason,
@@ -547,10 +613,10 @@ def _finalize_run(
     run_result.langfuse_trace_id = (
         None
         if stop_reason == StopReason.INTERRUPTED or obs is None
-        else obs.get_langfuse_trace_id(session.obs_campaign_id)
+        else obs.get_langfuse_trace_id(session.state.obs_campaign_id)
     )
 
-    if session.cycle_id:
+    if session.state.cycle_id:
         with graceful("Final summary write failed"):
             from promptpotter.application.scoring.evaluators import (
                 default_per_round_formula,
@@ -558,8 +624,8 @@ def _finalize_run(
             )
 
             schema = session.pipeline_schema
-            if session.scorer_round_formula:
-                formula_full: str | None = session.scorer_round_formula
+            if session.scoring.scorer_round_formula:
+                formula_full: str | None = session.scoring.scorer_round_formula
                 formula_short: str | None = None
             elif schema is not None:
                 formula_full = default_per_round_formula(schema)
@@ -574,7 +640,7 @@ def _finalize_run(
             final_block["baseline_composite"] = baseline_composite
             session.store.campaigns.update(
                 session.backend_id,
-                session.cycle_id,
+                session.state.cycle_id,
                 {"final": final_block},
             )
 
@@ -589,7 +655,7 @@ def _finalize_run(
             with graceful("Hard-sample artifact build failed"):
                 artifact = build_hard_samples_artifact(
                     cycle.rounds,
-                    cycle_id=session.cycle_id,
+                    cycle_id=session.state.cycle_id,
                     top_k_candidates=hs_cfg.top_k_candidates,
                     top_k_samples=hs_cfg.top_k_samples,
                 )
@@ -600,18 +666,20 @@ def _finalize_run(
 def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
     """Render ``campaigns/{cycle_id}/log.md`` from index + trials. Pure derived
     view; wrapped in ``graceful()`` so a render bug never breaks the run."""
-    if not session.cycle_id or session.store is None:
+    if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        index = store.load(session.backend_id, session.cycle_id)
+        index = store.load(session.backend_id, session.state.cycle_id)
         if not index:
             return
         n_trials = int(index.get("n_trials", 0) or 0)
         trials = (
-            store.load_trials_range(session.backend_id, session.cycle_id, 0, n_trials - 1)
+            store.load_trials_range(session.backend_id, session.state.cycle_id, 0, n_trials - 1)
             if n_trials
             else []
         )
         content = render_log_md(index, trials, hard_samples_artifact=hard_samples_artifact)
-        (store.campaign_dir(session.cycle_id) / "log.md").write_text(content, encoding="utf-8")
+        (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
+            content, encoding="utf-8"
+        )

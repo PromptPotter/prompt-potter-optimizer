@@ -40,6 +40,13 @@ from promptpotter.presentation.cli.session import (
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.campaign.runner import RunListener
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
+    from promptpotter.infrastructure.persistence.session_emitter import (
+        CampaignPersistenceEmitter,
+    )
+    from promptpotter.presentation.cli.session import SessionCtx
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -238,7 +245,7 @@ def _mint_session_and_cycle(
         init_params["backend_id"], cycle_id, {"parent_session_id": session_id}
     )
     session.session_id = session_id
-    session.cycle_id = cycle_id
+    session.state.cycle_id = cycle_id
     return session_id
 
 
@@ -428,44 +435,28 @@ _DIVERGENCE_HINT = (
 )
 
 
-async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
-    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
-    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
+def _prepare_cycle_for_optimize(
+    args: argparse.Namespace,
+    ctx: SessionCtx,
+    session: Session,
+    campaign_config: CampaignConfig,
+    train_data: list,
+) -> tuple[dict, OptSearchPoint]:
+    """Resolve cycle context: drift-detect + auto-mint + ``--from`` validation.
+
+    Pipeline divergence-detect: if pipeline.json (model, temperature, …),
+    baseline prompt, or dataset changed since the active session was
+    init'd, the recomputed cycle hash no longer matches the pointer's
+    cycle_id. Auto-mint a fresh session+cycle so a model swap starts a
+    new campaign root instead of silently mixing measurements from the
+    old model. Mutates ``ctx`` (cycle_id / session_id / state) in place.
+    Returns ``(pipeline_params, baseline)`` for the emitter.
     """
-    from promptpotter.application.campaign.data import build_campaign_emitter
-    from promptpotter.application.campaign.runner import (
-        RunListener,
-    )
-    from promptpotter.application.campaign.runner import (
-        run_optimization as _orch_run_optimization,
-    )
-    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
-    from promptpotter.shared.errors import ResumeDivergenceError
-
-    ctx = load_session(args)
-    campaign_config = ctx.campaign_config
-    session = await init_services_cli(**ctx.init_params)
-    session.session_id = ctx.session_id
-    session.cycle_id = ctx.cycle_id
-
-    status = await session.backend_client.check_status()
-    if status.get("status") == "unreachable":
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
-        )
-
-    train_data = session.queries or []
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
     pipeline_params, baseline_now, expected_cycle_id = _prepare_cycle(
         session, campaign_config, train_data
     )
 
-    # Pipeline divergence-detect: if pipeline.json (model, temperature, …), baseline
-    # prompt, or dataset changed since the active session was init'd, the recomputed
-    # cycle hash will no longer match the pointer's cycle_id. Auto-mint a fresh
-    # session+cycle so a model swap starts a new campaign root instead of silently
-    # mixing measurements from the old model.
     minted_fresh = False
     if ctx.cycle_id and resume_from_round is None and expected_cycle_id != ctx.cycle_id:
         old_cycle_id = ctx.cycle_id
@@ -498,6 +489,76 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     elif ctx.cycle_id and not minted_fresh:
         logger.info("Resuming cycle %s", ctx.cycle_id)
 
+    return pipeline_params, baseline_now
+
+
+def _build_run_observers(
+    args: argparse.Namespace,
+    session: Session,
+    campaign_config: CampaignConfig,
+    campaign_dir: Path,
+    baseline_acc: float,
+) -> tuple[RunListener, CampaignPersistenceEmitter, RoundRecorder]:
+    """Wire recorder + emitter + display + listener.
+
+    Built BEFORE baseline so the dashboard ticks through the BASELINE
+    phase and per-query output reaches the terminal. Without this, the
+    CLI goes dark for the entire BASELINE phase. Recorder is built first
+    so the emitter can hold a direct reference (no callback indirection).
+    Side-effect: assigns the recorder to ``session.state.round_recorder``.
+    """
+    from promptpotter.application.campaign.data import build_campaign_emitter
+    from promptpotter.application.campaign.runner import RunListener as _RunListener
+    from promptpotter.infrastructure.persistence.round_recorder import (
+        RoundRecorder as _RoundRecorder,
+    )
+
+    recorder = _RoundRecorder(campaign_dir / ".cache" / "rounds")
+    recorder.rehydrate_sticky()
+    session.state.round_recorder = recorder
+
+    emitter = build_campaign_emitter(
+        session,
+        campaign_config,
+        baseline_accuracy=baseline_acc,
+        resumed_from_round=getattr(args, "resume_from_round", None),
+        recorder=recorder,
+    )
+    display = _build_live_display(
+        args, session=session, campaign_config=campaign_config, baseline_acc=baseline_acc
+    )
+    listener = _RunListener(emitter=emitter, display=display)
+    return listener, emitter, recorder
+
+
+async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
+    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
+    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
+    """
+    from promptpotter.application.campaign.runner import (
+        run_optimization as _orch_run_optimization,
+    )
+    from promptpotter.shared.errors import ResumeDivergenceError
+
+    ctx = load_session(args)
+    campaign_config = ctx.campaign_config
+    session = await init_services_cli(**ctx.init_params)
+
+    status = await session.backend_client.check_status()
+    if status.get("status") == "unreachable":
+        return CommandResult(
+            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
+            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
+        )
+
+    train_data = session.queries or []
+    pipeline_params, _baseline = _prepare_cycle_for_optimize(
+        args, ctx, session, campaign_config, train_data
+    )
+    # ctx may have been re-minted; bind the now-resolved ids onto session.
+    session.session_id = ctx.session_id
+    session.state.cycle_id = ctx.cycle_id
+
     log_startup_summary(
         session,
         pipeline_params,
@@ -510,26 +571,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     logger.info("Session: %s", session_dir)
     logger.info("Campaign: %s", campaign_dir)
 
-    # Build emitter + display BEFORE baseline so the dashboard ticks through the
-    # BASELINE phase and per-query output reaches the terminal. Without this, the
-    # CLI goes dark for the entire BASELINE phase. Recorder is built first so the
-    # emitter can hold a direct reference (no callback indirection).
-    recorder = RoundRecorder(campaign_dir / ".cache" / "rounds")
-    recorder.rehydrate_sticky()
-    session.round_recorder = recorder
-
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
-    emitter = build_campaign_emitter(
-        session,
-        campaign_config,
-        baseline_accuracy=pre_baseline_acc,
-        resumed_from_round=resume_from_round,
-        recorder=recorder,
+    listener, emitter, _recorder = _build_run_observers(
+        args, session, campaign_config, campaign_dir, pre_baseline_acc
     )
-    display = _build_live_display(
-        args, session=session, campaign_config=campaign_config, baseline_acc=pre_baseline_acc
-    )
-    listener = RunListener(emitter=emitter, display=display)
 
     ctx.save_phase("optimizing")
 
@@ -541,10 +586,8 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             listener=listener,
             experiment_id=ctx.state["experiment_id"],
             task_context=ctx.task_context,
-            session_id=ctx.session_id,
-            display=display,
-            cycle_id=ctx.cycle_id,
-            resume_from_round_override=resume_from_round,
+            display=listener.display,
+            resume_from_round_override=getattr(args, "resume_from_round", None),
             emitter=emitter,
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=getattr(args, "fork_on_divergence", False),
