@@ -48,20 +48,53 @@ def render_sp_diff(view: dict) -> str:
     """Render N-column diff table from a ``sp_diff`` view-dict.
 
     ``view`` shape: ``{"columns": [{"label": str, "flat": dict[str,str]}], ...
-    "node_param_keys": dict | None, "round_num": int | None}``
+    "node_param_keys": dict | None, "round_num": int | None,
+    "clone_labels": list[str] | None, "l1_n_no_op": int | None,
+    "l1_n_duplicate": int | None, "l1_yield": float | None}``
     """
     columns_in = view.get("columns") or []
     if len(columns_in) < 2:
         return ""
 
-    columns: list[tuple[str, dict[str, str]]] = [(c["label"], c["flat"]) for c in columns_in]
+    clone_labels = set(view.get("clone_labels") or [])
+    columns: list[tuple[str, dict[str, str]]] = [
+        (
+            f"{c['label']}[clone]" if c["label"] in clone_labels else c["label"],
+            c["flat"],
+        )
+        for c in columns_in
+    ]
     node_param_keys = view.get("node_param_keys")
     round_num = view.get("round_num")
+    n_no_op = int(view.get("l1_n_no_op", 0) or 0)
+    n_duplicate = int(view.get("l1_n_duplicate", 0) or 0)
+    l1_yield = float(view.get("l1_yield", 1.0) or 1.0)
+
+    warning_lines: list[str] = []
+    if n_no_op or n_duplicate:
+        n_total = sum(1 for c in columns_in if c["label"].startswith("C"))
+        n_valid = max(0, n_total - n_no_op - n_duplicate)
+        bits: list[str] = []
+        if n_no_op:
+            bits.append(f"{n_no_op} no-op")
+        if n_duplicate:
+            bits.append(f"{n_duplicate} duplicate")
+        bits_text = " / ".join(bits)
+        cl_text = f" ({', '.join(sorted(clone_labels))})" if clone_labels else ""
+        warning_lines.append(
+            _node_line(
+                f"{YELLOW}⚠ L1 produced {bits_text} variant(s){cl_text} — "
+                f"synthetic-zeroed (no API cost). yield={l1_yield:.0%} "
+                f"({n_valid}/{n_total} valid).{RESET}"
+            )
+        )
 
     all_keys = {k for _, d in columns for k in d}
     diff_keys = sorted(k for k in all_keys if len({d.get(k) for _, d in columns}) > 1)
     if not diff_keys:
-        return ""
+        # Even with no diffable axes, surface the warning so a fully-cloned
+        # batch can never read as a silent no-op round.
+        return "\n".join(warning_lines) if warning_lines else ""
 
     lookup: dict[str, str] = {}
     legend: list[tuple[str, str]] = []
@@ -112,7 +145,7 @@ def render_sp_diff(view: dict) -> str:
         )
         col_w.append(max(label_w, cell_w) + 2)
 
-    out: list[str] = []
+    out: list[str] = list(warning_lines)
     r_label = f"Round {round_num}" if round_num is not None else "SPs"
     out.append(_node_line(f"{CYAN}{r_label} SPs:{RESET}"))
     hdr = f"{'':>{max_key}}  " + "".join(

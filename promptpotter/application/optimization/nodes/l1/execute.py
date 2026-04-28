@@ -12,6 +12,10 @@ from promptpotter.application.optimization.nodes.l1.critique import (
     run_l1_critique,
 )
 from promptpotter.application.optimization.nodes.l1.generate import l1_generate
+from promptpotter.application.optimization.nodes.l1.measure import (
+    L1YieldStats,
+    detect_invariants,
+)
 from promptpotter.application.optimization.nodes.l1.score import l1_score
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import CandidateProposal, RoundResult
@@ -47,8 +51,8 @@ async def _generate_or_load_candidates(
     n_eval_queries: int = 0,
     *,
     obs: ObservabilityBridge | None = None,
-) -> list[CandidateProposal]:
-    """Load persisted candidates or generate fresh ones via LLM."""
+) -> tuple[list[CandidateProposal], L1YieldStats]:
+    """Load persisted candidates or generate fresh ones via LLM; detect no-op + duplicate variants."""
     session = cycle.session
     config = cycle.config
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
@@ -84,6 +88,7 @@ async def _generate_or_load_candidates(
         if persisted_raw is not None:
             persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
+            yield_stats = detect_invariants(persisted, cycle.opt_sp)
             # llm_call never fires on this branch — synthesize l1_generate
             # so dashboard.json + round_NNNN.json don't miss the node.
             if _rr := session.state.round_recorder:
@@ -103,8 +108,11 @@ async def _generate_or_load_candidates(
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=True,
                 candidates=candidate_summaries(persisted),
+                l1_yield=yield_stats.yield_,
+                l1_n_no_op=yield_stats.n_no_op,
+                l1_n_duplicate=yield_stats.n_duplicate,
             )
-            return persisted
+            return persisted, yield_stats
 
     logger.debug("No persisted candidates for round %d — generating fresh", round_num)
 
@@ -126,6 +134,8 @@ async def _generate_or_load_candidates(
             round_num=round_num,
         )
 
+    yield_stats = detect_invariants(candidates, cycle.opt_sp)
+
     if session.state.cycle_id:
         session.store.campaigns.save_round_candidates(
             session.backend_id,
@@ -143,9 +153,12 @@ async def _generate_or_load_candidates(
         n_eval_queries=n_eval_queries,
         loaded_from_disk=False,
         candidates=candidate_summaries(candidates),
+        l1_yield=yield_stats.yield_,
+        l1_n_no_op=yield_stats.n_no_op,
+        l1_n_duplicate=yield_stats.n_duplicate,
     )
 
-    return candidates
+    return candidates, yield_stats
 
 
 async def execute_round(
@@ -164,7 +177,7 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.obs_campaign_id, round_num=round_num))
 
-    candidates = await _generate_or_load_candidates(
+    candidates, yield_stats = await _generate_or_load_candidates(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
     )
 
@@ -201,6 +214,7 @@ async def execute_round(
             elimination_n_min=opt.elimination_n_min,
             elimination_alpha=opt.elimination_alpha,
             round_num=round_num,
+            yield_stats=yield_stats,
         )
         if obs and scoring_result.candidate_scores:
             with graceful("RoundWinnerChosen emit failed"):
@@ -269,6 +283,9 @@ async def execute_round(
         deprecated=scoring_result.deprecated,
         escalation_signal=scoring_result.escalation_signal,
         evaluators=scoring_result.winner_evaluators,
+        l1_yield=scoring_result.l1_yield,
+        l1_n_no_op=scoring_result.l1_n_no_op,
+        l1_n_duplicate=scoring_result.l1_n_duplicate,
     )
 
     if obs:

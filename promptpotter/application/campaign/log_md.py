@@ -191,6 +191,18 @@ def render_log_md(
             parts.append(f"- changes: {changes}")
         if directive := (osp.get("l2_directive") or "").strip():
             parts.append(f"- L2 directive: {directive}")
+        l1_yield = float(trial.get("l1_yield", 1.0) or 1.0)
+        if l1_yield < 1.0:
+            n_no_op = int(trial.get("l1_n_no_op", 0) or 0)
+            n_dup = int(trial.get("l1_n_duplicate", 0) or 0)
+            n_total = int(trial.get("candidates_scored", 0) or 0)
+            n_valid = max(0, n_total - n_no_op - n_dup)
+            bits: list[str] = []
+            if n_no_op:
+                bits.append(f"{n_no_op} no-op")
+            if n_dup:
+                bits.append(f"{n_dup} dup")
+            parts.append(f"- L1 yield: {n_valid}/{n_total} ({', '.join(bits)})")
         composite_block = render_composite_block(
             trial.get("composite", 0.0) or 0.0,
             dict(trial.get("evaluators") or {}),

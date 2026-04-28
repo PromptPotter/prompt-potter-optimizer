@@ -180,17 +180,34 @@ def _l1_generate_exit(d: dict, ctx: dict) -> dict:
         {"label": "Parent", "flat": dict(ctx.get("current_sp_flat") or {})},
     ]
     parent = ctx.get("current_sp_flat") or {}
+    clone_labels: list[str] = []
     for c in ctx["candidates_meta"]:
-        columns.append({"label": f"C{c['idx'] + 1}", "flat": build_candidate_flat(parent, c)})
+        label = f"C{c['idx'] + 1}"
+        flat = build_candidate_flat(parent, c)
+        if flat == parent:
+            clone_labels.append(label)
+        columns.append({"label": label, "flat": flat})
+
+    l1_yield = float(d.get("l1_yield", 1.0))
+    l1_n_no_op = int(d.get("l1_n_no_op", 0))
+    l1_n_duplicate = int(d.get("l1_n_duplicate", 0))
 
     return {
         "n_candidates": n,
         "source": source,
         "n_scoring_queries": ctx["n_scoring_queries"],
+        "l1_yield": l1_yield,
+        "l1_n_no_op": l1_n_no_op,
+        "l1_n_duplicate": l1_n_duplicate,
+        "clone_labels": clone_labels,
         "sp_diff": {
             "columns": columns,
             "node_param_keys": ctx.get("node_param_keys"),
             "round_num": ctx.get("round_num", 0) + 1,
+            "clone_labels": clone_labels,
+            "l1_yield": l1_yield,
+            "l1_n_no_op": l1_n_no_op,
+            "l1_n_duplicate": l1_n_duplicate,
         },
     }
 

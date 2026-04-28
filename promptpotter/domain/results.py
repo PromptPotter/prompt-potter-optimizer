@@ -159,6 +159,14 @@ class RoundDiagnostics(BaseModel):
     # trial JSON so post-hoc renderers can walk the trial list and
     # reconstruct the full event log.
     scoring_set_events: list[dict] = Field(default_factory=list)
+    # L1 generation quality — fraction of variants that proposed a non-empty
+    # unique mutation, plus the per-failure-class counts. Defaults preserve
+    # the "all valid" state for rounds where the detector is bypassed
+    # (resume / cache replay). Surfaced as the ``l1_diversity`` evaluator
+    # on each candidate so ``compile_scorer(formula)`` can weight it.
+    l1_yield: float = 1.0
+    l1_n_no_op: int = 0
+    l1_n_duplicate: int = 0
 
 
 class RoundResult(RoundMetadata, RoundDiagnostics):

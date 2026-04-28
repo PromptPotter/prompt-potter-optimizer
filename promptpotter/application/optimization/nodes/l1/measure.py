@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import logging
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.decisions import Decision, record_decision
@@ -14,12 +15,14 @@ from promptpotter.domain.analysis import (
     EscalationSignal,
     EscalationTarget,
     RuntimeFailure,
+    ValidationFailure,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal, CandidateScore
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.infrastructure.tracing.events import CandidateScored
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -28,7 +31,94 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["parse_population", "score_population"]
+__all__ = ["L1YieldStats", "detect_invariants", "parse_population", "score_population"]
+
+
+@dataclass(frozen=True)
+class L1YieldStats:
+    """Round-level L1 generation quality, computed from per-candidate signatures."""
+
+    yield_: float  # n_valid / n_proposed (1.0 when no proposals)
+    n_no_op: int
+    n_duplicate: int
+
+
+def _candidate_mutation_signature(
+    child: OptSearchPoint, parent: OptSearchPoint, node_overrides: dict | None
+) -> tuple:
+    """Canonical signature of the LLM-emitted delta vs parent. Empty signature == no-op."""
+    pf_delta = tuple(
+        (f, getattr(child, f))
+        for f in PROMPT_STRING_FIELDS
+        if getattr(child, f) != getattr(parent, f)
+    )
+    parent_tc = parent.task_context.to_dict()
+    child_tc = child.task_context.to_dict()
+    tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
+    no_canon = tuple(
+        sorted((n, tuple(sorted(p.items()))) for n, p in (node_overrides or {}).items() if p)
+    )
+    return (pf_delta, tc_delta, no_canon)
+
+
+_INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
+
+
+def detect_invariants(
+    proposals: list[CandidateProposal], parent_osp: OptSearchPoint
+) -> L1YieldStats:
+    """Attach ``ValidationFailure`` to no-op / duplicate variants; return round-level stats.
+
+    A candidate is a *no-op* when its mutation signature vs ``parent_osp`` is
+    empty (every prompt field, task-context entry, and node-override matches
+    parent). A *duplicate* signature equals one already seen earlier in the
+    batch. Failures attach to ``cp.osp.validation_failures`` so the existing
+    synthetic-0 path (``score_population`` Path 1) skips scoring with zero
+    LLM cost; L2 ingests them next round (Rail 1) and the resulting
+    ``l2_directive`` teaches L1 to diversify.
+
+    Idempotent: pre-existing ``no_op_variant`` / ``duplicate_variant``
+    entries are dropped before the pass so resume-from-disk doesn't
+    accumulate duplicates.
+    """
+    for cp in proposals:
+        cp.osp.validation_failures = [
+            vf for vf in cp.osp.validation_failures if vf.reason not in _INVARIANT_REASONS
+        ]
+    seen: dict[tuple, int] = {}
+    n_no_op = 0
+    n_duplicate = 0
+    for i, cp in enumerate(proposals):
+        sig = _candidate_mutation_signature(cp.osp, parent_osp, cp.node_overrides)
+        if not any(sig):
+            cp.osp.validation_failures = [
+                *cp.osp.validation_failures,
+                ValidationFailure(
+                    axis="variant",
+                    value="(no mutation)",
+                    allowed=["non-empty mutation"],
+                    reason="no_op_variant",
+                ),
+            ]
+            n_no_op += 1
+            continue
+        if sig in seen:
+            twin = seen[sig]
+            cp.osp.validation_failures = [
+                *cp.osp.validation_failures,
+                ValidationFailure(
+                    axis="variant",
+                    value=f"duplicate of C{twin + 1}",
+                    allowed=["unique mutation"],
+                    reason="duplicate_variant",
+                ),
+            ]
+            n_duplicate += 1
+            continue
+        seen[sig] = i
+    n = len(proposals)
+    yield_ = (n - n_no_op - n_duplicate) / n if n else 1.0
+    return L1YieldStats(yield_=yield_, n_no_op=n_no_op, n_duplicate=n_duplicate)
 
 
 def _merge_pipeline_params(
@@ -95,8 +185,10 @@ def _build_score_report(
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
+    l1_diversity: float = 1.0,
 ) -> CandidateScore:
     """Build the typed candidate score report — stable shape, defaults always present."""
+    evaluators = {**(scores.get("evaluators") or {}), "l1_diversity": l1_diversity}
     return CandidateScore(
         candidate_id=osp.lineage.id,
         changes_description=osp.lineage.changes_description or "",
@@ -105,7 +197,7 @@ def _build_score_report(
         composite=scores.get("composite", scores["accuracy"]),
         hits=scores["hits"],
         total=scores["total"],
-        evaluators=dict(scores.get("evaluators") or {}),
+        evaluators=evaluators,
         escalation_aborted=aborted,
         elimination_stopped=elimination_stopped,
         scored_queries=len(results),
@@ -138,6 +230,8 @@ def _handle_scored_candidate(
     dataset: list,
     elim_check: Any,
     round_num: int,
+    *,
+    l1_diversity: float = 1.0,
 ) -> tuple[CandidateScore, EscalationSignal | None]:
     """Build report for a scored candidate; attach RuntimeFailure on elimination (Rail 2)."""
     elimination_stopped = (
@@ -206,6 +300,7 @@ def _handle_scored_candidate(
         elimination_stopped=elimination_stopped,
         elimination_context=elim_ctx,
         new_runtime_failure=new_rf,
+        l1_diversity=l1_diversity,
     )
     residual = None if (elimination_stopped or not signal) else signal
     return report, residual
@@ -267,6 +362,7 @@ async def score_population(
     elimination_alpha: float = 0.2,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
+    l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryResult]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
@@ -302,7 +398,15 @@ async def score_population(
             all_candidate_results[osp_c.lineage.id] = []
             _fire(
                 idx,
-                _build_score_report(osp_c, override, _INVALID_SCORES, [], dataset, invalid=True),
+                _build_score_report(
+                    osp_c,
+                    override,
+                    _INVALID_SCORES,
+                    [],
+                    dataset,
+                    invalid=True,
+                    l1_diversity=l1_diversity,
+                ),
             )
             continue
 
@@ -325,6 +429,7 @@ async def score_population(
             candidate_idx=idx,
             n_total_candidates=n,
             axes=cycle.axes,
+            l1_diversity=l1_diversity,
         )
         all_candidate_results[osp_c.lineage.id] = results
 
@@ -336,7 +441,13 @@ async def score_population(
             _fire(
                 idx,
                 _build_score_report(
-                    osp_c, override, scores, results, dataset, resumed_from_cache=True
+                    osp_c,
+                    override,
+                    scores,
+                    results,
+                    dataset,
+                    resumed_from_cache=True,
+                    l1_diversity=l1_diversity,
                 ),
             )
             continue
@@ -344,7 +455,16 @@ async def score_population(
         # Path 3 — scored. Snapshot priors BEFORE helper registers this candidate.
         priors_at_test = list(elim_check.prior_ids)
         report, residual = _handle_scored_candidate(
-            osp_c, override, results, scores, signal, merged_pp[idx], dataset, elim_check, round_num
+            osp_c,
+            override,
+            results,
+            scores,
+            signal,
+            merged_pp[idx],
+            dataset,
+            elim_check,
+            round_num,
+            l1_diversity=l1_diversity,
         )
         if (
             signal is not None

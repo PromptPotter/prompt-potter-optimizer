@@ -66,9 +66,10 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
                 "type": "object",
                 "properties": override_properties,
                 "additionalProperties": False,
+                "minProperties": 1,
             },
         },
-        "required": ["variant_name", "changes_description"],
+        "required": ["variant_name", "changes_description", "pipeline_params_override"],
         "additionalProperties": False,
     }
 

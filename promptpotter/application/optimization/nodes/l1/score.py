@@ -8,6 +8,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.optimization.decisions import Decision, record_decision
 from promptpotter.application.optimization.nodes.l1.measure import (
+    L1YieldStats,
     parse_population,
     score_population,
 )
@@ -52,6 +53,9 @@ class L1ScoringResult(BaseModel):
     deprecated: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
     decisions: list[Decision] = Field(default_factory=list)
+    l1_yield: float = 1.0
+    l1_n_no_op: int = 0
+    l1_n_duplicate: int = 0
 
 
 async def l1_score(
@@ -67,6 +71,7 @@ async def l1_score(
     elimination_n_min: int = 4,
     elimination_alpha: float = 0.2,
     round_num: int = 0,
+    yield_stats: L1YieldStats,
 ) -> L1ScoringResult:
     """Score candidates and select the round winner (compares fitness, not composite)."""
     session = cycle.session
@@ -87,6 +92,7 @@ async def l1_score(
         elimination_alpha=elimination_alpha,
         round_num=round_num,
         decisions=decisions,
+        l1_diversity=yield_stats.yield_,
     )
 
     aborted_ids = {
@@ -112,6 +118,7 @@ async def l1_score(
             schema,
             opt_sp=ind,
             round_scorer=session.scoring.round_scorer,
+            l1_diversity=yield_stats.yield_,
         )
         if s["accuracy"] > best_acc:
             best_acc = s["accuracy"]
@@ -156,4 +163,7 @@ async def l1_score(
         deprecated=base["deprecated"],
         winner_evaluators=best_scores,
         decisions=decisions,
+        l1_yield=yield_stats.yield_,
+        l1_n_no_op=yield_stats.n_no_op,
+        l1_n_duplicate=yield_stats.n_duplicate,
     )

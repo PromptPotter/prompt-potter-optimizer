@@ -226,6 +226,7 @@ def compute_pipeline_metrics(
     *,
     opt_sp: Any = None,
     round_scorer: RoundScorer | str | None = None,
+    l1_diversity: float = 1.0,
 ) -> dict[str, Any]:
     """Compute round-level metrics from the evaluator registry.
 
@@ -251,6 +252,10 @@ def compute_pipeline_metrics(
     """
     base = _compute_accuracy(results)
     evaluator_values = materialize_round_values(pipeline_schema, results, opt_sp=opt_sp)
+    # L1-generation quality is a batch property, not a per-result derivation —
+    # injected after registry materialization so operator formulas can
+    # reference ``l1_diversity`` via campaign.json::scoring / scoring_steer.json.
+    evaluator_values["l1_diversity"] = round(float(l1_diversity), 6)
 
     if callable(round_scorer):
         scorer = round_scorer
@@ -290,12 +295,17 @@ def compute_composite_score(
     *,
     opt_sp: Any = None,
     round_scorer: RoundScorer | str | None = None,
+    l1_diversity: float = 1.0,
 ) -> dict:
     """Compute composite score — delegates to ``compute_pipeline_metrics()``.
 
     The composite is a **recorded** multi-signal diagnostic, not the
     winner-selection key. ``select_fittest`` compares candidates on
     ``accuracy`` (the user's performance scoring function).
+
+    ``l1_diversity`` is the round-level fraction of valid (non-no-op,
+    non-duplicate) L1 variants. Defaults to 1.0 for non-L1 calls
+    (baseline scoring, single-candidate paths).
 
     Returns dict with at least: hits, total, accuracy, errors, composite,
     evaluators (dict of named registry values), plus each evaluator's
@@ -306,6 +316,7 @@ def compute_composite_score(
         results,
         opt_sp=opt_sp,
         round_scorer=round_scorer,
+        l1_diversity=l1_diversity,
     )
 
 

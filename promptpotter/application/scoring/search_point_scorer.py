@@ -412,6 +412,7 @@ async def score_search_point(
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
+    l1_diversity: float = 1.0,
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
     """Score a search point via backend with chain-addressed caching.
 
@@ -470,7 +471,10 @@ async def score_search_point(
         if not (store and backend_id):
             return
         scores = compute_composite_score(
-            results, pipeline_schema, round_scorer=session.scoring.round_scorer
+            results,
+            pipeline_schema,
+            round_scorer=session.scoring.round_scorer,
+            l1_diversity=l1_diversity,
         )
         _save_run(results, scores)
 
@@ -514,7 +518,10 @@ async def score_search_point(
         )
 
     scores = compute_composite_score(
-        results, pipeline_schema, round_scorer=session.scoring.round_scorer
+        results,
+        pipeline_schema,
+        round_scorer=session.scoring.round_scorer,
+        l1_diversity=l1_diversity,
     )
 
     _save_run(results, scores)
