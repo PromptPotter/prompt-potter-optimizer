@@ -188,7 +188,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         )
     )
 
-    # Simulate a query evaluation
+    # Simulate a query measurement
     emitter.on_sample_scored(
         0,
         1,
@@ -218,7 +218,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         },
     )
 
-    # Simulate candidate eval
+    # Simulate candidate scoring
     emitter.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
 
     # Simulate round complete

@@ -42,7 +42,7 @@ Both backends and the optimizer loop declare their pipelines as JSON. The optimi
   "version": "v1.0",
   "nodes": {
     "node_name": {
-      "type": "llm | llm/structured | llm/meta | agent | deterministic | evaluation | web_search",
+      "type": "llm | llm/structured | llm/meta | agent | deterministic | measurement | web_search",
       "node_role": "cache | candidate_source | enricher | ranker",
       "config": { },
       "optimizer": {

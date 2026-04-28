@@ -590,7 +590,7 @@ def _section_l1c_runtime_failures(
         for e in by_warning[dom]:
             rate = float(e.get("degraded_rate", 0.0)) * 100
             dc = e.get("degraded_count", 0)
-            tot = e.get("total_evaluated", 0)
+            tot = e.get("total_scored", 0)
             cfg = e.get("observed_config") or {}
             cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _RF_CFG_AXES if k in cfg)
             lines.append(

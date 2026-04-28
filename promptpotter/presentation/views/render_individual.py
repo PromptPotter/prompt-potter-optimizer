@@ -67,7 +67,7 @@ def format_elimination_summary(ctx: dict, prior_label: str | None = None) -> str
     ``prior_label`` is the resolved label of the prior that triggered the
     Wilcoxon rejection; falls back to the integer index in ctx when absent.
     """
-    q = int(ctx.get("queries_evaluated", 0))
+    q = int(ctx.get("queries_scored", 0))
     qt = int(ctx.get("total_queries", 0))
     p = float(ctx.get("triggered_p", 1.0))
     n_priors = int(ctx.get("n_priors", 0))

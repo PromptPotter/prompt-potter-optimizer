@@ -52,7 +52,7 @@ async def init_notebook_session(
     dataset_name: str | None = None,
     take_over: bool = False,
 ) -> Session:
-    """Init store, client, pipeline schema, eval data — with notebook-friendly logging."""
+    """Init store, client, pipeline schema, scoring data — with notebook-friendly logging."""
     setup_logging()
     # views/notebook_run.py → views → presentation → promptpotter → repo_root
     project_root = Path(__file__).resolve().parent.parent.parent.parent

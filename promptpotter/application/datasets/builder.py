@@ -187,7 +187,7 @@ def split_train_test(
 
 
 def sample_dataset(dataset: list[Sample], sample_size: int) -> list[Sample]:
-    """Top-``sample_size`` slice of eval samples.
+    """Top-``sample_size`` slice of scoring samples.
 
     Datasets are already shuffled at creation (train/test split, HF load),
     so the loop-time slice is the deterministic prefix — no second RNG.

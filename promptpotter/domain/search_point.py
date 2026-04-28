@@ -31,7 +31,7 @@ class SearchPoint(BaseModel):
 
 
 class JobSearchPoint(SearchPoint):
-    """Frozen point in the target evaluation space: pipeline_params + optional prompt_fields.
+    """Frozen point in the target scoring space: pipeline_params + optional prompt_fields.
 
     Rendered prompt is injected into ``pipeline_params`` as a node config value — the
     prompt is just another tunable pipeline parameter. Use ``derive()`` for variants;
@@ -71,7 +71,7 @@ class JobSearchPoint(SearchPoint):
         return stable_hash(self.pipeline_params or {})
 
     def content_hash(self, dataset: list) -> str:
-        """Content-addressed hash for evaluation deduplication."""
+        """Content-addressed hash for measurement deduplication."""
         return content_hash(
             self.render(),
             dataset,

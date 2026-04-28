@@ -227,7 +227,7 @@ def _render_l1_generate_exit(view: dict) -> str:
 
 def _render_l1_score_enter(view: dict) -> str:
     label = f"{view['n_candidates']} × {view['n_queries']} = {view['n_calls']} calls"  # noqa: RUF001
-    return "\n" + _node_top("EVALUATE", label)
+    return "\n" + _node_top("SCORE", label)
 
 
 def _render_l1_score_exit(view: dict) -> str:

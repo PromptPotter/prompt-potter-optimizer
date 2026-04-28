@@ -1,4 +1,4 @@
-"""Content-addressed hashing for evaluation deduplication.
+"""Content-addressed hashing for measurement deduplication.
 
 Leaf module shared by both models and services. Lives in ``promptpotter/shared/``
 to avoid circular imports between search_point.py and opt_search_point.py.
@@ -30,7 +30,7 @@ def content_hash(
     dataset: list,
     pipeline_params: dict | None = None,
 ) -> str:
-    """Content-addressed hash for evaluation deduplication.
+    """Content-addressed hash for measurement deduplication.
 
     ``sha256(rendered_prompt + sorted_query_gt_pairs
     + pipeline_params)[:16]``

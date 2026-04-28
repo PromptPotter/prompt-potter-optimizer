@@ -40,14 +40,14 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryResult(TypedDict):
-    """Core per-query evaluation result.
+    """Core per-query measurement result.
 
     Raw trace fields (``query``, ``ground_truth``, ``predicted``, ``error``,
     ``pipeline_data``) are populated at measurement time. ``hit`` and ``score``
     are the *active-scorer projection* — written exclusively by
     ``rescore_results`` (in ``application.scoring.formula``), which also
     populates the authoritative ``scored`` audit map (``{scorer_id: {score,
-    hit, formula}}`` — one entry per scorer the trace has been evaluated
+    hit, formula}}`` — one entry per scorer the trace has been scored
     under). They are ``NotRequired`` because a freshly measured trace has not
     yet been scored.
 
@@ -66,7 +66,7 @@ class QueryResult(TypedDict):
 
 
 class QueryResultFull(QueryResult, total=False):
-    """Extended result with optional fields from eval pipeline and stale-data protocol."""
+    """Extended result with optional fields from scoring pipeline and stale-data protocol."""
 
     # Multi-scorer audit map — {scorer_id: {score, hit, formula}}.
     # Accumulated by ``rescore_results``; persisted to both trial JSON
@@ -74,7 +74,7 @@ class QueryResultFull(QueryResult, total=False):
     # share the same traces with their own scorer-specific views.
     scored: dict[str, dict]
 
-    # Eval pipeline
+    # Scoring pipeline
     n_candidates: int
     ground_truth_rank: int | None
     cached: bool

@@ -74,7 +74,7 @@ def extract_runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
     cfg = rf.get("observed_config") or {}
     cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
-    return rate_pct, dominant, cfg_str, rf.get("total_evaluated", 0)
+    return rate_pct, dominant, cfg_str, rf.get("total_scored", 0)
 
 
 def format_runtime_failure_line(rf: dict, label: str = "") -> list[str]:

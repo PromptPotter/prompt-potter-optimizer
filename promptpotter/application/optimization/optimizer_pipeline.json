@@ -13,7 +13,7 @@
       }
     },
     "l1_score": {
-      "type": "evaluation",
+      "type": "measurement",
       "config": {
         "improvement_threshold": 0.01,
         "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],

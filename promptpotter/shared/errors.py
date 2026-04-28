@@ -17,7 +17,7 @@ logger = logging.getLogger(__name__)
 
 
 class ErrorCategory(enum.StrEnum):
-    """Categorical tags for backend evaluation errors."""
+    """Categorical tags for backend scoring errors."""
 
     CLIENT = "CLIENT"
     SERVER = "SERVER"
@@ -127,7 +127,7 @@ class ResumeDivergenceError(RuntimeError):
 
 
 def is_error_result(result: Mapping[str, Any]) -> bool:
-    """Return True if *result* represents a failed evaluation.
+    """Return True if *result* represents a failed measurement.
 
     Catches all error forms:
     - Truthy ``error`` field (tagged error message from exception handling)

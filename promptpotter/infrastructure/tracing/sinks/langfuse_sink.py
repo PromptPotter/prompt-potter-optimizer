@@ -17,9 +17,9 @@ if TYPE_CHECKING:
         NodeEnd,
         NodeStart,
         PromptVersion,
-        QueryEvalEnd,
-        QueryEvalStart,
         QueryNodeSpan,
+        QueryScoreEnd,
+        QueryScoreStart,
         RoundEnd,
         RoundStart,
     )
@@ -299,7 +299,7 @@ class LangfuseSink:
         self._lf.end_trace(trace_id)
         self._persist()
 
-    def on_query_eval_start(self, event: QueryEvalStart) -> None:
+    def on_query_score_start(self, event: QueryScoreStart) -> None:
         if event.session_id:
             self._bind_session(event.session_id)
         metadata: dict[str, Any] = {
@@ -314,7 +314,7 @@ class LangfuseSink:
             name=trace_name,
             input={"query": event.query, "ground_truth": event.ground_truth},
             session_id=event.session_id,
-            tags=["eval", event.origin, "pipeline"],
+            tags=["score", event.origin, "pipeline"],
             metadata=metadata,
         )
         if trace_id:
@@ -340,7 +340,7 @@ class LangfuseSink:
             usage_details=event.usage_details,
         )
 
-    def on_query_eval_end(self, event: QueryEvalEnd) -> None:
+    def on_query_score_end(self, event: QueryScoreEnd) -> None:
         entry = self._query_trace_ids.pop((event.run_id, event.query), None)
         if not entry:
             return
@@ -375,7 +375,7 @@ class LangfuseSink:
         seed_items: dict[str, str] | None = None,
     ) -> dict[str, str]:
         """Create/update Langfuse dataset, returning ``{query: item_id}`` and
-        populating ``_dataset_item_ids`` for query-eval link-back."""
+        populating ``_dataset_item_ids`` for query-score link-back."""
         query_to_item_id: dict[str, str] = dict(seed_items or {})
 
         ok = self._lf.create_dataset(

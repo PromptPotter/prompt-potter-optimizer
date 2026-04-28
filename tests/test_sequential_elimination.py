@@ -45,7 +45,7 @@ def test_elimination_check_gates_on_n_min_and_inferiority():
     check = EliminationCheck(n_min=20, alpha=0.05, n_queries=100)
     check.register_completed([0.9] * 100)
     # Below n_min queries → no signal yet.
-    assert check.evaluate([{"score": 0.1}] * 10, candidate_idx=1, n_total_candidates=3) is None
+    assert check.check([{"score": 0.1}] * 10, candidate_idx=1, n_total_candidates=3) is None
     # Past n_min, an inferior candidate against a strong prior gets eliminated.
-    signal = check.evaluate([{"score": 0.1}] * 30, candidate_idx=1, n_total_candidates=3)
+    signal = check.check([{"score": 0.1}] * 30, candidate_idx=1, n_total_candidates=3)
     assert signal is not None and signal.check_name == "elimination"

@@ -2,7 +2,7 @@
 
 Inherits ``PromptTemplate`` (8 prompt fields) and adds lineage, L2/L3 state,
 and optimization memory. ``to_job_search_point()`` projects into a frozen
-``JobSearchPoint`` for evaluation by rendering prompt fields into
+``JobSearchPoint`` for scoring by rendering prompt fields into
 ``pipeline_params``.
 
 Two-layer tracing:
@@ -194,7 +194,7 @@ class OptSearchPoint(PromptTemplate):
       transitions via :meth:`copy_memory_to`).
 
     Persisted in trial checkpoints. Enables L4 to correlate optimizer
-    configuration with target-pipeline evaluation outcomes.
+    configuration with target-pipeline scoring outcomes.
     """
 
     # -- Lineage -------------------------------------------------------------
@@ -346,7 +346,7 @@ class OptSearchPoint(PromptTemplate):
         *,
         schema: PipelineSchema | None = None,
     ) -> JobSearchPoint:
-        """Project into a JobSearchPoint for target-layer evaluation.
+        """Project into a JobSearchPoint for target-layer scoring.
 
         Renders prompt fields → injects into pipeline_params → creates
         a frozen JobSearchPoint with ``prompt_fields`` populated for

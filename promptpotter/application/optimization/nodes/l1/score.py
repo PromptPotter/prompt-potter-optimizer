@@ -68,7 +68,7 @@ async def l1_score(
     elimination_alpha: float = 0.2,
     round_num: int = 0,
 ) -> L1ScoringResult:
-    """Evaluate candidates and select the round winner (compares fitness, not composite)."""
+    """Score candidates and select the round winner (compares fitness, not composite)."""
     session = cycle.session
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
@@ -94,7 +94,7 @@ async def l1_score(
         for cs in candidate_scores
         if cs.get("escalation_aborted") and not cs.get("elimination_stopped")
     }
-    evaluated = [
+    scored = [
         ind
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
@@ -104,9 +104,9 @@ async def l1_score(
     best_osp: OptSearchPoint = baseline.osp
     best_results: list = list(baseline.results)
     best_label = baseline.label
-    best_evals: dict[str, float] = dict(baseline.evaluators)
+    best_scores: dict[str, float] = dict(baseline.evaluators)
     winner_idx: int | None = None
-    for idx, ind in enumerate(evaluated):
+    for idx, ind in enumerate(scored):
         s = compute_composite_score(
             all_candidate_results[ind.lineage.id],
             schema,
@@ -119,17 +119,17 @@ async def l1_score(
             best_osp = ind
             best_results = list(all_candidate_results[ind.lineage.id])
             best_label = ind.lineage.changes_description or ind.lineage.id[:12]
-            best_evals = dict(s.get("evaluators") or {})
+            best_scores = dict(s.get("evaluators") or {})
             winner_idx = idx
 
     record_decision(
         decisions,
         "round_winner",
         {
-            "candidate_ids": [ind.lineage.id for ind in evaluated],
+            "candidate_ids": [ind.lineage.id for ind in scored],
             "round_num": round_num,
         },
-        evaluated[winner_idx].lineage.id if winner_idx is not None and evaluated else "",
+        scored[winner_idx].lineage.id if winner_idx is not None and scored else "",
         data={"current_best_accuracy_at_record": baseline.accuracy},
     )
 
@@ -147,13 +147,13 @@ async def l1_score(
         hits=base["hits"],
         total=base["total"],
         improved=best_acc > baseline.accuracy + improvement_threshold,
-        candidates_scored=len(evaluated),
+        candidates_scored=len(scored),
         candidate_scores=candidate_scores,
         winner_results=best_results,
         all_candidate_results=all_candidate_results,
         escalation_signal=escalation_signal,
         degraded_queries=count_degraded_queries(best_results),
         deprecated=base["deprecated"],
-        winner_evaluators=best_evals,
+        winner_evaluators=best_scores,
         decisions=decisions,
     )

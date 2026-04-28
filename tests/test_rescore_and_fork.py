@@ -75,7 +75,7 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
                 "inputs_ref": {
                     "candidate_id": "c2",
                     "prior_candidate_ids": ["c0", "c1"],
-                    "queries_evaluated": 6,
+                    "queries_scored": 6,
                     "alpha": 0.2,
                     "n_min": 4,
                     "round_num": 2,

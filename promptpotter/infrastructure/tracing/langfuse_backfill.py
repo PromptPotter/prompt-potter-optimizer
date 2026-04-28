@@ -1,7 +1,7 @@
 """Replay historical ``library/measurements/`` entries into the Langfuse sink.
 
-Reads JSON from disk and emits :class:`QueryEvalStart` / :class:`QueryNodeSpan`
-/ :class:`QueryEvalEnd` events into an :class:`ObservabilityBridge`. The sink
+Reads JSON from disk and emits :class:`QueryScoreStart` / :class:`QueryNodeSpan`
+/ :class:`QueryScoreEnd` events into an :class:`ObservabilityBridge`. The sink
 owns every Langfuse SDK call — this file is just a disk walker.
 
 Idempotency tracking (``backfilled_run_ids`` and legacy ``dataset_items``
@@ -23,9 +23,9 @@ from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import (
-    QueryEvalEnd,
-    QueryEvalStart,
     QueryNodeSpan,
+    QueryScoreEnd,
+    QueryScoreStart,
 )
 from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
@@ -174,7 +174,7 @@ def _replay_run(
         hit = bool(it.get("hit", False))
 
         bridge.emit(
-            QueryEvalStart(
+            QueryScoreStart(
                 run_id=run_id,
                 query=query,
                 ground_truth=it.get("ground_truth", ""),
@@ -213,7 +213,7 @@ def _replay_run(
                         node_outputs[k] = val
 
         bridge.emit(
-            QueryEvalEnd(
+            QueryScoreEnd(
                 run_id=run_id,
                 query=query,
                 predicted=it.get("predicted", ""),

@@ -12,7 +12,7 @@ Two families:
 - :class:`OptimizationEvent` — Topology A (live campaign trace). One Langfuse
   trace per campaign; rounds and nodes nest underneath. Emitted inline from
   the optimization loop.
-- :class:`EvaluationEvent` — Topology B (per-query dataset trace). One
+- :class:`MeasurementEvent` — Topology B (per-query dataset trace). One
   Langfuse trace per query, linked to dataset items. Emitted by the backfill
   replayer reading ``library/measurements/`` from disk.
 
@@ -116,7 +116,7 @@ class CandidateScored:
 
 @dataclass(frozen=True, slots=True)
 class RoundWinnerChosen:
-    """Round winner picked from evaluated candidates."""
+    """Round winner picked from scored candidates."""
 
     campaign_id: str
     round_num: int
@@ -161,7 +161,7 @@ class DatasetRun:
     """Target-layer scoring report for a single SearchPoint, nested under the active round.
 
     This event sits at the layer boundary: the data is target-layer
-    (``JobSearchPoint`` evaluation) but the Langfuse parent is the
+    (``JobSearchPoint`` scoring) but the Langfuse parent is the
     optimizer-layer round span. Topology A intentionally entangles them so
     a campaign trace shows which scoring run each round depended on.
     """
@@ -220,14 +220,14 @@ OptimizationEvent = Union[
 ]
 
 
-# --- Evaluation (Topology B, replayed from library/measurements/) ---
+# --- Measurement (Topology B, replayed from library/measurements/) ---
 
 
 @dataclass(frozen=True, slots=True)
 class QueryNodeSpan:
-    """One pipeline node's input/output captured during a target-layer eval.
+    """One pipeline node's input/output captured during a target-layer measurement.
 
-    Emitted as a child of a ``QueryEvalStart``/``QueryEvalEnd`` pair. The
+    Emitted as a child of a ``QueryScoreStart``/``QueryScoreEnd`` pair. The
     node's Langfuse ``as_type`` (generation/span/tool/...) is taken from
     the pipeline schema's ``langfuse_type`` for that node.
     """
@@ -244,7 +244,7 @@ class QueryNodeSpan:
 
 
 @dataclass(frozen=True, slots=True)
-class QueryEvalStart:
+class QueryScoreStart:
     run_id: str
     query: str
     ground_truth: str
@@ -258,7 +258,7 @@ class QueryEvalStart:
 
 
 @dataclass(frozen=True, slots=True)
-class QueryEvalEnd:
+class QueryScoreEnd:
     run_id: str
     query: str
     predicted: str
@@ -269,11 +269,11 @@ class QueryEvalEnd:
     """Flat map of pipeline node output keys → values (for the trace output blob)."""
 
 
-EvaluationEvent = Union[
-    QueryEvalStart,
+MeasurementEvent = Union[
+    QueryScoreStart,
     QueryNodeSpan,
-    QueryEvalEnd,
+    QueryScoreEnd,
 ]
 
 
-Event = Union[DatasetRegistered, OptimizationEvent, EvaluationEvent]
+Event = Union[DatasetRegistered, OptimizationEvent, MeasurementEvent]

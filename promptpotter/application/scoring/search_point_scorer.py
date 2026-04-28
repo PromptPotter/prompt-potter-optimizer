@@ -135,7 +135,7 @@ def _build_scoring_error_signal(
             "dominant_warning": dominant,
             "warning_types": warning_types,
             "degraded_count": len(real_errors),
-            "total_evaluated": len(results),
+            "total_scored": len(results),
             "last_error": last_error,
         },
         candidate_idx=candidate_idx,
@@ -340,7 +340,7 @@ async def _run_query_loop(
     axes: AxisIndex | None,
     persist_fresh: Callable[[list[QueryResult]], None],
 ) -> QueryLoopResult:
-    """Evaluate dataset samples, reusing prior results where available."""
+    """Score dataset samples, reusing prior results where available."""
     assert session.scorer is not None, "session.scorer required for scoring"
     state = _LoopState(results=[])
     ctx = _LoopContext(
@@ -360,7 +360,7 @@ async def _run_query_loop(
 
     def _check_escalation() -> EscalationSignal | None:
         for c in degradation_checks or []:
-            signal = c.evaluate(state.results, candidate_idx, n_total_candidates)
+            signal = c.check(state.results, candidate_idx, n_total_candidates)
             if signal is not None:
                 return signal
         return None
@@ -418,7 +418,7 @@ async def score_search_point(
     dataset: list[Sample],
     session: Session,
     *,
-    label: str = "Eval",
+    label: str = "Score",
     on_result: Callable[[QueryResult, int, int], None] | None = None,
     on_start: Callable[[str, int, int], None] | None = None,
     source: str = "",
@@ -427,7 +427,7 @@ async def score_search_point(
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
-    """Evaluate a search point via backend with chain-addressed caching.
+    """Score a search point via backend with chain-addressed caching.
 
     Two cache tiers (prior-result + per-node) share one prefix chain. Each
     fresh measurement is persisted immediately so retried deprecated samples

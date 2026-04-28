@@ -424,7 +424,7 @@ class CampaignStore(EntityStore):
         round_num: int,
         candidates: list[dict[str, Any]],
     ) -> None:
-        """Persist generated candidates before evaluation (mid-round checkpoint)."""
+        """Persist generated candidates before scoring (mid-round checkpoint)."""
         path = self._candidates_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
         write_json(path, candidates)
         logger.debug(

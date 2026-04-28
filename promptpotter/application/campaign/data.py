@@ -1,4 +1,4 @@
-"""Campaign data loading and baseline evaluation."""
+"""Campaign data loading and baseline scoring."""
 
 from __future__ import annotations
 
@@ -76,7 +76,7 @@ class CampaignBaseline(NamedTuple):
 def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
     """Extract baseline prompt state, accuracy, and results from campaign rounds.
 
-    Searches reversed rounds for the last with actual eval ``results``,
+    Searches reversed rounds for the last with actual scoring ``results``,
     then overrides the prompt_fields with the tip (most recent round).
     """
     if not campaign_rounds:
@@ -89,7 +89,7 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
 
     tip = campaign_rounds[-1]
 
-    # Prefer accuracy from the last round with eval results; fall back to
+    # Prefer accuracy from the last round with scoring results; fall back to
     # the tip's accuracy (e.g. scan winner carries accuracy but no results).
     baseline_acc = tip.get("accuracy", 0.0)
     baseline_results: list = []
@@ -206,7 +206,7 @@ async def prepare_scoring_context(
 
     session: Session = svc
     sp_budget = campaign_config.sp_budget_ttest or 15
-    eval_dataset = sample_dataset(dataset, sp_budget)
+    scoring_dataset = sample_dataset(dataset, sp_budget)
     spec = split_scoring_block(campaign_config.scoring)
 
     if session.index_terms:
@@ -219,7 +219,7 @@ async def prepare_scoring_context(
 
     if obs:
         with graceful("Dataset registration in baseline scoring failed"):
-            obs.register_dataset(DATASET_NAME, eval_dataset)
+            obs.register_dataset(DATASET_NAME, scoring_dataset)
 
     sp = baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
@@ -256,7 +256,7 @@ async def prepare_scoring_context(
     try:
         baseline_results, scores, _cached, _ = await score_search_point(
             sp,
-            eval_dataset,
+            scoring_dataset,
             session,
             label="Baseline",
             on_result=on_result_cb,
@@ -345,7 +345,7 @@ def build_all_index_terms(store: Stores) -> list[str]:
     """Unique ground_truth identifiers across all stored datasets (train + test).
 
     For /match to work correctly, the session must contain ALL identifiers:
-    - Train: query->ground_truth mappings (used for optimization evaluation)
+    - Train: query->ground_truth mappings (used for optimization scoring)
     - Test: ground_truth only (identifiers in candidate pool, no query mapping)
     """
     gt_set: set[str] = set()

@@ -179,7 +179,7 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
-    n = int(inputs_ref.get("queries_evaluated", 0))
+    n = int(inputs_ref.get("queries_scored", 0))
     alpha = float(inputs_ref.get("alpha", 0.2))
 
     current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]

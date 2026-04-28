@@ -60,7 +60,7 @@ class RoundResult(BaseModel):
     results: list[dict] = Field(default_factory=list)
     # Per-candidate scored results — persisted so resume can rescore
     # them under a changed scorer and replay decisions without needing
-    # to re-evaluate the pipeline. Keyed by candidate id.
+    # to re-run the pipeline. Keyed by candidate id.
     all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[dict] = Field(default_factory=list)
@@ -70,7 +70,7 @@ class RoundResult(BaseModel):
     decisions: list[dict] = Field(default_factory=list)
     degraded_queries: int = 0
     # Count of samples discarded as deprecated (fatal warnings) on the
-    # round-winner's evaluation; excluded from hits/total/accuracy and
+    # round-winner's scoring run; excluded from hits/total/accuracy and
     # surfaced in round summary for operator transparency.
     deprecated: int = 0
     escalation_signal: EscalationSignal | None = None

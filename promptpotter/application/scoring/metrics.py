@@ -1,8 +1,8 @@
-"""Scoring and metric computation for evaluation results.
+"""Scoring and metric computation for measurement results.
 
 Driven by the evaluator registry in ``application/scoring/evaluators.py``.
 The per-round composite is whatever the dataset's per-round scoring formula
-evaluates to; when no formula is set, the default formula reproduces the
+resolves to; when no formula is set, the default formula reproduces the
 pre-migration 4-bundle weighted sum.
 
 Pure computation — no I/O, no backend dependencies.
@@ -407,7 +407,7 @@ def compile_failure_analysis(
 def compile_query_difficulty(
     historical_results: Sequence[Sequence[Mapping[str, Any]]],
 ) -> QueryDifficulty:
-    """Classify queries by hit rate across multiple evaluation rounds.
+    """Classify queries by hit rate across multiple scoring rounds.
 
     Deprecated samples (fatal warnings) are skipped so hit-rate
     classification isn't biased by garbage measurements.

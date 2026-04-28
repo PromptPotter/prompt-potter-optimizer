@@ -100,7 +100,7 @@ class PipelineSchema(BaseModel):
     """Full description of a backend pipeline.
 
     Carries enough information for all PromptPotter services to operate
-    generically: evaluation, sensitivity scan, observability, and Langfuse push.
+    generically: scoring, sensitivity scan, observability, and Langfuse push.
 
     After ``configure_pipeline()`` filters and applies overrides, the schema
     is the single source of truth for pipeline identity at campaign start:

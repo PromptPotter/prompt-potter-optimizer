@@ -27,9 +27,9 @@ from promptpotter.infrastructure.tracing.events import (
     NodeEnd,
     NodeStart,
     PromptVersion,
-    QueryEvalEnd,
-    QueryEvalStart,
     QueryNodeSpan,
+    QueryScoreEnd,
+    QueryScoreStart,
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
@@ -64,9 +64,9 @@ _DISPATCH: dict[type[Event], str] = {
     RoundWinnerChosen: "on_write_point",
     L1CritiqueWritten: "on_write_point",
     LayerApplied: "on_layer_applied",
-    QueryEvalStart: "on_query_eval_start",
+    QueryScoreStart: "on_query_score_start",
     QueryNodeSpan: "on_query_node_span",
-    QueryEvalEnd: "on_query_eval_end",
+    QueryScoreEnd: "on_query_score_end",
 }
 
 

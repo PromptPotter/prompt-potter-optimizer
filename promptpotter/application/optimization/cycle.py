@@ -145,7 +145,7 @@ class Cycle:
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        """Construct a fresh Cycle from an evaluated baseline."""
+        """Construct a fresh Cycle from a scored baseline."""
         from promptpotter.application.scoring.metrics import compute_composite_score
 
         composite = (

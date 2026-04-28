@@ -163,7 +163,7 @@ def _handle_scored_candidate(
     if rf_kind and signal is not None:
         cr = signal.check_result
         dc = int(cr.get("degraded_count", 0))
-        te = int(cr.get("total_evaluated", len(results)))
+        te = int(cr.get("total_scored", len(results)))
         if rf_kind == "degradation_check":
             dominant = cr.get("dominant_warning", "unknown:unknown")
             node_cfg = (merged_pp_i or {}).get(dominant.split(":", 1)[0], {})
@@ -178,7 +178,7 @@ def _handle_scored_candidate(
             warning_types=dict(cr.get("warning_types") or {}),
             degraded_rate=rate,
             degraded_count=dc,
-            total_evaluated=te,
+            total_scored=te,
             observed_config=dict(node_cfg),
             first_seen_round=round_num,
             candidate_label=osp_c.lineage.changes_description or "",
@@ -191,7 +191,7 @@ def _handle_scored_candidate(
         elim_ctx = {
             "triggered_p": float(cr.get("triggered_p", 1.0)),
             "triggered_by_prior_idx": int(cr.get("triggered_by_prior", -1)),
-            "queries_evaluated": int(cr.get("queries_evaluated", len(results))),
+            "queries_scored": int(cr.get("queries_scored", len(results))),
             "total_queries": int(cr.get("total_queries", len(dataset))),
             "n_priors": int(cr.get("n_priors", 0)),
         }
@@ -245,7 +245,7 @@ def _record_elimination_cut(
             {
                 "candidate_id": osp_c.lineage.id,
                 "prior_candidate_ids": priors_at_test,
-                "queries_evaluated": int(cr.get("queries_evaluated", n_results)),
+                "queries_scored": int(cr.get("queries_scored", n_results)),
                 "alpha": float(elim_check.alpha),
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
@@ -272,7 +272,7 @@ async def score_population(
     round_num: int = 0,
     decisions: list[dict] | None = None,
 ) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
-    """Evaluate each individual; dispatch over three exit paths (validation/cache/scored)."""
+    """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
     obs = session.obs
     n = len(population)

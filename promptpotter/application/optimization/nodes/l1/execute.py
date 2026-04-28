@@ -51,7 +51,7 @@ async def _generate_or_load_candidates(
     """Load persisted candidates or generate fresh ones via LLM."""
     session = cycle.session
     config = cycle.config
-    # Cap n_variants at 3× config so L2 can't blow up eval budget.
+    # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
     model = config.optimizer_llm.model
     opt_params = cycle.opt_sp.optimizer_params

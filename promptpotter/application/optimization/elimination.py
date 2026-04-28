@@ -1,4 +1,4 @@
-"""Candidate elimination — four mid-evaluation checks (first-to-fire wins)."""
+"""Candidate elimination — mid-round checks (first-to-fire wins)."""
 
 from __future__ import annotations
 
@@ -42,7 +42,7 @@ class DegradationCheck:
         self.threshold = threshold
         self.min_queries = min_queries
 
-    def evaluate(
+    def check(
         self, results: list[dict], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if results:
@@ -55,7 +55,7 @@ class DegradationCheck:
                     {
                         "degraded_rate": 1.0,
                         "degraded_count": n,
-                        "total_evaluated": n,
+                        "total_scored": n,
                         "warning_types": dict.fromkeys(classification.fatal_codes, 1),
                         "dominant_warning": fatal,
                         "fatal": True,
@@ -81,7 +81,7 @@ class DegradationCheck:
             {
                 "degraded_rate": rate,
                 "degraded_count": degraded,
-                "total_evaluated": n,
+                "total_scored": n,
                 "warning_types": dict(wtypes),
                 "dominant_warning": dominant,
             },
@@ -106,7 +106,7 @@ class EliminationCheck:
         self.priors.append(scores)
         self.prior_ids.append(candidate_id)
 
-    def evaluate(
+    def check(
         self, results: list[dict], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if not self.priors:
@@ -121,7 +121,7 @@ class EliminationCheck:
         return _eliminate(
             self.name,
             {
-                "queries_evaluated": n,
+                "queries_scored": n,
                 "total_queries": self.n_queries,
                 "n_priors": len(self.priors),
                 **ctx,

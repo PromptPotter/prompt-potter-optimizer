@@ -25,7 +25,7 @@ class FailurePattern:
 
 @dataclass
 class FailureAnalysis:
-    """Structured failure analysis over a set of evaluation results."""
+    """Structured failure analysis over a set of measurement results."""
 
     patterns: list[FailurePattern] = field(default_factory=list)
     total_failures: int = 0
@@ -37,7 +37,7 @@ DifficultyClass = Literal["easy", "discriminating", "hard", "dead"]
 
 @dataclass
 class QueryProfile:
-    """Per-query difficulty profile across evaluations."""
+    """Per-query difficulty profile across measurements."""
 
     query: str
     hit_rate: float
@@ -85,7 +85,7 @@ class EscalationTarget(enum.StrEnum):
 
 @dataclass
 class EscalationSignal:
-    """Signal emitted when an EscalationCheck triggers mid-evaluation."""
+    """Signal emitted when an escalation check triggers mid-round."""
 
     check_name: str
     target: EscalationTarget
@@ -119,7 +119,7 @@ class ValidationFailure:
 
 @dataclass
 class RuntimeFailure:
-    """A runtime-observed health failure on a candidate's evaluation.
+    """A runtime-observed health failure on a candidate's scoring run.
 
     Sibling of ``ValidationFailure`` on the self-healing rail, but
     populated AFTER the candidate ran — from per-query degradation
@@ -141,7 +141,7 @@ class RuntimeFailure:
     warning_types: dict[str, int]  # full histogram of warning types seen
     degraded_rate: float  # fraction of scored queries that degraded
     degraded_count: int
-    total_evaluated: int
+    total_scored: int
     observed_config: dict[str, Any]  # snapshot of the offending node's config
     # Round in which this failure was first observed. Used by the L2
     # dispatch_msg renderer (``dispatch_msg_registry._section_runtime_failures``)

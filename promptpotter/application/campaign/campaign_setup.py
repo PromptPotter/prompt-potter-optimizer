@@ -196,7 +196,7 @@ async def init_services(
     take_over: bool = False,
     tenant_id: str = "default",
 ) -> Session:
-    """Init store, client, pipeline schema, eval data. Refuses tenant drift unless take_over=True."""
+    """Init store, client, pipeline schema, scoring data. Refuses tenant drift unless take_over=True."""
     from promptpotter.application.datasets.builder import DATASET_LOADERS, samples_from_dicts
     from promptpotter.application.pipeline_discovery import parse_pipeline_response
     from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
@@ -400,7 +400,7 @@ async def init_optimization_loop(
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
     if baseline.baseline_ps is None:
-        raise ValueError("baseline.baseline_ps is required; run baseline evaluation first.")
+        raise ValueError("baseline.baseline_ps is required; run baseline scoring first.")
 
     baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
     baseline_round_scorer = (
