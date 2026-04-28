@@ -143,10 +143,10 @@ class RuntimeFailure:
     degraded_count: int
     total_evaluated: int
     observed_config: dict[str, Any]  # snapshot of the offending node's config
-    # Round in which this failure was first observed. Used by the L2 inbox
-    # renderer (``inbox_registry._r_runtime_failures_l2``) to partition NEW
-    # (current round) vs ACCUMULATED (surviving earlier rounds) from a
-    # single list.
+    # Round in which this failure was first observed. Used by the L2
+    # dispatch_msg renderer (``dispatch_msg_registry._section_runtime_failures``)
+    # to partition NEW (current round) vs ACCUMULATED (surviving earlier
+    # rounds) from a single list.
     first_seen_round: int = 0
     # changes_description of the candidate that first produced this failure.
     # Propagated forward through the outer-memory mirror so ACCUMULATED rows

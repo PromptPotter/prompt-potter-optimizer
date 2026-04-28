@@ -3,7 +3,7 @@
 ``LayerTransition`` is the shared template (``run()`` = load prompt → compile →
 LLM call → parse → derive ``OptSearchPoint`` → ``TransitionResult``). Each
 subclass declares its prompt template + temperature + phase as ClassVars, then
-provides ``assemble_intelligence``, ``build_result``, ``apply_side_effects``,
+provides ``build_compile_vars``, ``build_result``, ``apply_side_effects``,
 ``enter_payload`` and ``exit_payload`` — the per-layer hooks the unified
 orchestrator in ``layer_escalation._run_transition`` calls around the LLM step.
 """
@@ -16,15 +16,14 @@ import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, ClassVar, Literal
 
+from promptpotter.application.optimization.nodes.dispatch_msg_registry import (
+    Layer,
+    assemble_dispatch_msg,
+)
 from promptpotter.application.optimization.nodes.formatting import (
-    format_axis_digest_block,
     format_pipeline_section,
     format_runtime_failures_for_l3,
     warning_summary,
-)
-from promptpotter.application.optimization.nodes.inbox_registry import (
-    Layer,
-    assemble_inbox,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -71,7 +70,7 @@ class LayerTransition:
 
     Subclasses set the four ClassVars (``layer``, ``template_name``,
     ``default_temperature``, ``phase``) and override the five hooks
-    consumed by the orchestrator: ``assemble_intelligence``,
+    consumed by the orchestrator: ``build_compile_vars``,
     ``build_result``, ``apply_side_effects``, ``enter_payload``,
     ``exit_payload``. ``run()`` is the shared LLM-call template.
     """
@@ -92,7 +91,7 @@ class LayerTransition:
         round_num: int = 0,
         escalation_check_result: dict | None = None,
     ) -> TransitionResult:
-        compile_vars = self.assemble_intelligence(
+        compile_vars = self.build_compile_vars(
             cycle,
             pipeline_params=pipeline_params,
             round_num=round_num,
@@ -108,7 +107,7 @@ class LayerTransition:
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
-    def assemble_intelligence(
+    def build_compile_vars(
         self,
         cycle: Cycle,
         *,
@@ -146,7 +145,7 @@ class L2RefineStrategy(LayerTransition):
     default_temperature: ClassVar[float] = 0.3
     phase: ClassVar[CampaignPhase] = CampaignPhase.REFINE_STRATEGY
 
-    def assemble_intelligence(
+    def build_compile_vars(
         self,
         cycle: Cycle,
         *,
@@ -166,7 +165,7 @@ class L2RefineStrategy(LayerTransition):
             )
 
         candidate_scores = cycle.rounds[-1].candidate_scores if cycle.rounds else []
-        inbox = assemble_inbox(
+        dispatch_msg = assemble_dispatch_msg(
             Layer.L2,
             cycle,
             round_num=round_num,
@@ -178,7 +177,7 @@ class L2RefineStrategy(LayerTransition):
         return {
             "current_params": json.dumps(opt_sp.optimizer_params),
             "task_context_section": task_context_section,
-            "inbox": ("\n\n" + inbox) if inbox else "",
+            "dispatch_msg": ("\n\n" + dispatch_msg) if dispatch_msg else "",
         }
 
     def build_result(
@@ -293,7 +292,7 @@ class L3ModifyPlan(LayerTransition):
     default_temperature: ClassVar[float] = 0.5
     phase: ClassVar[CampaignPhase] = CampaignPhase.MODIFY_PLAN
 
-    def assemble_intelligence(
+    def build_compile_vars(
         self,
         cycle: Cycle,
         *,
@@ -303,7 +302,6 @@ class L3ModifyPlan(LayerTransition):
     ) -> dict:
         opt_sp = cycle.opt_sp
         pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
-        axes = cycle.axes
 
         # L3's "l2_history" — synthetic single-entry summary of the most recent
         # L2 round, sourced directly from cycle state.
@@ -335,15 +333,7 @@ class L3ModifyPlan(LayerTransition):
             "runtime_failures_section": (
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
             ),
-            "inbox": format_axis_digest_block(
-                axes.digest_for_l3() if axes is not None else None,
-                {
-                    "axis_rankings": "Axis impact rankings",
-                    "bottleneck_distribution": "Bottleneck distribution",
-                    "failure_clusters": "Failure clusters",
-                    "persistent_failures": "Persistent failures",
-                },
-            ),
+            "dispatch_msg": assemble_dispatch_msg(Layer.L3, cycle),
         }
 
     def build_result(

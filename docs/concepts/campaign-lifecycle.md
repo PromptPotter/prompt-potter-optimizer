@@ -53,7 +53,7 @@ The fittest individual from the round is compared to the current best. If it bea
 
 After enough consecutive rounds with no improvement, L2 Refine Context fires.
 
-L2 reads the critique history, the current best configuration, and the historical intelligence from search memory. It adjusts two things: the task context (the domain framing fed to L1) and meta-settings (how many candidates to generate, how much to explore vs. exploit). It produces a directive — 2–3 sentences of diagnostic reasoning and action guidance — that becomes the primary signal for the next L1 round, superseding the critique.
+L2 reads the critique history, the current best configuration, and the historical context from `AxisIndex`. It adjusts two things: the task context (the domain framing fed to L1) and meta-settings (how many candidates to generate, how much to explore vs. exploit). It produces a directive — 2–3 sentences of diagnostic reasoning and action guidance — that becomes the primary signal for the next L1 round, superseding the critique.
 
 L2 does not touch pipeline parameters directly. Its job is to reframe the search, not to prescribe specific parameter values.
 
@@ -80,7 +80,7 @@ Two things can go wrong during evaluation, and PromptPotter handles both without
 
 Between rounds, three things may happen (in order):
 
-1. **Search memory refresh.** New evaluation data from the completed round is folded into the historical intelligence store. The next round's L1 Generate has an updated view.
+1. **AxisIndex refresh.** New evaluation data from the completed round is folded into the axis-side derived view. The next round's L1 Generate has an updated view.
 2. **Zero-signal filter** (off by default). Queries that always hit or always miss across a minimum number of observations are moved out of the active dataset — they carry no fitness signal.
 3. **Exploration / exploitation rebalance** (off by default). A Rasch IRT posterior tracks per-query difficulty; between rounds, well-characterised queries are swapped out of the active scoring set in favour of high-information ones. The scoring set is held fixed within a round.
 

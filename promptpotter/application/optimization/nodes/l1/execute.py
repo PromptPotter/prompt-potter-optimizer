@@ -233,7 +233,6 @@ async def execute_round(
             session.pipeline_schema,
             crit_llm,
             round_num=round_num,
-            axis_digest=(cycle.axes.digest_for_l1_critique() if cycle.axes else None),
             model=config.optimizer_llm.model,
             recorder=session.round_recorder,
         )

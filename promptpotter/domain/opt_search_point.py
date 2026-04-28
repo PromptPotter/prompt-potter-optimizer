@@ -263,7 +263,7 @@ class OptSearchPoint(PromptTemplate):
     failure_analysis: FailureAnalysis | None = Field(
         default=None,
         description="Latest round's clustered failure analysis over the "
-        "winner's results. Consumed by L1 as an inbox section; replaced "
+        "winner's results. Consumed by L1 as a dispatch_msg section; replaced "
         "each round. Carried across L2/L3 mutate + adopt_transition "
         "by copy_memory_to().",
     )

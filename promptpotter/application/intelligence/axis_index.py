@@ -136,7 +136,7 @@ class AxisIndex:
     # ----- digest construction (one entry-point per agent) -----
 
     def digest_for_l1_generate(self) -> dict[str, str] | None:
-        """Digest for the L1 generate inbox: failure_clusters, dead_queries, top_axes, top_values."""
+        """Digest for the L1 generate dispatch_msg: failure_clusters, dead_queries, top_axes, top_values."""
         rankings3 = self.axis_rankings()[:3]
         top_vals_str: str | None = None
         if rankings3:
@@ -191,7 +191,7 @@ class AxisIndex:
         )
 
     def digest_for_l2(self) -> dict[str, str] | None:
-        """Digest for the L2 refine_strategy inbox: rankings, bottleneck distribution,
+        """Digest for the L2 refine_strategy dispatch_msg: rankings, bottleneck distribution,
         persistent failures, failure-group correlations, volatile queries."""
         rankings5 = self.axis_rankings()[:5]
         bottleneck = self.sample_index.bottleneck_distribution()
@@ -225,7 +225,7 @@ class AxisIndex:
         )
 
     def digest_for_l3(self) -> dict[str, str] | None:
-        """Digest for the L3 modify_plan inbox: clusters, rankings, bottleneck, persistent."""
+        """Digest for the L3 modify_plan dispatch_msg: clusters, rankings, bottleneck, persistent."""
         c3 = self.sample_index.failure_clusters(3)
         rankings5 = self.axis_rankings()[:5]
         bottleneck = self.sample_index.bottleneck_distribution()

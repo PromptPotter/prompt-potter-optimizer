@@ -6,9 +6,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.nodes.inbox_registry import (
+from promptpotter.application.optimization.nodes.dispatch_msg_registry import (
     Layer,
-    assemble_inbox,
+    assemble_dispatch_msg,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
 from promptpotter.application.optimization.results import CandidateProposal
@@ -126,21 +126,21 @@ _HEADER_RE = re.compile(r"^([A-Z][A-Z _]+)")
 
 def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
     """Input-side visibility for dedup work; output budgeting is the provider's job."""
-    inbox = str(compile_vars.get("inbox", ""))
+    dispatch_msg = str(compile_vars.get("dispatch_msg", ""))
     sections = sorted(
         (
             ((m.group(1).rstrip() if (m := _HEADER_RE.match(p)) else "<unknown>"), len(p))
-            for p in inbox.split("\n\n")
+            for p in dispatch_msg.split("\n\n")
             if p
         ),
         key=lambda x: -x[1],
     )
     summary = " | ".join(f"{h}={s}" for h, s in sections[:6])
     logger.info(
-        "L1 R%d meta-prompt: %d chars (inbox=%d) | %s",
+        "L1 R%d meta-prompt: %d chars (dispatch_msg=%d) | %s",
         round_num,
         len(meta_prompt),
-        len(inbox),
+        len(dispatch_msg),
         summary,
     )
 
@@ -225,8 +225,8 @@ async def l1_generate(
         "accuracy_pct": f"{cycle.current_accuracy:.1%}",
         "n_queries": str(len(cycle.current_results)),
         "rendered_prompt": opt_sp.render(),
-        "inbox": assemble_inbox(
-            Layer.L1,
+        "dispatch_msg": assemble_dispatch_msg(
+            Layer.L1_GENERATE,
             cycle,
             round_num=round_num,
             pipeline_schema_text=schema_text,

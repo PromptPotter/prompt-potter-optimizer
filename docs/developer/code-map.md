@@ -33,7 +33,7 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 
 | Symbol | Module |
 |--------|--------|
-| `assemble_inbox` | `promptpotter/application/optimization/nodes/inbox_registry.py` |
+| `assemble_dispatch_msg` | `promptpotter/application/optimization/nodes/dispatch_msg_registry.py` |
 | `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |

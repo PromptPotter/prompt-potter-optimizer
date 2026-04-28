@@ -5,7 +5,7 @@ Implementation spec. Python class names, method signatures, module paths, and JS
 | Page | What it covers |
 |------|----------------|
 | [Code layout](code-layout.md) | Hexagonal package layout, three-layer I/O rule, shared libraries |
-| [Information flow](information-flow.md) | Data contract — what each optimizer layer reads and writes, inbox registry, retention lifecycle |
+| [Information flow](information-flow.md) | Data contract — what each optimizer layer reads and writes, dispatch_msg registry, retention lifecycle |
 | [Node standard](node-standard.md) | Node capabilities, JSON declaration format, wiring a new node |
 | [Prompt scheme internals](prompt-scheme-internals.md) | `PromptTemplate`, two prompt stores, rendering pipeline, `PROMPT_STRING_FIELDS` |
 | [Axis index internals](axis-index-internals.md) | Accessor catalog, digest API, consumer mapping, refresh mechanics |

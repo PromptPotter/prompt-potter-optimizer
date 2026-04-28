@@ -56,17 +56,15 @@ def format_axis_digest_block(
     digest: dict | None,
     key_labels: dict[str, str],
     *,
-    header: str = "HISTORICAL INTELLIGENCE:",
+    header: str = "",
 ) -> str:
-    """Build HISTORICAL INTELLIGENCE block from an AxisIndex digest dict."""
+    """Render an AxisIndex digest dict as a labelled block. Empty digest → ``""``."""
     if not digest:
         return ""
-    lines = [header]
-    for key, label in key_labels.items():
-        val = digest.get(key)
-        if val:
-            lines.append(f"  {label}: {val}")
-    return "\n".join(lines) if len(lines) > 1 else ""
+    entries = [f"  {label}: {val}" for key, label in key_labels.items() if (val := digest.get(key))]
+    if not entries:
+        return ""
+    return "\n".join([header, *entries]) if header else "\n".join(entries)
 
 
 def extract_runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:

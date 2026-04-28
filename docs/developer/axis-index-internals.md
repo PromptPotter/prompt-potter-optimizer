@@ -41,10 +41,10 @@ Per-query failure tracking: which pipeline step terminated processing (`terminat
 
 ## Digest API
 
-All consumers call one method with a chosen subset of intelligence keys. The cross-consumer matrix:
+All consumers call one method with a chosen subset of digest keys. The cross-consumer matrix:
 
-| Consumer | Intelligence received |
-|----------|-----------------------|
+| Consumer | Keys received |
+|----------|---------------|
 | **L1 — generate phase** | Failure clusters, dead queries, top parameter axes + best values |
 | **L1 — critique phase** | Discriminating queries, failure clusters, tractability profiles, exhausted axes, value trends, improvement attribution |
 | **L2** | Axis rankings, bottleneck distribution, failure group × axis correlations, persistent failures, volatile queries |
@@ -52,7 +52,7 @@ All consumers call one method with a chosen subset of intelligence keys. The cro
 
 Each consumer calls its own typed method: `digest_for_l1_generate()`, `digest_for_l1_critique()`, `digest_for_l2()`, `digest_for_l3()`. Each method composes a fixed set of keys for that layer and shares the underlying private accessors (no parameterized "keys" argument).
 
-The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 inbox](information-flow.md). This section documents the composition: which public and private accessors each key aggregates.
+The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 dispatch_msg](information-flow.md). This section documents the composition: which public and private accessors each key aggregates.
 
 | Key | Source | Consumed by |
 |-----|--------|-------------|
@@ -70,7 +70,7 @@ The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 
 | `failure_group_insights` | `_axis_failure_group_deltas` (populated by `_recompute_failure_group_correlations()`) | L2 |
 | `volatile_queries` | `sample_index.flips(limit=50)` | L2 |
 
-The result is a `dict[str, str]` rendered through `format_axis_digest_block()` for a consistent "HISTORICAL INTELLIGENCE" block shape.
+The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. The dispatch_msg registry passes the `"HISTORICAL CONTEXT:"` header at each L1/L2/L3 site; the renderer itself is header-agnostic.
 
 ---
 

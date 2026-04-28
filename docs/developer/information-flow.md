@@ -1,8 +1,8 @@
 # Information Flow — Optimization Loop
 
-Every optimizer LLM prompt (L1, L2, L3) receives an `{{inbox}}` block — the single channel through which evaluation history, search memory, and cross-round signals enter a prompt. L1 has two internal phases: generate (proposes candidates) and critique (analyzes round results). Both phases have their own inbox; this doc covers both.
+Every optimizer LLM prompt (L1, L2, L3) receives a `{{dispatch_msg}}` block — the single channel through which evaluation history, axis-side context, and cross-round signals enter a prompt. L1 has two internal phases: generate (proposes candidates) and critique (analyzes round results). Each phase / layer has its own dispatch_msg layout; this doc covers all four.
 
-This file owns the data-routing contract: which data enters which inbox, how long each piece of data lives, and which fields are mutually exclusive. [../concepts/three-layer-loop.md](../concepts/three-layer-loop.md) covers the conceptual picture; [code-map.md](code-map.md) names every symbol mentioned below.
+This file owns the data-routing contract: which data enters which dispatch_msg, how long each piece of data lives, and which fields are mutually exclusive. [../concepts/three-layer-loop.md](../concepts/three-layer-loop.md) covers the conceptual picture; [code-map.md](code-map.md) names every symbol mentioned below.
 
 The key invariant: no prompt site summarizes its own data. All compression flows through the chain documented below — if a field isn't in these tables, it doesn't enter a prompt.
 
@@ -29,9 +29,9 @@ L3 sees only the last 3 L2 outcomes (what changed, whether accuracy moved) — n
 
 **Stale data observations** — per-query warnings accumulate in the warning inventory and are aggregated cross-campaign by `AxisIndex`. The stale-data protocol uses `AxisIndex`'s per-query degradation rate to decide when to swap a sample out. Never enters an LLM prompt.
 
-## L1 / L2 inbox
+## L1 / L2 dispatch_msg
 
-Fields assembled by `assemble_inbox()` from the declarative registry in `application/optimization/nodes/inbox_registry.py`. The critique phase keeps its own assembler (see below); this table covers L1 generate and L2 only.
+Fields assembled by `assemble_dispatch_msg()` from the declarative registry in `application/optimization/nodes/dispatch_msg_registry.py`. The same registry covers all four layers (`Layer.L1_GENERATE`, `Layer.L1_CRITIQUE`, `Layer.L2`, `Layer.L3`); this table covers L1 generate and L2.
 
 | Field | L1 | L2 | Retention | Mutex | Description |
 |-------|----|----|-----------| ------|-------------|
@@ -54,13 +54,14 @@ Fields assembled by `assemble_inbox()` from the declarative registry in `applica
 
 Fields sharing a mutex group are mutually exclusive per layer — only the highest-priority populated field renders. On L1: `l2_directive` (pri 2) wins over `l1_critique_text` (pri 1) in the `guidance` group. When L2 fires, L1 sees the directive instead of the raw critique.
 
-## L1 — critique phase inbox
+## L1 — critique phase dispatch_msg
 
-The critique phase runs inside L1 after scoring and winner selection. It keeps its own inbox assembler because its sections share cross-cutting state (anomaly accumulator, near-miss query set passed between sections). Sections in order:
+The critique phase runs inside L1 after scoring and winner selection. Sections share cross-cutting state (anomaly accumulator, near-miss query set passed between sections); the registry runs a one-shot pre-pass — `_compute_critique_context` — that computes those facts up front and stashes them in a `_CritiqueContext` carried through kwargs, so the section renderers stay pure. Sections in order:
 
 | Section | Source |
 |---------|--------|
 | `SCORING SUMMARY` | Round accuracy, composite score, degraded query count, stall count, best accuracy |
+| `ANOMALY FLAGS` | Accumulated by the pre-pass; renders only when non-empty |
 | `PIPELINE HEALTH` | Candidate result distribution by termination step |
 | `RUNTIME FAILURES THIS ROUND` | Runtime failures from the round's candidates |
 | `CANDIDATE RANK ANALYSIS` | Per-candidate results and rankings |
@@ -68,16 +69,15 @@ The critique phase runs inside L1 after scoring and winner selection. It keeps i
 | `QUERY CATEGORIES` | Queries grouped by where processing terminated |
 | `FAILURE DETAILS` | Detailed failure breakdown |
 | `SUCCESSES` | Example hits |
-| `ANOMALY FLAGS` | Accumulated across the sections above |
-| `HISTORICAL INTELLIGENCE` | `AxisIndex`: discriminating queries, failure clusters, tractability, exhausted axes, value trends, improvement attribution |
+| `HISTORICAL CONTEXT` | `AxisIndex`: discriminating queries, failure clusters, tractability, exhausted axes, value trends, improvement attribution |
 | `THIS ROUND` | Round trajectory and cross-candidate diff |
 | `AVAILABLE SCHEMA MUTATIONS` | Pipeline nodes with mutable output schemas |
 
-The critique phase is the only inbox with access to raw per-query results — it's the every-round intelligence hub. Its output flows into L1 generate (next round) and L2 refine (on escalation).
+The critique phase is the only dispatch_msg with access to raw per-query results — it's the every-round analysis hub. Its output flows into L1 generate (next round) and L2 refine (on escalation).
 
 ## L3 — multi-hole template
 
-L3 fires when L2 stalls and owns the strategic plan. In addition to its `{{inbox}}`, it receives several context anchors:
+L3 fires when L2 stalls and owns the strategic plan. In addition to its `{{dispatch_msg}}`, it receives several context anchors:
 
 | Hole | Source |
 |------|--------|
@@ -86,9 +86,9 @@ L3 fires when L2 stalls and owns the strategic plan. In addition to its `{{inbox
 | `{{rendered_prompt}}` | Current prompt rendered as a single string |
 | `{{pipeline_section}}` | Current pipeline parameters |
 | `{{runtime_failures_section}}` | Runtime failures accumulated across rounds |
-| `{{inbox}}` | `AxisIndex`: axis rankings, bottleneck distribution, failure clusters, persistent failures |
+| `{{dispatch_msg}}` | `AxisIndex`: axis rankings, bottleneck distribution, failure clusters, persistent failures |
 
-## Three tiers of intelligence
+## Three tiers of analysis
 
 L1 focuses on generating diverse candidates. Everything else is one of three tiers, each with a distinct owner, trigger, and signal type.
 
