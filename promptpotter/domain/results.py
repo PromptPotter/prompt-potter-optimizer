@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass, field
+from typing import Any
+
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.analysis import EscalationSignal
@@ -9,12 +12,63 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 
 __all__ = [
     "CandidateProposal",
+    "CandidateScore",
     "RoundBaseline",
     "RoundDiagnostics",
     "RoundMetadata",
     "RoundResult",
     "RunResult",
 ]
+
+
+@dataclass(frozen=True)
+class CandidateScore:
+    """One candidate's score report from L1 scoring.
+
+    Stable shape, defaults always present. Lives in ``L1ScoringResult.candidate_scores``
+    (typed) and on phase events / RoundResult / library archives as a flat
+    dict via :meth:`to_dict` (wire format).
+    """
+
+    candidate_id: str
+    changes_description: str
+    accuracy: float
+    composite: float
+    hits: int
+    total: int
+    evaluators: dict[str, float]
+    pipeline_params_override: dict | None = None
+    escalation_aborted: bool = False
+    elimination_stopped: bool = False
+    scored_queries: int = 0
+    expected_queries: int = 0
+    invalid: bool = False
+    resumed_from_cache: bool = False
+    validation_failures: list[dict] = field(default_factory=list)
+    runtime_failures: list[dict] = field(default_factory=list)
+    elimination_context: dict = field(default_factory=dict)
+
+    def to_dict(self) -> dict[str, Any]:
+        """Flat dict representation for wire format / JSON serialization."""
+        return {
+            "candidate_id": self.candidate_id,
+            "changes_description": self.changes_description,
+            "pipeline_params_override": self.pipeline_params_override,
+            "accuracy": self.accuracy,
+            "composite": self.composite,
+            "hits": self.hits,
+            "total": self.total,
+            "evaluators": dict(self.evaluators),
+            "escalation_aborted": self.escalation_aborted,
+            "elimination_stopped": self.elimination_stopped,
+            "scored_queries": self.scored_queries,
+            "expected_queries": self.expected_queries,
+            "invalid": self.invalid,
+            "resumed_from_cache": self.resumed_from_cache,
+            "validation_failures": list(self.validation_failures),
+            "runtime_failures": list(self.runtime_failures),
+            "elimination_context": dict(self.elimination_context),
+        }
 
 
 class CandidateProposal(BaseModel):

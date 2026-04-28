@@ -17,7 +17,7 @@ from promptpotter.domain.analysis import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.results import CandidateProposal
+from promptpotter.domain.results import CandidateProposal, CandidateScore
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.infrastructure.tracing.events import CandidateScored
 from promptpotter.shared.errors import graceful
@@ -95,27 +95,27 @@ def _build_score_report(
     resumed_from_cache: bool = False,
     invalid: bool = False,
     new_runtime_failure: RuntimeFailure | None = None,
-) -> dict:
-    """Build unified candidate score report dict — stable shape, defaults always present."""
-    return {
-        "candidate_id": osp.lineage.id,
-        "changes_description": osp.lineage.changes_description or "",
-        "pipeline_params_override": override,
-        "accuracy": scores["accuracy"],
-        "composite": scores.get("composite", scores["accuracy"]),
-        "hits": scores["hits"],
-        "total": scores["total"],
-        "evaluators": dict(scores.get("evaluators") or {}),
-        "escalation_aborted": aborted,
-        "elimination_stopped": elimination_stopped,
-        "scored_queries": len(results),
-        "expected_queries": len(dataset),
-        "invalid": invalid,
-        "resumed_from_cache": resumed_from_cache,
-        "validation_failures": [vf.to_dict() for vf in osp.validation_failures],
-        "runtime_failures": [new_runtime_failure.to_dict()] if new_runtime_failure else [],
-        "elimination_context": dict(elimination_context) if elimination_context else {},
-    }
+) -> CandidateScore:
+    """Build the typed candidate score report — stable shape, defaults always present."""
+    return CandidateScore(
+        candidate_id=osp.lineage.id,
+        changes_description=osp.lineage.changes_description or "",
+        pipeline_params_override=override,
+        accuracy=scores["accuracy"],
+        composite=scores.get("composite", scores["accuracy"]),
+        hits=scores["hits"],
+        total=scores["total"],
+        evaluators=dict(scores.get("evaluators") or {}),
+        escalation_aborted=aborted,
+        elimination_stopped=elimination_stopped,
+        scored_queries=len(results),
+        expected_queries=len(dataset),
+        invalid=invalid,
+        resumed_from_cache=resumed_from_cache,
+        validation_failures=[vf.to_dict() for vf in osp.validation_failures],
+        runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
+        elimination_context=dict(elimination_context) if elimination_context else {},
+    )
 
 
 _INVALID_SCORES: dict[str, Any] = {
@@ -138,7 +138,7 @@ def _handle_scored_candidate(
     dataset: list,
     elim_check: Any,
     round_num: int,
-) -> tuple[dict, EscalationSignal | None]:
+) -> tuple[CandidateScore, EscalationSignal | None]:
     """Build report for a scored candidate; attach RuntimeFailure on elimination (Rail 2)."""
     elimination_stopped = (
         signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
@@ -216,8 +216,8 @@ def _record_elimination_cut(
     osp_c: OptSearchPoint,
     elim_check: Any,
     priors_at_test: list[str],
-    candidate_scores: list[dict],
-    report: dict,
+    candidate_scores: list[CandidateScore],
+    report: CandidateScore,
     decisions: list[Decision] | None,
     round_num: int,
     n_results: int,
@@ -228,15 +228,11 @@ def _record_elimination_cut(
     if 0 <= trigger_idx < len(priors_at_test):
         prior_id = priors_at_test[trigger_idx]
         prior_label = next(
-            (
-                f"C{i + 1}"
-                for i, r in enumerate(candidate_scores)
-                if r.get("candidate_id") == prior_id
-            ),
+            (f"C{i + 1}" for i, r in enumerate(candidate_scores) if r.candidate_id == prior_id),
             None,
         )
-        if prior_label and report["elimination_context"]:
-            report["elimination_context"]["triggered_by_prior_label"] = prior_label
+        if prior_label and report.elimination_context:
+            report.elimination_context["triggered_by_prior_label"] = prior_label
 
     if decisions is not None:
         record_decision(
@@ -271,22 +267,22 @@ async def score_population(
     elimination_alpha: float = 0.2,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
-) -> tuple[dict[str, list[QueryResult]], list[dict], EscalationSignal | None]:
+) -> tuple[dict[str, list[QueryResult]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
     obs = session.obs
     n = len(population)
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
-    candidate_scores: list[dict] = []
+    candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
     elim_check = EliminationCheck(
         n_min=elimination_n_min, alpha=elimination_alpha, n_queries=len(dataset)
     )
 
-    def _fire(idx: int, report: dict) -> None:
+    def _fire(idx: int, report: CandidateScore) -> None:
         candidate_scores.append(report)
-        callbacks.on_candidate_scored(idx, n, report)
+        callbacks.on_candidate_scored(idx, n, report.to_dict())
         if obs:
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
@@ -294,7 +290,7 @@ async def score_population(
                     campaign_id=session.obs_campaign_id,
                     round_num=round_num,
                     candidate_idx=idx,
-                    report=report,
+                    report=report.to_dict(),
                 )
 
     for idx, osp_c in enumerate(population):

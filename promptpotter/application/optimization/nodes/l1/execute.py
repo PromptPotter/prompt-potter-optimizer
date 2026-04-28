@@ -212,6 +212,7 @@ async def execute_round(
                     winner_accuracy=scoring_result.winner_accuracy,
                     improved=scoring_result.improved,
                 )
+    candidate_scores_dicts = [cs.to_dict() for cs in scoring_result.candidate_scores]
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -222,7 +223,7 @@ async def execute_round(
         winner_composite=scoring_result.winner_composite,
         winner_evaluators=dict(scoring_result.winner_evaluators),
         improved=scoring_result.improved,
-        candidate_scores=scoring_result.candidate_scores,
+        candidate_scores=candidate_scores_dicts,
     )
 
     critique_text = ""
@@ -262,7 +263,7 @@ async def execute_round(
         results=scoring_result.winner_results,
         all_candidate_results=dict(scoring_result.all_candidate_results),
         candidates_scored=scoring_result.candidates_scored,
-        candidate_scores=scoring_result.candidate_scores,
+        candidate_scores=candidate_scores_dicts,
         decisions=[d.to_dict() for d in scoring_result.decisions],
         degraded_queries=scoring_result.degraded_queries,
         deprecated=scoring_result.deprecated,
@@ -281,7 +282,7 @@ async def execute_round(
                     total=scoring_result.total,
                     improved=scoring_result.improved,
                     winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
-                    candidate_scores=scoring_result.candidate_scores,
+                    candidate_scores=candidate_scores_dicts,
                     model=config.optimizer_llm.model or "",
                     n_variants=config.optimization.n_variants,
                     optimizer_templates=["l1_generate", "l1_critique"],

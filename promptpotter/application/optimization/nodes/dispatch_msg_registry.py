@@ -614,11 +614,11 @@ def _section_l1c_runtime_failures(ctx: LayerContext) -> str:
         return ""
     failures = [
         {
-            "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[:60],
+            "candidate_desc": (cs.changes_description or cs.candidate_id)[:60],
             **rf,
         }
         for cs in ctx.scoring_result.candidate_scores
-        for rf in cs["runtime_failures"]
+        for rf in cs.runtime_failures
     ]
     if not failures:
         return ""
@@ -737,7 +737,7 @@ def _section_l1c_this_round(ctx: LayerContext) -> str:
     diff = build_cross_candidate_diff(
         cast(list[dict], sr.winner_results),
         cast("dict[str, list[dict]]", sr.all_candidate_results),
-        sr.candidate_scores,
+        [cs.to_dict() for cs in sr.candidate_scores],
     )
     trajectory = build_trajectory_report(ctx.cycle.rounds)
     if trajectory and trajectory.classification != "healthy":

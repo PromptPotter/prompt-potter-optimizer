@@ -298,7 +298,7 @@ class Cycle:
 
         existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
         for cs in scoring_result.candidate_scores:
-            for rf_dict in cs["runtime_failures"]:
+            for rf_dict in cs.runtime_failures:
                 k = _rf_dedup_key(rf_dict)
                 if k in existing_keys:
                     continue
