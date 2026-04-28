@@ -81,7 +81,7 @@ promptpotter/
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`, `phase_events.jsonl`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `candidates/`, `trials/`, `rounds/`, `langfuse/`, `prompts/`, `archived/`) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 
@@ -112,13 +112,12 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 3. **Drill into peer files when the dashboard isn't enough.** Layout splits into two bands:
    - At `campaigns/{root_cycle_id}/` (telemetry, shared across all forks of the family):
      - `output.log` — append-only HIT/MISS history (raw, ungrouped, fast to tail). Contains a `=== FORK <id> from round N (parent: ...) ===` banner at each cutover.
-     - `phase_events.jsonl` — structured event trace, one JSON per line; each record carries `cycle_id` so consumers can demux fork-vs-parent records.
    - At `campaigns/{cycle_id}/` (per-cycle audit, one set per fork):
      - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
      - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
-     - `candidates/round_NNNN.json` — full per-round node I/O including the L1 leaderboard with scores, eliminations, and change descriptions.
-     - `rounds/round_NNN.json` — per-round LLM action audit.
      - `index.json` — campaign metadata + trial index, plus the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
+     - `.cache/candidates/round_NNNN.json` — pre-scoring candidate checkpoint (resume state). Internal; overwritten next round.
+     - `.cache/rounds/round_NNN.json` — per-round LLM action audit (developer artifact). Internal.
 
 `optimize_result.json` and `hard_samples.json` were folded away this cycle: the final-run summary now lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md` instead of being its own file. Langfuse mirrors live under `campaigns/{cycle_id}/langfuse/` (including `langfuse/events.jsonl`); none of those are read for state reconstruction.
 
@@ -134,7 +133,7 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
-- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`, `phase_events.jsonl`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/`). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
+- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `langfuse/`, `prompts/`, plus `.cache/candidates/` and `.cache/rounds/` for internal resume state). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
 - `{tenant_id}/library/` — **the measurement archive — the database core, cross-cycle, cross-session, cross-tenant.** One row = `(sample × config → outcome)`. Two retrieval views, both first-class: `MeasurementArchive.measurements_for_sample(sample_id)` (by training example) and `MeasurementArchive.measurements_for_config(predicate)` (by searchpoint). Both return `list[Measurement]`. Cache reuse and LLM digests are derived views over this same archive. See [`docs/concepts/measurement-archive.md`](docs/concepts/measurement-archive.md) and [`docs/developer/measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md). Layout: `library/measurements/{run_id}.json` (facts), `library/measurements.json` (index), plus `backends/`, datasets, `prompt_aliases.json`. Both digest layers (`AxisIndex` and `SampleIndex`) are in-memory only — rebuilt from the archive every refresh, no on-disk file.
 
 Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.

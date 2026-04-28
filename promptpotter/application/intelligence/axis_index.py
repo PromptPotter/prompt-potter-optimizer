@@ -1,9 +1,10 @@
 """AxisIndex — derived axis-keyed view over the MeasurementArchive.
 
-Both digest sides are pure derivations of the archive: the axis side
-rebuilds ``_axis_values`` from ``archive.list_all()`` on every
-:meth:`refresh`, and the sample-side :class:`SampleIndex` ingests delta
-runs via ``archive.load_since(_seen_runs)``. Neither owns an on-disk
+Both digest sides are pure derivations of the archive and refresh
+**incrementally**: the axis side folds new index entries into
+``_axis_values`` via an in-process ``_axis_seen_runs`` cursor, and the
+sample-side :class:`SampleIndex` ingests delta runs via
+``archive.load_since(sample_index._seen_runs)``. Neither owns an on-disk
 artifact; the archive is the single source of truth.
 
 The class hosts the digest API consumed by L1/L2/L3 prompts. Names are
@@ -68,8 +69,9 @@ class AxisIndex:
     Holds two collaborating pieces:
 
     * ``sample_index`` — per-sample derived state (no persistence).
-    * ``_axis_values`` — axis → value → list[accuracy], rebuilt from the
-      archive index on every :meth:`refresh`.
+    * ``_axis_values`` — axis → value → list[accuracy], grown
+      incrementally from the archive index by folding only new entries
+      (``_axis_seen_runs`` cursor).
 
     Failure-group × axis correlations are recomputed on every refresh —
     cheap at current scale and avoids drift from a throttle.
@@ -80,6 +82,10 @@ class AxisIndex:
         self._axis_values: dict[str, dict[str, list[float]]] = defaultdict(
             lambda: defaultdict(list),
         )
+        # In-process cursor tracking which archive entries have been folded
+        # into ``_axis_values``. Mirrors ``sample_index._seen_runs`` for the
+        # axis side; new processes re-walk the full archive on first refresh.
+        self._axis_seen_runs: set[str] = set()
         self._axis_failure_group_deltas: dict[str, dict[str, float]] = {}
         self._cache_axis_impacts: dict[str, AxisImpact | None] = {}
 
@@ -310,18 +316,22 @@ class AxisIndex:
         scorer_id: str = "none",
         scorer_formula: str | None = None,
     ) -> None:
-        """Rebuild axis side from the archive; incrementally update sample side.
+        """Incrementally update both sides from the archive.
 
-        Sample side: incremental — walk
-        ``archive.load_since(_seen_runs)``, rescore items via
-        ``rescore_results``, ingest into ``sample_index``, mark seen.
-        ``_seen_runs`` is an in-process cursor only; new processes
-        re-walk the full archive on first refresh.
+        Sample side: walk ``archive.load_since(_seen_runs)``, rescore
+        items via ``rescore_results``, ingest into ``sample_index``,
+        mark seen.
 
-        Axis side: full rebuild every call — walk ``archive.list_all()``
-        (the index already carries ``pipeline_params`` and
-        ``scores.accuracy``, no detail load needed). Failure-group
-        correlations are recomputed unconditionally afterwards.
+        Axis side: walk ``archive.list_all()`` and fold only entries
+        whose ``run_id`` is new (cursor: ``_axis_seen_runs``). Index
+        entries already carry ``pipeline_params`` and ``scores.accuracy``,
+        so no detail load is needed. Touched axes have their cached
+        impact invalidated; untouched axes keep theirs. Failure-group
+        correlations are recomputed unconditionally afterwards (they
+        depend on aggregate state).
+
+        Both cursors are in-process only; new processes re-walk the
+        full archive on first refresh.
         """
         added = 0
         for run_id, detail in store.archive.load_since(backend_id, self.sample_index._seen_runs):
@@ -331,14 +341,18 @@ class AxisIndex:
             self.sample_index.mark_seen(run_id)
             added += 1
 
-        # Axis side: rebuild from the archive index. Cheap and stateless —
-        # no detail load needed because the index entries already carry
-        # ``pipeline_params`` and ``scores.accuracy``.
-        new_axis_values: dict[str, dict[str, list[float]]] = defaultdict(lambda: defaultdict(list))
+        # Axis side: fold only new index entries into the persistent
+        # ``_axis_values``, tracking which axes the delta touched so we
+        # can invalidate exactly those impact-cache slots.
+        touched_axes: set[str] = set()
         for entry in store.archive.list_all(backend_id):
-            self._fold_entry(new_axis_values, entry)
-        self._axis_values = new_axis_values
-        self._cache_axis_impacts = {}
+            run_id = entry.get("run_id", "")
+            if not run_id or run_id in self._axis_seen_runs:
+                continue
+            self._fold_entry(self._axis_values, entry, touched_axes=touched_axes)
+            self._axis_seen_runs.add(run_id)
+        for axis in touched_axes:
+            self._cache_axis_impacts.pop(axis, None)
         self._recompute_failure_group_correlations()
 
         if added:
@@ -391,16 +405,27 @@ class AxisIndex:
     def _fold_entry(
         axis_values: dict[str, dict[str, list[float]]],
         entry: dict[str, Any],
+        *,
+        touched_axes: set[str] | None = None,
     ) -> None:
-        """Fold one archive index entry's pipeline_params + accuracy into ``axis_values``."""
+        """Fold one archive index entry's pipeline_params + accuracy into ``axis_values``.
+
+        When ``touched_axes`` is provided, every axis that gets a value
+        appended is added to the set so callers can scope cache
+        invalidation to just the delta.
+        """
         accuracy = entry.get("scores", {}).get("accuracy", 0.0)
         for node_name, node_config in (entry.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):
                 for param, value in node_config.items():
                     axis = f"{node_name}.{param}" if node_name else param
                     axis_values[axis][_value_preview(value)].append(accuracy)
+                    if touched_axes is not None:
+                        touched_axes.add(axis)
             else:
                 axis_values[node_name][_value_preview(node_config)].append(accuracy)
+                if touched_axes is not None:
+                    touched_axes.add(node_name)
 
     def _compute_axis_impact(
         self,

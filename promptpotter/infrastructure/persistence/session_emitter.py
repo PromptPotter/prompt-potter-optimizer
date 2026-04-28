@@ -160,16 +160,15 @@ class CampaignPersistenceEmitter:
         recorder: RoundRecorder | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
-        # Forks share one continuous dashboard / output.log / phase_events stream;
-        # per-fork audit (index.json, log.md, candidates/, trials/, rounds/) stays
-        # in each cycle's own dir, written through dynamic ``session.cycle_id`` paths.
+        # Forks share one continuous dashboard / output.log stream; per-fork
+        # audit (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
+        # stays in each cycle's own dir, written through dynamic
+        # ``session.cycle_id`` paths.
         self.root_dir = root_dir
         self.state_path = root_dir / "dashboard.json"
         self.log_path = root_dir / "output.log"
-        self.phase_events_path = root_dir / "phase_events.jsonl"
         self.session_dir = session_dir
         self._recorder = recorder
-        self._phase_event_seq: int = 0
 
         self._patience_max: int = l1_patience
         self._state: dict[str, Any] = _make_initial_state(
@@ -202,8 +201,6 @@ class CampaignPersistenceEmitter:
         self._log_fh: IO[str] = open(  # noqa: SIM115
             self.log_path, "a", encoding="utf-8", buffering=1
         )
-        # Touch for artifact parity — append-only, preserved on resume.
-        self.phase_events_path.touch()
         if resume_from:
             r = resume_from
             self._log_fh.write(
@@ -234,7 +231,7 @@ class CampaignPersistenceEmitter:
 
         Telemetry binds to the family root (derived from ``cycle_id`` —
         the prefix before any ``_fork_`` segment). Forks of the same family
-        share that root's dashboard.json / output.log / phase_events.jsonl."""
+        share that root's dashboard.json / output.log."""
         if not (project_root and session_id and cycle_id):
             return None
 
@@ -311,28 +308,7 @@ class CampaignPersistenceEmitter:
             s["layer"] = _PHASE_TO_LAYER[phase]
 
         self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
-        self._persist_phase_event(event, view)
         self._persist()
-
-    def _persist_phase_event(self, event: PhaseEvent, view: dict | None) -> None:
-        """Append a phase_events.jsonl line; no-op when view is None.
-
-        Each record carries ``cycle_id`` so consumers can demux records that
-        belong to different forks of the same family root."""
-        if view is None:
-            return
-        record = {
-            "seq": self._phase_event_seq,
-            "phase": event.phase,
-            "event": event.event,
-            "round": event.round,
-            "cycle_id": self._state.get("cycle_id"),
-            "ts": event.timestamp,
-            "view": view,
-        }
-        self._phase_event_seq += 1
-        with self.phase_events_path.open("a", encoding="utf-8") as f:
-            f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
         """Banner in output.log marking a fork-on-divergence cutover.
@@ -509,7 +485,7 @@ class CampaignPersistenceEmitter:
         )
 
         # Deposit l1_score block + HITL onto the active recorder before
-        # runner.py flush() — produces one consolidated rounds/round_NNNN.json.
+        # runner.py flush() — produces one consolidated .cache/rounds/round_NNNN.json.
         self._deposit_round_recorder_state(round_result)
 
         self._current_round = {"round": round_result.round + 1, "candidates": {}}

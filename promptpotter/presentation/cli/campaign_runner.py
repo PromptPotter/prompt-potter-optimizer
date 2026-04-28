@@ -514,7 +514,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     # BASELINE phase and per-query output reaches the terminal. Without this, the
     # CLI goes dark for the entire BASELINE phase. Recorder is built first so the
     # emitter can hold a direct reference (no callback indirection).
-    recorder = RoundRecorder(campaign_dir / "rounds")
+    recorder = RoundRecorder(campaign_dir / ".cache" / "rounds")
     recorder.rehydrate_sticky()
     session.round_recorder = recorder
 

@@ -81,19 +81,17 @@ The same per-query data renders live to the terminal during `optimize`, so you u
 
 ## Where the live state lands (forks and the family root)
 
-For monitoring a run in progress, three files carry the live observability stream:
+For monitoring a run in progress, two files carry the live observability stream:
 
 - `dashboard.json` — current phase, round, candidate, accuracies, and the in-flight query.
 - `output.log` — append-only HIT/MISS history, raw and tail-friendly.
-- `phase_events.jsonl` — one structured JSON record per phase event.
 
-These three live in **one place per cycle family**: the **root cycle's** dir (the cycle with no `parent_cycle_id`). When you fork a campaign with `optimize --fork-on-divergence`, the fork's own dir nests under the root at `campaigns/{root_cycle_id}/forks/{cycle_id}/`, but its dashboard / output.log / phase_events stay at the root. So one place to tail covers the whole family — no chasing dirs as forks happen.
+These two live in **one place per cycle family**: the **root cycle's** dir (the cycle with no `parent_cycle_id`). When you fork a campaign with `optimize --fork-on-divergence`, the fork's own dir nests under the root at `campaigns/{root_cycle_id}/forks/{cycle_id}/`, but its dashboard / output.log stay at the root. So one place to tail covers the whole family — no chasing dirs as forks happen.
 
 Inside the stream, you can tell which fork is currently active:
 - `dashboard.json::cycle_id` always names the active fork.
 - `output.log` gets a `=== FORK <id> from round N (parent: ...) ===` banner inline at each cutover.
-- `phase_events.jsonl` records each carry a `cycle_id` field — useful when post-processing.
 
-The fork's *own* dir (`campaigns/{root_cycle_id}/forks/{cycle_id}/`) holds its per-cycle audit (`index.json`, `log.md`, `trials/`, `candidates/`, `rounds/`, etc.). Open those when you want to inspect what specifically happened in one fork; open the root's telemetry when you want to watch live progress.
+The fork's *own* dir (`campaigns/{root_cycle_id}/forks/{cycle_id}/`) holds its per-cycle audit (`index.json`, `log.md`, `trials/`, plus `.cache/` for internal resume state). Open those when you want to inspect what specifically happened in one fork; open the root's telemetry when you want to watch live progress.
 
 Next: [Troubleshooting](05-troubleshooting.md).

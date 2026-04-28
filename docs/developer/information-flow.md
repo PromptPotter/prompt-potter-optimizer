@@ -6,6 +6,20 @@ This file owns the data-routing contract: which data enters which dispatch_msg, 
 
 The key invariant: no prompt site summarizes its own data. All compression flows through the chain documented below — if a field isn't in these tables, it doesn't enter a prompt.
 
+## The flow in five nouns
+
+```
+archive ──► AxisIndex (cached) ──► LayerContext (per-call) ──► sections (pure) ──► dispatch_msg ──► LLM
+```
+
+1. **archive** — `MeasurementArchive` under `library/measurements/`. Append-only fact table; one row per `(sample × config → outcome)`. The single source of truth.
+2. **AxisIndex** — derived axis-keyed view over the archive. Refreshes incrementally each round (cursor: `_axis_seen_runs` for axis side, `sample_index._seen_runs` for sample side). Hosts `digest_for_l1_generate / _l1_critique / _l2 / _l3` — pure derivations of cached state.
+3. **LayerContext** — per-call payload built once by `compile_layer_context(layer, cycle, ...)`. Bundles the persistent `cycle` reference, per-call inputs (round_num, scoring_result, candidate_scores, …), the layer-appropriate axis digest pre-fetched from `cycle.axes`, and (only on L1_CRITIQUE) a `_CritiqueContext` with cross-cutting facts.
+4. **sections** — pure formatters with signature `(ctx: LayerContext) -> str`. Each returns its rendered text or `""` when inactive. No I/O, no recomputation. The complete catalogue lives in `application/optimization/nodes/dispatch_msg_registry.py::_SECTIONS`.
+5. **dispatch_msg** — `assemble_dispatch_msg()` walks `LAYER_ORDER[layer]`, calls each section, drops empties, joins with `\n\n`. Result is the `{{dispatch_msg}}` block injected into the L1/L2/L3 prompt template.
+
+If you can answer "what enters L1?" by listing what's in `LayerContext`, the flow is minimally knotted — by construction.
+
 ---
 
 ## How to read
@@ -56,7 +70,7 @@ Fields sharing a mutex group are mutually exclusive per layer — only the highe
 
 ## L1 — critique phase dispatch_msg
 
-The critique phase runs inside L1 after scoring and winner selection. Sections share cross-cutting state (anomaly accumulator, near-miss query set passed between sections); the registry runs a one-shot pre-pass — `_compute_critique_context` — that computes those facts up front and stashes them in a `_CritiqueContext` carried through kwargs, so the section renderers stay pure. Sections in order:
+The critique phase runs inside L1 after scoring and winner selection. Sections share cross-cutting state (anomaly accumulator, near-miss query set passed between sections); the registry runs a one-shot pre-pass — `_compute_critique_context` — that computes those facts up front and stashes them in a `_CritiqueContext` attached to `LayerContext.critique`, so the section renderers stay pure. Sections in order:
 
 | Section | Source |
 |---------|--------|

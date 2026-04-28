@@ -9,9 +9,9 @@ are separate trees; a campaign records its parent session via
 Campaign artifacts split into two bands:
 
 - ``ROOT_TELEMETRY_ARTIFACTS`` — the live observability stream
-  (dashboard.json, output.log, phase_events.jsonl). These bind to the
-  family root cycle (the one with no ``parent_cycle_id``); forks share a
-  single continuous stream rather than splintering it.
+  (dashboard.json, output.log). These bind to the family root cycle (the
+  one with no ``parent_cycle_id``); forks share a single continuous
+  stream rather than splintering it.
 - ``PER_CYCLE_AUDIT_ARTIFACTS`` — frozen-on-finalization records
   (index.json, log.md). Each cycle owns its own.
 
@@ -34,7 +34,6 @@ import pytest
 ROOT_TELEMETRY_ARTIFACTS = {
     "dashboard.json",
     "output.log",
-    "phase_events.jsonl",
 }
 
 # Per-cycle artifacts (frozen audit, owned by each fork).
@@ -100,7 +99,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
     assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_AUDIT_ARTIFACTS)
     assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
-    assert {"dashboard.json", "output.log", "phase_events.jsonl"} <= ROOT_TELEMETRY_ARTIFACTS
+    assert {"dashboard.json", "output.log"} <= ROOT_TELEMETRY_ARTIFACTS
     assert {"index.json", "log.md"} <= PER_CYCLE_AUDIT_ARTIFACTS
 
 

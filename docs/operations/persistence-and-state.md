@@ -22,7 +22,7 @@ To resume a campaign, run `python -m promptpotter optimize`. No need to `init` a
 Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts. Within a campaign dir, files split into two bands: **root telemetry** (live observability stream — `dashboard.json`, `output.log`, `phase_events.jsonl`) lives at the **family root** cycle (the cycle with no `parent_cycle_id`), so all forks of a family share one continuous stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/`) lives in each individual cycle's dir.
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts. Within a campaign dir, files split into two bands: **root telemetry** (live observability stream — `dashboard.json`, `output.log`) lives at the **family root** cycle (the cycle with no `parent_cycle_id`), so all forks of a family share one continuous stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each individual cycle's dir.
 - `{tenant_id}/library/` — **the measurement archive** (database core, cross-cycle, cross-session, cross-tenant): every measurement ever taken plus shared reference (datasets, backends, aliases). Concept doc: [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md).
 
 Full tree:
@@ -38,21 +38,21 @@ Full tree:
       # Root telemetry — shared across all forks of this family:
       dashboard.json                   # live counters; cycle_id field tracks active fork
       output.log                       # append-only HIT/MISS history; FORK banner on cutover
-      phase_events.jsonl               # structured phase event stream; each record carries cycle_id
       # Plus the root cycle's own per-cycle audit:
       index.json                       # campaign metadata + trial index + final summary block
       log.md                           # rendered narrative digest (per-round + heatmap + winner)
       trials/trial_NNNN.json           # resume source of truth
-      candidates/round_NNNN.json       # pre-scoring checkpoint
-      rounds/round_NNNN.json           # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3 when escalated)
       langfuse/                        # trace persistence (incl. events.jsonl mirror — not read for state)
       prompts/{family}/{version}/      # rendered optimizer prompts
       archived/resumed_at_{ts}/        # mid-cycle rewind history
+      .cache/                          # internal resume + audit state (hidden by convention)
+        candidates/round_NNNN.json     # pre-scoring candidate checkpoint
+        rounds/round_NNNN.json         # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3)
       forks/                           # all forks of this family nest here, regardless of depth
         {root_cycle_id}_fork_xxx/      # one subdir per fork; per-cycle audit only
           index.json   log.md
-          trials/   candidates/   rounds/   langfuse/   prompts/
-          # NO dashboard.json / output.log / phase_events.jsonl — those live at the family root above
+          trials/   langfuse/   prompts/   .cache/
+          # NO dashboard.json / output.log — those live at the family root above
     library/                           # the measurement archive — database core
       measurements/{run_id}.json       # MeasurementArchive: facts, append-only, content-addressed
       measurements.json                # archive index (denormalized read-side projection)
@@ -75,12 +75,11 @@ Prior evaluation results are replayed without calling the backend when a new pip
 |------|----------|---------|---------|
 | `dashboard.json` | family root | Every optimization event | Live state: round, baseline, best, candidates, counters. Its `cycle_id` field identifies which fork is currently active. |
 | `output.log` | family root | Append per eval query | Raw eval output (ANSI-stripped). On fork-on-divergence, gets a `=== FORK <id> from round N (parent: …) ===` banner inline. |
-| `phase_events.jsonl` | family root | Each phase event | One structured JSON per line. Each record carries `cycle_id` so consumers can demux fork-vs-parent records when tailing the family root. |
 | `index.json` | per cycle | Each phase transition + finalize | Config, phase, `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks only), `best_accuracy`, `trials[]`, `final` (winner + stop_reason on completion) |
 | `log.md` | per cycle | Round-complete + finalize | Rendered narrative digest: status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner. Pure derived view — safe to delete and recompute. |
-| `rounds/round_NNNN.json` | per cycle | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated) |
 | `trials/trial_NNNN.json` | per cycle | Each completed round | Serialized `OptSearchPoint` for resume |
-| `candidates/round_NNNN.json` | per cycle | Each round's pre-scoring step | Generated candidate list checkpoint |
+| `.cache/rounds/round_NNNN.json` | per cycle | Each round | One JSON object per node: l1_generate, l1_critique, l1_score, l2_context/l3_plan (when escalated). Internal — developer artifact. |
+| `.cache/candidates/round_NNNN.json` | per cycle | Each round's pre-scoring step | Generated candidate list checkpoint. Internal — overwritten next round. |
 | `langfuse/events.jsonl` | per cycle | Every observability event | Flat navigation log (mirror — not read for state) |
 | `langfuse/` | per cycle | During optimization | Trace/observation/score shadow + id-map `state.json` |
 | `prompts/` | per cycle | When prompts render | Rendered optimizer prompts per family/version |
@@ -90,9 +89,9 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 Scalar-only live dashboard. Atomically rewritten on every event during optimization. Carries display counters across cycles via `resume_from`.
 
-Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. The post-mortem `stop_reason` is written to `index.json::final::stop_reason` at finalize, not to the live dashboard. For per-query / per-candidate / per-round detail, read `rounds/round_NNNN.json` directly.
+Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. The post-mortem `stop_reason` is written to `index.json::final::stop_reason` at finalize, not to the live dashboard. For per-query / per-candidate / per-round detail, read `.cache/rounds/round_NNNN.json` directly.
 
-### `rounds/round_NNNN.json`
+### `.cache/rounds/round_NNNN.json`
 
 Consolidated per-round view — one JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type). Node types:
 

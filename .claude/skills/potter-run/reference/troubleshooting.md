@@ -9,7 +9,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `[CLIENT]` | Bad request (invalid params, missing fields) | Check command flags and config |
 | `[SERVER]` | Backend error (500, timeout) | Check backend status: `curl -s {url}/status` |
 | `[CONNECTION]` | Can't reach backend | Is the backend running? Check URL and port |
-| `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `trials/trial_NNNN.json` and `candidates/round_NNNN.json` for node-level details |
+| `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `trials/trial_NNNN.json` and `.cache/rounds/round_NNNN.json` for node-level details |
 | `[UNKNOWN]` | Unclassified | Read full error + `output.log` |
 
 ## Stop Reason → Recovery
@@ -33,9 +33,8 @@ The primary diagnostic surfaces (all under `campaigns/{cycle_id}/`):
 - **`log.md`** — rendered narrative digest, regenerated at each round-complete and at finalize. Contains status, per-round critique / L2 directive / changes, hard-samples heatmap, and final winner.
 - **`index.json`** — campaign metadata + trial index + `final` block (winner, baseline, stop_reason).
 - **`trials/trial_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, l2_directive, escalation state.
-- **`candidates/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O.
 - **`output.log`** — append-only HIT/MISS history (raw, ungrouped, fast to tail).
-- **`phase_events.jsonl`** — structured event trace, one JSON per line.
+- **`.cache/rounds/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O (internal — developer artifact).
 
 Look for: accuracy trends (improving, plateauing, degrading), L2/L3 activations, degradation warnings, error counts. Open `dashboard.json` in your editor for live state.
 

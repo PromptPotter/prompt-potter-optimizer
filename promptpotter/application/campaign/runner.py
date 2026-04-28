@@ -454,14 +454,16 @@ async def run_optimization(
     # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
     # minted a new fork cycle and updated ``session.cycle_id``. The emitter
     # is family-root-anchored so its telemetry paths stay correct, but the
-    # ``RoundRecorder`` writes ``rounds/round_NNN.json`` per cycle and must
-    # be rebuilt to point at the fork's own dir. Output.log gets a banner
-    # so the operator can see the cutover inline.
+    # ``RoundRecorder`` writes ``.cache/rounds/round_NNN.json`` per cycle and
+    # must be rebuilt to point at the fork's own dir. Output.log gets a
+    # banner so the operator can see the cutover inline.
     forked = pre_loop_cycle_id and session.cycle_id and pre_loop_cycle_id != session.cycle_id
     if forked and session.cycle_id and session.store is not None:
         from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
-        new_rounds_dir = session.store.campaigns.campaign_dir(session.cycle_id) / "rounds"
+        new_rounds_dir = (
+            session.store.campaigns.campaign_dir(session.cycle_id) / ".cache" / "rounds"
+        )
         session.round_recorder = RoundRecorder(new_rounds_dir)
         session.round_recorder.rehydrate_sticky()
 

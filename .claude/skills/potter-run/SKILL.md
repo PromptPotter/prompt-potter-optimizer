@@ -105,7 +105,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `candidates/round_NNNN.json` (per-candidate node I/O), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
+**Monitor** by tailing `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
 
 **Incremental persistence.** Every query lands in `library/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 

@@ -91,7 +91,9 @@ class CampaignStore(EntityStore):
         return self._campaign_dir(backend_id, cycle_id) / "trials"
 
     def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
-        return self._campaign_dir(backend_id, cycle_id) / "candidates"
+        # Internal resume checkpoint — hidden under ``.cache/`` so the cycle
+        # dir's top level shows only files an operator should actually read.
+        return self._campaign_dir(backend_id, cycle_id) / ".cache" / "candidates"
 
     def _entity_path(self, backend_id: str, entity_id: str) -> Path:
         """Campaign metadata (index.json) lives INSIDE the per-cycle dir."""
@@ -160,7 +162,7 @@ class CampaignStore(EntityStore):
         """Archive trial/candidate files for rounds > ``after_round``.
 
         Moves ``trials/trial_{M:04d}.json`` and
-        ``candidates/round_{M:04d}.json`` for M > after_round into
+        ``.cache/candidates/round_{M:04d}.json`` for M > after_round into
         ``archived/resumed_at_<ts>/{trials,candidates}/``, then rebuilds
         the cycle's trial index to reflect only surviving trials
         (rounds 0..after_round). No-op on a cycle with no such trial.

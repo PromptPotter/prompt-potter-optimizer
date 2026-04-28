@@ -3,7 +3,7 @@
 Each function takes the JSON ``view`` produced by
 ``application.campaign.phase_views`` and returns a formatted string. Zero
 domain-model knowledge. The dispatch entry point ``render_phase_event(event_record)``
-accepts a ``phase_events.jsonl`` line (``{phase, event, round, view, ...}``) and
+accepts a phase-event record (``{phase, event, round, view, ...}``) and
 returns the rendered string, or ``""`` if no renderer is registered.
 """
 
@@ -419,7 +419,7 @@ _RENDERERS: dict[str, Callable[[dict], str]] = {
 
 
 def render_phase_event(event_record: dict) -> str:
-    """Render a phase_events.jsonl record. Returns ``""`` if no renderer."""
+    """Render a phase-event record. Returns ``""`` if no renderer."""
     phase = event_record.get("phase", "")
     event = event_record.get("event", "")
     view = event_record.get("view") or {}

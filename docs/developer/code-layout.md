@@ -27,7 +27,7 @@ For the canonical symbol → file index, see [code-map.md](code-map.md).
 
 PromptPotter separates three kinds of output. Each kind has exactly one owner; violations are caught in tests.
 
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`, `phase_events.jsonl`) bind to the family root cycle (the one with no `parent_cycle_id`), so forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `candidates/`, `trials/`, `rounds/`, `langfuse/`, `prompts/`, `archived/`) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) bind to the family root cycle (the one with no `parent_cycle_id`), so forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
 - **Display** (per-entry-point) — caller passes a `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag set by Ctrl+C; notebook uses kernel interrupt). MUST NOT write campaign artifacts. The file-based `control.json` mechanism that predated this is gone.
 
@@ -65,20 +65,20 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
     campaigns/{root_cycle_id}/           # family root (cycle with no parent_cycle_id)
       dashboard.json                     # live counters — telemetry shared across forks
       output.log                         # append-only HIT/MISS history — fork banners on cutover
-      phase_events.jsonl                 # structured phase event stream — each record carries cycle_id
       # plus the root cycle's own per-cycle audit:
       index.json                         # campaign metadata + trial index + final summary
       log.md                             # rendered narrative digest (per-round + heatmap + winner)
       trials/trial_NNNN.json             # resume source of truth
-      candidates/round_NNNN.json         # pre-scoring checkpoint
-      rounds/round_NNN.json              # per-round LLM action audit
       langfuse/                          # trace persistence (incl. events.jsonl mirror)
       prompts/{family}/{version}/        # rendered optimizer prompts
       archived/resumed_at_{ts}/          # mid-cycle rewind history
+      .cache/                            # internal resume + audit state (hidden by convention)
+        candidates/round_NNNN.json       # pre-scoring candidate checkpoint
+        rounds/round_NNN.json            # per-round LLM action audit (developer artifact)
       forks/                             # all forks of this family nest here
         {root_cycle_id}_fork_xxx/        # one dir per fork — per-cycle audit only
           index.json   log.md            # telemetry stays at the family root above
-          trials/   candidates/   rounds/   langfuse/   prompts/
+          trials/   langfuse/   prompts/   .cache/
     library/                             # the measurement archive (database core)
       measurements/{run_id}.json         # MeasurementArchive: facts, append-only, content-addressed
       measurements.json                  # archive index (denormalized read-side projection)

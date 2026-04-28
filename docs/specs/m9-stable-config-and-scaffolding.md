@@ -139,8 +139,8 @@ All three are "where does the baseline `OptSearchPoint` come from?" but each one
 │   └── notes.md                         # Claude notes
 ├── campaigns/{cycle_id}/
 │   ├── trials/trial_{round:04d}.json    # resume WAL (state)
-│   ├── candidates/round_{round:04d}.json # pre-scoring checkpoint (state)
-│   ├── rounds/round_{round:03d}.json    # per-round LLM action audit
+│   ├── .cache/candidates/round_{round:04d}.json  # pre-scoring checkpoint (internal)
+│   ├── .cache/rounds/round_{round:03d}.json      # per-round LLM action audit (internal)
 │   ├── dashboard.json                   # live counters
 │   ├── events.jsonl                     # human navigation log
 │   ├── output.log                       # per-query audit
