@@ -120,24 +120,20 @@ async def _escalate_or_stop(
         raise StopLoop(stop)
 
 
-async def _post_round(
-    cycle: Cycle,
-    round_result: RoundResult,
-    round_num: int,
-    config: CampaignConfig,
-    session: Session,
-    dataset: list[Sample],
-    cb: RunListener,
-) -> None:
-    """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
+def _advance_l1_stall(cycle: Cycle, round_result: RoundResult, cb: RunListener) -> None:
+    """Bump (or reset) the L1 stall counter, clear volatile state on improvement, fan out."""
     cycle.escalation.l1_stall_count = (
         0 if round_result.improved else cycle.escalation.l1_stall_count + 1
     )
     if round_result.improved:
         cycle.opt_sp.clear_volatile()
-
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
+
+def _persist_round(
+    cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
+) -> None:
+    """Flush pending decisions onto the round, write trial + log.md, flush recorder."""
     if cycle.pending_decisions:
         round_result.decisions.extend(cycle.flush_decisions())
 
@@ -153,83 +149,123 @@ async def _post_round(
     if _rr := session.round_recorder:
         _rr.flush()
 
-    # Operator-driven composite-score steering: hot-swap the per-round
-    # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
-    # Sits before the round-boundary mutation block so the next round's
-    # candidates are evaluated under the new formula.
-    with graceful("Scoring steer apply failed"):
-        apply_steer_file(session, round_num, cb.on_phase)
 
-    if cycle.axes:
-        if session.store and session.backend_id:
-            cycle.axes.refresh(
-                session.store,
-                session.backend_id,
-                scorer=session.scoring.scorer,
-                scorer_id=session.scoring.scorer_id,
-                scorer_formula=session.scoring.scorer_formula,
-            )
-        # Prune always-hit/always-miss queries from the active set.
-        zsf = config.optimization.zero_signal_filter_enabled
-        dataset_name = session.dataset_name
-        if zsf and dataset_name and session.store is not None:
-            with graceful("Zero-signal filter failed"):
-                excluded = apply_zero_signal_exclusions(
-                    store=session.store,
-                    dataset_name=dataset_name,
-                    axes=cycle.axes,
-                    active_dataset=dataset,
-                    min_observations=config.optimization.zero_signal_filter_min_observations,
-                    campaign_id=session.cycle_id or "",
-                )
-                if excluded:
-                    excl_q = {e["query"] for e in excluded}
-                    session.scoring.scoring_dataset[:] = [
-                        s for s in session.scoring.scoring_dataset if s.query not in excl_q
-                    ]
-                    always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
-                    emit_phase(
-                        cb.on_phase,
-                        "zero_signal_filter",
-                        "applied",
-                        round=round_num,
-                        count=len(excluded),
-                        always_miss=always_miss,
-                        always_hit=len(excluded) - always_miss,
-                        examples=[e["query"] for e in excluded[:3]],
-                        dataset_name=dataset_name,
-                    )
+def _refresh_axes_and_filter(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    dataset: list[Sample],
+    round_num: int,
+    cb: RunListener,
+) -> None:
+    """Refresh AxisIndex from the archive, then prune zero-signal queries when enabled.
 
-    # Rasch + KG swap of the active scoring set.
-    ss_cfg = config.optimization.scoring_set
-    if ss_cfg.enabled and cycle.rounds:
-        from promptpotter.application.intelligence.scoring_set import (
-            build_scoring_set_event,
-            evolve_scoring_set,
+    The zero-signal filter is round-boundary mutation #1: it physically
+    moves always-hit/always-miss queries to ``datasets/{name}.json::excluded``
+    once an axis has ≥ N observations, and drops them from the active
+    scoring set in memory.
+    """
+    if not cycle.axes:
+        return
+
+    if session.store and session.backend_id:
+        cycle.axes.refresh(
+            session.store,
+            session.backend_id,
+            scorer=session.scoring.scorer,
+            scorer_id=session.scoring.scorer_id,
+            scorer_formula=session.scoring.scorer_formula,
         )
 
-        with graceful("ScoringSet evolve failed"):
-            ss_result = evolve_scoring_set(
-                full_dataset=dataset,
-                current_scoring_set=session.scoring.scoring_dataset,
-                rounds=cycle.rounds,
-                config=ss_cfg,
-                elimination_n_min=config.optimization.elimination_n_min,
-            )
-            if ss_result.swapped_in or ss_result.swapped_out:
-                session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
-                event = build_scoring_set_event(round_num=round_num, result=ss_result)
-                round_result.scoring_set_events.append(event)
-                emit_phase(
-                    cb.on_phase,
-                    "scoring_set",
-                    "evolved",
-                    round=round_num,
-                    swapped_out=event["swapped_out"],
-                    swapped_in=event["swapped_in"],
-                    new_scoring_set_size=event["new_scoring_set_size"],
-                )
+    zsf = config.optimization.zero_signal_filter_enabled
+    dataset_name = session.dataset_name
+    if not (zsf and dataset_name and session.store is not None):
+        return
 
+    with graceful("Zero-signal filter failed"):
+        excluded = apply_zero_signal_exclusions(
+            store=session.store,
+            dataset_name=dataset_name,
+            axes=cycle.axes,
+            active_dataset=dataset,
+            min_observations=config.optimization.zero_signal_filter_min_observations,
+            campaign_id=session.cycle_id or "",
+        )
+        if not excluded:
+            return
+        excl_q = {e["query"] for e in excluded}
+        session.scoring.scoring_dataset[:] = [
+            s for s in session.scoring.scoring_dataset if s.query not in excl_q
+        ]
+        always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
+        emit_phase(
+            cb.on_phase,
+            "zero_signal_filter",
+            "applied",
+            round=round_num,
+            count=len(excluded),
+            always_miss=always_miss,
+            always_hit=len(excluded) - always_miss,
+            examples=[e["query"] for e in excluded[:3]],
+            dataset_name=dataset_name,
+        )
+
+
+def _evolve_scoring_set_if_enabled(
+    cycle: Cycle,
+    round_result: RoundResult,
+    round_num: int,
+    dataset: list[Sample],
+    config: CampaignConfig,
+    session: Session,
+    cb: RunListener,
+) -> None:
+    """Round-boundary mutation #2: Rasch + KG swap on the active scoring set.
+
+    Off by default. Trades understood samples for high-info samples in
+    ``session.scoring.scoring_dataset`` (in-memory only — never disk).
+    """
+    ss_cfg = config.optimization.scoring_set
+    if not (ss_cfg.enabled and cycle.rounds):
+        return
+
+    from promptpotter.application.intelligence.scoring_set import (
+        build_scoring_set_event,
+        evolve_scoring_set,
+    )
+
+    with graceful("ScoringSet evolve failed"):
+        ss_result = evolve_scoring_set(
+            full_dataset=dataset,
+            current_scoring_set=session.scoring.scoring_dataset,
+            rounds=cycle.rounds,
+            config=ss_cfg,
+            elimination_n_min=config.optimization.elimination_n_min,
+        )
+        if not (ss_result.swapped_in or ss_result.swapped_out):
+            return
+        session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
+        event = build_scoring_set_event(round_num=round_num, result=ss_result)
+        round_result.scoring_set_events.append(event)
+        emit_phase(
+            cb.on_phase,
+            "scoring_set",
+            "evolved",
+            round=round_num,
+            swapped_out=event["swapped_out"],
+            swapped_in=event["swapped_in"],
+            new_scoring_set_size=event["new_scoring_set_size"],
+        )
+
+
+async def _check_stop_or_escalate(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    round_num: int,
+    cb: RunListener,
+) -> None:
+    """Raise ``StopLoop`` on perfect/patience, or trigger L2 escalation when stalled."""
     if cycle.current_accuracy >= 1.0:
         raise StopLoop(StopReason.PERFECT)
     if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
@@ -237,6 +273,31 @@ async def _post_round(
             raise StopLoop(StopReason.PATIENCE)
         await _escalate_or_stop(cycle, config, session, round_num, cb)
         cycle.escalation.l1_stall_count = 0
+
+
+async def _post_round(
+    cycle: Cycle,
+    round_result: RoundResult,
+    round_num: int,
+    config: CampaignConfig,
+    session: Session,
+    dataset: list[Sample],
+    cb: RunListener,
+) -> None:
+    """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
+    _advance_l1_stall(cycle, round_result, cb)
+    _persist_round(cycle, round_result, round_num, session)
+
+    # Operator-driven composite-score steering: hot-swap the per-round
+    # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
+    # Sits before the round-boundary mutation block so the next round's
+    # candidates are evaluated under the new formula.
+    with graceful("Scoring steer apply failed"):
+        apply_steer_file(session, round_num, cb.on_phase)
+
+    _refresh_axes_and_filter(cycle, config, session, dataset, round_num, cb)
+    _evolve_scoring_set_if_enabled(cycle, round_result, round_num, dataset, config, session, cb)
+    await _check_stop_or_escalate(cycle, config, session, round_num, cb)
 
 
 async def _run_round_loop(
