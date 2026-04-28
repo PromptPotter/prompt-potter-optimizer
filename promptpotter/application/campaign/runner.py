@@ -26,6 +26,7 @@ from promptpotter.application.optimization.nodes.l1 import (
 )
 from promptpotter.application.optimization.pipeline import get_round_recorder
 from promptpotter.application.optimization.results import RoundResult, RunResult
+from promptpotter.application.scoring.scoring_steer import apply_steer_file
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -160,6 +161,13 @@ async def _post_round(
         raise PauseForReviewError([], round_num)
     if _ctrl == "stop":
         raise StopLoop(StopReason.USER_STOPPED)
+
+    # Operator-driven composite-score steering: hot-swap the per-round
+    # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
+    # Sits before the round-boundary mutation block so the next round's
+    # candidates are evaluated under the new formula.
+    with graceful("Scoring steer apply failed"):
+        apply_steer_file(session, round_num, cb.on_phase)
 
     if cycle.search_memory:
         cycle.search_memory.on_round_complete(cycle, session, round_num)

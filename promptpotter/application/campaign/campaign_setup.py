@@ -78,6 +78,10 @@ class Session:
     scorer_id: str = "none"
     scorer_formula: str | None = None
     round_scorer: RoundScorer | None = None
+    # Source string for the active per-round formula. Tracked alongside
+    # ``round_scorer`` so the interactive ``scoring_steer.json`` hot-swap
+    # can record what it replaced. ``None`` = registry default.
+    scorer_round_formula: str | None = None
     max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
     sample_index: SampleIndex | None = None
@@ -118,6 +122,7 @@ def populate_session_scoring(
     session.round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
+    session.scorer_round_formula = scoring_round_formula
 
 
 def new_session_state(

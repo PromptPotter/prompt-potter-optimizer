@@ -145,7 +145,8 @@ def test_composite_matches_default_formula():
     results = [_result(score=1.0, total_time=100), _result(score=0.0, total_time=200)]
     scored = compute_composite_score(results, schema)
     # Accuracy=0.5, latency_norm=0.985, health=1.0; recall term falls back to accuracy.
-    expected = 0.7 * 0.5 + 0.15 * 1.0 + 0.10 * 0.985 + 0.05 * 0.5
+    # prompt_compactness defaults to 1.0 when no opt_sp passed (vacuous).
+    expected = 0.65 * 0.5 + 0.15 * 1.0 + 0.10 * 0.985 + 0.05 * 0.5 + 0.05 * 1.0
     assert scored["composite"] == pytest.approx(expected, abs=1e-4)
 
 
@@ -165,3 +166,21 @@ def test_round_scorer_fails_loud_and_clamps_unit_interval():
     assert compile_round_scorer("accuracy * 10")({"accuracy": 0.5}) == 1.0
     assert compile_round_scorer("accuracy - 2")({"accuracy": 0.5}) == 0.0
     assert compile_round_scorer(None)({"accuracy": 0.75}) == pytest.approx(0.75)
+
+
+def test_prompt_compactness_penalizes_verbose_prompt():
+    """Long rendered prompts drive compactness toward zero; short prompts stay near 1."""
+    from promptpotter.application.scoring.evaluators import (
+        PROMPT_BUDGET_CHARS,
+        compute_prompt_compactness,
+    )
+    from promptpotter.domain.opt_search_point import OptSearchPoint
+
+    short = OptSearchPoint(instruction="Answer correctly.")
+    long_text = "x " * (PROMPT_BUDGET_CHARS // 2)  # ≈ 2× budget
+    verbose = OptSearchPoint(instruction=long_text)
+
+    assert compute_prompt_compactness(opt_sp=short) > 0.99
+    assert compute_prompt_compactness(opt_sp=verbose) == 0.0
+    # Vacuous (no opt_sp) returns 1.0 so the term never injects a phantom penalty.
+    assert compute_prompt_compactness(opt_sp=None) == 1.0
