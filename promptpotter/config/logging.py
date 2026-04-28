@@ -1,10 +1,4 @@
-"""
-Logging configuration for PromptPotter Optimizer.
-
-Call ``setup_logging()`` explicitly from entry points (``promptpotter.main``,
-notebook ``init_services()``) to configure the root logger.
-All modules should use ``logger = logging.getLogger(__name__)``.
-"""
+"""Logging configuration. Call ``setup_logging()`` once from entry points."""
 
 import logging
 import sys
@@ -15,7 +9,7 @@ LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class _CliFormatter(logging.Formatter):
-    """Minimal format for interactive CLI: bare message at INFO, ``LEVEL: message`` above."""
+    """Bare message at INFO; ``LEVEL: message`` above."""
 
     def format(self, record: logging.LogRecord) -> str:
         if record.levelno >= logging.WARNING:
@@ -24,10 +18,7 @@ class _CliFormatter(logging.Formatter):
 
 
 class _TqdmStreamHandler(logging.StreamHandler):
-    """StreamHandler that writes through ``tqdm.write`` so log lines don't
-    trample an active progress bar. Falls back to plain stream writes if
-    tqdm isn't importable for some reason.
-    """
+    """Writes through ``tqdm.write`` so log lines don't trample an active progress bar."""
 
     def emit(self, record: logging.LogRecord) -> None:
         try:

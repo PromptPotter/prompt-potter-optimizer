@@ -43,24 +43,6 @@ class L1YieldStats:
     n_duplicate: int
 
 
-def _candidate_mutation_signature(
-    child: OptSearchPoint, parent: OptSearchPoint, node_overrides: dict | None
-) -> tuple:
-    """Canonical signature of the LLM-emitted delta vs parent. Empty signature == no-op."""
-    pf_delta = tuple(
-        (f, getattr(child, f))
-        for f in PROMPT_STRING_FIELDS
-        if getattr(child, f) != getattr(parent, f)
-    )
-    parent_tc = parent.task_context.to_dict()
-    child_tc = child.task_context.to_dict()
-    tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
-    no_canon = tuple(
-        sorted((n, tuple(sorted(p.items()))) for n, p in (node_overrides or {}).items() if p)
-    )
-    return (pf_delta, tc_delta, no_canon)
-
-
 _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
 
 
@@ -88,8 +70,20 @@ def detect_invariants(
     seen: dict[tuple, int] = {}
     n_no_op = 0
     n_duplicate = 0
+    parent_tc = parent_osp.task_context.to_dict()
     for i, cp in enumerate(proposals):
-        sig = _candidate_mutation_signature(cp.osp, parent_osp, cp.node_overrides)
+        child = cp.osp
+        pf_delta = tuple(
+            (f, getattr(child, f))
+            for f in PROMPT_STRING_FIELDS
+            if getattr(child, f) != getattr(parent_osp, f)
+        )
+        child_tc = child.task_context.to_dict()
+        tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
+        no_canon = tuple(
+            sorted((n, tuple(sorted(p.items()))) for n, p in (cp.node_overrides or {}).items() if p)
+        )
+        sig = (pf_delta, tc_delta, no_canon)
         if not any(sig):
             cp.osp.validation_failures = [
                 *cp.osp.validation_failures,

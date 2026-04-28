@@ -123,29 +123,6 @@ def validate_overrides(
 
 
 _HEADER_RE = re.compile(r"^([A-Z][A-Z _]+)")
-
-
-def _log_meta_prompt_size(meta_prompt: str, compile_vars: dict, round_num: int) -> None:
-    """Input-side visibility for dedup work; output budgeting is the provider's job."""
-    dispatch_msg = str(compile_vars.get("dispatch_msg", ""))
-    sections = sorted(
-        (
-            ((m.group(1).rstrip() if (m := _HEADER_RE.match(p)) else "<unknown>"), len(p))
-            for p in dispatch_msg.split("\n\n")
-            if p
-        ),
-        key=lambda x: -x[1],
-    )
-    summary = " | ".join(f"{h}={s}" for h, s in sections[:6])
-    logger.info(
-        "L1 R%d meta-prompt: %d chars (dispatch_msg=%d) | %s",
-        round_num,
-        len(meta_prompt),
-        len(dispatch_msg),
-        summary,
-    )
-
-
 _ENUM_RENDER_CAP = 12
 
 
@@ -243,7 +220,22 @@ async def l1_generate(
         json_schema=output_schema,
         recorder=cycle.session.state.round_recorder,
     )
-    _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
+    dispatch_msg = str(_compile_vars["dispatch_msg"])
+    sections = sorted(
+        (
+            ((m.group(1).rstrip() if (m := _HEADER_RE.match(p)) else "<unknown>"), len(p))
+            for p in dispatch_msg.split("\n\n")
+            if p
+        ),
+        key=lambda x: -x[1],
+    )
+    logger.info(
+        "L1 R%d meta-prompt: %d chars (dispatch_msg=%d) | %s",
+        round_num,
+        len(meta_prompt),
+        len(dispatch_msg),
+        " | ".join(f"{h}={s}" for h, s in sections[:6]),
+    )
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
 

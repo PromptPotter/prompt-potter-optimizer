@@ -4,9 +4,9 @@ The archive is the canonical store of every ``(sample × config → outcome)`` r
 ever recorded. Append-only, content-addressed, cross-cycle, cross-session,
 cross-tenant within a tenant root. Two natural views: by training example
 (``measurements_for_sample``) and by searchpoint / config
-(``measurements_for_config``). Cache reuse during scoring uses the
-``_match_prefix_exact`` positional matcher; discovery retrieval uses
-``_matches_subset``. See ``docs/concepts/measurement-archive.md``.
+(``measurements_for_config``). Cache reuse uses positional prefix-exact match;
+discovery retrieval uses ``_matches_subset``. See
+``docs/concepts/measurement-archive.md``.
 """
 
 import hashlib
@@ -31,31 +31,6 @@ from promptpotter.shared.constants import (
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
-
-
-def _match_prefix_exact(
-    run_node_configs: list[Any],
-    spec: list[tuple[str, dict[str, Any]]],
-) -> int:
-    """Position-by-position prefix match with full dict equality.
-
-    Compares ``spec`` against ``run_node_configs`` from index 0 onward,
-    stops at the first mismatch. Returns match length: 0 = no leading
-    position matches, N = the first N positions all match. Used by the
-    cache-reuse path (``find_by_node_configs``).
-    """
-    if not spec:
-        return 0
-    match_len = 0
-    for (n_want, c_want), stored_pair in zip(spec, run_node_configs, strict=False):
-        # stored_pair may be [name, config] after JSON round-trip.
-        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-            break
-        n_have, c_have = stored_pair
-        if n_have != n_want or c_have != c_want:
-            break
-        match_len += 1
-    return match_len
 
 
 def _matches_subset(
@@ -101,7 +76,6 @@ class MeasurementArchive:
     """
 
     def __init__(self, base_dir: Path):
-        # base_dir is the tenant root
         self._base_dir = base_dir
 
     # -- path helpers ---------------------------------------------------------
@@ -217,9 +191,9 @@ class MeasurementArchive:
     ) -> list[tuple[dict[str, Any], int]]:
         """Return index entries sharing a node-config prefix, best match first.
 
-        Compares each stored entry's ``node_configs`` element-by-element
-        against *node_configs*.  Returns ``(entry, match_length)`` tuples
-        sorted by match_length desc, then item_count desc.
+        Position-by-position prefix match with full dict equality. Returns
+        ``(entry, match_length)`` tuples sorted by match_length desc,
+        then item_count desc.
         """
         if not node_configs:
             return []
@@ -229,7 +203,14 @@ class MeasurementArchive:
             stored = entry.get("node_configs")
             if not stored:
                 continue
-            match_len = _match_prefix_exact(stored, node_configs)
+            match_len = 0
+            for (n_want, c_want), stored_pair in zip(node_configs, stored, strict=False):
+                if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+                    break
+                n_have, c_have = stored_pair
+                if n_have != n_want or c_have != c_want:
+                    break
+                match_len += 1
             if match_len > 0:
                 scored.append((entry, match_len))
 
@@ -308,17 +289,12 @@ class MeasurementArchive:
     ) -> dict[str, dict[str, Any]]:
         """Build per-query cache from prior runs sharing *node_configs*.
 
-        Exact matches (``match_length == len(node_configs)``) reuse every
-        non-error item.  Partial matches reuse only items whose
-        ``pipeline_data.terminated_at`` falls within the shared prefix —
-        the query short-circuited before the diverging node.
-
-        Later runs overwrite earlier ones for the same query, **except** when
-        ``is_fatal`` is supplied and the incoming row is fatal while the
-        existing row is clean — in that case the clean row stands. This keeps
-        a saved valid retry from being shadowed by an older deprecated archive
-        on a subsequent load. Policy callback stays in the caller's layer so
-        the archive remains a pure I/O adapter.
+        Exact matches reuse every non-error item; partial matches reuse only
+        items whose ``pipeline_data.terminated_at`` falls within the shared
+        prefix. Later runs overwrite earlier ones for the same query, except
+        when ``is_fatal`` flags the incoming row fatal while the existing row
+        is clean — keeps a saved valid retry from being shadowed by an older
+        deprecated archive on subsequent load.
         """
         if not node_configs:
             return {}

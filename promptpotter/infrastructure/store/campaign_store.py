@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 def root_cycle_id(cycle_id: str) -> str:
     """Family-root cycle id — the prefix before the first ``_fork_`` segment.
 
-    ``_mint_fork_cycle_id`` is the only producer of ``_fork_`` in cycle ids,
+    ``_fork_at_divergence`` is the only producer of ``_fork_`` in cycle ids,
     so a string split is sufficient — no I/O, no parent-chain walk."""
     return cycle_id.split("_fork_", 1)[0]
 

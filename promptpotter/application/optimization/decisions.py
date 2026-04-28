@@ -48,15 +48,6 @@ class Decision:
             "data": dict(self.data),
         }
 
-    @classmethod
-    def from_dict(cls, d: dict[str, Any]) -> Decision:
-        return cls(
-            kind=d["kind"],
-            inputs_ref=dict(d.get("inputs_ref") or {}),
-            outcome=d.get("outcome"),
-            data=dict(d.get("data") or {}),
-        )
-
 
 @dataclass(frozen=True)
 class Divergence:
@@ -198,14 +189,6 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return bool(stop)
 
 
-def _rescored_composite(trial: dict[str, Any]) -> float:
-    """Approximate rescored composite as mean of winner's rescored scores."""
-    winner_results = trial.get("results") or []
-    if winner_results:
-        return _mean_score(winner_results)
-    return float(trial.get("composite", trial.get("accuracy", 0.0)))
-
-
 def _derive_stall_count(
     prior_trials: list[dict[str, Any]],
     entry_round: int,
@@ -222,7 +205,12 @@ def _derive_stall_count(
         r = int(t.get("round", -1))
         if r < 0 or r > this_round:
             continue
-        comp = _rescored_composite(t)
+        winner_results = t.get("results") or []
+        comp = (
+            _mean_score(winner_results)
+            if winner_results
+            else float(t.get("composite", t.get("accuracy", 0.0)))
+        )
         running_max = max(running_max, comp)
         if r <= entry_round:
             if r == entry_round:
@@ -258,13 +246,6 @@ def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     return stalls < int(patience)
 
 
-def _mint_fork_cycle_id(old_cycle_id: str) -> str:
-    """Derive a stable-looking new cycle id rooted at the parent."""
-    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
-    suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
-    return f"{old_cycle_id}_fork_{suffix}"
-
-
 def _fork_at_divergence(
     campaign_store: CampaignStore,
     tenant_id: str,
@@ -277,7 +258,9 @@ def _fork_at_divergence(
     from promptpotter.infrastructure.store.base import read_json_optional, write_json
     from promptpotter.infrastructure.store.stores import save_active_pointer
 
-    new_cycle_id = _mint_fork_cycle_id(old_cycle_id)
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
+    new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
     old_dir = campaign_store.campaign_dir(old_cycle_id)
     new_dir = campaign_store.campaign_dir(new_cycle_id)
     if new_dir.exists():

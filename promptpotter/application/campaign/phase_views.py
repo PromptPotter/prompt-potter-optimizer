@@ -20,34 +20,6 @@ def _truncate(s: str, max_len: int) -> str:
     return s[: max_len - 3] + "..."
 
 
-def _resolve_composite_formulas(session: Any) -> tuple[str | None, str | None]:
-    """Return ``(full, short)`` per-round formula strings for renderers.
-
-    ``full`` is the literal formula — explicit ``Session.scorer_round_formula``
-    when set (custom block in ``campaign.json::scoring`` or hot-swapped via
-    ``scoring_steer.json``), otherwise ``default_per_round_formula(schema)``.
-
-    ``short`` is the abbreviated one-liner, populated only when the active
-    formula matches the registry default (so renderers can fit a 3-line
-    block at 70-char width). ``None`` for custom formulas — callers fall
-    back to the full text and accept the wrap.
-    """
-    schema = getattr(session, "pipeline_schema", None)
-    explicit = getattr(session, "scorer_round_formula", None)
-    if explicit:
-        # Custom formula: render verbatim. No abbreviation — operator
-        # authored it, they read it.
-        return explicit, None
-    if schema is None:
-        return None, None
-    from promptpotter.application.scoring.evaluators import (
-        default_per_round_formula,
-        default_per_round_formula_short,
-    )
-
-    return default_per_round_formula(schema), default_per_round_formula_short(schema)
-
-
 def _init_enter(d: dict, ctx: dict) -> dict:
     config = d["config"]
     dataset = d["dataset"]
@@ -96,7 +68,20 @@ def _init_exit(d: dict, ctx: dict) -> dict:
     session = d["env"]
     ctx["baseline_accuracy"] = cycle.current_accuracy
     ctx["baseline_composite"] = getattr(cycle, "current_composite", cycle.current_accuracy)
-    full, short = _resolve_composite_formulas(session)
+    schema = getattr(session, "pipeline_schema", None)
+    explicit = getattr(session, "scorer_round_formula", None)
+    if explicit:
+        full, short = explicit, None
+    elif schema is None:
+        full, short = None, None
+    else:
+        from promptpotter.application.scoring.evaluators import (
+            default_per_round_formula,
+            default_per_round_formula_short,
+        )
+
+        full = default_per_round_formula(schema)
+        short = default_per_round_formula_short(schema)
     ctx["composite_formula"] = full
     ctx["composite_formula_short"] = short
 

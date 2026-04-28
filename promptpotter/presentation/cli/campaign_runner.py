@@ -68,11 +68,6 @@ def set_verbose(value: bool) -> None:
     _VERBOSE = value
 
 
-def _status_sink(msg: str) -> None:
-    if _VERBOSE:
-        logger.info(msg)
-
-
 def log_startup_summary(
     session: Session,
     pipeline_params: dict | None,
@@ -111,7 +106,7 @@ async def init_services_cli(
         experiment_id=experiment_id,
         project_root=project_root,
         dataset_name=dataset_name,
-        on_status=_status_sink,
+        on_status=lambda msg: logger.info(msg) if _VERBOSE else None,
         take_over=take_over,
         tenant_id=tenant_id,
     )
@@ -121,7 +116,7 @@ def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: l
     """Apply pipeline → load baseline → compute cycle_id. Returns (pipeline_params, baseline, cycle_id)."""
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
     from promptpotter.application.campaign.data import load_baseline_prompt
-    from promptpotter.domain.cycle_identity import cycle_config_identity
+    from promptpotter.domain.cycle_identity import build_baseline_cycle_id
 
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(
@@ -132,9 +127,7 @@ def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: l
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_name=session.dataset_name,
     )
-    base_pp = schema.to_pipeline_params() if schema else {}
-    jsp = baseline.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
-    return pipeline_params, baseline, cycle_config_identity(jsp, dataset)
+    return pipeline_params, baseline, build_baseline_cycle_id(baseline, schema, dataset)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -220,32 +213,19 @@ def _mint_session_and_cycle(
     baseline,
     dataset_count: int,
 ) -> str:
-    """Mint session+cycle, snapshot resolved pipeline into state, create campaign dir.
-
-    Wraps ``auto_mint_session`` (which writes the session + active pointer)
-    with the CLI-only extras: explicit ``init_params`` snapshot for resume,
-    pipeline_params + active_steps in state, and ``campaigns.create()``.
-    """
+    """Mint session+cycle with the CLI's pipeline-snapshot extras."""
     from promptpotter.application.campaign.campaign_setup import auto_mint_session
 
     session_id, _ = auto_mint_session(
         session,
         campaign_config,
-        cycle_hash=cycle_id.removeprefix("cycle_"),
+        cycle_id=cycle_id,
         baseline_prompt_fields=baseline.prompt_field_dict(),
         dataset_size=dataset_count,
         experiment_id=init_params.get("experiment_id"),
+        pipeline_params=pipeline_params,
+        active_steps=list(pipeline_params.get("steps", [])),
     )
-    state = session.store.sessions.read(session_id) or {}
-    state["init_params"] = dict(init_params)
-    state["pipeline_params"] = pipeline_params
-    state["active_steps"] = list(pipeline_params.get("steps", []))
-    session.store.sessions.update(session_id, state)
-    session.store.campaigns.create(
-        init_params["backend_id"], cycle_id, {"parent_session_id": session_id}
-    )
-    session.session_id = session_id
-    session.state.cycle_id = cycle_id
     return session_id
 
 
