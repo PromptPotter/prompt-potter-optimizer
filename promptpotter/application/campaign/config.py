@@ -11,6 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.llm.client import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -20,8 +21,11 @@ __all__ = [
     "HardSampleSorterConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
+    "PipelinePlan",
     "PreflightWarning",
     "ScoringSetConfig",
+    "apply_pipeline_to_session",
+    "compute_pipeline_plan",
     "compute_preflight_metrics",
     "configure_and_apply_pipeline",
     "create_llm_client",
@@ -246,13 +250,34 @@ def compute_preflight_metrics(
     )
 
 
-def configure_and_apply_pipeline(
+@dataclass(frozen=True)
+class PipelinePlan:
+    """Resolved pipeline plan ready to apply to a session.
+
+    Pure compute output of :func:`compute_pipeline_plan`. Carries a
+    filtered + override-applied schema (or ``None`` when no schema is
+    available), the wire-format pipeline params, and the active /
+    excluded node lists for logging.
+    """
+
+    schema: PipelineSchema | None
+    pipeline_params: dict
+    active_nodes: list[str]
+    excluded_nodes: list[str]
+
+
+def compute_pipeline_plan(
     session: Session,
     campaign_config: CampaignConfig,
     *,
     log: Callable[[str], None] = logger.info,
-) -> dict:
-    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
+) -> PipelinePlan:
+    """Pure compute: filter + override the active pipeline schema.
+
+    Reads ``session.pipeline_schema`` / ``session.experiment_extract`` /
+    ``session.dataset_name`` but does NOT mutate ``session``. Apply the
+    returned plan via :func:`apply_pipeline_to_session`.
+    """
     from promptpotter.application.datasets.prompt_store import (
         has_dataset_prompts,
         load_node_prompt,
@@ -309,16 +334,35 @@ def configure_and_apply_pipeline(
 
     pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
 
-    if filtered is not None:
-        session.pipeline_schema = filtered
-    session.pipeline_params = pipeline_params
-
-    excluded_nodes = list(exclude) if exclude else []
     nodes_str = ", ".join(active)
-    excl_str = f"  Excluded: {', '.join(excluded_nodes)}" if excluded_nodes else ""
+    excl_str = f"  Excluded: {', '.join(exclude)}" if exclude else ""
     log(f"Active nodes: {nodes_str}{excl_str}")
 
-    return pipeline_params
+    return PipelinePlan(
+        schema=filtered,
+        pipeline_params=pipeline_params,
+        active_nodes=active,
+        excluded_nodes=list(exclude),
+    )
+
+
+def apply_pipeline_to_session(session: Session, plan: PipelinePlan) -> None:
+    """Single mutation point: write a resolved ``PipelinePlan`` onto *session*."""
+    if plan.schema is not None:
+        session.pipeline_schema = plan.schema
+    session.pipeline_params = plan.pipeline_params
+
+
+def configure_and_apply_pipeline(
+    session: Session,
+    campaign_config: CampaignConfig,
+    *,
+    log: Callable[[str], None] = logger.info,
+) -> dict:
+    """Build pipeline identity, apply filtered schema + overrides onto *session*."""
+    plan = compute_pipeline_plan(session, campaign_config, log=log)
+    apply_pipeline_to_session(session, plan)
+    return plan.pipeline_params
 
 
 def create_llm_client(
