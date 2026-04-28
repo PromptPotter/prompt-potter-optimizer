@@ -30,6 +30,11 @@ from promptpotter.application.optimization.diagnostics import classify_result
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.scoring import extract_display_answer
+from promptpotter.presentation.views.composite_render import (
+    compact_display_enabled,
+    render_composite_block,
+    render_composite_inline,
+)
 from promptpotter.presentation.views.display_primitives import (
     _DISPLAY_TAGS,
     CYAN,
@@ -329,16 +334,21 @@ class IndividualSummary:
       ``cand k/N``.
     - ``body_line`` — the mutations + hits + delta line; the notebook
       renders it as an inner box line, the CLI as an indented second line.
-    - ``detail_lines`` — ordered extras (elimination summary, composite,
-      degraded count, or validation-failure entries); rendered inline by
-      both displays, with the notebook folding the last entry into the
-      bottom info rule when possible.
+    - ``detail_lines`` — ordered extras (elimination summary, optional
+      compact-mode composite + degraded count, or validation-failure
+      entries); rendered inline by both displays, with the notebook
+      folding the last entry into the bottom info rule when possible.
+    - ``composite_lines`` — full-mode composite block (composite value +
+      formula text + named-evaluator pairs). Empty in compact mode and
+      when no formula is resolvable. When non-empty, callers render
+      these as ordinary box lines (no bottom-info-rule fold).
     """
 
     status: Literal["ok", "invalid", "aborted", "eliminated"]
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
+    composite_lines: tuple[str, ...] = ()
 
 
 def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
@@ -356,7 +366,12 @@ def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
     return tuple(out)
 
 
-def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSummary:
+def build_individual_summary(
+    scores: dict,
+    baseline_acc: float,
+    *,
+    formula: str | None = None,
+) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
     Single source of truth for what the CLI and notebook show per candidate.
@@ -364,6 +379,13 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
     exclusive flag semantics (invalid never runs the backend; aborted and
     eliminated are mutually exclusive by construction in
     ``_handle_scored_candidate``).
+
+    *formula* is the active per-round formula string — when provided and
+    ``PROMPTPOTTER_COMPACT_DISPLAY`` is unset, drives a multi-line
+    composite block (composite value + formula + named evaluator pairs)
+    on ``composite_lines``. In compact mode (env-var set) or when
+    *formula* is None, falls back to the legacy single-line
+    ``composite=0.4f`` bottom rule shown only when composite ≠ accuracy.
     """
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
@@ -399,19 +421,31 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
         prior_label = elim_ctx.get("triggered_by_prior_label")
         detail_lines.append(format_elimination_summary(elim_ctx, prior_label))
 
-    # Composite + degraded share the bottom info rule — joined with two
-    # spaces so the box bottom carries both numbers in one line. Computed
-    # for every status (ok / aborted / eliminated) since the score report
-    # carries them regardless of why scoring stopped.
-    bottom_extras: list[str] = []
     comp = scores.get("composite")
-    if comp is not None and comp != acc:
-        bottom_extras.append(f"composite={comp:.4f}")
     degraded = scores.get("degraded_queries", 0)
-    if degraded:
-        bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
-    if bottom_extras:
-        detail_lines.append("  ".join(bottom_extras))
+
+    # Two render modes:
+    #   - compact (env var set, or no formula): legacy single-line bottom
+    #     rule, ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
+    #   - full: composite_lines carry the multi-line block (composite +
+    #     formula + named evaluators). Degraded gets its own detail line
+    #     so the box bottom is a plain rule.
+    composite_lines: tuple[str, ...] = ()
+    if comp is not None and not compact_display_enabled() and formula:
+        # Box wraps content at width-4 (two walls + two-space pad). Per-
+        # candidate boxes are 66 wide → 62 chars content room.
+        block = render_composite_block(comp, scores.get("evaluators"), formula, width=62)
+        composite_lines = tuple(block)
+        if degraded:
+            detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+    else:
+        bottom_extras: list[str] = []
+        if comp is not None and comp != acc:
+            bottom_extras.append(render_composite_inline(comp))
+        if degraded:
+            bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+        if bottom_extras:
+            detail_lines.append("  ".join(bottom_extras))
 
     status: Literal["ok", "aborted", "eliminated"]
     if aborted:
@@ -425,6 +459,7 @@ def build_individual_summary(scores: dict, baseline_acc: float) -> IndividualSum
         tag=tag,
         body_line=body_line,
         detail_lines=tuple(detail_lines),
+        composite_lines=composite_lines,
     )
 
 
@@ -439,9 +474,10 @@ def render_progress_table(
 ) -> str:
     """Round-over-round trajectory table: accuracy, composite, rolling avg, trend, plateau.
 
-    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``;
-    ``composite`` is optional and only adds a column when it differs from
-    accuracy in at least one round.
+    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
+    The ``Composite`` column is always shown so the operator never has to
+    wonder whether composite was hidden because it equalled accuracy on
+    every round so far.
 
     ``framed=True`` (default) wraps each line in ``_node_line()`` for
     box-drawing terminals (live CLI / notebook live view). ``framed=False``
@@ -454,23 +490,15 @@ def render_progress_table(
     def wrap(s: str) -> str:
         return _node_line(s) if framed else s
 
-    has_comp = any(
-        rd.get("composite") is not None and rd.get("composite") != (rd.get("accuracy") or 0)
-        for rd in rounds
-    )
-
     row_rnd_w = 5 if framed else 7
     row_comp_w = 9 if framed else 10
     trend_w = 8 if framed else 10
     plateau_step = "+0.0%  <-- plateau" if framed else "+0.0% plateau"
 
-    if has_comp:
-        header = (
-            f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-            f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
-        )
-    else:
-        header = f"{'Round':<7s} {'Accuracy':>9s} {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
+    header = (
+        f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+        f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
+    )
 
     lines: list[str] = []
     if framed:
@@ -495,14 +523,8 @@ def render_progress_table(
             else:
                 trend = f"{d:.1%}"
         rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        if has_comp:
-            comp = rd.get("composite") or acc
-            row = (
-                f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f}"
-                f" {rolling:>12.1%}  {trend}"
-            )
-        else:
-            row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {rolling:>12.1%}  {trend}"
+        comp = rd.get("composite") if rd.get("composite") is not None else acc
+        row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f} {rolling:>12.1%}  {trend}"
         lines.append(wrap(row))
 
     if len(accs) >= 3:
@@ -746,6 +768,12 @@ class LiveDisplay:
             and event.data["env"].resumed_from_round > 0
         ):
             del self.campaign_rounds[self.initial_len :]
+        # Mirror an interactive-steer formula swap onto the shared phase
+        # ctx so the next round's renderers print the new formula.
+        if event.phase == "scoring_steer" and event.event == "applied":
+            new_formula = event.data.get("formula")
+            if new_formula:
+                self._phase_ctx["composite_formula"] = new_formula
 
     def on_sample_started(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, query_text: str
@@ -790,17 +818,29 @@ class LiveDisplay:
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        summary = build_individual_summary(scores, baseline_acc)
+        formula = self._phase_ctx.get("composite_formula")
+        summary = build_individual_summary(scores, baseline_acc, formula=formula)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
             self._write(f"  {_box_line(summary.body_line, width=w)}")
-        for line in summary.detail_lines[:-1]:
-            self._write(f"  {_box_line(line, width=w)}")
-        if summary.detail_lines:
-            self._write(f"  {_box_bottom_info(summary.detail_lines[-1], width=w)}")
-        else:
+        # Full mode (composite_lines populated): all detail_lines render as
+        # plain box lines, then composite block as box lines, then a flat
+        # bottom rule. Compact mode keeps the legacy "fold last detail onto
+        # bottom-info" rule.
+        if summary.composite_lines:
+            for line in summary.detail_lines:
+                self._write(f"  {_box_line(line, width=w)}")
+            for line in summary.composite_lines:
+                self._write(f"  {_box_line(line, width=w)}")
             self._write(f"  {_box_bottom(width=w)}")
+        else:
+            for line in summary.detail_lines[:-1]:
+                self._write(f"  {_box_line(line, width=w)}")
+            if summary.detail_lines:
+                self._write(f"  {_box_bottom_info(summary.detail_lines[-1], width=w)}")
+            else:
+                self._write(f"  {_box_bottom(width=w)}")
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         if self._bars is not None:
@@ -829,6 +869,17 @@ class LiveDisplay:
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
+        # Composite block — full mode only. The per-round formula + the
+        # winner's per-evaluator values, so the operator sees what drove
+        # the round's composite without opening the trial JSON.
+        formula = self._phase_ctx.get("composite_formula")
+        if formula and not compact_display_enabled():
+            for line in render_composite_block(
+                round_result.composite,
+                dict(round_result.evaluators),
+                formula,
+            ):
+                self._write(_node_line(line))
         if stats := render_round_stats(round_result, self.pipeline_schema):
             for line in stats.split("\n"):
                 if line:

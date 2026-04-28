@@ -231,6 +231,7 @@ async def execute_round(
         winner_label=scoring_result.label,
         winner_accuracy=scoring_result.winner_accuracy,
         winner_composite=scoring_result.winner_composite,
+        winner_evaluators=dict(scoring_result.winner_evaluators),
         improved=scoring_result.improved,
         candidate_scores=scoring_result.candidate_scores,
     )

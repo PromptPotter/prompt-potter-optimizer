@@ -196,12 +196,10 @@ def _scoreboard(
         reverse=True,
     )
     w = 78
-    has_composite = any(
-        s.get("composite") is not None and s.get("composite") != s["accuracy"] for s in ranked
-    )
 
-    comp_hdr = f"  {'Composite':>9s}" if has_composite else ""
-    hdr = f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}{comp_hdr}  {'Delta':>7s}"
+    hdr = (
+        f"{'#':<4s}{'Label':<8s}{'Accuracy':>9s}  {'95% CI':>16s}  {'Composite':>9s}  {'Delta':>7s}"
+    )
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
@@ -217,7 +215,8 @@ def _scoreboard(
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_part = f"   {s.get('composite', acc):>8.4f}" if has_composite else ""
+        comp_val = s.get("composite") if s.get("composite") is not None else acc
+        comp_part = f"   {comp_val:>8.4f}"
         row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
         lines.append(f"  {_box_line(row, width=w)}")
 

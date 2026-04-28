@@ -30,11 +30,32 @@ Three files in `campaigns/{cycle_id}/` track the composite over time. None of th
 | --- | --- | --- |
 | `dashboard.json` | Live scalar state — current round's composite, baseline, best | Per-callback (per-query → per-candidate cadence) |
 | `index.json::trials` (+ `trials/trial_NNNN.json`) | Per-round checkpoint with `accuracy`, `composite`, `evaluators`, `improved` | Per-round |
-| `log.md` | Markdown digest with the full trajectory + leaderboard | Rendered every round-end and at finalize |
+| `log.md` | Markdown digest with the full trajectory + per-round composite block | Rendered every round-end and at finalize |
 
 For a numerical trajectory, walk `trials/trial_NNNN.json` files in order and read `composite` + `evaluators` from each. The `evaluators` dict carries every named contribution to the composite — `accuracy`, `latency_norm`, `prompt_compactness`, etc. — so you can see *which* term moved when the composite shifted.
 
 The optimizer state itself carries a compact mirror: `OptSearchPoint.round_history` is a list of `RoundSummary` records, each with `(round, accuracy, composite, improved, degraded_queries, ...)`. This is what `build_trajectory_report` consumes when L1/L2/L3 need to reason about prior rounds.
+
+## Reading the composite block
+
+Every per-candidate box, every L1_SCORE summary, every round summary, and every `log.md` round section now print a uniform composite block that names the formula and shows each evaluator value:
+
+```
+composite = 0.3667
+formula:  0.65 * accuracy + 0.15 * (((1 - error_rate) + (1 -
+          degraded_rate) + (1 - runtime_failure_rate)) / 3) +
+          0.10 * latency_norm + 0.05 * accuracy + 0.05 *
+          prompt_compactness
+  accuracy=0.167              error_rate=0.000
+  degraded_rate=0.000         runtime_failure_rate=0.000
+  latency_norm=0.985          prompt_compactness=0.998
+```
+
+The block lists every named evaluator that appears in the formula, in first-appearance order, paired across two columns. Builtins (`min`, `max`, `log`) and bare numbers are filtered out — only registered evaluator names show. Sub-expressions like the health term are not decomposed; you see the formula text plus the inputs, and can do the per-term math from there.
+
+When the formula is unset (rare — typically means rendering before init completes), the block collapses to `composite = 0.3667 (formula unavailable)`.
+
+**`PROMPTPOTTER_COMPACT_DISPLAY=1`** in the environment reverts the live CLI / notebook surfaces to the legacy single-line `composite=0.4f` bottom rule (only when composite ≠ accuracy). `log.md` is unaffected — the digest is the operator's permanent record and always carries the full block.
 
 ---
 

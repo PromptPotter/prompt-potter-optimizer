@@ -32,6 +32,7 @@ from promptpotter.application.campaign.utils import (
     load_and_apply_experiment,
 )
 from promptpotter.application.scoring.metrics import count_failures
+from promptpotter.presentation.views.composite_render import render_composite_block
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
@@ -85,20 +86,19 @@ def _lineage_refs(rd: dict) -> tuple[str, str, str]:
 
 
 def render_campaign_summary(rounds: list[dict]) -> str:
-    """Per-round comparison table — round, accuracy, hits, label, prompt id."""
+    """Per-round comparison table — round, accuracy, composite, hits, label, prompt id.
+
+    Composite column is always shown — log.md is the operator's permanent
+    record and never abbreviates by hiding columns that happen to equal
+    accuracy on every round so far.
+    """
     if not rounds:
         return "No campaign rounds."
-    has_composite = any(
-        rd.get("composite") is not None and rd.get("composite") != rd.get("accuracy", 0)
-        for rd in rounds
+    header = (
+        f"  {'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
+        f" {'Hits':>9s} {'Label':<40s} {'Prompt':<12s}"
     )
-    header = f"  {'Round':<7s} {'Accuracy':>9s}"
-    sep = f"  {'-' * 7} {'-' * 9}"
-    if has_composite:
-        header += f" {'Composite':>10s}"
-        sep += f" {'-' * 10}"
-    header += f" {'Hits':>9s} {'Label':<40s} {'Prompt':<12s}"
-    sep += f" {'-' * 9} {'-' * 40} {'-' * 12}"
+    sep = f"  {'-' * 7} {'-' * 9} {'-' * 10} {'-' * 9} {'-' * 40} {'-' * 12}"
 
     lines = [
         f"\nCAMPAIGN SUMMARY ({len(rounds)} rounds)",
@@ -115,14 +115,10 @@ def render_campaign_summary(rounds: list[dict]) -> str:
         pid, _, _ = _lineage_refs(rd)
         pid_short = pid[:12] if pid else ""
         hits_str = f"{hits:>3d}/{total:<3d}"
-        if has_composite:
-            comp = rd.get("composite") or acc
-            lines.append(
-                f"  {rnd:<7s} {acc:>8.1%} {comp:>10.4f} {hits_str:>9s} "
-                f"{label:<40s} {pid_short:<12s}"
-            )
-        else:
-            lines.append(f"  {rnd:<7s} {acc:>8.1%} {hits_str:>9s} {label:<40s} {pid_short:<12s}")
+        comp = rd.get("composite") if rd.get("composite") is not None else acc
+        lines.append(
+            f"  {rnd:<7s} {acc:>8.1%} {comp:>10.4f} {hits_str:>9s} {label:<40s} {pid_short:<12s}"
+        )
     return "\n".join(lines)
 
 
@@ -416,6 +412,11 @@ def render_log_md(
             parts.append(f"- {label}: {v}")
     parts += ["", "## Rounds", ""]
 
+    # Per-round formula source: scoring_round_formula stored on
+    # index.json::final at finalize. None when the default formula was in
+    # use; render_composite_block then prints "(formula unavailable)".
+    formula = final.get("scorer_round_formula")
+
     if not trials:
         parts += ["_No rounds yet._", ""]
     for trial in trials:
@@ -428,11 +429,21 @@ def render_log_md(
             "",
             f"- improved: **{'yes' if trial.get('improved') else 'no'}**",
             f"- hits: {trial.get('hits', 0)}/{trial.get('total', 0)}",
+            f"- composite: `{trial.get('composite', 0.0) or 0.0:.4f}`",
         ]
         if changes := (lineage.get("changes_description") or "").strip():
             parts.append(f"- changes: {changes}")
         if directive := (osp.get("l2_directive") or "").strip():
             parts.append(f"- L2 directive: {directive}")
+        # Composite block: formula + per-evaluator values, fenced as a
+        # code block so the alignment survives any markdown renderer.
+        composite_block = render_composite_block(
+            trial.get("composite", 0.0) or 0.0,
+            dict(trial.get("evaluators") or {}),
+            formula,
+        )
+        if composite_block:
+            parts += ["", "```", *composite_block, "```"]
         if critique := (osp.get("l1_critique_text") or "").strip():
             parts += ["", "> " + critique.replace("\n", "\n> ")]
         parts.append("")

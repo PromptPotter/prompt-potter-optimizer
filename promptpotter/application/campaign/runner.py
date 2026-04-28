@@ -535,10 +535,18 @@ def _finalize_run(
 
     if session.cycle_id:
         with graceful("Final summary write failed"):
+            from promptpotter.application.scoring.evaluators import default_per_round_formula
+
+            schema = session.pipeline_schema
+            formula = session.scorer_round_formula or (
+                default_per_round_formula(schema) if schema else None
+            )
+            final_block = run_result.model_dump(exclude={"rounds"}, mode="json")
+            final_block["scorer_round_formula"] = formula
             session.store.campaigns.update(
                 session.backend_id,
                 session.cycle_id,
-                {"final": run_result.model_dump(exclude={"rounds"}, mode="json")},
+                {"final": final_block},
             )
 
     if emitter:
