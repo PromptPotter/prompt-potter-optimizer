@@ -102,15 +102,20 @@ def replayer(kind: str) -> Callable[[Replayer], Replayer]:
 
 
 def record_decision(
-    decisions: list[dict[str, Any]],
+    decisions: list[Decision],
     kind: str,
     inputs_ref: dict[str, Any],
     outcome: Any,
     *,
     data: dict[str, Any] | None = None,
 ) -> Any:
-    """Append a ``Decision`` to *decisions* and return *outcome* for passthrough."""
-    decisions.append(Decision(kind, dict(inputs_ref), outcome, dict(data or {})).to_dict())
+    """Append a ``Decision`` to *decisions* and return *outcome* for passthrough.
+
+    Wire serialization (`to_dict()`) happens once when the in-memory
+    list is folded into ``RoundResult.decisions`` (which stays
+    ``list[dict]`` for Pydantic + JSON wire compatibility).
+    """
+    decisions.append(Decision(kind, dict(inputs_ref), outcome, dict(data or {})))
     return outcome
 
 

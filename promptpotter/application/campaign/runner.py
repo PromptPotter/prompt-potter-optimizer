@@ -139,7 +139,7 @@ async def _post_round(
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
     if cycle.pending_decisions:
-        round_result.decisions.extend(cycle.flush_decisions())
+        round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
 
     if session.cycle_id:
         with graceful("Round checkpoint failed"):

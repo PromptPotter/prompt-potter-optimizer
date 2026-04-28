@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from promptpotter.application.optimization.decisions import record_decision
+from promptpotter.application.optimization.decisions import Decision, record_decision
 from promptpotter.application.optimization.nodes.l1.measure import (
     parse_population,
     score_population,
@@ -18,7 +18,7 @@ from promptpotter.application.scoring.metrics import (
 )
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import CandidateProposal, RoundBaseline
+from promptpotter.domain.results import CandidateProposal, CandidateScore, RoundBaseline
 from promptpotter.domain.scoring import QueryResult
 
 if TYPE_CHECKING:
@@ -44,14 +44,14 @@ class L1ScoringResult(BaseModel):
     total: int
     improved: bool
     candidates_scored: int
-    candidate_scores: list[dict[str, Any]]
+    candidate_scores: list[CandidateScore]
     winner_results: list[QueryResult]
     all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
     escalation_signal: EscalationSignal | None = None
     degraded_queries: int = 0
     deprecated: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
-    decisions: list[dict] = Field(default_factory=list)
+    decisions: list[Decision] = Field(default_factory=list)
 
 
 async def l1_score(
@@ -74,7 +74,7 @@ async def l1_score(
     assert schema is not None, "l1_score requires pipeline_schema"
 
     osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
-    decisions: list[dict] = []
+    decisions: list[Decision] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,
@@ -90,9 +90,9 @@ async def l1_score(
     )
 
     aborted_ids = {
-        cs["candidate_id"]
+        cs.candidate_id
         for cs in candidate_scores
-        if cs.get("escalation_aborted") and not cs.get("elimination_stopped")
+        if cs.escalation_aborted and not cs.elimination_stopped
     }
     scored = [
         ind

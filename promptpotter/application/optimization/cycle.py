@@ -6,6 +6,7 @@ import json
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
+from promptpotter.application.optimization.decisions import Decision
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import RoundBaseline, RoundResult
@@ -131,7 +132,8 @@ class Cycle:
     escalation: EscalationState = field(default_factory=EscalationState)
 
     # Flushed into the next trial's ``decisions`` list before ``campaign_store.add_trial``.
-    pending_decisions: list[dict] = field(default_factory=list)
+    # Stored as ``Decision`` instances; converted to dict at the RoundResult boundary.
+    pending_decisions: list[Decision] = field(default_factory=list)
 
     state_version: int = 1
 
@@ -254,11 +256,11 @@ class Cycle:
             round_num,
         )
 
-    def record_decision(self, d: dict) -> None:
+    def record_decision(self, d: Decision) -> None:
         """Queue a decision produced outside the normal round flow (escalation/probe)."""
         self.pending_decisions.append(d)
 
-    def flush_decisions(self) -> list[dict]:
+    def flush_decisions(self) -> list[Decision]:
         """Drain queued decisions (used before checkpointing a round)."""
         out = list(self.pending_decisions)
         self.pending_decisions.clear()
@@ -296,7 +298,7 @@ class Cycle:
 
         existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
         for cs in scoring_result.candidate_scores:
-            for rf_dict in cs["runtime_failures"]:
+            for rf_dict in cs.runtime_failures:
                 k = _rf_dedup_key(rf_dict)
                 if k in existing_keys:
                     continue
