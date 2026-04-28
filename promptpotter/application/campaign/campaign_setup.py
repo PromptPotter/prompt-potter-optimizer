@@ -444,38 +444,19 @@ async def init_services(
     return session
 
 
-async def init_optimization_loop(
-    baseline: CampaignBaseline,
-    dataset: list[Sample],
+async def _emit_preflight_and_init_session(
     config: CampaignConfig,
-    *,
+    dataset: list[Sample],
     cb: RunListener,
-    task_context: TaskDecomposition,
-    scoring_formula: str | None,
-    scoring_round_formula: str | None,
-    scorer_id: str,
-    no_divergence_check: bool,
-    fork_on_divergence: bool,
-    langfuse_session_id: str | None,
-    cycle_id: str | None,
-    resume_from_round_override: int | None,
-    experiment_id: str,
     session: Session,
-    started_at: str,
-) -> Cycle:
-    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
-    from promptpotter.application.campaign.config import run_preflight_checks
-    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
-    from promptpotter.application.datasets.builder import sample_dataset
-    from promptpotter.application.intelligence.axis_index import AxisIndex
-    from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.decisions import resume_with_divergence_check
-    from promptpotter.application.optimization.elimination import build_degradation_checks
-    from promptpotter.application.scoring.formula import compile_round_scorer
-    from promptpotter.domain.phases import CampaignPhase, emit_phase
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+) -> None:
+    """Run preflight checks, emit ``INIT.enter``, and call backend init_session.
 
-    opt = config.optimization
+    Side-effects only.
+    """
+    from promptpotter.application.campaign.config import run_preflight_checks
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
+
     preflight_warnings = run_preflight_checks(config, dataset)
     for w in preflight_warnings:
         logger.warning("preflight[%s]: %s — %s", w.code, w.title, w.detail)
@@ -491,9 +472,31 @@ async def init_optimization_loop(
 
     if session.index_terms:
         await session.backend_client.init_session(session.index_terms)
+
+
+def _build_cycle_and_bootstrap(
+    baseline: CampaignBaseline,
+    task_context: TaskDecomposition,
+    scoring_round_formula: str | None,
+    session: Session,
+    config: CampaignConfig,
+    dataset: list[Sample],
+    cycle_id: str | None,
+    resume_from_round_override: int | None,
+) -> tuple[Cycle, OptSearchPoint, str | None, int]:
+    """Build the baseline ``OptSearchPoint`` + ``Cycle.start`` and bootstrap cycle storage.
+
+    Returns ``(cycle, baseline_osp, resolved_cycle_id, resumed_from_round)``.
+    The ``baseline_osp`` is returned so the resume/fork stage can register
+    its prompt alias without re-deriving it. Raises ``ValueError`` when
+    ``baseline.baseline_ps`` is missing — required for OSP construction.
+    """
+    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.scoring.formula import compile_round_scorer
+
     if baseline.baseline_ps is None:
         raise ValueError("baseline.baseline_ps is required; run baseline scoring first.")
-
     baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
     baseline_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
@@ -523,7 +526,31 @@ async def init_optimization_loop(
         parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
     )
+    return cycle, baseline_osp, resolved_cycle_id, resumed_from_round
 
+
+def _start_observability_and_scoring(
+    session: Session,
+    config: CampaignConfig,
+    baseline: CampaignBaseline,
+    dataset: list[Sample],
+    *,
+    resolved_cycle_id: str | None,
+    started_at: str,
+    langfuse_session_id: str | None,
+    experiment_id: str,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None,
+    scorer_id: str,
+) -> tuple[str, ObservabilityBridge | None]:
+    """Start the ObservabilityBridge for this cycle and populate scoring on ``session``.
+
+    Returns ``(obs_campaign_id, obs)``. ``obs`` may be ``None`` when the
+    bridge can't be built (no project_root/backend_id, or graceful failure).
+    """
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
+
+    opt = config.optimization
     obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
         session.project_root,
@@ -534,7 +561,6 @@ async def init_optimization_loop(
         obs_campaign_id=obs_campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
     )
-
     populate_session_scoring(
         session,
         obs=obs,
@@ -546,6 +572,24 @@ async def init_optimization_loop(
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
     )
+    return obs_campaign_id, obs
+
+
+def _apply_resume_fork(
+    session: Session,
+    cycle: Cycle,
+    baseline: CampaignBaseline,
+    baseline_osp: OptSearchPoint,
+    resolved_cycle_id: str | None,
+    resumed_from_round: int,
+    *,
+    no_divergence_check: bool,
+    fork_on_divergence: bool,
+) -> tuple[str | None, int]:
+    """Replay decisions on resume; fork on divergence when configured. Register the
+    baseline prompt alias. Returns the (possibly rebound) ``(cycle_id, resumed_from_round)``.
+    """
+    from promptpotter.application.optimization.decisions import resume_with_divergence_check
 
     if resumed_from_round > 0 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
@@ -565,6 +609,25 @@ async def init_optimization_loop(
         session.store.archive.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()
         )
+    return resolved_cycle_id, resumed_from_round
+
+
+def _finalize_loop_state(
+    cycle: Cycle,
+    session: Session,
+    config: CampaignConfig,
+    dataset: list[Sample],
+    cb: RunListener,
+    *,
+    resolved_cycle_id: str | None,
+    obs_campaign_id: str,
+    resumed_from_round: int,
+) -> None:
+    """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
+    from promptpotter.application.datasets.builder import sample_dataset
+    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.optimization.elimination import build_degradation_checks
+    from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     cycle.axes = AxisIndex.ensure_for(
         session.store,
@@ -589,5 +652,75 @@ async def init_optimization_loop(
         env=session,
         config=config,
         dataset=dataset,
+    )
+
+
+async def init_optimization_loop(
+    baseline: CampaignBaseline,
+    dataset: list[Sample],
+    config: CampaignConfig,
+    *,
+    cb: RunListener,
+    task_context: TaskDecomposition,
+    scoring_formula: str | None,
+    scoring_round_formula: str | None,
+    scorer_id: str,
+    no_divergence_check: bool,
+    fork_on_divergence: bool,
+    langfuse_session_id: str | None,
+    cycle_id: str | None,
+    resume_from_round_override: int | None,
+    experiment_id: str,
+    session: Session,
+    started_at: str,
+) -> Cycle:
+    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
+    await _emit_preflight_and_init_session(config, dataset, cb, session)
+
+    cycle, baseline_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+        baseline,
+        task_context,
+        scoring_round_formula,
+        session,
+        config,
+        dataset,
+        cycle_id,
+        resume_from_round_override,
+    )
+
+    obs_campaign_id, _obs = _start_observability_and_scoring(
+        session,
+        config,
+        baseline,
+        dataset,
+        resolved_cycle_id=resolved_cycle_id,
+        started_at=started_at,
+        langfuse_session_id=langfuse_session_id,
+        experiment_id=experiment_id,
+        scoring_formula=scoring_formula,
+        scoring_round_formula=scoring_round_formula,
+        scorer_id=scorer_id,
+    )
+
+    resolved_cycle_id, resumed_from_round = _apply_resume_fork(
+        session,
+        cycle,
+        baseline,
+        baseline_osp,
+        resolved_cycle_id,
+        resumed_from_round,
+        no_divergence_check=no_divergence_check,
+        fork_on_divergence=fork_on_divergence,
+    )
+
+    _finalize_loop_state(
+        cycle,
+        session,
+        config,
+        dataset,
+        cb,
+        resolved_cycle_id=resolved_cycle_id,
+        obs_campaign_id=obs_campaign_id,
+        resumed_from_round=resumed_from_round,
     )
     return cycle
