@@ -16,6 +16,8 @@ import time
 from collections import deque
 from dataclasses import dataclass, field
 
+from promptpotter.shared.errors import RequestTooLargeError
+
 
 def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
     """Rough prompt + output token estimate (~4 chars/token).
@@ -87,6 +89,31 @@ class RateLimiter:
             ts, _ = self._tokens[-1]
             self._tokens[-1] = (ts, actual)
 
+    async def acquire_with_estimation(
+        self,
+        messages: list[dict[str, str]],
+        max_output: int | None,
+        *,
+        provider_name: str,
+    ) -> RateLimitReservation:
+        """Estimate, fail-fast on over-cap, throttle, and return a closeable reservation.
+
+        Bundles the three-step dance every LLM call needs: estimate prompt
+        size, raise ``RequestTooLargeError`` if the configured TPM cap can
+        never fit it, and block until the rolling window has room. The
+        returned reservation must be ``close()``-d with the server's actual
+        token count after the response so the rolling window stays accurate.
+        """
+        estimated = estimate_tokens(messages, max_output)
+        if self.tpm is not None and estimated > self.tpm:
+            raise RequestTooLargeError(
+                provider_name=provider_name,
+                limit=self.tpm,
+                requested=estimated,
+            )
+        await self.acquire(estimated)
+        return RateLimitReservation(estimated=estimated, limiter=self)
+
     def _prune(self, now: float) -> None:
         cutoff = now - self.window_s
         while self._requests and self._requests[0] < cutoff:
@@ -109,3 +136,15 @@ class RateLimiter:
                         delays.append(ts + self.window_s - now)
                         break
         return max(delays)
+
+
+@dataclass(frozen=True)
+class RateLimitReservation:
+    """One outstanding throttle reservation — call ``close()`` after the response."""
+
+    estimated: int
+    limiter: RateLimiter
+
+    def close(self, actual: int) -> None:
+        """Reconcile the reservation with the server's actual token usage."""
+        self.limiter.record_actual(self.estimated, actual)

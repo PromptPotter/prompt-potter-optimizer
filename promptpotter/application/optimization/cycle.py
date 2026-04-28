@@ -107,9 +107,8 @@ class EscalationState:
 class Cycle:
     """Mutable orchestration state for the feedback cycle round loop."""
 
-    # None default keeps dataclass field-ordering valid for test isolation; active loop dereferences without guards.
-    session: Session = None  # type: ignore[assignment]
-    config: CampaignConfig = None  # type: ignore[assignment]
+    session: Session
+    config: CampaignConfig
 
     rounds: list[RoundResult] = field(default_factory=list)
     current_sp: JobSearchPoint | None = None
@@ -171,7 +170,9 @@ class Cycle:
             base_pipeline_params=schema.to_pipeline_params() if schema else None,
             schema=schema,
         )
-        cycle = cls(
+        return cls(
+            session=session,
+            config=config,
             current_sp=sp,
             current_accuracy=baseline_accuracy,
             current_composite=composite,
@@ -182,9 +183,6 @@ class Cycle:
             opt_sp=opt_sp,
             baseline_composite=composite,
         )
-        cycle.session = session
-        cycle.config = config
-        return cycle
 
     def restore_from_trial(self, trial: dict[str, Any]) -> None:
         """Restore optimizer state from a campaign checkpoint dict (in-place)."""
@@ -229,7 +227,7 @@ class Cycle:
         from promptpotter.domain.opt_search_point import RoundSummary
         from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
-        schema = self.session.pipeline_schema if self.session is not None else None
+        schema = self.session.pipeline_schema
         self.rounds.append(rr)
         self.opt_sp.round_history.append(
             RoundSummary(
@@ -280,7 +278,7 @@ class Cycle:
         from promptpotter.application.optimization.utils import update_query_tracker
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
-        schema = self.session.pipeline_schema if self.session is not None else None
+        schema = self.session.pipeline_schema
 
         self.opt_sp.l1_critique_text = critique_text
 
@@ -314,7 +312,7 @@ class Cycle:
         """
         from promptpotter.application.scoring.metrics import compute_composite_score
 
-        schema = self.session.pipeline_schema if self.session is not None else None
+        schema = self.session.pipeline_schema
         accuracy = self.current_accuracy
         composite = self.current_composite
         results: list[dict] = list(self.current_results)

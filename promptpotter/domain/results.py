@@ -7,7 +7,14 @@ from pydantic import BaseModel, ConfigDict, Field
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
-__all__ = ["CandidateProposal", "RoundBaseline", "RoundResult", "RunResult"]
+__all__ = [
+    "CandidateProposal",
+    "RoundBaseline",
+    "RoundDiagnostics",
+    "RoundMetadata",
+    "RoundResult",
+    "RunResult",
+]
 
 
 class CandidateProposal(BaseModel):
@@ -43,8 +50,14 @@ class RoundBaseline(BaseModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
 
 
-class RoundResult(BaseModel):
-    """Result of a single feedback cycle round."""
+class RoundMetadata(BaseModel):
+    """Checkpoint-critical scalars describing a round's outcome.
+
+    These are the fields a termination/escalation/dashboard reader needs:
+    what round, how good, did it improve, did it escalate. No raw payloads.
+    `RoundResult` inherits these flat for wire-format compatibility; functions
+    that only need the outcome can be typed against `RoundMetadata` directly.
+    """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
@@ -55,6 +68,24 @@ class RoundResult(BaseModel):
     hits: int
     total: int
     improved: bool
+    degraded_queries: int = 0
+    # Count of samples discarded as deprecated (fatal warnings) on the
+    # round-winner's scoring run; excluded from hits/total/accuracy and
+    # surfaced in round summary for operator transparency.
+    deprecated: int = 0
+    escalation_signal: EscalationSignal | None = None
+
+
+class RoundDiagnostics(BaseModel):
+    """Raw round payload — what was tested and the per-candidate detail.
+
+    These fields exist for replay (resume rescoring), audit (decisions log),
+    and full-fidelity rendering. Persistence and the divergence replay walker
+    consume them; lean readers do not.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
+
     prompt_fields: dict
     pipeline_params: dict | None = None
     results: list[dict] = Field(default_factory=list)
@@ -68,18 +99,23 @@ class RoundResult(BaseModel):
     # escalate_l2, …). Consumed by the divergence replay walker in
     # ``application/campaign/decisions.py``.
     decisions: list[dict] = Field(default_factory=list)
-    degraded_queries: int = 0
-    # Count of samples discarded as deprecated (fatal warnings) on the
-    # round-winner's scoring run; excluded from hits/total/accuracy and
-    # surfaced in round summary for operator transparency.
-    deprecated: int = 0
-    escalation_signal: EscalationSignal | None = None
     evaluators: dict[str, float] = Field(default_factory=dict)
     # Scoring-set evolution events emitted during this round (only populated
     # when ``scoring_set.enabled``; empty otherwise). Persisted to the
     # trial JSON so post-hoc renderers can walk the trial list and
     # reconstruct the full event log.
     scoring_set_events: list[dict] = Field(default_factory=list)
+
+
+class RoundResult(RoundMetadata, RoundDiagnostics):
+    """Result of a single feedback cycle round.
+
+    Conjunction of `RoundMetadata` + `RoundDiagnostics`. Fields are flat at
+    the access level (`result.accuracy`, `result.results`) and serialize to a
+    flat dict for wire-format compatibility with `index.json` / `trial_NNNN.json`.
+    """
+
+    model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
 class RunResult(BaseModel):

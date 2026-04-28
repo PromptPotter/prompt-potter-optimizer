@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from typing import Any, cast
 
 import pytest
 
@@ -146,7 +147,13 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     # Simulate a single round lifecycle.  The emitter only reads a handful of
     # fields off the ``env`` payload (cycle_id, scoring_dataset, obs,
     # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
-    init_state = Cycle(current_accuracy=0.5)
+    # Cycle requires session+config; the emitter doesn't read them off
+    # ``init_state`` here, so SimpleNamespace stand-ins are fine.
+    init_state = Cycle(
+        session=cast("Any", SimpleNamespace(pipeline_schema=None)),
+        config=config,
+        current_accuracy=0.5,
+    )
     init_env = SimpleNamespace(
         cycle_id="cycle_test_001",
         scoring_dataset=[],

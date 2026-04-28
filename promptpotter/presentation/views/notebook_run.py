@@ -138,7 +138,7 @@ async def run_optimization_notebook(
     session_id: str = "",
 ) -> tuple[list, RunResult | None]:
     """Run optimization with ``LiveDisplay``. Prints final completion box."""
-    from promptpotter.application.campaign.cycle_store import resolve_campaign_id
+    from promptpotter.application.campaign.resume import resolve_campaign_id
 
     bl = extract_campaign_baseline(campaign_rounds)
     baseline_acc = bl.baseline_acc

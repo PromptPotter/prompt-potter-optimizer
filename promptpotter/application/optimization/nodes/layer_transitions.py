@@ -103,7 +103,7 @@ class LayerTransition:
             llm_client=llm_client,
             model=model,
             temperature=self.default_temperature if temperature is None else temperature,
-            recorder=cycle.session.round_recorder if cycle.session is not None else None,
+            recorder=cycle.session.round_recorder,
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
@@ -301,7 +301,7 @@ class L3ModifyPlan(LayerTransition):
         escalation_check_result: dict | None,
     ) -> dict:
         opt_sp = cycle.opt_sp
-        pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
+        pipeline_schema = cycle.session.pipeline_schema
 
         # L3's "l2_history" — synthetic single-entry summary of the most recent
         # L2 round, sourced directly from cycle state.

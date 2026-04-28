@@ -1,4 +1,4 @@
-"""Cycle persistence boundary — resume/create cycles, resolve campaign IDs."""
+"""Cycle persistence boundary — resume/create cycles."""
 
 from __future__ import annotations
 
@@ -10,7 +10,6 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store import Stores
 
 
 logger = logging.getLogger(__name__)
@@ -36,30 +35,7 @@ HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
 __all__ = [
     "HOT_UPDATEABLE_KEYS",
     "bootstrap_cycle",
-    "resolve_campaign_id",
 ]
-
-
-def resolve_campaign_id(
-    store: Stores,
-    backend_id: str,
-    short_id: str,
-) -> str | None:
-    """Resolve short prefix/suffix to full campaign_id."""
-    campaigns = store.campaigns.list_all(backend_id)
-    matches = [c for c in campaigns if short_id in c["campaign_id"]]
-    if len(matches) == 1:
-        return matches[0]["campaign_id"]
-    if len(matches) > 1:
-        logger.warning(
-            "Ambiguous ID '%s' — %d matches: %s",
-            short_id,
-            len(matches),
-            [m["campaign_id"] for m in matches],
-        )
-        return None
-    logger.warning("No campaign matching '%s'", short_id)
-    return None
 
 
 def bootstrap_cycle(

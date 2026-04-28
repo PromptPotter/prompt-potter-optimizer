@@ -216,9 +216,9 @@ async def l1_generate(
         raise ValueError(f"n_variants must be >0, got {n_variants}")
 
     opt_sp = cycle.opt_sp
-    pipeline_schema = cycle.session.pipeline_schema if cycle.session is not None else None
+    pipeline_schema = cycle.session.pipeline_schema
     schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
-    obs_campaign_id = cycle.session.obs_campaign_id if cycle.session is not None else ""
+    obs_campaign_id = cycle.session.obs_campaign_id
 
     _compile_vars = {
         "n_variants": str(n_variants),
@@ -240,7 +240,7 @@ async def l1_generate(
         model=model,
         temperature=creativity,
         json_schema=output_schema,
-        recorder=cycle.session.round_recorder if cycle.session is not None else None,
+        recorder=cycle.session.round_recorder,
     )
     _log_meta_prompt_size(meta_prompt, _compile_vars, round_num)
 

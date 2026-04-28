@@ -29,7 +29,7 @@ if TYPE_CHECKING:
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, estimate_tokens
+from promptpotter.infrastructure.llm.rate_limiter import RateLimiter
 from promptpotter.shared.errors import RequestTooLargeError
 from promptpotter.shared.llm_parsing import try_parse_json
 
@@ -241,15 +241,13 @@ class OpenAICompatibleClient(LLMClientBase):
         # Proactive tier check + throttle. If the configured TPM cap can never
         # fit this request, fail fast before any network call. Otherwise block
         # until sending it stays within the rolling-window budget.
-        estimated = estimate_tokens(messages, max_tokens)
-        if self._rate_limiter is not None:
-            if self._rate_limiter.tpm is not None and estimated > self._rate_limiter.tpm:
-                raise RequestTooLargeError(
-                    provider_name=self._provider_name,
-                    limit=self._rate_limiter.tpm,
-                    requested=estimated,
-                )
-            await self._rate_limiter.acquire(estimated)
+        reservation = (
+            await self._rate_limiter.acquire_with_estimation(
+                messages, max_tokens, provider_name=self._provider_name
+            )
+            if self._rate_limiter is not None
+            else None
+        )
 
         # SDK's own ``max_retries`` handles 408/409/429/5xx + Retry-After.
         # We only intercept for: terminal request-too-large (413/429 with
@@ -279,8 +277,8 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
         usage = response.usage
-        if self._rate_limiter is not None and usage is not None:
-            self._rate_limiter.record_actual(estimated, usage.total_tokens)
+        if reservation is not None and usage is not None:
+            reservation.close(usage.total_tokens)
         return LLMResponse(
             content=content,
             model=response.model,
@@ -397,22 +395,21 @@ class AnthropicClient(LLMClientBase):
         if system_message:
             request_params["system"] = system_message
 
-        estimated = estimate_tokens(messages, max_tokens)
-        if self._rate_limiter is not None:
-            if self._rate_limiter.tpm is not None and estimated > self._rate_limiter.tpm:
-                raise RequestTooLargeError(
-                    provider_name="Anthropic",
-                    limit=self._rate_limiter.tpm,
-                    requested=estimated,
-                )
-            await self._rate_limiter.acquire(estimated)
+        reservation = (
+            await self._rate_limiter.acquire_with_estimation(
+                messages, max_tokens, provider_name="Anthropic"
+            )
+            if self._rate_limiter is not None
+            else None
+        )
 
         raw = await client.messages.with_raw_response.create(**request_params)
         response = raw.parse()
 
         total = response.usage.input_tokens + response.usage.output_tokens
+        if reservation is not None:
+            reservation.close(total)
         if self._rate_limiter is not None:
-            self._rate_limiter.record_actual(estimated, total)
             rpm = _parse_int_header(raw.headers, "anthropic-ratelimit-requests-limit")
             tpm = _parse_int_header(raw.headers, "anthropic-ratelimit-tokens-limit")
             self._rate_limiter.apply_discovered(rpm, tpm)

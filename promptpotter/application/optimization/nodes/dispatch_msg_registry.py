@@ -431,7 +431,7 @@ def _escalation_report_text(ctx: LayerContext) -> str:
     if not ctx.escalation_check_result:
         return ""
     cycle = ctx.cycle
-    schema = cycle.session.pipeline_schema if cycle.session is not None else None
+    schema = cycle.session.pipeline_schema
     text = format_escalation_report(
         ctx.escalation_check_result,
         cycle.opt_sp.escalation_journal or None,
