@@ -33,7 +33,7 @@ __all__ = [
     "load_baseline_prompt",
     "prepare_datasets",
     "prepare_scoring_context",
-    "summarize_dataset_runs",
+    "summarize_archive_runs",
 ]
 
 
@@ -368,8 +368,8 @@ class DatasetRunSummary(NamedTuple):
     best_name: str
 
 
-def summarize_dataset_runs(runs: list[dict]) -> DatasetRunSummary:
-    """Aggregate dataset runs by source prefix and find best accuracy."""
+def summarize_archive_runs(runs: list[dict]) -> DatasetRunSummary:
+    """Aggregate measurement-archive runs by source prefix and find best accuracy."""
     by_source: dict[str, int] = {}
     best_acc = 0.0
     best_name = ""

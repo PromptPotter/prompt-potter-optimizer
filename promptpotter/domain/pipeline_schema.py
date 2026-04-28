@@ -220,7 +220,7 @@ class PipelineSchema(BaseModel):
 
         The canonical SearchPoint identity at the archive layer: hashed
         by ``sp_hash`` and compared element-wise by
-        ``DatasetRunStore.find_by_node_configs``.
+        ``MeasurementArchive.find_by_node_configs``.
         """
         result: list[tuple[str, dict]] = []
         for node in self.nodes:

@@ -1,8 +1,10 @@
 # Search Memory Internals
 
+> **Phase 2 plan — rename to `AxisIndex`, rebuild on `MeasurementArchive`.** `SearchMemory` is the LLM-digest layer over the measurement archive. It maintains `_axis_values` and `_axis_failure_group_deltas` via its own ingestion path (`refresh()` → `_ingest_run()`); both are derivable from `measurements_for_config(...)` queries against the archive. Phase 2 will rename this class to `AxisIndex` and rebuild the digests as views over the archive rather than a parallel store. The `digest_for_*` surface stays — only the storage layer underneath collapses. See [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md) for the database-core framing this rebuild aligns to.
+
 `SearchMemory` is a materialized view over all historical evaluation data, persisted at `{tenant_id}/library/search_memory.json`. Conceptual overview in [../concepts/search-memory.md](../concepts/search-memory.md); this file covers the accessor catalog, digest API, and refresh mechanics.
 
-Each consumer (L1 generate, L1 critique, L2, L3) calls a typed `digest_for_*` method and receives a summary — never raw records. The view is incremental: each refresh folds in only the new dataset runs since the last watermark, so refresh cost is proportional to new evaluations, not total history.
+Each consumer (L1 generate, L1 critique, L2, L3) calls a typed `digest_for_*` method and receives a summary — never raw records. The view is incremental: each refresh folds in only the new measurement-archive batches since the last watermark, so refresh cost is proportional to new evaluations, not total history.
 
 ---
 
@@ -84,7 +86,7 @@ The result is a `dict[str, str]` rendered through `format_search_memory_block()`
 
 ### Watermark + incremental update
 
-Each pillar tracks a watermark — the set of `dataset_run` IDs already folded into its statistics. On refresh, `SearchMemory` compares current run IDs against the watermark, loads only the **new** runs' per-query data, and updates the rolling statistics in place. Persisted view + new watermark are written back atomically. No full recomputation, no re-reading the entire `dataset_runs/` archive — the cost of one refresh is proportional to new evaluations since the last refresh, not to total history.
+Each pillar tracks a watermark — the set of `run_id`s already folded into its statistics. On refresh, `SearchMemory` compares current run IDs against the watermark, loads only the **new** measurement batches' per-query data, and updates the rolling statistics in place. Persisted view + new watermark are written back atomically. No full recomputation, no re-reading the entire `library/measurements/` archive — the cost of one refresh is proportional to new evaluations since the last refresh, not to total history.
 
 ### Design constraint
 

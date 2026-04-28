@@ -13,7 +13,9 @@ from promptpotter.domain.sample import Sample
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
+    from promptpotter.domain.measurement import Measurement
     from promptpotter.domain.scoring import QueryResult
+    from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 logger = logging.getLogger(__name__)
 
@@ -88,6 +90,22 @@ class SampleIndex:
     def sample(self, sample_id: int) -> Sample | None:
         return self._samples.get(sample_id)
 
+    def measurements(
+        self,
+        sample_id: int,
+        archive: MeasurementArchive,
+        backend_id: str,
+    ) -> list[Measurement]:
+        """All cross-campaign measurements for ``sample_id``.
+
+        Forwards to ``MeasurementArchive.measurements_for_sample``,
+        passing the cached ``Sample.run_ids`` so the archive skips the
+        index scan when the sample is registered here.
+        """
+        sample = self._samples.get(sample_id)
+        run_ids = sample.run_ids if sample else None
+        return archive.measurements_for_sample(backend_id, sample_id, run_ids=run_ids)
+
     def id_for_query(self, query: str) -> int | None:
         """Reverse lookup for legacy string-keyed callers."""
         return self._query_to_id.get(query)
@@ -116,8 +134,8 @@ class SampleIndex:
         self._cache_records = None
 
     def ingest_run(self, run_detail: dict[str, Any]) -> None:
-        """Replay a dataset_runs/ archive entry into the index."""
-        items = run_detail.get("dataset_run_items", [])
+        """Replay a measurement-archive entry into the index."""
+        items = run_detail.get("measurements", [])
         run_id = run_detail.get("run_id", "")
 
         for item in items:

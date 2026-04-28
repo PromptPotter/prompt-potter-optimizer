@@ -14,7 +14,7 @@ Two families:
   the optimization loop.
 - :class:`EvaluationEvent` — Topology B (per-query dataset trace). One
   Langfuse trace per query, linked to dataset items. Emitted by the backfill
-  replayer reading ``dataset_runs/`` from disk.
+  replayer reading ``library/measurements/`` from disk.
 
 The audit table at ``docs/planned/observability-refactor.md`` documents
 exactly which Langfuse SDK calls each event triggers.
@@ -220,7 +220,7 @@ OptimizationEvent = Union[
 ]
 
 
-# --- Evaluation (Topology B, replayed from dataset_runs/) ---
+# --- Evaluation (Topology B, replayed from library/measurements/) ---
 
 
 @dataclass(frozen=True, slots=True)

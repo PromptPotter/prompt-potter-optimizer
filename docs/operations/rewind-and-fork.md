@@ -17,7 +17,7 @@ python -m promptpotter optimize --from 2
 
 This archives `trials/trial_0003.json` onward into `campaigns/{cycle_id}/archived/resumed_at_<ts>/`, rebuilds the trial index to reflect only rounds 0–2, restores the optimizer state from round 2's trial, and resumes at round 3.
 
-**What's preserved:** the content-addressed evaluation cache. Any per-query result from the archived trials that stays identical under the new search replays from `library/dataset_runs/` without touching the backend.
+**What's preserved:** the content-addressed measurement archive. Any per-query result from the archived trials that stays identical under the new search replays from `library/measurements/` without touching the backend.
 
 **What's discarded:** the rounds after N are moved aside but not deleted — you can inspect them in the archive directory. They're no longer referenced by the live campaign.
 
@@ -33,7 +33,7 @@ Fork exists for one specific situation: the scoring formula changed, and resume 
 python -m promptpotter optimize --fork-on-divergence
 ```
 
-When this flag is set and resume detects a divergence, the run mints a new `cycle_id` rooted at the divergence point, copies the trials before the divergent round into the new cycle, records a `parent_cycle_id` pointer back to the original, retargets the active session pointer at the new cycle, and continues — re-running the divergent round under the current scorer. The shared `dataset_runs/` trace corpus is not duplicated — both cycles read the same underlying traces, each through their own scoring ledger. The old cycle is left alone as a record of what happened under the original scorer.
+When this flag is set and resume detects a divergence, the run mints a new `cycle_id` rooted at the divergence point, copies the trials before the divergent round into the new cycle, records a `parent_cycle_id` pointer back to the original, retargets the active session pointer at the new cycle, and continues — re-running the divergent round under the current scorer. The shared `library/measurements/` archive is not duplicated — both cycles read the same underlying measurements, each through their own scoring ledger. The old cycle is left alone as a record of what happened under the original scorer.
 
 ### What lands where after a fork
 

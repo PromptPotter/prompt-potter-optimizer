@@ -44,7 +44,7 @@ SearchPoint (abstract)
 
 Every service signature follows the same shape: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state is traced at both layers:
 
-- **Target layer** — `JobSearchPoint` → `dataset_runs/` (content-addressed, shared across cycles).
+- **Target layer** — `JobSearchPoint` → `library/measurements/` (content-addressed, shared across cycles). See [`measurement-archive-internals.md`](measurement-archive-internals.md).
 - **Optimizer layer** — `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint).
 
 Both layers must be independently reconstructable from disk. When adding new optimizer state, it MUST flow through `OptSearchPoint` for persistence — no sidecar state.
@@ -79,12 +79,13 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
         {root_cycle_id}_fork_xxx/        # one dir per fork — per-cycle audit only
           index.json   log.md            # telemetry stays at the family root above
           trials/   candidates/   rounds/   langfuse/   prompts/
-    library/                             # cross-cycle: shared reference data
+    library/                             # the measurement archive (database core)
+      measurements/{run_id}.json         # MeasurementArchive: facts, append-only, content-addressed
+      measurements.json                  # archive index (denormalized read-side projection)
+      samples.json                       # SampleIndex: per-sample derived state
       backends/{backend_id}/             # backend profile + datasets
-      dataset_runs/                      # content-addressed evaluation archive
-      search_memory.json                 # materialized intelligence view
+      search_memory.json                 # axis-side digest view (Phase 2 → axes.json)
       prompt_aliases.json
-      restructure_cache.json
 ```
 
 Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`. For operator-level walkthrough of these files, see [../operations/persistence-and-state.md](../operations/persistence-and-state.md).

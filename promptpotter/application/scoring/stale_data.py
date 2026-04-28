@@ -72,7 +72,7 @@ async def execute_stale_data_protocol(
     self-optimizes.
 
     Observation counts come from ``search_memory.sample_index`` (degradation
-    tables ingested from dataset_runs at round boundaries). Within a round
+    tables ingested from the measurement archive at round boundaries). Within a round
     the count is constant; no mutable state is passed through the scorer.
 
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step

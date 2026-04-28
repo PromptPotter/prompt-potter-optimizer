@@ -38,7 +38,7 @@ SearchPoint (abstract)
         └── OptSearchPoint  — optimizer working state (+ lineage, L2/L3, memory)
 ```
 
-**Prompt alias groups** link the original monolithic prompt to its decomposed form so historical evaluations stay discoverable across both. Per-query results from prior `dataset_runs/` are reused when a new `SearchPoint`'s `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
+**Prompt alias groups** link the original monolithic prompt to its decomposed form so historical evaluations stay discoverable across both. Per-query results from prior `library/measurements/` entries are reused when a new `SearchPoint`'s `node_configs` share a prefix with a stored run — exact matches reuse everything, partial matches reuse queries that short-circuited before the diverging node.
 
 ## Two parameter namespaces
 

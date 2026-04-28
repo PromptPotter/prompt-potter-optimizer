@@ -8,7 +8,7 @@ import from here.
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
 
-# stores/dataset_run_store — file lock parameters
+# stores/measurement_archive — file lock parameters
 LOCK_TIMEOUT: float = 5.0  # seconds before treating lock as stale
 
 
@@ -36,5 +36,5 @@ def classify_axis(axis_key: str) -> str:
 
 
 # Persistence versioning
-DATASET_RUNS_SCHEMA_VERSION = 1
+MEASUREMENTS_SCHEMA_VERSION = 1
 DEFAULT_CONNECTOR_TYPE = "default"

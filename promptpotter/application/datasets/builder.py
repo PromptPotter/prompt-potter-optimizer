@@ -337,7 +337,7 @@ def build_dataset_run_data(
     experiment_id: str = "",
     pipeline_schema: PipelineSchema | None = None,
 ) -> dict:
-    """Build a DatasetRun dict ready for ``Stores.dataset_runs.save()``."""
+    """Build a measurement-batch dict ready for ``Stores.archive.save()``."""
     rendered_prompt = search_point.render()
     sp_h = search_point.sp_hash(pipeline_schema)
     data: dict = {
@@ -352,7 +352,7 @@ def build_dataset_run_data(
         "scores": scores,
         "source": source,
         "created_at": datetime.now(UTC).isoformat(),
-        "dataset_run_items": list(results),
+        "measurements": list(results),
     }
     if pipeline_schema and search_point.pipeline_params:
         data["node_configs"] = pipeline_schema.node_configs(search_point.pipeline_params)

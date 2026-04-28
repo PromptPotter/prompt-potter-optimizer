@@ -470,7 +470,7 @@ async def init_optimization_loop(
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
     if session.store:
-        session.store.dataset_runs.register_prompt_alias(
+        session.store.archive.register_prompt_alias(
             session.backend_id, baseline.instruction, baseline_osp.render()
         )
 

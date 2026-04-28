@@ -1,35 +1,99 @@
-"""Dataset run storage — archive layer for eval history."""
+"""Measurement archive — the database core, cross-cycle measurement storage.
+
+The archive is the canonical store of every ``(sample × config → outcome)`` row
+ever recorded. Append-only, content-addressed, cross-cycle, cross-session,
+cross-tenant within a tenant root. Two natural views: by training example
+(``measurements_for_sample``) and by searchpoint / config
+(``measurements_for_config``). Cache reuse during scoring uses the same
+underlying matcher in ``prefix_exact`` mode; discovery retrieval uses
+``subset`` mode. See ``docs/concepts/measurement-archive.md``.
+"""
 
 import hashlib
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from filelock import FileLock
 
+from promptpotter.domain.measurement import Measurement
 from promptpotter.infrastructure.store.base import (
     read_json,
     read_json_optional,
     write_json,
 )
 from promptpotter.shared.constants import (
-    DATASET_RUNS_SCHEMA_VERSION,
     DEFAULT_CONNECTOR_TYPE,
     LOCK_TIMEOUT,
+    MEASUREMENTS_SCHEMA_VERSION,
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 logger = logging.getLogger(__name__)
 
 
-class DatasetRunStore:
-    """File I/O for dataset evaluation runs and incremental eval writes.
+def _node_config_matches(
+    run_node_configs: list[Any],
+    spec: list[tuple[str, dict[str, Any]]] | dict[str, dict[str, Any]],
+    *,
+    mode: Literal["prefix_exact", "subset"],
+) -> int:
+    """Match a stored ``node_configs`` chain against a *spec*.
 
-    Tenant-global (v3): all dataset_runs live under ``library/dataset_runs/``
-    regardless of ``backend_id``. Content-addressed identity comes from
-    ``PipelineSchema.node_configs()`` — there's no cross-backend collision
-    risk since each config blob carries the backend's pipeline shape.
+    ``mode="prefix_exact"`` — *spec* is an ordered list of ``(name, cfg)``
+    tuples; matches stored entries position-by-position with full dict
+    equality, stops at first mismatch. Returns match length (0 = no match).
+    Used by the cache reuse path (``find_by_node_configs``).
+
+    ``mode="subset"`` — *spec* is a ``{node_name: required_subdict}`` dict;
+    a stored chain matches iff every (name, subdict) in spec finds a
+    ``[name, cfg]`` in the chain where ``subdict.items() <= cfg.items()``.
+    Empty subdict tests node presence only. Empty spec returns 0 (no-match).
+    Returns 1 on full subset match, 0 otherwise. Used by discovery retrieval
+    (``measurements_for_config``).
+    """
+    if mode == "prefix_exact":
+        if not isinstance(spec, list) or not spec:
+            return 0
+        match_len = 0
+        for (n_want, c_want), stored_pair in zip(spec, run_node_configs, strict=False):
+            # stored_pair may be [name, config] after JSON round-trip
+            if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+                break
+            n_have, c_have = stored_pair
+            if n_have != n_want or c_have != c_want:
+                break
+            match_len += 1
+        return match_len
+
+    # mode == "subset"
+    if not isinstance(spec, dict) or not spec:
+        return 0
+    by_name: dict[str, dict[str, Any]] = {}
+    for stored_pair in run_node_configs:
+        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+            continue
+        n_have, c_have = stored_pair
+        if isinstance(c_have, dict):
+            by_name[n_have] = c_have
+    for node_name, subdict in spec.items():
+        cfg = by_name.get(node_name)
+        if cfg is None:
+            return 0
+        if subdict and not (subdict.items() <= cfg.items()):
+            return 0
+    return 1
+
+
+class MeasurementArchive:
+    """File I/O for the measurement archive — the database core.
+
+    Tenant-global: every measurement batch lives under
+    ``library/measurements/`` regardless of ``backend_id``.
+    Content-addressed identity comes from ``PipelineSchema.node_configs()`` —
+    no cross-backend collision risk since each config blob carries the
+    backend's pipeline shape.
 
     The ``backend_id`` parameter is preserved on public methods for
     call-site stability but is ignored for path construction.
@@ -42,10 +106,10 @@ class DatasetRunStore:
     # -- path helpers ---------------------------------------------------------
 
     def _runs_dir(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / "dataset_runs"
+        return self._base_dir / "library" / "measurements"
 
     def _index_path(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / "dataset_runs.json"
+        return self._base_dir / "library" / "measurements.json"
 
     # -- complete runs --------------------------------------------------------
 
@@ -91,10 +155,10 @@ class DatasetRunStore:
             if index_path.exists():
                 index = read_json(index_path)
             else:
-                index = {"dataset_runs": [], "total": 0}
+                index = {"measurements": [], "total": 0}
 
             content_hash_val = data.get("content_hash", "")
-            entries = index["dataset_runs"]
+            entries = index["measurements"]
             replaced = False
             for i, entry in enumerate(entries):
                 if entry.get("content_hash") == content_hash_val:
@@ -114,17 +178,17 @@ class DatasetRunStore:
         backend_id: str,
         run_id: str,
     ) -> dict[str, Any] | None:
-        """Load a dataset run detail file directly by run_id (no index scan)."""
+        """Load a run detail file directly by run_id (no index scan)."""
         return read_json_optional(self._runs_dir(backend_id) / f"{run_id}.json")
 
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return the index entries (summaries without full items)."""
         index = read_json_optional(self._index_path(backend_id)) or {
-            "dataset_runs": [],
+            "measurements": [],
             "total": 0,
-            "schema_version": DATASET_RUNS_SCHEMA_VERSION,
+            "schema_version": MEASUREMENTS_SCHEMA_VERSION,
         }
-        return index.get("dataset_runs", [])
+        return index.get("measurements", [])
 
     def load_since(
         self,
@@ -134,7 +198,7 @@ class DatasetRunStore:
         """Yield ``(run_id, detail)`` for runs whose ``run_id`` is not in ``seen_ids``.
 
         Skips runs whose detail file is missing. Encapsulates the index-scan +
-        per-run load that SearchMemory.refresh used to do by hand.
+        per-run load that derived views (e.g. SearchMemory) used to do by hand.
         """
         for entry in self.list_all(backend_id):
             run_id = entry["run_id"]
@@ -164,20 +228,76 @@ class DatasetRunStore:
             stored = entry.get("node_configs")
             if not stored:
                 continue
-            match_len = 0
-            for (n_want, c_want), stored_pair in zip(node_configs, stored, strict=False):
-                # stored_pair may be [name, config] after JSON round-trip
-                if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-                    break
-                n_have, c_have = stored_pair
-                if n_have != n_want or c_have != c_want:
-                    break
-                match_len += 1
+            match_len = _node_config_matches(stored, node_configs, mode="prefix_exact")
             if match_len > 0:
                 scored.append((entry, match_len))
 
         scored.sort(key=lambda t: (t[1], t[0].get("item_count", 0)), reverse=True)
         return scored
+
+    # -- direct retrieval (the database-core view) -----------------------------
+
+    def measurements_for_sample(
+        self,
+        backend_id: str,
+        sample_id: int,
+        *,
+        run_ids: list[str] | None = None,
+    ) -> list[Measurement]:
+        """Every measurement of one training example, across all configs.
+
+        When ``run_ids`` is provided (typically from
+        ``Sample.run_ids``), skips the index scan and loads only those
+        files. When ``None``, walks every batch in the archive.
+        """
+        if run_ids is not None:
+            sources: Iterator[tuple[str, dict[str, Any]]] = (
+                (rid, detail)
+                for rid in run_ids
+                if (detail := self.load_by_id(backend_id, rid)) is not None
+            )
+        else:
+            sources = (
+                (entry["run_id"], detail)
+                for entry in self.list_all(backend_id)
+                if (detail := self.load_by_id(backend_id, entry["run_id"])) is not None
+            )
+
+        out: list[Measurement] = []
+        for run_id, detail in sources:
+            for item in detail.get("measurements", []):
+                if item.get("sample_id") == sample_id:
+                    out.append(_to_measurement(run_id, detail, item))
+        return out
+
+    def measurements_for_config(
+        self,
+        backend_id: str,
+        predicate: dict[str, dict[str, Any]],
+    ) -> list[Measurement]:
+        """Every measurement under configs matching *predicate*, across all samples.
+
+        ``predicate`` is ``{node_name: required_subdict}`` — see
+        :func:`_node_config_matches` for subset semantics. Empty
+        predicate returns ``[]``.
+        """
+        if not predicate:
+            return []
+
+        out: list[Measurement] = []
+        for entry in self.list_all(backend_id):
+            stored = entry.get("node_configs")
+            if not stored:
+                continue
+            if _node_config_matches(stored, predicate, mode="subset") == 0:
+                continue
+            run_id = entry["run_id"]
+            detail = self.load_by_id(backend_id, run_id)
+            if detail is None:
+                continue
+            for item in detail.get("measurements", []):
+                out.append(_to_measurement(run_id, detail, item))
+        return out
 
     def load_reusable_results(
         self,
@@ -185,7 +305,7 @@ class DatasetRunStore:
         node_configs: list[tuple[str, dict]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-query cache from prior dataset_runs sharing *node_configs*.
+        """Build per-query cache from prior runs sharing *node_configs*.
 
         Exact matches (``match_length == len(node_configs)``) reuse every
         non-error item.  Partial matches reuse only items whose
@@ -197,7 +317,7 @@ class DatasetRunStore:
         existing row is clean — in that case the clean row stands. This keeps
         a saved valid retry from being shadowed by an older deprecated archive
         on a subsequent load. Policy callback stays in the caller's layer so
-        the store remains a pure I/O adapter.
+        the archive remains a pure I/O adapter.
         """
         if not node_configs:
             return {}
@@ -212,7 +332,7 @@ class DatasetRunStore:
             trusted_nodes: set[str] = (
                 set() if is_full_match else {node_configs[i][0] for i in range(match_length)}
             )
-            for item in detail.get("dataset_run_items", []):
+            for item in detail.get("measurements", []):
                 q = item.get("query", "")
                 if not q or item.get("predicted") == "ERROR":
                     continue
@@ -293,3 +413,32 @@ class DatasetRunStore:
             if rp_hash in group:
                 return set(group)
         return {rp_hash}
+
+
+def _to_measurement(
+    run_id: str,
+    detail: dict[str, Any],
+    item: dict[str, Any],
+) -> Measurement:
+    """Project a stored item + its enclosing run into a flat Measurement row."""
+    raw_configs = detail.get("node_configs") or []
+    node_configs: list[tuple[str, dict[str, Any]]] = [
+        (pair[0], pair[1])
+        for pair in raw_configs
+        if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
+    ]
+    score = item.get("score")
+    return Measurement(
+        run_id=run_id,
+        content_hash=detail.get("content_hash", ""),
+        sample_id=int(item.get("sample_id", -1)),
+        query=item.get("query", ""),
+        ground_truth=item.get("ground_truth", ""),
+        predicted=item.get("predicted", ""),
+        hit=bool(item.get("hit", False)),
+        score=float(score) if score is not None else None,
+        node_configs=node_configs,
+        pipeline_data=item.get("pipeline_data") or {},
+        created_at=detail.get("created_at", ""),
+        run_scores=detail.get("scores") or {},
+    )

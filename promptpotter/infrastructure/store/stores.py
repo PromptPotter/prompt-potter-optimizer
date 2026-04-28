@@ -17,7 +17,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
-from promptpotter.infrastructure.store.dataset_run_store import DatasetRunStore
+from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 from promptpotter.infrastructure.store.session_store import SessionStore
 
 logger = logging.getLogger(__name__)
@@ -362,7 +362,7 @@ class Stores:
     backends: BackendStore
     sessions: SessionStore
     campaigns: CampaignStore
-    dataset_runs: DatasetRunStore
+    archive: MeasurementArchive
 
 
 def build_stores(
@@ -388,5 +388,5 @@ def build_stores(
         backends=BackendStore(tenant_dir, ds_root),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
-        dataset_runs=DatasetRunStore(tenant_dir),
+        archive=MeasurementArchive(tenant_dir),
     )

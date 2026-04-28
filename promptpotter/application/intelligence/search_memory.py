@@ -295,13 +295,9 @@ class SearchMemory:
     ) -> bool:
         """Incrementally update from new dataset runs; True if anything was added."""
         added = 0
-        for run_id, detail in store.dataset_runs.load_since(
-            backend_id, self.sample_index._watermark
-        ):
+        for run_id, detail in store.archive.load_since(backend_id, self.sample_index._watermark):
             if scorer is not None:
-                rescore_results(
-                    detail.get("dataset_run_items") or [], scorer, scorer_id, scorer_formula
-                )
+                rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
             self._ingest_run(detail)
             self.sample_index.ingest_run(detail)
             self.sample_index.mark_watermark(run_id)
@@ -344,7 +340,7 @@ class SearchMemory:
                 )
             base = Path(session.store.base_dir) / "library"
             self.save(base / "search_memory.json")
-            self.sample_index.save(base / "sample_index.json")
+            self.sample_index.save(base / "samples.json")
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):
@@ -386,13 +382,13 @@ class SearchMemory:
         if not (store and backend_id):
             return None
         base = Path(store.base_dir) / "library"
-        sample_index = SampleIndex.load(base / "sample_index.json")
+        sample_index = SampleIndex.load(base / "samples.json")
         mem = cls.load(base / "search_memory.json", sample_index=sample_index)
         if mem.refresh(
             store, backend_id, scorer=scorer, scorer_id=scorer_id, scorer_formula=scorer_formula
         ):
             mem.save(base / "search_memory.json")
-            mem.sample_index.save(base / "sample_index.json")
+            mem.sample_index.save(base / "samples.json")
         return mem
 
     @classmethod
@@ -412,7 +408,7 @@ class SearchMemory:
         return mem
 
     def _ingest_run(self, detail: dict[str, Any]) -> None:
-        """Ingest axis-side state from a dataset_runs/ entry."""
+        """Ingest axis-side state from a measurement-archive entry."""
         accuracy = detail.get("scores", {}).get("accuracy", 0.0)
         for node_name, node_config in (detail.get("pipeline_params") or {}).items():
             if isinstance(node_config, dict):

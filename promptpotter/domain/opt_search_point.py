@@ -6,7 +6,7 @@ and optimization memory. ``to_job_search_point()`` projects into a frozen
 ``pipeline_params``.
 
 Two-layer tracing:
-  Target layer:    JobSearchPoint  → content_hash → dataset_runs/
+  Target layer:    JobSearchPoint  → content_hash → library/measurements/
   Optimizer layer: OptSearchPoint  → model_dump() → campaigns/{id}/trial.json
 
 ADR-8: Mutable (not frozen). Updated in-place during the feedback cycle,

@@ -451,9 +451,7 @@ async def score_search_point(
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         prior_results = cast(
             "dict[str, QueryResult]",
-            store.dataset_runs.load_reusable_results(
-                backend_id, node_configs, is_fatal=is_deprecated
-            ),
+            store.archive.load_reusable_results(backend_id, node_configs, is_fatal=is_deprecated),
         )
 
     prior_results, evicted_priors = _filter_deprecated_priors(prior_results)
@@ -479,7 +477,7 @@ async def score_search_point(
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
         )
-        store.dataset_runs.save(backend_id, run_id, run_data)
+        store.archive.save(backend_id, run_id, run_data)
 
     def _persist_fresh(results: list[QueryResult]) -> None:
         if not (store and backend_id):

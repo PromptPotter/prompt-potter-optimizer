@@ -1,4 +1,4 @@
-"""Replay historical ``dataset_runs/`` entries into the Langfuse sink.
+"""Replay historical ``library/measurements/`` entries into the Langfuse sink.
 
 Reads JSON from disk and emits :class:`QueryEvalStart` / :class:`QueryNodeSpan`
 / :class:`QueryEvalEnd` events into an :class:`ObservabilityBridge`. The sink
@@ -52,7 +52,7 @@ def classify_run_origin(source: str = "") -> str:
 
 @dataclass(frozen=True)
 class LangfuseObservation:
-    """A pipeline node extracted from ``dataset_runs/`` ready to emit."""
+    """A pipeline node extracted from ``library/measurements/`` ready to emit."""
 
     name: str
     as_type: str
@@ -136,10 +136,10 @@ def _collect_ground_truth(
     gt_map: dict[str, str] = {}
     for s in summaries:
         rid = s.get("run_id", "")
-        detail = store.dataset_runs.load_by_id(backend_id, rid)
+        detail = store.archive.load_by_id(backend_id, rid)
         if not detail:
             continue
-        for item in detail.get("dataset_run_items", []):
+        for item in detail.get("measurements", []):
             query = item.get("query", "")
             ground_truth = item.get("ground_truth", "")
             if query and ground_truth:
@@ -157,12 +157,12 @@ def _replay_run(
     dataset_name: str,
 ) -> bool:
     """Replay one dataset_run's items as events. Returns ``True`` on success."""
-    detail = store.dataset_runs.load_by_id(backend_id, run_id)
+    detail = store.archive.load_by_id(backend_id, run_id)
     if not detail:
         logger.warning("replay: could not load detail for run %s", run_id)
         return False
 
-    items = detail.get("dataset_run_items", [])
+    items = detail.get("measurements", [])
     origin = classify_run_origin(detail.get("source", ""))
     any_pushed = False
 
@@ -245,7 +245,7 @@ def sync_langfuse_runs(
         _save_state(store, backend_id, _fresh_state())
         logger.info("Langfuse push state reset — will re-push all runs.")
 
-    n_runs = len(store.dataset_runs.list_all(backend_id))
+    n_runs = len(store.archive.list_all(backend_id))
     if n_runs == 0:
         logger.info("No completed dataset runs — skipping Langfuse backfill.")
         return None
@@ -261,7 +261,7 @@ def push_all_runs(
     flush_every: int = 20,
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
-    """Replay all historical dataset_runs through a Langfuse bridge."""
+    """Replay all historical measurement runs through a Langfuse bridge."""
     bridge = ObservabilityBridge.from_settings(store.base_dir, backend_id)
     lf_sink = bridge.langfuse_sink
     if lf_sink is None:
@@ -270,7 +270,7 @@ def push_all_runs(
     state = _load_state(store, backend_id)
     already_done = set(state["backfilled_run_ids"])
 
-    summaries = store.dataset_runs.list_all(backend_id)
+    summaries = store.archive.list_all(backend_id)
     total_on_disk = len(summaries)
 
     def _emit(msg: str) -> None:
@@ -325,11 +325,11 @@ def push_all_runs(
                 dataset_name=dataset_name,
             )
             if ok:
-                detail = store.dataset_runs.load_by_id(backend_id, rid)
+                detail = store.archive.load_by_id(backend_id, rid)
                 if detail:
                     scores = detail.get("scores", {})
                     accuracies.append(scores.get("accuracy", 0.0))
-                    total_items += len(detail.get("dataset_run_items", []))
+                    total_items += len(detail.get("measurements", []))
                 state["backfilled_run_ids"].append(rid)
 
             run_counter += 1

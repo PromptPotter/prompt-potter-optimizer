@@ -23,7 +23,7 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
 
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange).
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts. Within a campaign dir, files split into two bands: **root telemetry** (live observability stream — `dashboard.json`, `output.log`, `phase_events.jsonl`) lives at the **family root** cycle (the cycle with no `parent_cycle_id`), so all forks of a family share one continuous stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/`) lives in each individual cycle's dir.
-- `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
+- `{tenant_id}/library/` — **the measurement archive** (database core, cross-cycle, cross-session, cross-tenant): every measurement ever taken plus shared reference (datasets, backends, search_memory, aliases). Concept doc: [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md).
 
 Full tree:
 
@@ -53,19 +53,20 @@ Full tree:
           index.json   log.md
           trials/   candidates/   rounds/   langfuse/   prompts/
           # NO dashboard.json / output.log / phase_events.jsonl — those live at the family root above
-    library/                           # cross-cycle: shared reference data
+    library/                           # the measurement archive — database core
+      measurements/{run_id}.json       # MeasurementArchive: facts, append-only, content-addressed
+      measurements.json                # archive index (denormalized read-side projection)
+      samples.json                     # SampleIndex: per-sample derived state
       backends/{backend_id}/           # backend profile + datasets
-      dataset_runs/                    # content-addressed evaluation archive
-      search_memory.json               # materialized intelligence view
+      search_memory.json               # axis-side digest view (Phase 2 → axes.json)
       prompt_aliases.json
-      restructure_cache.json
 ```
 
 **Why split this way?** Telemetry is *temporal* — a stream that flows through whichever fork is currently active. Anchoring it at the family root means a single `tail dashboard.json` covers every fork without chasing dirs. Audit is *structural* — frozen records keyed by the cycle that produced them. Each cycle owns its own and the parent stays intact when you fork.
 
 Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`.
 
-**Deprecated-sample eviction.** Entries in `library/dataset_runs/` whose `classify_result()` (in `application/optimization/diagnostics.py`) returns any fatal code are written normally so the trace record stays intact for forensic analysis, but they are evicted at load — never served as cache. The next encounter with that query gets a fresh backend call and the resulting `QueryResult` is tagged `retry_of_deprecated_cache`. Eviction is purely load-side, in `score_search_point::_filter_deprecated_priors`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the full operator-facing framing.
+**Deprecated-sample eviction.** Entries in `library/measurements/` whose `classify_result()` (in `application/optimization/diagnostics.py`) returns any fatal code are written normally so the trace record stays intact for forensic analysis, but they are evicted at load — never served as cache. The next encounter with that query gets a fresh backend call and the resulting `QueryResult` is tagged `retry_of_deprecated_cache`. Eviction is purely load-side, in `score_search_point::_filter_deprecated_priors`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the full operator-facing framing.
 
 ---
 

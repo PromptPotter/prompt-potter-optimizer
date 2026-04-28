@@ -95,7 +95,8 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `build_stores` | `promptpotter/infrastructure/store/stores.py` |
 | `CampaignPersistenceEmitter` | `promptpotter/infrastructure/persistence/session_emitter.py` |
 | `CampaignStore` | `promptpotter/infrastructure/store/campaign_store.py` |
-| `DatasetRunStore` | `promptpotter/infrastructure/store/dataset_run_store.py` |
+| `MeasurementArchive` | `promptpotter/infrastructure/store/measurement_archive.py` |
+| `Measurement` | `promptpotter/domain/measurement.py` |
 | `parse_pipeline_response` | `promptpotter/application/pipeline_discovery.py` |
 | `SessionStore` | `promptpotter/infrastructure/store/session_store.py` |
 | `Stores` | `promptpotter/infrastructure/store/stores.py` |
@@ -125,7 +126,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `.promptpotter/active_session.json` | `{tenant_id, session_id, cycle_id}` pointer |
 | `.promptpotter/projects/{tenant}/sessions/{session_id}/` | Per-session workspace (journal, notes, control) |
 | `.promptpotter/projects/{tenant}/campaigns/{cycle_id}/` | Per-cycle artifacts (index, dashboard, trials, candidates, rounds, events, langfuse, prompts) |
-| `.promptpotter/projects/{tenant}/library/` | Cross-cycle reference (backends, datasets, dataset_runs, search_memory) |
+| `.promptpotter/projects/{tenant}/library/` | The measurement archive (database core) — measurements/, samples.json, search_memory.json, backends, datasets |
 | `datasets/{name}/campaign.json` | Campaign hyperparameters per dataset |
 | `datasets/{name}/pipeline.json` | Pipeline + model + caps per dataset |
 | `datasets/{name}/prompts/{node}.json` | Canonical starting `PromptTemplate` JSON |

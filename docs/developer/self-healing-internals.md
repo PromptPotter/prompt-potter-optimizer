@@ -126,7 +126,7 @@ Legacy archive alias: rows captured before TermNorm renamed the advisory carry `
 A fatal classification has **three** load-boundary effects (consumed via the `is_deprecated()` wrapper in `application/optimization/utils.py`):
 
 1. **Candidate elimination** — `DegradationCheck` fast-path in `application/optimization/elimination.py::DegradationCheck.evaluate` returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_queries` and `threshold` entirely.
-2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `dataset_runs.load_reusable_results` and drops every entry the classifier marks fatal. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The dataset_run archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
+2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `archive.load_reusable_results` and drops every entry the classifier marks fatal. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The measurement archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
 3. **Stats exclusion** — `_compute_accuracy` partitions deprecated rows into a separate `deprecated` count and excludes them from `hits`, `total`, `errors`, and the accuracy denominator. The display layer tags them `DEPR` instead of HIT/MISS, and the round summary appends `(N deprecated)` when any are present.
 
 ### Deprecated samples — why this is not a fallback
