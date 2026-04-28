@@ -4,16 +4,16 @@ The archive is the canonical store of every ``(sample × config → outcome)`` r
 ever recorded. Append-only, content-addressed, cross-cycle, cross-session,
 cross-tenant within a tenant root. Two natural views: by training example
 (``measurements_for_sample``) and by searchpoint / config
-(``measurements_for_config``). Cache reuse during scoring uses the same
-underlying matcher in ``prefix_exact`` mode; discovery retrieval uses
-``subset`` mode. See ``docs/concepts/measurement-archive.md``.
+(``measurements_for_config``). Cache reuse during scoring uses the
+``_match_prefix_exact`` positional matcher; discovery retrieval uses
+``_matches_subset``. See ``docs/concepts/measurement-archive.md``.
 """
 
 import hashlib
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any, Literal
+from typing import Any
 
 from filelock import FileLock
 
@@ -33,43 +33,44 @@ from promptpotter.shared.hashing import HASH_TRUNCATE
 logger = logging.getLogger(__name__)
 
 
-def _node_config_matches(
+def _match_prefix_exact(
     run_node_configs: list[Any],
-    spec: list[tuple[str, dict[str, Any]]] | dict[str, dict[str, Any]],
-    *,
-    mode: Literal["prefix_exact", "subset"],
+    spec: list[tuple[str, dict[str, Any]]],
 ) -> int:
-    """Match a stored ``node_configs`` chain against a *spec*.
+    """Position-by-position prefix match with full dict equality.
 
-    ``mode="prefix_exact"`` — *spec* is an ordered list of ``(name, cfg)``
-    tuples; matches stored entries position-by-position with full dict
-    equality, stops at first mismatch. Returns match length (0 = no match).
-    Used by the cache reuse path (``find_by_node_configs``).
-
-    ``mode="subset"`` — *spec* is a ``{node_name: required_subdict}`` dict;
-    a stored chain matches iff every (name, subdict) in spec finds a
-    ``[name, cfg]`` in the chain where ``subdict.items() <= cfg.items()``.
-    Empty subdict tests node presence only. Empty spec returns 0 (no-match).
-    Returns 1 on full subset match, 0 otherwise. Used by discovery retrieval
-    (``measurements_for_config``).
+    Compares ``spec`` against ``run_node_configs`` from index 0 onward,
+    stops at the first mismatch. Returns match length: 0 = no leading
+    position matches, N = the first N positions all match. Used by the
+    cache-reuse path (``find_by_node_configs``).
     """
-    if mode == "prefix_exact":
-        if not isinstance(spec, list) or not spec:
-            return 0
-        match_len = 0
-        for (n_want, c_want), stored_pair in zip(spec, run_node_configs, strict=False):
-            # stored_pair may be [name, config] after JSON round-trip
-            if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
-                break
-            n_have, c_have = stored_pair
-            if n_have != n_want or c_have != c_want:
-                break
-            match_len += 1
-        return match_len
-
-    # mode == "subset"
-    if not isinstance(spec, dict) or not spec:
+    if not spec:
         return 0
+    match_len = 0
+    for (n_want, c_want), stored_pair in zip(spec, run_node_configs, strict=False):
+        # stored_pair may be [name, config] after JSON round-trip.
+        if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
+            break
+        n_have, c_have = stored_pair
+        if n_have != n_want or c_have != c_want:
+            break
+        match_len += 1
+    return match_len
+
+
+def _matches_subset(
+    run_node_configs: list[Any],
+    predicate: dict[str, dict[str, Any]],
+) -> bool:
+    """Subset match — every node in ``predicate`` must appear in the
+    stored chain with at least the required key/value pairs.
+
+    Empty subdict tests node presence only. Empty predicate returns
+    ``False`` (discovery contract: no constraints, no rows). Used by
+    ``measurements_for_config``.
+    """
+    if not predicate:
+        return False
     by_name: dict[str, dict[str, Any]] = {}
     for stored_pair in run_node_configs:
         if not (isinstance(stored_pair, list | tuple) and len(stored_pair) == 2):
@@ -77,13 +78,13 @@ def _node_config_matches(
         n_have, c_have = stored_pair
         if isinstance(c_have, dict):
             by_name[n_have] = c_have
-    for node_name, subdict in spec.items():
+    for node_name, subdict in predicate.items():
         cfg = by_name.get(node_name)
         if cfg is None:
-            return 0
+            return False
         if subdict and not (subdict.items() <= cfg.items()):
-            return 0
-    return 1
+            return False
+    return True
 
 
 class MeasurementArchive:
@@ -228,7 +229,7 @@ class MeasurementArchive:
             stored = entry.get("node_configs")
             if not stored:
                 continue
-            match_len = _node_config_matches(stored, node_configs, mode="prefix_exact")
+            match_len = _match_prefix_exact(stored, node_configs)
             if match_len > 0:
                 scored.append((entry, match_len))
 
@@ -278,8 +279,8 @@ class MeasurementArchive:
         """Every measurement under configs matching *predicate*, across all samples.
 
         ``predicate`` is ``{node_name: required_subdict}`` — see
-        :func:`_node_config_matches` for subset semantics. Empty
-        predicate returns ``[]``.
+        :func:`_matches_subset` for subset semantics. Empty predicate
+        returns ``[]``.
         """
         if not predicate:
             return []
@@ -289,7 +290,7 @@ class MeasurementArchive:
             stored = entry.get("node_configs")
             if not stored:
                 continue
-            if _node_config_matches(stored, predicate, mode="subset") == 0:
+            if not _matches_subset(stored, predicate):
                 continue
             run_id = entry["run_id"]
             detail = self.load_by_id(backend_id, run_id)

@@ -1,9 +1,8 @@
 """MeasurementArchive — retrieval contract.
 
 Guards: ``measurements_for_sample``, ``measurements_for_config`` (subset
-predicate), ``find_by_node_configs`` (positional prefix-exact match).
-The two retrieval views and the cache-reuse matcher all share
-``_node_config_matches`` — one source of truth for archive lookup.
+predicate via ``_matches_subset``), ``find_by_node_configs`` (positional
+prefix-exact match via ``_match_prefix_exact``).
 """
 
 from __future__ import annotations
