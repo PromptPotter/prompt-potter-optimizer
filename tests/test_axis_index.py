@@ -73,8 +73,7 @@ def stores(tmp_path: Path):
 
 def test_axis_index_refresh_rebuilds_axis_values(stores: Any) -> None:
     idx = AxisIndex()
-    # First refresh ingests both seeded runs; sample-side reports added.
-    assert idx.refresh(stores, "any-backend") is True
+    idx.refresh(stores, "any-backend")
 
     # Axis side: model has two values (X, Y); temperature has one (0.0).
     assert set(idx._axis_values["llm_only.model"].keys()) == {"X", "Y"}
@@ -83,12 +82,11 @@ def test_axis_index_refresh_rebuilds_axis_values(stores: Any) -> None:
     assert set(idx._axis_values["llm_only.temperature"].keys()) == {"0.0"}
     assert sorted(idx._axis_values["llm_only.temperature"]["0.0"]) == [0.4, 0.8]
 
-    # Idempotent: refresh again with no archive change — sample side reports
-    # nothing-added, but axis side stays equivalent (full rebuild).
+    # Idempotent under full rebuild.
     snapshot = {
         a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
     }
-    assert idx.refresh(stores, "any-backend") is False
+    idx.refresh(stores, "any-backend")
     rebuilt = {
         a: {v: list(accs) for v, accs in vals.items()} for a, vals in idx._axis_values.items()
     }
@@ -96,9 +94,10 @@ def test_axis_index_refresh_rebuilds_axis_values(stores: Any) -> None:
 
 
 def test_axis_index_no_persistence(stores: Any, tmp_path: Path) -> None:
-    """AxisIndex never writes ``axes.json`` / ``search_memory.json``."""
+    """Neither digest side writes anything to ``library/``."""
     idx = AxisIndex()
     idx.refresh(stores, "any-backend")
     library = stores.base_dir / "library"
     assert not (library / "axes.json").exists()
     assert not (library / "search_memory.json").exists()
+    assert not (library / "samples.json").exists()

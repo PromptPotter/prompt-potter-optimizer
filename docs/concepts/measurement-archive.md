@@ -37,11 +37,10 @@ Both return `list[Measurement]` — the same denormalized row type. They compose
 ├── measurements/              ← MeasurementArchive: facts (append-only)
 │   ├── {run_id}.json          ← one batch = one config × dataset pass
 │   └── ...
-├── measurements.json          ← index over the batches
-└── samples.json               ← SampleIndex: per-sample derived state
+└── measurements.json          ← index over the batches
 ```
 
-`AxisIndex` (axis-keyed digest layer) is in-memory only — rebuilt from the archive on every refresh, no on-disk file.
+Both digest layers (`AxisIndex` axis-keyed, `SampleIndex` sample-keyed) are in-memory only — rebuilt from the archive on every refresh, no on-disk file.
 
 Each `measurements/{run_id}.json` carries:
 

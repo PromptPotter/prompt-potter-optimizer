@@ -160,7 +160,14 @@ async def _post_round(
         apply_steer_file(session, round_num, cb.on_phase)
 
     if cycle.axes:
-        cycle.axes.on_round_complete(cycle, session, round_num)
+        if session.store and session.backend_id:
+            cycle.axes.refresh(
+                session.store,
+                session.backend_id,
+                scorer=session.scorer,
+                scorer_id=session.scorer_id,
+                scorer_formula=session.scorer_formula,
+            )
         # Prune always-hit/always-miss queries from the active set.
         zsf = config.optimization.zero_signal_filter_enabled
         dataset_name = session.dataset_name

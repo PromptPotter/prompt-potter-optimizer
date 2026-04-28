@@ -1,12 +1,10 @@
-"""SampleIndex — per-sample cross-campaign state, keyed by sample.id."""
+"""SampleIndex — per-sample derived view over MeasurementArchive."""
 
 from __future__ import annotations
 
-import json
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.sample import Sample
@@ -14,7 +12,6 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.measurement import Measurement
-    from promptpotter.domain.scoring import QueryResult
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 logger = logging.getLogger(__name__)
@@ -25,6 +22,7 @@ class QueryRecord:
     """Per-sample pattern summary across measurements."""
 
     query: str
+    sample_id: int
     hit_rate: float
     n_measurements: int
     variance: float
@@ -60,28 +58,25 @@ class HardnessRecord:
 class SampleIndex:
     """Per-sample state keyed by ``sample.id: int``.
 
-    Owns the Sample primitives themselves plus per-sample aggregate
-    tables populated by ``on_measurement`` (steady-state) and
-    ``ingest_run`` (cold-start replay).
+    Pure derived view over the ``MeasurementArchive``: holds Sample
+    primitives plus per-sample aggregate tables that are populated by
+    :meth:`ingest_run` during ``AxisIndex.refresh``. ``_seen_runs`` is an
+    in-process delta cursor — it is never persisted across processes.
     """
 
     def __init__(self) -> None:
         self._samples: dict[int, Sample] = {}
-        self._watermark: set[str] = set()
+        self._seen_runs: set[str] = set()
         self._hits: dict[int, list[bool]] = defaultdict(list)
         self._failure_modes: dict[int, list[str]] = defaultdict(list)
         self._degradation_counts: dict[int, int] = defaultdict(int)
         self._flips: list[dict[str, Any]] = []
-        # Reverse lookup for legacy string-keyed APIs on AxisIndex.
-        self._query_to_id: dict[str, int] = {}
         # Cache for derived query records; cleared on ingest.
         self._cache_records: list[QueryRecord] | None = None
 
     def register(self, sample: Sample) -> None:
-        """Register a Sample. Call at dataset-load time so on_measurement
-        can find the right primitive to update."""
+        """Register a Sample at dataset-load time."""
         self._samples[sample.id] = sample
-        self._query_to_id[sample.query] = sample.id
 
     def register_many(self, samples: list[Sample]) -> None:
         for s in samples:
@@ -105,33 +100,6 @@ class SampleIndex:
         sample = self._samples.get(sample_id)
         run_ids = sample.run_ids if sample else None
         return archive.measurements_for_sample(backend_id, sample_id, run_ids=run_ids)
-
-    def id_for_query(self, query: str) -> int | None:
-        """Reverse lookup for legacy string-keyed callers."""
-        return self._query_to_id.get(query)
-
-    def on_measurement(self, result: QueryResult, run_id: str) -> None:
-        """Fired after each measurement. Mutates Sample + aggregate tables."""
-        sid = result.get("sample_id")
-        if sid is None:
-            return
-
-        hit = bool(result.get("hit"))
-        self._hits[sid].append(hit)
-
-        pd = result.get("pipeline_data") or {}
-        if (pd.get("diagnostics") or {}).get("warnings"):
-            self._degradation_counts[sid] += 1
-
-        if not hit and not is_error_result(result):
-            terminated = pd.get("terminated_at", "unknown")
-            self._failure_modes[sid].append(terminated)
-
-        sample = self._samples.get(sid)
-        if sample is not None and run_id and run_id not in sample.run_ids:
-            sample.run_ids.append(run_id)
-
-        self._cache_records = None
 
     def ingest_run(self, run_detail: dict[str, Any]) -> None:
         """Replay a measurement-archive entry into the index."""
@@ -239,6 +207,7 @@ class SampleIndex:
             records.append(
                 QueryRecord(
                     query=query,
+                    sample_id=sid,
                     hit_rate=round(hit_rate, 4),
                     n_measurements=len(hits),
                     variance=round(variance, 4),
@@ -258,8 +227,7 @@ class SampleIndex:
         """Zero-signal samples — always-hit and/or always-miss."""
         out: list[QueryRecord] = []
         for r in self.records():
-            sid = self._query_to_id.get(r.query)
-            if sid is None or len(self._hits.get(sid, [])) < min_observations:
+            if len(self._hits.get(r.sample_id, [])) < min_observations:
                 continue
             if (include_always_miss and r.hit_rate == 0.0) or (
                 include_always_hit and r.hit_rate == 1.0
@@ -301,10 +269,7 @@ class SampleIndex:
         """Intractable (hit_rate == 0) + chronic (failed last ``min_streak``) samples."""
         records = []
         for r in self.records():
-            sid = self._query_to_id.get(r.query)
-            if sid is None:
-                continue
-            hits = self._hits.get(sid, [])
+            hits = self._hits.get(r.sample_id, [])
             if len(hits) >= min_streak and not any(hits[-min_streak:]):
                 records.append(r)
         records.sort(key=lambda r: r.hit_rate)
@@ -344,48 +309,8 @@ class SampleIndex:
             return {}
         return {step: count / total for step, count in sorted(counts.items(), key=lambda x: -x[1])}
 
-    def is_watermarked(self, run_id: str) -> bool:
-        return run_id in self._watermark
-
-    def mark_watermark(self, run_id: str) -> None:
-        self._watermark.add(run_id)
-
-    def save(self, path: Path) -> None:
-        data = {
-            "watermark": sorted(self._watermark),
-            "samples": {sid: s.model_dump() for sid, s in self._samples.items()},
-            "hits": dict(self._hits),
-            "failure_modes": dict(self._failure_modes),
-            "degradation_counts": dict(self._degradation_counts),
-            "flips": self._flips,
-        }
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(json.dumps(data, indent=2), encoding="utf-8")
-
-    @classmethod
-    def load(cls, path: Path) -> SampleIndex:
-        idx = cls()
-        if not path.exists():
-            return idx
-        try:
-            data = json.loads(path.read_text(encoding="utf-8"))
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Failed to load SampleIndex from %s — starting fresh", path)
-            return idx
-
-        idx._watermark = set(data.get("watermark", []))
-        for sample_data in data.get("samples", {}).values():
-            idx.register(Sample(**sample_data))
-        for sid_str, hits in data.get("hits", {}).items():
-            idx._hits[int(sid_str)] = hits
-        for sid_str, modes in data.get("failure_modes", {}).items():
-            idx._failure_modes[int(sid_str)] = modes
-        idx._degradation_counts = defaultdict(
-            int,
-            {int(k): v for k, v in data.get("degradation_counts", {}).items()},
-        )
-        idx._flips = data.get("flips", [])
-        return idx
+    def mark_seen(self, run_id: str) -> None:
+        self._seen_runs.add(run_id)
 
     def _dominant_failure_mode(self, sample_id: int) -> str:
         modes = self._failure_modes.get(sample_id, [])

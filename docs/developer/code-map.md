@@ -126,7 +126,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `.promptpotter/active_session.json` | `{tenant_id, session_id, cycle_id}` pointer |
 | `.promptpotter/projects/{tenant}/sessions/{session_id}/` | Per-session workspace (journal, notes, control) |
 | `.promptpotter/projects/{tenant}/campaigns/{cycle_id}/` | Per-cycle artifacts (index, dashboard, trials, candidates, rounds, events, langfuse, prompts) |
-| `.promptpotter/projects/{tenant}/library/` | The measurement archive (database core) — measurements/, samples.json, backends, datasets |
+| `.promptpotter/projects/{tenant}/library/` | The measurement archive (database core) — measurements/, backends, datasets |
 | `datasets/{name}/campaign.json` | Campaign hyperparameters per dataset |
 | `datasets/{name}/pipeline.json` | Pipeline + model + caps per dataset |
 | `datasets/{name}/prompts/{node}.json` | Canonical starting `PromptTemplate` JSON |

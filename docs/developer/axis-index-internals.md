@@ -1,6 +1,6 @@
 # Axis Index Internals
 
-`AxisIndex` is the LLM-digest layer over the [measurement archive](../concepts/measurement-archive.md). It is a *pure derived view* — every refresh rebuilds the axis-side state from `MeasurementArchive.list_all()` in memory. There is no `axes.json`, no axis watermark; the only on-disk file in this layer is `library/samples.json`, owned by `SampleIndex` (sample side stays incremental + watermarked because it isn't a pure derivation).
+`AxisIndex` is the LLM-digest layer over the [measurement archive](../concepts/measurement-archive.md). It is a *pure derived view* — every refresh rebuilds the axis-side state from `MeasurementArchive.list_all()` in memory. The peer `SampleIndex` is the per-sample derived view; it is also pure in-memory and ingested incrementally via `archive.load_since(_seen_runs)`. `_seen_runs` is an in-process delta cursor only — never persisted across processes. Neither digest side owns an on-disk file.
 
 Conceptual overview in [../concepts/axis-index.md](../concepts/axis-index.md); this file covers the accessor catalog, digest API, and refresh mechanics.
 
@@ -76,18 +76,18 @@ The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. 
 
 ## Refresh mechanics
 
-`refresh(store, backend_id, scorer, scorer_id, scorer_formula) -> bool` does two things, in order:
+`refresh(store, backend_id, scorer, scorer_id, scorer_formula) -> None` does two things, in order:
 
-1. **Sample side (incremental, watermarked).** Walk `archive.load_since(watermark)`; rescore items via `rescore_results`; ingest into `sample_index`; mark watermark. Returns `True` iff at least one new run was added.
+1. **Sample side (incremental cursor).** Walk `archive.load_since(_seen_runs)`; rescore items via `rescore_results`; ingest into `sample_index`; mark seen. `_seen_runs` is an in-process set — new processes re-walk the full archive on first refresh.
 2. **Axis side (full rebuild every call).** Allocate a fresh `_axis_values`, walk `archive.list_all()`, fold each entry's `(pipeline_params, scores.accuracy)` into the new dict, replace `_axis_values` atomically, clear `_cache_axis_impacts`, then call `_recompute_failure_group_correlations()` (always — no throttle).
 
 The axis side rebuild is cheap because the archive index already carries `pipeline_params` and `scores.accuracy` per entry — no per-detail file load is needed.
 
 Failure-group correlations are recomputed on every refresh. The previous every-5-rounds throttle is gone — at current scale, throttling adds staleness without saving meaningful work.
 
-`on_round_complete(state, session, round_num)` calls `refresh(...)` and persists `samples.json`. No axis-side persistence.
+The runner calls `refresh(...)` directly at round-end (no `on_round_complete` wrapper). Nothing is persisted.
 
-`ensure_for(store, backend_id, ...)` loads `SampleIndex` from `library/samples.json`, builds a fresh `AxisIndex`, runs `refresh()` once, persists `samples.json` if anything changed, and returns the index. There is no axis-side load — the axis state comes entirely from the in-memory rebuild.
+`ensure_for(store, backend_id, ...)` builds a fresh `AxisIndex` (with a fresh in-memory `SampleIndex`) and runs `refresh()` once. Both digest sides come entirely from the archive on each process boot.
 
 ### Per-refresh cache
 

@@ -1,15 +1,14 @@
 """AxisIndex — derived axis-keyed view over the MeasurementArchive.
 
-Phase 2 of the measurement-archive rework: this object replaces the former
-``SearchMemory``. The axis side is a *pure derivation* of
-``MeasurementArchive.list_all()`` plus the per-sample :class:`SampleIndex`,
-so it owns no persistence — every ``refresh()`` rebuilds ``_axis_values``
-from the archive index. The sample side stays watermarked + persisted on
-``SampleIndex`` (which is not a pure derivation).
+Both digest sides are pure derivations of the archive: the axis side
+rebuilds ``_axis_values`` from ``archive.list_all()`` on every
+:meth:`refresh`, and the sample-side :class:`SampleIndex` ingests delta
+runs via ``archive.load_since(_seen_runs)``. Neither owns an on-disk
+artifact; the archive is the single source of truth.
 
 The class hosts the digest API consumed by L1/L2/L3 prompts. Names are
-unchanged across the rebuild — ``digest_for_l1_generate`` / ``_l1_critique``
-/ ``_l2`` / ``_l3`` are stable LLM-context surfaces.
+stable LLM-context surfaces — ``digest_for_l1_generate`` / ``_l1_critique``
+/ ``_l2`` / ``_l3``.
 """
 
 from __future__ import annotations
@@ -18,7 +17,6 @@ import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
 from itertools import combinations, pairwise
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.sample_index import (
@@ -69,10 +67,9 @@ class AxisIndex:
 
     Holds two collaborating pieces:
 
-    * ``sample_index`` — per-sample state (its own persistence at
-      ``library/samples.json``).
+    * ``sample_index`` — per-sample derived state (no persistence).
     * ``_axis_values`` — axis → value → list[accuracy], rebuilt from the
-      archive index on every :meth:`refresh`. No persistence.
+      archive index on every :meth:`refresh`.
 
     Failure-group × axis correlations are recomputed on every refresh —
     cheap at current scale and avoids drift from a throttle.
@@ -268,16 +265,10 @@ class AxisIndex:
             return
 
         # Map each failure mode to the full set of sample_ids whose dominant mode matches.
-        # cluster.example_queries only carries the top few; scan every sample's
-        # failure-mode counter to recover full membership.
         groups: dict[str, set[int]] = {}
         for cluster in clusters:
             mode = cluster.failure_mode
-            sids: set[int] = {
-                sid
-                for q in cluster.example_queries
-                if (sid := self.sample_index.id_for_query(q)) is not None
-            }
+            sids: set[int] = set()
             for sid in self.sample_index._samples:
                 modes = self.sample_index.failure_modes(sid)
                 if modes and Counter(modes).most_common(1)[0][0] == mode:
@@ -318,15 +309,14 @@ class AxisIndex:
         scorer: Scorer | None = None,
         scorer_id: str = "none",
         scorer_formula: str | None = None,
-    ) -> bool:
+    ) -> None:
         """Rebuild axis side from the archive; incrementally update sample side.
 
-        Sample side: incremental, watermarked — walk
-        ``archive.load_since(watermark)``, rescore items via
-        ``rescore_results``, ingest into ``sample_index``, mark watermark.
-        Returns ``True`` when at least one new run was ingested into the
-        sample side (callers use this to decide whether to persist
-        ``samples.json``).
+        Sample side: incremental — walk
+        ``archive.load_since(_seen_runs)``, rescore items via
+        ``rescore_results``, ingest into ``sample_index``, mark seen.
+        ``_seen_runs`` is an in-process cursor only; new processes
+        re-walk the full archive on first refresh.
 
         Axis side: full rebuild every call — walk ``archive.list_all()``
         (the index already carries ``pipeline_params`` and
@@ -334,11 +324,11 @@ class AxisIndex:
         correlations are recomputed unconditionally afterwards.
         """
         added = 0
-        for run_id, detail in store.archive.load_since(backend_id, self.sample_index._watermark):
+        for run_id, detail in store.archive.load_since(backend_id, self.sample_index._seen_runs):
             if scorer is not None:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
             self.sample_index.ingest_run(detail)
-            self.sample_index.mark_watermark(run_id)
+            self.sample_index.mark_seen(run_id)
             added += 1
 
         # Axis side: rebuild from the archive index. Cheap and stateless —
@@ -353,32 +343,10 @@ class AxisIndex:
 
         if added:
             logger.debug(
-                "AxisIndex refreshed: %d new runs (total watermark: %d)",
+                "AxisIndex refreshed: %d new runs (total seen: %d)",
                 added,
-                len(self.sample_index._watermark),
+                len(self.sample_index._seen_runs),
             )
-        return added > 0
-
-    def on_round_complete(
-        self,
-        state: Any,
-        session: Any,
-        round_num: int,
-    ) -> None:
-        """Per-round hook: refresh and persist the sample side."""
-        if (
-            session.store
-            and session.backend_id
-            and self.refresh(
-                session.store,
-                session.backend_id,
-                scorer=session.scorer,
-                scorer_id=session.scorer_id,
-                scorer_formula=session.scorer_formula,
-            )
-        ):
-            base = Path(session.store.base_dir) / "library"
-            self.sample_index.save(base / "samples.json")
 
     def record_flips_from_rounds(self, rounds: list[Any], round_num: int) -> None:
         if len(rounds) < 2 or not (rounds[-2].results and rounds[-1].results):
@@ -403,20 +371,18 @@ class AxisIndex:
         scorer_id: str = "none",
         scorer_formula: str | None = None,
     ) -> AxisIndex | None:
-        """Load ``SampleIndex`` from disk, build a fresh ``AxisIndex``, refresh once.
+        """Build a fresh ``AxisIndex`` and refresh once.
 
         Returns ``None`` when ``store`` or ``backend_id`` is missing.
-        Persists ``samples.json`` after the refresh; never writes an axis-side file.
+        Both digest sides are pure derivations over the archive; nothing
+        is read from or written to disk here.
         """
         if not (store and backend_id):
             return None
-        base = Path(store.base_dir) / "library"
-        sample_index = SampleIndex.load(base / "samples.json")
-        idx = cls(sample_index=sample_index)
-        if idx.refresh(
+        idx = cls()
+        idx.refresh(
             store, backend_id, scorer=scorer, scorer_id=scorer_id, scorer_formula=scorer_formula
-        ):
-            idx.sample_index.save(base / "samples.json")
+        )
         return idx
 
     # ----- helpers -----

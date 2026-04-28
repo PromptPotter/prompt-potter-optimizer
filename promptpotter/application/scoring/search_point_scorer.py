@@ -169,7 +169,6 @@ class _LoopContext:
 
     search_point: JobSearchPoint
     session: Session
-    run_id: str
     prior_results: dict[str, QueryResult]
     on_result: Callable[[QueryResult, int, int], None] | None
     on_start: Callable[[str, int, int], None] | None
@@ -247,7 +246,6 @@ async def _process_cache_hit(
     state: _LoopState,
     ctx: _LoopContext,
     check_escalation: Callable[[], EscalationSignal | None],
-    fire_on_measurement: Callable[[QueryResult], None],
 ) -> _SampleOutcome:
     """Materialize a prior-cache result, append, and check escalation."""
     cached_r = _materialize_cached(
@@ -260,7 +258,6 @@ async def _process_cache_hit(
     # Overlay current-run sample_id — archived traces may predate the field.
     cached_r["sample_id"] = sample.id
     state.results.append(cached_r)
-    fire_on_measurement(cached_r)
     if ctx.on_result is not None:
         ctx.on_result(cached_r, idx, dataset_len)
     # Elimination must see cached rows too — otherwise a candidate
@@ -276,7 +273,6 @@ async def _process_fresh_sample(
     state: _LoopState,
     ctx: _LoopContext,
     check_escalation: Callable[[], EscalationSignal | None],
-    fire_on_measurement: Callable[[QueryResult], None],
 ) -> _SampleOutcome:
     """Backend-measure one sample, classify errors, check escalation.
 
@@ -307,7 +303,6 @@ async def _process_fresh_sample(
     if sample.query in ctx.evicted_priors:
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
-    fire_on_measurement(result)
     ctx.persist_fresh(state.results)
 
     if is_error_result(result):
@@ -329,7 +324,6 @@ async def _run_query_loop(
     dataset: list[Sample],
     session: Session,
     *,
-    run_id: str,
     prior_results: dict[str, QueryResult],
     evicted_priors: dict[str, QueryResult],
     on_result: Callable[[QueryResult, int, int], None] | None,
@@ -346,7 +340,6 @@ async def _run_query_loop(
     ctx = _LoopContext(
         search_point=search_point,
         session=session,
-        run_id=run_id,
         prior_results=prior_results,
         on_result=on_result,
         on_start=on_start,
@@ -365,11 +358,6 @@ async def _run_query_loop(
                 return signal
         return None
 
-    def _fire_on_measurement(result: QueryResult) -> None:
-        """Auto-trigger: synchronous SampleIndex update after each measurement."""
-        if session.sample_index is not None:
-            session.sample_index.on_measurement(result, run_id)
-
     try:
         for i, sample in enumerate(dataset):
             if session.stop_check and session.stop_check():
@@ -380,9 +368,7 @@ async def _run_query_loop(
                 on_start(sample.query, i, len(dataset))
 
             handler = _process_cache_hit if sample.query in prior_results else _process_fresh_sample
-            outcome = await handler(
-                sample, i, len(dataset), state, ctx, _check_escalation, _fire_on_measurement
-            )
+            outcome = await handler(sample, i, len(dataset), state, ctx, _check_escalation)
 
             if outcome.escalation:
                 return QueryLoopResult(
@@ -488,8 +474,9 @@ async def score_search_point(
         )
         _save_run(results, scores)
 
-    # Ensure Samples are registered on the SampleIndex before the auto-trigger
-    # fires — on_measurement updates Sample.run_ids by id lookup.
+    # Pre-register Samples so the SampleIndex carries primitives for any
+    # query that lands. ``Sample.run_ids`` accumulates later, when
+    # ``AxisIndex.refresh`` ingests this run from the archive.
     if session.sample_index is not None:
         session.sample_index.register_many(dataset)
 
@@ -497,7 +484,6 @@ async def score_search_point(
         search_point,
         dataset,
         session,
-        run_id=run_id,
         prior_results=prior_results,
         evicted_priors=evicted_priors,
         on_result=on_result,

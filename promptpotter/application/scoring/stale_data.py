@@ -83,7 +83,6 @@ async def execute_stale_data_protocol(
     node = get_optimizer_schema().get_node("l1_score")
     assert node is not None, "l1_score node missing from optimizer schema"
     cfg = node.current_config
-    query = sample.query
     result = cached_result
 
     for step in protocol_steps:
@@ -93,11 +92,7 @@ async def execute_stale_data_protocol(
             trigger_count = cfg.get("rerun_trigger_count", 3)
             # Historical count through last AxisIndex refresh (previous round).
             # The current observation bumps the effective count by 1.
-            historical = 0
-            if axes:
-                sid = axes.sample_index.id_for_query(query)
-                if sid is not None:
-                    historical = axes.sample_index.degradation_count(sid)
+            historical = axes.sample_index.degradation_count(sample.id) if axes else 0
             effective_count = historical + 1
             if effective_count < trigger_count:
                 return {
@@ -136,11 +131,8 @@ async def execute_stale_data_protocol(
 
         elif step == "sampleswitch":
             min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
-            if axes:
-                sid = axes.sample_index.id_for_query(query)
-                deg_rate = axes.sample_index.degradation_rate(sid) if sid is not None else 0.0
-                if deg_rate >= min_deg_rate:
-                    result = {**cached_result, "cached": True, "switched_out": True}
-                    return result, "sampleswitch"
+            if axes and axes.sample_index.degradation_rate(sample.id) >= min_deg_rate:
+                result = {**cached_result, "cached": True, "switched_out": True}
+                return result, "sampleswitch"
 
     return {**result, "persistently_degraded": True}, "exhausted"

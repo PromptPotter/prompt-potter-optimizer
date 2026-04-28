@@ -31,7 +31,7 @@ class Sample(BaseModel):
     query: str
     ground_truth: str
 
-    # Cross-campaign metadata — accumulates via SampleIndex.on_measurement.
+    # Cross-campaign metadata — accumulates via SampleIndex.ingest_run.
     escalation_count: int = 0
     run_ids: list[str] = Field(default_factory=list)
 

@@ -82,7 +82,6 @@ Sessions and campaigns are separate concepts. Today the relation is 1:1; the lay
     library/                             # the measurement archive (database core)
       measurements/{run_id}.json         # MeasurementArchive: facts, append-only, content-addressed
       measurements.json                  # archive index (denormalized read-side projection)
-      samples.json                       # SampleIndex: per-sample derived state
       backends/{backend_id}/             # backend profile + datasets
       prompt_aliases.json
 ```

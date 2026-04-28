@@ -56,10 +56,9 @@ Full tree:
     library/                           # the measurement archive — database core
       measurements/{run_id}.json       # MeasurementArchive: facts, append-only, content-addressed
       measurements.json                # archive index (denormalized read-side projection)
-      samples.json                     # SampleIndex: per-sample derived state
       backends/{backend_id}/           # backend profile + datasets
       prompt_aliases.json
-      # AxisIndex (axis-side digest view) is in-memory only — rebuilt from the archive every refresh.
+      # Both digest layers (AxisIndex, SampleIndex) are in-memory only — rebuilt from the archive every refresh.
 ```
 
 **Why split this way?** Telemetry is *temporal* — a stream that flows through whichever fork is currently active. Anchoring it at the family root means a single `tail dashboard.json` covers every fork without chasing dirs. Audit is *structural* — frozen records keyed by the cycle that produced them. Each cycle owns its own and the parent stays intact when you fork.

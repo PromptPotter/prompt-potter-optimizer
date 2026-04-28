@@ -2,7 +2,7 @@
 
 The axis index is a derived view over the [measurement archive](measurement-archive.md). It groups every measurement by parameter axis and surfaces the resulting digests to the optimizer at L1, L1-critique, L2, and L3. The archive is the database; the axis index is one of two derived projections — the other is `SampleIndex`, keyed by training example.
 
-The axis index does not own data. Every refresh rebuilds the axis-side state from the archive index in memory; nothing is persisted on the axis side. The only on-disk file in this layer is `library/samples.json`, owned by `SampleIndex`.
+The axis index does not own data. Every refresh rebuilds the axis-side state from the archive index in memory; nothing is persisted. The peer `SampleIndex` is also a pure in-memory derivation — both digest layers sit downstream of the archive, neither owns disk state.
 
 ---
 
@@ -52,7 +52,7 @@ Every failed query carries information about where in the pipeline processing te
 ```
 MeasurementArchive   ← facts (append-only, persisted)
    │
-   ├── SampleIndex   ← per-sample derived view (persisted; library/samples.json)
+   ├── SampleIndex   ← per-sample derived view (in-memory; rebuilt every refresh)
    └── AxisIndex     ← axis-keyed derived view (in-memory; rebuilt every refresh)
 ```
 
