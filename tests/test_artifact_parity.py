@@ -155,10 +155,12 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         current_accuracy=0.5,
     )
     init_env = SimpleNamespace(
-        cycle_id="cycle_test_001",
+        state=SimpleNamespace(
+            cycle_id="cycle_test_001",
+            obs=None,
+            resumed_from_round=0,
+        ),
         scoring=SimpleNamespace(scoring_dataset=[]),
-        obs=None,
-        resumed_from_round=0,
         pipeline_schema=None,
     )
     fire(

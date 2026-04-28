@@ -245,7 +245,7 @@ def _mint_session_and_cycle(
         init_params["backend_id"], cycle_id, {"parent_session_id": session_id}
     )
     session.session_id = session_id
-    session.cycle_id = cycle_id
+    session.state.cycle_id = cycle_id
     return session_id
 
 
@@ -505,7 +505,7 @@ def _build_run_observers(
     phase and per-query output reaches the terminal. Without this, the
     CLI goes dark for the entire BASELINE phase. Recorder is built first
     so the emitter can hold a direct reference (no callback indirection).
-    Side-effect: assigns the recorder to ``session.round_recorder``.
+    Side-effect: assigns the recorder to ``session.state.round_recorder``.
     """
     from promptpotter.application.campaign.data import build_campaign_emitter
     from promptpotter.application.campaign.runner import RunListener as _RunListener
@@ -515,7 +515,7 @@ def _build_run_observers(
 
     recorder = _RoundRecorder(campaign_dir / ".cache" / "rounds")
     recorder.rehydrate_sticky()
-    session.round_recorder = recorder
+    session.state.round_recorder = recorder
 
     emitter = build_campaign_emitter(
         session,
@@ -557,7 +557,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
     # ctx may have been re-minted; bind the now-resolved ids onto session.
     session.session_id = ctx.session_id
-    session.cycle_id = ctx.cycle_id
+    session.state.cycle_id = ctx.cycle_id
 
     log_startup_summary(
         session,

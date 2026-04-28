@@ -270,7 +270,7 @@ async def score_population(
 ) -> tuple[dict[str, list[QueryResult]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
-    obs = session.obs
+    obs = session.state.obs
     n = len(population)
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
@@ -287,7 +287,7 @@ async def score_population(
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
                     CandidateScored,
-                    campaign_id=session.obs_campaign_id,
+                    campaign_id=session.state.obs_campaign_id,
                     round_num=round_num,
                     candidate_idx=idx,
                     report=report.to_dict(),

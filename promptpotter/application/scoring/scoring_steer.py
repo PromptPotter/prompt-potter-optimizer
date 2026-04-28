@@ -84,10 +84,10 @@ def apply_steer_file(
     re-apply it. On failure the file is left in place so the operator
     can fix the formula and let it apply on the next round.
     """
-    if not session.cycle_id or session.store is None:
+    if not session.state.cycle_id or session.store is None:
         return None
 
-    cycle_dir = session.store.campaigns.campaign_dir(session.cycle_id)
+    cycle_dir = session.store.campaigns.campaign_dir(session.state.cycle_id)
     steer_path = cycle_dir / STEER_FILENAME
     if not steer_path.exists():
         return None

@@ -32,9 +32,10 @@ def _make_session(tmp_path: Path) -> SimpleNamespace:
     cycle_dir.mkdir(parents=True)
     campaigns = SimpleNamespace(campaign_dir=lambda _cid: cycle_dir)
     store = SimpleNamespace(campaigns=campaigns)
+    state = SimpleNamespace(cycle_id=cycle_id)
     scoring = SimpleNamespace(round_scorer=None, scorer_round_formula=None)
     return SimpleNamespace(
-        cycle_id=cycle_id,
+        state=state,
         store=store,
         scoring=scoring,
         _cycle_dir=cycle_dir,

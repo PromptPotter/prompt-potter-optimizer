@@ -174,7 +174,7 @@ async def run_optimization_notebook(
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
 
     if resolved_cycle_id:
-        session.cycle_id = resolved_cycle_id
+        session.state.cycle_id = resolved_cycle_id
     if session_id:
         session.session_id = session_id
 

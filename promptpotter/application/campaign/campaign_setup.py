@@ -39,6 +39,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "CampaignState",
     "ScoringContext",
     "Session",
     "auto_mint_session",
@@ -76,9 +77,37 @@ class ScoringContext:
 
 
 @dataclass
-class Session:
-    """Session-scoped identity + wire-up + loop-cycle infra + scoring."""
+class CampaignState:
+    """Per-cycle mutable state — bound when ``init_optimization_loop`` fires.
 
+    ``cycle_id`` and ``obs_campaign_id`` flip on fork; ``obs`` and
+    ``round_recorder`` rebind to the new fork's directories.
+    ``resumed_from_round`` records where the loop picked up.
+    Wiring stays directly on ``Session`` and is shared across all
+    cycles minted under one Session lifetime.
+    """
+
+    cycle_id: str = ""
+    obs_campaign_id: str = ""
+    resumed_from_round: int = 0
+    obs: ObservabilityBridge | None = None
+    round_recorder: RoundRecorder | None = None
+
+
+@dataclass
+class Session:
+    """Session-scoped identity + wire-up + loop-cycle infra + scoring.
+
+    Field groups (top-down):
+    - Wiring: store + backend client + pipeline schema/params + dataset
+      (set at ``init_services`` time; mostly immutable thereafter).
+    - ``session_id`` + ``experiment_id``: session-stable identity.
+    - ``state``: per-cycle mutable bundle (``CampaignState``).
+    - ``scoring``: per-cycle scoring policy (``ScoringContext``).
+    - Runtime config + lifecycle hook.
+    """
+
+    # -- Wiring ----------------------------------------------------------
     store: Stores
     backend_id: str
     experiment_id: str
@@ -90,20 +119,22 @@ class Session:
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
     dataset_name: str | None = None
-    session_id: str = ""
-    cycle_id: str = ""
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
 
-    obs_campaign_id: str = ""
-    resumed_from_round: int = 0
+    # -- Identity --------------------------------------------------------
+    session_id: str = ""
 
-    obs: ObservabilityBridge | None = None
-    round_recorder: RoundRecorder | None = None
+    # -- Per-cycle bundles ----------------------------------------------
+    state: CampaignState = field(default_factory=CampaignState)
     scoring: ScoringContext = field(default_factory=ScoringContext)
+
+    # -- Runtime config --------------------------------------------------
     max_consecutive_errors: int = 3
     stale_data_load_protocol: list[str] | None = None
     source: str = ""
+
+    # -- Lifecycle hook --------------------------------------------------
     stop_check: Callable[[], bool] | None = None
 
 
@@ -130,7 +161,7 @@ def populate_session_scoring(
     session.experiment_id = experiment_id or (
         cycle_id.replace("cycle_", "")[:12] if cycle_id else ""
     )
-    session.obs = obs
+    session.state.obs = obs
     session.source = source
     session.max_consecutive_errors = max_consecutive_errors
     session.stale_data_load_protocol = stale_data_load_protocol
@@ -504,11 +535,11 @@ async def init_optimization_loop(
     )
 
     if resolved_cycle_id:
-        session.cycle_id = resolved_cycle_id
-    session.obs_campaign_id = obs_campaign_id
+        session.state.cycle_id = resolved_cycle_id
+    session.state.obs_campaign_id = obs_campaign_id
     session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
     session.scoring.degradation_checks = build_degradation_checks(config)
-    session.resumed_from_round = resumed_from_round
+    session.state.resumed_from_round = resumed_from_round
 
     emit_phase(
         cb.on_phase,

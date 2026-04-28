@@ -112,8 +112,8 @@ async def _escalate_or_stop(
         session.pipeline_schema,
         round_num,
         cb.on_phase,
-        obs=session.obs,
-        obs_campaign_id=session.obs_campaign_id,
+        obs=session.state.obs,
+        obs_campaign_id=session.state.obs_campaign_id,
         escalation_check_result=escalation_check_result,
     )
     if stop:
@@ -137,16 +137,16 @@ def _persist_round(
     if cycle.pending_decisions:
         round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
 
-    if session.cycle_id:
+    if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
             session.store.campaigns.add_trial(
                 session.backend_id,
-                session.cycle_id,
+                session.state.cycle_id,
                 cycle.checkpoint(round_result, round_num),
             )
         _write_log_md(session)
 
-    if _rr := session.round_recorder:
+    if _rr := session.state.round_recorder:
         _rr.flush()
 
 
@@ -189,7 +189,7 @@ def _refresh_axes_and_filter(
             axes=cycle.axes,
             active_dataset=dataset,
             min_observations=config.optimization.zero_signal_filter_min_observations,
-            campaign_id=session.cycle_id or "",
+            campaign_id=session.state.cycle_id or "",
         )
         if not excluded:
             return
@@ -310,8 +310,8 @@ async def _run_round_loop(
     """Execute the round loop: generate → score → escalate → stop."""
     opt = config.optimization
     hard_cap = opt.hard_cap
-    round_num = session.resumed_from_round
-    clean_rounds = session.resumed_from_round
+    round_num = session.state.resumed_from_round
+    clean_rounds = session.state.resumed_from_round
     max_rounds = opt.max_rounds or 999
 
     try:
@@ -336,7 +336,7 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            if _rr := session.round_recorder:
+            if _rr := session.state.round_recorder:
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
@@ -389,10 +389,10 @@ async def _run_round_loop(
                     )
                 elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
                     raise StopLoop(StopReason.ABORT)
-                if session.cycle_id:
+                if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
                         session.backend_id,
-                        session.cycle_id,
+                        session.state.cycle_id,
                         round_num + 1,
                     )
                 emit_phase(cb.on_phase, CampaignPhase.ESCALATION, "exit", round=round_num)
@@ -430,7 +430,7 @@ async def run_optimization(
 ) -> RunResult:
     """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
 
-    ``session.session_id`` / ``session.cycle_id`` carry the active ids;
+    ``session.session_id`` / ``session.state.cycle_id`` carry the active ids;
     callers set them before calling. When ``session.session_id`` is empty
     (notebook entry path), this auto-mints a fresh session+cycle.
     """
@@ -478,8 +478,8 @@ async def run_optimization(
             experiment_id=experiment_id,
         )
         session.session_id = new_session_id
-        if not session.cycle_id:
-            session.cycle_id = minted_cycle_id
+        if not session.state.cycle_id:
+            session.state.cycle_id = minted_cycle_id
 
     from promptpotter.application.scoring.formula import split_scoring_block
 
@@ -494,7 +494,7 @@ async def run_optimization(
 
     cb = listener if listener is not None else RunListener(display=display)
 
-    pre_loop_cycle_id = session.cycle_id
+    pre_loop_cycle_id = session.state.cycle_id
 
     cycle = await init_optimization_loop(
         baseline,
@@ -508,7 +508,7 @@ async def run_optimization(
         no_divergence_check=no_divergence_check,
         fork_on_divergence=fork_on_divergence,
         langfuse_session_id=langfuse_session_id,
-        cycle_id=session.cycle_id or None,
+        cycle_id=session.state.cycle_id or None,
         resume_from_round_override=resume_from_round_override,
         experiment_id=experiment_id or "",
         session=session,
@@ -516,20 +516,22 @@ async def run_optimization(
     )
 
     # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
-    # minted a new fork cycle and updated ``session.cycle_id``. The emitter
+    # minted a new fork cycle and updated ``session.state.cycle_id``. The emitter
     # is family-root-anchored so its telemetry paths stay correct, but the
     # ``RoundRecorder`` writes ``.cache/rounds/round_NNN.json`` per cycle and
     # must be rebuilt to point at the fork's own dir. Output.log gets a
     # banner so the operator can see the cutover inline.
-    forked = pre_loop_cycle_id and session.cycle_id and pre_loop_cycle_id != session.cycle_id
-    if forked and session.cycle_id and session.store is not None:
+    forked = (
+        pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
+    )
+    if forked and session.state.cycle_id and session.store is not None:
         from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
         new_rounds_dir = (
-            session.store.campaigns.campaign_dir(session.cycle_id) / ".cache" / "rounds"
+            session.store.campaigns.campaign_dir(session.state.cycle_id) / ".cache" / "rounds"
         )
-        session.round_recorder = RoundRecorder(new_rounds_dir)
-        session.round_recorder.rehydrate_sticky()
+        session.state.round_recorder = RoundRecorder(new_rounds_dir)
+        session.state.round_recorder.rehydrate_sticky()
 
     if emitter is None:
         from promptpotter.application.campaign.data import build_campaign_emitter
@@ -538,15 +540,15 @@ async def run_optimization(
             session,
             campaign_config,
             baseline_accuracy=baseline.baseline_acc,
-            resumed_from_round=session.resumed_from_round,
-            recorder=session.round_recorder,
+            resumed_from_round=session.state.resumed_from_round,
+            recorder=session.state.round_recorder,
         )
-    elif forked and session.cycle_id and pre_loop_cycle_id:
-        emitter._recorder = session.round_recorder
+    elif forked and session.state.cycle_id and pre_loop_cycle_id:
+        emitter._recorder = session.state.round_recorder
         emitter.log_fork(
             old_cycle_id=pre_loop_cycle_id,
-            new_cycle_id=session.cycle_id,
-            from_round=session.resumed_from_round or 0,
+            new_cycle_id=session.state.cycle_id,
+            from_round=session.state.resumed_from_round or 0,
         )
     cb.emitter = emitter
 
@@ -564,9 +566,9 @@ async def run_optimization(
         stop_reason=stop_reason,
         started_at=started_at,
         finished_at=finished_at,
-        cycle_id=session.cycle_id,
+        cycle_id=session.state.cycle_id,
         session_id=session.session_id or None,
-        resumed_from_round=session.resumed_from_round,
+        resumed_from_round=session.state.resumed_from_round,
     )
     _finalize_run(cycle, session, emitter, run_result, campaign_config)
     return run_result
@@ -583,13 +585,13 @@ def _finalize_run(
     render ``log.md`` (with the hard-samples heatmap inlined when the sorter
     ran), finalize the emitter. Mutates ``run_result.langfuse_trace_id``."""
     stop_reason = run_result.stop_reason
-    if session.cycle_id:
+    if session.state.cycle_id:
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
         }
         session.store.campaigns.mark_finished(
             session.backend_id,
-            session.cycle_id,
+            session.state.cycle_id,
             status=status_map.get(stop_reason, "completed"),
             stop_reason=stop_reason,
             best_accuracy=run_result.best_accuracy,
@@ -598,10 +600,10 @@ def _finalize_run(
             finished_at=run_result.finished_at,
         )
 
-    obs = session.obs
+    obs = session.state.obs
     if obs:
         obs.end_campaign(
-            session.obs_campaign_id,
+            session.state.obs_campaign_id,
             best_accuracy=run_result.best_accuracy,
             n_rounds=run_result.n_rounds,
             stop_reason=stop_reason,
@@ -611,10 +613,10 @@ def _finalize_run(
     run_result.langfuse_trace_id = (
         None
         if stop_reason == StopReason.INTERRUPTED or obs is None
-        else obs.get_langfuse_trace_id(session.obs_campaign_id)
+        else obs.get_langfuse_trace_id(session.state.obs_campaign_id)
     )
 
-    if session.cycle_id:
+    if session.state.cycle_id:
         with graceful("Final summary write failed"):
             from promptpotter.application.scoring.evaluators import (
                 default_per_round_formula,
@@ -638,7 +640,7 @@ def _finalize_run(
             final_block["baseline_composite"] = baseline_composite
             session.store.campaigns.update(
                 session.backend_id,
-                session.cycle_id,
+                session.state.cycle_id,
                 {"final": final_block},
             )
 
@@ -653,7 +655,7 @@ def _finalize_run(
             with graceful("Hard-sample artifact build failed"):
                 artifact = build_hard_samples_artifact(
                     cycle.rounds,
-                    cycle_id=session.cycle_id,
+                    cycle_id=session.state.cycle_id,
                     top_k_candidates=hs_cfg.top_k_candidates,
                     top_k_samples=hs_cfg.top_k_samples,
                 )
@@ -664,18 +666,20 @@ def _finalize_run(
 def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
     """Render ``campaigns/{cycle_id}/log.md`` from index + trials. Pure derived
     view; wrapped in ``graceful()`` so a render bug never breaks the run."""
-    if not session.cycle_id or session.store is None:
+    if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        index = store.load(session.backend_id, session.cycle_id)
+        index = store.load(session.backend_id, session.state.cycle_id)
         if not index:
             return
         n_trials = int(index.get("n_trials", 0) or 0)
         trials = (
-            store.load_trials_range(session.backend_id, session.cycle_id, 0, n_trials - 1)
+            store.load_trials_range(session.backend_id, session.state.cycle_id, 0, n_trials - 1)
             if n_trials
             else []
         )
         content = render_log_md(index, trials, hard_samples_artifact=hard_samples_artifact)
-        (store.campaign_dir(session.cycle_id) / "log.md").write_text(content, encoding="utf-8")
+        (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
+            content, encoding="utf-8"
+        )
