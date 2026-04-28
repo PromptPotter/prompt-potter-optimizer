@@ -180,7 +180,6 @@ class LangfuseSink:
         )
         if obs_id:
             self._round_obs_ids[(event.campaign_id, event.round_num)] = obs_id
-            self._persist()
 
     def on_node_start(self, event: NodeStart) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
@@ -198,7 +197,6 @@ class LangfuseSink:
         )
         if obs_id:
             self._node_obs_ids[(event.campaign_id, event.round_num, event.node_id)] = obs_id
-            self._persist()
 
     def on_node_end(self, event: NodeEnd) -> None:
         key = (event.campaign_id, event.round_num, event.node_id)
@@ -215,7 +213,6 @@ class LangfuseSink:
             output=event.output_data,
             metadata=meta or None,
         )
-        self._persist()
 
     def on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
@@ -258,7 +255,6 @@ class LangfuseSink:
                 name=f"{ev_name}_round_{event.round_num}",
                 value=numeric,
             )
-        self._persist()
 
     def on_prompt_version(self, event: PromptVersion) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)

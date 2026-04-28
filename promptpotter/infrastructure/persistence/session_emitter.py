@@ -332,7 +332,8 @@ class CampaignPersistenceEmitter:
         entry["pp_override"] = pp_override
         entry.setdefault("samples", [])
         entry.setdefault("scores", None)
-        self._persist()
+        # No _persist() here — placeholder seed; the next on_sample_scored
+        # write picks it up live, and on_round_complete is the final flush.
 
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
         s = self._state
@@ -444,7 +445,8 @@ class CampaignPersistenceEmitter:
             idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
         )
         cand["scores"] = scores
-        self._persist()
+        # No _persist() here — on_round_complete (or the next candidate's
+        # on_sample_scored) flushes the scored candidate to dashboard.json.
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         s = self._state

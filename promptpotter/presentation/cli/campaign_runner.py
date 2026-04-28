@@ -27,7 +27,6 @@ if sys.platform == "win32" and hasattr(sys.stdout, "reconfigure"):
 from dataclasses import dataclass
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign.campaign_setup import new_session_state
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -111,24 +110,24 @@ async def init_services_cli(
     )
 
 
-def _apply_pipeline(session: Session, campaign_config: CampaignConfig) -> dict:
+def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: list):
+    """Apply pipeline → load baseline → compute cycle_id. Returns (pipeline_params, baseline, cycle_id)."""
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
+    from promptpotter.application.campaign.data import load_baseline_prompt
+    from promptpotter.domain.cycle_identity import cycle_config_identity
 
-    return configure_and_apply_pipeline(
+    schema = session.pipeline_schema
+    pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
     )
-
-
-def _load_baseline(session: Session):
-    from promptpotter.application.campaign.data import load_baseline_prompt
-
-    return load_baseline_prompt(
+    baseline = load_baseline_prompt(
         session.experiment_extract,
-        prompt_node_names=session.pipeline_schema.prompt_node_names()
-        if session.pipeline_schema
-        else [],
+        prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_name=session.dataset_name,
     )
+    base_pp = schema.to_pipeline_params() if schema else {}
+    jsp = baseline.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
+    return pipeline_params, baseline, cycle_config_identity(jsp, dataset)
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -211,49 +210,36 @@ def _mint_session_and_cycle(
     cycle_id: str,
     init_params: dict,
     pipeline_params: dict,
-    active: list[str],
     baseline,
     dataset_count: int,
 ) -> str:
-    """Mint session+cycle pair, write active pointer, return new session_id.
+    """Mint session+cycle, snapshot resolved pipeline into state, create campaign dir.
 
-    Shared by ``cmd_init`` and ``cmd_optimize``'s pipeline-divergence
-    auto-mint. ``init_params`` is copied verbatim into the new session
-    state, so callers (cmd_optimize) can reuse a prior session's
-    backend/dataset routing.
+    Wraps ``auto_mint_session`` (which writes the session + active pointer)
+    with the CLI-only extras: explicit ``init_params`` snapshot for resume,
+    pipeline_params + active_steps in state, and ``campaigns.create()``.
     """
-    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
+    from promptpotter.application.campaign.campaign_setup import auto_mint_session
 
-    session_id = mint_session_id()
-    state = new_session_state(
-        init_params=dict(init_params),
-        campaign_config=campaign_config.model_dump(),
-        pipeline_params=pipeline_params,
-        active_steps=active,
-    )
-    state.update(
+    session_id, _ = auto_mint_session(
+        session,
+        campaign_config,
+        cycle_hash=cycle_id.removeprefix("cycle_"),
         baseline_prompt_fields=baseline.prompt_field_dict(),
-        dataset_count=dataset_count,
-        baseline_accuracy=0.0,
+        dataset_size=dataset_count,
+        experiment_id=init_params.get("experiment_id"),
     )
-    session.store.sessions.create(session_id, state)
-    session.store.sessions.ensure_narrative_files(session_id)
+    state = session.store.sessions.read(session_id) or {}
+    state["init_params"] = dict(init_params)
+    state["pipeline_params"] = pipeline_params
+    state["active_steps"] = list(pipeline_params.get("steps", []))
+    session.store.sessions.update(session_id, state)
     session.store.campaigns.create(
         init_params["backend_id"], cycle_id, {"parent_session_id": session_id}
     )
-    save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     session.session_id = session_id
     session.cycle_id = cycle_id
     return session_id
-
-
-def _compute_cycle_id(session: Session, baseline, dataset: list) -> str:
-    """Derive ``cycle_<hash>`` from the baseline JobSearchPoint + dataset."""
-    from promptpotter.domain.cycle_identity import cycle_config_identity
-
-    base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
-    jsp = baseline.to_job_search_point(base_pipeline_params=base_pp, schema=session.pipeline_schema)
-    return cycle_config_identity(jsp, dataset)
 
 
 async def _maybe_decompose_task(
@@ -348,8 +334,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     profile = session.store.backends.load_connector_profile(backend_id) or {}
     campaign_config = _load_cfg({**profile, **file_config})
 
-    pipeline_params = _apply_pipeline(session, campaign_config)
-    active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     excluded = list(campaign_config.exclude_nodes)
 
     if args.excel_path:
@@ -357,8 +341,8 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     else:
         train_data = session.queries or []
 
-    baseline = _load_baseline(session)
-    cycle_id = _compute_cycle_id(session, baseline, train_data)
+    pipeline_params, baseline, cycle_id = _prepare_cycle(session, campaign_config, train_data)
+    active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     init_params = {
         "backend_url": args.backend_url,
         "backend_id": backend_id,
@@ -371,7 +355,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         cycle_id=cycle_id,
         init_params=init_params,
         pipeline_params=pipeline_params,
-        active=active,
         baseline=baseline,
         dataset_count=len(train_data),
     )
@@ -476,9 +459,11 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
         )
 
-    pipeline_params = _apply_pipeline(session, campaign_config)
     train_data = session.queries or []
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
+    pipeline_params, baseline_now, expected_cycle_id = _prepare_cycle(
+        session, campaign_config, train_data
+    )
 
     # Pipeline divergence-detect: if pipeline.json (model, temperature, …), baseline
     # prompt, or dataset changed since the active session was init'd, the recomputed
@@ -486,29 +471,25 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     # session+cycle so a model swap starts a new campaign root instead of silently
     # mixing measurements from the old model.
     minted_fresh = False
-    if ctx.cycle_id and resume_from_round is None:
-        baseline_now = _load_baseline(session)
-        expected_cycle_id = _compute_cycle_id(session, baseline_now, train_data)
-        if expected_cycle_id != ctx.cycle_id:
-            old_cycle_id = ctx.cycle_id
-            ctx.session_id = _mint_session_and_cycle(
-                session,
-                campaign_config,
-                cycle_id=expected_cycle_id,
-                init_params=ctx.init_params,
-                pipeline_params=pipeline_params,
-                active=list(pipeline_params.get("steps", [])),
-                baseline=baseline_now,
-                dataset_count=len(train_data),
-            )
-            ctx.cycle_id = expected_cycle_id
-            ctx.state = session.store.sessions.read(ctx.session_id) or ctx.state
-            minted_fresh = True
-            logger.info(
-                "Pipeline changed since init (was %s, now %s) — minted new cycle",
-                old_cycle_id,
-                expected_cycle_id,
-            )
+    if ctx.cycle_id and resume_from_round is None and expected_cycle_id != ctx.cycle_id:
+        old_cycle_id = ctx.cycle_id
+        ctx.session_id = _mint_session_and_cycle(
+            session,
+            campaign_config,
+            cycle_id=expected_cycle_id,
+            init_params=ctx.init_params,
+            pipeline_params=pipeline_params,
+            baseline=baseline_now,
+            dataset_count=len(train_data),
+        )
+        ctx.cycle_id = expected_cycle_id
+        ctx.state = session.store.sessions.read(ctx.session_id) or ctx.state
+        minted_fresh = True
+        logger.info(
+            "Pipeline changed since init (was %s, now %s) — minted new cycle",
+            old_cycle_id,
+            expected_cycle_id,
+        )
 
     if resume_from_round is not None:
         if not ctx.cycle_id:

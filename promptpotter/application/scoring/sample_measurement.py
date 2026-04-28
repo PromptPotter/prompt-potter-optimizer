@@ -49,11 +49,6 @@ _EXCLUDED_FIELDS: frozenset[str] = frozenset(
 )
 
 
-def extract_template_variables(text: str) -> list[str]:
-    """Return sorted list of ``{{variable}}`` names found in *text*."""
-    return sorted(set(_TEMPLATE_VAR_RE.findall(text)))
-
-
 def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
     """Replace ``{{key}}`` placeholders in *text* from *variables*.
 

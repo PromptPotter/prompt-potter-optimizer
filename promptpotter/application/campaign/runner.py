@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -43,10 +42,9 @@ __all__ = ["RunListener", "run_optimization"]
 
 
 class RunListener:
-    """Fan-out to emitter + display sinks; ``__getattr__`` dispatches every
-    ``on_*`` callback to whichever sinks are present. ``on_phase`` is
-    explicit so ``build_phase_view`` runs once on a shared ctx instead of
-    twice in parallel."""
+    """Fan-out to emitter + display sinks. ``on_phase`` is special-cased so
+    ``build_phase_view`` runs once on a shared ctx instead of twice in
+    parallel."""
 
     def __init__(
         self,
@@ -72,20 +70,32 @@ class RunListener:
     def _sinks(self) -> tuple[Any, ...]:
         return tuple(s for s in (self.emitter, self.display) if s is not None)
 
-    def __getattr__(self, name: str) -> Callable[..., None]:
-        if not name.startswith("on_"):
-            raise AttributeError(name)
-
-        def fan_out(*args: Any, **kwargs: Any) -> None:
-            for sink in self._sinks:
-                getattr(sink, name)(*args, **kwargs)
-
-        return fan_out
-
     def on_phase(self, event: Any) -> None:
         view = build_phase_view(event, self._phase_ctx)
         for sink in self._sinks:
             sink.on_phase(event, view)
+
+    def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
+        for sink in self._sinks:
+            sink.on_round_complete(round_result, l1_stall_count)
+
+    def on_candidate_started(
+        self, idx: int, total: int, changes_description: str, pp_override: dict | None
+    ) -> None:
+        for sink in self._sinks:
+            sink.on_candidate_started(idx, total, changes_description, pp_override)
+
+    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+        for sink in self._sinks:
+            sink.on_candidate_scored(idx, total, scores)
+
+    def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
+        for sink in self._sinks:
+            sink.on_sample_started(ci, ct, qi, qt, query_text)
+
+    def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+        for sink in self._sinks:
+            sink.on_sample_scored(ci, ct, qi, qt, result)
 
 
 async def _escalate_or_stop(
