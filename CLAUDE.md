@@ -81,7 +81,7 @@ promptpotter/
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. The allowlists for new artifacts (`CAMPAIGN_ARTIFACTS` per-cycle in `campaigns/{cycle_id}/`, `SESSION_ARTIFACTS` per-session in `sessions/{session_id}/`) live in `tests/test_artifact_parity.py` — the test owns the contract and enforces both sets.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`, `phase_events.jsonl`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `candidates/`, `trials/`, `rounds/`, `langfuse/`, `prompts/`, `archived/`) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 
@@ -105,17 +105,20 @@ Features land left → right. Post-hoc renderers (campaign summary, flip trackin
 
 The cleanest live-monitoring setup for an operator running `python -m promptpotter optimize`:
 
-1. **Open `campaigns/{cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence).
+1. **Open `campaigns/{root_cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence). For forked cycles, telemetry binds to the **family root** (the cycle with no `parent_cycle_id`); the active fork is identified by `dashboard.json::cycle_id` so a single tail covers the whole family.
 
 2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live.py::LiveDisplay`](promptpotter/presentation/views/live.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
 
-3. **Drill into peer files in the same `campaigns/{cycle_id}/` directory when the dashboard isn't enough:**
-   - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
-   - `output.log` — append-only HIT/MISS history (raw, ungrouped, fast to tail).
-   - `phase_events.jsonl` — structured event trace, one JSON per line.
-   - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
-   - `candidates/round_NNNN.json` — full per-round node I/O including the L1 leaderboard with scores, eliminations, and change descriptions.
-   - `index.json` — campaign metadata + trial index, plus the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
+3. **Drill into peer files when the dashboard isn't enough.** Layout splits into two bands:
+   - At `campaigns/{root_cycle_id}/` (telemetry, shared across all forks of the family):
+     - `output.log` — append-only HIT/MISS history (raw, ungrouped, fast to tail). Contains a `=== FORK <id> from round N (parent: ...) ===` banner at each cutover.
+     - `phase_events.jsonl` — structured event trace, one JSON per line; each record carries `cycle_id` so consumers can demux fork-vs-parent records.
+   - At `campaigns/{cycle_id}/` (per-cycle audit, one set per fork):
+     - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
+     - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
+     - `candidates/round_NNNN.json` — full per-round node I/O including the L1 leaderboard with scores, eliminations, and change descriptions.
+     - `rounds/round_NNN.json` — per-round LLM action audit.
+     - `index.json` — campaign metadata + trial index, plus the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
 
 `optimize_result.json` and `hard_samples.json` were folded away this cycle: the final-run summary now lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md` instead of being its own file. Langfuse mirrors live under `campaigns/{cycle_id}/langfuse/` (including `langfuse/events.jsonl`); none of those are read for state reconstruction.
 
@@ -129,7 +132,7 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle optimization artifacts: `index.json` (campaign metadata + trial index + `parent_session_id`), `dashboard.json`, `output.log`, `phase_events.jsonl`, `trials/trial_NNNN.json`, `candidates/round_NNNN.json`, langfuse shadow, prompts.
+- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`, `phase_events.jsonl`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/`). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
 - `{tenant_id}/library/` — cross-cycle reference: datasets, backends, dataset_runs, mlruns, search_memory, aliases.
 
 Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.

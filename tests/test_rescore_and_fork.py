@@ -156,7 +156,8 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
         surviving_trials=trials[:2],
     )
 
-    new_dir = tmp_path / tenant / "campaigns" / new_cycle
+    new_dir = stores.campaigns.campaign_dir(new_cycle)
+    assert new_dir.parent.name == "forks", "fork dirs nest under their family root's forks/"
     assert (new_dir / "trials" / "trial_0001.json").exists()
     assert not (new_dir / "trials" / "trial_0002.json").exists()  # R is dropped
     assert not (new_dir / "trials" / "trial_0003.json").exists()  # > R also dropped

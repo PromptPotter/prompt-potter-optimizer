@@ -68,7 +68,7 @@ Runs the full autonomous loop (L1 → L2 → L3 until convergence or `max_rounds
 
 `--from <round>` rewinds the active cycle to after round N and resumes in-place. Same `cycle_id`, not a new campaign. See [rewind-and-fork.md](rewind-and-fork.md) for full mechanics.
 
-While `optimize` runs, the live in-flight round's per-node I/O (l1_generate, l1_critique, l1_score with per-sample lines and stats) mirrors into `campaigns/{cycle_id}/dashboard.json::current_round`; each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Full shape in [persistence-and-state.md § `rounds/round_NNNN.json`](persistence-and-state.md#roundsround_nnnnjson).
+While `optimize` runs, the live in-flight round's per-node I/O (l1_generate, l1_critique, l1_score with per-sample lines and stats) mirrors into `campaigns/{root_cycle_id}/dashboard.json::current_round` (telemetry binds to the family root — see [persistence-and-state.md](persistence-and-state.md)); each completed round is snapshotted to `campaigns/{cycle_id}/rounds/round_NNNN.json`. Full shape in [persistence-and-state.md § `rounds/round_NNNN.json`](persistence-and-state.md#roundsround_nnnnjson).
 
 **Flags:**
 
@@ -82,17 +82,19 @@ While `optimize` runs, the live in-flight round's per-node I/O (l1_generate, l1_
 
 ## Reading state
 
-There is no read CLI. Open the artifact tree directly:
+There is no read CLI. Open the artifact tree directly. Two bands — telemetry at the family root, audit per cycle (forks share the root's telemetry stream):
 
 | File | Purpose |
 |---|---|
-| `campaigns/<cycle_id>/dashboard.json` | Live scalar state during a run (phase, round, candidate, in-flight payload, per-round node I/O) |
-| `campaigns/<cycle_id>/log.md` | Per-round digest, regenerated on every round-complete and at finalize |
-| `campaigns/<cycle_id>/index.json` | Campaign metadata + `final` block (best/baseline/stop_reason/winner) once finished |
-| `campaigns/<cycle_id>/output.log` | Append-only HIT/MISS history, fast to tail |
-| `campaigns/<cycle_id>/phase_events.jsonl` | Structured event trace, one JSON per line |
-| `campaigns/<cycle_id>/trials/trial_NNNN.json` | Per-round optimizer checkpoint (critique, l2_directive, escalation state) |
-| `campaigns/<cycle_id>/rounds/round_NNNN.json` | Per-round node I/O |
+| `campaigns/<root_cycle_id>/dashboard.json` | Live scalar state during a run (phase, round, candidate, in-flight payload, per-round node I/O). `cycle_id` field names the active fork. |
+| `campaigns/<root_cycle_id>/output.log` | Append-only HIT/MISS history, fast to tail. `=== FORK ... ===` banner inline at each cutover. |
+| `campaigns/<root_cycle_id>/phase_events.jsonl` | Structured event trace, one JSON per line; each record carries `cycle_id`. |
+| `<cycle_dir>/log.md` | Per-round digest, regenerated on every round-complete and at finalize |
+| `<cycle_dir>/index.json` | Campaign metadata + `final` block (best/baseline/stop_reason/winner) once finished. Forks have a `parent_cycle_id` field pointing back to the root chain. |
+| `<cycle_dir>/trials/trial_NNNN.json` | Per-round optimizer checkpoint (critique, l2_directive, escalation state) |
+| `<cycle_dir>/rounds/round_NNNN.json` | Per-round node I/O |
+
+`<cycle_dir>` resolves to `campaigns/{cycle_id}/` for root cycles and `campaigns/{root_cycle_id}/forks/{cycle_id}/` for forks. Telemetry stays at the family root regardless; audit nests with each cycle.
 
 ---
 

@@ -35,6 +35,17 @@ python -m promptpotter optimize --fork-on-divergence
 
 When this flag is set and resume detects a divergence, the run mints a new `cycle_id` rooted at the divergence point, copies the trials before the divergent round into the new cycle, records a `parent_cycle_id` pointer back to the original, retargets the active session pointer at the new cycle, and continues — re-running the divergent round under the current scorer. The shared `dataset_runs/` trace corpus is not duplicated — both cycles read the same underlying traces, each through their own scoring ledger. The old cycle is left alone as a record of what happened under the original scorer.
 
+### What lands where after a fork
+
+The fork dir nests under its family root: `campaigns/{root_cycle_id}/forks/{cycle_id}/`. All forks of a family — even forks-of-forks — live flat under the root's `forks/` subdir regardless of lineage depth, so finding any descendant is one directory listing. After fork-on-divergence:
+
+- **Live telemetry — `dashboard.json`, `output.log`, `phase_events.jsonl` — stays at the family root** (`campaigns/{root_cycle_id}/`, the cycle with no `parent_cycle_id`). Forks share one continuous stream so `tail dashboard.json` covers the whole family. `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner at the cutover; `phase_events.jsonl` records each carry a `cycle_id` field so consumers can demux fork-vs-parent records; `dashboard.json::cycle_id` always names the currently active fork.
+- **Per-cycle audit — `index.json`, `log.md`, `trials/`, `candidates/`, `rounds/`, `langfuse/`, `prompts/` — lives in the fork's own dir** under `forks/`. The parent's audit stays frozen as the historical record up to the divergence point. The fork's audit starts with the survivor trials copied at fork-mint and grows as new rounds complete.
+
+To monitor a forked run, point your editor at `campaigns/{root_cycle_id}/dashboard.json` (the root, not the fork). To inspect what specifically happened in one fork, open `campaigns/{root_cycle_id}/forks/{cycle_id}/index.json` / `log.md` / `trials/`.
+
+**Pre-existing flat-layout fork dirs** (from before this layout) are auto-migrated into the new nested structure on the next `optimize` run — `CampaignStore.__init__` runs an idempotent scan that moves any top-level `*_fork_*` directory into its root's `forks/`. After the first run on a tree, the scan is a no-op.
+
 Without the flag, divergence halts so you can review the diagnostic and decide. There is no separate `fork` subcommand — fork is just a continuation flag on the next `optimize` call.
 
 ### Why rewind is not enough

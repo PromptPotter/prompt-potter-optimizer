@@ -9,7 +9,7 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.infrastructure.store.campaign_store import campaign_dir_for
+from promptpotter.infrastructure.store.campaign_store import root_dir_for
 from promptpotter.infrastructure.store.session_store import session_dir_for
 from promptpotter.shared.errors import is_degraded
 
@@ -138,7 +138,7 @@ class CampaignPersistenceEmitter:
 
     def __init__(
         self,
-        campaign_dir: Path,
+        root_dir: Path,
         session_dir: Path,
         *,
         l1_patience: int,
@@ -148,10 +148,14 @@ class CampaignPersistenceEmitter:
         cycle_id: str | None = None,
         recorder: RoundRecorder | None = None,
     ) -> None:
-        self.campaign_dir = campaign_dir
-        self.state_path = campaign_dir / "dashboard.json"
-        self.log_path = campaign_dir / "output.log"
-        self.phase_events_path = campaign_dir / "phase_events.jsonl"
+        # Telemetry binds to the family root (the cycle with no parent_cycle_id).
+        # Forks share one continuous dashboard / output.log / phase_events stream;
+        # per-fork audit (index.json, log.md, candidates/, trials/, rounds/) stays
+        # in each cycle's own dir, written through dynamic ``session.cycle_id`` paths.
+        self.root_dir = root_dir
+        self.state_path = root_dir / "dashboard.json"
+        self.log_path = root_dir / "output.log"
+        self.phase_events_path = root_dir / "phase_events.jsonl"
         self.session_dir = session_dir
         self._recorder = recorder
         self._phase_event_seq: int = 0
@@ -209,16 +213,20 @@ class CampaignPersistenceEmitter:
         """Build emitter, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
         On ``--from N`` rewind, the ``best`` counter past the surviving trials
-        is clamped to avoid a phantom value."""
+        is clamped to avoid a phantom value.
+
+        Telemetry binds to the family root (derived from ``cycle_id`` —
+        the prefix before any ``_fork_`` segment). Forks of the same family
+        share that root's dashboard.json / output.log / phase_events.jsonl."""
         if not (project_root and session_id and cycle_id):
             return None
 
         tenant_root = Path(project_root)
-        campaign_dir = campaign_dir_for(tenant_root, cycle_id)
+        root_dir = root_dir_for(tenant_root, cycle_id)
         session_dir = session_dir_for(tenant_root, session_id)
 
         resume_from: dict[str, Any] | None = None
-        prior_state = campaign_dir / "dashboard.json"
+        prior_state = root_dir / "dashboard.json"
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
@@ -232,7 +240,7 @@ class CampaignPersistenceEmitter:
                 resume_from["best"] = 0.0
 
         return cls(
-            campaign_dir,
+            root_dir,
             session_dir,
             l1_patience=l1_patience,
             n_variants=n_variants,
@@ -273,7 +281,10 @@ class CampaignPersistenceEmitter:
         self._persist()
 
     def _persist_phase_event(self, event: PhaseEvent, view: dict | None) -> None:
-        """Append a phase_events.jsonl line; no-op when view is None."""
+        """Append a phase_events.jsonl line; no-op when view is None.
+
+        Each record carries ``cycle_id`` so consumers can demux records that
+        belong to different forks of the same family root."""
         if view is None:
             return
         record = {
@@ -281,12 +292,27 @@ class CampaignPersistenceEmitter:
             "phase": event.phase,
             "event": event.event,
             "round": event.round,
+            "cycle_id": self._state.get("cycle_id"),
             "ts": event.timestamp,
             "view": view,
         }
         self._phase_event_seq += 1
         with self.phase_events_path.open("a", encoding="utf-8") as f:
             f.write(json.dumps(record, ensure_ascii=False, default=str) + "\n")
+
+    def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
+        """Banner in output.log marking a fork-on-divergence cutover.
+
+        Mirrors the resume banner in ``__init__``. Subsequent HIT/MISS lines
+        and phase events belong to the new fork; consumers tailing the
+        family-root output.log see the cutover inline."""
+        self._log_fh.write(
+            f"\n{'=' * 70}\n"
+            f"  FORK {new_cycle_id} from round {from_round} (parent: {old_cycle_id})\n"
+            f"{'=' * 70}\n\n"
+        )
+        self._state["cycle_id"] = new_cycle_id
+        self._persist()
 
     def on_candidate_started(
         self,

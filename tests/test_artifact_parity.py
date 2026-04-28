@@ -6,6 +6,18 @@ after the emitter lifecycle, this test fails.  Sessions and campaigns
 are separate trees; a campaign records its parent session via
 ``index.json::parent_session_id``.
 
+Campaign artifacts split into two bands:
+
+- ``ROOT_TELEMETRY_ARTIFACTS`` — the live observability stream
+  (dashboard.json, output.log, phase_events.jsonl). These bind to the
+  family root cycle (the one with no ``parent_cycle_id``); forks share a
+  single continuous stream rather than splintering it.
+- ``PER_CYCLE_AUDIT_ARTIFACTS`` — frozen-on-finalization records
+  (index.json, log.md). Each cycle owns its own.
+
+For an un-forked campaign root and fork are the same dir, so both bands
+collapse onto the same path — the contract still holds.
+
 The artifact sets are owned by this test — they were never read by
 production code, only by these assertions. New artifacts produced by
 ``CampaignPersistenceEmitter`` need an entry here.
@@ -18,14 +30,21 @@ from pathlib import Path
 
 import pytest
 
-# Per-cycle artifacts under ``campaigns/{cycle_id}/``.
-CAMPAIGN_ARTIFACTS = {
-    "index.json",
+# Per-family-root artifacts (telemetry stream, shared across forks).
+ROOT_TELEMETRY_ARTIFACTS = {
     "dashboard.json",
     "output.log",
-    "log.md",
     "phase_events.jsonl",
 }
+
+# Per-cycle artifacts (frozen audit, owned by each fork).
+PER_CYCLE_AUDIT_ARTIFACTS = {
+    "index.json",
+    "log.md",
+}
+
+# Combined campaign-tree contract — what an un-forked cycle dir must contain.
+CAMPAIGN_ARTIFACTS = ROOT_TELEMETRY_ARTIFACTS | PER_CYCLE_AUDIT_ARTIFACTS
 
 # Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
 # is owned by SessionStore; the emitter ensures the rest exist from mint.
@@ -75,16 +94,14 @@ def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
 
 def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     """CAMPAIGN_ARTIFACTS and SESSION_ARTIFACTS must never overlap; each
-    fixed key must land in the expected set. Prevents a file from being
-    written into both trees."""
+    fixed key must land in the expected set. The two campaign bands
+    (``ROOT_TELEMETRY_ARTIFACTS`` and ``PER_CYCLE_AUDIT_ARTIFACTS``) must
+    also be disjoint — telemetry is not per-cycle, audit is not at root."""
     assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
+    assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_AUDIT_ARTIFACTS)
     assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
-    assert {
-        "dashboard.json",
-        "index.json",
-        "log.md",
-        "phase_events.jsonl",
-    } <= CAMPAIGN_ARTIFACTS
+    assert {"dashboard.json", "output.log", "phase_events.jsonl"} <= ROOT_TELEMETRY_ARTIFACTS
+    assert {"index.json", "log.md"} <= PER_CYCLE_AUDIT_ARTIFACTS
 
 
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:

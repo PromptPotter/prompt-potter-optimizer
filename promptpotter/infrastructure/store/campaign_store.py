@@ -1,4 +1,4 @@
-"""Campaign registry persistence — per-cycle optimization artifacts under ``campaigns/{cycle_id}/``."""
+"""Campaign registry persistence — per-cycle optimization artifacts under ``campaigns/``."""
 
 from __future__ import annotations
 
@@ -19,15 +19,49 @@ from promptpotter.shared.constants import DEFAULT_CONNECTOR_TYPE
 logger = logging.getLogger(__name__)
 
 
-def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
-    """Return ``{tenant_root}/campaigns/{cycle_id}``.
+def root_cycle_id(cycle_id: str) -> str:
+    """Family-root cycle id — the prefix before the first ``_fork_`` segment.
 
-    Module-level so callers that don't hold a ``CampaignStore`` (e.g. the
-    emitter's classmethod constructor, which only has a raw project root)
-    can resolve the same path without instantiating a store.
-    """
+    ``_mint_fork_cycle_id`` is the only producer of ``_fork_`` in cycle ids,
+    so a string split is sufficient — no I/O, no parent-chain walk."""
+    return cycle_id.split("_fork_", 1)[0]
+
+
+def root_dir_for(tenant_root: Path, cycle_id: str) -> Path:
+    """Family-root campaign dir — where telemetry binds (one continuous stream
+    across all forks of the family)."""
+    return tenant_root / "campaigns" / root_cycle_id(cycle_id)
+
+
+def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
+    """Per-cycle dir (audit). Roots live at ``campaigns/{cycle_id}``; forks
+    nest under their family root at ``campaigns/{root}/forks/{cycle_id}``.
+
+    Module-level so callers that don't hold a ``CampaignStore`` (the emitter's
+    classmethod constructor) can resolve the same path without a store."""
     validate_path_component(cycle_id)
-    return tenant_root / "campaigns" / cycle_id
+    root = root_cycle_id(cycle_id)
+    if root == cycle_id:
+        return tenant_root / "campaigns" / cycle_id
+    return tenant_root / "campaigns" / root / "forks" / cycle_id
+
+
+def _migrate_legacy_fork_dirs(base_dir: Path) -> None:
+    """One-time, idempotent: move ``campaigns/{X_fork_Y}/`` (legacy flat layout)
+    into ``campaigns/{X}/forks/{X_fork_Y}/``. After the first store init on
+    a pre-migration tree, the iteration finds nothing and returns immediately."""
+    campaigns_root = base_dir / "campaigns"
+    if not campaigns_root.exists():
+        return
+    for child in list(campaigns_root.iterdir()):
+        if not child.is_dir() or "_fork_" not in child.name:
+            continue
+        target = campaign_dir_for(base_dir, child.name)
+        if target.exists():
+            continue  # already migrated (or name conflict — leave alone)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        child.rename(target)
+        logger.info("Migrated fork dir %s → %s", child.name, target)
 
 
 class CampaignStore(EntityStore):
@@ -36,23 +70,21 @@ class CampaignStore(EntityStore):
     def __init__(self, base_dir: Path):
         # base_dir is tenant root; campaigns nest directly under it
         super().__init__(base_dir, "campaigns")
+        _migrate_legacy_fork_dirs(base_dir)
 
     # -- path helpers ---------------------------------------------------------
 
     def _entity_dir(self, _backend_id: str) -> Path:
-        """Parent dir for campaign trees. Tenant-global."""
+        """Parent dir for root campaign trees. Tenant-global."""
         return self._base_dir / "campaigns"
 
     def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
-        """Per-cycle dir holding trials + dashboard + logs."""
+        """Per-cycle dir holding trials + audit. Resolves root vs fork layout."""
         return campaign_dir_for(self._base_dir, cycle_id)
 
     def campaign_dir(self, cycle_id: str) -> Path:
-        """Public accessor for ``{tenant_root}/campaigns/{cycle_id}``.
-
-        Shared by the presentation layer and the emitter so the layout
-        lives in one place.
-        """
+        """Public path accessor — root cycles at ``campaigns/{cycle_id}``,
+        forks at ``campaigns/{root}/forks/{cycle_id}``."""
         return campaign_dir_for(self._base_dir, cycle_id)
 
     def _trials_dir(self, backend_id: str, cycle_id: str) -> Path:
@@ -268,19 +300,31 @@ class CampaignStore(EntityStore):
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign stored under this tenant.
 
-        Optionally filters by ``backend_id`` (matched against the
-        ``backend_id`` field inside each ``index.json``). Campaigns are
-        tenant-global; the filter is a post-read pass, not a path scope.
+        Walks both top-level root cycles (``campaigns/{cycle_id}/``) and
+        nested forks (``campaigns/{root}/forks/{cycle_id}/``). Optionally
+        filters by ``backend_id`` (matched against ``index.json::backend_id``).
         Pass ``""`` to list all campaigns regardless of backend.
         """
         campaigns_dir = self._entity_dir(backend_id)
         if not campaigns_dir.exists():
             return []
+
+        def index_files() -> list[Path]:
+            out: list[Path] = []
+            for root_dir in sorted(campaigns_dir.iterdir()):
+                if not root_dir.is_dir():
+                    continue
+                if (idx := root_dir / "index.json").is_file():
+                    out.append(idx)
+                forks_dir = root_dir / "forks"
+                if forks_dir.is_dir():
+                    for fork_dir in sorted(forks_dir.iterdir()):
+                        if (idx := fork_dir / "index.json").is_file():
+                            out.append(idx)
+            return out
+
         results = []
-        for cycle_dir in sorted(campaigns_dir.iterdir()):
-            index_path = cycle_dir / "index.json"
-            if not index_path.is_file():
-                continue
+        for index_path in index_files():
             data = read_json(index_path)
             if "campaign_id" not in data:
                 continue
