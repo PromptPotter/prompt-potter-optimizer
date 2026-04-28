@@ -57,11 +57,7 @@ The critique is the every-round intelligence hub. It's what makes L1 Generate in
 
 A stall escalates upward, but each layer continues to run in its own slot. When L3 fires, the next round still has L3, L2, and L1 all running — L3's plan shapes L2's refinement, which shapes L1's generation. Higher layers don't replace lower ones; they constrain them.
 
-## The dynamic field set
-
-The eight prompt fields aren't a hard ceiling. L2 can add a field — say, `domain_constraints` — to widen the search space when prior fields haven't captured the right axis. It can also remove a field that's proved irrelevant. This keeps the prompt-field set matched to what the current problem actually demands.
-
-For the mechanics of each layer — what data flows in, what memory persists, what signals escalation — see [self-healing.md](self-healing.md) and [../developer/information-flow.md](../developer/information-flow.md).
+For the mechanics of each layer — what data flows in, what memory persists, what signals escalation — see [self-healing.md](self-healing.md) and [../developer/information-flow.md](../developer/information-flow.md). L2-driven add/remove of prompt fields is a future direction; see [../developer/prompt-scheme-internals.md](../developer/prompt-scheme-internals.md).
 
 ## Inspiration and call sites
 

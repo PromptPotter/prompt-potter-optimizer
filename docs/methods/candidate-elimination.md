@@ -14,7 +14,7 @@ Individuals are evaluated sequentially on **Q** in the same deterministic order.
 Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the individual is stopped early. The round winner is selected from the full population (including early-stopped individuals) by composite fitness, subject to an improvement threshold (default delta > 0.01).[^winner]
 
 [^elim]: `promptpotter/shared/statistics.py::should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
-[^winner]: `promptpotter/application/optimization/nodes/l1/score.py::select_fittest()`.
+[^winner]: `promptpotter/application/optimization/nodes/l1/score.py::l1_score()` (winner selection is inline — no separate `select_fittest` exists).
 
 ---
 
@@ -45,10 +45,10 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `OptSearchPoint.memory.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `memory.validation_failures` | `application/optimization/nodes/l1/measure.py::score_candidates` |
+| 1 | **Validation skip** — `OptSearchPoint.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `validation_failures` | `application/optimization/nodes/l1/measure.py::score_population` |
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
-| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
-| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `memory.runtime_failures` | `application/optimization/elimination.py` |
+| 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
+| 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 5 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
 ### Ordering inside the query loop

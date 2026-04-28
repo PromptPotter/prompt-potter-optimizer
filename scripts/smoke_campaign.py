@@ -30,7 +30,7 @@ from pathlib import Path
 _REPO_ROOT = Path(__file__).resolve().parent.parent
 
 # Force utf-8 stdout so Windows cp1252 console doesn't choke on box-drawing
-# characters emitted by NotebookDisplay.
+# characters emitted by LiveDisplay.
 os.environ.setdefault("PYTHONIOENCODING", "utf-8")
 try:
     sys.stdout.reconfigure(encoding="utf-8")  # type: ignore[attr-defined]

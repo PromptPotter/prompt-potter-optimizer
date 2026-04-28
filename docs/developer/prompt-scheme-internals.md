@@ -142,7 +142,7 @@ Every L1 / L2 / critique / L3 template receives a single `inbox` hole holding th
 | Template file | Consumer | Compile variables |
 |---|---|---|
 | `l1_generate.json` | `l1_generate()` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `inbox` |
-| `l1_critique.json` | `L1CritiqueAgent.run()` | `inbox` |
+| `l1_critique.json` | `run_l1_critique()` | `inbox` |
 | `l2_context.json` | L2 refine transition | `current_params`, `task_context_section`, `inbox` |
 | `l3_plan.json` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `inbox` |
 | `restructure.json` | `decompose_prompt_fields()` | `consultation_instruction` |

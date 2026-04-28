@@ -2,7 +2,7 @@
 
 Implementation of the two self-healing rails. Concept-level overview in [../concepts/self-healing.md](../concepts/self-healing.md); this page covers the classes, memory fields, and escalation wiring.
 
-Failures attach to the **candidate that produced them** (per-candidate `OptSearchPoint.memory`), never to the round, so a losing candidate's problem never disrupts the round winner. Two rails exist; new mechanisms must pick one — **do not invent a sidecar, do not silently drop, do not just log.**
+Failures attach to the **candidate that produced them** (direct fields on `OptSearchPoint`), never to the round, so a losing candidate's problem never disrupts the round winner. Two rails exist; new mechanisms must pick one — **do not invent a sidecar, do not silently drop, do not just log.**
 
 |  | **Rail 1 — `ValidationFailure`** | **Rail 2 — `RuntimeFailure`** |
 |---|---|---|
@@ -10,8 +10,8 @@ Failures attach to the **candidate that produced them** (per-candidate `OptSearc
 | Example | `model: gpt-4o` when allowed = `[gpt-oss-120b]` | `max_tokens=150` → 100% `reasoning_budget_exhausted` on reasoning model |
 | Who made the mistake | L1 (tactical — picked a disallowed value) | Nobody tactically (L1's value was in range; the *strategic shape* of the search didn't account for the runtime constraint) |
 | Score effect | Synthetic 0 (zero backend calls) | Real score stands (candidate is eliminated mid-eval) |
-| Per-candidate memory | `memory.validation_failures` | `memory.runtime_failures` |
-| Outer-memory mirror | None — L2 reads from `candidate_scores` only | Cumulative `state.opt_sp.memory.runtime_failures` (every round's new failures deduped and appended) |
+| Per-candidate memory | `validation_failures` | `runtime_failures` |
+| Outer-memory mirror | None — L2 reads from `candidate_scores` only | Cumulative `cycle.opt_sp.runtime_failures` (every round's new failures deduped and appended) |
 | Healer | **L2 teaches L1** via a directive (`"use ONLY one of: …"`) | **L2 heals itself** — updates its own directive / `task_context` / `optimizer_params` to re-shape what L1 is allowed to search over |
 | Escalation | None (L2 can always articulate the constraint) | **L3** `modify_plan` — when the accumulated list keeps growing despite L2's adjustments, L3 reads the trail and replans |
 
@@ -23,7 +23,7 @@ Both rails share the rule *"detect → trace on the candidate → surface on `ca
 
 Some L1-generated candidates are invalid before evaluation starts — the optimizer LLM hallucinated a value outside the user-declared allowed set. Canonical example: `pipeline_params_override.llm_only.model = "gpt-4o"` when the backend only has `openai/gpt-oss-120b` per `PipelineSchema.available_models`.
 
-`validate_overrides()` in `application/optimization/nodes/l1/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.memory.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_candidates` shortcuts to a synthetic 0 report, the existing accuracy comparator naturally deprioritizes the candidate in `select_fittest`, and the round checkpoint persists the failure with the rest of the optimizer memory.
+`validate_overrides()` in `application/optimization/nodes/l1/generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
 **L2 teaches L1.** L2 `refine_strategy` already reads L1 critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces L1 critique for next round's L1 via the normal directive/l1_critique mutual exclusion. L1 next round follows the directive and heals itself.
 
@@ -58,7 +58,7 @@ The fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (in `domain/opt_search_p
 | `warning_inventory` | cross-round | Per-query warning aggregation |
 | `l2_directive` | one-round window, cleared on improvement | L2's diagnostic + action guidance for L1 |
 | `validation_failures` | per-candidate (set at L1 parse time) | Parse-time invariant violations — Rail 1 |
-| `runtime_failures` | per-candidate + cumulative outer-memory mirror | Runtime-observed health failures — Rail 2. Candidate-level copies set in `score_candidates`; outer-level accumulated after the round; cleared never. |
+| `runtime_failures` | per-candidate + cumulative outer-memory mirror | Runtime-observed health failures — Rail 2. Candidate-level copies set in `score_population` (Path 3); outer-level accumulated after the round; cleared never. |
 
 ---
 
@@ -71,13 +71,13 @@ degraded_rate >= threshold on candidate C_k mid-eval
     ↓
 DegradationCheck fires → EscalationSignal(target=ELIMINATE_CANDIDATE)
     ↓
-score_candidates absorbs the signal, synthesises a RuntimeFailure from
+score_population absorbs the signal, synthesises a RuntimeFailure from
 check_result + C_k's observed pipeline_params, attaches to
-C_k.memory.runtime_failures, includes in C_k's score report, CONTINUES
+C_k.runtime_failures, includes in C_k's score report, CONTINUES
 with the next candidate (round winner is unaffected)
     ↓
 End of round: execute_round mirrors every new RuntimeFailure onto
-state.opt_sp.memory.runtime_failures (deduped across rounds)
+cycle.opt_sp.runtime_failures (deduped across rounds)
     ↓
 L2 Refine next round receives: NEW (this round's candidate_scores) +
 ACCUMULATED (outer-memory trail)
@@ -88,7 +88,8 @@ Round N+1: pattern reduced? L2 self-healing worked.
            pattern persists? ACCUMULATED list keeps growing.
     ↓
 L3 modify_plan (triggered by l2_stall or l3_patience) reads the
-cumulative runtime_failures_section from opt_sp.memory and replans —
+cumulative runtime_failures_section from cycle.opt_sp.runtime_failures
+and replans —
 changes pipeline_params / swaps nodes / rewrites plan text — to escape
 the failing region entirely.
 ```
@@ -130,7 +131,7 @@ A fatal classification has **three** load-boundary effects (consumed via the `is
 
 ### Deprecated samples — why this is not a fallback
 
-The exclusion is a **load-boundary filter**, not a score-time fallback: it removes known-invalid measurements from the cache and from the stats denominator before the scoring layer runs. Trace records continue to be archived (forensic value), only cache reuse and primary-stat aggregation are blocked. This is sanctioned alongside the `_score_candidates()` validation-failure synthetic-0 — see [`scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator-facing framing.
+The exclusion is a **load-boundary filter**, not a score-time fallback: it removes known-invalid measurements from the cache and from the stats denominator before the scoring layer runs. Trace records continue to be archived (forensic value), only cache reuse and primary-stat aggregation are blocked. This is sanctioned alongside the `score_population()` validation-failure synthetic-0 — see [`scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator-facing framing.
 
 If a query consistently hits a fatal warning, it will be re-measured every round and immediately eliminate the candidate via `DegradationCheck` on each attempt. That is correct behavior — frequent fatal warnings on the same query indicate a too-tight token budget on the active model.
 

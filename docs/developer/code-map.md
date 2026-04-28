@@ -40,14 +40,15 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/nodes/l1/execute.py` |
 | `classify_result` | `promptpotter/application/optimization/diagnostics.py` |
-| `L1CritiqueAgent` | `promptpotter/application/optimization/nodes/l1/critique.py` |
 | `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `l1_generate` | `promptpotter/application/optimization/nodes/l1/generate.py` |
+| `l1_score` | `promptpotter/application/optimization/nodes/l1/score.py` |
 | `LayerCounter` | `promptpotter/application/optimization/cycle.py` |
+| `LayerTransition` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `llm_call` | `promptpotter/application/optimization/pipeline.py` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
-| `score_candidates` | `promptpotter/application/optimization/nodes/l1/measure.py` |
-| `select_fittest` | `promptpotter/application/optimization/nodes/l1/score.py` |
+| `run_l1_critique` | `promptpotter/application/optimization/nodes/l1/critique.py` |
+| `score_population` | `promptpotter/application/optimization/nodes/l1/measure.py` |
 | `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `validate_overrides` | `promptpotter/application/optimization/nodes/l1/generate.py` |
 
@@ -103,7 +104,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 
 | Symbol | Module |
 |--------|--------|
-| `render_dashboard` | `promptpotter/presentation/views/dashboard.py` |
+| `LiveDisplay` | `promptpotter/presentation/views/live.py` |
 | `RunListener` | `promptpotter/application/campaign/runner.py` |
 
 ## Configuration

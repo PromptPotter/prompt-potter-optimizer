@@ -1,12 +1,8 @@
 # Search Memory Internals
 
-`SearchMemory` is a materialized view over all historical evaluation data, persisted at `{tenant_id}/library/search_memory.json`. It is refreshed incrementally before each optimization round and provides read-only intelligence to L1 generate, L2 refine, and the L1 critique agent.
+`SearchMemory` is a materialized view over all historical evaluation data, persisted at `{tenant_id}/library/search_memory.json`. Conceptual overview in [../concepts/search-memory.md](../concepts/search-memory.md); this file covers the accessor catalog, digest API, and refresh mechanics.
 
-Conceptual overview in [../concepts/search-memory.md](../concepts/search-memory.md); this file covers the accessor catalog, digest API, and refresh mechanics.
-
-Each consumer (L1, L1 Critique, L2, L3) asks typed questions via `digest()` and receives a summary — never raw records. `SearchMemory`'s job is to convert a growing archive of dataset runs into actionable intelligence that fits in a prompt.
-
-The materialized view is incremental: each refresh folds in only the new dataset runs since the last watermark, then persists the updated view. The cost of one refresh is proportional to new evaluations since the last refresh, not to total history.
+Each consumer (L1 generate, L1 critique, L2, L3) calls a typed `digest_for_*` method and receives a summary — never raw records. The view is incremental: each refresh folds in only the new dataset runs since the last watermark, so refresh cost is proportional to new evaluations, not total history.
 
 ---
 
@@ -31,7 +27,7 @@ Per-query hit/miss tracking across all evaluations. Every query accumulates a Be
 - `query_tractability()` → all queries with hit rate and variance.
 - `query_degradation_rate(query)` / `query_degradation_count(query)` → degradation stats consumed per-sample by the stale-data protocol.
 
-Digest-internal (private): `_discriminating_queries(min_variance)`, `_persistent_failures(min_streak)` — composed by `digest()`; not part of the external contract.
+Digest-internal: `SampleIndex.discriminating(min_variance)`, `SampleIndex.persistent_failures(min_streak)` — composed by the per-layer `digest_for_*` methods; not part of `SearchMemory`'s direct accessor surface.
 
 ### Failure Modes
 
@@ -71,7 +67,7 @@ The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 
 | `axis_rankings` | `axis_rankings()[:5]` | — | L2, L3 |
 | `bottleneck_distribution` | `bottleneck_distribution()` | — | L2, L3 |
 | `persistent_failures` | — | `persistent_failures(3)` | L2, L3 |
-| `failure_group_insights` | — | `_parameter_failure_correlation()` | L2 |
+| `failure_group_insights` | — | `_axis_failure_group_deltas` (populated by `_recompute_failure_group_correlations()`) | L2 |
 | `volatile_queries` | — | `flips(limit=50)` | L2 |
 
 Callers (selected):
@@ -92,7 +88,7 @@ Each pillar tracks a watermark — the set of `dataset_run` IDs already folded i
 
 ### Design constraint
 
-`SearchMemory` exposes granular data accessors returning structured data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`). It never produces LLM-ready text directly — instead, four typed digest methods (`digest_for_l1_generate`, `digest_for_l1_critique`, `digest_for_l2`, `digest_for_l3`) compose a fixed key set per consumer. Accessors used only by a digest (`_discriminating_queries`, `_persistent_failures`, `_exhausted_axes`, `_axis_value_trend`, `_parameter_failure_correlation`, `_query_flip_history`, `_format_recent_attributions`, `_record_query_flips`, `_recompute_failure_group_correlations`) are module-private — consumers call only the per-layer digest method and a handful of public aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`, `bottleneck_distribution`, `query_tractability`, `dead_queries`, `query_degradation_*`). This keeps `SearchMemory` from growing into a god object that knows about every prompt template.
+`SearchMemory` exposes granular data accessors returning structured data (`AxisImpact`, `ValueRecord`, `QueryRecord`, `FailureCluster`). It never produces LLM-ready text directly — instead, four typed digest methods (`digest_for_l1_generate`, `digest_for_l1_critique`, `digest_for_l2`, `digest_for_l3`) compose a fixed key set per consumer. Module-private helpers (`_exhausted_axes`, `_axis_value_trend`, `_format_recent_attributions`, `_recompute_failure_group_correlations`) are used only by digests; consumers call the per-layer digest method and a handful of public aggregate accessors (`axis_rankings`, `top_k_values`, `failure_clusters`, `bottleneck_distribution`, `query_tractability`, `dead_queries`, `query_degradation_*`, `record_flips_from_rounds`). This keeps `SearchMemory` from growing into a god object that knows about every prompt template.
 
 ### Per-refresh cache
 

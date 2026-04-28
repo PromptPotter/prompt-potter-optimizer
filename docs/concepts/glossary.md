@@ -38,7 +38,7 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Pipeline parameters** — nested dicts keyed by node name. Everything in a candidate other than prompt fields. Example: `{"web_search": {"max_sites": 5}, "token_matching": {"threshold": 0.8}}`.
 
-**Prompt fields** — the eight named parts a prompt decomposes into: persona, task intent, problem description, instruction, thinking style, answer format, few-shot examples, plan. Some or all may be exposed by a given pipeline node.
+**Prompt fields** — the six prompt-string fields (`PROMPT_STRING_FIELDS`: persona, task intent, problem description, instruction, thinking style, answer format) that render into the prompt, plus two appended sections (few-shot examples, plan). Some or all may be exposed by a given pipeline node.
 
 **Rewind** — restart an active campaign from an earlier round, discarding later trials. Same `cycle_id`, archived history. Run via `optimize --from N`.
 
@@ -50,7 +50,7 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **Search memory** — the materialized intelligence view that accumulates across campaigns. Tracks parameter impact, query patterns, and failure modes. Feeds a digest into every L1, L2, and L3 round.
 
-**Session** — the operator workspace. A session can host multiple campaigns (1:N today used as 1:1). Session-level artifacts (journal, notes, control surface) live in `sessions/{session_id}/`.
+**Session** — the operator workspace. A session can host multiple campaigns (1:N today used as 1:1). Session-level artifacts (journal, notes) live in `sessions/{session_id}/`.
 
 **Trial** — the per-round serialized snapshot of optimizer state. Resume reads from the latest trial. `trials/trial_NNNN.json` is the resume source of truth.
 

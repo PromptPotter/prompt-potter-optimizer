@@ -65,7 +65,7 @@ Default shape: one sentence, one compact box, or 3–5 bullets — or a combinat
 
 **No active session** — one sentence: which entry point the dataset uses (per `dataset.md`) and what to run. No box, no ask.
 
-**Active session** — compact 4–6 line box from `dashboard.json` via `render_dashboard` in `promptpotter/presentation/views/dashboard.py` (or mirror: `cycle_id · dataset · phase · round/max · best vs baseline`) + one sentence: resume command or next phase.
+**Active session** — compact 4–6 line box mirroring `dashboard.json` (`cycle_id · dataset · phase · round/max · best vs baseline`) + one sentence: resume command or next phase.
 
 If the user's intent is genuinely ambiguous ("should I resume or start over?"), ask once — one question, no `(a)/(b)` stacking.
 
