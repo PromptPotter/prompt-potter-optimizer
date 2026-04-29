@@ -6,7 +6,7 @@
 
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
-**PromptPotter brews better prompts.** Point it at your task and it tries thousands of prompt and parameter combinations for you, keeping what works. No more guessing which wording the model likes.
+**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle — an **LLM-driven program evolution** engine that jointly searches prompts and pipeline parameters with statistical early-stopping (Wilcoxon), cross-run memory, and self-healing rails. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
 
 ## Why PromptPotter?
 
@@ -56,6 +56,8 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
 
 ## How It Works
 
+PromptPotter's inner **generate → score → critique** loop mirrors the classic **plan / implement / validate (PIV)** developer workflow, driven by an LLM at scale.
+
 > [!TIP]
 > <details>
 > <summary><b>What a round actually looks like</b> (click to expand)</summary>
@@ -87,7 +89,35 @@ Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (
 
 Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
 
+## Relation to Karpathy's AutoResearch
 
+If your use case is the simple one — a single agent editing one Python file against a fixed 5-min training run, no population, no statistics — go use [`karpathy/autoresearch`](https://github.com/karpathy/autoresearch). It is purpose-built and minimal.
+
+Otherwise: PromptPotter is the same idea generalized. The architecture maps cleanly:
+
+- AutoResearch's `train.py` (the artifact mutated each loop) ≈ PromptPotter's `OptSearchPoint` (the structured artifact L1 mutates each round — `PromptTemplate` fields + `pipeline_params`).
+- AutoResearch's `program.md` (agent meta-instructions) ≈ PromptPotter's L1 generate node prompt at [`promptpotter/application/optimization/nodes/l1/generate.py`](promptpotter/application/optimization/nodes/l1/generate.py) — the instructions telling the proposing LLM *how* to mutate. Karpathy's [issue #314](https://github.com/karpathy/autoresearch/issues/314) (evolve `program.md` itself) is the L4 / self-optimization direction PromptPotter has on its own roadmap ([`docs/specs/m12-plus-backlog.md`](docs/specs/m12-plus-backlog.md) § Self-optimization).
+
+Structurally, **AutoResearch is the degenerate case of PromptPotter**:
+
+- `n_variants = 1`
+- L2 / L3 / critique disabled
+- Elimination disabled (single noisy trial accepted as-is)
+- One sample, one scoring run = the 5-min training loss
+- Single PromptTemplate field, e.g. `program_md`
+
+It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Wilcoxon signed-rank + Holm–Bonferroni elimination across seeds, L2/L3 escalation, self-healing rails, and the hard-sample sorter on top.
+
+| | AutoResearch | PromptPotter |
+|---|---|---|
+| Evolved artifact | Python source code (`train.py`) | Structured prompt fields + `pipeline_params` |
+| Fitness signal | 5-min nanochat training loss | Dataset accuracy (per-sample, scorer formula) |
+| Search | 1 agent, try-keep-revert | Population (`n_variants`), Wilcoxon-eliminated rounds |
+| Loop layers | Flat — one agent, one loop | L1 generate/critique + L2 refine + L3 replan |
+| Recovery | None — agent reverts on regression | Self-healing rails (`ValidationFailure` / `RuntimeFailure`) per individual |
+| Sample selection | Fixed nanochat run | Rasch + KG scoring-set evolution; hard-sample sorter |
+| Statistical guarantees | None — single noisy trial | Wilcoxon signed-rank + Holm–Bonferroni elimination |
+| Domain | ML training research | Prompt/pipeline optimization for production LLM apps |
 
 ## Documentation
 
