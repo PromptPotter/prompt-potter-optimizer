@@ -275,6 +275,30 @@ class OptSearchPoint(PromptTemplate):
         "this persisted mirror survives trial checkpoints.",
     )
 
+    # -- L1-generate surface state (owned by L2 mutations) ----------------
+    l1_section_overrides: dict[str, bool] = Field(
+        default_factory=dict,
+        description="Per-section visibility toggles for L1-generate. Keys are "
+        '``L1GenerateField`` names; ``False`` gates a section off (renders ``""``); '
+        "``True`` or absent renders normally. Set by L2 when it fires; "
+        "persists round-over-round until L2 flips it.",
+    )
+    l1_section_overrides_text: dict[str, str] = Field(
+        default_factory=dict,
+        description="Per-section text overrides for L1-generate. Keys are "
+        "``L1GenerateField`` names; the value replaces that section's rendered "
+        "output. Set by L2 when it fires. Wins over default rendering, "
+        "loses to a section being toggled off.",
+    )
+    l1_template_override: str = Field(
+        default="",
+        description="Whole-body override for L1-generate's ``problem_description`` "
+        "template. When non-empty, this string replaces the default body and is "
+        "compiled with the same named-hole substitutions. Set by L2 on a "
+        "fundamental reframing fire. Should contain ``{{l2_directive}}`` so "
+        "directives still flow through.",
+    )
+
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "l1_critique_text",
         "escalation_journal",

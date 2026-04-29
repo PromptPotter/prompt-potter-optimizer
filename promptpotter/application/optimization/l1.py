@@ -23,7 +23,6 @@ from __future__ import annotations
 
 import copy
 import logging
-import re
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
@@ -32,10 +31,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.pipeline import (
-    Layer,
-    assemble_dispatch_msg,
     candidate_summaries,
+    compile_l1_surface,
     format_l1_critique_for_prompt,
+    load_optimizer_prompt,
     run_l1_critique,
     run_optimizer_node,
 )
@@ -204,63 +203,6 @@ def validate_overrides(
     return failures
 
 
-_HEADER_RE = re.compile(r"^([A-Z][A-Z _]+)")
-_ENUM_RENDER_CAP = 12
-
-
-def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
-    """Pipeline schema for L1 context. Enums capped at ``_ENUM_RENDER_CAP``."""
-    lines: list[str] = []
-    npk = pipeline_schema.node_param_keys()
-    if not npk:
-        return ""
-
-    lines.append(
-        "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):"
-    )
-    for node_name, params in npk.items():
-        node = pipeline_schema.get_node(node_name)
-        descs = node.param_descriptions if node else {}
-        enums = node.param_allowed_values if node else {}
-        if not params:
-            lines.append(f"  {node_name}: (no tunable params)")
-            continue
-        param_parts: list[str] = []
-        for p in sorted(params):
-            desc = descs.get(p)
-            allowed = enums.get(p)
-            suffix_bits: list[str] = []
-            if desc:
-                suffix_bits.append(desc)
-            if allowed:
-                shown = list(allowed)[:_ENUM_RENDER_CAP]
-                extra = len(allowed) - len(shown)
-                suffix = "one of: " + ", ".join(shown)
-                if extra > 0:
-                    suffix += f" (+{extra} more)"
-                suffix_bits.append(suffix)
-            param_parts.append(f"{p} ({'; '.join(suffix_bits)})" if suffix_bits else p)
-        lines.append(f"  {node_name}: {', '.join(param_parts)}")
-
-    mutable = [n for n in pipeline_schema.nodes if n.output_schema and n.output_schema.fields]
-    if mutable:
-        lines.append("")
-        lines.append(
-            "OUTPUT SCHEMA MUTATIONS — use as output_schema param: "
-            '["+", name, type, is_array, desc] / ["-", name] / '
-            '["~", old, new, type, is_array, desc]'
-        )
-        for node in mutable:
-            assert node.output_schema is not None
-            lines.append(f"  {node.name}: {', '.join(node.output_schema.fields)}")
-
-    text = "\n".join(lines)
-    if pipeline_schema.available_models:
-        text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
-        text += "\n".join(f"  {m}" for m in pipeline_schema.available_models)
-    return text
-
-
 async def l1_generate(
     cycle: Cycle,
     *,
@@ -277,46 +219,39 @@ async def l1_generate(
 
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
-    schema_text = _render_schema_text(pipeline_schema) if pipeline_schema else ""
     obs_campaign_id = cycle.session.state.obs_campaign_id
 
-    _compile_vars = {
-        "n_variants": str(n_variants),
-        "accuracy_pct": f"{cycle.current_accuracy:.1%}",
-        "n_queries": str(len(cycle.current_results)),
-        "rendered_prompt": opt_sp.render(),
-        "dispatch_msg": assemble_dispatch_msg(
-            Layer.L1_GENERATE,
-            cycle,
-            round_num=round_num,
-            pipeline_schema_text=schema_text,
-        ),
-    }
+    surface = compile_l1_surface(cycle, round_num=round_num, n_variants=n_variants)
+    compile_vars = surface.to_compile_vars()
+
+    template = load_optimizer_prompt("l1_generate")
+    if opt_sp.l1_template_override:
+        template = template.model_copy(update={"problem_description": opt_sp.l1_template_override})
+
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     generated, meta_prompt = await run_optimizer_node(
         template_name="l1_generate",
-        compile_vars=_compile_vars,
+        compile_vars=compile_vars,
         llm_client=llm_client,
         model=model,
         temperature=creativity,
         json_schema=output_schema,
         recorder=cycle.session.state.round_recorder,
+        template=template,
     )
-    dispatch_msg = str(_compile_vars["dispatch_msg"])
-    sections = sorted(
+    section_sizes = sorted(
         (
-            ((m.group(1).rstrip() if (m := _HEADER_RE.match(p)) else "<unknown>"), len(p))
-            for p in dispatch_msg.split("\n\n")
-            if p
+            (name, len(value.rstrip()))
+            for name, value in compile_vars.items()
+            if value and value.strip()
         ),
         key=lambda x: -x[1],
     )
     logger.info(
-        "L1 R%d meta-prompt: %d chars (dispatch_msg=%d) | %s",
+        "L1 R%d meta-prompt: %d chars | %s",
         round_num,
         len(meta_prompt),
-        len(dispatch_msg),
-        " | ".join(f"{h}={s}" for h, s in sections[:6]),
+        " | ".join(f"{n}={s}" for n, s in section_sizes[:6]),
     )
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated

@@ -63,12 +63,25 @@ Next `optimize` will start sending traces.
 
 | Source | Event type | Payload |
 |--------|-----------|---------|
-| L1 Generate | LLM call | meta-prompt, candidate outputs, token counts |
-| L1 Critique | LLM call | critique-phase dispatch_msg, structured output |
-| L2 Refine | LLM call | refine dispatch_msg, new directive / task_context |
+| L1 Generate | LLM call | meta-prompt (compiled from `L1GenerateSurface`), candidate outputs, token counts |
+| L1 Critique | LLM call | critique-phase blob (`compile_l1_critique_blob`), structured output |
+| L2 Refine | LLM call | meta-prompt (compiled from `L2Surface` including `l1_generate_field_catalogue`), parsed `TransitionResult` (directive, optimizer_params, task_context, action, scheme/text/template overrides) |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
 | Escalation check | Event | check type, fired/not, reason |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
 Node-level tracing follows the same envelope regardless of whether the node lives in the optimizer loop or the backend pipeline — see [../developer/node-standard.md](../developer/node-standard.md).
+
+## Reading what L2 did from a trial
+
+Every L2 fire serializes its writes to the trial JSON. Open `campaigns/{cycle_id}/trials/trial_NNNN.json` and inspect:
+
+- `opt_search_point.l2_directive` — the directive L2 wrote (if any).
+- `opt_search_point.l1_section_overrides` / `l1_section_overrides_text` / `l1_template_override` — surface mutations L2 has placed on the individual.
+- `opt_search_point.optimizer_params` / `task_context` — strategy fields refined by L2.
+- `decisions[]` — entry with `kind: "probe_round_commitment"`, outcome = `True` when L2 set `action = "probe_round"` for the next round.
+- `nodes.l2_context.input.prompt` — the rendered L2 prompt; contains the `L1-GENERATE FIELD CATALOGUE` block showing every section's current state.
+- `nodes.l2_context.output` — the raw LLM JSON dict L2 emitted.
+
+For a complete reference, see [`../developer/l2-internals.md`](../developer/l2-internals.md).

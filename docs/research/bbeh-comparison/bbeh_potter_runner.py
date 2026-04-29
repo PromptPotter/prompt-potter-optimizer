@@ -60,6 +60,8 @@ def build_campaign_config(
                 "l3_patience": 3,
                 "l2_temperature": 0.3,
                 "l3_temperature": 0.5,
+                "elimination_n_min": 4,
+                "elimination_alpha": 0.2,
             },
             "optimizer_llm": {
                 "model": "openai/gpt-oss-120b",

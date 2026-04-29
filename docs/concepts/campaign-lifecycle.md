@@ -51,13 +51,18 @@ The fittest individual from the round is compared to the current best. If it bea
 
 ## When L1 stalls — L2 fires
 
-After enough consecutive rounds with no improvement, L2 Refine Context fires.
+After enough consecutive rounds with no improvement, L2 fires. L1's defaults already cover most non-trivial tasks well, so L1 often runs several rounds in a row without help — L2 is the rescue layer that engages when L1 has exhausted its near-term moves.
 
-L2 reads the critique history, the current best configuration, and the historical context from `AxisIndex`. It adjusts two things: the task context (the domain framing fed to L1) and meta-settings (how many candidates to generate, how much to explore vs. exploit). It produces a directive — 2–3 sentences of diagnostic reasoning and action guidance — that becomes the primary signal for the next L1 round, superseding the critique.
+L2 reads the critique history, the current best configuration, the historical context from `AxisIndex`, and the current state of L1's prompt surface. It writes a flat dict back onto the individual — any subset of:
 
-L2 does not touch pipeline parameters directly. Its job is to reframe the search, not to prescribe specific parameter values.
+- a strategic **directive** (most common output)
+- **optimizer params** tweaks (creativity, candidate budget)
+- **task context** refinements
+- **section overrides** that toggle individual L1-surface sections off or replace their text
+- a **template override** that replaces L1's whole prompt body (rare; large mutation)
+- an **action** of `normal_round` or `probe_round`
 
-After L2 fires, the patience counter resets. L1 resumes with the new framing.
+Fields not set are left unchanged. L2 does not touch pipeline parameters directly. Its mutations land on the individual record (`OptSearchPoint`); the next L1 round reads from the same record. After L2 fires, the patience counter resets. See [l2-decision-tree.md](l2-decision-tree.md) for typical scenarios.
 
 ---
 

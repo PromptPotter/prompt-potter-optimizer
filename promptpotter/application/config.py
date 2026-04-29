@@ -143,16 +143,16 @@ TRACE_GT_RESOLVERS["termnorm"] = lambda d, q: _extract_ground_truth_map(d).get(_
 class ScoringSetConfig(BaseModel):
     """Round-level scoring-set evolution (Rasch + KG).
 
-    Off by default — when ``enabled`` is false the scoring set is the
-    static ``sample_dataset(dataset, sp_budget_ttest)`` it has always
-    been. When on, ``evolve_scoring_set()`` runs after each round, refits
+    On by default — ``evolve_scoring_set()`` runs after each round, refits
     Rasch on accumulated observations, and swaps low-info samples (narrow
     CI on δ_s) out for high-KG samples not currently in the scoring set.
+    Set ``enabled=False`` to fall back to the static
+    ``sample_dataset(dataset, sp_budget_ttest)`` slice.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(False, description="Master off-switch — false = today's behavior.")
+    enabled: bool = Field(True, description="Master switch — true = Rasch + KG evolution active.")
     swap_out_delta_se: float = Field(
         0.25,
         description="Swap-out threshold: SE on δ_s below which a sample is 'understood' "

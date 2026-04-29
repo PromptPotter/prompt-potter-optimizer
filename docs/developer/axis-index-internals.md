@@ -52,7 +52,7 @@ All consumers call one method with a chosen subset of digest keys. The cross-con
 
 Each consumer calls its own typed method: `digest_for_l1_generate()`, `digest_for_l1_critique()`, `digest_for_l2()`, `digest_for_l3()`. Each method composes a fixed set of keys for that layer and shares the underlying private accessors (no parameterized "keys" argument).
 
-The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 dispatch_msg](information-flow.md). This section documents the composition: which public and private accessors each key aggregates.
+The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 surface fields](information-flow.md). This section documents the composition: which public and private accessors each key aggregates.
 
 | Key | Source | Consumed by |
 |-----|--------|-------------|
@@ -70,7 +70,7 @@ The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 
 | `failure_group_insights` | `_axis_failure_group_deltas` (populated by `_recompute_failure_group_correlations()`) | L2 |
 | `volatile_queries` | `sample_index.flips(limit=50)` | L2 |
 
-The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. The dispatch_msg registry passes the `"HISTORICAL CONTEXT:"` header at each L1 generate / L1 critique / L2 site; L3 calls `format_axis_digest_block` directly into its `{{axes_digest}}` template hole with the same header. The renderer itself is header-agnostic.
+The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. The L1-generate / L1-critique / L2 section renderers pass the `"HISTORICAL CONTEXT:"` header at each call site; L3 calls `format_axis_digest_block` directly into its `{{axes_digest}}` template hole with the same header. The renderer itself is header-agnostic.
 
 ---
 

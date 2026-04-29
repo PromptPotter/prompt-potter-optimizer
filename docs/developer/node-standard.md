@@ -77,7 +77,7 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 - **Optimizer-discoverable parameters** — the node declares which parameters it accepts and their valid values. PromptPotter picks these up automatically as optimization axes — no hardcoding.
 - **Self-healing Rail 1** — `ValidationFailure` caught at L1 parse time; L2 teaches L1 not to repeat the invalid proposal. See [self-healing-internals.md](self-healing-internals.md).
 - **Self-healing Rail 2** — `RuntimeFailure` attached to the candidate mid-evaluation; L2 adjusts its own strategy; L3 replans if the pattern persists.
-- **Warnings → optimizer context** — per-query warnings from the node accumulate in `warning_inventory` and feed L2's dispatch_msg.
+- **Warnings → optimizer context** — per-query warnings from the node accumulate in `warning_inventory` and feed L2's `warning_inventory` surface field.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter. When patience runs out, the orchestrator escalates or halts the round.
 - **Warnings → search-point attachment** — failures are pinned to the exact configuration that caused them, not to the round. Future proposals that resemble the failing config are penalized.
 - **Skip** — a candidate producing too many degraded or empty results is eliminated mid-run; remaining candidates continue.

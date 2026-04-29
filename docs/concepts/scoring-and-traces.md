@@ -53,6 +53,8 @@ Every decision record splits into two halves:
 - **Flow-determining half** — what the divergence check reads. Stores pointers and invariants only: candidate identifiers, round numbers, and gate parameters that do not depend on the active scorer. Anything that is a function of scored numbers is derived on replay from the rescored trial, never stored, because a persisted value computed under the old scorer would manufacture false divergences.
 - **Archival half** — everything that matters for meta-analysis but has no business in a gate: full LLM outputs, diagnostic context, the recorded threshold under the old scorer. Replay never reads this half. A rescore that wiggles numeric inputs but leaves the gate intact does not flip the archival payload — the split is what lets a "noisy rescore that doesn't change the flow" pass silently.
 
+L2's surface mutations (section overrides, text overrides, template override) are not separate decision kinds. They live as OSP fields on each round's `opt_search_point` snapshot, so the trial JSON already records what L2 wrote. The only L2 decision recorded per fire is `probe_round_commitment` — its outcome is whether the next round runs as `normal_round` or `probe_round`.
+
 ### Fork commits to the new policy
 
 If the user wants the new scoring policy to continue, `fork` mints a new cycle rooted at the divergence point with a pointer back to its parent. Trials up to the divergence round are copied into the new tree; the shared trace data stays in place. The old cycle is left untouched. From the fork point forward, the new cycle makes its decisions under the current scorer; the old cycle remains the record of what happened under the original one.

@@ -34,21 +34,29 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 
 | Symbol | Module |
 |--------|--------|
-| `assemble_dispatch_msg` | `promptpotter/application/optimization/pipeline.py` |
 | `classify_result` | `promptpotter/application/optimization/elimination.py` |
+| `compile_l1_critique_blob` | `promptpotter/application/optimization/pipeline.py` |
+| `compile_l1_surface` | `promptpotter/application/optimization/pipeline.py` |
+| `compile_l2_surface` | `promptpotter/application/optimization/pipeline.py` |
 | `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/l1.py` |
 | `is_deprecated` | `promptpotter/application/optimization/elimination.py` |
+| `L1_GENERATE_SECTION_FIELDS` | `promptpotter/application/optimization/pipeline.py` |
+| `L1GenerateField` (enum) | `promptpotter/application/optimization/pipeline.py` |
+| `L1GenerateSurface` (dataclass) | `promptpotter/application/optimization/pipeline.py` |
 | `L1ScoringResult` | `promptpotter/application/optimization/l1.py` |
+| `L2RefineStrategy` | `promptpotter/application/optimization/pipeline.py` |
+| `L2Surface` (dataclass) | `promptpotter/application/optimization/pipeline.py` |
 | `l1_generate` | `promptpotter/application/optimization/l1.py` |
 | `l1_score` | `promptpotter/application/optimization/l1.py` |
 | `LayerCounter` | `promptpotter/application/optimization/cycle.py` |
 | `LayerTransition` | `promptpotter/application/optimization/pipeline.py` |
 | `llm_call` | `promptpotter/application/optimization/pipeline.py` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
+| `OptimizerAction` (enum) | `promptpotter/application/optimization/pipeline.py` |
 | `record_decision` / `replay_decisions` | `promptpotter/application/optimization/cycle.py` |
 | `run_l1_critique` | `promptpotter/application/optimization/pipeline.py` |
 | `score_population` | `promptpotter/application/optimization/l1.py` |

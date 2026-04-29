@@ -26,7 +26,19 @@ Authoritative definitions of terms used across the documentation. If a doc uses 
 
 **L1 / Layer 1** — the normal generation layer: evolve a population, measure fitness, critique. Fires every round.
 
-**L2 / Layer 2** — engaged when L1 hasn't improved for `l1_patience` rounds. Rewrites the task framing fed to L1. Does not touch pipeline parameters directly.
+**L2 / Layer 2** — the optimizer's strategist. Fires on L1 stall (per `l1_patience`). When it fires, writes any subset of fields onto the individual: a directive, optimizer params, task context, L1-surface section/text/template overrides, plus an `action` choice between `normal_round` and `probe_round`. Stays dormant when L1 is improving on its own. Does not touch pipeline parameters directly. See [what-is-l2.md](what-is-l2.md).
+
+**L1-generate surface** — the closed catalogue of every variable injected into L1's meta-prompt. Eight sections + four scalars, defined by the `L1GenerateField` enum. Sections are L2-mutable; scalars are factual. See [l1-generate-surface.md](l1-generate-surface.md).
+
+**Section override** — L2's write onto the individual that toggles a section off (`l1_section_overrides`) or replaces its text (`l1_section_overrides_text`). Persists across rounds until L2 flips it again.
+
+**Catalogue** — the menu of L1-generate sections + scalars rendered into L2's prompt. Built from `L1GenerateField` so it is code-derived; the optimizer cannot accidentally drop a section without a deliberate code change.
+
+**Probe round** — a round scoped to warned queries only, called by L2 setting `action = "probe_round"`. Used when one narrow failure mode dominates and L2 has a specific axis hypothesis to test on the smaller subset.
+
+**Normal round** — the default round mode (`action = "normal_round"`). Runs the full scoring set.
+
+**OSP mutation** — L2's canonical motion when it fires. L2 writes onto `OptSearchPoint` (the individual record); the next round's L1 reads from the same record. State that's not on the OSP does not survive between rounds.
 
 **L3 / Layer 3** — engaged when L2 also hasn't helped. Rewrites the strategic plan — a high-level framework that changes how L1 approaches the search. Rare.
 

@@ -203,7 +203,7 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |
 | Existing log renderer | `presentation/views/log_md.py::render_log_md` (purity pattern) |
 | Reusable formatters | `presentation/views/display.py` |
-| Dispatch-msg assembly | `application/optimization/pipeline.py::assemble_dispatch_msg` |
+| Surface compile path | `application/optimization/pipeline.py::compile_l1_surface`, `compile_l2_surface`, `compile_l1_critique_blob` |
 | Cycle finalize / round emission | `application/runner.py` |
 | Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
 | Parity test | `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` |

@@ -24,13 +24,19 @@ Five labeled sections, in dependency order:
    builders consumed by section renderers and the L1 round driver.
 
 5. **Layer dispatch + transitions** (``Layer``, ``LayerContext``,
-   ``assemble_dispatch_msg``, ``run_l1_critique``,
+   ``L1GenerateField``, ``L1GenerateSurface``, ``L2Surface``,
+   ``compile_l1_surface``, ``compile_l2_surface``,
+   ``compile_l1_critique_blob``, ``run_l1_critique``,
    ``format_l1_critique_for_prompt``, ``CritiqueContext``,
-   ``LayerTransition``, ``L2RefineStrategy``, ``L3ModifyPlan``) — the
-   five-noun flow: archive → AxisIndex (cached) → LayerContext (per-call
-   payload) → sections (pure formatters) → dispatch_msg, plus the L2/L3
-   transition templates that run an optimizer node and project the
-   parsed result back into ``OptSearchPoint`` updates.
+   ``OptimizerAction``, ``LayerTransition``, ``L2RefineStrategy``,
+   ``L3ModifyPlan``) — the flow: archive → AxisIndex (cached) →
+   LayerContext (per-call payload) → sections (pure formatters) →
+   surface (OSP overrides applied) → LLM. L1-generate's surface is
+   typed (``L1GenerateField`` registry + ``L1GenerateSurface`` payload)
+   and owned by L2 via OSP override fields (section visibility, section
+   text, whole-template body); L1-critique stays on the legacy blob path
+   because nothing external mutates it. L2 fires on stall and writes any
+   subset of these fields onto the next OSP.
 """
 
 from __future__ import annotations
@@ -86,21 +92,26 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "LAYER_ORDER",
+    "L1_GENERATE_SECTION_FIELDS",
     "CritiqueContext",
+    "L1GenerateField",
+    "L1GenerateSurface",
     "L2RefineStrategy",
+    "L2Surface",
     "L3ModifyPlan",
     "Layer",
     "LayerContext",
     "LayerTransition",
+    "OptimizerAction",
     "TrajectoryReport",
-    "TransitionAction",
     "TransitionResult",
-    "assemble_dispatch_msg",
     "build_cross_candidate_diff",
     "build_trajectory_report",
     "candidate_summaries",
     "compile_critique_context",
+    "compile_l1_critique_blob",
+    "compile_l1_surface",
+    "compile_l2_surface",
     "compile_layer_context",
     "decompose_prompt_fields",
     "decompose_prompt_fields_cached",
@@ -265,9 +276,17 @@ async def run_optimizer_node(
     json_schema: dict | None = None,
     user_content: str | None = None,
     recorder: RoundRecorder | None = None,
+    template: PromptTemplate | None = None,
 ) -> tuple[Any, str]:
-    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text)."""
-    template = load_optimizer_prompt(template_name)
+    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
+
+    When *template* is provided, it overrides the load-from-name path (used
+    by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt
+    body by writing ``template_override`` on its OSP). The trace metadata
+    still records ``template_name`` so observability stays continuous.
+    """
+    if template is None:
+        template = load_optimizer_prompt(template_name)
     prompt = template.compile_prompt(**compile_vars)
     if user_content is not None:
         messages: list[dict[str, str]] = [
@@ -1639,66 +1658,397 @@ _SECTIONS: dict[str, Callable[[LayerContext], str]] = {
 }
 
 
-LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
-    Layer.L1_GENERATE: (
-        "pipeline_schema_text",
-        "failure_analysis",
-        "axes_l1",
-        "task_context",
-        "escalation_probe",
-        "escalation_alert",
-        "l2_directive",
-        "plan",
-    ),
-    Layer.L1_CRITIQUE: _L1C_SECTION_ORDER,
-    Layer.L2: (
-        "escalation_section",
-        "warning_inventory",
-        "l2_directive",
-        "validation_failures",
-        "runtime_failures",
-        "axes_l2",
-    ),
+# L1-critique stays on the legacy blob path because nothing external
+# mutates it; L1-generate and L2 moved to typed ``L1GenerateSurface`` /
+# ``L2Surface`` payloads compiled below.
+_L1_CRITIQUE_ORDER: tuple[str, ...] = _L1C_SECTION_ORDER
+
+
+_ENUM_RENDER_CAP = 12
+
+
+def _render_schema_text(pipeline_schema: PipelineSchema) -> str:
+    """Pipeline schema for L1 context. Enums capped at ``_ENUM_RENDER_CAP``."""
+    lines: list[str] = []
+    npk = pipeline_schema.node_param_keys()
+    if not npk:
+        return ""
+
+    lines.append(
+        "VALID PIPELINE NODES AND PARAMETERS (only use these — do not invent nodes or params):"
+    )
+    for node_name, params in npk.items():
+        node = pipeline_schema.get_node(node_name)
+        descs = node.param_descriptions if node else {}
+        enums = node.param_allowed_values if node else {}
+        if not params:
+            lines.append(f"  {node_name}: (no tunable params)")
+            continue
+        param_parts: list[str] = []
+        for p in sorted(params):
+            desc = descs.get(p)
+            allowed = enums.get(p)
+            suffix_bits: list[str] = []
+            if desc:
+                suffix_bits.append(desc)
+            if allowed:
+                shown = list(allowed)[:_ENUM_RENDER_CAP]
+                extra = len(allowed) - len(shown)
+                suffix = "one of: " + ", ".join(shown)
+                if extra > 0:
+                    suffix += f" (+{extra} more)"
+                suffix_bits.append(suffix)
+            param_parts.append(f"{p} ({'; '.join(suffix_bits)})" if suffix_bits else p)
+        lines.append(f"  {node_name}: {', '.join(param_parts)}")
+
+    mutable = [n for n in pipeline_schema.nodes if n.output_schema and n.output_schema.fields]
+    if mutable:
+        lines.append("")
+        lines.append(
+            "OUTPUT SCHEMA MUTATIONS — use as output_schema param: "
+            '["+", name, type, is_array, desc] / ["-", name] / '
+            '["~", old, new, type, is_array, desc]'
+        )
+        for node in mutable:
+            assert node.output_schema is not None
+            lines.append(f"  {node.name}: {', '.join(node.output_schema.fields)}")
+
+    text = "\n".join(lines)
+    if pipeline_schema.available_models:
+        text += "\n\nAVAILABLE MODELS (only use these for model overrides):\n"
+        text += "\n".join(f"  {m}" for m in pipeline_schema.available_models)
+    return text
+
+
+# ---------------------------------------------------------------------------
+# L1-generate surface — closed registry + typed payload owned by L2 via OSP.
+# ---------------------------------------------------------------------------
+
+
+class L1GenerateField(enum.StrEnum):
+    """Closed registry of every variable injectable into the L1-generate prompt.
+
+    Section entries (the first 8) are what L2 can toggle off or replace via
+    ``OptSearchPoint.l1_section_overrides`` / ``l1_section_overrides_text``
+    when it fires. Scalar entries (the last 4) are factual state — always
+    rendered, never overridable. Adding a capability = enum entry + render
+    function + ``compile_l1_surface`` wiring; removing a capability = enum
+    entry deletion (deliberate code change).
+    """
+
+    # -- Sections (visibility/text-overridable by L2 when it fires) --
+    PIPELINE_SCHEMA_TEXT = "pipeline_schema_text"
+    FAILURE_ANALYSIS = "failure_analysis"
+    AXES_L1 = "axes_l1"
+    TASK_CONTEXT = "task_context"
+    ESCALATION_PROBE = "escalation_probe"
+    ESCALATION_ALERT = "escalation_alert"
+    L2_DIRECTIVE = "l2_directive"
+    PLAN = "plan"
+    # -- Scalars (factual, always rendered, not overridable) --
+    N_VARIANTS = "n_variants"
+    ACCURACY_PCT = "accuracy_pct"
+    N_QUERIES = "n_queries"
+    RENDERED_PROMPT = "rendered_prompt"
+
+
+L1_GENERATE_SECTION_FIELDS: tuple[L1GenerateField, ...] = (
+    L1GenerateField.PIPELINE_SCHEMA_TEXT,
+    L1GenerateField.FAILURE_ANALYSIS,
+    L1GenerateField.AXES_L1,
+    L1GenerateField.TASK_CONTEXT,
+    L1GenerateField.ESCALATION_PROBE,
+    L1GenerateField.ESCALATION_ALERT,
+    L1GenerateField.L2_DIRECTIVE,
+    L1GenerateField.PLAN,
+)
+
+_L1_GENERATE_SECTION_RENDERERS: dict[L1GenerateField, Callable[[LayerContext], str]] = {
+    L1GenerateField.PIPELINE_SCHEMA_TEXT: _section_pipeline_schema_text,
+    L1GenerateField.FAILURE_ANALYSIS: _section_failure_analysis,
+    L1GenerateField.AXES_L1: _section_axes_l1,
+    L1GenerateField.TASK_CONTEXT: _section_task_context,
+    L1GenerateField.ESCALATION_PROBE: _section_escalation_probe,
+    L1GenerateField.ESCALATION_ALERT: _section_escalation_alert,
+    L1GenerateField.L2_DIRECTIVE: _section_l2_directive,
+    L1GenerateField.PLAN: _section_plan,
+}
+
+_L1_GENERATE_FIELD_DESCRIPTIONS: dict[L1GenerateField, str] = {
+    L1GenerateField.PIPELINE_SCHEMA_TEXT: "Target pipeline + active steps + per-node schema.",
+    L1GenerateField.FAILURE_ANALYSIS: "Latest round's clustered failure patterns.",
+    L1GenerateField.AXES_L1: "AxisIndex digest for L1-generate (failure clusters, top axes).",
+    L1GenerateField.TASK_CONTEXT: "Structured domain context — domain, goals, challenges.",
+    L1GenerateField.ESCALATION_PROBE: "Probe-round per-query warning block (probe rounds only).",
+    L1GenerateField.ESCALATION_ALERT: "Aggregated pipeline-issue alert (non-probe).",
+    L1GenerateField.L2_DIRECTIVE: "L2's strategic directive for this round.",
+    L1GenerateField.PLAN: "L3's strategic framework.",
+    L1GenerateField.N_VARIANTS: "[scalar] How many candidates L1 must produce.",
+    L1GenerateField.ACCURACY_PCT: "[scalar] Current accuracy of the parent SearchPoint.",
+    L1GenerateField.N_QUERIES: "[scalar] Number of queries the parent was scored on.",
+    L1GenerateField.RENDERED_PROMPT: "[scalar] The current prompt being optimized.",
 }
 
 
-def assemble_dispatch_msg(
-    layer: Layer,
+@dataclass(frozen=True)
+class L1GenerateSurface:
+    """Typed payload of every variable injected into the L1-generate prompt.
+
+    Section fields (first 8) carry their own trailing ``\\n\\n`` separator
+    when non-empty so the template can concatenate them inertly. Scalar
+    fields (last 4) carry plain values. Built by :func:`compile_l1_surface`
+    after applying L2's per-section overrides from ``OptSearchPoint``.
+    """
+
+    pipeline_schema_text: str = ""
+    failure_analysis: str = ""
+    axes_l1: str = ""
+    task_context: str = ""
+    escalation_probe: str = ""
+    escalation_alert: str = ""
+    l2_directive: str = ""
+    plan: str = ""
+    # Scalars — factual, always rendered, not overridable.
+    n_variants: str = ""
+    accuracy_pct: str = ""
+    n_queries: str = ""
+    rendered_prompt: str = ""
+
+    def to_compile_vars(self) -> dict[str, str]:
+        """Map every registry member to its prompt-hole value."""
+        return {f.value: getattr(self, f.value) for f in L1GenerateField}
+
+
+def compile_l1_surface(
     cycle: Cycle,
     *,
     round_num: int = 0,
-    pipeline_schema_text: str = "",
+    n_variants: int,
+) -> L1GenerateSurface:
+    """Walk :class:`L1GenerateField`, render sections, apply OSP overrides.
+
+    Override application order per section:
+    1. ``cycle.opt_sp.l1_section_overrides[name] is False`` → empty string.
+    2. ``cycle.opt_sp.l1_section_overrides_text[name]`` set → use that text.
+    3. Otherwise → call the registered section renderer.
+
+    Non-empty section outputs gain a trailing ``\\n\\n`` so the template
+    body stays inert when sections gate off. The whole-template override
+    on ``cycle.opt_sp.l1_template_override`` is applied one layer up
+    (in ``l1.l1_generate``) by swapping the loaded template's
+    ``problem_description`` body before compile.
+    """
+    schema = cycle.session.pipeline_schema
+    schema_text = _render_schema_text(schema) if schema else ""
+    ctx = compile_layer_context(
+        Layer.L1_GENERATE,
+        cycle,
+        round_num=round_num,
+        pipeline_schema_text=schema_text,
+        pipeline_schema=schema,
+    )
+
+    overrides_visible = cycle.opt_sp.l1_section_overrides
+    overrides_text = cycle.opt_sp.l1_section_overrides_text
+
+    rendered: dict[str, str] = {}
+    for f in L1_GENERATE_SECTION_FIELDS:
+        name = f.value
+        if overrides_visible.get(name) is False:
+            text = ""
+        elif name in overrides_text:
+            text = overrides_text[name]
+        else:
+            text = _L1_GENERATE_SECTION_RENDERERS[f](ctx)
+        rendered[name] = (text + "\n\n") if text else ""
+
+    return L1GenerateSurface(
+        pipeline_schema_text=rendered[L1GenerateField.PIPELINE_SCHEMA_TEXT.value],
+        failure_analysis=rendered[L1GenerateField.FAILURE_ANALYSIS.value],
+        axes_l1=rendered[L1GenerateField.AXES_L1.value],
+        task_context=rendered[L1GenerateField.TASK_CONTEXT.value],
+        escalation_probe=rendered[L1GenerateField.ESCALATION_PROBE.value],
+        escalation_alert=rendered[L1GenerateField.ESCALATION_ALERT.value],
+        l2_directive=rendered[L1GenerateField.L2_DIRECTIVE.value],
+        plan=rendered[L1GenerateField.PLAN.value],
+        n_variants=str(n_variants),
+        accuracy_pct=f"{cycle.current_accuracy:.1%}",
+        n_queries=str(len(cycle.current_results)),
+        rendered_prompt=cycle.opt_sp.render(),
+    )
+
+
+# ---------------------------------------------------------------------------
+# L2 surface — typed payload + L1-generate field catalogue for L2's prompt.
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class L2Surface:
+    """Typed payload of every variable injected into the L2-context prompt.
+
+    Built by :func:`compile_l2_surface` from cycle state + the L1-generate
+    surface (so L2 always sees the catalogue of what L1 is currently
+    receiving). All section strings carry their own trailing ``\\n\\n``
+    when non-empty. ``l1_generate_field_catalogue`` is the menu of L1's
+    surface — built from the closed registry so L2 can never lose track
+    of a capability.
+    """
+
+    current_params: str = ""
+    task_context_section: str = ""
+    escalation_section: str = ""
+    warning_inventory: str = ""
+    l2_directive: str = ""
+    validation_failures: str = ""
+    runtime_failures: str = ""
+    axes_l2: str = ""
+    l1_generate_field_catalogue: str = ""
+
+    def to_compile_vars(self) -> dict[str, str]:
+        """Map every L2 prompt hole to its rendered value."""
+        return {
+            "current_params": self.current_params,
+            "task_context_section": self.task_context_section,
+            "escalation_section": self.escalation_section,
+            "warning_inventory": self.warning_inventory,
+            "l2_directive": self.l2_directive,
+            "validation_failures": self.validation_failures,
+            "runtime_failures": self.runtime_failures,
+            "axes_l2": self.axes_l2,
+            "l1_generate_field_catalogue": self.l1_generate_field_catalogue,
+        }
+
+
+_L2_SECTION_RENDERERS: tuple[tuple[str, Callable[[LayerContext], str]], ...] = (
+    ("escalation_section", _section_escalation_section),
+    ("warning_inventory", _section_warning_inventory),
+    ("l2_directive", _section_l2_directive),
+    ("validation_failures", _section_validation_failures),
+    ("runtime_failures", _section_runtime_failures),
+    ("axes_l2", _section_axes_l2),
+)
+
+
+def _format_l1_generate_field_catalogue(
+    l1_surface: L1GenerateSurface,
+    overrides_visible: dict[str, bool],
+    overrides_text: dict[str, str],
+) -> str:
+    """Render the L1-generate field catalogue for L2's prompt.
+
+    One line per registry entry: ``[ON]``/``[OFF]`` + name + description
+    (+ override-text preview when set). The catalogue is built from
+    :class:`L1GenerateField` so L2 always sees every section that exists
+    in code — including ones currently toggled off.
+    """
+    lines: list[str] = []
+    for f in L1GenerateField:
+        name = f.value
+        is_section = f in L1_GENERATE_SECTION_FIELDS
+        if not is_section:
+            state = "[scalar]"
+        elif overrides_visible.get(name) is False:
+            state = "[OFF]"
+        else:
+            state = "[ON]"
+        desc = _L1_GENERATE_FIELD_DESCRIPTIONS[f]
+        line = f"  {state} {name} — {desc}"
+        if name in overrides_text:
+            preview = overrides_text[name].strip().splitlines()[0][:80]
+            line += f"\n    override: {preview!r}"
+        lines.append(line)
+    return "\n".join(lines)
+
+
+def compile_l2_surface(
+    cycle: Cycle,
+    *,
+    round_num: int = 0,
     candidate_scores: list[dict] | None = None,
     escalation_check_result: dict | None = None,
     pipeline_params: dict | None = None,
-    scoring_result: L1ScoringResult | None = None,
-    pipeline_schema: PipelineSchema | None = None,
-) -> str:
-    """Walk the registry for *layer*, render each section, drop empties, join.
+) -> L2Surface:
+    """Build the per-call L2 surface — analysis sections + L1 catalogue.
 
-    Builds the per-call :class:`LayerContext` once (which pre-fetches the
-    layer-appropriate axis digest from ``cycle.axes`` and, on
-    L1_CRITIQUE, computes the cross-cutting :class:`CritiqueContext`),
-    then hands it to each section in :data:`LAYER_ORDER`. Returns ``""``
-    when no section produces content.
+    The L1-generate field catalogue is computed here (not in the
+    prompt template) so L2's view of L1's surface stays code-derived
+    and cannot drift from the registry.
     """
     ctx = compile_layer_context(
-        layer,
+        Layer.L2,
         cycle,
         round_num=round_num,
-        pipeline_schema_text=pipeline_schema_text,
-        pipeline_schema=pipeline_schema,
+        pipeline_schema=cycle.session.pipeline_schema,
         pipeline_params=pipeline_params,
         candidate_scores=candidate_scores,
         escalation_check_result=escalation_check_result,
+    )
+    rendered = {name: fn(ctx) for name, fn in _L2_SECTION_RENDERERS}
+    rendered = {k: (v + "\n\n") if v else "" for k, v in rendered.items()}
+
+    opt_sp = cycle.opt_sp
+    current_params = json.dumps(opt_sp.optimizer_params)
+
+    task_context_section = ""
+    if opt_sp.task_context:
+        tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
+        if tc_display:
+            task_context_section = (
+                "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
+                + json.dumps(tc_display, indent=2)
+            )
+
+    l1_surface = compile_l1_surface(cycle, round_num=round_num, n_variants=0)
+    catalogue = _format_l1_generate_field_catalogue(
+        l1_surface,
+        opt_sp.l1_section_overrides,
+        opt_sp.l1_section_overrides_text,
+    )
+
+    return L2Surface(
+        current_params=current_params,
+        task_context_section=task_context_section,
+        escalation_section=rendered["escalation_section"],
+        warning_inventory=rendered["warning_inventory"],
+        l2_directive=rendered["l2_directive"],
+        validation_failures=rendered["validation_failures"],
+        runtime_failures=rendered["runtime_failures"],
+        axes_l2=rendered["axes_l2"],
+        l1_generate_field_catalogue=catalogue,
+    )
+
+
+# ---------------------------------------------------------------------------
+# L1-critique blob — last consumer of the legacy register-walk pattern.
+# ---------------------------------------------------------------------------
+
+
+def compile_l1_critique_blob(
+    cycle: Cycle,
+    scoring_result: L1ScoringResult,
+    schema: PipelineSchema | None,
+    *,
+    round_num: int,
+) -> str:
+    """Walk L1-critique sections, drop empties, join with blank lines.
+
+    L1-critique stays on the legacy blob format because nothing external
+    mutates its surface — there is no L4-style channel that could drop a
+    section permanently. L1-generate and L2 graduated to typed surfaces.
+    """
+    ctx = compile_layer_context(
+        Layer.L1_CRITIQUE,
+        cycle,
+        round_num=round_num,
+        pipeline_schema=schema,
         scoring_result=scoring_result,
     )
     sections: dict[str, str] = {}
-    for name in LAYER_ORDER[layer]:
+    for name in _L1_CRITIQUE_ORDER:
         if text := _SECTIONS[name](ctx):
             sections[name] = text
-
-    return "\n\n".join(sections[name] for name in LAYER_ORDER[layer] if name in sections)
+    return "\n\n".join(sections[name] for name in _L1_CRITIQUE_ORDER if name in sections)
 
 
 async def run_l1_critique(
@@ -1712,12 +2062,11 @@ async def run_l1_critique(
     recorder: RoundRecorder | None = None,
 ) -> dict:
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict."""
-    dispatch_msg = assemble_dispatch_msg(
-        Layer.L1_CRITIQUE,
+    dispatch_msg = compile_l1_critique_blob(
         cycle,
+        scoring_result,
+        schema,
         round_num=round_num,
-        scoring_result=scoring_result,
-        pipeline_schema=schema,
     )
     result, prompt = await run_optimizer_node(
         template_name="l1_critique",
@@ -1757,22 +2106,36 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
 # ---------------------------------------------------------------------------
 
 
-class TransitionAction(enum.StrEnum):
-    """What the feedback cycle should do after an L2/L3 transition."""
+class OptimizerAction(enum.StrEnum):
+    """Whether the next round runs as a normal round or as a probe round.
 
-    CONTINUE = "continue"
-    PROBE = "probe"
+    Probe rounds scope evaluation to warned queries only; normal rounds
+    run on the full scoring set.
+    """
+
+    NORMAL_ROUND = "normal_round"
+    PROBE_ROUND = "probe_round"
 
 
 @dataclass
 class TransitionResult:
-    """L2/L3 transition result — new OptSearchPoint plus optional pipeline_params changes."""
+    """L2/L3 transition result.
+
+    L2 may write any combination of these fields on the next OSP — they
+    are independent. Surface mutations (`scheme_overrides`,
+    `text_overrides`, `template_override`) target L1's prompt surface;
+    `directive`, `optimizer_params`, and `task_context` are L2's strategic
+    levers; `action` controls whether the next round is normal or a probe.
+    """
 
     opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None
     task_context: TaskDecomposition | None = None
     l2_directive: str = ""
-    action: TransitionAction = TransitionAction.CONTINUE
+    action: OptimizerAction = OptimizerAction.NORMAL_ROUND
+    scheme_overrides: dict[str, bool] = field(default_factory=dict)
+    text_overrides: dict[str, str] = field(default_factory=dict)
+    template_override: str = ""
     debug_prompt: str = ""
     debug_response: dict | None = None
 
@@ -1850,7 +2213,15 @@ class LayerTransition:
 
 
 class L2RefineStrategy(LayerTransition):
-    """L2: tune ``optimizer_params`` + ``task_context`` + directive (one-round window)."""
+    """L2: refine the optimizer's strategy by writing onto ``OptSearchPoint``.
+
+    L2 fires on L1 stall (per ``l1_patience``). When it fires it can write
+    any combination of: a strategic directive, optimizer params, task
+    context, L1-surface section/text/template overrides. It also chooses
+    whether the next round is a normal round or a probe round
+    (:class:`OptimizerAction`). Fields not set in L2's output are left
+    untouched on the OSP.
+    """
 
     layer: ClassVar[Literal["L2", "L3"]] = "L2"
     template_name: ClassVar[str] = "l2_context"
@@ -1865,32 +2236,15 @@ class L2RefineStrategy(LayerTransition):
         round_num: int,
         escalation_check_result: dict | None,
     ) -> dict:
-        opt_sp = cycle.opt_sp
-        task_context_section = ""
-        if opt_sp.task_context:
-            tc_display = {
-                k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v
-            }
-            task_context_section = (
-                "\n\nTASK CONTEXT (structured domain understanding — refine if inaccurate):\n"
-                + json.dumps(tc_display, indent=2)
-            )
-
         candidate_scores = cycle.rounds[-1].candidate_scores if cycle.rounds else []
-        dispatch_msg = assemble_dispatch_msg(
-            Layer.L2,
+        surface = compile_l2_surface(
             cycle,
             round_num=round_num,
             candidate_scores=candidate_scores,
             escalation_check_result=escalation_check_result,
             pipeline_params=pipeline_params,
         )
-
-        return {
-            "current_params": json.dumps(opt_sp.optimizer_params),
-            "task_context_section": task_context_section,
-            "dispatch_msg": ("\n\n" + dispatch_msg) if dispatch_msg else "",
-        }
+        return surface.to_compile_vars()
 
     def build_result(
         self,
@@ -1900,7 +2254,9 @@ class L2RefineStrategy(LayerTransition):
         *,
         pipeline_params: dict | None,
     ) -> TransitionResult:
-        changes: dict = {}
+        section_names = {f.value for f in L1_GENERATE_SECTION_FIELDS}
+
+        changes: dict[str, Any] = {}
         if raw.get("optimizer_params"):
             new_params = {**opt_sp.optimizer_params, **raw["optimizer_params"]}
             changes["optimizer_params"] = new_params
@@ -1914,20 +2270,45 @@ class L2RefineStrategy(LayerTransition):
                 new_task_context = merged
 
         try:
-            action = TransitionAction(raw.get("action", "continue"))
+            action = OptimizerAction(raw.get("action", "normal_round"))
         except ValueError:
-            action = TransitionAction.CONTINUE
+            action = OptimizerAction.NORMAL_ROUND
 
         l2_directive = raw.get("directive", "")
         if not isinstance(l2_directive, str):
             l2_directive = ""
 
+        scheme_overrides_raw = raw.get("scheme_overrides") or {}
+        text_overrides_raw = raw.get("text_overrides") or {}
+        scheme_overrides: dict[str, bool] = {}
+        text_overrides: dict[str, str] = {}
+        if isinstance(scheme_overrides_raw, dict):
+            for k, v in scheme_overrides_raw.items():
+                if k in section_names:
+                    scheme_overrides[k] = bool(v)
+                else:
+                    logger.warning("L2 scheme_overrides: ignoring unknown section %r", k)
+        if isinstance(text_overrides_raw, dict):
+            for k, v in text_overrides_raw.items():
+                if k in section_names:
+                    text_overrides[k] = str(v)
+                else:
+                    logger.warning("L2 text_overrides: ignoring unknown section %r", k)
+
+        template_override = raw.get("template_override", "")
+        if not isinstance(template_override, str):
+            template_override = ""
+
         logger.debug(
-            "L2 refine_strategy: %d param changes, task_context %s, action=%s, directive=%d chars",
+            "L2 refine_strategy: %d param changes, task_context %s, action=%s, "
+            "directive=%d chars, scheme_overrides=%d, text_overrides=%d, template_override=%d chars",
             len(raw.get("optimizer_params", {})),
             "updated" if new_task_context else "unchanged",
             action,
             len(l2_directive),
+            len(scheme_overrides),
+            len(text_overrides),
+            len(template_override),
         )
 
         new_opt_sp = opt_sp.mutate(**changes) if changes else opt_sp
@@ -1936,6 +2317,9 @@ class L2RefineStrategy(LayerTransition):
             task_context=new_task_context,
             l2_directive=l2_directive,
             action=action,
+            scheme_overrides=scheme_overrides,
+            text_overrides=text_overrides,
+            template_override=template_override,
             debug_prompt=prompt,
             debug_response=raw,
         )
@@ -1946,9 +2330,21 @@ class L2RefineStrategy(LayerTransition):
         if result.task_context:
             cycle.opt_sp.task_context = result.task_context
         cycle.opt_sp.l2_directive = result.l2_directive
+        if result.scheme_overrides:
+            cycle.opt_sp.l1_section_overrides = {
+                **cycle.opt_sp.l1_section_overrides,
+                **result.scheme_overrides,
+            }
+        if result.text_overrides:
+            cycle.opt_sp.l1_section_overrides_text = {
+                **cycle.opt_sp.l1_section_overrides_text,
+                **result.text_overrides,
+            }
+        if result.template_override:
+            cycle.opt_sp.l1_template_override = result.template_override
         cycle.escalation.l2.record_entry(cycle.best_accuracy, cycle.best_composite)
 
-        is_probe = result.action == TransitionAction.PROBE
+        is_probe = result.action == OptimizerAction.PROBE_ROUND
         record_decision(
             cycle.pending_decisions,
             "probe_round_commitment",
@@ -1985,6 +2381,9 @@ class L2RefineStrategy(LayerTransition):
             "l2_round": cycle.escalation.l2.round,
             "param_changes_count": len(result.opt_search_point.optimizer_params),
             "task_context_changed": result.task_context is not None,
+            "scheme_overrides_count": len(result.scheme_overrides),
+            "text_overrides_count": len(result.text_overrides),
+            "template_override_changed": bool(result.template_override),
             "changes_description": result.opt_search_point.lineage.changes_description or "",
             "pipeline_params_changed": result.pipeline_params is not None,
             "pipeline_params": result.pipeline_params,

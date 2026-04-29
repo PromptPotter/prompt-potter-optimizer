@@ -12,7 +12,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | Score effect | Synthetic 0 (zero backend calls) | Real score stands (candidate is eliminated mid-eval) |
 | Per-candidate memory | `validation_failures` | `runtime_failures` |
 | Outer-memory mirror | None — L2 reads from `candidate_scores` only | Cumulative `cycle.opt_sp.runtime_failures` (every round's new failures deduped and appended) |
-| Healer | **L2 teaches L1** via a directive (`"use ONLY one of: …"`) | **L2 heals itself** — updates its own directive / `task_context` / `optimizer_params` to re-shape what L1 is allowed to search over |
+| Healer | **L2 writes a directive** like `"use ONLY one of: …"` | **L2 updates its own outputs** — directive / `task_context` / `optimizer_params` / L1-surface section overrides |
 | Escalation | None (L2 can always articulate the constraint) | **L3** `modify_plan` — when the accumulated list keeps growing despite L2's adjustments, L3 reads the trail and replans |
 
 Both rails share the rule *"detect → trace on the candidate → surface on `candidate_scores` → feed the right teacher"* but diverge on **who the teacher is** and **what the healing action looks like**.
@@ -25,9 +25,9 @@ Some L1-generated candidates are invalid before evaluation starts — the optimi
 
 `validate_overrides()` in `application/optimization/l1.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
-**L2 teaches L1.** L2 `refine_strategy` already reads escalation reports and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*). The directive is L1 generate's only guidance channel, so L1 next round follows it and heals itself.
+**L2 teaches L1.** L2 `refine_strategy` already reads escalation reports and the previous directive; validation failures land in the L2 surface as a `validation_failures` section (see [l2-internals.md](l2-internals.md)). L2 writes a directive that names the disallowed value (e.g. *"do not propose gpt-4o for model"*). The directive lands on `OptSearchPoint.l2_directive` and L1 next round reads it as primary signal, healing itself.
 
-Flow: `detect → attach to candidate memory → synthetic-0 → surface on candidate_scores → L2 directive → L1 next round heals`.
+Flow: `detect → attach to candidate memory → synthetic-0 → surface on candidate_scores → L2 writes directive → L1 next round heals`.
 
 ---
 
@@ -37,7 +37,7 @@ Some candidates are valid at parse time — every parameter is in the allowed ra
 
 **Outer-memory mirror.** After the round, every new runtime failure is appended to the outer optimizer state — deduplicated by `(source, dominant warning, observed config)` so recurring patterns don't bloat the list. This trail follows the optimizer forward automatically. It is never cleared — it represents discovered runtime constraints, not one-round guidance.
 
-**L2 heals itself.** L2 receives two partitions: `NEW (this round)` and `ACCUMULATED (surviving from earlier rounds despite L2 adjustment)`. The `ACCUMULATED` section is the real signal — if items survived L2's prior strategy adjustments, L2's last angle didn't work and it must try a different one. L2's job is NOT to parrot "don't use X" to L1 (that's Rail 1's pattern) — it must update its own outputs: tighten the directive to name the failing config range, refine task context with the discovered constraint, or adjust optimizer params to narrow L1's search.
+**L2 heals itself.** L2 receives two partitions: `NEW (this round)` and `ACCUMULATED (surviving from earlier rounds despite L2 adjustment)`. The `ACCUMULATED` section is the real signal — if items survived L2's prior strategy adjustments, L2's last angle didn't work and it must try a different one. L2's job is NOT to parrot "don't use X" to L1 (that's Rail 1's pattern) — it must update its own outputs: tighter directive naming the failing config range, refined task context, adjusted optimizer params, or section overrides that gate misleading sections off / replace them with hand-written content to narrow the search.
 
 **L3 replans on escalation.** When the accumulated list keeps growing across L2 rounds, L3 receives it as discovered constraints on the search space and must either change pipeline params (switch model, raise a param floor, swap a node) or change the plan to steer L1/L2 around it.
 

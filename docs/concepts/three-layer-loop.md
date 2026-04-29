@@ -1,6 +1,6 @@
 # The Three-Layer Loop
 
-PromptPotter's optimizer runs three layers, each at a different cadence. L1 changes every round. L2 fires when L1 has stalled for several rounds in a row. L3 fires when L2 also fails to help.
+PromptPotter's optimizer runs three layers, each at a different cadence. L1 changes every round. L2 fires only when L1 has stalled — writing onto the individual to steer the next round. L3 fires when L2's strategy stops moving the needle.
 
 ```
 ┌─ ONE ROUND ────────────────────────────────────────────────────────────┐
@@ -29,10 +29,10 @@ Each layer fires at a different cadence: L1 every generation, L2 on consecutive-
 |-------|-------|---------|-----------------|
 | **L1 Generate** | Every round | Pipeline parameters (prompt fields, thresholds, model params, schema overrides) | Task framing, meta-settings |
 | **L1 Critique** | Every round | Which failure patterns to focus on; what L1 should prioritize next | Specific parameter values |
-| **L2 Refine** | Escalation only (stall, degradation) | Task context, meta-settings (creativity, candidate budget), a directive that steers L1 | Pipeline parameters |
+| **L2 Refine** | On L1 stall (escalation-gated) | Any subset of: directive, optimizer params, task context, L1-surface overrides, action (normal vs probe round). Owns L1's prompt-surface state. | Pipeline parameters |
 | **L3 Plan** | L2 stalls | The strategic plan — a high-level framework shaping how L1 searches | Pipeline parameters, task context |
 
-L2 does not prescribe parameter values. It reframes *how* L1 searches; L1 still picks the specific values. Same relationship between L3 and L2.
+L2 does not prescribe parameter values. It reframes *how* L1 searches — by writing onto the individual record (the `OptSearchPoint`) — and L1 still picks the specific values. Same relationship between L3 and L2. L2's full role is documented in [what-is-l2.md](what-is-l2.md), [l2-decision-tree.md](l2-decision-tree.md), [l1-generate-surface.md](l1-generate-surface.md), and [optsearchpoint-as-state.md](optsearchpoint-as-state.md).
 
 ## What L1 proposes each round
 
@@ -57,7 +57,7 @@ The critique is the every-round intelligence hub. It's what makes L1 Generate in
 
 A stall escalates upward, but each layer continues to run in its own slot. When L3 fires, the next round still has L3, L2, and L1 all running — L3's plan shapes L2's refinement, which shapes L1's generation. Higher layers don't replace lower ones; they constrain them.
 
-For the mechanics of each layer — what data flows in, what memory persists, what signals escalation — see [self-healing.md](self-healing.md) and [../developer/information-flow.md](../developer/information-flow.md). L2-driven add/remove of prompt fields is a future direction; see [../developer/prompt-scheme-internals.md](../developer/prompt-scheme-internals.md).
+For the mechanics of each layer — what data flows in, what memory persists, what signals escalation — see [self-healing.md](self-healing.md) and [../developer/information-flow.md](../developer/information-flow.md). L2 can toggle and replace prompt-surface sections via section overrides on the individual; see [l1-generate-surface.md](l1-generate-surface.md) and [../developer/l1-generate-surface.md](../developer/l1-generate-surface.md). Add/remove of fields from the *catalogue itself* is still a code-level change.
 
 ## Inspiration and call sites
 
