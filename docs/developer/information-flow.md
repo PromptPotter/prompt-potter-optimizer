@@ -15,7 +15,7 @@ archive ──► AxisIndex (cached) ──► LayerContext (per-call) ──►
 1. **archive** — `MeasurementArchive` under `library/measurements/`. Append-only fact table; one row per `(sample × config → outcome)`. The single source of truth.
 2. **AxisIndex** — derived axis-keyed view over the archive. Refreshes incrementally each round (cursor: `_axis_seen_runs` for axis side, `sample_index._seen_runs` for sample side). Hosts `digest_for_l1_generate / _l1_critique / _l2 / _l3` — pure derivations of cached state.
 3. **LayerContext** — per-call payload built once by `compile_layer_context(layer, cycle, ...)`. Bundles the persistent `cycle` reference, per-call inputs (round_num, scoring_result, candidate_scores, …), the layer-appropriate axis digest pre-fetched from `cycle.axes`, and (only on L1_CRITIQUE) a `_CritiqueContext` with cross-cutting facts.
-4. **sections** — pure formatters with signature `(ctx: LayerContext) -> str`. Each returns its rendered text or `""` when inactive. No I/O, no recomputation. The complete catalogue lives in `application/optimization/nodes/dispatch_msg_registry.py::_SECTIONS`.
+4. **sections** — pure formatters with signature `(ctx: LayerContext) -> str`. Each returns its rendered text or `""` when inactive. No I/O, no recomputation. The complete catalogue lives in `application/optimization/pipeline.py::_SECTIONS`.
 5. **dispatch_msg** — `assemble_dispatch_msg()` walks `LAYER_ORDER[layer]`, calls each section, drops empties, joins with `\n\n`. Result is the `{{dispatch_msg}}` block injected into the L1/L2/L3 prompt template.
 
 If you can answer "what enters L1?" by listing what's in `LayerContext`, the flow is minimally knotted — by construction.
@@ -45,7 +45,7 @@ L3 sees only the last 3 L2 outcomes (what changed, whether accuracy moved) — n
 
 ## L1 / L2 dispatch_msg
 
-Fields assembled by `assemble_dispatch_msg()` from the declarative registry in `application/optimization/nodes/dispatch_msg_registry.py`. The same registry covers all four layers (`Layer.L1_GENERATE`, `Layer.L1_CRITIQUE`, `Layer.L2`, `Layer.L3`); this table covers L1 generate and L2.
+Fields assembled by `assemble_dispatch_msg()` from the declarative registry in `application/optimization/pipeline.py`. The same registry covers all four layers (`Layer.L1_GENERATE`, `Layer.L1_CRITIQUE`, `Layer.L2`, `Layer.L3`); this table covers L1 generate and L2.
 
 | Field | L1 | L2 | Retention | Mutex | Description |
 |-------|----|----|-----------| ------|-------------|

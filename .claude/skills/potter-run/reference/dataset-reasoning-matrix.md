@@ -28,4 +28,4 @@ If a hard subtask still trips on either model, the operator can:
 1. Override per-cycle: `pipeline_overrides.llm_only.reasoning_effort = "none"` in `campaign.json`.
 2. Or override `pipeline_overrides.llm_only.max_tokens = 8192` (or higher) — but this is model-specific tuning, not a dataset default.
 
-See `datasets/bbeh/task_description.md` for the trap description and `promptpotter/application/optimization/diagnostics.py:97-121` for the `classify_result()` rule table.
+See `datasets/bbeh/task_description.md` for the trap description and `promptpotter/application/optimization/elimination.py` for the `classify_result()` rule table.

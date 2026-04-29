@@ -16,7 +16,7 @@ For the allowlist of phase events and what each emits, see [../developer/informa
 
 ## Langfuse integration
 
-When `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` are set in `.env`, traces also go to Langfuse cloud. The integration lives in `promptpotter/infrastructure/tracing/langfuse_client.py` and the sink in `promptpotter/infrastructure/tracing/sinks/langfuse_sink.py`.
+When `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` are set in `.env`, traces also go to Langfuse cloud. The integration and sink both live in `promptpotter/infrastructure/tracing.py`.
 
 Trace shape:
 
@@ -29,13 +29,13 @@ A mirror of what's sent to Langfuse is persisted locally under `campaigns/{cycle
 
 ### Backfill
 
-If Langfuse was off when a campaign ran and you want to push historical traces up later, `promptpotter/infrastructure/tracing/langfuse_backfill.py` reads the local shadow and replays it. Useful for resurrecting runs when cloud observability was added mid-project.
+If Langfuse was off when a campaign ran and you want to push historical traces up later, the backfill helper in `promptpotter/infrastructure/tracing.py` reads the local shadow and replays it. Useful for resurrecting runs when cloud observability was added mid-project.
 
 ---
 
 ## MLflow sink
 
-Each round can optionally be logged as an MLflow run, gated by `settings.MLFLOW_ENABLED` (default `False`). Tracking URI points at `library/mlruns/` under the tenant root, and the experiment name is `{tenant_id}/{cycle_id}` so every cycle owns its own experiment. Implementation: `promptpotter/infrastructure/tracing/sinks/mlflow_sink.py`. The sink installs alongside the file and Langfuse sinks — no other observability surface changes when it's toggled. Turn it on by setting `MLFLOW_ENABLED=true` in `.env`.
+Each round can optionally be logged as an MLflow run, gated by `settings.MLFLOW_ENABLED` (default `False`). Tracking URI points at `library/mlruns/` under the tenant root, and the experiment name is `{tenant_id}/{cycle_id}` so every cycle owns its own experiment. Implementation: `promptpotter/infrastructure/tracing.py`. The sink installs alongside the file and Langfuse sinks — no other observability surface changes when it's toggled. Turn it on by setting `MLFLOW_ENABLED=true` in `.env`.
 
 ---
 

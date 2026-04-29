@@ -792,7 +792,7 @@ class CampaignStore(EntityStore):
 
         Missing trials are skipped silently (``None`` from
         :meth:`load_trial`). Used by the resume-divergence walker in
-        :mod:`promptpotter.application.campaign.decisions` to re-derive
+        :mod:`promptpotter.application.optimization.cycle` to re-derive
         each recorded decision under the current scorer.
         """
         out: list[dict[str, Any]] = []

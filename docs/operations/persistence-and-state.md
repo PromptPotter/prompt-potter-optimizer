@@ -65,7 +65,7 @@ Full tree:
 
 Prior evaluation results are replayed without calling the backend when a new pipeline configuration shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume and rewind are driven entirely by `trials/trial_NNNN.json`.
 
-**Deprecated-sample eviction.** Entries in `library/measurements/` whose `classify_result()` (in `application/optimization/diagnostics.py`) returns any fatal code are written normally so the trace record stays intact for forensic analysis, but they are evicted at load — never served as cache. The next encounter with that query gets a fresh backend call and the resulting `QueryResult` is tagged `retry_of_deprecated_cache`. Eviction is purely load-side, in `score_search_point::_filter_deprecated_priors`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the full operator-facing framing.
+**Deprecated-sample eviction.** Entries in `library/measurements/` whose `classify_result()` (in `application/optimization/elimination.py`) returns any fatal code are written normally so the trace record stays intact for forensic analysis, but they are evicted at load — never served as cache. The next encounter with that query gets a fresh backend call and the resulting `QueryResult` is tagged `retry_of_deprecated_cache`. Eviction is purely load-side, in `score_search_point::_filter_deprecated_priors`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the full operator-facing framing.
 
 ---
 
@@ -106,7 +106,7 @@ The resume source of truth. Each completed round writes its serialized `OptSearc
 
 ## Entry-point emission boundary
 
-Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. The sole writer is `CampaignPersistenceEmitter` in `promptpotter/infrastructure/persistence/session_emitter.py`. The `CAMPAIGN_ARTIFACTS` and `SESSION_ARTIFACTS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract and enforces both sets. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
+Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. The sole writer is `CampaignPersistenceEmitter` in `promptpotter/infrastructure/persistence.py`. The `CAMPAIGN_ARTIFACTS` and `SESSION_ARTIFACTS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract and enforces both sets. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
 
 ---
 

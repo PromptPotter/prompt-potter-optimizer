@@ -33,7 +33,7 @@ Concept overview in [`../concepts/measurement-archive.md`](../concepts/measureme
 
 ## The `Measurement` row
 
-`promptpotter/domain/measurement.py`:
+`promptpotter/domain/sample.py`:
 
 ```python
 @dataclass(frozen=True, slots=True)

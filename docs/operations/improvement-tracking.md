@@ -178,6 +178,6 @@ Per-query steering is intentionally not supported by this file-drop. Changing `c
 
 - Evaluator registry + default formula: [`promptpotter/application/scoring/evaluators.py`](../../promptpotter/application/scoring/evaluators.py)
 - Composite computation gateway: [`promptpotter/application/scoring/metrics.py::compute_composite_score`](../../promptpotter/application/scoring/metrics.py)
-- Hot-swap module: [`promptpotter/application/scoring/scoring_steer.py`](../../promptpotter/application/scoring/scoring_steer.py)
-- Wired into `_post_round` after `cb.on_round_complete`: [`promptpotter/application/campaign/runner.py`](../../promptpotter/application/campaign/runner.py)
+- Hot-swap module: [`promptpotter/application/scoring/formula.py`](../../promptpotter/application/scoring/formula.py)
+- Wired into `_post_round` after `cb.on_round_complete`: [`promptpotter/application/runner.py`](../../promptpotter/application/runner.py)
 - Per-round trajectory mirror: [`promptpotter/domain/opt_search_point.py::RoundSummary`](../../promptpotter/domain/opt_search_point.py)

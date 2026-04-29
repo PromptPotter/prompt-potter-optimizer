@@ -35,7 +35,7 @@ Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. T
 
 ### 1. L1 behavior checks
 
-`promptpotter/application/campaign/l1_behavior_checks.py`. Registry of programmatic checks: `(round_dict, ctx) -> CheckResult`. Each check looks at one round's output and verdicts ✓/✗ + evidence string. Pure functions, no I/O.
+`promptpotter/application/l1_behavior_checks.py` (planned — landing site after V10 hoist). Registry of programmatic checks: `(round_dict, ctx) -> CheckResult`. Each check looks at one round's output and verdicts ✓/✗ + evidence string. Pure functions, no I/O.
 
 | check_id | rule |
 |---|---|
@@ -50,7 +50,7 @@ Adding a check = one-function diff. New unknown unknowns land here as the operat
 
 ### 2. Per-cycle `review.md`
 
-`promptpotter/application/campaign/review.py`. Pure renderer (peer of `log_md.py`).
+`promptpotter/application/review.py` (planned — landing site after V10 hoist). Pure renderer (peer of `presentation/views/log_md.py`).
 
 ```python
 def render_review_md(
@@ -91,7 +91,7 @@ Parent composite: `baseline_composite` for round 1, `trials[r-1].composite` ther
 
 ### 4. Cross-cycle leaderboard
 
-`promptpotter/application/campaign/leaderboard.py`. Read-only shim `scripts/ppot_review.py`.
+`promptpotter/application/leaderboard.py` (planned — landing site after V10 hoist). Read-only shim `scripts/ppot_review.py`.
 
 Row: `cycle_id | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | baseline_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
 
@@ -201,10 +201,10 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 | Per-round trace | `campaigns/{cycle_id}/.cache/rounds/round_NNNN.json` (`nodes.l1_generate`, `nodes.l1_score`, `nodes.l1_critique`) |
 | Per-round optimizer state | `campaigns/{cycle_id}/trials/trial_NNNN.json` |
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |
-| Existing log renderer | `application/campaign/log_md.py::render_log_md` (purity pattern) |
-| Reusable formatters | `presentation/views/formatting.py` |
-| Dispatch-msg assembly | `application/optimization/nodes/dispatch_msg_registry.py` |
-| Cycle finalize / round emission | `application/campaign/runner.py` |
+| Existing log renderer | `presentation/views/log_md.py::render_log_md` (purity pattern) |
+| Reusable formatters | `presentation/views/display.py` |
+| Dispatch-msg assembly | `application/optimization/pipeline.py::assemble_dispatch_msg` |
+| Cycle finalize / round emission | `application/runner.py` |
 | Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
 | Parity test | `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` |
 

@@ -35,7 +35,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **What shipped:**
 
-1. `dataset_name` lives on `Session` (`application/campaign/campaign_setup.py`) and `CampaignConfig` (`application/campaign/config.py`). `pipeline_name` is **not** a separate field — pipeline identity is carried by `pipeline_schema.name` + `JobSearchPoint.content_hash(dataset)` (truncated, `cycle_` prefix).
+1. `dataset_name` lives on `Session` (`application/bootstrap.py`) and `CampaignConfig` (`application/config.py`). `pipeline_name` is **not** a separate field — pipeline identity is carried by `pipeline_schema.name` + `JobSearchPoint.content_hash(dataset)` (truncated, `cycle_` prefix).
 2. Store layout is `{tenant_id}/campaigns/{cycle_id}/` flat — datasets and pipelines became identity inputs to `cycle_id` instead of path components. Cleaner outcome than the originally-planned `{backend_id}/{dataset}/{pipeline}/...` nesting.
 3. `active_session.json` carries `{tenant_id, session_id, cycle_id}` (`infrastructure/store/stores.py:312`). Backend, dataset, and pipeline identity are reconstructed from `session.json` state and the live `pipeline.json`. `cmd_optimize` recomputes the cycle hash on every run; if it differs, a fresh session+cycle auto-mints before baseline runs.
 4. CLI: `--dataset-name` exists on `init` (`presentation/cli/campaign_runner.py`). `--pipeline` was not built — pipeline selected by editing `datasets/{name}/pipeline.json`; revisit in M12 when the connector swap motivates it.
@@ -120,7 +120,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 3. **Per-cycle artifacts in `CAMPAIGN_ARTIFACTS` land in `campaigns/{cycle_id}/`; per-session artifacts in `SESSION_ARTIFACTS` land in `sessions/{session_id}/`.** The two sets are disjoint and parity is enforced by `tests/test_artifact_parity.py`.
 
 **Semantic invariant: sessions and campaigns are separate.** Two mint points per `init` (one for each tree); the parent pointer in `index.json::parent_session_id` keeps the link addressable. Code shape:
-- `SessionStore` (`infrastructure/store/session_store.py`) owns `sessions/{session_id}/`.
+- `SessionStore` (`infrastructure/store/stores.py`) owns `sessions/{session_id}/`.
 - `CampaignStore` owns `campaigns/{cycle_id}/`; its `create()` records `parent_session_id` on the campaign.
 - `Stores` dataclass exposes both `sessions` and `campaigns` fields.
 - `active_session.json` payload is `{tenant_id, session_id, cycle_id}`.
@@ -276,12 +276,11 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 | Area | Files |
 |------|-------|
 | Optimizer pipeline | `promptpotter/application/optimization/pipeline.py`, `optimizer_pipeline.json` |
-| LLM client | `promptpotter/infrastructure/llm/client.py` |
-| Scoring | `promptpotter/domain/scoring.py` |
-| Dataset builder | `promptpotter/application/datasets/builder.py` |
-| Dataset store | `promptpotter/infrastructure/store/dataset_run_store.py` |
-| Session store | `promptpotter/infrastructure/store/session_store.py` |
-| Campaign store | `promptpotter/infrastructure/store/campaign_store.py` |
+| LLM client | `promptpotter/infrastructure/llm.py` |
+| Scoring | `promptpotter/application/scoring/formula.py` |
+| Dataset builder | `promptpotter/application/datasets/datasets.py` |
+| Measurement archive | `promptpotter/infrastructure/store/measurement_archive.py` |
+| Session + Campaign stores | `promptpotter/infrastructure/store/stores.py` |
 | CLI live output | `promptpotter/presentation/cli/campaign_runner.py`, `promptpotter/presentation/views/live.py` |
 | Notebook | `notebooks/optimization_campaign.ipynb` |
 | Renderers | `promptpotter/presentation/views/` |

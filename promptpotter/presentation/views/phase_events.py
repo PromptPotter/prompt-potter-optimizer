@@ -1,7 +1,7 @@
 """Phase-event renderers — pure functions over view dicts.
 
 Each function takes the JSON ``view`` produced by
-``application.campaign.phase_views`` and returns a formatted string. Zero
+``presentation.views.phase_views`` and returns a formatted string. Zero
 domain-model knowledge. The dispatch entry point ``render_phase_event(event_record)``
 accepts a phase-event record (``{phase, event, round, view, ...}``) and
 returns the rendered string, or ``""`` if no renderer is registered.

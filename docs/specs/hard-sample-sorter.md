@@ -29,7 +29,7 @@ Nothing else. No rendering. No CLI. No new persisted artifact. The primitive exi
 
 ### Phase 2 — CLI + notebook ASCII heatmap
 
-Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `application/campaign/log_md.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
+Intermediate checkpoint. The compact ASCII heatmap of the candidate×sample matrix is rendered inline into `log.md` at finalize (and at round boundaries when the digest regenerates). Reuses the phase-1 primitive plus the existing Rasch fit held in `EvolveResult.rasch`. Lives in `presentation/views/log_md.py::render_hard_sample_heatmap`. Optional promotion of the δ_s leaderboard from the compact `hardness_top` field into a standalone campaign artifact will be decided in this phase.
 
 ### Phase 3 — webapp heatmap
 
@@ -116,6 +116,6 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 ## References
 
 - Methods doc: [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md)
-- Scoring-set evolution mechanism: `promptpotter/application/intelligence/scoring_set.py`
-- Rasch posterior: `promptpotter/application/intelligence/rasch.py::RaschPosterior`
+- Scoring-set evolution mechanism: `promptpotter/application/intelligence/exploration.py`
+- Rasch posterior: `promptpotter/application/intelligence/exploration.py::RaschPosterior`
 - Downstream webapp home (phase 3): [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)

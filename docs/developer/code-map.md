@@ -8,59 +8,62 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 
 | Symbol | Module |
 |--------|--------|
-| `AxisImpact` | `promptpotter/application/intelligence/axis_index.py` |
-| `CampaignConfig` | `promptpotter/application/campaign/config.py` |
+| `AxisImpact` | `promptpotter/application/intelligence/indexes.py` |
+| `AxisIndex` | `promptpotter/application/intelligence/indexes.py` |
+| `CampaignConfig` | `promptpotter/application/config.py` |
 | `Cycle` | `promptpotter/application/optimization/cycle.py` |
-| `Decision` | `promptpotter/application/campaign/decisions.py` |
-| `Divergence` | `promptpotter/application/campaign/decisions.py` |
-| `FailureCluster` | `promptpotter/application/intelligence/axis_index.py` |
+| `Decision` | `promptpotter/application/optimization/cycle.py` |
+| `Divergence` | `promptpotter/application/optimization/cycle.py` |
+| `FailureCluster` | `promptpotter/application/intelligence/indexes.py` |
 | `JobSearchPoint` | `promptpotter/domain/search_point.py` |
+| `Measurement` | `promptpotter/domain/sample.py` |
 | `OptSearchPoint` | `promptpotter/domain/opt_search_point.py` |
-| `OptimizationConfig` | `promptpotter/application/campaign/config.py` |
+| `OptimizationConfig` | `promptpotter/application/config.py` |
 | `PipelineNode` | `promptpotter/domain/pipeline_schema.py` |
 | `PipelineSchema` | `promptpotter/domain/pipeline_schema.py` |
 | `PromptTemplate` | `promptpotter/domain/opt_search_point.py` |
-| `QueryRecord` | `promptpotter/application/intelligence/axis_index.py` |
-| `ReplayContext` | `promptpotter/application/campaign/decisions.py` |
+| `QueryRecord` | `promptpotter/application/intelligence/indexes.py` |
+| `ReplayContext` | `promptpotter/application/optimization/cycle.py` |
 | `RoundResult` | `promptpotter/domain/results.py` |
 | `RuntimeFailure` | `promptpotter/domain/analysis.py` |
-| `Session` | `promptpotter/application/campaign/campaign_setup.py` |
-| `AxisIndex` | `promptpotter/application/intelligence/axis_index.py` |
+| `Session` | `promptpotter/application/bootstrap.py` |
 | `ValidationFailure` | `promptpotter/domain/analysis.py` |
-| `ValueRecord` | `promptpotter/application/intelligence/axis_index.py` |
+| `ValueRecord` | `promptpotter/application/intelligence/indexes.py` |
 
 ## Optimization loop
 
 | Symbol | Module |
 |--------|--------|
-| `assemble_dispatch_msg` | `promptpotter/application/optimization/nodes/dispatch_msg_registry.py` |
+| `assemble_dispatch_msg` | `promptpotter/application/optimization/pipeline.py` |
+| `classify_result` | `promptpotter/application/optimization/elimination.py` |
 | `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
-| `execute_round` | `promptpotter/application/optimization/nodes/l1_execute.py` |
-| `classify_result` | `promptpotter/application/optimization/diagnostics.py` |
-| `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1_score.py` |
-| `l1_generate` | `promptpotter/application/optimization/nodes/l1_generate.py` |
-| `l1_score` | `promptpotter/application/optimization/nodes/l1_score.py` |
+| `execute_round` | `promptpotter/application/optimization/l1.py` |
+| `is_deprecated` | `promptpotter/application/optimization/elimination.py` |
+| `L1ScoringResult` | `promptpotter/application/optimization/l1.py` |
+| `l1_generate` | `promptpotter/application/optimization/l1.py` |
+| `l1_score` | `promptpotter/application/optimization/l1.py` |
 | `LayerCounter` | `promptpotter/application/optimization/cycle.py` |
-| `LayerTransition` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
+| `LayerTransition` | `promptpotter/application/optimization/pipeline.py` |
 | `llm_call` | `promptpotter/application/optimization/pipeline.py` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
-| `run_l1_critique` | `promptpotter/application/optimization/nodes/l1_critique.py` |
-| `score_population` | `promptpotter/application/optimization/nodes/l1_measure.py` |
-| `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
-| `validate_overrides` | `promptpotter/application/optimization/nodes/l1_generate.py` |
+| `record_decision` / `replay_decisions` | `promptpotter/application/optimization/cycle.py` |
+| `run_l1_critique` | `promptpotter/application/optimization/pipeline.py` |
+| `score_population` | `promptpotter/application/optimization/l1.py` |
+| `TransitionResult` | `promptpotter/application/optimization/pipeline.py` |
+| `validate_overrides` | `promptpotter/application/optimization/l1.py` |
 
-Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[str]` on transition classes in `nodes/layer_transitions.py` and registered in `optimizer_pipeline.json` alongside the loop.
+Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[str]` on transition classes in `optimization/pipeline.py` and registered in `optimizer_pipeline.json` alongside the loop.
 
 ## Prompt scheme
 
 | Symbol | Module |
 |--------|--------|
+| `format_axis_digest_block` | `promptpotter/application/optimization/pipeline.py` |
 | `mutate` | `promptpotter/domain/opt_search_point.py` |
-| `format_axis_digest_block` | `promptpotter/application/optimization/nodes/formatting.py` |
-| `PROMPT_STRING_FIELDS` | `promptpotter/shared/constants.py` |
+| `PROMPT_STRING_FIELDS` | `promptpotter/config/settings.py` |
 | `PromptTemplate.render` | `promptpotter/domain/opt_search_point.py` |
 | `to_job_search_point` | `promptpotter/domain/opt_search_point.py` |
 
@@ -68,43 +71,50 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 
 | Symbol | Module |
 |--------|--------|
-| `compile_scorer` | `promptpotter/domain/scoring.py` |
+| `compile_scorer` | `promptpotter/application/scoring/formula.py` |
 | `compute_composite_score` | `promptpotter/application/scoring/metrics.py` |
+| `Evaluator` | `promptpotter/application/scoring/evaluators.py` |
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py` |
-| `SCORING_FUNCTIONS` | `promptpotter/domain/scoring.py` |
+| `SCORING_FUNCTIONS` | `promptpotter/application/scoring/formula.py` |
 | `score_search_point` | `promptpotter/application/scoring/search_point_scorer.py` |
-| `zero_signal_filter` | `promptpotter/application/scoring/zero_signal_filter.py` |
+| `scoring_steer` (hot-swap) | `promptpotter/application/scoring/formula.py` |
+| `zero_signal_filter` | `promptpotter/application/scoring/formula.py` |
 
 ## Intelligence (cross-campaign memory)
 
 | Symbol | Module |
 |--------|--------|
-| `scoring_set` | `promptpotter/application/intelligence/scoring_set.py` |
-| `rasch` | `promptpotter/application/intelligence/rasch.py` |
-| `sample_index` | `promptpotter/application/intelligence/sample_index.py` |
-| `AxisIndex.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/axis_index.py` |
+| `AxisIndex.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/indexes.py` |
+| `evolve_scoring_set` (Rasch + KG) | `promptpotter/application/intelligence/exploration.py` |
+| `hard_sample_sorter` | `promptpotter/application/intelligence/hard_sample_sorter.py` |
+| `Rasch` (joint logistic-IRT fit) | `promptpotter/application/intelligence/exploration.py` |
+| `SampleIndex` | `promptpotter/application/intelligence/indexes.py` |
+| `ScoringSetConfig` | `promptpotter/application/intelligence/exploration.py` |
 
 ## Infrastructure
 
 | Symbol | Module |
 |--------|--------|
-| `BackendClient` | `promptpotter/infrastructure/backend/client.py` |
+| `BackendClient` | `promptpotter/infrastructure/backend.py` |
 | `BackendStore` | `promptpotter/infrastructure/store/stores.py` |
 | `build_stores` | `promptpotter/infrastructure/store/stores.py` |
-| `CampaignPersistenceEmitter` | `promptpotter/infrastructure/persistence/session_emitter.py` |
-| `CampaignStore` | `promptpotter/infrastructure/store/campaign_store.py` |
+| `CampaignPersistenceEmitter` | `promptpotter/infrastructure/persistence.py` |
+| `CampaignStore` | `promptpotter/infrastructure/store/stores.py` |
 | `MeasurementArchive` | `promptpotter/infrastructure/store/measurement_archive.py` |
-| `Measurement` | `promptpotter/domain/measurement.py` |
+| `OpenAICompatibleClient` / `AnthropicClient` | `promptpotter/infrastructure/llm.py` |
 | `parse_pipeline_response` | `promptpotter/application/pipeline_discovery.py` |
-| `SessionStore` | `promptpotter/infrastructure/store/session_store.py` |
+| `SessionStore` | `promptpotter/infrastructure/store/stores.py` |
 | `Stores` | `promptpotter/infrastructure/store/stores.py` |
+| Tracing (events + bridge + sinks + Langfuse + backfill) | `promptpotter/infrastructure/tracing.py` |
 
 ## Presentation
 
 | Symbol | Module |
 |--------|--------|
 | `LiveDisplay` | `promptpotter/presentation/views/live.py` |
-| `RunListener` | `promptpotter/application/campaign/runner.py` |
+| `render_hard_sample_heatmap` | `promptpotter/presentation/views/log_md.py` |
+| `render_log_md` | `promptpotter/presentation/views/log_md.py` |
+| `RunListener` | `promptpotter/application/runner.py` |
 
 ## Configuration
 
@@ -112,8 +122,10 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 |--------|--------|-------|
 | `APP_VERSION` | `promptpotter/config/settings.py` | Single source for version string |
 | `CAMPAIGN_ARTIFACTS` | `tests/test_artifact_parity.py` | Per-cycle artifact allowlist; test owns + enforces |
+| `cycle_config_identity` | `promptpotter/application/runner.py` | Cycle-id derivation from JSP + dataset |
+| `DATASET_LOADERS` | `promptpotter/application/datasets/datasets.py` | Dataset loader registry |
+| `PROMPT_STRING_FIELDS` | `promptpotter/config/settings.py` | Prompt-vs-node-param split |
 | `SESSION_ARTIFACTS` | `tests/test_artifact_parity.py` | Per-session artifact allowlist; test owns + enforces |
-| `DATASET_LOADERS` | `promptpotter/application/datasets/builder.py` | Dataset loader registry |
 
 ---
 

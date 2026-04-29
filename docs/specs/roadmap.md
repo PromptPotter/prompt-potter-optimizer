@@ -123,10 +123,10 @@ The 3-layer LLM-driven program-evolution loop is plumbed end-to-end through M8 +
 
 Five tracks:
 
-1. **L1 Behavior Ledger + Auto-Checks.** Extensible registry of `(round_dict) -> CheckResult` rules in `application/campaign/l1_behavior_checks.py`. Seeded with `context_object_honored`, `param_scope_discipline`, `l2_directive_followed`, `not_only_param_variants`. Adding a new check is a one-function diff — that's where new "unknown unknowns" land as the operator iterates.
+1. **L1 Behavior Ledger + Auto-Checks.** Extensible registry of `(round_dict) -> CheckResult` rules in `application/l1_behavior_checks.py` (planned). Seeded with `context_object_honored`, `param_scope_discipline`, `l2_directive_followed`, `not_only_param_variants`. Adding a new check is a one-function diff — that's where new "unknown unknowns" land as the operator iterates.
 2. **Per-cycle `review.md` renderer.** Pure renderer (peer of `log_md.py`) emitting per-round inputs → behavior-checks → variants-vs-fitness table → critique. Wired into `runner.py::finalize`. Parity test updated.
 3. **L1Stats with `rounds_to_95`.** Headline metric is `rounds_to_95` (first round where best accuracy ≥ 0.95; `None` if never reached). Diagnostics: `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`.
-4. **Cross-cycle leaderboard.** `application/campaign/leaderboard.py` + read-only `scripts/ppot_review.py --leaderboard`. Rows cluster by `l1_generate_hash`, sorted by `rounds_to_95` ascending. Visual readout: when a prompt revision works, `rounds_to_95` drops and `behavior_pass_rate` climbs.
+4. **Cross-cycle leaderboard.** `application/leaderboard.py` (planned) + read-only `scripts/ppot_review.py --leaderboard`. Rows cluster by `l1_generate_hash`, sorted by `rounds_to_95` ascending. Visual readout: when a prompt revision works, `rounds_to_95` drops and `behavior_pass_rate` climbs.
 5. **Methodology document.** `docs/methods/manual-prompt-tuning.md` — daily cadence, diagnosis decision tree, "one knob per iteration" rule, "general fix not specific" rule, generalization gate, procedure for adding a new behavior check.
 
 **Entry criteria:** M9 exit gate passed.

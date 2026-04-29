@@ -150,10 +150,10 @@ Wave 4: Track 3 (benchmark results display)
 
 | Area | Files (post-M9 hexagonal layout) |
 |------|-------|
-| Dataset loaders | `application/datasets/builder.py` |
-| Scoring | `domain/scoring.py` |
+| Dataset loaders | `application/datasets/datasets.py` |
+| Scoring | `application/scoring/formula.py` |
 | Export pipeline | _Deleted (2026-04-27); restore from git history when supplement work resumes._ |
-| FastAPI API | `presentation/api/` (was `main.py` + `routers/`) |
+| FastAPI API | `presentation/api.py` |
 | Benchmark methodology | `docs/research/benchmarks.md` |
 | Dataset configs | `datasets/hotpotqa/`, `datasets/gsm8k/`, `datasets/lca-termnorm/` |
 | BBEH head-to-head | `docs/research/bbeh-comparison/` (notebooks: `bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) |

@@ -3,12 +3,8 @@
 ANSI color codes, box-drawing helpers, scoreboard, interrupt banner,
 display-tag module state, and small numeric helpers (``_pp_val``,
 ``_fmt_delta``). Higher-level renderers consuming these primitives live
-in sibling modules: ``render_query`` (per-query line),
-``render_individual`` (per-candidate summary), and ``render_round``
-(round-level rollups). The tqdm bar tracker lives inline in ``live.py``.
-
-Depends only on ``shared`` utilities and ``views.formatting`` (for
-``fmt_ci``).
+in ``views/round_render.py`` (per-query / per-candidate / per-round
+output). The tqdm bar tracker lives inline in ``live.py``.
 """
 
 from __future__ import annotations

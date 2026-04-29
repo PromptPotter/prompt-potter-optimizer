@@ -27,7 +27,7 @@ For the canonical symbol → file index, see [code-map.md](code-map.md).
 
 PromptPotter separates three kinds of output. Each kind has exactly one owner; violations are caught in tests.
 
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) bind to the family root cycle (the one with no `parent_cycle_id`), so forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) bind to the family root cycle (the one with no `parent_cycle_id`), so forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
 - **Display** (per-entry-point) — caller passes a `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag set by Ctrl+C; notebook uses kernel interrupt). MUST NOT write campaign artifacts. The file-based `control.json` mechanism that predated this is gone.
 
@@ -92,15 +92,15 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 ## Scoring pipeline
 
-`score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway for scoring archival and observability. Three early-exit paths live in `application/optimization/nodes/l1_measure.py::score_population` — validation-failure synthetic zero, full-run cache hit, and mid-evaluation escalation — detailed in [self-healing-internals.md](self-healing-internals.md).
+`score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway for scoring archival and observability. Three early-exit paths live in `application/optimization/l1.py::score_population` — validation-failure synthetic zero, full-run cache hit, and mid-evaluation escalation — detailed in [self-healing-internals.md](self-healing-internals.md).
 
-Per-node cache reuse happens inside `measure_sample()` in `application/scoring/sample_measurement.py`. `score_search_point` reads infrastructure (store, backend client, backend id, pipeline schema, observer, compiled scorer) directly off the `Session` argument; the previously separate `ScoringEnv` bundle was inlined when callers all converged on `Session`. The compiled scorer lives in `domain/scoring.py` (`compile_scorer`, `SCORING_FUNCTIONS`).
+Per-node cache reuse happens inside `measure_sample()` in `application/scoring/sample_measurement.py`. `score_search_point` reads infrastructure (store, backend client, backend id, pipeline schema, observer, compiled scorer) directly off the `Session` argument; the previously separate `ScoringEnv` bundle was inlined when callers all converged on `Session`. The compiled scorer lives in `application/scoring/formula.py` (`compile_scorer`, `SCORING_FUNCTIONS`).
 
 ---
 
 ## Pipeline parameters
 
-Always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `shared/constants.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from the backend's `GET /pipeline` — zero backend-specific constants in PromptPotter. See [node-standard.md](node-standard.md) for the JSON declaration format.
+Always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `config/settings.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from the backend's `GET /pipeline` — zero backend-specific constants in PromptPotter. See [node-standard.md](node-standard.md) for the JSON declaration format.
 
 ---
 
@@ -111,7 +111,7 @@ Features land left → right.
 1. **Notebook** — `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Display via the shared `LiveDisplay` (`presentation/views/live.py`); notebook orchestration in `presentation/views/notebook_run.py`.
 2. **CLI** — `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/` artifacts directly; see CLAUDE.md for the mental-model framing.
 3. **Claude skill `/potter-run`** — `.claude/skills/potter-run/SKILL.md`. Operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
-4. **FastAPI** — `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
+4. **FastAPI** — `promptpotter/main.py` mounts `presentation/api.py` — currently read-only.
 5. **Next.js webapp** — planned; zero code today.
 
 Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`. Live-phase per-query output is notebook-only today.

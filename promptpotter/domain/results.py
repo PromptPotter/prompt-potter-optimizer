@@ -151,7 +151,7 @@ class RoundDiagnostics(BaseModel):
     candidate_scores: list[dict] = Field(default_factory=list)
     # Decision records produced this round (round_winner, elimination_cut,
     # escalate_l2, …). Consumed by the divergence replay walker in
-    # ``application/campaign/decisions.py``.
+    # ``application/optimization/cycle.py``.
     decisions: list[dict] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # Scoring-set evolution events emitted during this round (only populated

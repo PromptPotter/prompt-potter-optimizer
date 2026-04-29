@@ -61,7 +61,7 @@ L1 candidates use `pipeline_params_override` for both namespaces: keys matching 
 | 7 | `few_shot_examples` | L1 | No | Input/Output demonstration pairs (rendered separately) |
 | 8 | `plan` | L3 | No | Strategic optimization framework (rendered at end) |
 
-Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/shared/constants.py` (fields 1-6). `few_shot_examples` and `plan` are appended by `PromptTemplate.render()` after the string fields.
+Source of truth: `PROMPT_STRING_FIELDS` in `promptpotter/config/settings.py` (fields 1-6). `few_shot_examples` and `plan` are appended by `PromptTemplate.render()` after the string fields.
 
 ---
 

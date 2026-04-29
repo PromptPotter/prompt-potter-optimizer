@@ -67,36 +67,41 @@ Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `in
 promptpotter/
 ├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema — pure, no I/O
 ├── application/
-│   ├── campaign/    # campaign lifecycle + thin orchestration
-│   ├── optimization/  # THE CORE LOOP — L1/L2/L3 nodes, l1_critique, llm_call, restructure
-│   ├── intelligence/  # SHARED materialized view — AxisIndex, variant_library
-│   ├── scoring/       # score_search_point gateway
-│   └── datasets/
-├── infrastructure/  # store/, backend/, llm/, tracing/, persistence/
-├── presentation/    # cli/, api/, ui/ — thin per-surface adapters
-├── shared/          # leaf utilities (errors, constants)
-└── config/          # settings, APP_VERSION, logging
+│   ├── runner.py / bootstrap.py / baseline.py / config.py / resume.py  # campaign lifecycle
+│   ├── optimization/  # THE CORE LOOP — l1.py (L1 generate/measure/score/critique),
+│   │                  # cycle.py (decisions + state machine + L2/L3 escalation),
+│   │                  # elimination.py (DegradationCheck + classify_result),
+│   │                  # pipeline.py (llm_call, prompt loading, layer transitions)
+│   ├── intelligence/  # SHARED materialized view — indexes.py (AxisIndex + SampleIndex),
+│   │                  # exploration.py (Rasch + scoring-set evolution),
+│   │                  # hard_sample_sorter.py
+│   ├── scoring/       # score_search_point gateway, formula.py (compile_scorer + steer)
+│   └── datasets/datasets.py
+├── infrastructure/  # backend.py, llm.py, persistence.py, tracing.py, store/
+├── presentation/    # api.py, cli/, views/ — thin per-surface adapters
+├── shared/          # leaf utilities (errors, hashing, statistics, composite)
+└── config/          # settings (incl. PROMPT_STRING_FIELDS, APP_VERSION), logging
 ```
 
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence/session_emitter.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
+- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 
 **SearchPoint hierarchy** — `JobSearchPoint` (frozen target spec, pipeline_params) and `PromptTemplate` → `OptSearchPoint` (optimizer state + memory). All services: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state traced at both layers: `JobSearchPoint` → `dataset_runs/` (content-addressed, shared); `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Details in [`docs/developer/code-layout.md`](docs/developer/code-layout.md).
 
-**Scoring pipeline** — `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway. Three early-exit paths (validation-failure synthetic-0, full-run cache hit, mid-eval escalation) live in `application/optimization/nodes/l1_measure.py::score_population` and are detailed in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
+**Scoring pipeline** — `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway. Three early-exit paths (validation-failure synthetic-0, full-run cache hit, mid-eval escalation) live in `application/optimization/l1.py::score_population` and are detailed in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
 
-**Pipeline params** — always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `shared/constants.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
+**Pipeline params** — always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `config/settings.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
 
 ## Entry Points (Maturity Order)
 
 1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Display via the shared `LiveDisplay` (`presentation/views/live.py`); notebook orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) lives in `presentation/views/notebook_run.py`.
 2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/`.
 3. **Claude skill `/potter-run`**: `.claude/skills/potter-run/SKILL.md` — operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
-4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api/` — currently read-only.
+4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api.py` — currently read-only.
 5. **Next.js webapp** (planned M11/M12): zero code today; consumes FastAPI API.
 
 Features land left → right. Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`; live-phase per-query output is notebook-only pending M9 Track 4.
@@ -136,16 +141,16 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 - `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `langfuse/`, `prompts/`, plus `.cache/candidates/` and `.cache/rounds/` for internal resume state). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
 - `{tenant_id}/library/` — **the measurement archive — the database core, cross-cycle, cross-session, cross-tenant.** One row = `(sample × config → outcome)`. Two retrieval views, both first-class: `MeasurementArchive.measurements_for_sample(sample_id)` (by training example) and `MeasurementArchive.measurements_for_config(predicate)` (by searchpoint). Both return `list[Measurement]`. Cache reuse and LLM digests are derived views over this same archive. See [`docs/concepts/measurement-archive.md`](docs/concepts/measurement-archive.md) and [`docs/developer/measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md). Layout: `library/measurements/{run_id}.json` (facts), `library/measurements.json` (index), plus `backends/`, datasets, `prompt_aliases.json`. Both digest layers (`AxisIndex` and `SampleIndex`) are in-memory only — rebuilt from the archive every refresh, no on-disk file.
 
-Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence/session_emitter.py` and `application/campaign/runner.py`.
+Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence.py` and `application/runner.py`.
 
 ## Key Patterns
 
-- **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/campaign/campaign_setup.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
+- **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/bootstrap.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
 - **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores. `Stores.archive` is the `MeasurementArchive` (database core); peers are `BackendStore`, `SessionStore`, `CampaignStore`.
 - **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
 - **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. There is no mid-run pause/resume — re-running `optimize` resumes from the latest completed round.
 - **Optimizer LLM calls**: all go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
-- **Cycle identity**: cycle hash is the baseline `JobSearchPoint`'s `content_hash(dataset)` (truncated, `cycle_` prefix). `JobSearchPoint.pipeline_params` already carries the active-steps list + per-node target-layer config (model, temperature, max_tokens, …) and `content_hash` folds in the rendered prompt + dataset, so changing the target LLM, prompt, pipeline composition, or dataset starts a new cycle root. Loop-control / strategy knobs on `CampaignConfig` (max_rounds, optimizer-LLM, patience, n_variants, …) are not part of `JobSearchPoint` and are excluded. `cmd_optimize` recomputes the hash from the live `pipeline.json` on every run; if it differs from the active session pointer's `cycle_id`, a fresh session+cycle is auto-minted before baseline runs. See `cycle_config_identity()` in `domain/cycle_identity.py` and `_compute_cycle_id()` in `presentation/cli/campaign_runner.py`.
+- **Cycle identity**: cycle hash is the baseline `JobSearchPoint`'s `content_hash(dataset)` (truncated, `cycle_` prefix). `JobSearchPoint.pipeline_params` already carries the active-steps list + per-node target-layer config (model, temperature, max_tokens, …) and `content_hash` folds in the rendered prompt + dataset, so changing the target LLM, prompt, pipeline composition, or dataset starts a new cycle root. Loop-control / strategy knobs on `CampaignConfig` (max_rounds, optimizer-LLM, patience, n_variants, …) are not part of `JobSearchPoint` and are excluded. `cmd_optimize` recomputes the hash from the live `pipeline.json` on every run; if it differs from the active session pointer's `cycle_id`, a fresh session+cycle is auto-minted before baseline runs. See `cycle_config_identity()` in `application/runner.py` and `_compute_cycle_id()` in `presentation/cli/campaign_runner.py`.
 - **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set. Sequential elimination early-stops inferior candidates via the Wilcoxon signed-rank test.
 - **Canonical prompt authoring**: dataset starting prompts live in `datasets/{name}/prompts/{node}.json` (or `default.json`) as `PromptTemplate` JSON. Monolithic `prompt` strings in `pipeline.json` are deprecated.
 - **Round-boundary scoring-set mutations** — two sanctioned writers, in this order: (1) **Zero-signal filter** (off by default, `min_observations=5`): queries with 0 variance across ≥ N samples physically moved to `datasets/{name}.json::excluded`; mutates the on-disk dataset. (2) **Scoring-set evolution** (off by default, code symbol `scoring_set`): Rasch + KG swaps understood samples ↔ high-info samples in the in-memory `session.scoring_dataset` only; never touches disk. No other mutation of either is sanctioned.

@@ -55,7 +55,7 @@ Read these. Don't recommend parameter tweaks unless the user asks. Don't classif
 2. `curl -s {backend_url}/status` — backend up?
 3. Active pointer → `index.json` + `dashboard.json` if present.
 
-**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/shared/scoring.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/builder.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
+**Print only if** no dataset arg, dataset not implemented (scorer in `promptpotter/application/scoring/formula.py::SCORING_FUNCTIONS`, loader in `promptpotter/application/datasets/datasets.py::DATASET_LOADERS`), or an anomaly from the allowlist below fires.
 
 If `datasets/{name}/` has never produced a `dataset_runs/` entry, suggest (don't auto-run): `python scripts/smoke_campaign.py --dataset {name}` (~90s).
 

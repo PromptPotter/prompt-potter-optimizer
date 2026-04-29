@@ -9,14 +9,14 @@ from typing import Any
 
 from shared_config import MODEL_ID, export_results
 
-from promptpotter.application.campaign.config import (
+from promptpotter.application.config import (
     CampaignConfig,
     configure_and_apply_pipeline,
     load_campaign_config,
 )
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
-from promptpotter.presentation.views.display_primitives import set_display_tags
+from promptpotter.presentation.views.display import set_display_tags
 from promptpotter.presentation.views.notebook_run import (
     init_notebook_session,
     prepare_scoring_context_notebook,

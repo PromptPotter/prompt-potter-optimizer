@@ -4,8 +4,8 @@
 
 At each optimization round, the system evolves *N* individuals (default *N* = 5) via an LLM meta-prompt.[^gen] Each individual's fitness is measured on a shared query set **Q** of size *K* (typically 50–500), producing a per-query score in [0, 1] aggregated as a mean composite score.[^scoring] The evaluation budget per round is *N* × *K* backend calls, which dominates wall-clock time. The population is pre-enumerated — there is no parameter space to search, only a fixed set to compare.
 
-[^gen]: `promptpotter/application/optimization/nodes/l1_generate.py::l1_generate()`.
-[^scoring]: `promptpotter/domain/scoring.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
+[^gen]: `promptpotter/application/optimization/l1.py::l1_generate()`.
+[^scoring]: `promptpotter/application/scoring/formula.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
 
 ## Individual elimination
 
@@ -14,7 +14,7 @@ Individuals are evaluated sequentially on **Q** in the same deterministic order.
 Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the individual is stopped early. The round winner is selected from the full population (including early-stopped individuals) by composite fitness, subject to an improvement threshold (default delta > 0.01).[^winner]
 
 [^elim]: `promptpotter/shared/statistics.py::should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
-[^winner]: `promptpotter/application/optimization/nodes/l1_score.py::l1_score()` (winner selection is inline — no separate `select_fittest` exists).
+[^winner]: `promptpotter/application/optimization/l1.py::l1_score()` (winner selection is inline — no separate `select_fittest` exists).
 
 ---
 
@@ -45,8 +45,8 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
-| 1 | **Validation skip** — `OptSearchPoint.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `validation_failures` | `application/optimization/nodes/l1_measure.py::score_population` |
-| 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/stale_data.py::execute_stale_data_protocol` |
+| 1 | **Validation skip** — `OptSearchPoint.validation_failures` non-empty | pre-score | — | synthetic `{accuracy: 0.0, invalid: True}` (no backend calls) | `validation_failures` | `application/optimization/l1.py::score_population` |
+| 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 5 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
@@ -64,7 +64,7 @@ Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* or
 
 ### `classify_result()` is a hardcoded invariant
 
-The classifier in `application/optimization/diagnostics.py` derives fatal codes from the backend's neutral advisory (e.g. `llm_only:content_empty`) and the raw response shape (`finish_reason`, `reasoning` token count) carried in `pipeline_data.step_tokens.{node}`. Initial rule table:
+The classifier in `application/optimization/elimination.py` derives fatal codes from the backend's neutral advisory (e.g. `llm_only:content_empty`) and the raw response shape (`finish_reason`, `reasoning` token count) carried in `pipeline_data.step_tokens.{node}`. Initial rule table:
 
 - `content_empty` + `finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`
 - `content_empty` + `finish_reason=length` + `reasoning_tokens = 0` → `output_truncated`
@@ -75,4 +75,4 @@ Fatal codes are deterministic for the whole config — one sighting proves the c
 
 Legacy archive alias: rows captured before TermNorm renamed the advisory carry `llm_only:empty_content_reasoning_fallback`; the classifier maps that directly to `reasoning_budget_exhausted` so resume on old cycles still deprecates correctly.
 
-The classifier does triple duty: it drives mechanism 3 above (candidate elimination) **and** is consumed by `score_search_point::_filter_deprecated_priors` (cache eviction at load) and `_compute_accuracy` (primary-stats exclusion) — both via the `is_deprecated()` wrapper in `application/optimization/result_extraction.py`. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification) for the three load-boundary effects and [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator framing.
+The classifier does triple duty: it drives mechanism 3 above (candidate elimination) **and** is consumed by `score_search_point::_filter_deprecated_priors` (cache eviction at load) and `_compute_accuracy` (primary-stats exclusion) — both via the `is_deprecated()` wrapper in `application/optimization/elimination.py`. See [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md#classify_result--fatal-classification) for the three load-boundary effects and [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples) for the operator framing.

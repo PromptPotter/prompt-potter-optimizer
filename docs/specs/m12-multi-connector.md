@@ -113,11 +113,11 @@ Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPRO
 
 | Area | Files (post-M9 hexagonal layout) |
 |------|-------|
-| Backend client | `infrastructure/backend/client.py` (was `services/backend_client.py`) |
-| Query parsing | `infrastructure/backend/client.py::split_query_parts` |
-| Pipeline discovery | `infrastructure/backend/client.py::fetch_pipeline` |
-| Tenant seam | `domain/tenant.py` + `SessionEnv.tenant` (M9 shaped, M12 enforced) |
-| FastAPI API | `presentation/api/` |
+| Backend client | `infrastructure/backend.py` |
+| Query parsing | `infrastructure/backend.py::split_query_parts` |
+| Pipeline discovery | `infrastructure/backend.py::fetch_pipeline` |
+| Tenant seam | `domain/tenant.py` + `Session.tenant` (M9 shaped, M12 enforced) |
+| FastAPI API | `presentation/api.py` |
 | Webapp | `webapp/` (M11 MVP) |
 
 ## Risks

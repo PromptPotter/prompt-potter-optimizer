@@ -23,7 +23,7 @@ Both rails share the rule *"detect → trace on the candidate → surface on `ca
 
 Some L1-generated candidates are invalid before evaluation starts — the optimizer LLM hallucinated a value outside the user-declared allowed set. Canonical example: `pipeline_params_override.llm_only.model = "gpt-4o"` when the backend only has `openai/gpt-oss-120b` per `PipelineSchema.available_models`.
 
-`validate_overrides()` in `application/optimization/nodes/l1_generate.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
+`validate_overrides()` in `application/optimization/l1.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
 **L2 teaches L1.** L2 `refine_strategy` already reads L1 critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces L1 critique for next round's L1 via the normal directive/l1_critique mutual exclusion. L1 next round follows the directive and heals itself.
 
@@ -112,7 +112,7 @@ Validation is the only one that fires *before* evaluation — it needs nothing b
 
 ## `classify_result()` — fatal classification
 
-`classify_result()` in `application/optimization/diagnostics.py` derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and the raw response shape carried in `pipeline_data.step_tokens.{node}` (normalized `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy: TermNorm reports observations and PromptPotter classifies. The rule table:
+`classify_result()` in `application/optimization/elimination.py` derives **fatal codes** from the backend's neutral advisories (`llm_only:content_empty`, `*:content_filtered`, …) and the raw response shape carried in `pipeline_data.step_tokens.{node}` (normalized `finish_reason`, `reasoning` token count). Backend = facts, optimizer = policy: TermNorm reports observations and PromptPotter classifies. The rule table:
 
 - `content_empty` + `finish_reason=length` + `reasoning_tokens > 0` → `reasoning_budget_exhausted`
 - `content_empty` + `finish_reason=length` + `reasoning_tokens = 0` → `output_truncated`
@@ -123,7 +123,7 @@ Fatal codes are deterministic for the whole config — one sighting proves the c
 
 Legacy archive alias: rows captured before TermNorm renamed the advisory carry `llm_only:empty_content_reasoning_fallback`; the classifier maps that directly to `reasoning_budget_exhausted` so resume on old cycles still deprecates correctly.
 
-A fatal classification has **three** load-boundary effects (consumed via the `is_deprecated()` wrapper in `application/optimization/result_extraction.py`):
+A fatal classification has **three** load-boundary effects (consumed via the `is_deprecated()` wrapper in `application/optimization/elimination.py`):
 
 1. **Candidate elimination** — `DegradationCheck` fast-path in `application/optimization/elimination.py::DegradationCheck.evaluate` returns `EscalationSignal(target=ELIMINATE_CANDIDATE)` on first sighting; bypasses `min_queries` and `threshold` entirely.
 2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on the result of `archive.load_reusable_results` and drops every entry the classifier marks fatal. The query falls through to a fresh backend call so the optimizer never replays a known-bad measurement. The measurement archive on disk is left intact — eviction is purely load-side. Fresh re-measurements receive `retry_of_deprecated_cache=True`.

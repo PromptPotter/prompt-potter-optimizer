@@ -9,12 +9,12 @@
 
 | Milestone | Spec file | Pre-reading hint |
 |-----------|-----------|-----------------|
-| M12 (headline): Multi-Connector, Competitor Comparison, Webapp Phase 2 | [`m12-multi-connector.md`](m12-multi-connector.md) | `promptpotter/infrastructure/backend/client.py`, `webapp/` (M11 output) |
+| M12 (headline): Multi-Connector, Competitor Comparison, Webapp Phase 2 | [`m12-multi-connector.md`](m12-multi-connector.md) | `promptpotter/infrastructure/backend.py`, `webapp/` (M11 output) |
 | M12+: Backlog | [`m12-plus-backlog.md`](m12-plus-backlog.md) | (opportunistic; no pre-reading) |
-| M11 (backbone, publication): Publication Benchmarks, Ablation Studies, Webapp Read-Only | [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) | `docs/research/benchmarks.md`, `datasets/hotpotqa/`, `datasets/gsm8k/`, `promptpotter/application/datasets/builder.py`, `promptpotter/main.py` |
-| M10 (backbone, optimizer-prompts; also L4 partial): Prompt-Iteration Framework + L1-generate Tuning | [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md) | `promptpotter/application/optimization/prompts/`, `promptpotter/application/optimization/nodes/dispatch_msg_registry.py`, `promptpotter/application/campaign/log_md.py`, `promptpotter/application/campaign/runner.py`, `tests/test_artifact_parity.py`. Cross-ref: [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md). |
+| M11 (backbone, publication): Publication Benchmarks, Ablation Studies, Webapp Read-Only | [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) | `docs/research/benchmarks.md`, `datasets/hotpotqa/`, `datasets/gsm8k/`, `promptpotter/application/datasets/datasets.py`, `promptpotter/main.py` |
+| M10 (backbone, optimizer-prompts; also L4 partial): Prompt-Iteration Framework + L1-generate Tuning | [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md) | `promptpotter/application/optimization/prompts/`, `promptpotter/application/optimization/pipeline.py` (assemble_dispatch_msg), `promptpotter/presentation/views/log_md.py`, `promptpotter/application/runner.py`, `tests/test_artifact_parity.py`. Cross-ref: [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md). |
 | M9 (complete): Hierarchy Refactor, Multi-Dataset/Pipeline, File-Directory UI v0, Config Aggregate | [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.md) | reference only; spec retained for historical context |
-| Hard-Sample Sorter (capability spec; unscheduled) | [`hard-sample-sorter.md`](hard-sample-sorter.md) | `promptpotter/application/intelligence/{hard_sample_sorter,scoring_set,rasch}.py`, `docs/methods/exploration-exploitation.md` |
+| Hard-Sample Sorter (capability spec; unscheduled) | [`hard-sample-sorter.md`](hard-sample-sorter.md) | `promptpotter/application/intelligence/{hard_sample_sorter,exploration}.py`, `docs/methods/exploration-exploitation.md` |
 
 Archived under [`archive/`](archive/): M9 Track 2 hierarchy refactor (DONE — [`archive/m9-hierarchy-refactor.md`](archive/m9-hierarchy-refactor.md)). Archived in git history: M0-M7, M8 (campaign intelligence), old M9 (publication/config/webapp combined and multi-connector). Material relevant to M12 has been inlined in `m12-multi-connector.md`.
 
