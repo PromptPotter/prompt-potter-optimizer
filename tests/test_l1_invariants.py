@@ -1,6 +1,6 @@
 """L1 detector: candidate ≡ non-empty unique mutation, else ValidationFailure → synth-0."""
 
-from promptpotter.application.optimization.nodes.l1_measure import detect_invariants
+from promptpotter.application.optimization.l1 import detect_invariants
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
 

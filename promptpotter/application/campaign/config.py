@@ -18,7 +18,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.infrastructure.llm.client import LLMClientBase
+    from promptpotter.infrastructure.llm import LLMClientBase
 
 logger = logging.getLogger(__name__)
 
@@ -367,7 +367,7 @@ def configure_and_apply_pipeline(
         has_dataset_prompts,
         load_node_prompt,
     )
-    from promptpotter.infrastructure.backend.client import extract_pipeline_config
+    from promptpotter.infrastructure.backend import extract_pipeline_config
 
     pipeline_schema = session.pipeline_schema
     experiment_extract: dict = session.experiment_extract
@@ -435,7 +435,7 @@ def create_llm_client(
     campaign_config: CampaignConfig,
 ) -> tuple[LLMClientBase, str]:
     """Create LLM client + model from ``campaign_config.optimizer_llm``."""
-    from promptpotter.infrastructure.llm.client import get_llm_client
+    from promptpotter.infrastructure.llm import get_llm_client
 
     llm = campaign_config.optimizer_llm
     return get_llm_client(llm.provider), llm.model or ""

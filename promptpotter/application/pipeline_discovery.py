@@ -15,7 +15,7 @@ from promptpotter.domain.pipeline_schema import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.backend.client import BackendClient
+    from promptpotter.infrastructure.backend import BackendClient
 
 logger = logging.getLogger(__name__)
 

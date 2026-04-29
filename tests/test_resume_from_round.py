@@ -14,7 +14,7 @@ import json
 
 import pytest
 
-from promptpotter.infrastructure.store.campaign_store import CampaignStore
+from promptpotter.infrastructure.store import CampaignStore
 
 
 def _make_trial(round_num: int, accuracy: float) -> dict:

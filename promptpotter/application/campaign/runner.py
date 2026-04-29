@@ -20,7 +20,7 @@ from promptpotter.application.optimization.cycle import (
     build_escalation_entry,
     escalate_l2,
 )
-from promptpotter.application.optimization.nodes.l1_execute import execute_round
+from promptpotter.application.optimization.l1 import execute_round
 from promptpotter.application.scoring.formula import (
     apply_steer_file,
     apply_zero_signal_exclusions,
@@ -36,7 +36,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import RoundResult, RunResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
+from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -550,7 +550,7 @@ async def run_optimization(
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
     if forked and session.state.cycle_id and session.store is not None:
-        from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
+        from promptpotter.infrastructure.persistence import RoundRecorder
 
         new_rounds_dir = (
             session.store.campaigns.campaign_dir(session.state.cycle_id) / ".cache" / "rounds"

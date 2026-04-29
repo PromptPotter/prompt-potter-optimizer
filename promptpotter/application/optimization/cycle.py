@@ -28,7 +28,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.nodes.layer_transitions import (
+from promptpotter.application.optimization.pipeline import (
     L2RefineStrategy,
     L3ModifyPlan,
     LayerTransition,
@@ -38,21 +38,20 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure.llm import client as _llm_client
-from promptpotter.infrastructure.tracing import observed_node
-from promptpotter.infrastructure.tracing.events import LayerApplied
+from promptpotter.infrastructure import llm as _llm_client
+from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.intelligence.axis_index import AxisIndex
-    from promptpotter.application.optimization.nodes.l1_score import L1ScoringResult
+    from promptpotter.application.optimization.l1 import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryResult
     from promptpotter.domain.search_point import TaskDecomposition
-    from promptpotter.infrastructure.store.campaign_store import CampaignStore
+    from promptpotter.infrastructure.store import CampaignStore
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)

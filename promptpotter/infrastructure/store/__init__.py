@@ -1,10 +1,10 @@
 """Focused store modules for file-based persistence."""
 
-from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
-from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import (
     BackendStore,
+    CampaignStore,
+    SessionStore,
     Stores,
     build_stores,
     clear_active_pointer,

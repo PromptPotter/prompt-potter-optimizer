@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock
 import pytest
 from _helpers import MockCompletion, MockHTTPError, make_http_error
 
-from promptpotter.infrastructure.llm.client import OpenAICompatibleClient
+from promptpotter.infrastructure.llm import OpenAICompatibleClient
 from promptpotter.shared.errors import RequestTooLargeError
 
 

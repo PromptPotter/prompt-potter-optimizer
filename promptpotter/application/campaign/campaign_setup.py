@@ -19,7 +19,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
-from promptpotter.infrastructure.backend.client import BackendClient
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
+    from promptpotter.infrastructure.persistence import RoundRecorder
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 

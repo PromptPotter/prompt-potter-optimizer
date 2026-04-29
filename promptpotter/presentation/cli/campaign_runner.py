@@ -42,9 +42,9 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.campaign.runner import RunListener
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
-    from promptpotter.infrastructure.persistence.session_emitter import (
+    from promptpotter.infrastructure.persistence import (
         CampaignPersistenceEmitter,
+        RoundRecorder,
     )
     from promptpotter.presentation.cli.session import SessionCtx
 
@@ -489,7 +489,7 @@ def _build_run_observers(
     """
     from promptpotter.application.campaign.data import build_campaign_emitter
     from promptpotter.application.campaign.runner import RunListener as _RunListener
-    from promptpotter.infrastructure.persistence.round_recorder import (
+    from promptpotter.infrastructure.persistence import (
         RoundRecorder as _RoundRecorder,
     )
 

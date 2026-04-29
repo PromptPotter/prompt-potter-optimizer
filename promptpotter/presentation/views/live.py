@@ -310,13 +310,13 @@ class LiveDisplay:
 
     def note(self, action: str, body: str = "") -> None:
         """Append a narrative note to ``journal.md`` for Claude."""
-        from promptpotter.infrastructure.persistence.session_emitter import append_journal
+        from promptpotter.infrastructure.persistence import append_journal
 
         append_journal(self._resolve_session_dir(), action, body)
 
     def render_claude_notes(self) -> None:
         """Render ``notes.md`` inline so Claude's notes appear in a cell."""
-        from promptpotter.infrastructure.persistence.session_emitter import read_claude_notes
+        from promptpotter.infrastructure.persistence import read_claude_notes
         from promptpotter.presentation.views.formatting import render_markdown_box
 
         content = read_claude_notes(self._resolve_session_dir()).rstrip()

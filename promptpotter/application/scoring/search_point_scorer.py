@@ -275,7 +275,7 @@ async def _process_fresh_sample(
         display_cached["sample_id"] = sample.id
         if ctx.on_result is not None:
             ctx.on_result(display_cached, idx, dataset_len)
-        from promptpotter.infrastructure.llm.rate_limiter import (
+        from promptpotter.infrastructure.llm import (
             DEPR_RETRY_COOLDOWN_SEC,
             wait_with_countdown,
         )
@@ -514,8 +514,7 @@ async def score_search_point(
 
     _save_run(results, scores)
     if store and backend_id:
-        from promptpotter.infrastructure.tracing import ObservabilityBridge
-        from promptpotter.infrastructure.tracing.events import DatasetRun
+        from promptpotter.infrastructure.tracing import DatasetRun, ObservabilityBridge
         from promptpotter.shared.errors import graceful
 
         with graceful("DatasetRun emit failed"):

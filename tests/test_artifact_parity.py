@@ -114,7 +114,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult, RunResult
-    from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
+    from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
 
     session_dir, campaign_dir = session_and_campaign_dirs
     config = CampaignConfig(
@@ -286,15 +286,15 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     A JSON from ``campaigns/{cycle_id}/langfuse/`` should be uploadable to
     Langfuse's ingestion API without a transform pass.
     """
-    from promptpotter.infrastructure.tracing.events import (
+    from promptpotter.infrastructure.tracing import (
         CampaignEnd,
         CampaignStart,
+        FileSink,
         NodeEnd,
         NodeStart,
         RoundEnd,
         RoundStart,
     )
-    from promptpotter.infrastructure.tracing.sinks.file_sink import FileSink
 
     tenant_root = tmp_path / "default"
     tenant_root.mkdir()

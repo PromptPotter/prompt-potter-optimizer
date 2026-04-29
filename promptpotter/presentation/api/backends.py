@@ -15,7 +15,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
 from promptpotter.domain.backend import BackendConnection
-from promptpotter.infrastructure.backend.client import BackendClient
+from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store import Stores
 from promptpotter.presentation.api import StoreDep
 

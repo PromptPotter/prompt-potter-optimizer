@@ -2,7 +2,7 @@
 
 import pytest
 
-from promptpotter.infrastructure.llm.rate_limiter import RateLimiter
+from promptpotter.infrastructure.llm import RateLimiter
 
 
 class _Clock:
@@ -19,7 +19,7 @@ class _Clock:
 @pytest.fixture
 def clock(monkeypatch):
     c = _Clock()
-    monkeypatch.setattr("promptpotter.infrastructure.llm.rate_limiter.time.monotonic", c)
+    monkeypatch.setattr("promptpotter.infrastructure.llm.time.monotonic", c)
     return c
 
 
@@ -28,7 +28,7 @@ def fast_sleep(monkeypatch, clock):
     async def _sleep(seconds):
         clock.advance(seconds)
 
-    monkeypatch.setattr("promptpotter.infrastructure.llm.rate_limiter.asyncio.sleep", _sleep)
+    monkeypatch.setattr("promptpotter.infrastructure.llm.asyncio.sleep", _sleep)
 
 
 @pytest.mark.asyncio

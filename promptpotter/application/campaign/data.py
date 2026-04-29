@@ -45,7 +45,7 @@ def build_campaign_emitter(
     recorder: Any | None = None,
 ) -> Any:
     """Build the campaign persistence emitter from session + config. Single factory shared by CLI and runner."""
-    from promptpotter.infrastructure.persistence.session_emitter import (
+    from promptpotter.infrastructure.persistence import (
         CampaignPersistenceEmitter,
     )
 

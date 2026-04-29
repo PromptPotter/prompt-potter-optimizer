@@ -13,15 +13,17 @@ Provider selection is always explicit — caller passes
 env-var fallback.
 
 Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
-settings — see :mod:`promptpotter.infrastructure.llm.rate_limiter`.
+settings — see the rate-limiter section below.
 """
+
+from __future__ import annotations
 
 import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
 # TokenUsage / token-sink registry was previously in
@@ -36,7 +38,6 @@ if TYPE_CHECKING:
 from pydantic import BaseModel, Field
 
 from promptpotter.config.settings import settings
-from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, RateLimitReservation
 from promptpotter.shared.errors import RequestTooLargeError
 
 logger = logging.getLogger(__name__)
@@ -355,7 +356,7 @@ class OpenAICompatibleClient(LLMClientBase):
         self._rate_limiter = rate_limiter
         self._client: AsyncOpenAI | None = None
 
-    def _ensure_client(self) -> "AsyncOpenAI":
+    def _ensure_client(self) -> AsyncOpenAI:
         """Lazy-initialize the async OpenAI client."""
         if self._client is None:
             try:
@@ -702,3 +703,194 @@ def get_llm_client(provider: str) -> LLMClientBase:
         valid = ", ".join(sorted(_PROVIDER_FACTORIES))
         raise ValueError(f"Unknown LLM provider: {provider!r}. Valid: {valid}.")
     return factory()
+
+
+# ===========================================================================
+# Rate limiter — rolling-window RPM + TPM + 429 Retry-After honoring
+# ===========================================================================
+#
+# Proactive throttle to match provider tier caps (e.g. Groq free tier
+# 5 req/min + 8000 tokens/min). Prevents 429 bursts by blocking *before*
+# sending when either cap would be exceeded. Token estimation uses a rough
+# ``chars // 4`` approximation; ``record_actual()`` corrects the reservation
+# from server-reported usage. Also hosts the shared 429 ``Retry-After``
+# parser + visible countdown (RFC 7231 §7.1.3).
+
+
+import asyncio  # noqa: E402
+import sys  # noqa: E402
+import time  # noqa: E402
+from collections import deque  # noqa: E402
+
+MAX_429_ATTEMPTS: int = 5
+# Brief visible cooldown between displaying a deprecated cache row and firing
+# the fresh remeasurement. Not a throttle — a signal so the operator sees the
+# retry happening instead of a 0.0s row jumping to a 20s call.
+DEPR_RETRY_COOLDOWN_SEC: float = 1.0
+_YELLOW = "\033[93m"
+_RESET = "\033[0m"
+
+
+def parse_retry_after(headers: object | None) -> float | None:
+    """RFC 7231 §7.1.3 — read ``Retry-After`` (seconds) from response headers."""
+    if headers is None:
+        return None
+    for key in ("Retry-After", "retry-after"):
+        val = headers.get(key) if hasattr(headers, "get") else None
+        if val is None:
+            continue
+        try:
+            return float(val)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+async def wait_with_countdown(total_sec: float, label: str) -> None:
+    """Sleep `total_sec` while emitting a yellow single-line countdown to stderr."""
+    end = time.monotonic() + total_sec
+    while True:
+        remaining = max(0.0, end - time.monotonic())
+        mins_total, secs = divmod(int(remaining + 0.5), 60)
+        hours, mins = divmod(mins_total, 60)
+        stamp = f"{hours:d}:{mins:02d}:{secs:02d}" if hours else f"{mins:02d}:{secs:02d}"
+        sys.stderr.write(
+            f"\r{_YELLOW}⚠ rate-limit ({label}): waiting {stamp}  (Ctrl+C to abort){_RESET}"
+        )
+        sys.stderr.flush()
+        if remaining <= 0:
+            break
+        await asyncio.sleep(min(1.0, remaining))
+    sys.stderr.write(f"\r{_YELLOW}⚠ rate-limit ({label}): resuming.{' ' * 30}{_RESET}\n")
+    sys.stderr.flush()
+
+
+def estimate_tokens(messages: list[dict[str, str]], max_output: int | None) -> int:
+    """Rough prompt + output token estimate (~4 chars/token).
+
+    When ``max_output`` is ``None`` (no caller-side cap), only the input
+    side is counted. The TPM pre-check loses its output reservation, but
+    the provider's own 429 still surfaces if the actual response overshoots.
+    """
+    char_count = sum(len(m.get("content", "")) for m in messages)
+    return char_count // 4 + (max_output or 0)
+
+
+@dataclass
+class RateLimiter:
+    """Rolling-window request/token limiter.
+
+    Attributes:
+        rpm: Requests per window. ``None`` disables the request cap.
+        tpm: Tokens per window. ``None`` disables the token cap.
+        window_s: Window length in seconds (default 60).
+        rpm_pinned: When True, ``apply_discovered()`` won't override ``rpm``
+            (caller explicitly configured it via settings).
+        tpm_pinned: Same for ``tpm``.
+    """
+
+    rpm: int | None = None
+    tpm: int | None = None
+    window_s: float = 60.0
+    rpm_pinned: bool = False
+    tpm_pinned: bool = False
+
+    _requests: deque[float] = field(default_factory=deque)
+    _tokens: deque[tuple[float, int]] = field(default_factory=deque)
+    _lock: asyncio.Lock = field(default_factory=asyncio.Lock)
+
+    def apply_discovered(self, rpm: int | None, tpm: int | None) -> None:
+        """Populate caps from server-reported rate-limit headers.
+
+        Pinned slots (explicit user config) are never overwritten. Unpinned
+        slots latch to the first non-``None`` value we see and update if the
+        server later reports a different cap (tier change mid-run).
+        """
+        if rpm is not None and not self.rpm_pinned:
+            self.rpm = rpm
+        if tpm is not None and not self.tpm_pinned:
+            self.tpm = tpm
+
+    async def acquire(self, estimated_tokens: int) -> None:
+        """Block until sending ``estimated_tokens`` fits within RPM + TPM caps.
+
+        Reserves an RPM slot and a TPM allocation on return. Callers should
+        follow up with :meth:`record_actual` once the server reports actual
+        usage so the reservation reflects reality.
+        """
+        async with self._lock:
+            while True:
+                now = time.monotonic()
+                self._prune(now)
+                wait = self._wait_needed(now, estimated_tokens)
+                if wait <= 0:
+                    self._requests.append(now)
+                    self._tokens.append((now, estimated_tokens))
+                    return
+                await asyncio.sleep(wait)
+
+    def record_actual(self, estimated: int, actual: int) -> None:
+        """Correct the most recent reservation with the response's actual tokens."""
+        if self._tokens and self._tokens[-1][1] == estimated:
+            ts, _ = self._tokens[-1]
+            self._tokens[-1] = (ts, actual)
+
+    async def acquire_with_estimation(
+        self,
+        messages: list[dict[str, str]],
+        max_output: int | None,
+        *,
+        provider_name: str,
+    ) -> RateLimitReservation:
+        """Estimate, fail-fast on over-cap, throttle, and return a closeable reservation.
+
+        Bundles the three-step dance every LLM call needs: estimate prompt
+        size, raise ``RequestTooLargeError`` if the configured TPM cap can
+        never fit it, and block until the rolling window has room. The
+        returned reservation must be ``close()``-d with the server's actual
+        token count after the response so the rolling window stays accurate.
+        """
+        estimated = estimate_tokens(messages, max_output)
+        if self.tpm is not None and estimated > self.tpm:
+            raise RequestTooLargeError(
+                provider_name=provider_name,
+                limit=self.tpm,
+                requested=estimated,
+            )
+        await self.acquire(estimated)
+        return RateLimitReservation(estimated=estimated, limiter=self)
+
+    def _prune(self, now: float) -> None:
+        cutoff = now - self.window_s
+        while self._requests and self._requests[0] < cutoff:
+            self._requests.popleft()
+        while self._tokens and self._tokens[0][0] < cutoff:
+            self._tokens.popleft()
+
+    def _wait_needed(self, now: float, estimated_tokens: int) -> float:
+        delays: list[float] = [0.0]
+        if self.rpm is not None and len(self._requests) >= self.rpm:
+            delays.append(self._requests[0] + self.window_s - now)
+        if self.tpm is not None:
+            current = sum(t for _, t in self._tokens)
+            if current + estimated_tokens > self.tpm:
+                needed = current + estimated_tokens - self.tpm
+                shed = 0
+                for ts, toks in self._tokens:
+                    shed += toks
+                    if shed >= needed:
+                        delays.append(ts + self.window_s - now)
+                        break
+        return max(delays)
+
+
+@dataclass(frozen=True)
+class RateLimitReservation:
+    """One outstanding throttle reservation — call ``close()`` after the response."""
+
+    estimated: int
+    limiter: RateLimiter
+
+    def close(self, actual: int) -> None:
+        """Reconcile the reservation with the server's actual token usage."""
+        self.limiter.record_actual(self.estimated, actual)
