@@ -115,6 +115,7 @@ __all__ = [
     "compile_l1_surface",
     "compile_l2_surface",
     "compile_layer_context",
+    "compute_optimizer_prompt_hashes",
     "decompose_prompt_fields",
     "decompose_prompt_fields_cached",
     "decompose_task_context",
@@ -400,6 +401,21 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
 def list_optimizer_prompts() -> list[str]:
     """List available optimizer prompt names from local JSON files."""
     return sorted(p.stem for p in _PROMPT_DIR.glob("*.json"))
+
+
+def compute_optimizer_prompt_hashes() -> dict[str, str]:
+    """SHA-256 (16-char prefix) of each optimizer prompt's loaded content.
+
+    Hashes the deterministic ``model_dump_json()`` of the loaded
+    ``PromptTemplate`` (so the hash reflects what was actually used,
+    Langfuse-overridden or local). Persisted to ``index.json::final.prompt_hashes``
+    so M10's cross-cycle leaderboard can join cycles by ``l1_generate_hash`` etc.
+    """
+    out: dict[str, str] = {}
+    for name in list_optimizer_prompts():
+        tpl = load_optimizer_prompt(name)
+        out[name] = hashlib.sha256(tpl.model_dump_json().encode("utf-8")).hexdigest()[:16]
+    return out
 
 
 # ===========================================================================
@@ -2363,7 +2379,7 @@ class L2RefineStrategy(LayerTransition):
             len(template_override),
         )
 
-        new_opt_sp = opt_sp.mutate(**changes) if changes else opt_sp
+        new_opt_sp = opt_sp.mutate(source="l2_context", **changes) if changes else opt_sp
         return TransitionResult(
             opt_search_point=new_opt_sp,
             task_context=new_task_context,
@@ -2543,6 +2559,7 @@ class L3ModifyPlan(LayerTransition):
         new_opt_sp = opt_sp.mutate(
             plan=new_plan,
             changes_description=f"L3: {rationale[:80]}",
+            source="l3_plan",
         )
         return TransitionResult(
             opt_search_point=new_opt_sp,

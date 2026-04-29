@@ -154,9 +154,10 @@ class ScoringSetConfig(BaseModel):
 
     enabled: bool = Field(True, description="Master switch — true = Rasch + KG evolution active.")
     swap_out_delta_se: float = Field(
-        0.25,
-        description="Swap-out threshold: SE on δ_s below which a sample is 'understood' "
-        "(corresponds to ~95% CI width of 1.0 in logits).",
+        0.5,
+        description="Swap-out threshold: SE on delta_s below which a sample is 'understood' "
+        "(~95% CI half-width of 1 logit). Loose enough to fire by round 2-3 on a typical "
+        "20-sample / 5-candidate budget; round-1->2 firing requires push to 0.7-0.8.",
     )
     swap_in_kg_threshold: float = Field(
         0.01,

@@ -179,6 +179,11 @@ class IndividualLineage(BaseModel):
     parent_id: str | None = None
     changes_description: str = ""
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
+    source: str = Field(
+        default="",
+        description="Origin of this individual: 'baseline' / 'l1_generate' / "
+        "'l2_context' / 'l3_plan'.",
+    )
 
 
 class OptSearchPoint(PromptTemplate):
@@ -450,6 +455,7 @@ class OptSearchPoint(PromptTemplate):
         data["lineage"] = IndividualLineage(
             parent_id=self.lineage.id,
             changes_description=changes.pop("changes_description", ""),
+            source=changes.pop("source", ""),
         )
         # Any remaining changes
         data.update(changes)

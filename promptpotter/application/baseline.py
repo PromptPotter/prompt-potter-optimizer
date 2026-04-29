@@ -157,6 +157,7 @@ def load_baseline_prompt(
                         changes_description=(
                             f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
                         ),
+                        source="baseline",
                     ),
                 )
 
@@ -164,6 +165,7 @@ def load_baseline_prompt(
         instruction="",
         lineage=IndividualLineage(
             changes_description="Baseline (no prompt node active — param-only optimization)",
+            source="baseline",
         ),
     )
 

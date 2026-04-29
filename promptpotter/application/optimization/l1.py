@@ -332,6 +332,7 @@ async def l1_generate(
         # Override validation is deferred to parse_population — one producer of truth.
         child = opt_sp.mutate(
             changes_description=v.get("changes_description", ""),
+            source="l1_generate",
             **prompt_changes,
         )
         if tc_changes:

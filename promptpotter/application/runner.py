@@ -663,6 +663,11 @@ def _finalize_run(
             final_block["scorer_round_formula"] = formula_full
             final_block["scorer_round_formula_short"] = formula_short
             final_block["baseline_composite"] = baseline_composite
+            from promptpotter.application.optimization.pipeline import (
+                compute_optimizer_prompt_hashes,
+            )
+
+            final_block["prompt_hashes"] = compute_optimizer_prompt_hashes()
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
