@@ -6,7 +6,7 @@ from collections import Counter
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.diagnostics import classify_result
-from promptpotter.application.optimization.utils import extract_warning_types
+from promptpotter.application.optimization.result_extraction import extract_warning_types
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.shared.statistics import should_stop_early

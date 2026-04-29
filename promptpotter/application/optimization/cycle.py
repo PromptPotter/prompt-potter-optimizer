@@ -277,7 +277,7 @@ class Cycle:
         warning_inventory (from all candidate results), runtime_failures
         (deduped by source/warning/observed-config).
         """
-        from promptpotter.application.optimization.utils import update_query_tracker
+        from promptpotter.application.optimization.result_extraction import update_query_tracker
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
         schema = self.session.pipeline_schema

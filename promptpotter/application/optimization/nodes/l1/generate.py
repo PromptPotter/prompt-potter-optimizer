@@ -16,11 +16,7 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.infrastructure.llm.client import LLMClientBase
 from promptpotter.infrastructure.tracing.events import CandidateCreated
-from promptpotter.shared.constants import (
-    PROMPT_STRING_FIELDS,
-    TASK_CONTEXT_OVERRIDES,
-    classify_axis,
-)
+from promptpotter.shared.constants import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -30,6 +26,15 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = ["build_l1_output_schema", "l1_generate", "validate_overrides"]
+
+
+def _classify_axis(axis_key: str) -> str:
+    """Classify a pipeline_params override key as 'prompt_field', 'task_context', or 'pipeline_param'."""
+    if axis_key in PROMPT_STRING_FIELDS:
+        return "prompt_field"
+    if axis_key in TASK_CONTEXT_OVERRIDES:
+        return "task_context"
+    return "pipeline_param"
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
@@ -247,7 +252,7 @@ async def l1_generate(
         tc_changes: dict = {}
         node_overrides: dict = {}
         for k, pv in pp_override.items():
-            kind = classify_axis(k)
+            kind = _classify_axis(k)
             if kind == "prompt_field":
                 prompt_changes[k] = pv
             elif kind == "task_context":

@@ -26,15 +26,6 @@ PROMPT_STRING_FIELDS: list[str] = [
 TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
 
 
-def classify_axis(axis_key: str) -> str:
-    """Classify a pipeline_params override key as 'prompt_field', 'task_context', or 'pipeline_param'."""
-    if axis_key in PROMPT_STRING_FIELDS:
-        return "prompt_field"
-    if axis_key in TASK_CONTEXT_OVERRIDES:
-        return "task_context"
-    return "pipeline_param"
-
-
 # Persistence versioning
 MEASUREMENTS_SCHEMA_VERSION = 1
 DEFAULT_CONNECTOR_TYPE = "default"

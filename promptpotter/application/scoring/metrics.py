@@ -46,7 +46,6 @@ __all__ = [
     "compile_failure_analysis",
     "compile_query_difficulty",
     "compute_composite_score",
-    "compute_pipeline_metrics",
     "count_degraded_queries",
     "count_failures",
     "extract_sample_diagnostics",
@@ -76,7 +75,7 @@ def _compute_accuracy(results: list[QueryResult]) -> dict:
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.
     """
-    from promptpotter.application.optimization.utils import is_deprecated
+    from promptpotter.application.optimization.result_extraction import is_deprecated
 
     deprecated = sum(1 for r in results if is_deprecated(r))
     valid = [r for r in results if not is_deprecated(r)]
@@ -113,7 +112,7 @@ def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """Extract per-query diagnostic signals; per-query complement to ``compute_pipeline_metrics``."""
+    """Extract per-query diagnostic signals; per-query complement to ``compute_composite_score``."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {
@@ -220,9 +219,9 @@ _DIAG_DISPATCH: dict[str, Any] = {
 # ---------------------------------------------------------------------------
 
 
-def compute_pipeline_metrics(
-    pipeline_schema: PipelineSchema,
+def compute_composite_score(
     results: list[QueryResult],
+    pipeline_schema: PipelineSchema,
     *,
     opt_sp: Any = None,
     round_scorer: RoundScorer | str | None = None,
@@ -244,6 +243,8 @@ def compute_pipeline_metrics(
       ``memory.validation_failures`` forces composite to 0.0 (structurally
       invalid candidates), and ``memory.runtime_failures`` feeds the
       ``runtime_failure_rate`` evaluator.
+    - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
+      non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
 
     The composite is **recorded, not gating**: ``select_fittest``
     compares candidates on ``accuracy`` (the user's per-query scoring
@@ -287,37 +288,6 @@ def compute_pipeline_metrics(
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
     }
-
-
-def compute_composite_score(
-    results: list[QueryResult],
-    pipeline_schema: PipelineSchema,
-    *,
-    opt_sp: Any = None,
-    round_scorer: RoundScorer | str | None = None,
-    l1_diversity: float = 1.0,
-) -> dict:
-    """Compute composite score — delegates to ``compute_pipeline_metrics()``.
-
-    The composite is a **recorded** multi-signal diagnostic, not the
-    winner-selection key. ``select_fittest`` compares candidates on
-    ``accuracy`` (the user's performance scoring function).
-
-    ``l1_diversity`` is the round-level fraction of valid (non-no-op,
-    non-duplicate) L1 variants. Defaults to 1.0 for non-L1 calls
-    (baseline scoring, single-candidate paths).
-
-    Returns dict with at least: hits, total, accuracy, errors, composite,
-    evaluators (dict of named registry values), plus each evaluator's
-    value at top level for legacy key access.
-    """
-    return compute_pipeline_metrics(
-        pipeline_schema,
-        results,
-        opt_sp=opt_sp,
-        round_scorer=round_scorer,
-        l1_diversity=l1_diversity,
-    )
 
 
 # ---------------------------------------------------------------------------
@@ -375,7 +345,7 @@ def compile_failure_analysis(
     patterns ranked by failure count. Deprecated samples (fatal warnings)
     are excluded so they don't pollute pattern groupings.
     """
-    from promptpotter.application.optimization.utils import is_deprecated
+    from promptpotter.application.optimization.result_extraction import is_deprecated
 
     failures = [
         r for r in results if not r.get("hit") and not is_error_result(r) and not is_deprecated(r)
@@ -423,7 +393,7 @@ def compile_query_difficulty(
     Deprecated samples (fatal warnings) are skipped so hit-rate
     classification isn't biased by garbage measurements.
     """
-    from promptpotter.application.optimization.utils import is_deprecated
+    from promptpotter.application.optimization.result_extraction import is_deprecated
 
     query_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:

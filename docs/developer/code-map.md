@@ -70,7 +70,6 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 |--------|--------|
 | `compile_scorer` | `promptpotter/domain/scoring.py` |
 | `compute_composite_score` | `promptpotter/application/scoring/metrics.py` |
-| `compute_pipeline_metrics` | `promptpotter/application/scoring/metrics.py` |
 | `measure_sample` | `promptpotter/application/scoring/sample_measurement.py` |
 | `SCORING_FUNCTIONS` | `promptpotter/domain/scoring.py` |
 | `score_search_point` | `promptpotter/application/scoring/search_point_scorer.py` |
@@ -84,7 +83,6 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `rasch` | `promptpotter/application/intelligence/rasch.py` |
 | `sample_index` | `promptpotter/application/intelligence/sample_index.py` |
 | `AxisIndex.digest_for_l1_generate` / `digest_for_l1_critique` / `digest_for_l2` / `digest_for_l3` | `promptpotter/application/intelligence/axis_index.py` |
-| `variant_library` | `promptpotter/application/intelligence/variant_library.py` |
 
 ## Infrastructure
 

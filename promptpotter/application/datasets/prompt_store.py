@@ -17,10 +17,6 @@ Resolution order in ``load_node_prompt(dataset, node, variant="default")``:
   1. ``{node}.json`` if present — per-node canonical template
   2. ``{variant}.json`` — dataset-wide fallback (typical single-node case)
   3. ``FileNotFoundError`` with a migration hint listing both paths
-
-The global ``promptpotter/config/prompt_variants.json`` is a separate
-store — it holds the L1 crossover/recombination pool and recon axis
-seeds, not starting points.
 """
 
 from __future__ import annotations

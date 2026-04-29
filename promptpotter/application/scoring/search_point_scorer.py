@@ -144,7 +144,7 @@ def _filter_deprecated_priors(
     prior_results: dict[str, QueryResult],
 ) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
     """Split prior-results cache into ``(kept, evicted)``; evicted entries force a fresh backend call so the optimizer doesn't replay known-bad measurements (load-side filter only — disk archive untouched)."""
-    from promptpotter.application.optimization.utils import is_deprecated
+    from promptpotter.application.optimization.result_extraction import is_deprecated
 
     evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}
     kept = {q: r for q, r in prior_results.items() if q not in evicted}
@@ -422,7 +422,7 @@ async def score_search_point(
 
     prior_results: dict[str, QueryResult] = {}
     if store and backend_id:
-        from promptpotter.application.optimization.utils import is_deprecated
+        from promptpotter.application.optimization.result_extraction import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         prior_results = cast(
