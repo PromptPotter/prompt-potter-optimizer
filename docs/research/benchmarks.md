@@ -1,12 +1,26 @@
 # Benchmark Methodology
 
-## Priority (2026-04-12)
+## Priority (2026-04-29)
 
-1. **BBEH (primary)** — the M11 publication benchmark. Ample headroom at `gpt-oss-120b`; head-to-head infrastructure ready at [`bbeh-comparison/`](bbeh-comparison/).
-2. **HotPotQA (secondary, pending saturation probe)** — multi-hop QA data point. Probe first; run fully only if non-saturated.
-3. **GSM8K, AIME 2025 (deprioritized)** — effectively saturated at `gpt-oss-120b`. Cite published numbers for context; run only if a future probe reveals headroom (e.g., under a smaller or constrained model setup).
+**Bench framing.** PromptPotter is an Algorithm Configuration solver in prompt space; the bench definition lives in [`pevol-bench.md`](pevol-bench.md). What that bench requires (canonical split, population-grade size, non-saturated or procgen) is what distinguishes a credible AC benchmark from a method-comparison harness.
 
-The legacy "HotPotQA + GSM8K + AIME" framing below pre-dates the saturation finding. Dataset sections are kept as reference and for future model setups where headroom may exist.
+**What we actually ran.** Datasets to date were chosen for headroom and head-to-head comparability against peer optimizers (CAPO/GEPA/MIPROv2/Bootstrap) — not as PEvol-Bench-grade benchmarks. Run log below.
+
+See `## Trials log` for what's been run; see [`pevol-bench.md`](pevol-bench.md) for what comes next.
+
+## Trials log
+
+Status as of 2026-04-29.
+
+| Dataset | Status | Model used | Result snapshot | Notes / why this status |
+|---|---|---|---|---|
+| GSM8K | Dropped (cited only) | `gpt-oss-120b` | Saturated | No headroom under current model setup |
+| AIME 2025 | Dropped (cited only) | `gpt-oss-120b` | Saturated, n=30 | Shorter, simpler inputs than BBEH (a usability win) but population too small for config/test split |
+| LCA-TermNorm | Active | `gpt-oss-120b` (Groq) | Custom multi-node pipeline | Self-healing + multi-step pipeline demos; `llm_ranking` excluded (broken) |
+| BBEH (mini) | Active (M11 head-to-head) | `mistralai/mistral-small-3.2-24b-instruct` (OpenRouter) | M11 publication target | Verbose inputs trip `gpt-oss-120b` reasoning-budget ceiling → swapped to OpenRouter Mistral at `reasoning_effort: low`. Same model used across all peer methods in the head-to-head. Mini split too small for AC generalization claims; kept for method comparison only |
+| MMLU-Pro | Planned | tbd | n/a | PEvol-Bench v1 candidate |
+| MATH | Planned | tbd | n/a | PEvol-Bench v1 candidate |
+| LiveBench | Watching | tbd | n/a | Procgen candidate; fixed-test-set workflow design pending |
 
 ## Datasets
 
@@ -23,8 +37,11 @@ Successor to BBH from Google DeepMind. Replaces each of the 23 BBH tasks with a 
 | Metrics | Exact Match (case-insensitive), macro-average across tasks |
 | Format | `{"task": str, "input": str, "target": str, "mini": int}` |
 | Paper | [arXiv:2502.19187](https://arxiv.org/abs/2502.19187) (ACL 2025) |
+| Leaderboards | [Official (DeepMind, 11 models)](https://github.com/google-deepmind/bbeh/blob/main/leaderboard.md) · [Community (PricePerToken, broader coverage)](https://pricepertoken.com/leaderboards/benchmark/bbeh) |
 
 **Head-to-head infrastructure:** [`bbeh-comparison/`](bbeh-comparison/) contains Colab notebooks (`bbeh_capo.ipynb`, `bbeh_dspy.ipynb`) running CAPO, GEPA, MIPROv2, and BootstrapFewShot against the identical `gpt-oss-120b` model and identical 10/task train + 10/task test split (seed=42). PromptPotter runs via its own CLI producing the same JSON output schema. This is the M11 primary benchmark.
+
+**Optimization-loop model.** BBEH problem statements are verbose; running the optimization loop against `gpt-oss-120b` (Groq) trips the reasoning-budget ceiling on a non-trivial fraction of queries (`classify_result()` flags `llm_only:reasoning_budget_exhausted`; trace archived, candidate retried). The loop runs against `mistralai/mistral-small-3.2-24b-instruct` via OpenRouter at `reasoning_effort: low`. The head-to-head table uses the same model across all peer methods — the swap is a property of the BBEH dataset config, not a PromptPotter knob. See [`datasets/bbeh/dataset.md`](../../datasets/bbeh/dataset.md) and [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md).
 
 #### Reading BBEH results
 
@@ -191,4 +208,4 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 Wall-clock numbers in this document rely on prior-result reuse from `library/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
-See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.
+See [pevol-bench.md](pevol-bench.md) for the bench definition (what an AC-grade benchmark must satisfy) and the recommended dataset set going forward. See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.

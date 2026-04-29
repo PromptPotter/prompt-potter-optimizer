@@ -4,7 +4,7 @@
 
 </p>
 
-# PromptPotter: Automated Prompt Optimization for LLMs and Pipelines
+# PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
 **PromptPotter brews better prompts.** Point it at your task and it tries thousands of prompt and parameter combinations for you, keeping what works. No more guessing which wording the model likes.
 
@@ -19,19 +19,18 @@ Under the hood, PromptPotter just collects a lot of datapoints. Every evaluation
 
 **Core path (what everyone runs):**
 
-1. **Provide a labeled dataset:** input/output pairs (and any extra context)
-2. **Provide your `pipeline.json`:** your backend serves this via `GET /pipeline`. It declares every node, its parameters, and their allowed values. The optimizer only searches parameters defined in this file. Nothing else is touched.
+1. **Provide a labeled dataset.** Input/output pairs (plus any extra context).
+2. **Provide your `pipeline.json`.** Your backend declares every node, its parameters, and their allowed values. The optimizer searches only what's declared — nothing else is touched.
 3. **Optimize:** run the critique-guided feedback cycle — PromptPotter's flavour of **LLM-driven program evolution**. The optimization loop is self-contained. It measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
 
 > [!IMPORTANT]
-> **New here? Start with [`docs/manual/`](docs/manual/README.md):** six numbered chapters, install → first run → reading output → troubleshooting.
+> **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
 >
-> **Choose your personal experiance:** 5 was to operate the software:
-> 1. `/potter-run` skill via Claude Code - 2. CLI- 3. Python / Jupyter notebook - 4. REST API - 5. WebApp *(planned)*
+> **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp *(planned)*
 
 ## 🔄 The 3-layer loop
 
-A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round, with **L2** escalating on stall and **L3** escalating when L2 stalls. Full mechanics in [three-layer-loop.md](docs/concepts/three-layer-loop.md).
+A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round; **L2** escalates on stall, **L3** escalates when L2 stalls. Full mechanics in [three-layer-loop.md](docs/concepts/three-layer-loop.md).
 
 ```
   ┌──────────────────────────────────────────────────────────┐
@@ -107,10 +106,9 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 ## Limitations
 
 - **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
-- **Requires a labeled dataset.** You need input/output pairs. No labeled data, no optimization.
-- **Langfuse dependency.** Observability is currently coupled to Langfuse (v2). It works but adds operational complexity and is not optional for full tracing.
+- **Requires a labeled dataset.** Input/output pairs are mandatory.
 
-## Watching a Run
+## Watching a run
 
 While `python -m promptpotter optimize` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `trials/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the planned webapp. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
 
@@ -118,9 +116,9 @@ While `python -m promptpotter optimize` is running, the cleanest setup is **`cam
 
 ```bibtex
 @software{promptpotter,
-  title  = {PromptPotter: Automated Prompt and Pipeline Optimization for LLMs},
+  title  = {PromptPotter: LLM-Driven Evolution of Prompts and Pipelines},
   author = {Streuli, David},
   year   = {2026},
-  url    = {https://github.com/uniqued4ve/prompt-potter-optimizer}
+  url    = {https://github.com/runfish5/prompt-potter-optimizer}
 }
 ```
