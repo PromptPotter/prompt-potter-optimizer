@@ -10,7 +10,7 @@ How PromptPotter works, explained without reference to Python classes, module pa
 | [L2's decision tree](l2-decision-tree.md) | When L2 picks each of its five choices, with one scenario per variant |
 | [L1's prompt surface](l1-generate-surface.md) | The closed catalogue of variables L1 sees, and L2's three levers over it |
 | [The individual record](optsearchpoint-as-state.md) | The `OptSearchPoint` record explained — what each layer reads and writes |
-| [Self-healing](self-healing.md) | The two rails (validation failures vs. degraded runs) and how the optimizer recovers |
+| [Self-healing](self-healing.md) | The four LLM-to-LLM healing loops (validation, runtime, L2-stall, L2-output-validators) and how the optimizer recovers |
 | [Scoring and traces](scoring-and-traces.md) | Traces are facts, scores are policy. Rescore-on-load, decision replay, fork. |
 | [Axis index](axis-index.md) | How knowledge accumulates across campaigns; parameter impact, query patterns, failure modes |
 | [Prompts and individuals](prompts-and-individuals.md) | The 8-field prompt decomposition |

@@ -58,12 +58,14 @@ from promptpotter.application.optimization.elimination import (
     candidate_keys_from_schema,
     get_candidates,
 )
+from promptpotter.application.optimization.l2_validators import run_l2_output_validators
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.domain.validators import ValidatorOutcome
 from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
@@ -641,11 +643,47 @@ def format_runtime_failures_for_l3(runtime_failures: list[dict] | None) -> str:
 
     lines.append("")
     lines.append(
-        "  ↳ Required L3 action: treat these as discovered constraints on the "
-        "search space. Your replan must either change pipeline_params to "
-        "escape the failing region (switch model, raise max_tokens floor, "
-        "swap a node) OR change the plan text to steer L1/L2 around it. "
-        "Do NOT propose a plan that re-enters the same failure mode."
+        "  ↳ Treat these as discovered constraints on the search space. "
+        "Replan either by changing pipeline_params (switch model, raise a "
+        "param floor, swap a node) or by reshaping the plan text. Healing "
+        "is gradual — if the constraints persist after this replan, the "
+        "loop fires again and you'll have a tighter trail to work from."
+    )
+    return "\n".join(lines)
+
+
+def format_l2_output_failures_for_l3(outcomes: list[ValidatorOutcome] | None) -> str:
+    """Render L2-output validator outcomes for L3 modify_plan (heal L2)."""
+    if not outcomes:
+        return ""
+    lines = [
+        "L2 OUTPUT FAILURES — L2 STRATEGY IS BROKEN",
+        "  (deterministic validators caught problems in L2's own output; L3 is L2's nurse-LLM)",
+        "",
+    ]
+    for outcome in outcomes:
+        lines.append(f"  • {outcome.validator_id} (score={outcome.score:.2f})")
+        evidence = outcome.evidence or {}
+        if outcome.validator_id == "l2_cross_field_duplication":
+            for d in evidence.get("duplicates", [])[:3]:
+                fields = ", ".join(d.get("fields", []))
+                first_line = (d.get("block", "") or "").splitlines()[0][:80]
+                lines.append(f"      duplicated across [{fields}]: {first_line!r}")
+        elif outcome.validator_id == "l2_verbatim_self_repeat":
+            preview = (evidence.get("directive", "") or "")[:120]
+            lines.append(f"      directive == previous round's directive: {preview!r}")
+        elif outcome.validator_id == "l2_catalogue_redundancy":
+            for r in evidence.get("redundant_overrides", [])[:3]:
+                section = r.get("section", "")
+                preview = (r.get("value", "") or "")[:80]
+                lines.append(f"      no-op text_overrides[{section!r}]: {preview!r}")
+    lines.append("")
+    lines.append(
+        "  ↳ Healing is gradual. Refine the plan text to nudge L2 toward "
+        "novel mutations; you don't need to perfectly diagnose the broken "
+        "strategy mode in one pass. If the same validator keeps firing, "
+        "the loop retriggers — at which point a structural change "
+        "(pipeline composition, task framing) is the right move."
     )
     return "\n".join(lines)
 
@@ -1317,11 +1355,11 @@ def _section_validation_failures(ctx: LayerContext) -> str:
         )
         lines.append(f"    allowed: [{allowed_str}]")
     lines.append(
-        "  ↳ Required L2 action: produce a directive that names the disallowed "
-        "value(s) explicitly and instructs L1 to choose only from the allowed "
-        'set. Example: "For llm_only.model, use ONLY one of: <list>. Do NOT '
-        'propose any other value such as gpt-4o." Self-healing depends on the '
-        "directive being explicit."
+        "  ↳ Healing is gradual. Write a directive that shifts L1 toward the "
+        "allowed region — pointing at the allowed set is usually enough; "
+        "spelling out every forbidden value is not required. If L1 still "
+        "proposes invalid values next round, the loop retriggers with the "
+        "fresh evidence and you get another pass to refine."
     )
     return "\n".join(lines)
 
@@ -1353,16 +1391,12 @@ def _section_runtime_failures(ctx: LayerContext) -> str:
             lines.extend(format_runtime_failure_line(rf, rf.get("candidate_label", "")))
     lines.append("")
     lines.append(
-        "  ↳ Required L2 action: this is L2 self-healing, not L1 correction. "
-        "Update your OWN outputs — tighten the directive to name the failing "
-        "config range, refine task_context with the discovered constraint, or "
-        "adjust optimizer_params (creativity, n_variants) to narrow L1's search "
-        "around the safe region. Do NOT just parrot 'don't use X' to L1 — "
-        'restructure the search. Example directive: "Reasoning models on this '
-        "task need max_tokens ≥ 2000 to emit a final answer; propose variants "
-        'only within that range." '
-        "If ACCUMULATED entries persist across multiple L2 attempts, L3 will "
-        "replan the pipeline itself next."
+        "  ↳ Healing is gradual and self-directed. Update your OWN outputs — "
+        "shift the directive, refine task_context, or adjust optimizer_params "
+        "to steer L1's search toward a safer region. ACCUMULATED items are "
+        "the signal that your last angle didn't take; try a different one. "
+        "Don't expect a one-shot fix — if the pattern persists across L2 "
+        "attempts, L3 will replan the pipeline itself."
     )
     return "\n".join(lines)
 
@@ -1460,7 +1494,7 @@ def _section_l1c_runtime_failures(ctx: LayerContext) -> str:
     by_warning: dict[str, list[dict]] = {}
     for e in failures:
         by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
-    lines = ["## RUNTIME FAILURES THIS ROUND (Rail 2 — treat as hard constraints)"]
+    lines = ["## RUNTIME FAILURES THIS ROUND (steer away from these regions)"]
     for dom in sorted(by_warning):
         lines.append(f"  {dom}:")
         for e in by_warning[dom]:
@@ -1473,7 +1507,7 @@ def _section_l1c_runtime_failures(ctx: LayerContext) -> str:
                 f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
             )
     lines.append(
-        "  These configurations are broken — do NOT propose the same or similar values next round."
+        "  These configurations degraded — shift away from the same or similar regions."
     )
     return "\n".join(lines)
 
@@ -2136,6 +2170,7 @@ class TransitionResult:
     scheme_overrides: dict[str, bool] = field(default_factory=dict)
     text_overrides: dict[str, str] = field(default_factory=dict)
     template_override: str = ""
+    l2_output_failures: list[ValidatorOutcome] = field(default_factory=list)
     debug_prompt: str = ""
     debug_response: dict | None = None
 
@@ -2299,6 +2334,23 @@ class L2RefineStrategy(LayerTransition):
         if not isinstance(template_override, str):
             template_override = ""
 
+        # Loop 4 — validate L2's parsed output. Build a normalized snapshot
+        # so validators see the cleaned, type-checked values (not raw LLM
+        # JSON which may contain stray non-string entries that would crash
+        # text scans).
+        validator_input: dict[str, Any] = {
+            "directive": l2_directive,
+            "template_override": template_override,
+            "text_overrides": dict(text_overrides),
+        }
+        l2_output_failures = run_l2_output_validators(validator_input, opt_sp)
+        if l2_output_failures:
+            logger.warning(
+                "L2 output failed %d validator(s): %s",
+                len(l2_output_failures),
+                ", ".join(o.validator_id for o in l2_output_failures),
+            )
+
         logger.debug(
             "L2 refine_strategy: %d param changes, task_context %s, action=%s, "
             "directive=%d chars, scheme_overrides=%d, text_overrides=%d, template_override=%d chars",
@@ -2320,6 +2372,7 @@ class L2RefineStrategy(LayerTransition):
             scheme_overrides=scheme_overrides,
             text_overrides=text_overrides,
             template_override=template_override,
+            l2_output_failures=l2_output_failures,
             debug_prompt=prompt,
             debug_response=raw,
         )
@@ -2342,6 +2395,7 @@ class L2RefineStrategy(LayerTransition):
             }
         if result.template_override:
             cycle.opt_sp.l1_template_override = result.template_override
+        cycle.opt_sp.l2_output_failures = list(result.l2_output_failures)
         cycle.escalation.l2.record_entry(cycle.best_accuracy, cycle.best_composite)
 
         is_probe = result.action == OptimizerAction.PROBE_ROUND
@@ -2435,6 +2489,10 @@ class L3ModifyPlan(LayerTransition):
         runtime_failures_section = format_runtime_failures_for_l3(
             [rf.to_dict() for rf in opt_sp.runtime_failures]
         )
+        # Loop 4 — validator outcomes on L2's own output (heal L2).
+        l2_output_failures_section = format_l2_output_failures_for_l3(
+            list(opt_sp.l2_output_failures)
+        )
 
         return {
             "current_plan": opt_sp.plan or "(none — default strategy)",
@@ -2443,6 +2501,9 @@ class L3ModifyPlan(LayerTransition):
             "pipeline_section": format_pipeline_section(pipeline_params, pipeline_schema),
             "runtime_failures_section": (
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
+            ),
+            "l2_output_failures_section": (
+                "\n\n" + l2_output_failures_section if l2_output_failures_section else ""
             ),
             "axes_digest": format_axis_digest_block(
                 cycle.axes.digest_for_l3() if cycle.axes else None,

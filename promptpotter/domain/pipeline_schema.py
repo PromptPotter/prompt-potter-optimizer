@@ -76,7 +76,7 @@ class PipelineNode(BaseModel):
     # Enum constraints per param, sourced from the backend's /pipeline response.
     # Drives both L1 prompt guidance and the JSON-schema enum constraint
     # on structured-output generation, plus post-hoc ValidationFailure
-    # attachment in ``validate_overrides`` (same Rail 1 path as ``model``).
+    # attachment in ``validate_overrides`` (same path as ``model``).
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)

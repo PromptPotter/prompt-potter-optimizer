@@ -61,8 +61,9 @@ L1 generate and L2 receive typed surface payloads — `L1GenerateSurface` from `
 | `plan` | ✓ | — | opt_sp | L3's strategic plan (read-only from L1's view). |
 | `escalation_section` | — | ✓ | transient | Aggregated pipeline stability report — composed from `escalation_check_result`. |
 | `warning_inventory` | — | ✓ | memory | Per-query warning breakdown — L2 fallback when no escalation section. |
-| `validation_failures` | — | ✓ | transient | L1 parse-time invariant violations — Rail 1 self-healing input. |
-| `runtime_failures` | — | ✓ | memory | Mid-eval degradation records — Rail 2 self-healing input for L2. |
+| `validation_failures` | — | ✓ | transient | L1 parse-time invariant violations — Loop 1 self-healing input. |
+| `runtime_failures` | — | ✓ | memory | Mid-eval degradation records — Loop 2 self-healing input for L2. |
+| `l2_output_failures` | — | (L3) | memory | Validator outcomes on L2's own parsed output — Loop 4 self-healing input for L3. |
 | `axes_l2` | — | ✓ | axes | Cross-campaign strategic digest: axis rankings, bottlenecks, correlations. |
 
 L2 also receives a `l1_generate_field_catalogue` hole — a code-derived menu of every L1-generate registry entry with current visibility / override state. L2 cannot lose track of a section that exists in code; capability removal is a deliberate enum-deletion change. See [l1-generate-surface.md](l1-generate-surface.md).

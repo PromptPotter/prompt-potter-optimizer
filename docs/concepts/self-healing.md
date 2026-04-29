@@ -1,48 +1,45 @@
 # Self-Healing
 
-The optimizer can produce unfit individuals in two distinct ways, and it handles each on a separate rail. Failures always attach to the individual that produced them, never to the round — so one unfit individual can't disrupt the round's winner.
+Failures attach to the candidate that produced them, never to the round. Four loops watch a producer LLM's output, then nudge it via the nurse LLM's prompt. **Healing is gradual** — a guidance update shifts the producer's distribution; if it doesn't fully fix things, the loop retriggers next round with fresh evidence.
 
-## The two rails
+## The four loops
 
-|  | **Rail 1 — Invalid at proposal time** | **Rail 2 — Degraded at runtime** |
-|---|---|---|
-| Detected | Before any backend call | During evaluation |
-| Example | L1 proposed `model: gpt-4o` when only `gpt-oss-120b` is allowed | A configuration produces empty responses on 100% of queries |
-| Who made the mistake | L1 (picked a disallowed value) | Nobody tactically — L1's value was in range, but the search's *strategic shape* didn't account for the runtime constraint |
-| Score effect | Synthetic zero; no backend calls spent | Real score stands; the candidate is eliminated mid-evaluation |
-| Who teaches whom | **L2 writes a directive** that names the forbidden value | **L2 adjusts its own outputs** — directive, task context, meta-settings, or L1-surface section overrides |
-| Escalation | None — L2 can always articulate a constraint clearly | L3 replans when L2's adjustments keep failing |
+|   | Producer → Nurse | Detector | Failure record | Stored on OSP as |
+|---|---|---|---|---|
+| **1** | L1 → L2 (gen-time) | `L1_SCHEMA_COMPLIANCE` validator | `ValidationFailure` | `validation_failures` |
+| **2** | L1 → L2 (runtime) | `DegradationCheck` (mid-eval) | `RuntimeFailure` | `runtime_failures` (accumulates) |
+| **3** | L2 → L3 (stall) | `l2_patience` exhausted | (none — patience event) | `escalation.l2.stall_count` |
+| **4** | L2 → L3 (post-parse) | `L2_OUTPUT_VALIDATORS` registry | `ValidatorOutcome` | `l2_output_failures` |
 
-Both rails share a rule: *detect early, pin the failure to the specific candidate, surface it in the candidate's score report, and feed the right teacher.* What differs is who the teacher is and what healing looks like.
+- **Loop 1.** L1 proposed a value outside the allowed set. Synthetic 0; no backend call. L2 next round writes guidance shifting L1 toward the allowed region.
+- **Loop 2.** Candidate ran but degraded (e.g. 100% `reasoning_budget_exhausted`). Real score, candidate eliminated mid-eval, failure mirrored to outer memory. L2 reshapes its own outputs; trail accumulates across rounds.
+- **Loop 3.** L2's adjustments aren't moving the metric for `l2_patience` rounds. L3 replans — pipeline composition or strategic frame.
+- **Loop 4.** A deterministic validator caught L2's parsed output (cross-field duplication, verbatim self-repeat, catalogue redundancy). L3 fires *immediately*, bypassing patience.
 
-## Rail 1 — Invalid proposals
+## Healing is gradual
 
-Some candidates are dead before evaluation even starts. L1 proposed a value the backend doesn't accept — a model name outside the allowed set, a parameter value outside the allowed range. Nothing runs; the candidate gets a synthetic score of zero.
+A loop firing once produces *one* nudge — not a guaranteed fix. The producer's distribution shifts; whether the next proposal lands depends on how clear the evidence was and how strongly the nurse encoded it. If the failure recurs:
 
-L2 next round reads the list of validation failures and writes a directive that names the forbidden value explicitly: *"do not propose gpt-4o for model."* The directive lands on the individual record and L1 reads it as primary signal for the following round. L1 picks a different value. Self-healed in one round.
+- Loops 1 and 4 retrigger same/next round with the new evidence.
+- Loop 2's failure trail accumulates across rounds; L2 sees NEW vs ACCUMULATED and must change angle if the latter survives.
+- Loop 3 fires only on stall, but each L3 plan shapes both subsequent L1 and L2.
 
-Validation failures never make it to the user as a warning to resolve. They're just optimizer state — a loop participant learning its own rules.
+The system depends on this gradualness. Hard one-shot directives ("do NOT propose X") aren't required — softer pointers toward the right region are enough, because the loop is built to retry.
 
-## Rail 2 — Runtime degradation
+## Validators are Evaluator-shaped
 
-Some candidates are valid at proposal time — every parameter is in range — but degrade at runtime. Canonical example: a reasoning model asked to emit structured output with too tight a token budget. The model exhausts its reasoning budget before emitting visible content; the backend returns the raw reasoning trace as the answer; every query produces a degradation warning. No rule was broken; the search simply didn't account for the runtime constraint.
+`ValidatorOutcome(id, passed, score, evidence, nurse_target)` mirrors `Evaluator(name, ..., compute → float)`. The `score` field is the seam for future L4 composite scoring — outcomes can flow into the same kind of formula evaluators feed today.
 
-The optimizer handles this in three steps:
+## Failures attach to candidates, not rounds
 
-1. **The candidate is eliminated mid-evaluation.** Its real score stands, but scoring stops once the degradation pattern is clear — no point spending more budget on a candidate that's already lost.
-2. **The failure is pinned to that configuration** and mirrored into cumulative optimizer memory, deduplicated across rounds.
-3. **L2 reads the accumulated failure trail** next round. If items survived prior L2 adjustments, L2's last angle didn't work — it must try something different. L2 writes a tighter directive that names the failing region, refines task context with the discovered constraint, or sets section overrides to gate misleading sections off so L1's search narrows.
+One wild mutation can't waste the round; round winners are unaffected. This is what makes the gradual-retrigger property safe.
 
-If the pattern keeps growing across L2 rounds, L3 replans. L3 reads the trail as discovered constraints on the search space and either changes pipeline parameters (switch model, raise a floor, swap a node) or rewrites the plan to steer the whole search around the failing region.
+## Round-over-round feedback (separate)
 
-## Why failures attach to candidates, not rounds
+`l1_critique → l1_generate` fires every round, regardless of failure. Not in the canon — it's performance-driven feedback, not failure-driven healing. See [three-layer-loop.md](three-layer-loop.md).
 
-If a single unfit individual caused the round to abort, one wild mutation could waste an entire round's budget. By pinning failures to the individual and letting the round's other individuals run to completion, the round's winner is unaffected.
+## How user-visible
 
-This is also what makes self-healing work at the right cadence. Rail 1 learns from its mistakes in a single round. Rail 2 learns across rounds by accumulating the trail — the *strategic* shape of the search is what's being adjusted, and that demands multi-round feedback.
+Per-query `⚠ … ↳` annotations. Audit trail, not alerts.
 
-## How user-visible this is
-
-Not very. Both rails surface in the per-query annotation convention — a `⚠` line naming what was found, a `↳` line naming what the optimizer did about it — but they don't demand user intervention. The whole point of self-healing is that the loop fixes itself. The annotations are audit trail, not alerts.
-
-For the implementation wiring — failure types, escalation signals, where each gets detected — see [../developer/self-healing-internals.md](../developer/self-healing-internals.md).
+For implementation wiring see [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).

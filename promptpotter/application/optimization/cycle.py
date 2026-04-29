@@ -936,6 +936,28 @@ async def escalate_l2(
             obs_campaign_id=obs_campaign_id,
             escalation_check_result=escalation_check_result,
         )
+
+        # Loop 4 — post-L2 validator force: if L2 produced broken output,
+        # L3 fires immediately to heal L2, bypassing l2_patience and
+        # l3_patience. The trigger is deterministic from L2's output (which
+        # itself rides on the trial JSON), so resume reproduces it without
+        # needing a separate decision record.
+        if cycle.opt_sp.l2_output_failures and opt.enable_l3:
+            logger.info(
+                "L3 force-triggered by %d L2-output validator failure(s) at round %d",
+                len(cycle.opt_sp.l2_output_failures),
+                round_num,
+            )
+            await _run_transition(
+                L3ModifyPlan(),
+                cycle,
+                config,
+                pipeline_schema,
+                round_num,
+                on_phase,
+                obs=obs,
+                obs_campaign_id=obs_campaign_id,
+            )
         return None
 
     if not opt.enable_l3:

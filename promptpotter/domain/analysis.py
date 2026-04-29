@@ -121,7 +121,7 @@ class ValidationFailure:
 class RuntimeFailure:
     """A runtime-observed health failure on a candidate's scoring run.
 
-    Sibling of ``ValidationFailure`` on the self-healing rail, but
+    Sibling of ``ValidationFailure`` in the self-healing canon, but
     populated AFTER the candidate ran — from per-query degradation
     evidence (e.g. a candidate with ``max_tokens=150`` that classifies
     as ``reasoning_budget_exhausted`` on 7/7 queries). Attributes

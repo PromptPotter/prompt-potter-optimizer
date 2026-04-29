@@ -61,6 +61,7 @@ from promptpotter.domain.results import (
     RoundResult,
 )
 from promptpotter.domain.scoring import QueryResult
+from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
 # Module-level alias for test monkeypatching.
 from promptpotter.infrastructure import llm as _llm_client
@@ -86,6 +87,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "L1_SCHEMA_COMPLIANCE",
     "L1ScoringResult",
     "L1YieldStats",
     "build_l1_output_schema",
@@ -201,6 +203,46 @@ def validate_overrides(
                     )
                 )
     return failures
+
+
+def _check_l1_schema_compliance(
+    source_output: Any,
+    *,
+    pipeline_schema: PipelineSchema,
+    **_: Any,
+) -> ValidatorOutcome | None:
+    """L1-output validator wrapping :func:`validate_overrides`.
+
+    Source output is the candidate's ``node_overrides`` dict (parse-time
+    projection of L1's ``pipeline_params_override``). Produces a single
+    ValidatorOutcome carrying every detected ``ValidationFailure`` as
+    evidence. Nurse target: L2 — L2 reads the failures next round and
+    writes a directive that names the disallowed value.
+    """
+    if not source_output or not pipeline_schema:
+        return None
+    failures = validate_overrides(source_output, pipeline_schema)
+    if not failures:
+        return None
+    return ValidatorOutcome(
+        validator_id=L1_SCHEMA_COMPLIANCE.id,
+        passed=False,
+        score=0.0,
+        evidence={"failures": failures},
+        nurse_target="l2",
+    )
+
+
+L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
+    id="l1_schema_compliance",
+    description=(
+        "Verify L1's pipeline_params_override against the pipeline schema's "
+        "available_models and param_allowed_values. Failures attach to the "
+        "candidate as ValidationFailures and drive the synthetic-0 path."
+    ),
+    nurse_target="l2",
+    check=_check_l1_schema_compliance,
+)
 
 
 async def l1_generate(
@@ -336,8 +378,8 @@ def detect_invariants(
     parent). A *duplicate* signature equals one already seen earlier in the
     batch. Failures attach to ``cp.osp.validation_failures`` so the existing
     synthetic-0 path (``score_population`` Path 1) skips scoring with zero
-    LLM cost; L2 ingests them next round (Rail 1) and the resulting
-    ``l2_directive`` teaches L1 to diversify.
+    LLM cost; L2 ingests them next round and the resulting ``l2_directive``
+    teaches L1 to diversify.
 
     Idempotent: pre-existing ``no_op_variant`` / ``duplicate_variant``
     entries are dropped before the pass so resume-from-disk doesn't
@@ -430,8 +472,9 @@ def parse_population(
         override = cp.node_overrides or None
         osp = cp.osp
         if schema and override:
-            failures = validate_overrides(override, schema)
-            if failures:
+            outcome = L1_SCHEMA_COMPLIANCE.run(override, pipeline_schema=schema)
+            if outcome is not None:
+                failures: list[ValidationFailure] = outcome.evidence["failures"]
                 osp.validation_failures = failures
                 for vf in failures:
                     logger.warning(
@@ -507,7 +550,7 @@ def _handle_scored_candidate(
     *,
     l1_diversity: float = 1.0,
 ) -> tuple[CandidateScore, EscalationSignal | None]:
-    """Build report for a scored candidate; attach RuntimeFailure on elimination (Rail 2)."""
+    """Build report for a scored candidate; attach RuntimeFailure on elimination."""
     elimination_stopped = (
         signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
     )
@@ -632,8 +675,8 @@ async def score_population(
     *,
     degradation_checks: list | None = None,
     callbacks: RunListener,
-    elimination_n_min: int = 4,
-    elimination_alpha: float = 0.2,
+    elimination_n_min: int,
+    elimination_alpha: float,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
     l1_diversity: float = 1.0,
@@ -808,8 +851,8 @@ async def l1_score(
     improvement_threshold: float = 0.01,
     callbacks: RunListener,
     degradation_checks: list | None = None,
-    elimination_n_min: int = 4,
-    elimination_alpha: float = 0.2,
+    elimination_n_min: int,
+    elimination_alpha: float,
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> L1ScoringResult:

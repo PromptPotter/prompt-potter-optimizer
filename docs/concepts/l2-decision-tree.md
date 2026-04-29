@@ -78,4 +78,4 @@ L2's output is a flat JSON dict; only the fields it wants to change need to be s
 
 - [what-is-l2.md](what-is-l2.md) — what L2 is and what it watches.
 - [l1-generate-surface.md](l1-generate-surface.md) — the surface L2's section overrides operate on.
-- [self-healing.md](self-healing.md) — how L2's directives carry self-healing rails (validation + runtime failures).
+- [self-healing.md](self-healing.md) — how L2's directives carry the validation + runtime healing loops (Loops 1 and 2).

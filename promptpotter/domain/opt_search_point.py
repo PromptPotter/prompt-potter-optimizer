@@ -26,6 +26,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import FailureAnalysis, RuntimeFailure, ValidationFailure
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
+from promptpotter.domain.validators import ValidatorOutcome
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -253,12 +254,21 @@ class OptSearchPoint(PromptTemplate):
         default_factory=list,
         description="Runtime-observed health failures on this candidate "
         "(e.g. max_tokens=150 classifying as 100%% reasoning_budget_exhausted "
-        "on reasoning models). Sibling of validation_failures on the self-"
-        "healing rail but populated AFTER the backend ran, not at parse time. "
-        "Does not synthetic-0 — the real score stands — but flows to L2 as "
-        "self-healing evidence so the next round's directive names the "
+        "on reasoning models). Populated AFTER the backend ran, not at parse "
+        "time. Does not synthetic-0 — the real score stands — but flows to "
+        "L2 as self-healing evidence so the next round's directive names the "
         "disallowed value range. Attached per candidate, so a losing "
         "candidate's runtime issues never disrupt the round winner.",
+    )
+    l2_output_failures: list[ValidatorOutcome] = Field(
+        default_factory=list,
+        description="Deterministic validator outcomes on L2's own output for "
+        "this round. Populated post-parse by the L2-validator registry "
+        "(cross-field duplication, verbatim self-repeat, catalogue "
+        "redundancy). A non-empty list forces L3 escalation this round — "
+        "L3 is the nurse-LLM that heals L2, analogue of how L2 heals L1 "
+        "via validation_failures. See "
+        "docs/developer/self-healing-internals.md.",
     )
     failure_analysis: FailureAnalysis | None = Field(
         default=None,
@@ -306,6 +316,7 @@ class OptSearchPoint(PromptTemplate):
         "l2_directive",
         "validation_failures",
         "runtime_failures",
+        "l2_output_failures",
         "failure_analysis",
         "round_history",
     )

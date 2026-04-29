@@ -47,7 +47,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 **What you see:** Many candidates receive a synthetic score of zero. The optimizer logs mention "validation failure" or "invalid proposal."
 
-**Why:** L1 is proposing a parameter value outside the allowed set for that pipeline node. Rail 1 catches this before any backend call runs.
+**Why:** L1 is proposing a parameter value outside the allowed set for that pipeline node. The `L1_SCHEMA_COMPLIANCE` validator catches this before any backend call runs (Loop 1 in [self-healing](../concepts/self-healing.md)).
 
 **What to try:**
 - L2's directive should fix this within 1–2 rounds by naming the forbidden value explicitly. If it persists beyond that, check the `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured on the backend side.

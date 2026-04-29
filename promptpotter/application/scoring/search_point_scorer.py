@@ -496,7 +496,7 @@ async def score_search_point(
             raise KeyboardInterrupt()
         # Per-candidate scoring-error abort (consecutive 5xx, client 4xx,
         # pipeline ERROR). Synthesize a candidate-scoped escalation so the
-        # caller can attach a RuntimeFailure (Rail 2) and continue with the
+        # caller can attach a RuntimeFailure and continue with the
         # next candidate — never kill the round.
         escalation_signal = _build_scoring_error_signal(
             results=results,

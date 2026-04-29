@@ -30,8 +30,8 @@ L2 is **not every-round**. On healthy tasks where L1 keeps improving, L2 may sta
 | `escalation_section` | `_section_escalation_section(ctx)` | Active escalation report. |
 | `warning_inventory` | `_section_warning_inventory(ctx)` | Per-query warning inventory (when no escalation report). |
 | `l2_directive` | `_section_l2_directive(ctx)` | Previous round's directive (sliding window). |
-| `validation_failures` | `_section_validation_failures(ctx)` | Rail 1 evidence. |
-| `runtime_failures` | `_section_runtime_failures(ctx)` | Rail 2 evidence. |
+| `validation_failures` | `_section_validation_failures(ctx)` | Loop 1 evidence — L1 schema-compliance failures. |
+| `runtime_failures` | `_section_runtime_failures(ctx)` | Loop 2 evidence — runtime degradation patterns. |
 | `axes_l2` | `_section_axes_l2(ctx)` | AxisIndex digest for L2 (axis rankings, bottlenecks, persistent failures, volatile queries). |
 | `l1_generate_field_catalogue` | `_format_l1_generate_field_catalogue(...)` | Code-derived menu of L1's surface — capabilities cannot be silently lost. |
 
@@ -119,4 +119,4 @@ L2 does not mutate pipeline params (that's L3). L2 does not score candidates (th
 
 For the structural side, see:
 - [l1-generate-surface.md](l1-generate-surface.md) — what L2 mutates on L1's side.
-- [self-healing-internals.md](self-healing-internals.md) — Rail 1 (validation) and Rail 2 (runtime) self-healing flowing through L2.
+- [self-healing-internals.md](self-healing-internals.md) — four LLM-to-LLM healing loops; L2 is the nurse for Loops 1 and 2 (validation + runtime), and the producer for Loop 4 (its own output validators).

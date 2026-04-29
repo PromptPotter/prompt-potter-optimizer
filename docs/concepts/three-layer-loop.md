@@ -44,7 +44,7 @@ L1 Generate chooses among three kinds of knobs, all discovered from the target p
 
 The set of knobs isn't fixed. It's read from the backend's self-description at init time and flows into every round from there.
 
-## The critique step
+## The critique step — round-over-round feedback
 
 After scoring, before the next round's generate, the critique step runs. It is the only place in the loop that reads raw per-query results — every hit, every miss, the exact outputs. It produces a structured analysis that feeds forward:
 
@@ -52,6 +52,8 @@ After scoring, before the next round's generate, the critique step runs. It is t
 - **Into L2 Refine** on escalation — so L2 can build on the critique rather than re-deriving it.
 
 The critique is the every-round intelligence hub. It's what makes L1 Generate informed rather than random.
+
+`l1_critique → l1_generate` is **not** part of the self-healing canon — it fires every round whether anything failed or not. Self-healing is failure-driven (Loops 1–4 in [self-healing.md](self-healing.md)); this critique loop is performance-driven feedback. Different mechanism, similar plumbing: the critique writes `OptSearchPoint.l1_critique_text` and `failure_analysis`, which L1's prompt reads via the `{{failure_analysis}}` slot in `prompts/l1_generate.json`.
 
 ## Escalation is additive, not preemptive
 
