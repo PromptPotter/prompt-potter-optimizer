@@ -434,22 +434,6 @@ def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
     return tenant_root / "campaigns" / root / "forks" / cycle_id
 
 
-def _migrate_legacy_fork_dirs(base_dir: Path) -> None:
-    """One-time, idempotent: move ``campaigns/{X_fork_Y}/`` (legacy flat layout)
-    into ``campaigns/{X}/forks/{X_fork_Y}/``. After the first store init on
-    a pre-migration tree, the iteration finds nothing and returns immediately."""
-    campaigns_root = base_dir / "campaigns"
-    if not campaigns_root.exists():
-        return
-    for child in list(campaigns_root.iterdir()):
-        if not child.is_dir() or "_fork_" not in child.name:
-            continue
-        target = campaign_dir_for(base_dir, child.name)
-        if target.exists():
-            continue  # already migrated (or name conflict — leave alone)
-        target.parent.mkdir(parents=True, exist_ok=True)
-        child.rename(target)
-        logger.info("Migrated fork dir %s → %s", child.name, target)
 
 
 class CampaignStore(EntityStore):
@@ -458,7 +442,6 @@ class CampaignStore(EntityStore):
     def __init__(self, base_dir: Path):
         # base_dir is tenant root; campaigns nest directly under it
         super().__init__(base_dir, "campaigns")
-        _migrate_legacy_fork_dirs(base_dir)
 
     # -- path helpers ---------------------------------------------------------
 

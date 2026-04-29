@@ -53,8 +53,7 @@ SHEET_COLUMN_MAP: dict[str, dict[str, str]] = {
 def samples_from_dicts(items: list[dict]) -> list[Sample]:
     """Convert a list of dicts (e.g. from on-disk JSON) into Samples.
 
-    Assigns positional ``id`` to items lacking one (legacy migration);
-    ``sample_id`` is accepted as ``id``. Extra keys are ignored.
+    Assigns a positional ``id`` to items lacking one. Extra keys are ignored.
     """
     return [Sample.from_dict(item, fallback_id=i) for i, item in enumerate(items)]
 

@@ -16,11 +16,6 @@ Three layers in one file:
        llm_only:content_empty              stop / other    any         empty_response
        *:content_filtered                  any             any         (passthrough as fatal)
 
-   Legacy alias: archives written before TermNorm renamed the advisory carry
-   ``llm_only:empty_content_reasoning_fallback``. Treated as
-   ``llm_only:reasoning_budget_exhausted`` so resume on old cycles still
-   deprecates correctly.
-
 2. **Result helpers** (``extract_warning_types``, ``is_deprecated``,
    ``candidate_keys_from_schema``, ``get_candidates``, ``update_query_tracker``)
    — pure read-only helpers over a result dict / pipeline schema. Consumed by
@@ -64,9 +59,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Classification
 # ---------------------------------------------------------------------------
-
-_LEGACY_ADVISORY = "llm_only:empty_content_reasoning_fallback"
-
 
 @dataclass(frozen=True)
 class ResultClassification:
@@ -125,9 +117,6 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     """Walk advisories + raw response shape; return advisory + fatal codes."""
     advisories = _collect_advisories(result)
     fatals: set[str] = set()
-
-    if _LEGACY_ADVISORY in advisories:
-        fatals.add("llm_only:reasoning_budget_exhausted")
 
     if "llm_only:content_empty" in advisories:
         finish_reason, reasoning_tokens = _llm_only_shape(result)

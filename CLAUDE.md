@@ -58,7 +58,7 @@ CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pyt
 - **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
 - **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground.
 - Version: `APP_VERSION` in `promptpotter/config/settings.py`.
-- **Commit messages**: keep under 800 characters total. Terse bullets, not prose.
+- **Commit messages: HARD CAP 800 chars total** — including `Co-Authored-By` trailer. Title under 70, body terse bullets only. NO multi-paragraph prose, NO motivation essays, NO "this commit does X to enable Y so that Z" chains. If the message describes more than the diff, you have failed. This rule is the most often-ignored — when in doubt, cut it in half. Re-read your message before `git commit`; if it's over 800 you rewrite it shorter, you do not commit and "fix later."
 - **Sample IDs**: `sample_id: int` is optional on each sample (`QueryResult.sample_id`). It's an **internal positional index** assigned by the loader over the final merged list — not a canonical upstream ID. BBEH assigns sequential ints over its flattened 23-task mini list; display shows `#NNN` in the per-query line when present.
 
 ## Architecture

@@ -10,7 +10,7 @@ Accepted shapes:
 - **String shorthand** — interpreted as ``per_query``; ``per_round`` uses the evaluator-registry default.
 - **Twin form** — ``{"per_query": "...", "per_round": "..."}``; omitted keys fall back to defaults.
 
-No ``scoring`` key → defaults to ``float(hit)`` (exact-match, legacy).
+A missing ``scoring`` key raises in ``compile_scorer`` — there is no implicit default.
 """
 
 from __future__ import annotations

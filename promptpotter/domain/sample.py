@@ -43,14 +43,11 @@ class Sample(BaseModel):
 
     @classmethod
     def from_dict(cls, data: dict, fallback_id: int | None = None) -> Sample:
-        """Construct from a plain dict, tolerating legacy shapes.
+        """Construct from a plain dict.
 
-        - Legacy ``sample_id`` key is accepted as ``id``.
-        - If no id is present, falls back to ``fallback_id`` (positional).
+        ``id`` falls back to ``fallback_id`` (positional) when absent.
         Extra keys (``task``, ``source_sheet``, etc.) are ignored.
         """
-        if "id" not in data and "sample_id" in data:
-            data = {**data, "id": data["sample_id"]}
         if "id" not in data and fallback_id is not None:
             data = {**data, "id": fallback_id}
         return cls(**data)

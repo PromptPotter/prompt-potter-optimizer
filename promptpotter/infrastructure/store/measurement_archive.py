@@ -137,8 +137,11 @@ class MeasurementArchive:
             replaced = False
             for i, entry in enumerate(entries):
                 if entry.get("content_hash") == content_hash_val:
+                    old_run_id = entry.get("run_id", "")
                     entries[i] = summary
                     replaced = True
+                    if old_run_id and old_run_id != run_id:
+                        (self._runs_dir(backend_id) / f"{old_run_id}.json").unlink(missing_ok=True)
                     break
             if not replaced:
                 entries.append(summary)

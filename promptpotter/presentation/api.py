@@ -23,7 +23,6 @@ StoreDep = Annotated[Stores, Depends(build_stores)]
 logger = logging.getLogger(__name__)
 
 backends_router = APIRouter(prefix="/backends", tags=["Backends"])
-router = backends_router  # backwards-compat alias for in-file decorator usage
 
 
 class RegisterBackendRequest(BaseModel):
@@ -65,7 +64,7 @@ def _get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
     return backend
 
 
-@router.post("", response_model=RegisterBackendResponse, status_code=201)
+@backends_router.post("", response_model=RegisterBackendResponse, status_code=201)
 async def register_backend(request: RegisterBackendRequest, store: StoreDep):
     """Register a new backend connection."""
     backend_id = request.id or re.sub(r"[^a-z0-9]+", "-", request.name.lower().strip()).strip("-")
@@ -89,7 +88,7 @@ async def register_backend(request: RegisterBackendRequest, store: StoreDep):
     )
 
 
-@router.get("", response_model=list[RegisterBackendResponse])
+@backends_router.get("", response_model=list[RegisterBackendResponse])
 async def list_backends(store: StoreDep):
     """List all registered backends."""
     return [
@@ -104,7 +103,7 @@ async def list_backends(store: StoreDep):
     ]
 
 
-@router.get("/{backend_id}", response_model=RegisterBackendResponse)
+@backends_router.get("/{backend_id}", response_model=RegisterBackendResponse)
 async def get_backend(backend_id: str, store: StoreDep):
     """Get backend details."""
     b = _get_backend_or_404(backend_id, store)
@@ -117,7 +116,7 @@ async def get_backend(backend_id: str, store: StoreDep):
     )
 
 
-@router.post("/{backend_id}/sync", response_model=SyncResponse)
+@backends_router.post("/{backend_id}/sync", response_model=SyncResponse)
 async def sync_experiments(backend_id: str, store: StoreDep):
     """Sync experiments from backend API into project store (verbatim)."""
     backend = _get_backend_or_404(backend_id, store)
@@ -142,7 +141,7 @@ async def sync_experiments(backend_id: str, store: StoreDep):
     )
 
 
-@router.get("/{backend_id}/experiments")
+@backends_router.get("/{backend_id}/experiments")
 async def list_experiments(backend_id: str, store: StoreDep):
     """List synced experiments (from local store, native format)."""
     _get_backend_or_404(backend_id, store)
@@ -162,7 +161,7 @@ async def list_experiments(backend_id: str, store: StoreDep):
     return {"experiments": experiments}
 
 
-@router.get("/{backend_id}/experiments/{experiment_id}")
+@backends_router.get("/{backend_id}/experiments/{experiment_id}")
 async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
     """Get a synced experiment in native backend format."""
     _get_backend_or_404(backend_id, store)
@@ -175,7 +174,7 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
     return data
 
 
-@router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
+@backends_router.get("/{backend_id}/pipeline", response_model=PipelineViewResponse)
 async def get_pipeline(backend_id: str, store: StoreDep):
     """Dynamic pipeline view from the backend."""
     backend = _get_backend_or_404(backend_id, store)
@@ -205,7 +204,6 @@ from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
 campaigns_router = APIRouter()
-router = campaigns_router  # rebind for the campaigns half of the file
 
 
 class CampaignSummary(BaseModel):
@@ -255,7 +253,7 @@ class CampaignDetailResponse(BaseModel):
     )
 
 
-@router.get(
+@campaigns_router.get(
     "/backends/{backend_id}/campaigns",
     response_model=CampaignListResponse,
 )
@@ -271,7 +269,7 @@ async def list_campaigns(
     )
 
 
-@router.get(
+@campaigns_router.get(
     "/backends/{backend_id}/campaigns/{campaign_id}",
     response_model=CampaignDetailResponse,
 )
@@ -287,7 +285,7 @@ async def get_campaign(
     return CampaignDetailResponse(**data)
 
 
-@router.get(
+@campaigns_router.get(
     "/backends/{backend_id}/campaigns/{campaign_id}/trials/{round_num}",
     response_model=dict[str, Any],
 )
