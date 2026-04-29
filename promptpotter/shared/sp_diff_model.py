@@ -1,4 +1,9 @@
-"""SearchPoint diff view-model — flatten/build/group helpers for renderer consumption."""
+"""SearchPoint diff view-model — flatten/build/group helpers for renderer consumption.
+
+Pure dict/list shape munging with zero optimization-domain knowledge.
+Lives in ``shared/`` because callers cross layers: ``application.campaign.phase_views``
+(application) and ``presentation.views.phase_events`` (presentation) both consume it.
+"""
 
 from __future__ import annotations
 

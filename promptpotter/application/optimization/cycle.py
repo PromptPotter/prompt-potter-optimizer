@@ -16,7 +16,7 @@ if TYPE_CHECKING:
     from promptpotter.application.campaign.campaign_setup import Session
     from promptpotter.application.campaign.config import CampaignConfig
     from promptpotter.application.intelligence.axis_index import AxisIndex
-    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
+    from promptpotter.application.optimization.nodes.l1_score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryResult

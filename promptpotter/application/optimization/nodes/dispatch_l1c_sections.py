@@ -33,7 +33,7 @@ from promptpotter.shared.errors import is_error_result
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.nodes.dispatch_msg_registry import LayerContext
-    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
+    from promptpotter.application.optimization.nodes.l1_score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
 

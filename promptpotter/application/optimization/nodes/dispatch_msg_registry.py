@@ -42,7 +42,7 @@ from promptpotter.application.optimization.nodes.formatting import (
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.nodes.l1.score import L1ScoringResult
+    from promptpotter.application.optimization.nodes.l1_score import L1ScoringResult
     from promptpotter.domain.pipeline_schema import PipelineSchema
 
 

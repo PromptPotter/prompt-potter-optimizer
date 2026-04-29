@@ -87,7 +87,7 @@ promptpotter/
 
 **SearchPoint hierarchy** — `JobSearchPoint` (frozen target spec, pipeline_params) and `PromptTemplate` → `OptSearchPoint` (optimizer state + memory). All services: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state traced at both layers: `JobSearchPoint` → `dataset_runs/` (content-addressed, shared); `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Details in [`docs/developer/code-layout.md`](docs/developer/code-layout.md).
 
-**Scoring pipeline** — `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway. Three early-exit paths (validation-failure synthetic-0, full-run cache hit, mid-eval escalation) live in `application/optimization/nodes/l1/measure.py::score_population` and are detailed in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
+**Scoring pipeline** — `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway. Three early-exit paths (validation-failure synthetic-0, full-run cache hit, mid-eval escalation) live in `application/optimization/nodes/l1_measure.py::score_population` and are detailed in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
 
 **Pipeline params** — always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `shared/constants.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
 

@@ -17,7 +17,7 @@ if TYPE_CHECKING:
     from promptpotter.infrastructure.llm.client import LLMClientBase
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
 
-    from .score import L1ScoringResult
+    from .l1_score import L1ScoringResult
 
 logger = logging.getLogger(__name__)
 

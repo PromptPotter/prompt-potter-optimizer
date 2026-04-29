@@ -38,19 +38,19 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
-| `execute_round` | `promptpotter/application/optimization/nodes/l1/execute.py` |
+| `execute_round` | `promptpotter/application/optimization/nodes/l1_execute.py` |
 | `classify_result` | `promptpotter/application/optimization/diagnostics.py` |
-| `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1/score.py` |
-| `l1_generate` | `promptpotter/application/optimization/nodes/l1/generate.py` |
-| `l1_score` | `promptpotter/application/optimization/nodes/l1/score.py` |
+| `L1ScoringResult` | `promptpotter/application/optimization/nodes/l1_score.py` |
+| `l1_generate` | `promptpotter/application/optimization/nodes/l1_generate.py` |
+| `l1_score` | `promptpotter/application/optimization/nodes/l1_score.py` |
 | `LayerCounter` | `promptpotter/application/optimization/cycle.py` |
 | `LayerTransition` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
 | `llm_call` | `promptpotter/application/optimization/pipeline.py` |
 | `load_optimizer_prompt` | `promptpotter/application/optimization/pipeline.py` |
-| `run_l1_critique` | `promptpotter/application/optimization/nodes/l1/critique.py` |
-| `score_population` | `promptpotter/application/optimization/nodes/l1/measure.py` |
+| `run_l1_critique` | `promptpotter/application/optimization/nodes/l1_critique.py` |
+| `score_population` | `promptpotter/application/optimization/nodes/l1_measure.py` |
 | `TransitionResult` | `promptpotter/application/optimization/nodes/layer_transitions.py` |
-| `validate_overrides` | `promptpotter/application/optimization/nodes/l1/generate.py` |
+| `validate_overrides` | `promptpotter/application/optimization/nodes/l1_generate.py` |
 
 Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[str]` on transition classes in `nodes/layer_transitions.py` and registered in `optimizer_pipeline.json` alongside the loop.
 

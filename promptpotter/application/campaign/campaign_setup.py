@@ -19,7 +19,6 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
-from promptpotter.domain.tenant import TenantContext
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
@@ -42,12 +41,20 @@ __all__ = [
     "CampaignState",
     "ScoringContext",
     "Session",
+    "TenantContext",
     "auto_mint_session",
     "init_optimization_loop",
     "init_services",
     "new_session_state",
     "populate_session_scoring",
 ]
+
+
+@dataclass(frozen=True)
+class TenantContext:
+    tenant_id: str
+    user_id: str | None = None
+    capabilities: frozenset[str] = field(default_factory=frozenset)
 
 
 @dataclass
@@ -200,19 +207,29 @@ def auto_mint_session(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    cycle_hash: str,
+    cycle_id: str,
     baseline_acc: float = 0.0,
     baseline_prompt_fields: dict | None = None,
     dataset_size: int = 0,
     experiment_id: str | None = None,
+    pipeline_params: dict | None = None,
+    active_steps: list[str] | None = None,
+    create_campaign_dir: bool = True,
 ) -> tuple[str, str]:
-    """Mint (session_id, cycle_id) + write session + claim active pointer when called outside CLI init."""
+    """Mint (session_id, cycle_id), write session state, claim active pointer.
+
+    ``cycle_id`` must be the full prefixed form (``"cycle_<hash>"``).
+    Mutates ``session.session_id`` and ``session.state.cycle_id`` in place
+    so callers don't repeat the bind. Creates the campaign dir by default
+    (CLI ``init`` wants the dir to exist before ``optimize``); set
+    ``create_campaign_dir=False`` to defer to ``bootstrap_cycle``.
+    """
     from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
     from promptpotter.infrastructure.store.base import validate_path_component
 
+    cycle_hash = cycle_id.removeprefix("cycle_")
     validate_path_component(cycle_hash)
     session_id = mint_session_id()
-    cycle_id = f"cycle_{cycle_hash}"
 
     state = new_session_state(
         init_params={
@@ -222,8 +239,8 @@ def auto_mint_session(
             "dataset_name": session.dataset_name,
         },
         campaign_config=campaign_config.model_dump(),
-        pipeline_params={},
-        active_steps=[],
+        pipeline_params=pipeline_params or {},
+        active_steps=list(active_steps or []),
     )
     state["baseline_accuracy"] = baseline_acc
     state["dataset_count"] = dataset_size
@@ -232,6 +249,14 @@ def auto_mint_session(
     sessions = session.store.sessions
     sessions.create(session_id, state)
     sessions.ensure_narrative_files(session_id)
+
+    if create_campaign_dir:
+        session.store.campaigns.create(
+            session.backend_id, cycle_id, {"parent_session_id": session_id}
+        )
+
+    session.session_id = session_id
+    session.state.cycle_id = cycle_id
 
     save_active_pointer(session.store.tenant_id, session_id, cycle_id)
     logger.info("Auto-minted session %s + cycle %s", session_id, cycle_id)

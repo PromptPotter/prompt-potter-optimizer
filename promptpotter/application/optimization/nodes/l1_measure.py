@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.decisions import Decision, record_decision
 from promptpotter.application.optimization.elimination import EliminationCheck
-from promptpotter.application.optimization.nodes.l1.generate import validate_overrides
+from promptpotter.application.optimization.nodes.l1_generate import validate_overrides
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.analysis import (
     EscalationSignal,

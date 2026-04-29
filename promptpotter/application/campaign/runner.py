@@ -20,7 +20,7 @@ from promptpotter.application.optimization.layer_escalation import (
     build_escalation_entry,
     escalate_l2,
 )
-from promptpotter.application.optimization.nodes.l1 import execute_round
+from promptpotter.application.optimization.nodes.l1_execute import execute_round
 from promptpotter.application.scoring.scoring_steer import apply_steer_file
 from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
 from promptpotter.domain.analysis import EscalationTarget
@@ -457,29 +457,22 @@ async def run_optimization(
 
     if not session.session_id:
         from promptpotter.application.campaign.campaign_setup import auto_mint_session
-        from promptpotter.domain.cycle_identity import cycle_config_identity
+        from promptpotter.domain.cycle_identity import build_baseline_cycle_id
 
         ps = baseline.baseline_ps
         baseline_prompt_fields = (
             ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
         )
         baseline_osp = OptSearchPoint.from_prompt_fields(baseline_prompt_fields)
-        base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
-        baseline_jsp = baseline_osp.to_job_search_point(
-            base_pipeline_params=base_pp, schema=session.pipeline_schema
-        )
-        new_session_id, minted_cycle_id = auto_mint_session(
+        auto_mint_session(
             session,
             campaign_config,
-            cycle_hash=cycle_config_identity(baseline_jsp, dataset).removeprefix("cycle_"),
+            cycle_id=build_baseline_cycle_id(baseline_osp, session.pipeline_schema, dataset),
             baseline_acc=baseline.baseline_acc,
             baseline_prompt_fields=baseline_prompt_fields,
             dataset_size=len(dataset),
             experiment_id=experiment_id,
         )
-        session.session_id = new_session_id
-        if not session.state.cycle_id:
-            session.state.cycle_id = minted_cycle_id
 
     from promptpotter.application.scoring.formula import split_scoring_block
 

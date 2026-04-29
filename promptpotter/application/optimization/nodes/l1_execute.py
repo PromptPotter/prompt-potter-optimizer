@@ -7,16 +7,16 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.nodes.formatting import candidate_summaries
-from promptpotter.application.optimization.nodes.l1.critique import (
+from promptpotter.application.optimization.nodes.l1_critique import (
     format_l1_critique_for_prompt,
     run_l1_critique,
 )
-from promptpotter.application.optimization.nodes.l1.generate import l1_generate
-from promptpotter.application.optimization.nodes.l1.measure import (
+from promptpotter.application.optimization.nodes.l1_generate import l1_generate
+from promptpotter.application.optimization.nodes.l1_measure import (
     L1YieldStats,
     detect_invariants,
 )
-from promptpotter.application.optimization.nodes.l1.score import l1_score
+from promptpotter.application.optimization.nodes.l1_score import l1_score
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import CandidateProposal, RoundResult
 

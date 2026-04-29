@@ -92,7 +92,7 @@ Prior evaluation results are replayed without calling the backend when a new pip
 
 ## Scoring pipeline
 
-`score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway for scoring archival and observability. Three early-exit paths live in `application/optimization/nodes/l1/measure.py::score_population` — validation-failure synthetic zero, full-run cache hit, and mid-evaluation escalation — detailed in [self-healing-internals.md](self-healing-internals.md).
+`score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway for scoring archival and observability. Three early-exit paths live in `application/optimization/nodes/l1_measure.py::score_population` — validation-failure synthetic zero, full-run cache hit, and mid-evaluation escalation — detailed in [self-healing-internals.md](self-healing-internals.md).
 
 Per-node cache reuse happens inside `measure_sample()` in `application/scoring/sample_measurement.py`. `score_search_point` reads infrastructure (store, backend client, backend id, pipeline schema, observer, compiled scorer) directly off the `Session` argument; the previously separate `ScoringEnv` bundle was inlined when callers all converged on `Session`. The compiled scorer lives in `domain/scoring.py` (`compile_scorer`, `SCORING_FUNCTIONS`).
 
