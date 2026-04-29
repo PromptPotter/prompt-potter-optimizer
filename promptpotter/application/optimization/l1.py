@@ -79,8 +79,8 @@ from promptpotter.infrastructure.tracing import (
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.runner import RunListener
     from promptpotter.application.optimization.elimination import DegradationCheck
+    from promptpotter.application.runner import RunListener
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 

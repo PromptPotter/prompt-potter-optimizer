@@ -38,9 +38,9 @@ from promptpotter.presentation.cli.session import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.campaign.runner import RunListener
+    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.runner import RunListener
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.infrastructure.persistence import (
         CampaignPersistenceEmitter,
@@ -95,7 +95,7 @@ async def init_services_cli(
     tenant_id: str = "default",
 ) -> Session:
     """Initialize services for a CLI command (logging style + service init)."""
-    from promptpotter.application.campaign.campaign_setup import init_services
+    from promptpotter.application.bootstrap import init_services
     from promptpotter.config.logging import setup_logging
 
     setup_logging(style="full" if _VERBOSE else "cli")
@@ -114,9 +114,9 @@ async def init_services_cli(
 
 def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: list):
     """Apply pipeline → load baseline → compute cycle_id. Returns (pipeline_params, baseline, cycle_id)."""
-    from promptpotter.application.campaign.config import configure_and_apply_pipeline
-    from promptpotter.application.campaign.data import load_baseline_prompt
-    from promptpotter.application.campaign.runner import build_baseline_cycle_id
+    from promptpotter.application.baseline import load_baseline_prompt
+    from promptpotter.application.config import configure_and_apply_pipeline
+    from promptpotter.application.runner import build_baseline_cycle_id
 
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(
@@ -214,7 +214,7 @@ def _mint_session_and_cycle(
     dataset_count: int,
 ) -> str:
     """Mint session+cycle with the CLI's pipeline-snapshot extras."""
-    from promptpotter.application.campaign.campaign_setup import auto_mint_session
+    from promptpotter.application.bootstrap import auto_mint_session
 
     session_id, _ = auto_mint_session(
         session,
@@ -244,7 +244,7 @@ async def _maybe_decompose_task(
     ``--task-file`` and ``--task-text`` override for ad-hoc cases. Result
     is disk-cached, so re-init against the same dataset is free.
     """
-    from promptpotter.application.campaign.config import create_llm_client
+    from promptpotter.application.config import create_llm_client
     from promptpotter.application.optimization.pipeline import decompose_task_context
 
     if task_file:
@@ -287,8 +287,8 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     ``--task-text`` is given), the task description is decomposed once and
     stored on the session — ``optimize`` reads it from there.
     """
-    from promptpotter.application.campaign.config import load_campaign_config as _load_cfg
-    from promptpotter.application.campaign.data import prepare_datasets
+    from promptpotter.application.baseline import prepare_datasets
+    from promptpotter.application.config import load_campaign_config as _load_cfg
 
     file_config = load_campaign_config(args.config)
     dataset_name = args.dataset_name or file_config.get("dataset_name")
@@ -376,7 +376,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 def _build_live_display(args: argparse.Namespace, *, session, campaign_config, baseline_acc: float):
     """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
     from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.presentation.views.display_primitives import set_display_tags
+    from promptpotter.presentation.views.display import set_display_tags
 
     set_display_tags(session.pipeline_schema)
     scoring_formula = split_scoring_block(campaign_config.scoring).per_query
@@ -487,8 +487,8 @@ def _build_run_observers(
     so the emitter can hold a direct reference (no callback indirection).
     Side-effect: assigns the recorder to ``session.state.round_recorder``.
     """
-    from promptpotter.application.campaign.data import build_campaign_emitter
-    from promptpotter.application.campaign.runner import RunListener as _RunListener
+    from promptpotter.application.baseline import build_campaign_emitter
+    from promptpotter.application.runner import RunListener as _RunListener
     from promptpotter.infrastructure.persistence import (
         RoundRecorder as _RoundRecorder,
     )
@@ -515,7 +515,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
     digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
     """
-    from promptpotter.application.campaign.runner import (
+    from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.shared.errors import ResumeDivergenceError

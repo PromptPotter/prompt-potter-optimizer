@@ -13,7 +13,7 @@ from typing import Any
 
 import pytest
 
-from promptpotter.application.intelligence.axis_index import AxisIndex
+from promptpotter.application.intelligence.indexes import AxisIndex
 from promptpotter.infrastructure.store import build_stores
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 

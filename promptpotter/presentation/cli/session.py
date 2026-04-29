@@ -16,7 +16,7 @@ from typing import TYPE_CHECKING
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.config import CampaignConfig
 
 
 @dataclass
@@ -39,7 +39,7 @@ class SessionCtx:
 
     @property
     def campaign_config(self) -> CampaignConfig:
-        from promptpotter.application.campaign.config import load_campaign_config
+        from promptpotter.application.config import load_campaign_config
 
         return load_campaign_config(self.state["campaign_config"])
 

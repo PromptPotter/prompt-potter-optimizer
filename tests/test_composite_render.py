@@ -14,9 +14,9 @@ Pinned invariants:
 
 from __future__ import annotations
 
-from promptpotter.shared.composite_formula import inline_short_formula_values
-from promptpotter.shared.composite_render import (
+from promptpotter.shared.composite import (
     extract_evaluator_names,
+    inline_short_formula_values,
     render_composite_block,
     render_composite_oneliner,
 )

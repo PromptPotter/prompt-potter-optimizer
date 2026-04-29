@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.sample_index import SampleIndex
+    from promptpotter.application.intelligence.indexes import SampleIndex
 
 
 class Sample(BaseModel):

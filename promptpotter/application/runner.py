@@ -7,14 +7,12 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.campaign.campaign_setup import (
+from promptpotter.application.baseline import CampaignBaseline
+from promptpotter.application.bootstrap import (
     Session,
     init_optimization_loop,
 )
-from promptpotter.application.campaign.config import CampaignConfig
-from promptpotter.application.campaign.data import CampaignBaseline
-from promptpotter.application.campaign.log_md import render_log_md
-from promptpotter.application.campaign.phase_views import build_phase_view
+from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import (
     Cycle,
     build_escalation_entry,
@@ -37,6 +35,8 @@ from promptpotter.domain.results import RoundResult, RunResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
+from promptpotter.presentation.views.log_md import render_log_md
+from promptpotter.presentation.views.phase_views import build_phase_view
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -262,7 +262,7 @@ def _evolve_scoring_set_if_enabled(
     if not (ss_cfg.enabled and cycle.rounds):
         return
 
-    from promptpotter.application.intelligence.scoring_set import (
+    from promptpotter.application.intelligence.exploration import (
         build_scoring_set_event,
         evolve_scoring_set,
     )
@@ -470,7 +470,7 @@ async def run_optimization(
     started_at = datetime.now(UTC).isoformat()
 
     if baseline is None:
-        from promptpotter.application.campaign.data import (
+        from promptpotter.application.baseline import (
             extract_campaign_baseline,
             prepare_scoring_context,
         )
@@ -489,7 +489,7 @@ async def run_optimization(
             display.set_baseline(baseline.baseline_acc)
 
     if not session.session_id:
-        from promptpotter.application.campaign.campaign_setup import auto_mint_session
+        from promptpotter.application.bootstrap import auto_mint_session
 
         ps = baseline.baseline_ps
         baseline_prompt_fields = (
@@ -559,7 +559,7 @@ async def run_optimization(
         session.state.round_recorder.rehydrate_sticky()
 
     if emitter is None:
-        from promptpotter.application.campaign.data import build_campaign_emitter
+        from promptpotter.application.baseline import build_campaign_emitter
 
         emitter = build_campaign_emitter(
             session,

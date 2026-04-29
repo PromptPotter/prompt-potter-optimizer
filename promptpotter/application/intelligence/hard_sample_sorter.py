@@ -19,11 +19,10 @@ from __future__ import annotations
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.intelligence.rasch import fit_rasch
-from promptpotter.application.intelligence.scoring_set import build_observations
+from promptpotter.application.intelligence.exploration import build_observations, fit_rasch
 
 if TYPE_CHECKING:
-    from promptpotter.application.intelligence.rasch import Observation, RaschPosterior
+    from promptpotter.application.intelligence.exploration import Observation, RaschPosterior
     from promptpotter.domain.results import RoundResult
 
 __all__ = [

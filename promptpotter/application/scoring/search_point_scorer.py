@@ -9,7 +9,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.datasets.builder import build_dataset_run_data
+from promptpotter.application.datasets.datasets import build_dataset_run_data
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import compute_composite_score
 from promptpotter.application.scoring.sample_measurement import (
@@ -31,8 +31,8 @@ from promptpotter.shared.errors import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
 

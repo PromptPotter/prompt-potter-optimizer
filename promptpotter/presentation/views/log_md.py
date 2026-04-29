@@ -12,7 +12,7 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from promptpotter.shared.composite_render import render_composite_block
+from promptpotter.shared.composite import render_composite_block
 
 __all__ = ["render_hard_sample_heatmap", "render_log_md"]
 

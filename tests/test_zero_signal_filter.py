@@ -10,8 +10,7 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from promptpotter.application.intelligence.axis_index import AxisIndex
-from promptpotter.application.intelligence.sample_index import SampleIndex
+from promptpotter.application.intelligence.indexes import AxisIndex, SampleIndex
 from promptpotter.application.scoring.formula import (
     apply_zero_signal_exclusions,
 )

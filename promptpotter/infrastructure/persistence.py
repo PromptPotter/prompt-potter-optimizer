@@ -27,7 +27,7 @@ from typing import IO, TYPE_CHECKING, Any
 from promptpotter.domain.phases import CampaignPhase
 from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
-from promptpotter.shared.composite_formula import inline_short_formula_values
+from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 
 if TYPE_CHECKING:

@@ -16,7 +16,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.datasets.trace_dataset import load_potter_traces
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
@@ -361,3 +360,235 @@ def build_dataset_run_data(
     if experiment_id:
         data["experiment_id"] = experiment_id
     return data
+
+
+"""Per-dataset starting-point prompt templates — the canonical baseline store.
+
+Each dataset ships a ``datasets/{name}/prompts/`` directory of named
+``PromptTemplate`` JSON files (6-field canonical decomposition).  The
+campaign init flow loads one per prompt-bearing node and projects it
+into the starting ``JobSearchPoint`` as the node's ``prompt`` config.
+
+**This is the one true source for baseline prompts.**
+
+Layout::
+
+    datasets/{name}/prompts/
+      default.json            # single-node datasets
+      {node_name}.json        # per-node canonical templates (multi-node)
+
+Resolution order in ``load_node_prompt(dataset, node, variant="default")``:
+  1. ``{node}.json`` if present — per-node canonical template
+  2. ``{variant}.json`` — dataset-wide fallback (typical single-node case)
+  3. ``FileNotFoundError`` with a migration hint listing both paths
+"""
+
+
+import functools
+import json
+
+from promptpotter.domain.opt_search_point import PromptTemplate
+
+__all__ = [
+    "dataset_prompt_dir",
+    "has_dataset_prompts",
+    "list_dataset_prompts",
+    "load_dataset_prompt",
+    "load_node_prompt",
+]
+
+# promptpotter/application/datasets/prompt_store.py → repo root
+_REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def dataset_prompt_dir(dataset: str) -> Path:
+    """Return the expected ``prompts/`` directory for *dataset*."""
+    return _REPO_ROOT / "datasets" / dataset / "prompts"
+
+
+def has_dataset_prompts(dataset: str) -> bool:
+    """Whether *dataset* ships a ``prompts/`` directory."""
+    return dataset_prompt_dir(dataset).is_dir()
+
+
+@functools.lru_cache(maxsize=128)
+def load_node_prompt(
+    dataset: str,
+    node_name: str,
+    variant: str = "default",
+) -> PromptTemplate:
+    """Load the canonical starting-point ``PromptTemplate`` for a node.
+
+    Resolution:
+      1. ``datasets/{dataset}/prompts/{node_name}.json`` (per-node canonical)
+      2. ``datasets/{dataset}/prompts/{variant}.json`` (dataset-wide fallback)
+      3. ``FileNotFoundError`` citing both expected paths.
+    """
+    d = dataset_prompt_dir(dataset)
+    node_path = d / f"{node_name}.json"
+    if node_path.exists():
+        data = json.loads(node_path.read_text(encoding="utf-8"))
+        return PromptTemplate(**data)
+
+    variant_path = d / f"{variant}.json"
+    if variant_path.exists():
+        data = json.loads(variant_path.read_text(encoding="utf-8"))
+        return PromptTemplate(**data)
+
+    raise FileNotFoundError(
+        f"Canonical prompt template not found for dataset={dataset!r} node={node_name!r}. "
+        f"Expected either {node_path} (per-node) or {variant_path} (dataset default). "
+        f"Author one as a 6-field PromptTemplate JSON; see docs/developer/prompt-scheme-internals.md."
+    )
+
+
+@functools.lru_cache(maxsize=64)
+def load_dataset_prompt(dataset: str, name: str = "default") -> PromptTemplate:
+    """Load a dataset-wide named ``PromptTemplate`` (``{name}.json``).
+
+    Thin wrapper over ``load_node_prompt`` for single-node datasets and
+    display code.  Raises ``FileNotFoundError`` when the file is missing.
+    """
+    path = dataset_prompt_dir(dataset) / f"{name}.json"
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Dataset prompt not found: {path}. "
+            f"Create it, or change 'starting_prompt' in the campaign config."
+        )
+    data = json.loads(path.read_text(encoding="utf-8"))
+    return PromptTemplate(**data)
+
+
+def list_dataset_prompts(dataset: str) -> list[str]:
+    """Return sorted template names available for *dataset* (empty if none)."""
+    d = dataset_prompt_dir(dataset)
+    if not d.is_dir():
+        return []
+    return sorted(p.stem for p in d.glob("*.json"))
+
+
+"""Potter trace dataset loader.
+
+Reads archived ``campaigns/{cycle_id}/trials/trial_NNNN.json`` files and emits one
+row per ``(trial_N → trial_N+1)`` transition.  Each row is the raw material
+for self-optimization: the potter-state context at round N, the prompt change
+the potter actually made, and the accuracy delta that resulted.
+
+Rows conform to the dataset-row contract
+(``{"query", "ground_truth", ...}``) so they flow through the existing
+``load_dataset()`` / ``build_dataset_run_data()`` pipeline unchanged.
+"""
+
+
+from itertools import pairwise
+from typing import TYPE_CHECKING
+
+from promptpotter.domain.opt_search_point import OptSearchPoint
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.store import Stores
+
+
+def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
+    """Classify the transition by which piece of optimizer state changed.
+
+    Deterministic, inside-this-file rule (no import from optimization/):
+      - ``plan`` changed              → L3
+      - ``optimizer_params`` changed
+        or ``l2_directive`` set fresh → L2
+      - otherwise                     → L1
+    """
+    if prev_fields.get("plan", "") != next_fields.get("plan", ""):
+        return "L3"
+    if prev_fields.get("optimizer_params", {}) != next_fields.get("optimizer_params", {}):
+        return "L2"
+    prev_directive = prev_fields.get("l2_directive", "")
+    next_directive = next_fields.get("l2_directive", "")
+    if next_directive and next_directive != prev_directive:
+        return "L2"
+    return "L1"
+
+
+def _rehydrate(fields: dict) -> OptSearchPoint:
+    return OptSearchPoint.model_validate(fields)
+
+
+def _build_row(
+    cycle_id: str,
+    prev_trial: dict[str, Any],
+    next_trial: dict[str, Any],
+) -> dict[str, Any] | None:
+    prev_fields = prev_trial.get("prompt_fields") or {}
+    next_fields = next_trial.get("prompt_fields") or {}
+    if not prev_fields or not next_fields:
+        return None
+
+    prev_osp = _rehydrate(prev_fields)
+    next_osp = _rehydrate(next_fields)
+
+    prev_round = int(prev_trial.get("round", 0))
+    score_delta = float(next_trial.get("accuracy", 0.0)) - float(prev_trial.get("accuracy", 0.0))
+
+    round_context = {
+        "opt_search_point": prev_fields,
+        "l1_critique_text": prev_fields.get("l1_critique_text", ""),
+        "l2_directive": prev_fields.get("l2_directive", ""),
+        "optimizer_params": prev_fields.get("optimizer_params", {}),
+        "prev_accuracy": float(prev_trial.get("accuracy", 0.0)),
+    }
+
+    return {
+        "query": f"{cycle_id}:round_{prev_round}",
+        "ground_truth": next_fields.get("changes_description") or next_trial.get("label", ""),
+        "round_context": round_context,
+        "score_delta": score_delta,
+        "prev_prompt": prev_osp.render(),
+        "next_prompt": next_osp.render(),
+        "escalation_layer": _infer_escalation_layer(prev_fields, next_fields),
+    }
+
+
+def load_potter_traces(
+    store: Stores,
+    backend_id: str,
+    cycle_ids: list[str] | None = None,
+) -> list[dict]:
+    """Emit one row per round-to-round transition across archived campaigns.
+
+    Args:
+        store: Stores facade (reads ``campaigns/{cycle_id}/`` only).
+        backend_id: Which backend's campaigns to scan.
+        cycle_ids: Restrict to specific cycle IDs, or None for every campaign
+            under the backend.
+
+    Returns:
+        List of rows conforming to the dataset-row contract.  Empty list if
+        no transitions are recoverable.
+    """
+    campaigns = store.campaigns.load_many(backend_id, cycle_ids)
+    rows: list[dict] = []
+    for campaign in campaigns:
+        cycle_id = campaign["campaign_id"]
+        trial_summaries = sorted(
+            campaign.get("trials", []),
+            key=lambda t: int(t.get("round", 0)),
+        )
+        if len(trial_summaries) < 2:
+            continue
+
+        trials: list[dict[str, Any]] = []
+        for summary in trial_summaries:
+            detail = store.campaigns.load_trial(
+                backend_id,
+                cycle_id,
+                int(summary.get("round", 0)),
+            )
+            if detail is not None:
+                trials.append(detail)
+
+        for prev_trial, next_trial in pairwise(trials):
+            row = _build_row(cycle_id, prev_trial, next_trial)
+            if row is not None:
+                rows.append(row)
+
+    return rows

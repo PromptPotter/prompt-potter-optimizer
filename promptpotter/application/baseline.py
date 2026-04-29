@@ -7,11 +7,11 @@ from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
-from promptpotter.application.campaign.campaign_setup import (
+from promptpotter.application.bootstrap import (
     Session,
     populate_session_scoring,
 )
-from promptpotter.application.campaign.config import CampaignConfig
+from promptpotter.application.config import CampaignConfig
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.sample import Sample
@@ -140,7 +140,7 @@ def load_baseline_prompt(
         )
 
     if dataset_name and names:
-        from promptpotter.application.datasets.prompt_store import (
+        from promptpotter.application.datasets.datasets import (
             has_dataset_prompts,
             load_node_prompt,
         )
@@ -180,7 +180,7 @@ async def prepare_scoring_context(
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list, list]:
     """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
-    from promptpotter.application.datasets.builder import sample_dataset
+    from promptpotter.application.datasets.datasets import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     dataset_name = campaign_config.dataset_name if campaign_config else None
@@ -297,7 +297,7 @@ def prepare_datasets(
     force: bool = False,
 ) -> DatasetSummary:
     """Load/create datasets and build session terms (pure orchestration — notebook prints the summary)."""
-    from promptpotter.application.datasets.builder import (
+    from promptpotter.application.datasets.datasets import (
         SHEET_COLUMN_MAP,
         load_excel_ground_truth,
         samples_from_dicts,

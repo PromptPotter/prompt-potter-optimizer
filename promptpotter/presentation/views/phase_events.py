@@ -13,7 +13,7 @@ import json
 from collections.abc import Callable
 
 from promptpotter.domain.opt_search_point import group_diff_keys
-from promptpotter.presentation.views.display_primitives import (
+from promptpotter.presentation.views.display import (
     BOLD,
     CYAN,
     DIM,
@@ -27,9 +27,9 @@ from promptpotter.presentation.views.display_primitives import (
     _node_top,
     _round_rule,
     _scoreboard,
+    fmt_pvalue,
 )
-from promptpotter.presentation.views.formatting import fmt_pvalue
-from promptpotter.shared.composite_render import (
+from promptpotter.shared.composite import (
     compact_display_enabled,
     render_composite_block,
 )

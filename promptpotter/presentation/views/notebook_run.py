@@ -5,19 +5,19 @@ from __future__ import annotations
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.campaign.campaign_setup import (
-    Session,
-)
-from promptpotter.application.campaign.campaign_setup import (
-    init_services as _init_services,
-)
-from promptpotter.application.campaign.data import (
+from promptpotter.application.baseline import (
     extract_campaign_baseline,
 )
-from promptpotter.application.campaign.data import (
+from promptpotter.application.baseline import (
     prepare_scoring_context as _prepare_scoring_context,
 )
-from promptpotter.application.campaign.runner import (
+from promptpotter.application.bootstrap import (
+    Session,
+)
+from promptpotter.application.bootstrap import (
+    init_services as _init_services,
+)
+from promptpotter.application.runner import (
     run_optimization as _run_optimization,
 )
 from promptpotter.application.scoring.formula import split_scoring_block
@@ -29,18 +29,18 @@ from promptpotter.config.settings import (
 )
 from promptpotter.domain.results import RunResult
 from promptpotter.infrastructure.tracing import ObservabilityBridge
-from promptpotter.presentation.views.display_primitives import (
+from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
     RESET,
     YELLOW,
     _dbox_block,
+    render_pipeline_overrides,
 )
-from promptpotter.presentation.views.formatting import render_pipeline_overrides
 from promptpotter.presentation.views.live import LiveDisplay
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import TaskDecomposition
@@ -183,7 +183,7 @@ async def run_optimization_notebook(
     session_id: str = "",
 ) -> tuple[list, RunResult | None]:
     """Run optimization with ``LiveDisplay``. Prints final completion box."""
-    from promptpotter.application.campaign.resume import resolve_campaign_id
+    from promptpotter.application.resume import resolve_campaign_id
 
     bl = extract_campaign_baseline(campaign_rounds)
     baseline_acc = bl.baseline_acc

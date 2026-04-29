@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.presentation.views.display_primitives import (
+from promptpotter.presentation.views.display import (
     _box_bottom,
     _box_bottom_info,
     _box_line,
@@ -28,17 +28,15 @@ from promptpotter.presentation.views.display_primitives import (
     _node_top,
 )
 from promptpotter.presentation.views.phase_events import render_phase_event
-from promptpotter.presentation.views.render_individual import (
+from promptpotter.presentation.views.round_render import (
+    _fmt_query_result,
     build_individual_summary,
     fmt_individual_header,
-)
-from promptpotter.presentation.views.render_query import _fmt_query_result
-from promptpotter.presentation.views.render_round import (
     render_patience_status,
     render_progress_table,
     render_round_stats,
 )
-from promptpotter.shared.composite_render import (
+from promptpotter.shared.composite import (
     compact_display_enabled,
     render_composite_block,
 )
@@ -317,14 +315,14 @@ class LiveDisplay:
     def render_claude_notes(self) -> None:
         """Render ``notes.md`` inline so Claude's notes appear in a cell."""
         from promptpotter.infrastructure.persistence import read_claude_notes
-        from promptpotter.presentation.views.formatting import render_markdown_box
+        from promptpotter.presentation.views.display import render_markdown_box
 
         content = read_claude_notes(self._resolve_session_dir()).rstrip()
         print(render_markdown_box("CLAUDE NOTES", content, "(no claude notes yet)"))
 
     def render_journal(self) -> None:
         """Render ``journal.md`` inline - mirror of notes."""
-        from promptpotter.presentation.views.formatting import render_markdown_box
+        from promptpotter.presentation.views.display import render_markdown_box
 
         path = self._resolve_session_dir() / "journal.md"
         content = path.read_text(encoding="utf-8").rstrip() if path.exists() else ""

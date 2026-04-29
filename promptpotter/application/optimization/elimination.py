@@ -43,7 +43,7 @@ from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import should_stop_early
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
+    from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.scoring import QueryResult
 

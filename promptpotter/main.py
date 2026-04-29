@@ -14,7 +14,7 @@ from scalar_fastapi import get_scalar_api_reference
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
-from promptpotter.presentation.api import backends, campaigns
+from promptpotter.presentation import api
 
 setup_logging()
 logger = logging.getLogger(__name__)
@@ -84,5 +84,5 @@ async def health_check():
 
 # Include routers
 app.include_router(_health, prefix="/api/v1", tags=["Health"])
-app.include_router(backends.router, prefix="/api/v1", tags=["Backends"])
-app.include_router(campaigns.router, prefix="/api/v1", tags=["Campaigns"])
+app.include_router(api.backends_router, prefix="/api/v1", tags=["Backends"])
+app.include_router(api.campaigns_router, prefix="/api/v1", tags=["Campaigns"])

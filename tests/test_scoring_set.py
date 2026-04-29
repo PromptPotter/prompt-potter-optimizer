@@ -12,13 +12,13 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from promptpotter.application.campaign.config import ScoringSetConfig
-from promptpotter.application.intelligence.rasch import (
+from promptpotter.application.config import ScoringSetConfig
+from promptpotter.application.intelligence.exploration import (
     Observation,
+    evolve_scoring_set,
     fit_rasch,
     knowledge_gradient,
 )
-from promptpotter.application.intelligence.scoring_set import evolve_scoring_set
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.sample import Sample
 

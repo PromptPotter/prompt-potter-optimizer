@@ -109,12 +109,12 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     dir and ensure all SESSION_ARTIFACTS in the session dir."""
     from types import SimpleNamespace
 
-    from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.campaign.phase_views import build_phase_view
+    from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult, RunResult
     from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
+    from promptpotter.presentation.views.phase_views import build_phase_view
 
     session_dir, campaign_dir = session_and_campaign_dirs
     config = CampaignConfig(
@@ -244,7 +244,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
 
     # Mirror runner._finalize_run: fold the run summary into index.json::final
     # and render log.md from the index + trial dump.
-    from promptpotter.application.campaign.log_md import render_log_md
+    from promptpotter.presentation.views.log_md import render_log_md
 
     final = RunResult(
         rounds=[round_result],

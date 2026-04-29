@@ -17,7 +17,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
+    from promptpotter.application.bootstrap import Session
     from promptpotter.infrastructure.llm import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -363,7 +363,7 @@ def configure_and_apply_pipeline(
     log: Callable[[str], None] = logger.info,
 ) -> dict:
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
-    from promptpotter.application.datasets.prompt_store import (
+    from promptpotter.application.datasets.datasets import (
         has_dataset_prompts,
         load_node_prompt,
     )

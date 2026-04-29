@@ -42,8 +42,8 @@ from promptpotter.domain.scoring import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.infrastructure.store import Stores
 

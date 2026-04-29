@@ -23,12 +23,12 @@ from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store import Stores, build_stores
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.config import CampaignConfig
-    from promptpotter.application.campaign.data import CampaignBaseline
-    from promptpotter.application.campaign.runner import RunListener
-    from promptpotter.application.intelligence.sample_index import SampleIndex
+    from promptpotter.application.baseline import CampaignBaseline
+    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.intelligence.indexes import SampleIndex
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import DegradationCheck
+    from promptpotter.application.runner import RunListener
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.persistence import RoundRecorder
@@ -89,7 +89,7 @@ def bootstrap_cycle(
     """
     import json
 
-    from promptpotter.application.campaign.runner import cycle_config_identity
+    from promptpotter.application.runner import cycle_config_identity
 
     if not session.backend_id:
         return None, 0
@@ -401,7 +401,7 @@ def _load_dataset_into_session(
 ) -> None:
     """Populate ``session.queries`` + ``session.index_terms`` from the dataset store
     (or the ``DATASET_LOADERS`` registry on first use). Raises when neither resolves."""
-    from promptpotter.application.datasets.builder import DATASET_LOADERS, samples_from_dicts
+    from promptpotter.application.datasets.datasets import DATASET_LOADERS, samples_from_dicts
 
     ds = session.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
@@ -433,7 +433,7 @@ async def _sync_and_extract_experiment(
     """Populate ``session.queries`` + ``session.index_terms`` + ``experiment_extract`` from
     the experiment trace. Auto-syncs from the backend if the on-disk extract is missing
     or trace-less. Logs a warning + returns silently when no data is available."""
-    from promptpotter.application.datasets.builder import samples_from_dicts
+    from promptpotter.application.datasets.datasets import samples_from_dicts
 
     backend_id = session.backend_id
     extract = session.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
@@ -463,7 +463,7 @@ async def _sync_and_extract_experiment(
         status("WARNING: No experiment data available")
         return
 
-    from promptpotter.application.campaign.config import EXPERIMENT_EXTRACTORS
+    from promptpotter.application.config import EXPERIMENT_EXTRACTORS
 
     schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
@@ -557,7 +557,7 @@ async def _emit_preflight_and_init_session(
 
     Side-effects only.
     """
-    from promptpotter.application.campaign.config import run_preflight_checks
+    from promptpotter.application.config import run_preflight_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
     preflight_warnings = run_preflight_checks(config, dataset)
@@ -726,8 +726,8 @@ def _finalize_loop_state(
     resumed_from_round: int,
 ) -> None:
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
-    from promptpotter.application.datasets.builder import sample_dataset
-    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.datasets.datasets import sample_dataset
+    from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.application.optimization.elimination import build_degradation_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 

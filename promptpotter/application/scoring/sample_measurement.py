@@ -29,8 +29,8 @@ from promptpotter.domain.scoring import QueryResult
 from promptpotter.shared.errors import ErrorCategory, is_degraded
 
 if TYPE_CHECKING:
-    from promptpotter.application.campaign.campaign_setup import Session
-    from promptpotter.application.intelligence.axis_index import AxisIndex
+    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.intelligence.indexes import AxisIndex
 
 logger = logging.getLogger(__name__)
 

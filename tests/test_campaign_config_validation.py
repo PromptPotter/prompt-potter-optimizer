@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from promptpotter.application.campaign.config import CampaignConfig, load_campaign_config
+from promptpotter.application.config import CampaignConfig, load_campaign_config
 
 DATASETS_DIR = Path(__file__).resolve().parent.parent / "datasets"
 
