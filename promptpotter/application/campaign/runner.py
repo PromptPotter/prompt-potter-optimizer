@@ -15,8 +15,8 @@ from promptpotter.application.campaign.config import CampaignConfig
 from promptpotter.application.campaign.data import CampaignBaseline
 from promptpotter.application.campaign.log_md import render_log_md
 from promptpotter.application.campaign.phase_views import build_phase_view
-from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.layer_escalation import (
+from promptpotter.application.optimization.cycle import (
+    Cycle,
     build_escalation_entry,
     escalate_l2,
 )

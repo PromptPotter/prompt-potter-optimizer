@@ -691,7 +691,7 @@ def _apply_resume_fork(
     """Replay decisions on resume; fork on divergence when configured. Register the
     baseline prompt alias. Returns the (possibly rebound) ``(cycle_id, resumed_from_round)``.
     """
-    from promptpotter.application.optimization.decisions import resume_with_divergence_check
+    from promptpotter.application.optimization.cycle import resume_with_divergence_check
 
     if resumed_from_round > 0 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
