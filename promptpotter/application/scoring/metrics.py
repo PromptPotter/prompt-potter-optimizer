@@ -47,7 +47,6 @@ __all__ = [
     "compile_query_difficulty",
     "compute_composite_score",
     "count_degraded_queries",
-    "count_failures",
     "extract_sample_diagnostics",
     "find_rank",
     "is_degraded",
@@ -90,11 +89,6 @@ def _compute_accuracy(results: list[QueryResult]) -> dict:
         "errors": errors,
         "deprecated": deprecated,
     }
-
-
-def count_failures(results: list[QueryResult]) -> int:
-    """Count non-hit results (misses + errors)."""
-    return sum(1 for r in results if not r.get("hit"))
 
 
 def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:

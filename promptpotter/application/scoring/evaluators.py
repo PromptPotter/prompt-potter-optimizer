@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.scoring.formula import extract_candidate_label
@@ -126,14 +127,6 @@ def _compute_recall(
         if any(extract_candidate_label(c) == gt for c in candidates):
             found += 1
     return found / len(scoped)
-
-
-def compute_source_recall(**kwargs: Any) -> float:
-    return _compute_recall(candidate_key="candidate_ranking", **kwargs)
-
-
-def compute_candidate_recall(**kwargs: Any) -> float:
-    return _compute_recall(candidate_key="final_ranking", **kwargs)
 
 
 def compute_cache_hit_rate(*, results: list[QueryResult], node: PipelineNode, **_: Any) -> float:
@@ -300,7 +293,7 @@ _REGISTRY: list[Evaluator] = [
         name="source_recall",
         description="Fraction of queries where GT appears in a candidate_source node's output.",
         scope="per_round",
-        compute=compute_source_recall,
+        compute=partial(_compute_recall, candidate_key="candidate_ranking"),
         node_type="candidate_source",
         applies=lambda s: any(n.node_type == "candidate_source" for n in s.nodes),
     ),
@@ -308,7 +301,7 @@ _REGISTRY: list[Evaluator] = [
         name="candidate_recall",
         description="Fraction of queries where GT appears in a ranker node's final_ranking.",
         scope="per_round",
-        compute=compute_candidate_recall,
+        compute=partial(_compute_recall, candidate_key="final_ranking"),
         node_type="ranker",
         applies=lambda s: any(n.node_type == "ranker" for n in s.nodes),
     ),

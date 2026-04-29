@@ -27,7 +27,6 @@ __all__ = [
     "CampaignBaseline",
     "DatasetRunSummary",
     "DatasetSummary",
-    "build_all_index_terms",
     "build_campaign_emitter",
     "extract_campaign_baseline",
     "load_baseline_prompt",
@@ -317,46 +316,31 @@ def prepare_datasets(
             for name, items in test_sets.items():
                 store.backends.save_dataset(name, items, source_file=excel_path.name)
 
+    # Single pass — build samples, gt set (for /match index), and unique
+    # query set in one disk-load per split. Test sets contribute GTs only;
+    # train carries query→gt mappings used by the optimization loop.
     splits: dict[str, list[Sample]] = {}
+    gt_set: set[str] = set()
+    all_queries: set[str] = set()
     for name in ("train", "test_processes", "test_material"):
         ds = store.backends.load_dataset(name)
         raw_items = ds["items"] if ds and ds.get("items") else []
         splits[name] = samples_from_dicts(raw_items)
-
-    train_data = splits["train"] or None
-    index_terms = build_all_index_terms(store)
-
-    all_queries: set[str] = set()
-    for samples in splits.values():
-        for s in samples:
+        for item in raw_items:
+            gt = item.get("ground_truth", "").strip()
+            if gt:
+                gt_set.add(gt)
+        for s in splits[name]:
             q = s.query.strip()
             if q:
                 all_queries.add(q)
 
     return DatasetSummary(
-        train_data=train_data,
-        index_terms=index_terms,
+        train_data=splits["train"] or None,
+        index_terms=sorted(gt_set),
         splits=splits,
         n_unique_queries=len(all_queries),
     )
-
-
-def build_all_index_terms(store: Stores) -> list[str]:
-    """Unique ground_truth identifiers across all stored datasets (train + test).
-
-    For /match to work correctly, the session must contain ALL identifiers:
-    - Train: query->ground_truth mappings (used for optimization scoring)
-    - Test: ground_truth only (identifiers in candidate pool, no query mapping)
-    """
-    gt_set: set[str] = set()
-    for name in ("train", "test_processes", "test_material"):
-        ds = store.backends.load_dataset(name)
-        if ds and ds.get("items"):
-            for item in ds["items"]:
-                gt = item.get("ground_truth", "").strip()
-                if gt:
-                    gt_set.add(gt)
-    return sorted(gt_set)
 
 
 class DatasetRunSummary(NamedTuple):
