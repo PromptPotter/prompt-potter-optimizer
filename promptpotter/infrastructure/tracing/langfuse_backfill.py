@@ -63,22 +63,6 @@ class LangfuseObservation:
     usage_details: dict[str, int] | None = None
 
 
-def _node_meta(
-    timings: dict,
-    node_params: dict,
-    node_name: str,
-    schema: PipelineSchema,
-) -> dict[str, Any]:
-    meta: dict[str, Any] = {}
-    if node_name in timings:
-        meta["duration_s"] = timings[node_name]
-    param_keys = schema.node_param_keys().get(node_name, set())
-    matched = {k: node_params[k] for k in param_keys if k in node_params}
-    if matched:
-        meta["pipeline_params"] = matched
-    return meta
-
-
 def extract_pipeline_nodes(
     pipeline_data: dict,
     query: str,
@@ -89,18 +73,27 @@ def extract_pipeline_nodes(
     timings = pipeline_data.get("step_timings") or {}
     llm_provider = pipeline_data.get("llm_provider", "")
     node_params = pipeline_data.get("pipeline_params") or {}
+    param_keys_by_node = schema.node_param_keys()
 
     for node in schema.nodes:
         output = {k: pipeline_data[k] for k in node.output_keys if pipeline_data.get(k) is not None}
         if not output:
             continue
+        meta: dict[str, Any] = {}
+        if node.name in timings:
+            meta["duration_s"] = timings[node.name]
+        matched = {
+            k: node_params[k] for k in param_keys_by_node.get(node.name, set()) if k in node_params
+        }
+        if matched:
+            meta["pipeline_params"] = matched
         nodes.append(
             LangfuseObservation(
                 name=node.name,
                 as_type=node.langfuse_type,
                 input={"query": query},
                 output=output,
-                metadata=_node_meta(timings, node_params, node.name, schema),
+                metadata=meta,
                 model=llm_provider or None if node.is_llm else None,
             )
         )

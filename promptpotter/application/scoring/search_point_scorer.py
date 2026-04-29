@@ -105,11 +105,7 @@ def _build_scoring_error_signal(
     candidate_idx: int,
     n_total_candidates: int,
 ) -> EscalationSignal:
-    """Build an ELIMINATE_CANDIDATE signal for a consecutive-error abort.
-
-    Carries the error histogram + last seen error so the caller can mint a
-    RuntimeFailure.
-    """
+    """Build ELIMINATE_CANDIDATE signal carrying error histogram for RuntimeFailure mint."""
     # Skip rows whose error is the abort-reason padding — those are synthetic
     # markers inserted after the cascade to bring results up to dataset length,
     # not the real backend failure that triggered it.
@@ -147,15 +143,7 @@ def _build_scoring_error_signal(
 def _filter_deprecated_priors(
     prior_results: dict[str, QueryResult],
 ) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
-    """Split prior-results cache into kept and evicted (deprecated) entries.
-
-    Returns ``(kept, evicted)``. Evicted queries fall through to a fresh
-    backend call so the optimizer doesn't keep replaying a known-bad
-    measurement; the evicted entries themselves are returned (not just their
-    keys) so the display can show the original cached row before the retry.
-    The dataset_run archive on disk is left intact — eviction is purely a
-    load-side filter.
-    """
+    """Split prior-results cache into ``(kept, evicted)``; evicted entries force a fresh backend call so the optimizer doesn't replay known-bad measurements (load-side filter only — disk archive untouched)."""
     from promptpotter.application.optimization.utils import is_deprecated
 
     evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}

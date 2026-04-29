@@ -14,10 +14,10 @@ from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel, Field
 
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
-from promptpotter.dependencies import StoreDep
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.backend.client import BackendClient
 from promptpotter.infrastructure.store import Stores
+from promptpotter.presentation.api import StoreDep
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +56,6 @@ class PipelineViewResponse(BaseModel):
     source: str = Field(description="Pipeline source: 'live', 'cached', or 'default'")
 
 
-def _slugify(name: str) -> str:
-    """Convert a name to a filesystem-safe slug."""
-    slug = name.lower().strip()
-    slug = re.sub(r"[^a-z0-9]+", "-", slug)
-    return slug.strip("-")
-
-
 def _get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
     backend = store.backends.get(backend_id)
     if not backend:
@@ -73,7 +66,7 @@ def _get_backend_or_404(backend_id: str, store: Stores) -> BackendConnection:
 @router.post("", response_model=RegisterBackendResponse, status_code=201)
 async def register_backend(request: RegisterBackendRequest, store: StoreDep):
     """Register a new backend connection."""
-    backend_id = request.id or _slugify(request.name)
+    backend_id = request.id or re.sub(r"[^a-z0-9]+", "-", request.name.lower().strip()).strip("-")
     if store.backends.get(backend_id):
         raise HTTPException(status_code=409, detail=f"Backend '{backend_id}' already exists")
 

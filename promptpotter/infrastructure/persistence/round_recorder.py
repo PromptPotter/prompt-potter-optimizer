@@ -76,14 +76,7 @@ class RoundRecorder:
         self._started_at = datetime.now(UTC).isoformat()
 
     def rehydrate_sticky(self) -> None:
-        """Pre-populate ``_sticky_nodes`` from the highest existing round file.
-
-        Called once at startup on a resumed cycle so the dashboard's
-        ``current_round.nodes`` shows the prior round's node history
-        (l1_generate, l1_critique, …) before the next round writes its
-        first block. No-op when the rounds directory is empty / missing
-        or when sticky state is already populated.
-        """
+        """Pre-populate ``_sticky_nodes`` from the highest existing round file so resumed-cycle dashboards show prior history before the first new write."""
         if self._sticky_nodes:
             return
         if not self.rounds_dir.is_dir():
@@ -129,12 +122,7 @@ class RoundRecorder:
         self._l1_score = block
 
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
-        """Phase-keyed sticky snapshot for ``dashboard.json::current_round``.
-
-        Each slot keeps its most-recent fire across rounds, replaced only when
-        the same phase fires again. ``l1_score`` is composed separately by the
-        emitter and is not included here.
-        """
+        """Phase-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the emitter)."""
         return dict(self._sticky_nodes)
 
     def flush(self) -> Path | None:

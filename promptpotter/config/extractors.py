@@ -25,16 +25,7 @@ Signature: ``(experiment_extract, query_str) -> ground_truth | None``.
 Keyed by ``pipeline_schema.name.lower()``.
 """
 
-# ---------------------------------------------------------------------------
-# TermNorm extractor — LCA terminology normalization
-#
-# Query format: ``bom_material / process`` (slash-delimited)
-# Ground truth: ``dataset_entry`` from experiment mappings
-# Backend: TermNorm-excel (github.com/runfish5/TermNorm-excel)
-#
-# Pipeline: cache_lookup → fuzzy_matching → web_search → entity_profiling
-#           → token_matching (llm_ranking exists but excluded due to bugs)
-# ---------------------------------------------------------------------------
+# TermNorm extractor — query: ``bom_material / process``; GT: ``dataset_entry`` from mappings.
 
 
 def split_query(query: str) -> tuple[str, str]:
@@ -119,20 +110,5 @@ def extract_queries(experiment_data: dict) -> list[dict[str, Any]]:
     return queries
 
 
-# -- Registry self-registration -----------------------------------------------
-
-
-def _extract_experiment(experiment_extract: dict) -> tuple[list[dict[str, Any]], list[str]]:
-    """Registered extractor: experiment data → (queries, index_terms)."""
-    return extract_queries(experiment_extract), extract_index_terms(experiment_extract)
-
-
-def _resolve_trace_gt(experiment_extract: dict, query_str: str) -> str | None:
-    """Registered resolver: experiment data + query → ground truth."""
-    gt_map = extract_ground_truth_map(experiment_extract)
-    bom, _ = split_query(query_str)
-    return gt_map.get(bom)
-
-
-EXPERIMENT_EXTRACTORS["termnorm"] = _extract_experiment
-TRACE_GT_RESOLVERS["termnorm"] = _resolve_trace_gt
+EXPERIMENT_EXTRACTORS["termnorm"] = lambda d: (extract_queries(d), extract_index_terms(d))
+TRACE_GT_RESOLVERS["termnorm"] = lambda d, q: extract_ground_truth_map(d).get(split_query(q)[0])

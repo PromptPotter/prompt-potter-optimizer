@@ -85,10 +85,7 @@ def _extract_bold(text: str) -> str:
 
 
 def _extract_gsm8k_number(text: str) -> float | None:
-    """Extract numeric answer from a GSM8K-style string.
-
-    Tries ``#### N`` first, falls back to the last number in the text.
-    """
+    """Extract GSM8K answer: ``#### N`` first, else the last number."""
     m = _GSM8K_ANSWER_RE.search(text)
     if m:
         return float(m.group(1).replace(",", ""))

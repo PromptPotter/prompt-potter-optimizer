@@ -287,15 +287,7 @@ class MeasurementArchive:
         node_configs: list[tuple[str, dict]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-query cache from prior runs sharing *node_configs*.
-
-        Exact matches reuse every non-error item; partial matches reuse only
-        items whose ``pipeline_data.terminated_at`` falls within the shared
-        prefix. Later runs overwrite earlier ones for the same query, except
-        when ``is_fatal`` flags the incoming row fatal while the existing row
-        is clean — keeps a saved valid retry from being shadowed by an older
-        deprecated archive on subsequent load.
-        """
+        """Build per-query cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive."""
         if not node_configs:
             return {}
         chain_len = len(node_configs)

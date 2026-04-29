@@ -121,12 +121,7 @@ def _raise_if_request_too_large(exc: Exception, provider_name: str) -> None:
 
 
 def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
-    """Salvage Groq's ``json_validate_failed`` 400 by extracting failed_generation.
-
-    Returns ``(content, parsed)`` when the error body carries a recoverable
-    ``failed_generation`` block that re-parses as JSON, otherwise ``None``
-    (caller should fall through to retry).
-    """
+    """Salvage Groq's ``json_validate_failed`` 400 by re-parsing ``failed_generation``; ``None`` to fall through."""
     fg_key = "'failed_generation': '"
     fg_start = err_str.find(fg_key)
     if fg_start < 0:
