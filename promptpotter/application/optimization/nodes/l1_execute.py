@@ -6,17 +6,18 @@ import logging
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle
-from promptpotter.application.optimization.nodes.formatting import candidate_summaries
-from promptpotter.application.optimization.nodes.l1_critique import (
+from promptpotter.application.optimization.nodes.dispatch_msg_registry import (
     format_l1_critique_for_prompt,
     run_l1_critique,
 )
+from promptpotter.application.optimization.nodes.formatting import candidate_summaries
 from promptpotter.application.optimization.nodes.l1_generate import l1_generate
 from promptpotter.application.optimization.nodes.l1_measure import (
     L1YieldStats,
     detect_invariants,
 )
 from promptpotter.application.optimization.nodes.l1_score import l1_score
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import CandidateProposal, RoundResult
 
@@ -30,7 +31,6 @@ from promptpotter.infrastructure.tracing.events import (
     RoundStart,
     RoundWinnerChosen,
 )
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

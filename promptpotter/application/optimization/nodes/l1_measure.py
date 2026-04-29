@@ -11,6 +11,7 @@ from promptpotter.application.optimization.decisions import Decision, record_dec
 from promptpotter.application.optimization.elimination import EliminationCheck
 from promptpotter.application.optimization.nodes.l1_generate import validate_overrides
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import (
     EscalationSignal,
     EscalationTarget,
@@ -22,7 +23,6 @@ from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal, CandidateScore
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.infrastructure.tracing.events import CandidateScored
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

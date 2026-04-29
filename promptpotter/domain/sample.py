@@ -1,4 +1,4 @@
-"""Sample — the canonical per-sample domain object.
+"""Sample — the canonical per-sample domain object, plus ``Measurement`` archive row.
 
 Sample is the data-side peer to SearchPoint. It owns a stable cross-campaign
 ``id``, the input strings (``query``, ``ground_truth``), and accumulating
@@ -9,11 +9,17 @@ the methods below, never duplicated as fields on the Sample itself.
 
 Mutable (unlike frozen ``JobSearchPoint``) because ``escalation_count`` and
 ``run_ids`` accumulate over the campaign lifecycle.
+
+``Measurement`` is the canonical archive row — one ``(sample × config →
+outcome)`` row, denormalized for direct inspection, returned by both
+retrieval views (``measurements_for_sample`` / ``measurements_for_config``).
+Frozen + slots — read-only projection over archive batches.
 """
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, Field
 
@@ -68,3 +74,21 @@ class Sample(BaseModel):
     def degradation_count(self, index: SampleIndex) -> int:
         """Number of measurements that produced degradation warnings."""
         return index.degradation_count(self.id)
+
+
+@dataclass(frozen=True, slots=True)
+class Measurement:
+    """One ``(sample × config → outcome)`` archive row, denormalized."""
+
+    run_id: str
+    content_hash: str
+    sample_id: int
+    query: str
+    ground_truth: str
+    predicted: str
+    hit: bool
+    score: float | None
+    node_configs: list[tuple[str, dict[str, Any]]]
+    pipeline_data: dict[str, Any]
+    created_at: str
+    run_scores: dict[str, Any]

@@ -74,7 +74,7 @@ def _compute_accuracy(results: list[QueryResult]) -> dict:
     Kept as a thin function (not part of the registry) because several
     consumers read ``hits`` / ``total`` directly.
     """
-    from promptpotter.application.optimization.result_extraction import is_deprecated
+    from promptpotter.application.optimization.elimination import is_deprecated
 
     deprecated = sum(1 for r in results if is_deprecated(r))
     valid = [r for r in results if not is_deprecated(r)]
@@ -339,7 +339,7 @@ def compile_failure_analysis(
     patterns ranked by failure count. Deprecated samples (fatal warnings)
     are excluded so they don't pollute pattern groupings.
     """
-    from promptpotter.application.optimization.result_extraction import is_deprecated
+    from promptpotter.application.optimization.elimination import is_deprecated
 
     failures = [
         r for r in results if not r.get("hit") and not is_error_result(r) and not is_deprecated(r)
@@ -387,7 +387,7 @@ def compile_query_difficulty(
     Deprecated samples (fatal warnings) are skipped so hit-rate
     classification isn't biased by garbage measurements.
     """
-    from promptpotter.application.optimization.result_extraction import is_deprecated
+    from promptpotter.application.optimization.elimination import is_deprecated
 
     query_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:

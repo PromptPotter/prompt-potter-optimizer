@@ -216,7 +216,7 @@ class ObservabilityBridge:
         langfuse_session_id: str | None,
     ) -> ObservabilityBridge | None:
         """Build a bridge, emit ``CampaignStart``, register the dataset."""
-        from promptpotter.shared.constants import DATASET_NAME
+        from promptpotter.config.settings import DATASET_NAME
 
         if not (project_root and backend_id):
             return None

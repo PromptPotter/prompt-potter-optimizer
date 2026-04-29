@@ -12,6 +12,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
+from promptpotter.domain.opt_search_point import group_diff_keys
 from promptpotter.presentation.views.display_primitives import (
     BOLD,
     CYAN,
@@ -32,7 +33,6 @@ from promptpotter.shared.composite_render import (
     compact_display_enabled,
     render_composite_block,
 )
-from promptpotter.shared.sp_diff_model import group_diff_keys
 
 __all__ = ["render_phase_event"]
 

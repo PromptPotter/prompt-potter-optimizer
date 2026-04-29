@@ -7,7 +7,7 @@ markers). Pure: no I/O, no mutation. Three private helpers carry it.
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.diagnostics import classify_result
+from promptpotter.application.optimization.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.presentation.views.display_primitives import (
     _DISPLAY_TAGS,

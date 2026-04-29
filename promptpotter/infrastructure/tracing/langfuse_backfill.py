@@ -19,6 +19,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.config.settings import DATASET_NAME as _DEFAULT_DATASET_NAME
 from promptpotter.infrastructure.store import Stores
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
@@ -27,7 +28,6 @@ from promptpotter.infrastructure.tracing.events import (
     QueryScoreEnd,
     QueryScoreStart,
 )
-from promptpotter.shared.constants import DATASET_NAME as _DEFAULT_DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema

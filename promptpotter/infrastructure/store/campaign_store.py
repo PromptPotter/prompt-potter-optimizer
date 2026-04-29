@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
+from promptpotter.config.settings import DEFAULT_CONNECTOR_TYPE
 from promptpotter.infrastructure.store.base import (
     EntityStore,
     read_json,
@@ -14,7 +15,6 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
-from promptpotter.shared.constants import DEFAULT_CONNECTOR_TYPE
 
 logger = logging.getLogger(__name__)
 

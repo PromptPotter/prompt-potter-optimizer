@@ -17,16 +17,16 @@ from typing import Any
 
 from filelock import FileLock
 
-from promptpotter.domain.measurement import Measurement
+from promptpotter.config.settings import (
+    DEFAULT_CONNECTOR_TYPE,
+    LOCK_TIMEOUT,
+    MEASUREMENTS_SCHEMA_VERSION,
+)
+from promptpotter.domain.sample import Measurement
 from promptpotter.infrastructure.store.base import (
     read_json,
     read_json_optional,
     write_json,
-)
-from promptpotter.shared.constants import (
-    DEFAULT_CONNECTOR_TYPE,
-    LOCK_TIMEOUT,
-    MEASUREMENTS_SCHEMA_VERSION,
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
 

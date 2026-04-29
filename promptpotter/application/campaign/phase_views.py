@@ -4,11 +4,11 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.domain.phases import PhaseEvent
-from promptpotter.shared.sp_diff_model import (
+from promptpotter.domain.opt_search_point import (
     build_candidate_flat,
     flatten_sp_summary,
 )
+from promptpotter.domain.phases import PhaseEvent
 from promptpotter.shared.statistics import min_detectable_effect, proportion_test
 
 __all__ = ["build_phase_view"]

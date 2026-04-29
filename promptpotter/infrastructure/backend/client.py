@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 import httpx
 
-from promptpotter.shared.rate_limit import (
+from promptpotter.infrastructure.llm.rate_limiter import (
     MAX_429_ATTEMPTS,
     parse_retry_after,
     wait_with_countdown,

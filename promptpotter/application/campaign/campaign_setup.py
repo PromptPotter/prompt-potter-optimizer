@@ -30,7 +30,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.search_point import TaskDecomposition
+    from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.persistence.round_recorder import RoundRecorder
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -38,16 +38,94 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
+    "HOT_UPDATEABLE_KEYS",
     "CampaignState",
     "ScoringContext",
     "Session",
     "TenantContext",
     "auto_mint_session",
+    "bootstrap_cycle",
     "init_optimization_loop",
     "init_services",
     "new_session_state",
     "populate_session_scoring",
 ]
+
+
+# Hot-updateable on resume — these don't change WHAT the cycle solves, only HOW it searches.
+HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
+    {
+        "max_rounds",
+        "l1_patience",
+        "l2_patience",
+        "l3_patience",
+        "degradation_threshold",
+        "model",
+        "n_variants",
+        "creativity",
+        "improvement_threshold",
+        "sp_budget_ttest",
+        "seed",
+    }
+)
+
+
+def bootstrap_cycle(
+    config: CampaignConfig,
+    session: Session,
+    baseline_jsp: JobSearchPoint,
+    baseline_accuracy: float,
+    dataset: list,
+    cycle_id_override: str | None,
+    *,
+    parent_session_id: str = "",
+    resume_from_round_override: int | None = None,
+) -> tuple[str | None, int]:
+    """Resume an existing cycle or create a new one via ``session.store.campaigns``.
+
+    Returns ``(cycle_id, resumed_from_round)``. Hot-updateable config keys
+    on the existing cycle are refreshed from the current snapshot when
+    ``cycle_id_override`` is set.
+    """
+    import json
+
+    from promptpotter.application.campaign.runner import cycle_config_identity
+
+    if not session.backend_id:
+        return None, 0
+    try:
+        store = session.store.campaigns
+        resolved = cycle_id_override or cycle_config_identity(baseline_jsp, dataset)
+        if resume_from_round_override is not None:
+            store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
+        config_snapshot = config.model_dump(mode="json")
+        existing = store.load(session.backend_id, resolved)
+        if existing is not None:
+            if cycle_id_override:
+                stored_cfg = existing.get("config", {}) or {}
+                cfg_updated = False
+                for k in HOT_UPDATEABLE_KEYS:
+                    if stored_cfg.get(k) != config_snapshot.get(k):
+                        stored_cfg[k] = config_snapshot.get(k)
+                        cfg_updated = True
+                if cfg_updated and stored_cfg:
+                    store.update(session.backend_id, resolved, {"config": stored_cfg})
+                    logger.info("Updated loop-control config for %s", resolved)
+            return resolved, len(existing.get("trials", []))
+        store.create(
+            session.backend_id,
+            resolved,
+            {
+                "type": "optimization_loop",
+                "config": config_snapshot,
+                "baseline_accuracy": baseline_accuracy,
+                "parent_session_id": parent_session_id,
+            },
+        )
+        return resolved, 0
+    except (OSError, json.JSONDecodeError, KeyError):
+        logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
+        return None, 0
 
 
 @dataclass(frozen=True)
@@ -385,7 +463,7 @@ async def _sync_and_extract_experiment(
         status("WARNING: No experiment data available")
         return
 
-    from promptpotter.config.extractors import EXPERIMENT_EXTRACTORS
+    from promptpotter.application.campaign.config import EXPERIMENT_EXTRACTORS
 
     schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
@@ -516,7 +594,6 @@ def _build_cycle_and_bootstrap(
     its prompt alias without re-deriving it. Raises ``ValueError`` when
     ``baseline.baseline_ps`` is missing — required for OSP construction.
     """
-    from promptpotter.application.campaign.cycle_store import bootstrap_cycle
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.scoring.formula import compile_round_scorer
 

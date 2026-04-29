@@ -128,7 +128,7 @@ def render_round_stats(
     try:
         from collections import Counter
 
-        from promptpotter.application.optimization.result_extraction import (
+        from promptpotter.application.optimization.elimination import (
             candidate_keys_from_schema,
             get_candidates,
         )

@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import logging
 from datetime import UTC, datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.campaign.campaign_setup import (
     Session,
@@ -21,8 +21,10 @@ from promptpotter.application.optimization.layer_escalation import (
     escalate_l2,
 )
 from promptpotter.application.optimization.nodes.l1_execute import execute_round
-from promptpotter.application.scoring.scoring_steer import apply_steer_file
-from promptpotter.application.scoring.zero_signal_filter import apply_zero_signal_exclusions
+from promptpotter.application.scoring.formula import (
+    apply_steer_file,
+    apply_zero_signal_exclusions,
+)
 from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
@@ -37,9 +39,40 @@ from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.persistence.session_emitter import CampaignPersistenceEmitter
 from promptpotter.shared.errors import graceful
 
+if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.search_point import JobSearchPoint
+
 logger = logging.getLogger(__name__)
 
-__all__ = ["RunListener", "run_optimization"]
+__all__ = [
+    "RunListener",
+    "build_baseline_cycle_id",
+    "cycle_config_identity",
+    "run_optimization",
+]
+
+
+def cycle_config_identity(jsp: JobSearchPoint, dataset: list) -> str:
+    """Stable identity hash for a feedback cycle's baseline ``JobSearchPoint``.
+
+    Covers the rendered prompt, dataset, and full ``pipeline_params`` (active
+    steps + per-node target-layer config). Loop-control / strategy knobs on
+    ``CampaignConfig`` are deliberately excluded — tweaking optimizer
+    strategy or resuming with different budgets does not start a new cycle.
+    """
+    return f"cycle_{jsp.content_hash(dataset)[:12]}"
+
+
+def build_baseline_cycle_id(
+    osp: OptSearchPoint,
+    schema: PipelineSchema | None,
+    dataset: list,
+) -> str:
+    """Cycle ID for a baseline ``OptSearchPoint`` — the OSP → JSP projection ceremony."""
+    base_pp = schema.to_pipeline_params() if schema else {}
+    jsp = osp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
+    return cycle_config_identity(jsp, dataset)
 
 
 class RunListener:
@@ -457,7 +490,6 @@ async def run_optimization(
 
     if not session.session_id:
         from promptpotter.application.campaign.campaign_setup import auto_mint_session
-        from promptpotter.domain.cycle_identity import build_baseline_cycle_id
 
         ps = baseline.baseline_ps
         baseline_prompt_fields = (

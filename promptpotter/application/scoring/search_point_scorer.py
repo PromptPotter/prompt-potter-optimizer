@@ -16,7 +16,7 @@ from promptpotter.application.scoring.sample_measurement import (
     _error_result,
     measure_sample,
 )
-from promptpotter.application.scoring.stale_data import (
+from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
@@ -144,7 +144,7 @@ def _filter_deprecated_priors(
     prior_results: dict[str, QueryResult],
 ) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
     """Split prior-results cache into ``(kept, evicted)``; evicted entries force a fresh backend call so the optimizer doesn't replay known-bad measurements (load-side filter only — disk archive untouched)."""
-    from promptpotter.application.optimization.result_extraction import is_deprecated
+    from promptpotter.application.optimization.elimination import is_deprecated
 
     evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}
     kept = {q: r for q, r in prior_results.items() if q not in evicted}
@@ -275,7 +275,7 @@ async def _process_fresh_sample(
         display_cached["sample_id"] = sample.id
         if ctx.on_result is not None:
             ctx.on_result(display_cached, idx, dataset_len)
-        from promptpotter.shared.rate_limit import (
+        from promptpotter.infrastructure.llm.rate_limiter import (
             DEPR_RETRY_COOLDOWN_SEC,
             wait_with_countdown,
         )
@@ -422,7 +422,7 @@ async def score_search_point(
 
     prior_results: dict[str, QueryResult] = {}
     if store and backend_id:
-        from promptpotter.application.optimization.result_extraction import is_deprecated
+        from promptpotter.application.optimization.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         prior_results = cast(

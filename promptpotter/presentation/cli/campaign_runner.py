@@ -116,7 +116,7 @@ def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: l
     """Apply pipeline → load baseline → compute cycle_id. Returns (pipeline_params, baseline, cycle_id)."""
     from promptpotter.application.campaign.config import configure_and_apply_pipeline
     from promptpotter.application.campaign.data import load_baseline_prompt
-    from promptpotter.domain.cycle_identity import build_baseline_cycle_id
+    from promptpotter.application.campaign.runner import build_baseline_cycle_id
 
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(

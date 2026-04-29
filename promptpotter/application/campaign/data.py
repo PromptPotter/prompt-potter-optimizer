@@ -12,9 +12,9 @@ from promptpotter.application.campaign.campaign_setup import (
     populate_session_scoring,
 )
 from promptpotter.application.campaign.config import CampaignConfig
+from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.opt_search_point import IndividualLineage, OptSearchPoint
 from promptpotter.domain.sample import Sample
-from promptpotter.shared.constants import DATASET_NAME
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema

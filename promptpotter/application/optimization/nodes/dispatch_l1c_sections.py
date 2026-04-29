@@ -18,14 +18,14 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, cast
 
+from promptpotter.application.optimization.elimination import (
+    candidate_keys_from_schema,
+    get_candidates,
+)
 from promptpotter.application.optimization.nodes.formatting import (
     build_cross_candidate_diff,
     build_trajectory_report,
     format_axis_digest_block,
-)
-from promptpotter.application.optimization.result_extraction import (
-    candidate_keys_from_schema,
-    get_candidates,
 )
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.shared.errors import is_error_result

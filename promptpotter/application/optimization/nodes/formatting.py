@@ -6,7 +6,7 @@ import json
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema

@@ -17,7 +17,7 @@ _RELOAD_MODULES = (
     "promptpotter.application.optimization.elimination",
     "promptpotter.application.optimization.layer_escalation",
     "promptpotter.application.optimization.nodes.layer_transitions",
-    "promptpotter.application.optimization.nodes.l1_critique",
+    "promptpotter.application.optimization.nodes.dispatch_msg_registry",
     "promptpotter.application.optimization.nodes.l1_execute",
     "promptpotter.application.optimization.nodes.l1_generate",
     "promptpotter.application.optimization.nodes.l1_measure",

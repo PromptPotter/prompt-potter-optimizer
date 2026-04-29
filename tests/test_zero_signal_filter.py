@@ -12,7 +12,7 @@ from pathlib import Path
 
 from promptpotter.application.intelligence.axis_index import AxisIndex
 from promptpotter.application.intelligence.sample_index import SampleIndex
-from promptpotter.application.scoring.zero_signal_filter import (
+from promptpotter.application.scoring.formula import (
     apply_zero_signal_exclusions,
 )
 from promptpotter.domain.sample import Sample

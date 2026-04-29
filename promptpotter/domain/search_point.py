@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, ClassVar
 
 from pydantic import BaseModel
 
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.shared.hashing import content_hash
 
 if TYPE_CHECKING:

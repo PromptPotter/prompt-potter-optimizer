@@ -16,12 +16,19 @@ Client-side tier throttling (RPM + TPM) is opt-in via ``*_RPM`` / ``*_TPM``
 settings — see :mod:`promptpotter.infrastructure.llm.rate_limiter`.
 """
 
+import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
+
+# TokenUsage / token-sink registry was previously in
+# ``promptpotter.infrastructure.llm.token_usage``; folded into this module
+# during the V1 leaf sweep. ``TokenSink`` consumers fan-out via
+# ``emit_token_usage``; the built-in sink warns on optimizer prompts that
+# exceed ``OPTIMIZER_PROMPT_WARN_TOKENS``.
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -31,7 +38,6 @@ from pydantic import BaseModel, Field
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.llm.rate_limiter import RateLimiter, RateLimitReservation
 from promptpotter.shared.errors import RequestTooLargeError
-from promptpotter.shared.llm_parsing import try_parse_json
 
 logger = logging.getLogger(__name__)
 
@@ -40,8 +46,148 @@ __all__ = [
     "LLMClientBase",
     "LLMResponse",
     "OpenAICompatibleClient",
+    "TokenSink",
+    "TokenUsage",
+    "emit_token_usage",
+    "extract_parsed_json",
     "get_llm_client",
+    "register_token_sink",
+    "reset_token_sinks_for_tests",
+    "try_parse_json",
 ]
+
+
+# ---------------------------------------------------------------------------
+# JSON parsing utilities (formerly ``promptpotter.shared.llm_parsing``)
+# ---------------------------------------------------------------------------
+
+
+def try_parse_json(content: str, provider: str) -> Any | None:
+    """Parse JSON from response content, return None on failure."""
+    text = content.strip()
+    # Strip markdown code fences (e.g. ```json ... ```)
+    if text.startswith("```"):
+        first_nl = text.find("\n")
+        if first_nl != -1:
+            text = text[first_nl + 1 :]
+        if text.endswith("```"):
+            text = text[:-3]
+        text = text.strip()
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+
+    # Best-effort repair of malformed JSON (Groq/kimi artifacts)
+    try:
+        repaired = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
+        repaired = re.sub(r"(?<=[{,\s])(\w+)\s*:", r'"\1":', repaired)
+        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
+        # Truncate after last balanced closing brace
+        depth = 0
+        last_valid = -1
+        for i, ch in enumerate(repaired):
+            if ch in "{[":
+                depth += 1
+            elif ch in "}]":
+                depth -= 1
+                if depth == 0:
+                    last_valid = i
+        if 0 < last_valid < len(repaired) - 1:
+            repaired = repaired[: last_valid + 1]
+        result = json.loads(repaired)
+        logger.info("%s JSON repaired successfully", provider)
+        return result
+    except json.JSONDecodeError:
+        logger.debug("%s response not valid JSON: %s", provider, content[:200])
+        return None
+
+
+def extract_parsed_json(response: Any) -> Any:
+    """Extract parsed JSON from an LLM response.
+
+    Uses the pre-parsed ``response.parsed`` if available, otherwise falls
+    back to ``json.loads(response.content)``.
+    """
+    if response.parsed:
+        return response.parsed
+    return json.loads(response.content)
+
+
+# ---------------------------------------------------------------------------
+# Token usage record + emission registry
+# ---------------------------------------------------------------------------
+
+
+@dataclass(frozen=True)
+class TokenUsage:
+    """Per-call LLM token record.
+
+    Attributes:
+        node: Logical node name (optimizer: ``"l1_generate"``, ``"l1_critique"``,
+            …; backend: ``"entity_profiling"``, ``"llm_ranking"``, …).
+        kind: ``"optimizer"`` for meta-prompt calls, ``"backend"`` for
+            in-pipeline LLM calls. Sinks use this to threshold separately.
+        input_tokens: Prompt (input) tokens reported by the provider.
+        output_tokens: Completion (output) tokens reported by the provider.
+        duration_s: Wall-clock call duration in seconds.
+    """
+
+    node: str
+    kind: Literal["optimizer", "backend"]
+    input_tokens: int
+    output_tokens: int
+    duration_s: float
+
+    @property
+    def total_tokens(self) -> int:
+        return self.input_tokens + self.output_tokens
+
+
+TokenSink = Callable[[TokenUsage], None]
+
+_token_sinks: list[TokenSink] = []
+
+
+def register_token_sink(sink: TokenSink) -> None:
+    """Subscribe a consumer. Idempotent — repeated registration is a no-op."""
+    if sink not in _token_sinks:
+        _token_sinks.append(sink)
+
+
+def emit_token_usage(usage: TokenUsage) -> None:
+    """Fan out a token record to every registered sink. Sink exceptions are
+    logged and swallowed so one bad sink cannot break the caller's call site."""
+    for sink in _token_sinks:
+        try:
+            sink(usage)
+        except Exception:
+            logger.exception("token sink %r failed", sink)
+
+
+def reset_token_sinks_for_tests() -> None:
+    """Clear sink registry and re-install built-ins. Tests only."""
+    _token_sinks.clear()
+    register_token_sink(_warn_if_optimizer_over_threshold)
+
+
+def _warn_if_optimizer_over_threshold(usage: TokenUsage) -> None:
+    """Warn when an optimizer prompt exceeds ``OPTIMIZER_PROMPT_WARN_TOKENS``."""
+    if usage.kind != "optimizer":
+        return
+    threshold = settings.OPTIMIZER_PROMPT_WARN_TOKENS
+    if usage.input_tokens > threshold:
+        logger.warning(
+            "optimizer node %r prompt at %d tokens (threshold=%d) — tune the "
+            "template or drop context; large meta-prompts reduce signal-to-noise "
+            "for the meta-LLM and risk provider TPM caps",
+            usage.node,
+            usage.input_tokens,
+            threshold,
+        )
+
+
+register_token_sink(_warn_if_optimizer_over_threshold)
 
 
 def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:

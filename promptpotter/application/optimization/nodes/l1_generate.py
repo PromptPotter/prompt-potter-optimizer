@@ -11,12 +11,12 @@ from promptpotter.application.optimization.nodes.dispatch_msg_registry import (
     assemble_dispatch_msg,
 )
 from promptpotter.application.optimization.pipeline import run_optimizer_node
+from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.infrastructure.llm.client import LLMClientBase
 from promptpotter.infrastructure.tracing.events import CandidateCreated
-from promptpotter.shared.constants import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

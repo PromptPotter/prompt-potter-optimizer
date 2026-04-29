@@ -43,7 +43,7 @@ def _make_session(tmp_path: Path) -> SimpleNamespace:
 
 
 def test_valid_steer_swaps_round_scorer_and_archives_file(tmp_path: Path) -> None:
-    from promptpotter.application.scoring.scoring_steer import apply_steer_file
+    from promptpotter.application.scoring.formula import apply_steer_file
 
     session = _make_session(tmp_path)
     _write_steer(session._cycle_dir, {"per_round": "0.5 * accuracy + 0.5 * latency_norm"})
@@ -73,7 +73,7 @@ def test_valid_steer_swaps_round_scorer_and_archives_file(tmp_path: Path) -> Non
 
 
 def test_invalid_steer_leaves_state_untouched(tmp_path: Path) -> None:
-    from promptpotter.application.scoring.scoring_steer import apply_steer_file
+    from promptpotter.application.scoring.formula import apply_steer_file
 
     session = _make_session(tmp_path)
     sentinel = object()
@@ -90,7 +90,7 @@ def test_invalid_steer_leaves_state_untouched(tmp_path: Path) -> None:
 
 
 def test_no_steer_file_is_noop(tmp_path: Path) -> None:
-    from promptpotter.application.scoring.scoring_steer import apply_steer_file
+    from promptpotter.application.scoring.formula import apply_steer_file
 
     session = _make_session(tmp_path)
     sentinel = object()

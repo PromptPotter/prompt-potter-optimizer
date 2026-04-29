@@ -11,7 +11,7 @@ from promptpotter.domain.sample import Sample
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.measurement import Measurement
+    from promptpotter.domain.sample import Measurement
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 logger = logging.getLogger(__name__)

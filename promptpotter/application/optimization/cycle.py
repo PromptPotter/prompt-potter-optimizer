@@ -226,8 +226,8 @@ class Cycle:
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
+        from promptpotter.config.settings import PROMPT_STRING_FIELDS
         from promptpotter.domain.opt_search_point import RoundSummary
-        from promptpotter.shared.constants import PROMPT_STRING_FIELDS
 
         schema = self.session.pipeline_schema
         self.rounds.append(rr)
@@ -277,7 +277,7 @@ class Cycle:
         warning_inventory (from all candidate results), runtime_failures
         (deduped by source/warning/observed-config).
         """
-        from promptpotter.application.optimization.result_extraction import update_query_tracker
+        from promptpotter.application.optimization.elimination import update_query_tracker
         from promptpotter.application.scoring.metrics import compile_failure_analysis
 
         schema = self.session.pipeline_schema
