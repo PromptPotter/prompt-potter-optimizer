@@ -25,7 +25,7 @@ Some L1-generated candidates are invalid before evaluation starts — the optimi
 
 `validate_overrides()` in `application/optimization/l1.py` attaches a `ValidationFailure(axis, value, allowed, reason)` (from `domain/analysis.py`) to `OptSearchPoint.validation_failures` at L1 parse time. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
-**L2 teaches L1.** L2 `refine_strategy` already reads L1 critique, escalation reports, and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*), which replaces L1 critique for next round's L1 via the normal directive/l1_critique mutual exclusion. L1 next round follows the directive and heals itself.
+**L2 teaches L1.** L2 `refine_strategy` already reads escalation reports and the previous directive; validation failures slot into that same context as an "L1 VALIDATION FAILURES" section. L2 produces a directive that names the disallowed value by name (e.g. *"do not propose gpt-4o for model"*). The directive is L1 generate's only guidance channel, so L1 next round follows it and heals itself.
 
 Flow: `detect → attach to candidate memory → synthetic-0 → surface on candidate_scores → L2 directive → L1 next round heals`.
 
@@ -53,7 +53,7 @@ The fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (in `domain/opt_search_p
 
 | Field | Lifecycle | Purpose |
 |---|---|---|
-| `l1_critique_text` | per-round, cleared on improvement | L1 critique node's narrative for next L1 |
+| `l1_critique_text` | per-round, cleared on improvement | L1 critique narrative — used for display, telemetry, and as L2's input on escalation. Not injected into any prompt directly. |
 | `escalation_journal` | cross-round, append-only | History of degradation events with outcomes |
 | `warning_inventory` | cross-round | Per-query warning aggregation |
 | `l2_directive` | one-round window, cleared on improvement | L2's diagnostic + action guidance for L1 |

@@ -70,7 +70,7 @@ The per-layer prompt-injection mapping lives in [information-flow.md § L1 / L2 
 | `failure_group_insights` | `_axis_failure_group_deltas` (populated by `_recompute_failure_group_correlations()`) | L2 |
 | `volatile_queries` | `sample_index.flips(limit=50)` | L2 |
 
-The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. The dispatch_msg registry passes the `"HISTORICAL CONTEXT:"` header at each L1/L2/L3 site; the renderer itself is header-agnostic.
+The result is a `dict[str, str]` rendered through `format_axis_digest_block()`. The dispatch_msg registry passes the `"HISTORICAL CONTEXT:"` header at each L1 generate / L1 critique / L2 site; L3 calls `format_axis_digest_block` directly into its `{{axes_digest}}` template hole with the same header. The renderer itself is header-agnostic.
 
 ---
 

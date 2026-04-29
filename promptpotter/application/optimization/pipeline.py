@@ -903,7 +903,6 @@ class Layer(enum.StrEnum):
     L1_GENERATE = "L1_GENERATE"
     L1_CRITIQUE = "L1_CRITIQUE"
     L2 = "L2"
-    L3 = "L3"
 
 
 _PROMPT_BLOAT_CHARS = 3000
@@ -1104,8 +1103,6 @@ def _layer_axis_digest(layer: Layer, cycle: Cycle) -> dict[str, str] | None:
         return cycle.axes.digest_for_l1_critique()
     if layer is Layer.L2:
         return cycle.axes.digest_for_l2()
-    if layer is Layer.L3:
-        return cycle.axes.digest_for_l3()
     return None
 
 
@@ -1250,11 +1247,6 @@ def _section_l2_directive(ctx: LayerContext) -> str:
     return f"{label}\n{v}"
 
 
-def _section_l1_critique_text(ctx: LayerContext) -> str:
-    v = ctx.cycle.opt_sp.l1_critique_text
-    return f"CRITIQUE:\n{v}" if v else ""
-
-
 def _section_plan(ctx: LayerContext) -> str:
     v = ctx.cycle.opt_sp.plan
     return f"PLAN:\n{v}" if v else ""
@@ -1359,14 +1351,6 @@ def _section_runtime_failures(ctx: LayerContext) -> str:
 def _section_axes_l2(ctx: LayerContext) -> str:
     return (
         format_axis_digest_block(ctx.axis_digest, _L2_AXIS_LABELS, header="HISTORICAL CONTEXT:")
-        if ctx.axis_digest
-        else ""
-    )
-
-
-def _section_axes_l3(ctx: LayerContext) -> str:
-    return (
-        format_axis_digest_block(ctx.axis_digest, _L3_AXIS_LABELS, header="HISTORICAL CONTEXT:")
         if ctx.axis_digest
         else ""
     )
@@ -1598,18 +1582,34 @@ def _section_l1c_available_schema_mutations(ctx: LayerContext) -> str:
     )
 
 
+def _section_l1c_round_report(ctx: LayerContext) -> str:
+    """Round-level stats: scoring, anomalies, pipeline health, ranks, evolution, this-round diff."""
+    parts = (
+        _section_l1c_scoring_summary(ctx),
+        _section_l1c_anomaly_flags(ctx),
+        _section_l1c_pipeline_health(ctx),
+        _section_l1c_rank_analysis(ctx),
+        _section_l1c_round_evolution(ctx),
+        _section_l1c_this_round(ctx),
+    )
+    return "\n\n".join(p for p in parts if p)
+
+
+def _section_l1c_per_query_report(ctx: LayerContext) -> str:
+    """Per-query views: runtime failures, query categories, failure details, successes."""
+    parts = (
+        _section_l1c_runtime_failures(ctx),
+        _section_l1c_query_categories(ctx),
+        _section_l1c_failure_details(ctx),
+        _section_l1c_successes(ctx),
+    )
+    return "\n\n".join(p for p in parts if p)
+
+
 _L1C_SECTIONS: dict[str, Callable[[LayerContext], str]] = {
-    "l1c_scoring_summary": _section_l1c_scoring_summary,
-    "l1c_anomaly_flags": _section_l1c_anomaly_flags,
-    "l1c_pipeline_health": _section_l1c_pipeline_health,
-    "l1c_runtime_failures": _section_l1c_runtime_failures,
-    "l1c_rank_analysis": _section_l1c_rank_analysis,
-    "l1c_round_evolution": _section_l1c_round_evolution,
-    "l1c_query_categories": _section_l1c_query_categories,
-    "l1c_failure_details": _section_l1c_failure_details,
-    "l1c_successes": _section_l1c_successes,
+    "l1c_round_report": _section_l1c_round_report,
+    "l1c_per_query_report": _section_l1c_per_query_report,
     "l1c_historical_context": _section_l1c_historical_context,
-    "l1c_this_round": _section_l1c_this_round,
     "l1c_available_schema_mutations": _section_l1c_available_schema_mutations,
 }
 
@@ -1629,14 +1629,12 @@ _SECTIONS: dict[str, Callable[[LayerContext], str]] = {
     "escalation_probe": _section_escalation_probe,
     "escalation_alert": _section_escalation_alert,
     "l2_directive": _section_l2_directive,
-    "l1_critique_text": _section_l1_critique_text,
     "plan": _section_plan,
     "escalation_section": _section_escalation_section,
     "warning_inventory": _section_warning_inventory,
     "validation_failures": _section_validation_failures,
     "runtime_failures": _section_runtime_failures,
     "axes_l2": _section_axes_l2,
-    "axes_l3": _section_axes_l3,
     **_L1C_SECTIONS,
 }
 
@@ -1650,20 +1648,17 @@ LAYER_ORDER: dict[Layer, tuple[str, ...]] = {
         "escalation_probe",
         "escalation_alert",
         "l2_directive",
-        "l1_critique_text",
         "plan",
     ),
     Layer.L1_CRITIQUE: _L1C_SECTION_ORDER,
     Layer.L2: (
         "escalation_section",
         "warning_inventory",
-        "l1_critique_text",
         "l2_directive",
         "validation_failures",
         "runtime_failures",
         "axes_l2",
     ),
-    Layer.L3: ("axes_l3",),
 }
 
 
@@ -1684,12 +1679,8 @@ def assemble_dispatch_msg(
     Builds the per-call :class:`LayerContext` once (which pre-fetches the
     layer-appropriate axis digest from ``cycle.axes`` and, on
     L1_CRITIQUE, computes the cross-cutting :class:`CritiqueContext`),
-    then hands it to each section in :data:`LAYER_ORDER`.
-
-    On L1_GENERATE the L2 directive supersedes the L1 critique whenever
-    both are populated (the directive is L2's digested view of the
-    critique — sliding window of 1). Returns ``""`` when no section
-    produces content.
+    then hands it to each section in :data:`LAYER_ORDER`. Returns ``""``
+    when no section produces content.
     """
     ctx = compile_layer_context(
         layer,
@@ -1706,10 +1697,6 @@ def assemble_dispatch_msg(
     for name in LAYER_ORDER[layer]:
         if text := _SECTIONS[name](ctx):
             sections[name] = text
-
-    # On L1_GENERATE the L2 directive replaces the critique whenever both are present.
-    if layer is Layer.L1_GENERATE and "l2_directive" in sections:
-        sections.pop("l1_critique_text", None)
 
     return "\n\n".join(sections[name] for name in LAYER_ORDER[layer] if name in sections)
 
@@ -2058,7 +2045,11 @@ class L3ModifyPlan(LayerTransition):
             "runtime_failures_section": (
                 "\n\n" + runtime_failures_section if runtime_failures_section else ""
             ),
-            "dispatch_msg": assemble_dispatch_msg(Layer.L3, cycle),
+            "axes_digest": format_axis_digest_block(
+                cycle.axes.digest_for_l3() if cycle.axes else None,
+                _L3_AXIS_LABELS,
+                header="HISTORICAL CONTEXT:",
+            ),
         }
 
     def build_result(

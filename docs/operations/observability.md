@@ -66,7 +66,7 @@ Next `optimize` will start sending traces.
 | L1 Generate | LLM call | meta-prompt, candidate outputs, token counts |
 | L1 Critique | LLM call | critique-phase dispatch_msg, structured output |
 | L2 Refine | LLM call | refine dispatch_msg, new directive / task_context |
-| L3 Plan | LLM call | plan dispatch_msg, new plan text |
+| L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
 | Escalation check | Event | check type, fired/not, reason |
 | Stale-data protocol | Event | ladder step taken, resolution |

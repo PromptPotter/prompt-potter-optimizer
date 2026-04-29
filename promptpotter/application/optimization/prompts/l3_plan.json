@@ -1,7 +1,7 @@
 {
   "persona": "You are an expert optimization strategist.",
   "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled.",
-  "problem_description": "L2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}{{runtime_failures_section}}\n\n{{dispatch_msg}}",
+  "problem_description": "L2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}{{runtime_failures_section}}\n\n{{axes_digest}}",
   "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. If a runtime failure trail is present above, treat those patterns as discovered constraints on the search space — L2 has already tried to self-heal around them and failed, so your replan must either change pipeline_params to escape the failing region (switch model, raise a param floor, swap a node) or change the plan text to steer L1/L2 around it. Do not propose a plan that re-enters the same failure mode.",
   "thinking_style": "Consider:\n- What patterns in the L2 history suggest about why the current approach is failing\n- What fundamentally different strategies the data supports\n- Which pipeline dimensions have been under-explored\n- Which runtime constraints have been discovered and must be respected",
   "plan": "{{current_plan}}",

@@ -129,7 +129,7 @@ In optimizer prompts, `problem_description` carries analytical evidence (scoring
 └────────────────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┴──────┘
 ```
 
-Each optimizer prompt template receives a single `dispatch_msg` hole holding the assembled per-layer block. L3 keeps additional context holes for anchoring (current plan, L2 history, rendered prompt, pipeline snapshot). See [information-flow.md](information-flow.md) for the per-field table.
+L1 generate, L1 critique, and L2 templates each carry a single `dispatch_msg` hole holding the assembled per-layer block. L3 is multi-hole — it has a dedicated `axes_digest` hole rendered directly via `format_axis_digest_block(cycle.axes.digest_for_l3(), ...)`, plus context holes for anchoring (current plan, L2 history, rendered prompt, pipeline snapshot). See [information-flow.md](information-flow.md) for the per-field table.
 
 ---
 
@@ -137,14 +137,14 @@ Each optimizer prompt template receives a single `dispatch_msg` hole holding the
 
 The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt file under `promptpotter/application/optimization/prompts/` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
 
-Every L1 (generate / critique) / L2 / L3 template receives a single `dispatch_msg` hole holding the per-layer block assembled by `dispatch_msg_registry.assemble_dispatch_msg(layer, cycle, ...)`. One registry, four layer entries — no per-layer assembler forks.
+L1 generate, L1 critique, and L2 templates each receive a single `dispatch_msg` hole holding the per-layer block assembled by `assemble_dispatch_msg(layer, cycle, ...)`. One registry, three layer entries. L3 is multi-hole and reads its AxisIndex digest directly, bypassing the registry.
 
 | Template file | Consumer | Compile variables |
 |---|---|---|
 | `l1_generate.json` | `l1_generate()` | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`, `dispatch_msg` |
 | `l1_critique.json` | `run_l1_critique()` | `dispatch_msg` |
 | `l2_context.json` | L2 refine transition | `current_params`, `task_context_section`, `dispatch_msg` |
-| `l3_plan.json` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `dispatch_msg` |
+| `l3_plan.json` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `axes_digest` |
 | `restructure.json` | `decompose_prompt_fields()` | `consultation_instruction` |
 
 Loader and symbol paths: see [code-map.md](code-map.md).
