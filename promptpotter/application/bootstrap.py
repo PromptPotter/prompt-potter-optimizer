@@ -31,6 +31,7 @@ if TYPE_CHECKING:
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.infrastructure.ledger import RunLedger
     from promptpotter.infrastructure.projections import AuditTrailProjection
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -165,11 +166,17 @@ class ScoringContext:
 class CampaignState:
     """Per-cycle mutable state — bound when ``init_optimization_loop`` fires.
 
-    ``cycle_id`` and ``obs_campaign_id`` flip on fork; ``obs`` and
-    ``round_recorder`` rebind to the new fork's directories.
-    ``resumed_from_round`` records where the loop picked up.
+    ``cycle_id`` and ``obs_campaign_id`` flip on fork; ``obs``,
+    ``round_recorder``, and ``ledger`` rebind to the new fork's
+    directories. ``resumed_from_round`` records where the loop picked up.
     Wiring stays directly on ``Session`` and is shared across all
     cycles minted under one Session lifetime.
+
+    ``ledger`` is the per-cycle ``RunLedger`` (``events.jsonl``); facts
+    about the cycle (decisions, phase boundaries) are appended here in
+    addition to the legacy in-memory accumulators. Phase 3 of the
+    persistence cleanup is wiring the dual-write; Phase 5 will retire
+    the legacy paths once projections subscribe to the ledger directly.
     """
 
     cycle_id: str = ""
@@ -177,6 +184,7 @@ class CampaignState:
     resumed_from_round: int = 0
     obs: ObservabilityBridge | None = None
     round_recorder: AuditTrailProjection | None = None
+    ledger: RunLedger | None = None
 
 
 @dataclass
@@ -714,6 +722,22 @@ def _apply_resume_fork(
     return resolved_cycle_id, resumed_from_round
 
 
+def _open_cycle_ledger(session: Session, cycle_id: str) -> RunLedger | None:
+    """Open the per-cycle ``RunLedger`` (``events.jsonl``) under the cycle's audit dir.
+
+    Returns ``None`` if no store is wired (some test paths bypass storage).
+    Idempotent: re-opens with cumulative offsets so resumed cycles continue
+    appending after the existing tail.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import RunLedger
+
+    if session.store is None:
+        return None
+    cycle_dir = CycleDir(session.store.campaigns.campaign_dir(cycle_id))
+    return RunLedger.open(cycle_dir)
+
+
 def _finalize_loop_state(
     cycle: Cycle,
     session: Session,
@@ -741,6 +765,7 @@ def _finalize_loop_state(
 
     if resolved_cycle_id:
         session.state.cycle_id = resolved_cycle_id
+        session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.obs_campaign_id = obs_campaign_id
     session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
     session.scoring.degradation_checks = build_degradation_checks(config)

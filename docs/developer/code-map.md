@@ -106,7 +106,9 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `BackendClient` | `promptpotter/infrastructure/backend.py` |
 | `BackendStore` | `promptpotter/infrastructure/store/stores.py` |
 | `build_stores` | `promptpotter/infrastructure/store/stores.py` |
-| `CampaignPersistenceEmitter` | `promptpotter/infrastructure/persistence.py` |
+| `LiveDashboardProjection` | `promptpotter/infrastructure/projections/live_dashboard.py` |
+| `AuditTrailProjection` | `promptpotter/infrastructure/projections/audit_trail.py` |
+| `RunLedger` | `promptpotter/infrastructure/ledger.py` |
 | `CampaignStore` | `promptpotter/infrastructure/store/stores.py` |
 | `MeasurementArchive` | `promptpotter/infrastructure/store/measurement_archive.py` |
 | `OpenAICompatibleClient` / `AnthropicClient` | `promptpotter/infrastructure/llm.py` |

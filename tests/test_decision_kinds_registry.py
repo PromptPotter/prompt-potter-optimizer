@@ -143,3 +143,54 @@ def test_runledger_bind_fans_out_to_subscribers(tmp_path: Path) -> None:
     ledger.append(Decision(kind=DecisionKind.PROBE_ROUND_COMMITMENT, outcome=False))  # offset 2
 
     assert received == [(1, "phase"), (2, "decision")]
+
+
+def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
+    """``_open_cycle_ledger`` opens the ledger under the per-cycle audit dir.
+
+    Phase 3 plumbing: the ledger MUST live at
+    ``campaigns/{cycle_id}/ledger.jsonl`` (per-cycle scope) so a fork's
+    facts never bleed into the family-root telemetry stream. Returns
+    ``None`` when no store is wired (test-bypass paths).
+    """
+    from types import SimpleNamespace
+
+    from promptpotter.application.bootstrap import _open_cycle_ledger
+    from promptpotter.infrastructure.store import build_stores
+
+    stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
+    fake_session = SimpleNamespace(store=stores)
+
+    ledger = _open_cycle_ledger(fake_session, "cycle_x")  # type: ignore[arg-type]
+    assert ledger is not None
+    assert ledger.path == stores.campaigns.campaign_dir("cycle_x") / "ledger.jsonl"
+
+    # Storeless session (test-bypass path) → no ledger; loop still proceeds.
+    assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]
+
+
+def test_open_cycle_ledger_resumes_offsets(tmp_path: Path) -> None:
+    """A reopened ledger continues counting from the existing tail.
+
+    Prevents a resume from clobbering prior facts: a fresh ``open()``
+    over a populated ``events.jsonl`` reads the existing offset count
+    so subsequent appends land at offset N (not 0).
+    """
+    from types import SimpleNamespace
+
+    from promptpotter.application.bootstrap import _open_cycle_ledger
+    from promptpotter.infrastructure.store import build_stores
+
+    stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
+    fake_session = SimpleNamespace(store=stores)
+
+    first = _open_cycle_ledger(fake_session, "cycle_y")  # type: ignore[arg-type]
+    assert first is not None
+    first.append(Phase(phase="round", event="complete", round=0))
+    first.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
+
+    second = _open_cycle_ledger(fake_session, "cycle_y")  # type: ignore[arg-type]
+    assert second is not None
+    assert second.next_offset == 2
+    second.append(Phase(phase="round", event="complete", round=1))
+    assert sum(1 for _ in second.iter()) == 3

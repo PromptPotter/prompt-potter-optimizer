@@ -85,3 +85,62 @@ def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(fork_dir))
     assert proj.rounds_dir == fork_dir / ".cache" / "rounds"
     assert root_dir not in proj.rounds_dir.parents or "forks" in proj.rounds_dir.parts
+
+
+def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
+    """Phase('round', 'enter')/'complete' from a ledger drives the recorder lifecycle.
+
+    Phase 3 contract: an AuditTrailProjection bound to the ledger MUST
+    react to round-boundary phase records — ``enter`` opens a fresh
+    round, ``complete`` flushes ``round_NNNN.json`` to disk. Other
+    record types are ignored at this projection's scope.
+    """
+    from promptpotter.domain.run_records import Decision, DecisionKind, Phase
+
+    cycle_dir = tmp_path / "campaigns" / "cyc1"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
+
+    # Record an action so flush has state to write.
+    proj.on_record(Phase(phase="round", event="enter", round=4), 0)
+    proj.add_action({"type": "l1_generate", "response": "ok"})
+    # An unrelated Decision must not crash or trigger a flush.
+    proj.on_record(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 1)
+    # Round-complete triggers the disk write.
+    proj.on_record(Phase(phase="round", event="complete", round=4), 2)
+
+    written = cycle_dir / ".cache" / "rounds" / "round_0004.json"
+    assert written.exists(), "Phase('round', 'complete') must flush round_NNNN.json"
+
+
+def test_live_dashboard_on_record_writes_decision_line_to_output_log(tmp_path: Path) -> None:
+    """A bound LiveDashboardProjection mirrors decisions into ``output.log``.
+
+    The operator tailing output.log sees gating events (round-winner,
+    elimination cuts, escalation triggers) inline with the per-query
+    HIT/MISS stream — single tail target, no need to read trial JSONs.
+    """
+    from promptpotter.domain.run_records import Decision, DecisionKind
+
+    root_dir = tmp_path / "campaigns" / "root_xyz"
+    root_dir.mkdir(parents=True)
+    session_dir = tmp_path / "sessions" / "s_test"
+
+    proj = LiveDashboardProjection(
+        RootCycleDir(root_dir),
+        session_dir,
+        l1_patience=3,
+        n_variants=5,
+        sp_budget_ttest=20,
+    )
+    try:
+        proj.on_record(
+            Decision(kind=DecisionKind.ELIMINATION_CUT, outcome=True, round=2),
+            0,
+        )
+    finally:
+        proj.finalize()
+
+    log_text = (root_dir / "output.log").read_text(encoding="utf-8")
+    assert "decision:elimination_cut" in log_text
+    assert "round=2" in log_text

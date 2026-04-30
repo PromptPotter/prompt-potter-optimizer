@@ -166,9 +166,37 @@ def _advance_l1_stall(cycle: Cycle, round_result: RoundResult, cb: RunListener) 
 def _persist_round(
     cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
 ) -> None:
-    """Flush pending decisions onto the round, write trial + log.md, flush recorder."""
+    """Flush pending decisions onto the round, mirror to ledger, write trial + log.md, flush recorder.
+
+    Ledger dual-write is Phase 3 of the persistence cleanup: every
+    decision and the round-boundary phase event land on the per-cycle
+    ``events.jsonl`` alongside the legacy trial-JSON write. Phase 5
+    will retire the legacy paths and let projections subscribe to the
+    ledger for their views.
+    """
+    from promptpotter.domain.run_records import Phase
+
     if cycle.pending_decisions:
-        round_result.decisions.extend(d.to_dict() for d in cycle.flush_decisions())
+        flushed = cycle.flush_decisions()
+        round_result.decisions.extend(d.to_dict() for d in flushed)
+        if (ledger := session.state.ledger) is not None:
+            for d in flushed:
+                ledger.append(d.model_copy(update={"round": round_num}))
+
+    if (ledger := session.state.ledger) is not None:
+        ledger.append(
+            Phase(
+                phase="round",
+                event="complete",
+                round=round_num,
+                payload={
+                    "accuracy": round_result.accuracy,
+                    "composite": round_result.composite,
+                    "improved": round_result.improved,
+                    "label": round_result.label,
+                },
+            )
+        )
 
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
@@ -552,11 +580,13 @@ async def run_optimization(
     )
     if forked and session.state.cycle_id and session.store is not None:
         from promptpotter.domain.cycle_paths import CycleDir
+        from promptpotter.infrastructure.ledger import RunLedger
         from promptpotter.infrastructure.projections import AuditTrailProjection
 
         cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
         session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
         session.state.round_recorder.rehydrate_sticky()
+        session.state.ledger = RunLedger.open(cycle_dir)
 
     if emitter is None:
         from promptpotter.application.baseline import build_campaign_emitter
@@ -576,6 +606,17 @@ async def run_optimization(
             from_round=session.state.resumed_from_round or 0,
         )
     cb.emitter = emitter
+
+    # Phase 3 ledger subscription: bind both projections so they receive
+    # records via ``on_record`` in addition to the legacy callback API.
+    # Live appends fan out automatically; replay (history before bind) is
+    # not needed since the projections were also driven by the callbacks
+    # that produced those records. Phase 5 will retire the parallel
+    # callback path and leave the ledger as the only ingress.
+    if (ledger := session.state.ledger) is not None:
+        ledger.bind(emitter)
+        if session.state.round_recorder is not None:
+            ledger.bind(session.state.round_recorder)
 
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 

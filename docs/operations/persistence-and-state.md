@@ -106,7 +106,7 @@ The resume source of truth. Each completed round writes its serialized `OptSearc
 
 ## Entry-point emission boundary
 
-Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. The sole writer is `CampaignPersistenceEmitter` in `promptpotter/infrastructure/persistence.py`. The `CAMPAIGN_ARTIFACTS` and `SESSION_ARTIFACTS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract and enforces both sets. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
+Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardProjection` (family-root telemetry: `dashboard.json` + `output.log`) and `AuditTrailProjection` (per-cycle audit: `.cache/rounds/round_NNNN.json`). Both subscribe to the per-cycle `RunLedger` in `infrastructure/ledger.py` which persists every fact (`Decision`, `Phase`, `Snapshot`) to `events.jsonl`. The `CAMPAIGN_ARTIFACTS` and `SESSION_ARTIFACTS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
 
 ---
 

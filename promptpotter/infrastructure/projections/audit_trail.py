@@ -24,6 +24,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.run_records import Phase, RunRecord
 from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
@@ -160,6 +161,30 @@ class AuditTrailProjection:
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
         """Phase-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the live dashboard)."""
         return dict(self._sticky_nodes)
+
+    # -- Ledger subscription (Phase 3) ----------------------------------------
+
+    def on_record(self, record: RunRecord, offset: int) -> None:
+        """Subscribe-side hook: receive a typed record from the ledger.
+
+        Phase 3 of the persistence cleanup: the runner appends every fact
+        to the per-cycle ``RunLedger`` and projections that ``bind`` to
+        the ledger receive each record here. Round boundaries
+        (``Phase("round", "complete")``) flush the recorder to disk;
+        decisions and snapshots are archival under this projection's
+        scope (they shape the per-round node tree but not the recorder's
+        own state). Phase 5 will retire the parallel callback API and
+        leave this as the only ingress.
+        """
+        if isinstance(record, Phase) and record.phase == "round":
+            if record.event == "enter" and record.round is not None:
+                self.begin_round(record.round)
+            elif record.event == "complete":
+                self.flush()
+        # Decision/Snapshot records are not yet absorbed by the audit
+        # writer — the per-round node tree is still composed from the
+        # legacy callbacks. Phase 3c will widen the dispatch.
+        _ = (record, offset)
 
     def flush(self) -> Path | None:
         """Write ``round_NNNN.json`` and reset. Returns the written path."""

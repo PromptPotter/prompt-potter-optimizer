@@ -26,6 +26,7 @@ from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase
+from promptpotter.domain.run_records import Decision, Phase, RunRecord
 from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -573,6 +574,32 @@ class LiveDashboardProjection:
             "input": {"candidates": input_candidates},
             "output": {"candidates": output_candidates},
         }
+
+    # -- Ledger subscription (Phase 3) ----------------------------------------
+
+    def on_record(self, record: RunRecord, offset: int) -> None:
+        """Subscribe-side hook: receive a typed record from the ledger.
+
+        Phase 3 of the persistence cleanup: the runner appends every fact
+        to the per-cycle ``RunLedger`` and projections that ``bind`` to
+        the ledger receive each record here. Decisions are mirrored into
+        ``output.log`` so a tail follows the gating events (round-winner,
+        elimination cuts) inline with the per-query stream. Phase events
+        update the layer/phase scalars (the operator's top-of-dashboard
+        view). Per-query/per-candidate snapshots are still driven by the
+        legacy callbacks — Phase 3c will widen the dispatch.
+        """
+        if isinstance(record, Decision):
+            self._log_fh.write(
+                f"  [decision:{record.kind.value} round={record.round}] outcome={record.outcome!r}\n"
+            )
+        elif isinstance(record, Phase):
+            self._state["phase"] = record.phase
+            if record.round is not None:
+                self._state["round"] = record.round
+            self._persist()
+        # Snapshot records are still produced by the per-callback API.
+        _ = (record, offset)
 
     # -- Lifecycle -------------------------------------------------------------
 
