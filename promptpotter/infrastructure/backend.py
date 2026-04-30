@@ -1,8 +1,19 @@
-"""
-HTTP client for backend APIs.
+"""HTTP client for backend APIs — wire payloads + session lifecycle.
 
 Fetches experiments, syncs data into the project store, and replays
 pipeline queries. All API responses stored verbatim.
+
+The TermNorm-specific assumptions live in two swappable seams (see
+``promptpotter/domain/connector.py``):
+
+* ``termnorm_wire_adapter`` — the outbound payload shape
+  ``{"query", "steps", "node_config"}``. ``BackendClient.__init__``
+  accepts an optional ``wire_adapter`` parameter; M12 connectors swap
+  in their own.
+* ``TermNormSession`` — the ``POST /sessions`` handshake with a
+  ``terms`` array. ``BackendClient.__init__`` accepts an optional
+  ``session`` parameter; backends without a session concept pass a
+  no-op implementation.
 """
 
 from __future__ import annotations
@@ -22,11 +33,55 @@ from promptpotter.infrastructure.llm import (
 QUERY_TIMEOUT: float = 120.0  # HTTP timeout for /matches endpoint
 
 if TYPE_CHECKING:
+    from promptpotter.domain.connector import SessionProtocol, WireAdapter
     from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["BackendClient", "extract_pipeline_config"]
+__all__ = [
+    "BackendClient",
+    "TermNormSession",
+    "extract_pipeline_config",
+    "termnorm_wire_adapter",
+]
+
+
+def termnorm_wire_adapter(
+    query: str,
+    pipeline_params: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Default outbound payload shape — TermNorm's ``{"query", "steps", "node_config"}``.
+
+    ``pipeline_params`` carries ``steps`` (which nodes to run) plus per-node
+    override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
+    which become the ``node_config`` key in the wire payload. Non-dict
+    pipeline_param values are dropped with a debug log — the backend
+    contract is "everything beyond steps is a per-node config dict".
+    """
+    payload: dict[str, Any] = {"query": query}
+
+    _pp = pipeline_params or {}
+
+    if "steps" in _pp:
+        payload["steps"] = _pp["steps"]
+
+    wire_overrides: dict[str, dict] = {}
+    for k, v in _pp.items():
+        if k == "steps":
+            continue
+        if isinstance(v, dict):
+            wire_overrides[k] = v
+        else:
+            logger.debug(
+                "termnorm_wire_adapter: dropping non-dict pipeline_param %r=%r",
+                k,
+                v,
+            )
+
+    if wire_overrides:
+        payload["node_config"] = wire_overrides
+
+    return payload
 
 
 def extract_pipeline_config(experiment_extract: dict) -> dict:
@@ -58,18 +113,16 @@ def _is_session_error(resp: httpx.Response) -> bool:
     return "session" in detail.lower()
 
 
-class _SessionGuard:
-    """Session-lifecycle state for stateful backends that require a
-    ``POST /sessions`` handshake with a ``terms`` array (TermNorm-shaped).
+class TermNormSession:
+    """TermNorm-shaped session lifecycle — implements ``SessionProtocol``.
 
-    Keeps ``run_query()`` free of session semantics: the HTTP transport
-    asks the guard to initialize or recover; the guard owns the indexing
-    terms, the idempotency check, and the reinit handshake. When the
-    backend doesn't need a session, a ``None`` guard disables the rail.
-
-    This is internal to ``client.py`` — a future ``ConnectorProtocol``
-    (M12 Track 1) can cleanly take over this seam without touching the
-    callers of ``BackendClient.init_session``.
+    ``POST /sessions`` handshake with a ``terms`` array. Keeps
+    ``BackendClient.run_query()`` free of session semantics: the HTTP
+    transport asks the session to initialize or recover; the session
+    owns the indexing terms, the idempotency check, and the reinit
+    handshake. M12 connectors with a different (or no) session concept
+    pass their own ``SessionProtocol`` implementation to
+    ``BackendClient(__init__)``.
     """
 
     __slots__ = ("_terms",)
@@ -113,12 +166,27 @@ class _SessionGuard:
 
 
 class BackendClient:
-    """Async HTTP client for a single backend instance."""
+    """Async HTTP client for a single backend instance.
 
-    def __init__(self, base_url: str, timeout: float = 30.0):
+    Wire payload shape and session lifecycle are pluggable via
+    ``wire_adapter`` / ``session``. Defaults preserve TermNorm behavior
+    (the only connector implemented today). M12 connectors pass their
+    own implementations — ``ConnectorProtocol`` lives in
+    :mod:`promptpotter.domain.connector`.
+    """
+
+    def __init__(
+        self,
+        base_url: str,
+        timeout: float = 30.0,
+        *,
+        wire_adapter: WireAdapter | None = None,
+        session: SessionProtocol | None = None,
+    ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
-        self._guard: _SessionGuard = _SessionGuard()
+        self._wire_adapter: WireAdapter = wire_adapter or termnorm_wire_adapter
+        self._guard: SessionProtocol = session or TermNormSession()
         self._http: httpx.AsyncClient | None = None
 
     def _get_http(self) -> httpx.AsyncClient:
@@ -214,39 +282,17 @@ class BackendClient:
         query: str,
         pipeline_params: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
-        """POST /matches — translate pipeline_params to wire format.
+        """POST /matches — payload shape is owned by ``self._wire_adapter``.
 
-        ``pipeline_params`` carries ``steps`` (which nodes to run) plus
-        per-node override dicts (e.g. ``{"entity_profiling": {"prompt": "..."}}``)
-        which become the ``node_config`` key in the wire payload. The backend
-        merges overrides with its own defaults — callers only send what changed.
+        Default ``termnorm_wire_adapter`` projects ``pipeline_params``
+        into ``{"query", "steps", "node_config"}``; M12 connectors can
+        swap to a different shape by passing a custom ``wire_adapter``
+        to ``BackendClient(__init__)``.
 
         HTTP 400 with "session" in the detail triggers a one-shot session
-        recovery via the guard, then retries once.
+        recovery via the session protocol, then retries once.
         """
-        payload: dict[str, Any] = {"query": query}
-
-        _pp = pipeline_params or {}
-
-        if "steps" in _pp:
-            payload["steps"] = _pp["steps"]
-
-        # Collect per-node overrides (everything except "steps")
-        wire_overrides: dict[str, dict] = {}
-        for k, v in _pp.items():
-            if k == "steps":
-                continue
-            if isinstance(v, dict):
-                wire_overrides[k] = v
-            else:
-                logger.debug(
-                    "run_query: dropping non-dict pipeline_param %r=%r",
-                    k,
-                    v,
-                )
-
-        if wire_overrides:
-            payload["node_config"] = wire_overrides
+        payload = self._wire_adapter(query, pipeline_params)
 
         client = self._get_http()
 
