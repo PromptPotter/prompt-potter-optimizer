@@ -259,17 +259,37 @@ class MeasurementArchive:
         self,
         backend_id: str,
         predicate: dict[str, dict[str, Any]],
+        *,
+        run_ids: set[str] | list[str] | None = None,
     ) -> list[Measurement]:
         """Every measurement under configs matching *predicate*, across all samples.
 
         ``predicate`` is ``{node_name: required_subdict}`` — see
         :func:`_matches_subset` for subset semantics. Empty predicate
         returns ``[]``.
+
+        When ``run_ids`` is provided (typically from
+        ``ConfigIndex.run_ids_matching(predicate)``), skips the index
+        scan and loads only those run files. Loaders that hold a
+        :class:`~promptpotter.application.intelligence.indexes.ConfigIndex`
+        should always pass the hint — for an archive of N runs across K
+        unique configs, this turns an O(N) scan into an O(K + matches)
+        walk that's primarily index lookups.
         """
         if not predicate:
             return []
 
-        out: list[Measurement] = []
+        if run_ids is not None:
+            out: list[Measurement] = []
+            for rid in run_ids:
+                detail = self.load_by_id(backend_id, rid)
+                if detail is None:
+                    continue
+                for item in detail.get("measurements", []):
+                    out.append(_to_measurement(rid, detail, item))
+            return out
+
+        out = []
         for entry in self.list_all(backend_id):
             stored = entry.get("node_configs")
             if not stored:

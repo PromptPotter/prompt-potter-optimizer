@@ -101,3 +101,34 @@ def test_axis_index_no_persistence(stores: Any, tmp_path: Path) -> None:
     assert not (library / "axes.json").exists()
     assert not (library / "search_memory.json").exists()
     assert not (library / "samples.json").exists()
+
+
+def test_config_index_run_ids_match_archive_full_scan(stores: Any) -> None:
+    """ConfigIndex.run_ids_matching parity with measurements_for_config full scan.
+
+    Webapp + ablation paths poll measurements_for_config repeatedly; the
+    indexed fast path MUST return the same run set as the unindexed scan
+    or downstream views diverge. Predicate variants cover exact-config,
+    subset, and no-match.
+    """
+    idx = AxisIndex()
+    idx.refresh(stores, "any-backend")
+
+    for predicate in (
+        {"llm_only": {"model": "X"}},  # subset, matches run_a
+        {"llm_only": {"temperature": 0.0}},  # subset, matches both
+        {"llm_only": {"model": "Z"}},  # no match
+        {},  # archive contract: empty predicate → empty
+    ):
+        indexed_run_ids = idx.config_index.run_ids_matching(predicate)
+        full_scan = stores.archive.measurements_for_config("any-backend", predicate)
+        full_scan_run_ids = {m.run_id for m in full_scan}
+        assert indexed_run_ids == full_scan_run_ids, (
+            f"ConfigIndex/archive parity broken for predicate {predicate!r}"
+        )
+
+        # And the archive's own indexed-load path returns the same measurements.
+        indexed_load = stores.archive.measurements_for_config(
+            "any-backend", predicate, run_ids=indexed_run_ids
+        )
+        assert {m.run_id for m in indexed_load} == full_scan_run_ids
