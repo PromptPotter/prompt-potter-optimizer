@@ -1522,9 +1522,7 @@ def _section_l1c_runtime_failures(ctx: LayerContext) -> str:
             lines.append(
                 f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
             )
-    lines.append(
-        "  These configurations degraded — shift away from the same or similar regions."
-    )
+    lines.append("  These configurations degraded — shift away from the same or similar regions.")
     return "\n".join(lines)
 
 

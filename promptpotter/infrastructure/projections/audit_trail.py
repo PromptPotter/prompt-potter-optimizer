@@ -7,11 +7,13 @@ construction site, and ``from_cycle_dir`` derives the standard subpath.
 A runtime assertion in ``__init__`` rejects any path that doesn't end in
 ``/.cache/rounds`` to catch ad-hoc constructions.
 
-Phase 2 of the persistence cleanup: the class still exposes the legacy
+Dual ingress: the class exposes both the legacy
 ``begin_round`` / ``add_action`` / ``flush`` API the runner calls
-directly. Phase 3 will replace those with subscription to the
-``RunLedger`` via the ``Projection`` ``on_record`` hook, deriving the
-same on-disk artifacts from the typed record stream.
+directly, AND the ``Projection`` ``on_record`` hook the per-cycle
+``RunLedger`` fans out to. ``Phase("round","enter")`` records trigger
+``begin_round`` and ``Phase("round","complete")`` triggers ``flush``;
+direct calls remain the no-ledger fallback. Phase 5 will retire the
+direct-call path.
 """
 
 from __future__ import annotations

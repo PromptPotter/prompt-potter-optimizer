@@ -32,6 +32,7 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.results import RoundResult, RunResult
+from promptpotter.domain.run_records import Phase, Snapshot
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.projections import LiveDashboardProjection
@@ -79,7 +80,13 @@ class RunListener:
     """Fan-out to emitter + display sinks. Owns the phase-view ctx so
     ``build_phase_view`` (stateful — reads/writes ctx) runs once with a
     consistent state machine. ``l1_stall_count`` lands in ctx on
-    ``on_round_complete`` so the next ``l1_generate:enter`` view sees it."""
+    ``on_round_complete`` so the next ``l1_generate:enter`` view sees it.
+
+    When ``ledger`` is set (Phase 3 — wired by ``run_optimization`` after
+    the per-cycle ``RunLedger`` is opened), each callback also tees a
+    typed record onto the ledger. Sinks still receive the legacy
+    callbacks during the cleanup; Phase 5 will retire that path and
+    leave the ledger as the only ingress."""
 
     def __init__(
         self,
@@ -89,7 +96,9 @@ class RunListener:
     ) -> None:
         self.emitter = emitter
         self.display = display
+        self.ledger: Any = None  # set by run_optimization after the cycle ledger is opened
         self._phase_ctx: dict[str, Any] = {}
+        self._current_round: int = 0
         # Share the same ctx with the display so its on_round_complete /
         # on_candidate_scored hooks can read composite-formula and
         # baseline-composite without going through view dicts.
@@ -104,11 +113,27 @@ class RunListener:
         view = build_phase_view(event, self._phase_ctx)
         for sink in self._sinks:
             sink.on_phase(event, view)
+        if self.ledger is not None:
+            # Payload carries only the data dict's keys — values may hold
+            # complex objects (Cycle/Session/etc.) that don't serialize
+            # cleanly. Legacy callbacks above receive the rich event.
+            with graceful("ledger Phase append failed"):
+                self.ledger.append(
+                    Phase(
+                        phase=str(event.phase),
+                        event=str(event.event),
+                        round=event.round,
+                        payload={"data_keys": sorted((event.data or {}).keys())},
+                    )
+                )
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
         self._phase_ctx["l1_stall_count"] = l1_stall_count
         for sink in self._sinks:
             sink.on_round_complete(round_result, l1_stall_count)
+        # Round-complete Phase append is owned by ``_persist_round`` so
+        # the payload can include accuracy/composite/improved without
+        # this listener needing to project the RoundResult shape.
 
     def on_candidate_started(
         self, idx: int, total: int, changes_description: str, pp_override: dict | None
@@ -119,6 +144,21 @@ class RunListener:
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         for sink in self._sinks:
             sink.on_candidate_scored(idx, total, scores)
+        if self.ledger is not None:
+            with graceful("ledger candidate Snapshot append failed"):
+                self.ledger.append(
+                    Snapshot(
+                        round=self._current_round,
+                        candidate_idx=idx,
+                        payload={
+                            "accuracy": scores.get("accuracy"),
+                            "composite": scores.get("composite"),
+                            "hits": scores.get("hits"),
+                            "total": scores.get("total"),
+                            "invalid": bool(scores.get("invalid", False)),
+                        },
+                    )
+                )
 
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
         for sink in self._sinks:
@@ -127,6 +167,27 @@ class RunListener:
     def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
         for sink in self._sinks:
             sink.on_sample_scored(ci, ct, qi, qt, result)
+        if self.ledger is not None:
+            with graceful("ledger sample Snapshot append failed"):
+                pd = result.get("pipeline_data") or {}
+                self.ledger.append(
+                    Snapshot(
+                        round=self._current_round,
+                        candidate_idx=ci,
+                        sample_idx=qi,
+                        payload={
+                            "hit": bool(result.get("hit")),
+                            "score": result.get("score"),
+                            "cached": bool(result.get("cached", False)),
+                            "terminated_at": pd.get("terminated_at") or "",
+                            "sample_id": result.get("sample_id"),
+                        },
+                    )
+                )
+
+    def set_round(self, round_num: int) -> None:
+        """Track the active round for Snapshot record context."""
+        self._current_round = round_num
 
 
 async def _escalate_or_stop(
@@ -174,8 +235,6 @@ def _persist_round(
     will retire the legacy paths and let projections subscribe to the
     ledger for their views.
     """
-    from promptpotter.domain.run_records import Phase
-
     if cycle.pending_decisions:
         flushed = cycle.flush_decisions()
         round_result.decisions.extend(d.to_dict() for d in flushed)
@@ -397,7 +456,14 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            if _rr := session.state.round_recorder:
+            # Round-enter on the ledger drives AuditTrailProjection.begin_round
+            # via on_record. Direct begin_round is kept as the no-ledger path
+            # (test fixtures, headless tools) so behaviour is unchanged when
+            # session.state.ledger is None.
+            cb.set_round(round_num)
+            if (ledger := session.state.ledger) is not None:
+                ledger.append(Phase(phase="round", event="enter", round=round_num))
+            elif _rr := session.state.round_recorder:
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
@@ -628,6 +694,8 @@ async def run_optimization(
         ledger.bind(emitter)
         if session.state.round_recorder is not None:
             ledger.bind(session.state.round_recorder)
+        # Wire the listener so its callback tee-points reach the ledger.
+        cb.ledger = ledger
 
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
 

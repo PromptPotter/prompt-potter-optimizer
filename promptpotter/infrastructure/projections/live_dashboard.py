@@ -8,11 +8,11 @@ derives the root from ``cycle_id`` via ``stores.root_dir_for`` and wraps
 in the newtype before delegating to ``__init__``. A runtime assertion in
 ``__init__`` rejects any path that contains a ``forks/`` segment.
 
-Phase 2 of the persistence cleanup: the class still exposes the legacy
-per-event callback API (``on_phase`` / ``on_sample_started`` / …) the
-runner calls directly. Phase 3 will replace those with subscription to
-the ``RunLedger`` via the ``Projection`` ``on_record`` hook, deriving
-the same on-disk artifacts from the typed record stream.
+Dual ingress: the class exposes both the legacy per-event callback API
+(``on_phase`` / ``on_sample_started`` / …) the runner calls directly,
+AND the ``Projection`` ``on_record`` hook the per-cycle ``RunLedger``
+fans out to. Phase 5 will retire the callback path and leave the
+ledger as the only ingress.
 """
 
 from __future__ import annotations

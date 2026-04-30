@@ -60,6 +60,7 @@ __all__ = [
 # Classification
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class ResultClassification:
     """Codes seen on a single result.

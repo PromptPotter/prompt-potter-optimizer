@@ -7,13 +7,23 @@ cross-tenant within a tenant root. Two natural views: by training example
 (``measurements_for_config``). Cache reuse uses positional prefix-exact match;
 discovery retrieval uses ``_matches_subset``. See
 ``docs/concepts/measurement-archive.md``.
+
+Phase 3 of the persistence cleanup: ``save()`` accepts an optional
+``ledger: RunLedger`` so each measurement also lands on the per-cycle
+ledger as a typed :class:`~promptpotter.domain.run_records.Measurement`
+record. The archive remains the tenant-global source of truth (it
+spans cycles + sessions + tenants); the ledger records are the
+per-cycle slice that lets a fork's ``iter()`` see which measurements
+were produced without re-scanning the global archive.
 """
+
+from __future__ import annotations
 
 import hashlib
 import logging
 from collections.abc import Callable, Iterator
 from pathlib import Path
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from filelock import FileLock
 
@@ -22,6 +32,7 @@ from promptpotter.config.settings import (
     LOCK_TIMEOUT,
     MEASUREMENTS_SCHEMA_VERSION,
 )
+from promptpotter.domain.run_records import Measurement as MeasurementRecord
 from promptpotter.domain.sample import Measurement
 from promptpotter.infrastructure.store.base import (
     read_json,
@@ -29,6 +40,9 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.shared.hashing import HASH_TRUNCATE
+
+if TYPE_CHECKING:
+    from promptpotter.infrastructure.ledger import RunLedger
 
 logger = logging.getLogger(__name__)
 
@@ -93,6 +107,9 @@ class MeasurementArchive:
         backend_id: str,
         run_id: str,
         data: dict[str, Any],
+        *,
+        ledger: RunLedger | None = None,
+        round_num: int | None = None,
     ) -> Path:
         """Write detail file and upsert the index.
 
@@ -102,9 +119,33 @@ class MeasurementArchive:
         The detail file is written atomically (via ``write_json``).  The
         index update is protected by ``filelock`` to prevent concurrent
         writers from losing entries.
+
+        When ``ledger`` is provided, each measurement in the saved batch
+        is also appended as a typed :class:`MeasurementRecord` to the
+        per-cycle ``RunLedger``. The archive write is the source of
+        truth; the ledger record is the per-cycle slice (carries
+        ``run_id`` so readers can join back to the archive row).
         """
         detail_path = self._runs_dir(backend_id) / f"{run_id}.json"
         write_json(detail_path, data)
+
+        if ledger is not None:
+            content_hash = data.get("content_hash", "")
+            for item in data.get("measurements", []):
+                sample_id = item.get("sample_id")
+                if sample_id is None:
+                    continue
+                score = item.get("score")
+                ledger.append(
+                    MeasurementRecord(
+                        run_id=run_id,
+                        sample_id=int(sample_id),
+                        hit=bool(item.get("hit", False)),
+                        score=float(score) if score is not None else None,
+                        config_hash=content_hash,
+                        round=round_num,
+                    )
+                )
 
         summary = {
             "run_id": data["run_id"],

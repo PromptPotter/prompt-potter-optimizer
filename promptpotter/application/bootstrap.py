@@ -173,10 +173,11 @@ class CampaignState:
     cycles minted under one Session lifetime.
 
     ``ledger`` is the per-cycle ``RunLedger`` (``events.jsonl``); facts
-    about the cycle (decisions, phase boundaries) are appended here in
-    addition to the legacy in-memory accumulators. Phase 3 of the
-    persistence cleanup is wiring the dual-write; Phase 5 will retire
-    the legacy paths once projections subscribe to the ledger directly.
+    about the cycle (decisions, phase boundaries, candidate/sample
+    snapshots, measurements) are appended here in addition to the
+    legacy in-memory accumulators. Projections (``LiveDashboardProjection``,
+    ``AuditTrailProjection``) subscribe via ``ledger.bind`` to receive
+    the same records. Phase 5 will retire the parallel callback path.
     """
 
     cycle_id: str = ""

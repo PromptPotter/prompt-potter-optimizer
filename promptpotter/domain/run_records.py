@@ -25,6 +25,7 @@ __all__ = [
     "Decision",
     "DecisionKind",
     "GatingMode",
+    "Measurement",
     "Phase",
     "RunRecord",
     "Snapshot",
@@ -134,11 +135,34 @@ class Snapshot(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class Measurement(BaseModel):
+    """One ``(sample × config → outcome)`` fact, the per-cycle projection of an archive row.
+
+    The tenant-global :class:`~promptpotter.infrastructure.store.measurement_archive.MeasurementArchive`
+    remains the cross-cycle database core (it persists every row across all
+    cycles + sessions + tenants). This record type is the per-cycle slice
+    that lands on the cycle's ``RunLedger`` so a ledger replay sees which
+    measurements this cycle produced — without re-scanning the global
+    archive. The ``run_id`` field links back to the archive row.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["measurement"] = "measurement"
+    run_id: str
+    sample_id: int
+    hit: bool
+    score: float | None = None
+    config_hash: str = ""
+    round: int | None = None
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union — Pydantic uses ``record_type`` to pick the right model
 # when parsing a dict back into a RunRecord (e.g. when iterating a ledger
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 RunRecord = Annotated[
-    Decision | Phase | Snapshot,
+    Decision | Measurement | Phase | Snapshot,
     Field(discriminator="record_type"),
 ]

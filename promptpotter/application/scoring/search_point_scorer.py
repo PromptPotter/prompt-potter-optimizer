@@ -453,7 +453,16 @@ async def score_search_point(
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
         )
-        store.archive.save(backend_id, run_id, run_data)
+        # Tee per-cycle Measurement records onto the ledger when one is
+        # wired (Phase 3). The archive write is the source of truth; the
+        # ledger captures which measurements happened in this cycle so a
+        # fork's iter() can replay without re-scanning the global archive.
+        store.archive.save(
+            backend_id,
+            run_id,
+            run_data,
+            ledger=getattr(session.state, "ledger", None) if hasattr(session, "state") else None,
+        )
 
     def _persist_fresh(results: list[QueryResult]) -> None:
         if not (store and backend_id):

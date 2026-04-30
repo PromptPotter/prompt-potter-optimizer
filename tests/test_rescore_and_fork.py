@@ -171,9 +171,7 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
     assert pointer == {"tenant_id": tenant, "session_id": "s_test", "cycle_id": new_cycle}
 
 
-def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, monkeypatch) -> None:
     """The parent's events.jsonl must end with a FORK_CUT decision naming the new cycle.
 
     A reader tailing the parent's ledger sees the cutover inline — no
