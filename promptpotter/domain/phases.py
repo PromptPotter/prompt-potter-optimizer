@@ -42,6 +42,7 @@ class StopReason(enum.StrEnum):
     L3_PATIENCE = "l3_patience_exhausted"
     HARD_CAP = "hard_cap_reached"
     SWEEP_COMPLETE = "sweep_complete"
+    DIAG_COMPLETE = "diag_complete"
 
 
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error

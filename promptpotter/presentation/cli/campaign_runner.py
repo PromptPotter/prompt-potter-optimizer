@@ -200,7 +200,8 @@ def build_parser() -> argparse.ArgumentParser:
         help="On divergence, mint a sibling cycle (with parent_cycle_id) "
         "and re-run the divergent round under the current scorer.",
     )
-    p_opt.add_argument(
+    mode_group = p_opt.add_mutually_exclusive_group()
+    mode_group.add_argument(
         "--sweep",
         dest="sweep",
         action="store_true",
@@ -208,6 +209,16 @@ def build_parser() -> argparse.ArgumentParser:
         "1 generation-only round (variants emitted, no scoring) → halt. "
         "index.json::final.mode lands as 'sweep' so the leaderboard can "
         "pair sweep cycles with their full counterparts.",
+    )
+    mode_group.add_argument(
+        "--diag",
+        dest="diag",
+        action="store_true",
+        help="M10 diagnostic mode: baseline → 1 full scored round → "
+        "force L2-context (regardless of stall) → 1 generation-only "
+        "round 2 (with L2 overrides applied, no scoring) → halt. "
+        "index.json::final.mode lands as 'diag' and final.diag carries "
+        "L2's evolved L1 surface for the operator to promote.",
     )
 
     return parser
@@ -536,6 +547,118 @@ def _build_run_observers(
     return listener, emitter, recorder, display
 
 
+def _resolve_sweep_dir(dataset_name: str | None) -> Path | None:
+    """Path to ``datasets/{name}/sweep/`` if it exists, else None."""
+    if not dataset_name:
+        return None
+    sweep_dir = Path("datasets") / dataset_name / "sweep"
+    return sweep_dir if sweep_dir.is_dir() else None
+
+
+def _load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, Any]]:
+    """Parse every ``*.json`` under ``sweep_dir`` into ``(path, SweepPayload)``.
+
+    Pydantic ``extra='forbid'`` raises ``ValidationError`` on unknown keys,
+    so operator typos halt the batch before any fork mints.
+    """
+    from promptpotter.domain.run_records import SweepPayload
+
+    files = sorted(sweep_dir.glob("*.json"))
+    return [(p, SweepPayload.model_validate_json(p.read_text(encoding="utf-8"))) for p in files]
+
+
+async def _run_sweep_batch(
+    args: argparse.Namespace,
+    root_ctx: SessionCtx,
+    campaign_config: CampaignConfig,
+    train_data: list,
+    sweep_payloads: list[tuple[Path, Any]],
+) -> CommandResult:
+    """Mint one fork per ``SweepPayload`` and run sweep mode on each.
+
+    Forks branch off ``root_ctx.cycle_id`` at round 1. The first fork's
+    baseline run populates the ``library/`` cache; subsequent forks
+    cache-hit on identical baseline ``JobSearchPoint`` measurements,
+    making per-fork baseline cost ≈ 0. Active pointer is restored to the
+    root cycle at the end so the operator's next command stays anchored.
+    """
+    from promptpotter.application.optimization.cycle import _fork_at_divergence
+    from promptpotter.application.runner import (
+        run_optimization as _orch_run_optimization,
+    )
+    from promptpotter.infrastructure.store import build_stores
+    from promptpotter.infrastructure.store.stores import save_active_pointer
+
+    root_cycle_id = root_ctx.cycle_id
+    tenant_id = getattr(args, "tenant", "default")
+    store = build_stores(tenant_id=tenant_id)
+
+    new_cycle_ids: list[str] = []
+    for path, payload in sweep_payloads:
+        new_cycle_id = _fork_at_divergence(
+            campaign_store=store.campaigns,
+            tenant_id=tenant_id,
+            session_id=root_ctx.session_id,
+            old_cycle_id=root_cycle_id,
+            fork_from_round=1,
+            surviving_trials=[],
+            extra_data={
+                "sweep_payload": payload.model_dump(mode="json"),
+                "source_file": path.name,
+            },
+        )
+        # _fork_at_divergence retargeted the active pointer to new_cycle_id.
+        # Re-load context for this fork and build a fresh session bound to it.
+        fork_ctx = load_session(args)
+        fork_session = await init_services_cli(**fork_ctx.init_params)
+        fork_session.session_id = fork_ctx.session_id
+        fork_session.state.cycle_id = fork_ctx.cycle_id
+
+        fork_campaign_dir = store.campaigns.campaign_dir(fork_ctx.cycle_id)
+        listener, emitter, _recorder, display = _build_run_observers(
+            args, fork_session, campaign_config, fork_campaign_dir, 0.0
+        )
+
+        await _orch_run_optimization(
+            train_data,
+            campaign_config,
+            session=fork_session,
+            listener=listener,
+            experiment_id=fork_ctx.state["experiment_id"],
+            task_context=fork_ctx.task_context,
+            display=display,
+            emitter=emitter,
+            sweep=True,
+            fork_payload=payload,
+        )
+        new_cycle_ids.append(new_cycle_id)
+        logger.info(
+            "Sweep fork %d/%d complete: %s (payload=%s)",
+            len(new_cycle_ids),
+            len(sweep_payloads),
+            new_cycle_id,
+            path.name,
+        )
+
+    save_active_pointer(tenant_id, root_ctx.session_id, root_cycle_id)
+    logger.info(
+        "Sweep batch complete: %d forks under root %s; active pointer restored",
+        len(new_cycle_ids),
+        root_cycle_id,
+    )
+    return CommandResult(
+        data={
+            "sweep_batch": new_cycle_ids,
+            "root_cycle_id": root_cycle_id,
+            "n_forks": len(new_cycle_ids),
+        },
+        human=(
+            f"Sweep batch: {len(new_cycle_ids)} forks under {root_cycle_id}\n"
+            + "\n".join(f"  - {c}" for c in new_cycle_ids)
+        ),
+    )
+
+
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
     digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
@@ -576,6 +699,21 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     logger.info("Session: %s", session_dir)
     logger.info("Campaign: %s", campaign_dir)
 
+    # Multi-fork sweep dispatch: with --sweep AND a non-empty
+    # ``datasets/{name}/sweep/*.json`` directory, mint one fork per
+    # candidate ``SweepPayload`` and run sweep mode on each. Without the
+    # sweep dir, --sweep falls through to the existing single-cycle path
+    # (today's behavior, backwards compatible).
+    if getattr(args, "sweep", False):
+        sweep_dir = _resolve_sweep_dir(ctx.init_params.get("dataset_name"))
+        if sweep_dir is not None:
+            sweep_payloads = _load_sweep_payloads(sweep_dir)
+            if sweep_payloads:
+                ctx.save_phase("optimizing")
+                return await _run_sweep_batch(
+                    args, ctx, campaign_config, train_data, sweep_payloads
+                )
+
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
     listener, emitter, _recorder, display = _build_run_observers(
         args, session, campaign_config, campaign_dir, pre_baseline_acc
@@ -597,6 +735,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=getattr(args, "fork_on_divergence", False),
             sweep=getattr(args, "sweep", False),
+            diag=getattr(args, "diag", False),
         )
     except ResumeDivergenceError as div:
         return CommandResult(

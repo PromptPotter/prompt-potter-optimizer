@@ -12,6 +12,7 @@ How PromptPotter works, explained without reference to Python classes, module pa
 | [The individual record](optsearchpoint-as-state.md) | The `OptSearchPoint` record explained — what each layer reads and writes |
 | [Self-healing](self-healing.md) | The four LLM-to-LLM healing loops (validation, runtime, L2-stall, L2-output-validators) and how the optimizer recovers |
 | [Scoring and traces](scoring-and-traces.md) | Traces are facts, scores are policy. Rescore-on-load, decision replay, fork. |
+| [The fork tree and sweep primitive](fork-tree-and-sweep.md) | A campaign is a tree of cycles. What rides the tree (OSP, ledger), what doesn't (library measurements). How sweep mints siblings and why the same primitive simulates self-optimization. |
 | [Axis index](axis-index.md) | How knowledge accumulates across campaigns; parameter impact, query patterns, failure modes |
 | [Prompts and individuals](prompts-and-individuals.md) | The 8-field prompt decomposition |
 | [Nodes and pipelines](nodes-and-pipelines.md) | What a pipeline node is and what it can do |

@@ -16,6 +16,7 @@ from promptpotter.application.bootstrap import (
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import (
     Cycle,
+    apply_sweep_payload_to_osp,
     build_escalation_entry,
     escalate_l2,
 )
@@ -34,7 +35,7 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.results import RoundResult, RunResult
-from promptpotter.domain.run_records import Phase, Snapshot
+from promptpotter.domain.run_records import Phase, Snapshot, SweepPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.projections import LiveDashboardProjection
@@ -449,13 +450,17 @@ async def _run_sweep_generation_only(
     session: Session,
     cb: RunListener,
     round_num: int,
+    *,
+    label: str = "sweep_gen_only",
 ) -> None:
-    """M10 sweep mode: emit L1 variants for ``round_num`` without scoring them.
+    """Emit L1 variants for ``round_num`` without scoring them.
 
-    The audit projection captures the ``l1_generate`` node via the recorder,
-    so ``round_NNNN.json`` lands with ``output.response.variants[]`` exactly
-    as a full round would. The trial JSON is a minimal generation-only
-    record (``status="generation_only"``, no composite/accuracy/results).
+    Used by both M10 sweep mode (``label="sweep_gen_only"``) and M10 diag
+    mode (``label="diag_gen_only"``). The audit projection captures the
+    ``l1_generate`` node via the recorder, so ``round_NNNN.json`` lands
+    with ``output.response.variants[]`` exactly as a full round would. The
+    trial JSON is a minimal generation-only record
+    (``status="generation_only"``, no composite/accuracy/results).
     """
     from promptpotter.application.optimization.l1 import _generate_or_load_candidates
 
@@ -480,7 +485,7 @@ async def _run_sweep_generation_only(
                 {
                     "trial_id": f"round_{round_num}",
                     "round": round_num,
-                    "label": "sweep_gen_only",
+                    "label": label,
                     "status": "generation_only",
                     "accuracy": 0.0,
                     "composite": 0.0,
@@ -513,6 +518,30 @@ async def _run_sweep_generation_only(
         _rr.flush()
 
 
+async def _force_l2(
+    cycle: Cycle,
+    config: CampaignConfig,
+    session: Session,
+    round_num: int,
+    cb: RunListener,
+) -> None:
+    """Fire L2-context unconditionally — diag mode's bridge between round 1
+    and the round-2 generation peek.
+
+    Wraps :func:`_escalate_or_stop` with a ``forced=diag_mode`` marker so
+    L2 reads round-1 evidence and writes its directive + L1-surface
+    overrides onto ``cycle.opt_sp`` even though no stall has accumulated.
+    """
+    await _escalate_or_stop(
+        cycle,
+        config,
+        session,
+        round_num,
+        cb,
+        escalation_check_result={"forced": "diag_mode"},
+    )
+
+
 async def _run_round_loop(
     cycle: Cycle,
     dataset: list[Sample],
@@ -521,6 +550,7 @@ async def _run_round_loop(
     cb: RunListener,
     *,
     sweep: bool = False,
+    diag: bool = False,
 ) -> StopReason:
     """Execute the round loop: generate → score → escalate → stop.
 
@@ -528,6 +558,11 @@ async def _run_round_loop(
     a generation-only round (L1 produces variants, no scoring) for the
     review surface to compare against. Halts with ``SWEEP_COMPLETE`` after
     the gen-only round persists.
+
+    ``diag=True`` runs M10's diagnostic mode: one full scored round, then
+    L2-context fires (forced, regardless of stall counter), then a
+    generation-only round 2 with L2's overrides applied. Halts with
+    ``DIAG_COMPLETE``.
     """
     opt = config.optimization
     hard_cap = opt.hard_cap
@@ -635,6 +670,17 @@ async def _run_round_loop(
                 await _run_sweep_generation_only(cycle, session, cb, round_num)
                 return StopReason.SWEEP_COMPLETE
 
+            if diag and clean_rounds >= 1:
+                # Force L2 to fire on round-1 evidence (bypasses stall counter),
+                # then run the round-2 L1-generate peek with L2's overrides
+                # applied. ``round_num`` was incremented after _post_round, so
+                # the just-completed round is ``round_num - 1``.
+                await _force_l2(cycle, config, session, round_num - 1, cb)
+                await _run_sweep_generation_only(
+                    cycle, session, cb, round_num, label="diag_gen_only"
+                )
+                return StopReason.DIAG_COMPLETE
+
         return StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
 
     except StopLoop as sl:
@@ -660,6 +706,8 @@ async def run_optimization(
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
     sweep: bool = False,
+    diag: bool = False,
+    fork_payload: SweepPayload | None = None,
 ) -> RunResult:
     """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
 
@@ -746,6 +794,14 @@ async def run_optimization(
         started_at=started_at,
     )
 
+    # Sweep-fork override stamp. After bootstrap returns the cycle but
+    # before the round loop reads ``cycle.opt_sp``, apply the operator's
+    # L1-surface deltas. The cycle's existing checkpoint code then
+    # persists the stamped OSP into trial JSONs via the same path that
+    # JobSearchPoint already round-trips.
+    if fork_payload is not None:
+        apply_sweep_payload_to_osp(cycle.opt_sp, fork_payload)
+
     # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
     # minted a new fork cycle and updated ``session.state.cycle_id``. The
     # live dashboard projection is family-root-anchored so its telemetry
@@ -806,7 +862,9 @@ async def run_optimization(
             ledger.bind(display)
         cb.ledger = ledger
 
-    stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb, sweep=sweep)
+    stop_reason = await _run_round_loop(
+        cycle, dataset, campaign_config, session, cb, sweep=sweep, diag=diag
+    )
 
     finished_at = datetime.now(UTC).isoformat()
     run_result = RunResult(
@@ -824,7 +882,7 @@ async def run_optimization(
         session_id=session.session_id or None,
         resumed_from_round=session.state.resumed_from_round,
     )
-    _finalize_run(cycle, session, emitter, run_result, campaign_config, sweep=sweep)
+    _finalize_run(cycle, session, emitter, run_result, campaign_config, sweep=sweep, diag=diag)
     return run_result
 
 
@@ -836,6 +894,7 @@ def _finalize_run(
     campaign_config: CampaignConfig,
     *,
     sweep: bool = False,
+    diag: bool = False,
 ) -> None:
     """Mark cycle finished, fold the run summary into ``index.json::final``,
     render ``log.md`` (with the hard-samples heatmap inlined when the sorter
@@ -899,7 +958,24 @@ def _finalize_run(
             )
 
             final_block["prompt_hashes"] = compute_optimizer_prompt_hashes()
-            final_block["mode"] = "sweep" if sweep else "full"
+            if sweep:
+                final_block["mode"] = "sweep"
+            elif diag:
+                final_block["mode"] = "diag"
+            else:
+                final_block["mode"] = "full"
+            if diag:
+                # Diag mode's payload: the L2-evolved L1 surface that operator
+                # promotes by running plain optimize on the diag fork.
+                osp = cycle.opt_sp
+                final_block["diag"] = {
+                    "l2_directive": (osp.l2_directive or "").strip(),
+                    "l1_section_overrides": dict(osp.l1_section_overrides or {}),
+                    "l1_section_overrides_text_keys": sorted(
+                        (osp.l1_section_overrides_text or {}).keys()
+                    ),
+                    "l1_template_override": bool(osp.l1_template_override),
+                }
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
@@ -923,6 +999,8 @@ def _finalize_run(
                 )
         _write_log_md(session, hard_samples_artifact=artifact)
         _write_review_md(session, cycle)
+        with graceful("Tenant leaderboard refresh failed"):
+            _refresh_tenant_leaderboards(session)
         emitter.finalize()
 
 
@@ -945,6 +1023,71 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
         content = render_log_md(index, trials, hard_samples_artifact=hard_samples_artifact)
         (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
             content, encoding="utf-8"
+        )
+
+
+def _refresh_tenant_leaderboards(session: Session) -> None:
+    """Refresh the four folder-UI leaderboard files at ``library/leaderboards/``.
+
+    Tenant-scoped, idempotent overwrites: ``hard_samples.{json,md}`` (cross-cycle
+    Rasch fit over every measured sample), ``jsps.{json,md}`` (per-config
+    aggregate from the archive), ``cycles.md`` + ``cycles_sweep.md`` (existing
+    cycle leaderboard, default + sweep views). Each writer is best-effort so
+    one failure can't block the others.
+    """
+    from dataclasses import asdict
+
+    from promptpotter.application.intelligence.hard_sample_archive import (
+        build_archive_hard_samples_artifact,
+    )
+    from promptpotter.application.leaderboard import (
+        build_jsp_leaderboard_rows,
+        build_leaderboard_rows,
+        format_jsp_leaderboard,
+        format_leaderboard,
+        format_sweep_leaderboard,
+    )
+    from promptpotter.presentation.views.log_md import render_hard_sample_heatmap
+
+    if session.store is None:
+        return
+    out_dir = session.store.base_dir / "library" / "leaderboards"
+    out_dir.mkdir(parents=True, exist_ok=True)
+
+    backend_id = session.backend_id
+
+    with graceful("hard_samples.{json,md} write failed"):
+        artifact = build_archive_hard_samples_artifact(session.store.archive, backend_id)
+        (out_dir / "hard_samples.json").write_text(
+            json.dumps(artifact, indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        heatmap = render_hard_sample_heatmap(artifact)
+        body = "# Hard Samples (tenant)\n\n```\n" + (heatmap or "(no observations)") + "\n```\n"
+        (out_dir / "hard_samples.md").write_text(body, encoding="utf-8")
+
+    with graceful("jsps.{json,md} write failed"):
+        jsp_rows = build_jsp_leaderboard_rows(session.store, backend_id)
+        (out_dir / "jsps.json").write_text(
+            json.dumps([asdict(r) for r in jsp_rows], indent=2, ensure_ascii=False),
+            encoding="utf-8",
+        )
+        (out_dir / "jsps.md").write_text(
+            "# JSP Leaderboard (tenant)\n\n```\n" + format_jsp_leaderboard(jsp_rows) + "```\n",
+            encoding="utf-8",
+        )
+
+    with graceful("cycles{,_sweep}.md write failed"):
+        rows = build_leaderboard_rows(session.store)
+        (out_dir / "cycles.md").write_text(
+            "# Cycles Leaderboard (tenant)\n\n```\n" + format_leaderboard(rows) + "```\n",
+            encoding="utf-8",
+        )
+        (out_dir / "cycles_sweep.md").write_text(
+            "# Cycles Leaderboard — Sweep View (tenant)\n\n```\n"
+            + format_sweep_leaderboard(rows)
+            + "```\n",
+            encoding="utf-8",
         )
 
 

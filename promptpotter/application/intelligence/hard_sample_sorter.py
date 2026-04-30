@@ -28,6 +28,7 @@ if TYPE_CHECKING:
 __all__ = [
     "ARTIFACT_SCHEMA_VERSION",
     "build_hard_samples_artifact",
+    "build_hard_samples_artifact_from_observations",
     "empty_artifact",
 ]
 
@@ -115,15 +116,38 @@ def build_hard_samples_artifact(
 ) -> dict:
     """Build the hard-samples artifact dict from round observations.
 
+    Thin wrapper over :func:`build_hard_samples_artifact_from_observations`
+    that projects ``cycle.rounds`` into ``(candidate, sample, hit)`` triples
+    via :func:`build_observations` first. Pure function: no I/O.
+    """
+    return build_hard_samples_artifact_from_observations(
+        build_observations(rounds),
+        cycle_id=cycle_id,
+        top_k_candidates=top_k_candidates,
+        top_k_samples=top_k_samples,
+    )
+
+
+def build_hard_samples_artifact_from_observations(
+    observations: list[Observation],
+    *,
+    cycle_id: str | None = None,
+    top_k_candidates: int | None = 40,
+    top_k_samples: int | None = 40,
+) -> dict:
+    """Same as :func:`build_hard_samples_artifact` but takes pre-built
+    observations directly. Used by the cross-cycle archive aggregator
+    (``hard_sample_archive``) which builds observations from the
+    ``MeasurementArchive`` instead of a single cycle's ``rounds``.
+
     Fits Rasch on all observations (so θ_c and δ_s reflect the full evidence),
     then truncates the persisted axes to the top-K on the spec's sort contract.
     Cells are restricted to the intersection ``(c ∈ candidate_order × s ∈
     sample_order)``. Pass ``top_k_*=None`` to disable capping — the caller gets
     the full matrix without any second code path.
 
-    Pure function: no I/O, no mutation of ``rounds``.
+    Pure function: no I/O, no mutation of ``observations``.
     """
-    observations = build_observations(rounds)
     if not observations:
         return empty_artifact(cycle_id=cycle_id)
 

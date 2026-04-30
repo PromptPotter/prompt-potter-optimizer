@@ -5,6 +5,7 @@ Colab and must stay import-safe there (no ``promptpotter.*`` imports).
 """
 
 import contextlib
+import json
 from pathlib import Path
 from typing import Any
 
@@ -15,8 +16,10 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
+from promptpotter.application.datasets.datasets import samples_from_dicts
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
 from promptpotter.domain.opt_search_point import PromptTemplate
+from promptpotter.domain.sample import Sample
 from promptpotter.presentation.views.display import set_display_tags
 from promptpotter.presentation.views.notebook_run import (
     init_notebook_session,
@@ -31,58 +34,67 @@ BBEH_TASK_DESCRIPTION = (
     "carefully, reason step by step as needed, and return only the final answer."
 )
 
+# datasets/bbeh/{pipeline,campaign}.json are the SoT — pipeline.json drives the
+# target-layer schema (read by init_notebook_session via dataset_name="bbeh"),
+# campaign.json carries every loop-control knob and the optimizer LLM.
+_BBEH_CAMPAIGN_JSON = Path(__file__).resolve().parents[3] / "datasets" / "bbeh" / "campaign.json"
 
-def _normalize(examples: list[dict]) -> list[dict]:
-    return [
-        {"query": ex["input"], "ground_truth": ex["target"], "sample_id": i}
-        for i, ex in enumerate(examples)
-    ]
+
+def _normalize(examples: list[dict]) -> list[Sample]:
+    return samples_from_dicts(
+        [{"query": ex["input"], "ground_truth": ex["target"]} for ex in examples]
+    )
 
 
 def build_campaign_config(
-    *, max_rounds: int, n_variants: int, sp_budget_ttest: int
+    *,
+    max_rounds: int | None = None,
+    n_variants: int | None = None,
+    sp_budget_ttest: int | None = None,
+    optimizer_model: str | None = None,
+    optimizer_provider: str | None = None,
 ) -> CampaignConfig:
-    return load_campaign_config(
-        {
-            "dataset_name": "bbeh",
-            "scoring": "exact_match(predicted, ground_truth)",
-            "sp_budget_ttest": sp_budget_ttest,
-            "exclude_nodes": [],
-            "pipeline_overrides": {},
-            "optimization": {
-                "l1_patience": 2,
-                "max_rounds": max_rounds,
-                "n_variants": n_variants,
-                "creativity": 0.7,
-                "improvement_threshold": 0.01,
-                "max_failures": 10,
-                "degradation_threshold": 0.4,
-                "l2_patience": 5,
-                "l3_patience": 3,
-                "l2_temperature": 0.3,
-                "l3_temperature": 0.5,
-                "elimination_n_min": 4,
-                "elimination_alpha": 0.2,
-            },
-            "optimizer_llm": {
-                "model": "openai/gpt-oss-120b",
-                "provider": "groq",
-                "temperature": 0.4,
-                "max_tokens": 2000,
-            },
-        }
-    )
+    """Load campaign.json and patch any non-None overrides on top.
+
+    Overrides are intended as ad-hoc notebook conveniences; campaign.json
+    stays the project default and the SoT for CLI runs.
+    """
+    raw = json.loads(_BBEH_CAMPAIGN_JSON.read_text(encoding="utf-8"))
+    cfg = raw.get("campaign_config", raw)
+
+    if sp_budget_ttest is not None:
+        cfg["sp_budget_ttest"] = sp_budget_ttest
+
+    opt_overrides = {
+        k: v
+        for k, v in {"max_rounds": max_rounds, "n_variants": n_variants}.items()
+        if v is not None
+    }
+    if opt_overrides:
+        cfg["optimization"] = {**cfg.get("optimization", {}), **opt_overrides}
+
+    llm_overrides = {
+        k: v
+        for k, v in {"model": optimizer_model, "provider": optimizer_provider}.items()
+        if v is not None
+    }
+    if llm_overrides:
+        cfg["optimizer_llm"] = {**cfg.get("optimizer_llm", {}), **llm_overrides}
+
+    return load_campaign_config(cfg)
 
 
 async def run_bbeh_campaign(
     train_pool: list[dict],
     test_by_task: dict[str, list[dict]],
     *,
-    max_rounds: int,
-    n_variants: int,
-    sp_budget_ttest: int,
     output_path: Path,
     backend_url: str = "http://127.0.0.1:8000",
+    max_rounds: int | None = None,
+    n_variants: int | None = None,
+    sp_budget_ttest: int | None = None,
+    optimizer_model: str | None = None,
+    optimizer_provider: str | None = None,
 ) -> dict[str, Any] | None:
     """End-to-end BBEH run: baseline -> optimize -> per-task test eval -> export.
 
@@ -105,6 +117,8 @@ async def run_bbeh_campaign(
             max_rounds=max_rounds,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
+            optimizer_model=optimizer_model,
+            optimizer_provider=optimizer_provider,
         )
         pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
         set_display_tags(session.pipeline_schema)
@@ -142,11 +156,11 @@ async def run_bbeh_campaign(
             hits = 0
             for ex in test_items:
                 resp = await session.backend_client.run_query(
-                    ex["query"], pipeline_params=winner_pipeline_params
+                    ex.query, pipeline_params=winner_pipeline_params
                 )
                 ranking = resp.get("data", {}).get("final_ranking") or []
                 predicted = ranking[0].get("candidate", "") if ranking else ""
-                hits += int(exact_match(predicted, ex["ground_truth"]))
+                hits += int(exact_match(predicted, ex.ground_truth))
             acc = hits / len(test_items) if test_items else 0.0
             per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
             print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
@@ -159,14 +173,15 @@ async def run_bbeh_campaign(
         )
 
         winner_prompt_str = PromptTemplate(**winner_prompt_fields).render()
+        opt_cfg = campaign_config.optimization
         return export_results(
             method="promptpotter",
             per_task=per_task_results,
             config={
                 "optimizer": "promptpotter",
-                "max_rounds": max_rounds,
-                "n_variants": n_variants,
-                "sp_budget_ttest": sp_budget_ttest,
+                "max_rounds": opt_cfg.max_rounds,
+                "n_variants": opt_cfg.n_variants,
+                "sp_budget_ttest": campaign_config.sp_budget_ttest,
                 "model_id": MODEL_ID,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4),

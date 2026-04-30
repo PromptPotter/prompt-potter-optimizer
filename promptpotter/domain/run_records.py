@@ -28,6 +28,7 @@ __all__ = [
     "Phase",
     "RunRecord",
     "Snapshot",
+    "SweepPayload",
 ]
 
 
@@ -147,3 +148,24 @@ RunRecord = Annotated[
     Decision | Phase | Snapshot,
     Field(discriminator="record_type"),
 ]
+
+
+class SweepPayload(BaseModel):
+    """Operator sweep candidate — L1-surface override applied at fork bootstrap.
+
+    One JSON file per candidate under ``datasets/{name}/sweep/``. Parsed by
+    the sweep batch orchestrator; ``apply_sweep_payload_to_osp`` stamps the
+    deltas onto a fresh fork's ``OptSearchPoint`` before the round loop runs.
+    Field set is the same L1-surface owned by L2 (see
+    ``OptSearchPoint.l1_section_overrides`` and peers); operator authors a
+    payload by hand to test a specific L1-prompt hypothesis without firing
+    L2.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    reason: str = ""
+    directive: str | None = None
+    l1_section_overrides: dict[str, bool] | None = None
+    l1_section_overrides_text: dict[str, str] | None = None
+    l1_template_override: str | None = None

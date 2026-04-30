@@ -1,9 +1,12 @@
 # Rewind and Fork
 
-Two distinct operator workflows for recovering from a campaign state you don't want to continue from.
+Three operator workflows over the same fork primitive.
 
 - **Rewind** — stay in the same campaign; discard trials from round N+1 onward; resume at round N.
-- **Fork** — mint a new campaign rooted at a divergence point; keep the old one untouched.
+- **Fork on divergence** — mint a sibling campaign rooted at a scoring divergence; keep the old one untouched.
+- **Sweep batch** — author N candidate L1-surface overrides, mint N siblings under one root, run a 2-round sweep on each. Used for breadth-first comparison of L1 prompt hypotheses.
+
+For the conceptual picture (cycles as a tree, what rides on it vs. what doesn't), see [`../concepts/fork-tree-and-sweep.md`](../concepts/fork-tree-and-sweep.md).
 
 ---
 
@@ -53,3 +56,76 @@ Without the flag, divergence halts so you can review the diagnostic and decide. 
 Rewind restarts a cycle from an earlier point under the same policy. Fork restarts a *new* cycle under a *different* policy. If you've changed the scoring formula, rewind would try to re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord.
 
 See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md) for why traces and scores are separated — that's the framework that makes fork work at all.
+
+---
+
+## Sweep batch — `optimize --sweep` with payloads under `datasets/{name}/sweep/`
+
+Sweep is the breadth-first version of `optimize --sweep`: instead of running one cheap-trial cycle on the active OSP, it runs N cheap-trial siblings under one parent, each starting from a different operator-authored override. It's the workhorse for narrowing down candidate L1 prompts before promoting one to a full multi-round campaign.
+
+**The protocol per fork:** baseline (cache-hit after the first fork), one full scored round, one generation-only round (L1 emits variants but doesn't score them), halt with `SWEEP_COMPLETE`. The leaderboard already pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
+
+### Authoring a sweep payload
+
+One JSON file per candidate under `datasets/{name}/sweep/`. The schema (`SweepPayload`) is the four L1-surface fields L2 already mutates, plus a `reason` label:
+
+```json
+{
+  "reason": "step-by-step directive",
+  "directive": "Reason step-by-step in <thinking> tags before producing the final answer.",
+  "l1_section_overrides": {"axes_l1": false},
+  "l1_section_overrides_text": {"task_context": "BBEH targets multi-step deliberation; variants should explore decomposition + verification."},
+  "l1_template_override": null
+}
+```
+
+Every field is optional; `reason` defaults to empty string. The Pydantic model is `extra='forbid'` — a typo in a key name (e.g. `directve`) raises `ValidationError` at parse time, before any fork mints. Field meanings:
+
+| Field | Effect on L1 |
+|-------|--------------|
+| `directive` | Stamped onto `OptSearchPoint.l2_directive`; rendered in L1's meta-prompt as the primary signal. |
+| `l1_section_overrides` | Per-section visibility toggles for L1's prompt. Keys are `L1GenerateField` names; `false` gates a section off. |
+| `l1_section_overrides_text` | Per-section text replacements. Keys are `L1GenerateField` names; values replace that section's rendered output. |
+| `l1_template_override` | Whole-body replacement for L1-generate's `problem_description` template. Should contain `{{l2_directive}}` so the directive still flows through. |
+
+The override fields are the same ones L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../concepts/l1-generate-surface.md`](../concepts/l1-generate-surface.md) for what each L1 section contains.
+
+### Running the batch
+
+```bash
+python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/bbeh/campaign.json
+python -m promptpotter optimize --sweep
+```
+
+`--sweep` with no payloads under `datasets/{name}/sweep/` falls through to single-cycle sweep mode (today's behavior, backwards compatible). With payloads present, the runner:
+
+1. Parses every `*.json` under `datasets/{name}/sweep/` (sorted by filename for deterministic order).
+2. For each payload: mints a fork from the active root cycle at round 1; the FORK_CUT decision in the parent's ledger carries `data.fork.sweep_payload = <payload>` and `data.fork.source_file = <name>.json`.
+3. Stamps the payload's L1-surface fields onto the fork's starting OSP.
+4. Runs round 1 scored + round 2 generation-only + halt on the fork.
+5. After all forks complete, restores the active session pointer to the root cycle.
+
+### Reading the results
+
+The post-hoc renderers handle comparison. Each fork produces:
+
+- `campaigns/{root}/forks/{fork_id}/trials/trial_0001.json` — round 1 scored. The `opt_search_point` block carries the payload's overrides (so a future resume reconstructs the same starting state).
+- `campaigns/{root}/forks/{fork_id}/trials/trial_0002.json` — `status: "generation_only"`, no `composite` / `accuracy`.
+- `campaigns/{root}/forks/{fork_id}/review.md` — per-fork review including the round-1 verdict and behavior-check checklist.
+- `campaigns/{root}/forks/{fork_id}/index.json::final.mode == "sweep"`.
+
+For the side-by-side comparison:
+
+```bash
+python scripts/ppot_review.py --sweep
+```
+
+Sweep view groups branches by parent root, sorts by `round_1_top_lift` desc, and once at least 4 paired (sweep, full) branches exist for the same `l1_generate_hash`, reports `proxy_lift_corr` in the footer. See [`../specs/m10-prompt-iteration-framework.md`](../specs/m10-prompt-iteration-framework.md) for the headline metrics this view computes.
+
+### What sweep is for, and what it isn't
+
+Sweep is screening, not validation. A prompt that wins a sweep batch should be promoted to a full multi-round `optimize` run — the round-1 signal predicts full-cycle outcome only as well as `proxy_lift_corr` says it does, which the framework measures and reports rather than assumes.
+
+Sweep is for the L1-surface overrides, not for pipeline or scoring changes. Both are intentionally absent from `SweepPayload` — pipeline changes belong to the M12 connector layer; scoring changes already have `--fork-on-divergence` as their fork driver. If a future hypothesis can't be expressed with the four available fields, that's a signal the framework wants a different layer above sweep, not a wider payload.
+
+A sweep batch is one operator command, no race conditions: forks run sequentially because the active session pointer and the parent ledger don't tolerate concurrent mints. For tens of payloads on a slow pipeline this is the practical bound; the parallelization comes with M12's connector work.

@@ -37,7 +37,13 @@ from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.results import RoundBaseline, RoundResult
-from promptpotter.domain.run_records import DECISION_GATING, Decision, DecisionKind, GatingMode
+from promptpotter.domain.run_records import (
+    DECISION_GATING,
+    Decision,
+    DecisionKind,
+    GatingMode,
+    SweepPayload,
+)
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
@@ -66,6 +72,7 @@ __all__ = [
     "ForkResult",
     "LayerCounter",
     "ReplayContext",
+    "apply_sweep_payload_to_osp",
     "build_escalation_entry",
     "escalate_l2",
     "record_decision",
@@ -304,6 +311,7 @@ def _fork_at_divergence(
     old_cycle_id: str,
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
+    extra_data: dict[str, Any] | None = None,
 ) -> str:
     """Mint a sibling cycle that re-runs round ``fork_from_round``.
 
@@ -313,6 +321,12 @@ def _fork_at_divergence(
     inline. The fork's own ledger inherits from the parent up to (but
     not including) the FORK_CUT — wired in :mod:`runner` after the
     fork is detected.
+
+    ``extra_data`` is an optional dict merged into the FORK_CUT
+    decision's archival ``data`` block. The scoring-divergence caller
+    passes nothing; the M10 sweep caller threads the parsed
+    ``SweepPayload`` (under key ``sweep_payload``) so leaderboard
+    rendering and downstream review can attribute the fork.
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import RunLedger
@@ -331,6 +345,9 @@ def _fork_at_divergence(
     # Parent ledger gets a FORK_CUT record naming the new cycle so a
     # tail of the parent sees the cutover. Best-effort — a missing or
     # corrupt ledger doesn't block the fork from minting.
+    decision_data: dict[str, Any] = {"forked_at": datetime.now(UTC).isoformat()}
+    if extra_data:
+        decision_data.update(extra_data)
     with graceful("FORK_CUT decision append failed"):
         parent_ledger = RunLedger.open(CycleDir(old_dir))
         parent_ledger.append(
@@ -338,7 +355,7 @@ def _fork_at_divergence(
                 kind=DecisionKind.FORK_CUT,
                 inputs_ref={"from_round": fork_from_round},
                 outcome=new_cycle_id,
-                data={"forked_at": datetime.now(UTC).isoformat()},
+                data=decision_data,
             )
         )
 
@@ -387,6 +404,32 @@ def _fork_at_divergence(
         fork_from_round,
     )
     return new_cycle_id
+
+
+def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
+    """Stamp ``SweepPayload`` L1-surface deltas onto the cycle's starting OSP.
+
+    Mirrors the merge pattern in
+    :meth:`L2RefineStrategy.apply_side_effects` so a sweep-supplied
+    override behaves identically to one L2 would have written. Called
+    after ``bootstrap_cycle`` returns the cycle and before the round
+    loop reads ``cycle.opt_sp`` — the override then rides the
+    cycle's existing checkpoint code into the trial JSON.
+    """
+    if payload.l1_section_overrides:
+        opt_sp.l1_section_overrides = {
+            **opt_sp.l1_section_overrides,
+            **payload.l1_section_overrides,
+        }
+    if payload.l1_section_overrides_text:
+        opt_sp.l1_section_overrides_text = {
+            **opt_sp.l1_section_overrides_text,
+            **payload.l1_section_overrides_text,
+        }
+    if payload.l1_template_override:
+        opt_sp.l1_template_override = payload.l1_template_override
+    if payload.directive:
+        opt_sp.l2_directive = payload.directive
 
 
 # ---------------------------------------------------------------------------

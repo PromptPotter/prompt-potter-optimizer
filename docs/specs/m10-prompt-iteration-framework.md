@@ -1,9 +1,11 @@
 # M10: Prompt-Iteration Framework + L1-generate Tuning
 
-**Version:** 0.1.0
-**Date:** 2026-04-28
+**Version:** 0.2.0
+**Date:** 2026-04-30
 **Status:** Planned
 **Depends on:** M9
+
+**0.2.0 amendment:** Track 5 replaces the original `optimize --sweep` halt-flag with a **unified fork primitive** (typed `ForkPayload`, trigger-agnostic `_mint_fork()`). Sweep becomes the first caller; future L2/L3 rebase, L4 auto-rebase, M12 pipeline-switch, and M11 webapp-replay are additional callers built on the same mechanism. See Track 5.
 
 ---
 
@@ -13,7 +15,7 @@
 
 ## L4 partial — what this also is
 
-The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, `optimize --sweep` is the cheap-trial mechanism, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~400 LOC of new code**, all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
+The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, the unified fork primitive (Track 5) is the cheap-trial mechanism *and* the substrate that L4 auto-rebase will plug into, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~500 LOC of new code** (50 LOC bump from 0.1.0 to absorb the fork primitive generalization), all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `RunLedger.inherit_from`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
 
 ## Why a milestone
 
@@ -43,6 +45,7 @@ Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. T
 | `param_scope_discipline` | No variant touches `temperature`/`max_tokens`/`reasoning_effort` while ≥1 prompt field has been unchanged for the past 2 rounds, or before round `param_unlock_round` (default 3). |
 | `l2_directive_followed` | If `opt_search_point.l2_directive` non-empty, ≥1 variant's `changes_description` references a key noun phrase from it. |
 | `not_only_param_variants` | ≥1 variant per round mutates a `PROMPT_STRING_FIELDS` field. |
+| `optimizer_rewind_guard` *(5b — wired only when L2/L3 rebase emission lands)* | If the round emitted a `RebaseAction`, target round must exist + be ≤ current round; `reason` non-empty; payload non-empty (no-op rebase = bug). |
 
 Adding a check = one-function diff. New unknown unknowns land here as the operator iterates.
 
@@ -89,27 +92,90 @@ Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the 
 
 Parent composite: `baseline_composite` for round 1, `trials[r-1].composite` thereafter.
 
-### 4. Cross-cycle leaderboard
+### 4. Cross-cycle / cross-branch leaderboard
 
 `promptpotter/application/leaderboard.py` (planned — landing site after V10 hoist). Read-only shim `scripts/ppot_review.py`.
 
-Row: `cycle_id | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | baseline_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
+Row: `branch_path | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | fork_trigger | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | baseline_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
 
-`mode` = `sweep` (1 round + gen peek) or `full` (≥ 2 scored rounds).
+`branch_path` = `root_cycle_id → ... → leaf_cycle_id` (renders the branch's lineage in one column). `fork_trigger` ∈ `{none, operator_sweep, operator_rewind, l2_rebase, l3_rebase, scoring_divergence}` (none = root cycle of a family).
+
+`mode` = `sweep` (1 round + gen peek; emitted by sweep-triggered forks) or `full` (≥ 2 scored rounds).
 
 Two views:
-- **Default** (`--leaderboard`): all cycles, sorted `(l1_generate_hash, rounds_to_95 asc with None last, behavior_pass_rate desc)`.
-- **Sweep** (`--sweep`): sweep-mode cycles only, sorted by `round_1_top_lift` desc. Used for narrowing down candidate L1 prompts before promoting to full runs.
+- **Default** (`--leaderboard`): all branches across all family-roots, sorted `(l1_generate_hash, rounds_to_95 asc with None last, behavior_pass_rate desc)`.
+- **Sweep** (`--sweep`): branches with `fork_trigger = operator_sweep` only, grouped by parent `root_cycle_id`, sorted by `round_1_top_lift` desc within each group. Used for narrowing down candidate L1 prompts before promoting to full runs.
 
-Computes `proxy_lift_corr` across all cycles where the same `l1_generate_hash` exists in both modes — answers "does round-1 lift predict full-cycle outcome?". Reported in the table footer. Stdout-only. Not a new write verb.
+Computes `proxy_lift_corr` across all branches where the same `l1_generate_hash` exists in both modes — answers "does round-1 lift predict full-cycle outcome?". Reported in the table footer. Stdout-only. Not a new write verb.
 
-### 5. Sweep mode — `optimize --sweep`
+### 5. Unified fork primitive (`--sweep` is the first caller)
 
-CLI flag on `optimize`: `--sweep` runs **baseline → round 1 (full: generate + score) → round 2 generation only (no scoring) → halt**. Round-2's L1 output lands in `nodes.l1_generate.output.response.variants[]` of `round_0002.json` exactly as in a full run; the round-2 trial JSON is written with `status: "generation_only"` and no `composite`/`accuracy` fields. `index.json::final.mode = "sweep"` distinguishes the cycle from a full run.
+Today `Decision(kind=FORK_CUT)` is scoring-divergence-only and its payload is `{from_round, forked_at}`. Generalize it to a typed action that **any trigger** can emit. Operator sweep is one caller; future L2/L3 rebase, L4 auto-rebase, M11 manual rewind, M12 pipeline-switch, and M11/M12 webapp-replay are additional callers built on the same code path. **One mechanism, multiple drivers.**
 
-Reuses existing persistence (round_recorder, OptSearchPoint trace archival, prompt snapshots) — no new infra. The framework just halts before `score_population` for round 2.
+**Why this shape (vs the 0.1.0 `--sweep` halt-flag).** Sweep, L2-rebase-to-historical-parent, L3-meta-replan, and scoring-divergence all answer the same shape of question: *"abandon this lineage from round N, start over from round M < N with a different payload."* They differ only in (a) who issues the cut, (b) what payload differs at the cut. Building one primitive per driver compounds tech debt. Building the typed primitive once means new drivers (L4, webapp, multi-pipeline) ship as small callers rather than re-architecture.
 
-Sweep cycles feed the leaderboard's `--sweep` view and the `proxy_lift_corr` computation. They are first-class cycles for cross-cycle comparison; their `cycle_id`s appear next to full-mode cycles using the same `l1_generate_hash`.
+**Domain extension** (`promptpotter/domain/run_records.py`):
+
+```python
+class ForkTrigger(StrEnum):
+    OPERATOR_SWEEP    = "operator_sweep"
+    OPERATOR_REWIND   = "operator_rewind"     # M11 — labelled manual fork from any round
+    L2_REBASE         = "l2_rebase"            # M11 — gated behind --allow-llm-rebase
+    L3_REBASE         = "l3_rebase"            # M11 — gated behind --allow-llm-rebase
+    SCORING_DIVERGENCE = "scoring_divergence"  # already wired; today's only trigger
+    # M12+ additions land as enum members; payload + mechanism unchanged:
+    # PIPELINE_SWITCH, COMPETITOR_HARNESS, WEBAPP_REPLAY, L4_AUTO_REBASE
+
+class ForkPayload(BaseModel):
+    """The diff that distinguishes the fork from its parent at the cut point.
+    Trigger-agnostic — every trigger uses the same payload shape."""
+    trigger: ForkTrigger
+    reason: str                          # mandatory; LLM-issued reason or operator label
+    issued_by: str                       # operator id, "L2", "L3", "L4", or "system"
+    # Optional deltas; any subset may be set:
+    directive: str | None = None
+    l1_section_overrides: dict[str, bool] | None = None
+    l1_section_overrides_text: dict[str, str] | None = None
+    l1_template_override: str | None = None
+    pipeline_swap: dict | None = None    # M12 — connector / pipeline change at the cut
+    scoring_swap: dict | None = None     # forward-compat: explicit scorer change at fork
+```
+
+`Decision(kind=FORK_CUT)` continues to carry `inputs_ref={"from_round": N}` and `outcome=new_cycle_id` (existing wire shape preserved); the new payload moves into `data.fork: ForkPayload`. Existing scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`.
+
+`FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING` — its outcome (the new cycle_id) is downstream of the divergence-checked decisions, never gating itself.
+
+**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, trials/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `RunLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
+
+**LLM-side surface.** Extend `OptimizerAction` in `application/optimization/pipeline.py`:
+
+```python
+class OptimizerAction(BaseModel):
+    # ... existing L1-surface fields ...
+    rebase: RebaseAction | None = None  # ForkPayload-shaped sans `trigger`/`issued_by`
+                                         # (set by runner from the layer that emitted it)
+```
+
+L2 and L3 emit `rebase` through their existing JSON-output channel — no new optimizer-side plumbing. **L1 cannot rebase** (asymmetry: only meta-layers may; L1 is the thing being rebased *on*).
+
+**Operator caller (M10 deliverable).** `optimize --sweep` becomes a thin harness over the primitive:
+
+1. Read N L1-candidate payloads from `datasets/{name}/sweep/*.json` (one `ForkPayload` per candidate, `trigger=OPERATOR_SWEEP`, `issued_by=<operator>`).
+2. For each candidate: `_mint_fork(root_cycle, fork_from_round=1, payload=candidate_i)`, run round 1 (full: generate + score) → round 2 generation only (no scoring) → halt.
+3. Round-2 trial JSON written with `status: "generation_only"`, no `composite`/`accuracy`.
+4. `index.json::final.mode = "sweep"` and `index.json::fork.trigger = "operator_sweep"` distinguish the branch.
+
+All sweep branches share their parent's baseline measurements via the `library/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
+
+**LLM-rebase callers (M11 deliverable, scoped here for forward compat).** Out of M10 implementation, but the primitive must support:
+
+- L2 rebase fires when accumulated `RuntimeFailure` trail contaminates the current branch beyond what L2's L1-surface writes can fix. Gated behind: (a) `--allow-llm-rebase` opt-in (default off until calibrated), (b) `l2_rebase_patience` counter (default `l2_patience × 2`), (c) hard cap of one L2 rebase per branch.
+- L3 rebase fires when the whole L2 alley has stalled and L3's directive-rewrite is insufficient. Same gating shape with `l3_rebase_patience`, hard cap of one L3 rebase per branch.
+- `OPTIMIZER_REWIND_GUARD` behavior check (Track 1): rebase target round must exist + be ≤ current round; reason field non-empty; payload non-empty (no-op rebase = bug).
+
+**Telemetry.** Stays at family root. The active fork's `cycle_id` already lives at `dashboard.json::cycle_id`; extend with `cycle_id_path: list[str]` (root → ... → current) so the live view + webapp can render the branch tree without walking ledgers.
+
+**Forward compat (≥M13).** New trigger types are enum additions. New payload deltas are optional fields. The mechanism (parent FORK_CUT + ledger inherit + dir copy + active-pointer retarget) does not change. Webapp-driven replay, multi-pipeline parallel evaluation, L4 auto-rebase, and competitor harnesses all ship as new callers + new enum members, never as schema or code-path changes.
 
 ### 6. Round-1 gate + analysis skill
 
@@ -128,11 +194,11 @@ The skill is the L4 substitute. Mandatory after round 1 in full mode; required a
 5. Operator confirms / redirects. Claude applies the edit. Operator re-runs.
 
 **Sweep mode (`/potter-review --sweep`):** triggered after a batch of `optimize --sweep` runs.
-1. Collect all cycles where `index.json::final.mode == "sweep"` and `cycle_id` belongs to the active sweep batch.
-2. Render side-by-side comparison: round-1 metrics + round-2 next-generation peek per cycle.
+1. Collect all branches where `index.json::fork.trigger == "operator_sweep"` and parent `root_cycle_id` matches the active sweep batch.
+2. Render side-by-side comparison under one root: round-1 metrics + round-2 next-generation peek per branch.
 3. Rank by `round_1_top_lift` desc, tiebreak by `behavior_pass_rate`.
-4. Highlight the top 2-3 to promote to full `optimize` runs; flag any cycle with `round_1_verdict == broken` for prompt revisit.
-5. Once paired (sweep, full) cycles exist for ≥ 4 candidates, report `proxy_lift_corr` and recommend whether to keep using sweep mode per the proxy validation procedure (Track 7).
+4. Highlight the top 2-3 to promote to full `optimize` runs; flag any branch with `round_1_verdict == broken` for prompt revisit.
+5. Once paired (sweep, full) branches exist for ≥ 4 candidates, report `proxy_lift_corr` and recommend whether to keep using sweep mode per the proxy validation procedure (Track 7).
 
 The skill never triggers `optimize` itself — the operator owns runs. The skill's only side effect on approval is editing prompt files.
 
@@ -156,13 +222,16 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 
 ## Wave sequencing
 
-1. Tracks 1 + 3 (parallel — pure-Python over loaded dicts).
-2. Track 2 (renderer + wiring + parity test + incremental round-1 emission + next-generation peek).
-3. Track 5 (`optimize --sweep` flag — small surgery in `runner.py` to halt before round-2 scoring).
-4. Track 4 (leaderboard with sweep view + `proxy_lift_corr`).
-5. Track 6 (`potter-review` skill, both modes).
-6. Track 7 (methodology) + `l1_generate.json` revision.
-7. **Iterate.** Each new "unknown unknown" → new behavior check + skill rule update; each batch of sweep cycles updates `proxy_lift_corr`.
+Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first sweep workflow on day one. Without it, the operator workflow stalls and downstream tracks have no sweep data to consume. Subsequent tracks layer on as data accumulates.
+
+1. **Track 5a — unified fork primitive (M10).** Domain extension (`ForkTrigger`, `ForkPayload`) + `_mint_fork()` generalization + scoring-divergence-path retrofit + `optimize --sweep` as first operator caller. `OptimizerAction.rebase` schema field added but unwired (no L2/L3 emission yet). **This is the gating deliverable** — every other track produces or consumes sweep-cycle data.
+2. **Tracks 1 + 3 (parallel).** L1 behavior checks + `L1Stats`. Pure-Python over loaded dicts; run against sweep round-1 data as it accumulates. Manual reading of round JSONs covers the analysis gap until these land.
+3. **Track 4 — branch-tree leaderboard.** Consumes 5a fork metadata + Track 3 stats. First cross-branch comparison view; sweep candidates ranked side-by-side.
+4. **Track 2 — `review.md` renderer.** Consumes 1 + 3 output; per-fork view. `runner.py::finalize` wiring + parity test + incremental round-1 emission + next-generation peek.
+5. **Track 6 — `/potter-review` skill** (single-cycle + sweep modes). Consumes 2 + 4.
+6. **Track 7 — methodology doc** + `l1_generate.json` revision.
+7. **Track 5b — LLM-rebase callers (M11).** L2/L3 rebase emission + patience gating + `--allow-llm-rebase` opt-in + `optimizer_rewind_guard` behavior check. `optimize --rewind --label X` second operator caller. Out of M10; lands once 5a + sweep workflow have produced calibration data.
+8. **Iterate.** Each new "unknown unknown" → new behavior check + skill rule update; each batch of sweep branches updates `proxy_lift_corr`.
 
 ## Entry / exit
 
@@ -173,8 +242,9 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 - `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`.
 - `behavior_pass_rate = 1.0` for both seeded checks across the qualifying cycles.
 - `/potter-review` skill demonstrably catches at least one prompt regression on a re-run before round 2 fires.
-- **Proxy hypothesis decision recorded** — either `proxy_lift_corr ≥ 0.6` over ≥ 4 paired cycles (sweep validated as primary screening tool), or sweep-mode rules modified per the proxy validation procedure with the rationale documented in the methodology doc.
+- **Proxy hypothesis decision recorded** — either `proxy_lift_corr ≥ 0.6` over ≥ 4 paired branches (sweep validated as primary screening tool), or sweep-mode rules modified per the proxy validation procedure with the rationale documented in the methodology doc.
 - Methodology doc maps section-by-section to actual `review.md` output.
+- **Unified `_mint_fork()` covers both scoring-divergence and operator-sweep callers under one code path.** `Decision(kind=FORK_CUT).data.fork: ForkPayload` populated for both. `OptimizerAction.rebase` schema field present (unwired in M10; M11 wires L2/L3 emission).
 
 ## Out of scope
 
@@ -191,6 +261,9 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 - Evidence strictness: substring match. Upgrade to semantic if false-pass rate misleads iteration.
 - Leaderboard persistence: stdout only.
 - New skill vs extension of `/potter-run`: new skill (cleaner separation). Confirm.
+- **Sweep-payload source**: `datasets/{name}/sweep/*.json` (one ForkPayload per file) vs stdin vs CLI-flag-array. Default to filesystem layout for git-tracked reproducibility; revisit if operator friction shows up.
+- **L2/L3 rebase patience defaults** (5b): proposed `l2_rebase_patience = l2_patience × 2`, `l3_rebase_patience = l3_patience × 2`. Calibrate during M11 once first L2/L3 rebase events ship.
+- **`cycle_id_path` exposure**: add to `dashboard.json` only, or also to `index.json::final` for offline branch-tree reconstruction. Default to both — cheap, makes webapp wiring trivial later.
 
 ## Key existing code
 
@@ -207,6 +280,8 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 | Cycle finalize / round emission | `application/runner.py` |
 | Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
 | Parity test | `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` |
+| **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::RunLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
+| **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard.py` (telemetry binds to root with no `parent_cycle_id`) |
 
 ## Risks
 

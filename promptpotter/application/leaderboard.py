@@ -29,9 +29,12 @@ from promptpotter.application.optimization.l1_stats import (
 )
 
 __all__ = [
+    "JSPRow",
     "LeaderboardRow",
+    "build_jsp_leaderboard_rows",
     "build_leaderboard_rows",
     "compute_proxy_lift_corr",
+    "format_jsp_leaderboard",
     "format_leaderboard",
     "format_sweep_leaderboard",
 ]
@@ -295,9 +298,9 @@ _SWEEP_COLS: tuple[tuple[str, str], ...] = (
 )
 
 
-def _format_table(rows: list[LeaderboardRow], cols: tuple[tuple[str, str], ...]) -> str:
+def _format_table(rows: list[Any], cols: tuple[tuple[str, str], ...]) -> str:
     if not rows:
-        return "(no cycles)\n"
+        return "(no rows)\n"
     cells: list[list[str]] = [[label for _, label in cols]]
     for r in rows:
         cells.append([_fmt(getattr(r, attr)) for attr, _ in cols])
@@ -317,4 +320,110 @@ def _fmt(value: Any) -> str:
         return "y" if value else "n"
     if isinstance(value, float):
         return f"{value:+.3f}" if abs(value) < 10 else f"{value:.2f}"
+    if isinstance(value, tuple | list):
+        if not value:
+            return "—"
+        if len(value) == 1:
+            return str(value[0])
+        return f"{value[0]} (+{len(value) - 1})"
     return str(value)
+
+
+# ===========================================================================
+# JSP (config) leaderboard — peer of the cycle leaderboard, ranks individual
+# JobSearchPoints across the tenant's measurement archive. Each archive index
+# entry is one JSP (content_hash unique in index — see MeasurementArchive.save).
+# ===========================================================================
+
+
+@dataclass(frozen=True)
+class JSPRow:
+    """One JSP's aggregate performance across the tenant's archive."""
+
+    jsp_hash: str  # content_hash[:12]
+    n_samples: int  # samples measured under this JSP
+    n_hits: int
+    mean_score: float
+    hit_rate: float
+    last_seen: str  # ISO timestamp from the archive entry's created_at
+    pipeline_short: str  # 1-line summary derived from node_configs
+
+
+def build_jsp_leaderboard_rows(stores: Any, backend_id: str) -> list[JSPRow]:
+    """Walk the archive, build one JSPRow per measured config.
+
+    Each archive index entry maps 1:1 to a JSP (the archive replaces by
+    content_hash on save). For each entry, load the detail file to
+    aggregate per-sample hit/score and produce the row. Skips entries
+    with unreadable detail.
+    """
+    archive = stores.archive
+    rows: list[JSPRow] = []
+    for entry in archive.list_all(backend_id):
+        content_hash = (entry.get("content_hash") or "").strip()
+        if not content_hash:
+            continue
+        run_id = entry.get("run_id")
+        if not run_id:
+            continue
+        detail = archive.load_by_id(backend_id, run_id)
+        if detail is None:
+            continue
+        items = detail.get("measurements") or []
+        n_samples = 0
+        n_hits = 0
+        score_sum = 0.0
+        score_n = 0
+        for item in items:
+            if item.get("error") or item.get("predicted") == "ERROR":
+                continue
+            n_samples += 1
+            if bool(item.get("hit")):
+                n_hits += 1
+            s = item.get("score")
+            if s is not None:
+                score_sum += float(s)
+                score_n += 1
+        if n_samples == 0:
+            continue
+        mean_score = (score_sum / score_n) if score_n else 0.0
+        hit_rate = n_hits / n_samples
+        rows.append(
+            JSPRow(
+                jsp_hash=content_hash[:12],
+                n_samples=n_samples,
+                n_hits=n_hits,
+                mean_score=mean_score,
+                hit_rate=hit_rate,
+                last_seen=str(entry.get("created_at") or ""),
+                pipeline_short=_pipeline_short(entry.get("node_configs")),
+            )
+        )
+    return rows
+
+
+def _pipeline_short(node_configs: Any) -> str:
+    """One-line node-list summary for the leaderboard's pipeline column."""
+    if not node_configs:
+        return "?"
+    names: list[str] = []
+    for pair in node_configs:
+        if isinstance(pair, list | tuple) and len(pair) == 2:
+            names.append(str(pair[0]))
+    return "→".join(names) if names else "?"
+
+
+def format_jsp_leaderboard(rows: list[JSPRow]) -> str:
+    """JSP table sorted by mean_score desc, tiebreak by n_samples desc."""
+    sorted_rows = sorted(rows, key=lambda r: (-r.mean_score, -r.n_samples, r.jsp_hash))
+    return _format_table(sorted_rows, _JSP_COLS)
+
+
+_JSP_COLS: tuple[tuple[str, str], ...] = (
+    ("jsp_hash", "jsp"),
+    ("mean_score", "score"),
+    ("hit_rate", "hits"),
+    ("n_samples", "n"),
+    ("pipeline_short", "pipeline"),
+    ("last_seen", "last_seen"),
+)
