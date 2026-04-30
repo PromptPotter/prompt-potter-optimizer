@@ -567,6 +567,40 @@ def _load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, Any]]:
     return [(p, SweepPayload.model_validate_json(p.read_text(encoding="utf-8"))) for p in files]
 
 
+def _existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, str]:
+    """Read the batch parent's ledger; return ``{source_file: fork_cycle_id}`` for prior FORK_CUTs.
+
+    Lets the batch dispatcher skip payloads that already minted a fork
+    from this exact parent on a previous run, so re-invoking
+    ``optimize --sweep`` after an interrupt at the same active pointer
+    picks up where it stopped instead of duplicating hypotheses.
+    Scoped to the active pointer's current cycle — sweep can branch
+    from a root, a fork, a fork-of-fork, or any deeper node; the
+    branch point is whatever ``cycle_id`` the active pointer (or
+    direct ``--cycle`` arg, when added) names.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import DecisionKind
+    from promptpotter.infrastructure.ledger import RunLedger
+
+    out: dict[str, str] = {}
+    parent_dir = store.campaigns.campaign_dir(parent_cycle_id)
+    if not (parent_dir / "ledger.jsonl").exists():
+        return out
+    ledger = RunLedger.open(CycleDir(parent_dir))
+    for record in ledger.iter():
+        if (
+            getattr(record, "record_type", None) == "decision"
+            and getattr(record, "kind", None) == DecisionKind.FORK_CUT
+        ):
+            data = getattr(record, "data", {}) or {}
+            src = data.get("source_file")
+            outcome = getattr(record, "outcome", None)
+            if src and outcome:
+                out[str(src)] = str(outcome)
+    return out
+
+
 async def _run_sweep_batch(
     args: argparse.Namespace,
     root_ctx: SessionCtx,
@@ -576,11 +610,18 @@ async def _run_sweep_batch(
 ) -> CommandResult:
     """Mint one fork per ``SweepPayload`` and run sweep mode on each.
 
-    Forks branch off ``root_ctx.cycle_id`` at round 1. The first fork's
-    baseline run populates the ``library/`` cache; subsequent forks
-    cache-hit on identical baseline ``JobSearchPoint`` measurements,
-    making per-fork baseline cost ≈ 0. Active pointer is restored to the
-    root cycle at the end so the operator's next command stays anchored.
+    Forks branch off ``root_ctx.cycle_id`` — the cycle the active
+    pointer (or direct ``--cycle`` arg, when added) names. That can be
+    a root, a fork, a fork-of-fork, or any deeper node in the
+    campaign tree; sweep batches operate from a single reference
+    point with no automatic walk-back. The first fork's baseline run
+    populates the ``library/`` cache; subsequent forks cache-hit on
+    identical baseline ``JobSearchPoint`` measurements, making
+    per-fork baseline cost ≈ 0. Active pointer is restored to the
+    branch point at the end so the operator's next command stays
+    anchored. Re-invocation from the same branch point dedupes via
+    ``data.source_file`` in the parent's FORK_CUT records — already
+    forked payloads are skipped.
     """
     from promptpotter.application.optimization.cycle import _fork_at_divergence
     from promptpotter.application.runner import (
@@ -589,17 +630,37 @@ async def _run_sweep_batch(
     from promptpotter.infrastructure.store import build_stores
     from promptpotter.infrastructure.store.stores import save_active_pointer
 
-    root_cycle_id = root_ctx.cycle_id
     tenant_id = getattr(args, "tenant", "default")
     store = build_stores(tenant_id=tenant_id)
+    # Branch point = whatever the active pointer (or direct --cycle
+    # arg, when added) names. No walk-back: sweep forks must be
+    # mintable from any node in the tree (root, fork, fork-of-fork).
+    # An interrupted prior batch leaves the pointer on a partial
+    # orphan fork; re-invoking from that pointer forks under it,
+    # which is the documented behavior — operator who wants a
+    # different branch point moves the pointer (or passes --cycle)
+    # before re-invoking.
+    parent_cycle_id = root_ctx.cycle_id
+    # Idempotent re-runs from the same branch point: skip payloads
+    # whose source_file already has a FORK_CUT in this parent's
+    # ledger.
+    existing = _existing_fork_source_files(store, parent_cycle_id)
 
     new_cycle_ids: list[str] = []
     for path, payload in sweep_payloads:
+        if path.name in existing:
+            logger.info(
+                "Sweep payload %s already forked → %s; skipping (re-run optimize "
+                "without --sweep on that fork to resume it)",
+                path.name,
+                existing[path.name],
+            )
+            continue
         new_cycle_id = _fork_at_divergence(
             campaign_store=store.campaigns,
             tenant_id=tenant_id,
             session_id=root_ctx.session_id,
-            old_cycle_id=root_cycle_id,
+            old_cycle_id=parent_cycle_id,
             fork_from_round=1,
             surviving_trials=[],
             extra_data={
@@ -613,10 +674,33 @@ async def _run_sweep_batch(
         fork_session = await init_services_cli(**fork_ctx.init_params)
         fork_session.session_id = fork_ctx.session_id
         fork_session.state.cycle_id = fork_ctx.cycle_id
+        # init_services_cli builds the pipeline_schema but leaves
+        # session.pipeline_params empty until configure_and_apply_pipeline
+        # runs. Without this, the backend receives no per-node model
+        # override and falls back to its llm_defaults — i.e. wrong model.
+        from promptpotter.application.config import configure_and_apply_pipeline
+
+        configure_and_apply_pipeline(
+            fork_session,
+            campaign_config,
+            log=logger.info if _VERBOSE else (lambda *_a, **_k: None),
+        )
+        logger.info(
+            "Sweep fork session bound: session_id=%s cycle_id=%s pp.llm_only.model=%s",
+            fork_session.session_id,
+            fork_session.state.cycle_id,
+            (fork_session.pipeline_params or {}).get("llm_only", {}).get("model"),
+        )
 
         fork_campaign_dir = store.campaigns.campaign_dir(fork_ctx.cycle_id)
         listener, emitter, _recorder, display = _build_run_observers(
             args, fork_session, campaign_config, fork_campaign_dir, 0.0
+        )
+        logger.info(
+            "Sweep observers built: emitter=%s recorder=%s display=%s",
+            type(emitter).__name__,
+            type(_recorder).__name__,
+            type(display).__name__ if display else None,
         )
 
         await _orch_run_optimization(
@@ -631,6 +715,12 @@ async def _run_sweep_batch(
             sweep=True,
             fork_payload=payload,
         )
+        logger.info(
+            "Sweep fork %s post-run: session.state.ledger=%s buffered_events=%d",
+            new_cycle_id,
+            "set" if fork_session.state.ledger is not None else "None",
+            len(getattr(listener, "_buffer", [])),
+        )
         new_cycle_ids.append(new_cycle_id)
         logger.info(
             "Sweep fork %d/%d complete: %s (payload=%s)",
@@ -640,20 +730,20 @@ async def _run_sweep_batch(
             path.name,
         )
 
-    save_active_pointer(tenant_id, root_ctx.session_id, root_cycle_id)
+    save_active_pointer(tenant_id, root_ctx.session_id, parent_cycle_id)
     logger.info(
-        "Sweep batch complete: %d forks under root %s; active pointer restored",
+        "Sweep batch complete: %d forks under %s; active pointer restored",
         len(new_cycle_ids),
-        root_cycle_id,
+        parent_cycle_id,
     )
     return CommandResult(
         data={
             "sweep_batch": new_cycle_ids,
-            "root_cycle_id": root_cycle_id,
+            "parent_cycle_id": parent_cycle_id,
             "n_forks": len(new_cycle_ids),
         },
         human=(
-            f"Sweep batch: {len(new_cycle_ids)} forks under {root_cycle_id}\n"
+            f"Sweep batch: {len(new_cycle_ids)} forks under {parent_cycle_id}\n"
             + "\n".join(f"  - {c}" for c in new_cycle_ids)
         ),
     )
