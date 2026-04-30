@@ -240,7 +240,7 @@ async def run_optimization_notebook(
             f"stopped before any rounds completed."
         )
         print("  Resume: re-run this cell to restart.")
-        raise KeyboardInterrupt("optimization interrupted before any rounds completed")
+        return campaign_rounds, result
 
     if result is None:
         return campaign_rounds, result
@@ -249,6 +249,9 @@ async def run_optimization_notebook(
     print(render_completion(result, best_round=best, pipeline_schema=session.pipeline_schema))
 
     if result.stop_reason == "interrupted":
-        raise KeyboardInterrupt(f"optimization interrupted after {result.n_rounds} rounds")
+        print(
+            f"  {YELLOW}{BOLD}[INTERRUPTED]{RESET} after {result.n_rounds} rounds — "
+            "artifacts saved. Caller decides whether to continue downstream phases."
+        )
 
     return campaign_rounds, result

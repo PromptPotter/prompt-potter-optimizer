@@ -4,6 +4,7 @@ Kept out of ``shared_config.py`` because the CAPO/DSPy notebooks live on
 Colab and must stay import-safe there (no ``promptpotter.*`` imports).
 """
 
+import contextlib
 from pathlib import Path
 from typing import Any
 
@@ -14,8 +15,8 @@ from promptpotter.application.config import (
     configure_and_apply_pipeline,
     load_campaign_config,
 )
-from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.application.scoring.formula import SCORING_FUNCTIONS
+from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.presentation.views.display import set_display_tags
 from promptpotter.presentation.views.notebook_run import (
     init_notebook_session,
@@ -32,7 +33,10 @@ BBEH_TASK_DESCRIPTION = (
 
 
 def _normalize(examples: list[dict]) -> list[dict]:
-    return [{"query": ex["input"], "ground_truth": ex["target"]} for ex in examples]
+    return [
+        {"query": ex["input"], "ground_truth": ex["target"], "sample_id": i}
+        for i, ex in enumerate(examples)
+    ]
 
 
 def build_campaign_config(
@@ -79,8 +83,13 @@ async def run_bbeh_campaign(
     sp_budget_ttest: int,
     output_path: Path,
     backend_url: str = "http://127.0.0.1:8000",
-) -> dict[str, Any]:
-    """End-to-end BBEH run: baseline -> optimize -> per-task test eval -> export."""
+) -> dict[str, Any] | None:
+    """End-to-end BBEH run: baseline -> optimize -> per-task test eval -> export.
+
+    Returns ``None`` when interrupted (Ctrl+C) — optimization artifacts are
+    already saved to disk by the loop's finalizer; the test-eval / export
+    phase is skipped because the user signalled stop.
+    """
     exact_match = SCORING_FUNCTIONS["exact_match"]
     tasks = sorted(test_by_task.keys())
     train_norm = _normalize(train_pool)
@@ -91,85 +100,92 @@ async def run_bbeh_campaign(
     print("=" * 60)
 
     session = await init_notebook_session(backend_url=backend_url, dataset_name="bbeh")
-    campaign_config = build_campaign_config(
-        max_rounds=max_rounds,
-        n_variants=n_variants,
-        sp_budget_ttest=sp_budget_ttest,
-    )
-    pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
-    set_display_tags(session.pipeline_schema)
+    try:
+        campaign_config = build_campaign_config(
+            max_rounds=max_rounds,
+            n_variants=n_variants,
+            sp_budget_ttest=sp_budget_ttest,
+        )
+        pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
+        set_display_tags(session.pipeline_schema)
 
-    _, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
-        session,
-        train_norm,
-        campaign_config,
-        pipeline_params=pipeline_params,
-    )
-    baseline_train_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else 0.0
+        _, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
+            session,
+            train_norm,
+            campaign_config,
+            pipeline_params=pipeline_params,
+        )
+        baseline_train_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else 0.0
 
-    campaign_rounds, cycle_result = await run_optimization_notebook(
-        campaign_rounds,
-        dataset_obj,
-        campaign_config,
-        session=session,
-        experiment_id="",
-        task_context={"task_description": BBEH_TASK_DESCRIPTION},
-    )
-    assert cycle_result is not None, "optimization loop returned no RunResult"
+        campaign_rounds, cycle_result = await run_optimization_notebook(
+            campaign_rounds,
+            dataset_obj,
+            campaign_config,
+            session=session,
+            experiment_id="",
+            task_context={"task_description": BBEH_TASK_DESCRIPTION},
+        )
+        if cycle_result is None or cycle_result.stop_reason == "interrupted":
+            return None
 
-    winner_prompt_fields = cycle_result.winner_prompt_fields
-    winner_pipeline_params = cycle_result.winner_pipeline_params
-    train_acc = cycle_result.best_accuracy
+        winner_prompt_fields = cycle_result.winner_prompt_fields
+        winner_pipeline_params = cycle_result.winner_pipeline_params
+        train_acc = cycle_result.best_accuracy
 
-    print(f"\n{'=' * 60}")
-    print("PER-TASK TEST EVALUATION")
-    print("=" * 60)
+        print(f"\n{'=' * 60}")
+        print("PER-TASK TEST EVALUATION")
+        print("=" * 60)
 
-    per_task_results: dict[str, dict] = {}
-    for i, task in enumerate(tasks, start=1):
-        test_items = test_norm_by_task[task]
-        hits = 0
-        for ex in test_items:
-            resp = await session.backend_client.run_query(
-                ex["query"], pipeline_params=winner_pipeline_params
-            )
-            ranking = resp.get("data", {}).get("final_ranking") or []
-            predicted = ranking[0].get("candidate", "") if ranking else ""
-            hits += int(exact_match(predicted, ex["ground_truth"]))
-        acc = hits / len(test_items) if test_items else 0.0
-        per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
-        print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
+        per_task_results: dict[str, dict] = {}
+        for i, task in enumerate(tasks, start=1):
+            test_items = test_norm_by_task[task]
+            hits = 0
+            for ex in test_items:
+                resp = await session.backend_client.run_query(
+                    ex["query"], pipeline_params=winner_pipeline_params
+                )
+                ranking = resp.get("data", {}).get("final_ranking") or []
+                predicted = ranking[0].get("candidate", "") if ranking else ""
+                hits += int(exact_match(predicted, ex["ground_truth"]))
+            acc = hits / len(test_items) if test_items else 0.0
+            per_task_results[task] = {"accuracy": round(acc, 4), "n_test": len(test_items)}
+            print(f"  [{i:2d}/{len(tasks)}] {task:<40s} {acc:>6.1%}  ({hits}/{len(test_items)})")
 
-    await session.backend_client.aclose()
+        macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
+        total_test = sum(r["n_test"] for r in per_task_results.values())
+        print(
+            f"\nMacro-avg test accuracy: {macro_avg:.1%}  "
+            f"(global winner, {total_test} non-mini examples across {len(tasks)} tasks)"
+        )
 
-    macro_avg = sum(r["accuracy"] for r in per_task_results.values()) / len(per_task_results)
-    total_test = sum(r["n_test"] for r in per_task_results.values())
-    print(
-        f"\nMacro-avg test accuracy: {macro_avg:.1%}  "
-        f"(global winner, {total_test} non-mini examples across {len(tasks)} tasks)"
-    )
-
-    winner_prompt_str = PromptTemplate(**winner_prompt_fields).render()
-    return export_results(
-        method="promptpotter",
-        per_task=per_task_results,
-        config={
-            "optimizer": "promptpotter",
-            "max_rounds": max_rounds,
-            "n_variants": n_variants,
-            "sp_budget_ttest": sp_budget_ttest,
-            "model_id": MODEL_ID,
-            "n_train": len(train_pool),
-            "train_accuracy": round(train_acc, 4),
-            "baseline_train_accuracy": round(baseline_train_acc, 4),
-            "rounds": len(campaign_rounds),
-            "methodology": (
-                "Single global prompt optimized on 460 mini-BBEH examples pooled "
-                "across 23 tasks; evaluated on all non-mini examples (~4,060). "
-                "Mini/non-mini partition is disjoint by HF flag - no leakage."
-            ),
-            "note": "unmeasured starting hyperparameters - pre-sweep",
-        },
-        optimized_prompts={"__global__": winner_prompt_str},
-        output_path=str(output_path),
-    )
+        winner_prompt_str = PromptTemplate(**winner_prompt_fields).render()
+        return export_results(
+            method="promptpotter",
+            per_task=per_task_results,
+            config={
+                "optimizer": "promptpotter",
+                "max_rounds": max_rounds,
+                "n_variants": n_variants,
+                "sp_budget_ttest": sp_budget_ttest,
+                "model_id": MODEL_ID,
+                "n_train": len(train_pool),
+                "train_accuracy": round(train_acc, 4),
+                "baseline_train_accuracy": round(baseline_train_acc, 4),
+                "rounds": len(campaign_rounds),
+                "methodology": (
+                    "Single global prompt optimized on 460 mini-BBEH examples pooled "
+                    "across 23 tasks; evaluated on all non-mini examples (~4,060). "
+                    "Mini/non-mini partition is disjoint by HF flag - no leakage."
+                ),
+                "note": "unmeasured starting hyperparameters - pre-sweep",
+            },
+            optimized_prompts={"__global__": winner_prompt_str},
+            output_path=str(output_path),
+        )
+    finally:
+        # Always close the httpx pool — leaked async clients are the most
+        # common cause of "kernel stuck connecting" after a notebook Ctrl+C.
+        # ``Exception`` excludes BaseException subclasses (KeyboardInterrupt,
+        # SystemExit), so a second Ctrl+C still force-quits.
+        with contextlib.suppress(Exception):
+            await session.backend_client.aclose()
