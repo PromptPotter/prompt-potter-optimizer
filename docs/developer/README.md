@@ -13,6 +13,7 @@ Implementation spec. Python class names, method signatures, module paths, and JS
 | [Axis index internals](axis-index-internals.md) | Accessor catalog, digest API, consumer mapping, refresh mechanics |
 | [Self-healing internals](self-healing-internals.md) | `ValidationFailure` vs `RuntimeFailure`, `classify_result()`, escalation wiring |
 | [Display conventions](display-conventions.md) | `⚠ … ↳` rendering contract, entry-point adoption |
+| [OptimizationConfig fields](optimization-config.md) | Required per-dataset knobs vs. defaulted system invariants — what goes in `campaign.json` and what doesn't |
 | [Code map](code-map.md) | Alphabetical Python symbol → file:line index |
 
 **Understanding L2 (contributor track):**

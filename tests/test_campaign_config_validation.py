@@ -49,9 +49,10 @@ def test_legacy_pipeline_params_is_rejected() -> None:
 
 
 def test_required_optimization_fields_must_be_explicit() -> None:
-    """Shared knobs (``improvement_threshold``, ``seed``, ``max_failures``,
-    ``degradation_threshold``, ``enable_l2``, ``enable_l3``) have no default —
-    a campaign that omits them is rejected at load time so dataset configs are
-    self-describing rather than relying on hidden defaults."""
+    """Per-dataset knobs (``improvement_threshold``, ``max_failures``,
+    ``degradation_threshold``) have no default — a campaign that omits them
+    is rejected at load time so dataset configs are self-describing.
+    System invariants (``enable_l2``, ``enable_l3``, ``seed``) DO have
+    defaults — they are not per-dataset knobs."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})

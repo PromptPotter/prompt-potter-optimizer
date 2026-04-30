@@ -154,10 +154,11 @@ class ScoringSetConfig(BaseModel):
 
     enabled: bool = Field(True, description="Master switch — true = Rasch + KG evolution active.")
     swap_out_delta_se: float = Field(
-        0.5,
+        0.7,
         description="Swap-out threshold: SE on delta_s below which a sample is 'understood' "
-        "(~95% CI half-width of 1 logit). Loose enough to fire by round 2-3 on a typical "
-        "20-sample / 5-candidate budget; round-1->2 firing requires push to 0.7-0.8.",
+        "(~95% CI half-width of ~1.4 logits). Sized so the swap fires round 1->2 on the "
+        "typical 20-sample / 5-candidate budget. Not a user knob — change only when "
+        "altering loop-budget invariants.",
     )
     swap_in_kg_threshold: float = Field(
         0.01,
@@ -205,6 +206,11 @@ class HardSampleSorterConfig(BaseModel):
 
 
 class OptimizationConfig(BaseModel):
+    """Optimization-loop knobs. Required per-dataset experiment fields vs.
+    defaulted system invariants are split deliberately — see
+    ``docs/developer/optimization-config.md`` before adding or moving a field.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     max_rounds: int | None = Field(10, description="Max rounds (None = unlimited)")
@@ -212,11 +218,11 @@ class OptimizationConfig(BaseModel):
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
-    seed: int = Field(..., description="Random seed")
+    seed: int = Field(42, description="Random seed — system invariant, not a per-dataset knob")
     max_failures: int = Field(..., description="Max failure examples fed to L1")
 
-    enable_l2: bool = Field(...)
-    enable_l3: bool = Field(...)
+    enable_l2: bool = Field(True, description="System invariant — L2 is part of the architecture")
+    enable_l3: bool = Field(True, description="System invariant — L3 is part of the architecture")
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
     l2_temperature: float = Field(0.3)
