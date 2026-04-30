@@ -42,6 +42,7 @@ Full tree:
       index.json                       # campaign metadata + trial index + final summary block
       log.md                           # rendered narrative digest (per-round + heatmap + winner)
       trials/trial_NNNN.json           # resume source of truth
+      ledger.jsonl                     # RunLedger spine — typed Decision/Phase/Snapshot append-only stream
       langfuse/                        # trace persistence (incl. events.jsonl mirror — not read for state)
       prompts/{family}/{version}/      # rendered optimizer prompts
       archived/resumed_at_{ts}/        # mid-cycle rewind history
@@ -50,7 +51,7 @@ Full tree:
         rounds/round_NNNN.json         # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3)
       forks/                           # all forks of this family nest here, regardless of depth
         {root_cycle_id}_fork_xxx/      # one subdir per fork; per-cycle audit only
-          index.json   log.md
+          index.json   log.md   ledger.jsonl  # fork's own ledger inherits from parent up to FORK_CUT
           trials/   langfuse/   prompts/   .cache/
           # NO dashboard.json / output.log — those live at the family root above
     library/                           # the measurement archive — database core

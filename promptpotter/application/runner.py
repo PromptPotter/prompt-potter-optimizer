@@ -587,12 +587,16 @@ async def run_optimization(
         session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
         session.state.round_recorder.rehydrate_sticky()
         fork_ledger = RunLedger.open(cycle_dir)
-        # Inherit from parent up to its current tail — the parent's
-        # FORK_CUT decision (just appended in _fork_at_divergence) is
-        # included so a tail of the fork's iter() sees the cutover
-        # before the fork's own appends start.
-        if pre_loop_cycle_id and (parent_ledger := session.state.ledger) is not None:
-            fork_ledger.inherit_from(parent_ledger, parent_ledger.next_offset)
+        # Re-open the parent so the offset count reflects ``_fork_at_divergence``'s
+        # FORK_CUT append (which used a separate RunLedger instance and so
+        # didn't bump the in-memory cursor of ``session.state.ledger``).
+        # The fork inherits the parent's full history up to the fresh tail
+        # so a tail of ``fork.iter()`` sees the FORK_CUT marker before the
+        # fork's own appends.
+        if pre_loop_cycle_id:
+            parent_dir = CycleDir(session.store.campaigns.campaign_dir(pre_loop_cycle_id))
+            fresh_parent = RunLedger.open(parent_dir)
+            fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
         session.state.ledger = fork_ledger
 
     if emitter is None:

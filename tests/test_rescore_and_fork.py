@@ -208,3 +208,16 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(
     assert cut.kind is DecisionKind.FORK_CUT
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 1}
+
+    # The fork's ledger inheriting from the freshly-reopened parent must
+    # see the FORK_CUT marker — i.e. the runner's "re-open parent before
+    # inherit" pattern is what downstream readers depend on.
+    fork_dir = stores.campaigns.campaign_dir(new_cycle)
+    fork_ledger = RunLedger.open(CycleDir(fork_dir))
+    fresh_parent = RunLedger.open(CycleDir(parent_dir))
+    fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
+    fork_history = list(fork_ledger.iter())
+    assert any(
+        isinstance(r, Decision) and r.kind is DecisionKind.FORK_CUT and r.outcome == new_cycle
+        for r in fork_history
+    ), "fork inheriting from re-opened parent must see the FORK_CUT marker"

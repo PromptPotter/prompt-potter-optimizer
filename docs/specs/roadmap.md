@@ -95,7 +95,7 @@ PipelineSchema model, `GET /pipeline` self-describing config, schema derivation 
 
 ## Parity: Entry-Point Parity -- Complete
 
-Three-layer I/O architecture (persistence / display / control). `CampaignPersistenceEmitter` auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log` (per-cycle) plus `session.json`, `journal.md`, `notes.md` (per-session). Parity tests enforce both artifact sets. Stop control is via Ctrl+C (CLI) or kernel interrupt (notebook); the file-based `control.json` mechanism was retired alongside the `control` / `show-status` / `show-results` CLI commands. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
+Three-layer I/O architecture (persistence / display / control). `LiveDashboardProjection` and `AuditTrailProjection` (under `infrastructure/projections/`) auto-created by `run_optimization()` — all entry points produce identical `dashboard.json`, `output.log` (per-cycle family) plus `session.json`, `journal.md`, `notes.md` (per-session). Parity tests enforce both artifact sets. Stop control is via Ctrl+C (CLI) or kernel interrupt (notebook); the file-based `control.json` mechanism was retired alongside the `control` / `show-status` / `show-results` CLI commands. Spec: [`m-parity-entry-point-parity.md`](m-parity-entry-point-parity.md)
 
 ---
 

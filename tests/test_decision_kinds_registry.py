@@ -194,6 +194,21 @@ def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> 
     assert isinstance(history[2], Decision) and history[2].outcome == "c2"
 
 
+def test_divergence_hint_lists_every_decision_kind() -> None:
+    """The CLI hint shown on resume-divergence enumerates every kind by gating mode.
+
+    Was hardcoded — silently rotted when a kind was added or moved between
+    REPLAYED/ARCHIVAL. Now derived from ``DECISION_GATING`` so adding a
+    kind updates the operator message automatically.
+    """
+    from promptpotter.presentation.cli.campaign_runner import _DIVERGENCE_HINT
+
+    for kind, mode in DECISION_GATING.items():
+        assert kind.value in _DIVERGENCE_HINT, (
+            f"_DIVERGENCE_HINT must mention {kind.value} ({mode.value})"
+        )
+
+
 def test_runledger_inherit_from_rejects_rebind(tmp_path: Path) -> None:
     """Re-binding a fork's parent silently would mask the cutover lineage."""
     import pytest

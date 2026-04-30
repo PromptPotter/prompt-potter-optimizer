@@ -13,7 +13,7 @@
 
 ## L4 partial — what this also is
 
-The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, `optimize --sweep` is the cheap-trial mechanism, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~400 LOC of new code**, all reusing existing primitives (`RoundRecorder`, `OptSearchPoint` traces, `MeasurementArchive`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
+The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, `optimize --sweep` is the cheap-trial mechanism, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~400 LOC of new code**, all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
 
 ## Why a milestone
 

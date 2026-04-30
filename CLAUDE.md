@@ -79,7 +79,7 @@ promptpotter/
 │   │                  # hard_sample_sorter.py
 │   ├── scoring/       # score_search_point gateway, formula.py (compile_scorer + steer)
 │   └── datasets/datasets.py
-├── infrastructure/  # backend.py, llm.py, persistence.py, tracing.py, store/
+├── infrastructure/  # backend.py, llm.py, ledger.py, projections/, tracing.py, store/
 ├── presentation/    # api.py, cli/, views/ — thin per-surface adapters
 ├── shared/          # leaf utilities (errors, hashing, statistics, composite)
 └── config/          # settings (incl. PROMPT_STRING_FIELDS, APP_VERSION), logging
@@ -88,7 +88,7 @@ promptpotter/
 **Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
 
 **Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — `CampaignPersistenceEmitter` in `infrastructure/persistence.py`. Entry points MUST NOT write campaign artifacts directly. Campaign artifacts split into two bands: **root telemetry** (`dashboard.json`, `output.log`) binds to the family root cycle (the one with no `parent_cycle_id`) — forks share one continuous live stream; **per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` + `.cache/rounds/` for internal resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract.
+- **Persistence** (shared, mandatory) — two newtype-guarded projections under `infrastructure/projections/`: `LiveDashboardProjection` (takes `RootCycleDir`, owns `dashboard.json` + `output.log` bound to the family-root cycle) and `AuditTrailProjection` (takes `CycleDir`, owns `.cache/rounds/round_NNNN.json` per cycle/fork). Both subscribe to the per-cycle `RunLedger` (`infrastructure/ledger.py`) — every fact (`Decision` / `Phase` / `Snapshot`) is appended to `events.jsonl`; the legacy per-callback API still drives them in parallel during the Phase 3 cleanup. Forks are first-class via `RunLedger.inherit_from(parent, offset)`; a fork's `iter()` walks the parent's records up to the cut, then its own appends. The `DecisionKind` enum + `DECISION_GATING` table in `domain/run_records.py` are the single source of truth for replayed-vs-archival gating; adding a new kind without an entry fails `tests/test_decision_kinds_registry.py`. The remaining per-cycle audit shape (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` for resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract. Entry points MUST NOT write campaign artifacts directly.
 - **Display** (per-entry-point) — caller passes `RunListener`. MUST NOT write to disk.
 - **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
 
@@ -143,7 +143,7 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 - `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `langfuse/`, `prompts/`, plus `.cache/candidates/` and `.cache/rounds/` for internal resume state). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
 - `{tenant_id}/library/` — **the measurement archive — the database core, cross-cycle, cross-session, cross-tenant.** One row = `(sample × config → outcome)`. Two retrieval views, both first-class: `MeasurementArchive.measurements_for_sample(sample_id)` (by training example) and `MeasurementArchive.measurements_for_config(predicate)` (by searchpoint). Both return `list[Measurement]`. Cache reuse and LLM digests are derived views over this same archive. See [`docs/concepts/measurement-archive.md`](docs/concepts/measurement-archive.md) and [`docs/developer/measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md). Layout: `library/measurements/{run_id}.json` (facts), `library/measurements.json` (index), plus `backends/`, datasets, `prompt_aliases.json`. Both digest layers (`AxisIndex` and `SampleIndex`) are in-memory only — rebuilt from the archive every refresh, no on-disk file.
 
-Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/persistence.py` and `application/runner.py`.
+Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/projections/`, `infrastructure/ledger.py`, and `application/runner.py`.
 
 ## Key Patterns
 
