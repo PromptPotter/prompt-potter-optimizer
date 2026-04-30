@@ -60,6 +60,7 @@ from promptpotter.domain.results import (
     RoundBaseline,
     RoundResult,
 )
+from promptpotter.domain.run_records import DecisionKind
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
@@ -650,7 +651,7 @@ def _record_elimination_cut(
     if decisions is not None:
         record_decision(
             decisions,
-            "elimination_cut",
+            DecisionKind.ELIMINATION_CUT,
             {
                 "candidate_id": osp_c.lineage.id,
                 "prior_candidate_ids": priors_at_test,
@@ -915,7 +916,7 @@ async def l1_score(
 
     record_decision(
         decisions,
-        "round_winner",
+        DecisionKind.ROUND_WINNER,
         {
             "candidate_ids": [ind.lineage.id for ind in scored],
             "round_num": round_num,

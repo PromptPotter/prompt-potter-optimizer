@@ -37,6 +37,7 @@ from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.results import RoundBaseline, RoundResult
+from promptpotter.domain.run_records import DECISION_GATING, Decision, DecisionKind, GatingMode
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
@@ -77,24 +78,11 @@ __all__ = [
 # ---------------------------------------------------------------------------
 # Decision ledger — records that drive resume divergence-checking
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class Decision:
-    """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
-
-    kind: str
-    inputs_ref: dict[str, Any]
-    outcome: Any
-    data: dict[str, Any] = field(default_factory=dict)
-
-    def to_dict(self) -> dict[str, Any]:
-        return {
-            "kind": self.kind,
-            "inputs_ref": dict(self.inputs_ref),
-            "outcome": self.outcome,
-            "data": dict(self.data),
-        }
+#
+# ``Decision`` and ``DecisionKind`` are defined in
+# :mod:`promptpotter.domain.run_records` so the broader ledger spine can
+# reach them. They are re-exported here for compatibility with call sites
+# that still import from this module.
 
 
 @dataclass(frozen=True)
@@ -127,11 +115,19 @@ class ForkResult:
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
 
-REPLAYERS: dict[str, Replayer] = {}
+REPLAYERS: dict[DecisionKind, Replayer] = {}
 
 
-def replayer(kind: str) -> Callable[[Replayer], Replayer]:
-    """Register a replayer function for a decision kind."""
+def replayer(kind: DecisionKind) -> Callable[[Replayer], Replayer]:
+    """Register a replayer function for a ``REPLAYED`` decision kind.
+
+    ``ARCHIVAL`` kinds (per ``DECISION_GATING``) MUST NOT be registered;
+    ``test_decision_kinds_registry.py`` enforces the pairing.
+    """
+    if DECISION_GATING.get(kind) is not GatingMode.REPLAYED:
+        raise ValueError(
+            f"replayer registered for {kind!r}, which is not REPLAYED in DECISION_GATING"
+        )
 
     def deco(fn: Replayer) -> Replayer:
         REPLAYERS[kind] = fn
@@ -142,7 +138,7 @@ def replayer(kind: str) -> Callable[[Replayer], Replayer]:
 
 def record_decision(
     decisions: list[Decision],
-    kind: str,
+    kind: DecisionKind,
     inputs_ref: dict[str, Any],
     outcome: Any,
     *,
@@ -150,11 +146,18 @@ def record_decision(
 ) -> Any:
     """Append a ``Decision`` to *decisions* and return *outcome* for passthrough.
 
-    Wire serialization (`to_dict()`) happens once when the in-memory list is
-    folded into ``RoundResult.decisions`` (which stays ``list[dict]`` for
-    Pydantic + JSON wire compatibility).
+    ``Decision.to_dict()`` projects to the legacy wire shape when the
+    in-memory list is folded into ``RoundResult.decisions`` (which stays
+    ``list[dict]`` for Pydantic + JSON wire compatibility).
     """
-    decisions.append(Decision(kind, dict(inputs_ref), outcome, dict(data or {})))
+    decisions.append(
+        Decision(
+            kind=kind,
+            inputs_ref=dict(inputs_ref),
+            outcome=outcome,
+            data=dict(data or {}),
+        )
+    )
     return outcome
 
 
@@ -198,7 +201,7 @@ def _mean_score(results: list[dict]) -> float:
     return sum(float(r.get("score", 0.0)) for r in results) / len(results)
 
 
-@replayer("round_winner")
+@replayer(DecisionKind.ROUND_WINNER)
 def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
@@ -215,7 +218,7 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     return winner_id
 
 
-@replayer("elimination_cut")
+@replayer(DecisionKind.ELIMINATION_CUT)
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-run the Wilcoxon signed-rank gate under rescored scores."""
     from promptpotter.shared.statistics import should_stop_early
@@ -270,7 +273,7 @@ def _derive_stall_count(
     return rounds_after if baseline is not None else 0
 
 
-@replayer("l2_escalation_trigger")
+@replayer(DecisionKind.L2_ESCALATION_TRIGGER)
 def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-derive L2 fire/patience-defer."""
     patience = inputs_ref.get("l2_patience")
@@ -282,7 +285,7 @@ def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     return stalls < int(patience)
 
 
-@replayer("l3_escalation_trigger")
+@replayer(DecisionKind.L3_ESCALATION_TRIGGER)
 def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-derive whether L3 fires. Same shape as ``l2_escalation_trigger``."""
     patience = inputs_ref.get("l3_patience")
@@ -909,7 +912,7 @@ async def escalate_l2(
     entry_round_l2 = esc.l2.round if esc.l2.round > 0 else -1
     record_decision(
         cycle.pending_decisions,
-        "l2_escalation_trigger",
+        DecisionKind.L2_ESCALATION_TRIGGER,
         {
             "round_num": round_num,
             "l2_patience": opt.l2_patience,
@@ -969,7 +972,7 @@ async def escalate_l2(
     entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
     record_decision(
         cycle.pending_decisions,
-        "l3_escalation_trigger",
+        DecisionKind.L3_ESCALATION_TRIGGER,
         {
             "round_num": round_num,
             "l3_patience": opt.l3_patience,

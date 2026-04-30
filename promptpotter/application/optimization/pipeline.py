@@ -2395,6 +2395,7 @@ class L2RefineStrategy(LayerTransition):
 
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         from promptpotter.application.optimization.cycle import record_decision
+        from promptpotter.domain.run_records import DecisionKind
 
         if result.task_context:
             cycle.opt_sp.task_context = result.task_context
@@ -2417,7 +2418,7 @@ class L2RefineStrategy(LayerTransition):
         is_probe = result.action == OptimizerAction.PROBE_ROUND
         record_decision(
             cycle.pending_decisions,
-            "probe_round_commitment",
+            DecisionKind.PROBE_ROUND_COMMITMENT,
             {
                 "round_num": round_num,
                 "l2_round": cycle.escalation.l2.round,
