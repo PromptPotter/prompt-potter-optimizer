@@ -586,7 +586,14 @@ async def run_optimization(
         cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
         session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
         session.state.round_recorder.rehydrate_sticky()
-        session.state.ledger = RunLedger.open(cycle_dir)
+        fork_ledger = RunLedger.open(cycle_dir)
+        # Inherit from parent up to its current tail — the parent's
+        # FORK_CUT decision (just appended in _fork_at_divergence) is
+        # included so a tail of the fork's iter() sees the cutover
+        # before the fork's own appends start.
+        if pre_loop_cycle_id and (parent_ledger := session.state.ledger) is not None:
+            fork_ledger.inherit_from(parent_ledger, parent_ledger.next_offset)
+        session.state.ledger = fork_ledger
 
     if emitter is None:
         from promptpotter.application.baseline import build_campaign_emitter

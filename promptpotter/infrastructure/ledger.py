@@ -11,9 +11,11 @@ Path-newtype guards (``RootCycleDir`` / ``CycleDir``) live in
 projection writers in :mod:`promptpotter.infrastructure.projections` can
 import them without crossing hexagonal layers.
 
-Forks become first-class via ``RunLedger.inherit_from(parent, offset)`` —
-Phase 4 work; the placeholder hook is here so Phase 2/3 projections can be
-written against the final shape.
+Forks are first-class via ``RunLedger.inherit_from(parent, offset)``: a
+fork's ``iter()`` walks the parent's records up to ``offset``, then its
+own appends. The parent records the cut as a
+``Decision(kind=FORK_CUT, ...)`` so the divergence walker sees the
+boundary.
 """
 
 from __future__ import annotations
@@ -53,6 +55,8 @@ class RunLedger:
         self._path = path
         self._subscribers: list[Projection] = []
         self._next_offset = self._scan_existing_offset()
+        self._inherit_parent: RunLedger | None = None
+        self._inherit_offset: int = 0
 
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> RunLedger:
@@ -86,19 +90,50 @@ class RunLedger:
     def iter(self, since: int = 0) -> Iterator[RunRecord]:
         """Yield records from disk starting at offset ``since``.
 
+        For an inherited ledger (``inherit_from`` set), walks the parent's
+        records up to the inherit offset first, then this ledger's own
+        records. ``since`` is interpreted against the combined offset
+        space — offset 0 is the parent's first record.
+
         Walks the file every call — projections that need streaming should
         ``bind`` instead. Records past the file's end are silently absent.
         """
+        produced = 0
+        if self._inherit_parent is not None:
+            for rec in self._inherit_parent.iter():
+                if produced >= self._inherit_offset:
+                    break
+                if produced >= since:
+                    yield rec
+                produced += 1
         if not self._path.exists():
             return
         with self._path.open("r", encoding="utf-8") as fh:
-            for i, line in enumerate(fh):
-                if i < since:
-                    continue
+            for line in fh:
                 line = line.strip()
                 if not line:
                     continue
-                yield _RECORD_ADAPTER.validate_json(line)
+                if produced >= since:
+                    yield _RECORD_ADAPTER.validate_json(line)
+                produced += 1
+
+    def inherit_from(self, parent: RunLedger, offset: int) -> None:
+        """Mark this ledger as a fork of *parent*, replaying parent records up to *offset*.
+
+        Subsequent ``iter()`` calls walk the parent's first ``offset``
+        records before this ledger's own. Subscribers see only this
+        ledger's appended records (parent records aren't re-broadcast on
+        subscribe — the parent already broadcast them when they happened).
+        Idempotent: calling twice with the same args is a no-op.
+        """
+        if self._inherit_parent is parent and self._inherit_offset == offset:
+            return
+        if self._inherit_parent is not None:
+            raise ValueError("RunLedger.inherit_from: already inheriting; cannot rebind")
+        if offset < 0:
+            raise ValueError(f"RunLedger.inherit_from: offset must be >= 0, got {offset}")
+        self._inherit_parent = parent
+        self._inherit_offset = offset
 
     def bind(self, projection: Projection) -> None:
         """Subscribe a projection to subsequent appends.

@@ -43,6 +43,7 @@ class DecisionKind(enum.StrEnum):
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
     PROBE_ROUND_COMMITMENT = "probe_round_commitment"
+    FORK_CUT = "fork_cut"
 
 
 class GatingMode(enum.StrEnum):
@@ -66,6 +67,12 @@ DECISION_GATING: dict[DecisionKind, GatingMode] = {
     DecisionKind.L2_ESCALATION_TRIGGER: GatingMode.REPLAYED,
     DecisionKind.L3_ESCALATION_TRIGGER: GatingMode.REPLAYED,
     DecisionKind.PROBE_ROUND_COMMITMENT: GatingMode.ARCHIVAL,
+    # Fork is observable from the parent's history (the FORK_CUT record in
+    # the parent ledger names the new cycle id and the offset that the
+    # fork inherits from). It's archival because the fork's identity is
+    # downstream of the divergence-checked decisions, not part of the
+    # gating itself — replaying it can't re-derive a different fork.
+    DecisionKind.FORK_CUT: GatingMode.ARCHIVAL,
 }
 
 

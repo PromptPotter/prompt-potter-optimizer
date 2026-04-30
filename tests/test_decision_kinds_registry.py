@@ -169,6 +169,45 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]
 
 
+def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> None:
+    """A fork's iter() walks parent's records up to the cut offset, then its own.
+
+    Phase 4 contract: the fork's view of its history is parent[0:cut] +
+    fork's own appends. Subscribers of the fork ledger only see new
+    appends (the parent already broadcast its records when they
+    happened) — but a downstream replay (e.g. a webapp opening the
+    fork) walks the combined stream.
+    """
+    parent = RunLedger.open(CycleDir(tmp_path / "parent"))
+    parent.append(Phase(phase="round", event="complete", round=0))
+    parent.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
+    parent.append(Phase(phase="round", event="complete", round=1))  # past the cut
+
+    fork = RunLedger.open(CycleDir(tmp_path / "fork"))
+    fork.inherit_from(parent, offset=2)  # parent's first 2 records
+    fork.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c2", round=1))
+
+    history = list(fork.iter())
+    assert len(history) == 3
+    assert isinstance(history[0], Phase) and history[0].round == 0
+    assert isinstance(history[1], Decision) and history[1].outcome == "c1"
+    assert isinstance(history[2], Decision) and history[2].outcome == "c2"
+
+
+def test_runledger_inherit_from_rejects_rebind(tmp_path: Path) -> None:
+    """Re-binding a fork's parent silently would mask the cutover lineage."""
+    import pytest
+
+    parent_a = RunLedger.open(CycleDir(tmp_path / "a"))
+    parent_b = RunLedger.open(CycleDir(tmp_path / "b"))
+    fork = RunLedger.open(CycleDir(tmp_path / "fork"))
+    fork.inherit_from(parent_a, 0)
+    # Idempotent re-bind to same args is fine.
+    fork.inherit_from(parent_a, 0)
+    with pytest.raises(ValueError, match="already inheriting"):
+        fork.inherit_from(parent_b, 0)
+
+
 def test_open_cycle_ledger_resumes_offsets(tmp_path: Path) -> None:
     """A reopened ledger continues counting from the existing tail.
 

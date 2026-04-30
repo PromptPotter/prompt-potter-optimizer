@@ -305,7 +305,17 @@ def _fork_at_divergence(
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
 ) -> str:
-    """Mint a sibling cycle that re-runs round ``fork_from_round``."""
+    """Mint a sibling cycle that re-runs round ``fork_from_round``.
+
+    Records a ``Decision(kind=FORK_CUT, ...)`` on the parent's ledger
+    naming the new cycle id and the fork-from-round so any downstream
+    reader following the parent's ``events.jsonl`` sees the cutover
+    inline. The fork's own ledger inherits from the parent up to (but
+    not including) the FORK_CUT — wired in :mod:`runner` after the
+    fork is detected.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import RunLedger
     from promptpotter.infrastructure.store.base import read_json_optional, write_json
     from promptpotter.infrastructure.store.stores import save_active_pointer
 
@@ -317,6 +327,20 @@ def _fork_at_divergence(
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
+
+    # Parent ledger gets a FORK_CUT record naming the new cycle so a
+    # tail of the parent sees the cutover. Best-effort — a missing or
+    # corrupt ledger doesn't block the fork from minting.
+    with graceful("FORK_CUT decision append failed"):
+        parent_ledger = RunLedger.open(CycleDir(old_dir))
+        parent_ledger.append(
+            Decision(
+                kind=DecisionKind.FORK_CUT,
+                inputs_ref={"from_round": fork_from_round},
+                outcome=new_cycle_id,
+                data={"forked_at": datetime.now(UTC).isoformat()},
+            )
+        )
 
     index = read_json_optional(old_dir / "index.json") or {}
     best_acc = max((float(t.get("accuracy", 0.0)) for t in surviving_trials), default=0.0)

@@ -169,3 +169,42 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
 
     pointer = json.loads(ptr.read_text(encoding="utf-8"))
     assert pointer == {"tenant_id": tenant, "session_id": "s_test", "cycle_id": new_cycle}
+
+
+def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """The parent's events.jsonl must end with a FORK_CUT decision naming the new cycle.
+
+    A reader tailing the parent's ledger sees the cutover inline — no
+    cross-file polling needed to discover that a fork was minted.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.infrastructure.ledger import RunLedger
+
+    tenant = "default"
+    old_cycle = "cycle_fork_cut_test"
+    trials = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=3)
+    ptr = tmp_path / ".promptpotter" / "active_session.json"
+    monkeypatch.setattr("promptpotter.infrastructure.store.stores._ACTIVE_SESSION_PATH", ptr)
+
+    stores = build_stores(tmp_path, tenant_id=tenant)
+    parent_dir = stores.campaigns.campaign_dir(old_cycle)
+    new_cycle = _fork_at_divergence(
+        stores.campaigns,
+        tenant_id=tenant,
+        session_id="s_test",
+        old_cycle_id=old_cycle,
+        fork_from_round=1,
+        surviving_trials=trials[:1],
+    )
+
+    parent_ledger = RunLedger.open(CycleDir(parent_dir))
+    records = list(parent_ledger.iter())
+    assert records, "parent ledger must contain the FORK_CUT record"
+    cut = records[-1]
+    assert isinstance(cut, Decision)
+    assert cut.kind is DecisionKind.FORK_CUT
+    assert cut.outcome == new_cycle
+    assert cut.inputs_ref == {"from_round": 1}

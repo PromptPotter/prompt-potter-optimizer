@@ -402,17 +402,29 @@ def _build_live_display(args: argparse.Namespace, *, session, campaign_config, b
     )
 
 
-_DIVERGENCE_HINT = (
-    "Checked decisions: round_winner, elimination_cut, "
-    "l2_escalation_trigger, l3_escalation_trigger. "
-    "(probe_round_commitment is recorded but not divergence-gated — "
-    "it depends on L2's LLM output, which is invariant under a "
-    "pure scorer swap.)\n\n"
-    "Rerun with `--fork-on-divergence` to branch a sibling cycle "
-    "here under the current scorer, revert "
-    "`campaign.json::scoring` to continue the original trajectory, "
-    "or pass `--no-divergence-check` to accept the divergence."
-)
+def _build_divergence_hint() -> str:
+    """Derive the divergence-checked-kinds list from the DECISION_GATING table.
+
+    The hint used to hardcode the gated kinds, which silently rotted
+    every time a new ``DecisionKind`` member landed. Now it walks the
+    enum so adding a kind (with its gating choice) updates the operator
+    message automatically.
+    """
+    from promptpotter.domain.run_records import DECISION_GATING, GatingMode
+
+    replayed = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.REPLAYED)
+    archival = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.ARCHIVAL)
+    return (
+        f"Checked decisions: {', '.join(replayed)}.\n"
+        f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
+        "Rerun with `--fork-on-divergence` to branch a sibling cycle "
+        "here under the current scorer, revert "
+        "`campaign.json::scoring` to continue the original trajectory, "
+        "or pass `--no-divergence-check` to accept the divergence."
+    )
+
+
+_DIVERGENCE_HINT = _build_divergence_hint()
 
 
 def _prepare_cycle_for_optimize(
