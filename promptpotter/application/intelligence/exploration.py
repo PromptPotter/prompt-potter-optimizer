@@ -1,11 +1,32 @@
-"""Rasch model + Knowledge Gradient for adaptive sample selection."""
+"""Rasch + KG primitives + round-level scoring-set evolution.
+
+Two related concerns share this module so the Rasch posterior and the
+sample-swap policy that consumes it stay co-located:
+
+1. **Rasch model + Knowledge Gradient** — fitting the IRT posterior
+   (``RaschPosterior`` / ``fit_rasch_irt``) and computing per-sample KG
+   used to rank exploration value. Pure-math primitives.
+
+2. **Round-level scoring-set evolution** (``evolve_scoring_set``) —
+   between rounds, swap understood samples (low δ_s SE) out of the active
+   scoring set in favor of high-KG samples. Exploration / exploitation
+   on which sample IDs are in play next round.
+"""
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass, field
-from typing import NamedTuple
+from typing import TYPE_CHECKING, NamedTuple
 
 import numpy as np
+
+if TYPE_CHECKING:
+    from promptpotter.application.config import ScoringSetConfig
+    from promptpotter.domain.results import RoundResult
+    from promptpotter.domain.sample import Sample
+
+logger = logging.getLogger(__name__)
 
 
 class Observation(NamedTuple):
@@ -206,24 +227,9 @@ def confidence_interval_width(se: float, z: float = 1.96) -> float:
     return 2.0 * z * se
 
 
-"""Round-level scoring-set evolution via Rasch + KG.
-
-Between rounds, swap understood samples (low δ_s SE) out of the active
-scoring set in favor of high-Knowledge-Gradient samples — exploration /
-exploitation on which sample IDs are in play next round.
-"""
-
-
-import logging
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from promptpotter.application.config import ScoringSetConfig
-    from promptpotter.domain.results import RoundResult
-    from promptpotter.domain.sample import Sample
-
-logger = logging.getLogger(__name__)
+# ===========================================================================
+# Round-level scoring-set evolution via Rasch + KG
+# ===========================================================================
 
 __all__ = ["EvolveResult", "build_observations", "build_scoring_set_event", "evolve_scoring_set"]
 

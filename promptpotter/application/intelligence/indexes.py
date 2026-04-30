@@ -1,4 +1,26 @@
-"""SampleIndex — per-sample derived view over MeasurementArchive."""
+"""SampleIndex / ConfigIndex / AxisIndex — derived views over the MeasurementArchive.
+
+Three collaborating views, kept in one module so they share the
+incremental-refresh contract (``_seen_runs`` cursors) and the archive's
+``load_since`` / ``list_all`` ingestion seam:
+
+1. **SampleIndex** — per-sample state keyed by ``sample.id: int``.
+   Owns Sample primitives + per-sample aggregate tables (hits, failure
+   modes, degradation counts, flips). Pure derivation; no on-disk artifact.
+
+2. **ConfigIndex** — per-config view caching ``node_configs → set[run_id]``
+   so ``measurements_for_config(predicate)`` skips the O(N) full scan and
+   becomes O(unique_configs).
+
+3. **AxisIndex** — derived axis-keyed view; folds new index entries into
+   ``_axis_values`` via an in-process ``_axis_seen_runs`` cursor; hosts
+   the digest API consumed by L1/L2/L3 prompts (``digest_for_l1_generate``
+   / ``_l1_critique`` / ``_l2`` / ``_l3``). Holds a SampleIndex + ConfigIndex
+   internally so refresh updates all three in one walk.
+
+Failure-group × axis correlations are recomputed on every refresh — cheap
+at current scale and avoids drift from a throttle.
+"""
 
 from __future__ import annotations
 
@@ -6,14 +28,18 @@ import json
 import logging
 from collections import Counter, defaultdict
 from dataclasses import dataclass, field
+from itertools import combinations, pairwise
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.intelligence.exploration import confidence_interval_width
+from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.sample import Sample
+from promptpotter.domain.scoring import Scorer
 from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.sample import Measurement
+    from promptpotter.infrastructure.store import Stores
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 logger = logging.getLogger(__name__)
@@ -407,31 +433,9 @@ class SampleIndex:
         return Counter(modes).most_common(1)[0][0] if modes else ""
 
 
-"""AxisIndex — derived axis-keyed view over the MeasurementArchive.
-
-Both digest sides are pure derivations of the archive and refresh
-**incrementally**: the axis side folds new index entries into
-``_axis_values`` via an in-process ``_axis_seen_runs`` cursor, and the
-sample-side :class:`SampleIndex` ingests delta runs via
-``archive.load_since(sample_index._seen_runs)``. Neither owns an on-disk
-artifact; the archive is the single source of truth.
-
-The class hosts the digest API consumed by L1/L2/L3 prompts. Names are
-stable LLM-context surfaces — ``digest_for_l1_generate`` / ``_l1_critique``
-/ ``_l2`` / ``_l3``.
-"""
-
-
-import logging
-from dataclasses import dataclass, field
-from itertools import combinations, pairwise
-from typing import TYPE_CHECKING
-
-from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.domain.scoring import Scorer
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+# ===========================================================================
+# AxisIndex — axis-keyed digest view
+# ===========================================================================
 
 
 NOISE_THRESHOLD = 0.02

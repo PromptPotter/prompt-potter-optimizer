@@ -1,8 +1,14 @@
-"""
-Project-based backend storage endpoints.
+"""HTTP read API — backend storage + campaign registry endpoints.
 
-Manages backend connections, syncs experiments from backends in their
-native format, and exposes pipeline discovery.
+Two routers in one module so they share the storage / pipeline-discovery
+imports and the ``StoreDep`` dependency:
+
+1. **Backend storage** (``backends_router``) — manages backend connections,
+   syncs experiments from backends in their native format, and exposes
+   pipeline discovery.
+
+2. **Campaign registry** (``campaigns_router``) — lists + views
+   optimization campaigns, nested under ``/backends/{backend_id}/campaigns``.
 """
 
 import logging
@@ -191,17 +197,10 @@ async def get_pipeline(backend_id: str, store: StoreDep):
     )
 
 
-"""
-Campaign registry endpoints.
-
-Provides REST API for listing and viewing optimization campaigns,
-nested under ``/backends/{backend_id}/campaigns``.
-"""
-
-from typing import Any
-
-from fastapi import APIRouter
-from pydantic import BaseModel, Field
+# ===========================================================================
+# Campaign registry endpoints — REST API for listing + viewing campaigns,
+# nested under /backends/{backend_id}/campaigns.
+# ===========================================================================
 
 campaigns_router = APIRouter()
 

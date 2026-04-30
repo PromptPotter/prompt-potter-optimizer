@@ -1,27 +1,48 @@
-"""Ground-truth loaders (Excel, HuggingFace) and train/test splitter.
+"""Datasets module — three related concerns kept in one file so loader / prompt-store / trace-loader share imports.
 
-Each loader returns ``list[Sample]`` — the canonical per-sample domain
-object. Legacy dicts are no longer returned; conversion happens at load
-time via ``Sample.from_dict`` for any on-disk data predating pass 2.
+Sections:
+
+1. **Ground-truth loaders + train/test splitter** — Excel, HuggingFace,
+   plus the dataset-cache reader used by ``init`` / ``optimize``. Each
+   loader returns ``list[Sample]`` (the canonical per-sample domain object).
+   Legacy dicts are no longer returned; conversion happens at load time
+   via ``Sample.from_dict`` for any on-disk data predating pass 2.
+
+2. **Per-dataset starting-point prompt store** — ``load_node_prompt`` /
+   ``load_dataset_prompt`` / ``dataset_prompt_dir`` etc. The single source
+   for baseline ``PromptTemplate`` JSON files under
+   ``datasets/{name}/prompts/``. Resolution is per-node first, then
+   dataset-wide ``{variant}.json`` fallback.
+
+3. **Potter-trace dataset loader** — emits one row per
+   ``(trial_N → trial_N+1)`` transition from archived ``trials/trial_NNNN.json``
+   files. Rows conform to the dataset-row contract so they flow through
+   the existing ``load_dataset()`` / ``build_dataset_run_data()`` pipeline
+   unchanged. Raw material for self-optimization.
 """
 
 from __future__ import annotations
 
+import functools
 import hashlib
+import json
 import logging
 import random
 import re
 from collections.abc import Callable
 from datetime import UTC, datetime
+from itertools import pairwise
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
 from promptpotter.domain.sample import Sample
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -361,32 +382,13 @@ def build_dataset_run_data(
     return data
 
 
-"""Per-dataset starting-point prompt templates — the canonical baseline store.
-
-Each dataset ships a ``datasets/{name}/prompts/`` directory of named
-``PromptTemplate`` JSON files (6-field canonical decomposition).  The
-campaign init flow loads one per prompt-bearing node and projects it
-into the starting ``JobSearchPoint`` as the node's ``prompt`` config.
-
-**This is the one true source for baseline prompts.**
-
-Layout::
-
-    datasets/{name}/prompts/
-      default.json            # single-node datasets
-      {node_name}.json        # per-node canonical templates (multi-node)
-
-Resolution order in ``load_node_prompt(dataset, node, variant="default")``:
-  1. ``{node}.json`` if present — per-node canonical template
-  2. ``{variant}.json`` — dataset-wide fallback (typical single-node case)
-  3. ``FileNotFoundError`` with a migration hint listing both paths
-"""
-
-
-import functools
-import json
-
-from promptpotter.domain.opt_search_point import PromptTemplate
+# ===========================================================================
+# Per-dataset starting-point prompt store
+# Each dataset ships datasets/{name}/prompts/ with PromptTemplate JSON files
+# (6-field canonical decomposition). Resolution: per-node {node_name}.json
+# first, then dataset-wide {variant}.json, then FileNotFoundError citing
+# both expected paths. This is the one true source for baseline prompts.
+# ===========================================================================
 
 __all__ = [
     "dataset_prompt_dir",
@@ -466,26 +468,14 @@ def list_dataset_prompts(dataset: str) -> list[str]:
     return sorted(p.stem for p in d.glob("*.json"))
 
 
-"""Potter trace dataset loader.
-
-Reads archived ``campaigns/{cycle_id}/trials/trial_NNNN.json`` files and emits one
-row per ``(trial_N → trial_N+1)`` transition.  Each row is the raw material
-for self-optimization: the potter-state context at round N, the prompt change
-the potter actually made, and the accuracy delta that resulted.
-
-Rows conform to the dataset-row contract
-(``{"query", "ground_truth", ...}``) so they flow through the existing
-``load_dataset()`` / ``build_dataset_run_data()`` pipeline unchanged.
-"""
-
-
-from itertools import pairwise
-from typing import TYPE_CHECKING
-
-from promptpotter.domain.opt_search_point import OptSearchPoint
-
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.store import Stores
+# ===========================================================================
+# Potter-trace dataset loader
+# Reads campaigns/{cycle_id}/trials/trial_NNNN.json and emits one row per
+# (trial_N → trial_N+1) transition: the potter-state context at round N,
+# the prompt change the potter actually made, and the accuracy delta that
+# resulted. Rows conform to the dataset-row contract so they flow through
+# load_dataset / build_dataset_run_data unchanged.
+# ===========================================================================
 
 
 def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:

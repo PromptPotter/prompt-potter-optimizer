@@ -1,14 +1,24 @@
-"""Per-candidate (individual) renderers — pre-scoring header + post-scoring summary.
+"""Per-candidate + round-summary renderers — single module so per-round display surfaces share imports.
 
-``IndividualSummary`` is the structured output ``LiveDisplay`` and the
-notebook's box renderer both compose into their respective layouts.
+Two related sections:
+
+1. **Per-candidate (individual) renderers** — ``IndividualSummary`` is the
+   structured output ``LiveDisplay`` and the notebook's box renderer both
+   compose into their respective layouts. ``build_individual_summary`` /
+   ``fmt_individual_header`` produce pre-scoring header + post-scoring summary.
+
+2. **Round-summary renderers** — ``render_progress_table`` (round-over-round
+   trajectory), ``render_round_stats`` (per-round hits / pipeline / recall),
+   ``render_patience_status`` (patience banner).
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
+from promptpotter.application.optimization.elimination import classify_result
+from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.presentation.views.display import (
     _DISPLAY_TAGS,
     CYAN,
@@ -29,7 +39,12 @@ from promptpotter.shared.composite import (
     render_composite_inline,
     render_composite_oneliner,
 )
+from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import wilson_ci
+
+if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.results import RoundResult
 
 
 def fmt_pp_override(pp: dict | None) -> str:
@@ -226,17 +241,12 @@ def build_individual_summary(
     )
 
 
-"""Per-query HIT/MISS line formatter — feeds ``LiveDisplay.on_sample_scored``.
-
-A single function, ``_fmt_query_result``, produces one display line plus
-zero-or-more annotation lines (diagnostic warnings, stale-data ladder
-markers). Pure: no I/O, no mutation. Three private helpers carry it.
-"""
-
-
-from promptpotter.application.optimization.elimination import classify_result
-from promptpotter.application.scoring.formula import extract_display_answer
-from promptpotter.shared.errors import is_error_result
+# ===========================================================================
+# Per-query HIT/MISS line formatter — feeds ``LiveDisplay.on_sample_scored``.
+# A single function (``_fmt_query_result``) produces one display line plus
+# zero-or-more annotation lines (diagnostic warnings, stale-data ladder
+# markers). Pure: no I/O, no mutation. Three private helpers carry it.
+# ===========================================================================
 
 
 def _infer_terminated_step(step_timings: dict) -> str | None:
@@ -430,14 +440,9 @@ def _fmt_query_result(
     return line
 
 
-"""Round-summary renderers — progress table, round stats, patience banner."""
-
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundResult
+# ===========================================================================
+# Round-summary renderers — progress table, round stats, patience banner
+# ===========================================================================
 
 
 def render_progress_table(

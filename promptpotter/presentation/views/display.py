@@ -10,9 +10,12 @@ output). The tqdm bar tracker lives inline in ``live.py``.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.shared.statistics import wilson_ci
+
+if TYPE_CHECKING:
+    from promptpotter.domain.pipeline_schema import PipelineSchema
 
 _ANSI_RE = re.compile(r"\033\[[0-9;]*m")
 
@@ -270,19 +273,12 @@ def _step_tag(step_name: str | None) -> str:
     return f"[{_DISPLAY_TAGS.get(step_name, step_name[:4])}]"
 
 
-"""Live-display formatting helpers shared across views.
-
-Two markdown / box helpers consumed by ``live.py``, ``reports.py``, and the
-notebook ↔ Claude exchange channel; plus a re-export of the ``fmt_*``
-numeric formatters from ``display_primitives`` so callers have a single
-import surface.
-"""
-
-
-from typing import TYPE_CHECKING
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
+# ===========================================================================
+# Live-display formatting helpers shared across views.
+# Markdown/box helpers consumed by ``live.py``, ``reports.py``, and the
+# notebook ↔ Claude exchange channel; plus the ``fmt_*`` numeric formatters
+# (``fmt_pct`` / ``fmt_ci`` / ``fmt_pvalue``) — single import surface.
+# ===========================================================================
 
 __all__ = [
     "fmt_ci",

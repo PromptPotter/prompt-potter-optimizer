@@ -1,18 +1,41 @@
-"""Pure utilities for the short-form composite formula.
+"""Composite-score utilities — short-form formula inlining + render primitives.
 
-Lives in ``shared/`` because both the application layer (``evaluators``,
-``phase_views``) and the infrastructure layer (``session_emitter``) need
-to inline values into the short formula string for dashboard.json. The
-short codes (``acc``, ``H``, ``lat``, ``R``, ``pc``) are tightly coupled
-to ``application/scoring/evaluators.py::default_per_round_formula_short``;
-keep them in sync by hand if the registry default changes.
+Two related concerns share this module so the short codes (``acc``, ``H``,
+``lat``, ``R``, ``pc``) stay in lockstep with the renderers that use them:
+
+1. **Short-form formula inlining** (``inline_short_formula_values``) —
+   transforms ``0.65*acc + 0.15*H + ...`` into
+   ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for ``dashboard.json``. Used by
+   both the application layer (``evaluators``, ``phase_views``) and the
+   infrastructure layer (``session_emitter``). Codes are tightly coupled to
+   ``application/scoring/evaluators.py::default_per_round_formula_short``;
+   keep them in sync by hand if the registry default changes.
+
+2. **Composite-score render primitives** (``render_composite_oneliner`` /
+   ``render_composite_block`` / ``render_composite_inline``) — operator-
+   facing forms that surfaces share. Without seeing the inputs the operator
+   can't tell *why* composite moved when accuracy didn't.
+   ``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to the
+   legacy single-line ``composite=0.4f`` bottom rule (``log.md`` always
+   carries the full block).
+
+Pure functions; no I/O, no Session, no logging side-effects.
 """
 
 from __future__ import annotations
 
+import os
 import re
 
-__all__ = ["inline_short_formula_values"]
+__all__ = [
+    "SHORT_NAMES",
+    "compact_display_enabled",
+    "extract_evaluator_names",
+    "inline_short_formula_values",
+    "render_composite_block",
+    "render_composite_inline",
+    "render_composite_oneliner",
+]
 
 
 # Direct-mapping codes used by ``default_per_round_formula_short``;
@@ -84,33 +107,9 @@ def inline_short_formula_values(
     return _SHORT_CODE_RE.sub(_sub, formula_short)
 
 
-"""Composite-score rendering primitives — single source of truth.
-
-The composite is a weighted aggregate of named evaluators (see
-``application/scoring/evaluators.py``); without seeing the inputs the
-operator can't tell *why* composite moved when accuracy didn't. This
-module renders the operator-facing forms that surfaces share:
-
-- ``render_composite_oneliner`` — 1 line for the per-candidate box.
-  Anchors progress against the campaign baseline so even at deep rounds
-  the operator sees how far the run has come from origin.
-- ``render_composite_block`` — 3-line block for round-level surfaces
-  (round summary, L1_SCORE:exit, log.md fenced section). Composite +
-  trajectory anchor on line 1; formula on line 2; named evaluator
-  values on line 3. Width-honest: short evaluator names are used when
-  ``use_short_names`` is set so the values line fits 70-char inner
-  width on the node frame.
-
-``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to the
-legacy single-line ``composite=0.4f`` bottom rule (only when composite
-≠ accuracy). ``log.md`` always carries the full block.
-
-Pure functions; no I/O, no Session, no logging side-effects.
-"""
-
-
-import os
-import re
+# ===========================================================================
+# Composite-score rendering primitives
+# ===========================================================================
 
 # Builtins exposed to ``compile_round_scorer``'s eval namespace — exclude
 # them from name discovery so they don't get spuriously rendered as
@@ -156,15 +155,6 @@ SHORT_NAMES: dict[str, str] = {
 }
 
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
-
-__all__ = [
-    "SHORT_NAMES",
-    "compact_display_enabled",
-    "extract_evaluator_names",
-    "render_composite_block",
-    "render_composite_inline",
-    "render_composite_oneliner",
-]
 
 
 def compact_display_enabled() -> bool:
