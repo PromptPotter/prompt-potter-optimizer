@@ -21,8 +21,8 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
-from promptpotter.application.ledger import CycleDir, RunLedger
 from promptpotter.application.optimization.cycle import REPLAYERS
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
     DECISION_GATING,
     Decision,
@@ -31,6 +31,7 @@ from promptpotter.domain.run_records import (
     Phase,
     Snapshot,
 )
+from promptpotter.infrastructure.ledger import RunLedger
 
 _SRC_ROOT = Path(__file__).resolve().parent.parent / "promptpotter"
 

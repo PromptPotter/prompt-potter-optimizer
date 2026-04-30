@@ -6,11 +6,10 @@ audit trail, measurement archive, langfuse mirror) subscribe to the spine and
 rebuild their views deterministically — they never write to disk on their
 own initiative.
 
-Two newtypes (``RootCycleDir`` / ``CycleDir``) gate the projection writers'
-output paths at construction. The fork-telemetry leak in the prior
-``CampaignPersistenceEmitter`` (per-round audit blocks landing in the shared
-root ``dashboard.json``) is impossible by construction once a projection
-takes one newtype but not the other.
+Path-newtype guards (``RootCycleDir`` / ``CycleDir``) live in
+:mod:`promptpotter.domain.cycle_paths` so both this module and the
+projection writers in :mod:`promptpotter.infrastructure.projections` can
+import them without crossing hexagonal layers.
 
 Forks become first-class via ``RunLedger.inherit_from(parent, offset)`` —
 Phase 4 work; the placeholder hook is here so Phase 2/3 projections can be
@@ -22,47 +21,16 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterator
 from pathlib import Path
-from typing import IO, NewType, Protocol
+from typing import IO
 
 from pydantic import TypeAdapter
 
+from promptpotter.domain.cycle_paths import CycleDir, Projection
 from promptpotter.domain.run_records import RunRecord
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "CycleDir",
-    "Projection",
-    "RootCycleDir",
-    "RunLedger",
-]
-
-
-# Newtype guards for projection write targets.
-#
-# - ``RootCycleDir`` is the family-root campaign dir. Telemetry projections
-#   (live dashboard, output.log) bind here. Constructed only via
-#   ``stores.root_dir_for(...)`` (Phase 2 will enforce this with a builder).
-# - ``CycleDir`` is the per-cycle dir (root or fork). Audit projections
-#   (index.json, log.md, trials/) bind here. Constructed only via
-#   ``stores.campaign_dir_for(...)``.
-#
-# A projection that takes ``RootCycleDir`` cannot accidentally write per-fork
-# audit data — its constructor refuses the wrong newtype.
-RootCycleDir = NewType("RootCycleDir", Path)
-CycleDir = NewType("CycleDir", Path)
-
-
-class Projection(Protocol):
-    """A subscriber to the ledger's record stream.
-
-    Projections receive every appended record via ``on_record``. They may
-    persist whatever projection-specific view they own (a JSON dashboard, a
-    markdown log, an in-memory index). Projections never call ``append`` —
-    the ledger is single-writer from the campaign loop.
-    """
-
-    def on_record(self, record: RunRecord, offset: int) -> None: ...
+__all__ = ["RunLedger"]
 
 
 _RECORD_ADAPTER: TypeAdapter[RunRecord] = TypeAdapter(RunRecord)
@@ -89,8 +57,8 @@ class RunLedger:
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> RunLedger:
         """Open (creating if absent) the ledger for a cycle dir."""
-        cycle_dir.mkdir(parents=True, exist_ok=True)
-        return cls(cycle_dir / "ledger.jsonl")
+        Path(cycle_dir).mkdir(parents=True, exist_ok=True)
+        return cls(Path(cycle_dir) / "ledger.jsonl")
 
     @property
     def path(self) -> Path:

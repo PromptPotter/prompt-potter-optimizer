@@ -1,31 +1,31 @@
-"""Persistence — live dashboard + output.log + per-round action recorder.
+"""LiveDashboardProjection — operator-facing ``dashboard.json`` + ``output.log`` writer.
 
-Two cooperating writers in one file:
+Family-root-bound: one stream per cycle family, shared across all forks
+(the active fork is identified by ``dashboard.json::cycle_id``). The
+constructor takes :data:`RootCycleDir` so a per-cycle audit block cannot
+accidentally land here. ``for_session`` is the standard factory — it
+derives the root from ``cycle_id`` via ``stores.root_dir_for`` and wraps
+in the newtype before delegating to ``__init__``. A runtime assertion in
+``__init__`` rejects any path that contains a ``forks/`` segment.
 
-1. **CampaignPersistenceEmitter** — live ``dashboard.json`` + ``output.log``
-   under the family-root cycle dir; receives ``RunListener`` callbacks and
-   serialises scalar state + per-query summary lines.
-2. **RoundRecorder** — accumulates per-node I/O (``l1_generate``,
-   ``l1_critique``, ``l1_score``) within a round and flushes to
-   ``campaigns/{cycle_id}/.cache/rounds/round_NNNN.json``.
-
-The emitter holds an optional ``RoundRecorder`` reference (injected by the
-runner) and snapshots its sticky-node state into ``dashboard.json`` on every
-write so the live dashboard mirrors the per-round node tree.
+Phase 2 of the persistence cleanup: the class still exposes the legacy
+per-event callback API (``on_phase`` / ``on_sample_started`` / …) the
+runner calls directly. Phase 3 will replace those with subscription to
+the ``RunLedger`` via the ``Projection`` ``on_record`` hook, deriving
+the same on-disk artifacts from the typed record stream.
 """
 
 from __future__ import annotations
 
 import json
 import logging
-import re
 import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
+from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase
-from promptpotter.infrastructure.store.base import write_json
 from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -33,15 +33,11 @@ from promptpotter.shared.errors import is_degraded
 if TYPE_CHECKING:
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult
+    from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
 
-__all__ = [
-    "CampaignPersistenceEmitter",
-    "RoundRecorder",
-    "append_journal",
-    "read_claude_notes",
-]
+__all__ = ["LiveDashboardProjection"]
 
 
 # Keep in sync with ``LayerTransition.phase`` / ``.layer``.
@@ -49,22 +45,6 @@ _PHASE_TO_LAYER: dict[str, str] = {
     CampaignPhase.REFINE_STRATEGY: "L2",
     CampaignPhase.MODIFY_PLAN: "L3",
 }
-
-
-def append_journal(session_dir: Path, action: str, body: str = "") -> None:
-    ts = datetime.now(UTC).isoformat(timespec="seconds")
-    entry = f"## {ts} \u2014 {action}\n"
-    if body:
-        entry += f"\n{body}\n"
-    with (session_dir / "journal.md").open("a", encoding="utf-8") as f:
-        f.write(entry + "\n")
-
-
-def read_claude_notes(session_dir: Path) -> str:
-    path = session_dir / "notes.md"
-    if not path.exists():
-        return ""
-    return path.read_text(encoding="utf-8")
 
 
 def _make_initial_state(
@@ -160,14 +140,14 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
-class CampaignPersistenceEmitter:
+class LiveDashboardProjection:
     """Per-cycle dashboard + audit log writer; ensures per-session narrative
     + control files. Not an optimizer checkpoint — resume reads
     ``trials/trial_NNNN.json``, counters here are display continuity only."""
 
     def __init__(
         self,
-        root_dir: Path,
+        root_dir: RootCycleDir,
         session_dir: Path,
         *,
         l1_patience: int,
@@ -175,16 +155,22 @@ class CampaignPersistenceEmitter:
         sp_budget_ttest: int,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
-        recorder: RoundRecorder | None = None,
+        recorder: AuditTrailProjection | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
         # Forks share one continuous dashboard / output.log stream; per-fork
         # audit (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
         # stays in each cycle's own dir, written through dynamic
         # ``session.state.cycle_id`` paths.
-        self.root_dir = root_dir
-        self.state_path = root_dir / "dashboard.json"
-        self.log_path = root_dir / "output.log"
+        root_path = Path(root_dir)
+        if "forks" in root_path.parts:
+            raise ValueError(
+                f"LiveDashboardProjection root_dir must be a family root, not a fork dir; "
+                f"got {root_path}"
+            )
+        self.root_dir = root_path
+        self.state_path = root_path / "dashboard.json"
+        self.log_path = root_path / "output.log"
         self.session_dir = session_dir
         self._recorder = recorder
 
@@ -214,7 +200,7 @@ class CampaignPersistenceEmitter:
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
-        # One log handle for the emitter's lifetime; closed in ``finalize``.
+        # One log handle for the projection's lifetime; closed in ``finalize``.
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self._log_fh: IO[str] = open(  # noqa: SIM115
             self.log_path, "a", encoding="utf-8", buffering=1
@@ -240,9 +226,9 @@ class CampaignPersistenceEmitter:
         n_variants: int,
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
-        recorder: RoundRecorder | None = None,
-    ) -> CampaignPersistenceEmitter | None:
-        """Build emitter, or ``None`` if ids missing. Carries prior UI counters
+        recorder: AuditTrailProjection | None = None,
+    ) -> LiveDashboardProjection | None:
+        """Build projection, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
         On ``--from N`` rewind, the ``best`` counter past the surviving trials
         is clamped to avoid a phantom value.
@@ -254,11 +240,11 @@ class CampaignPersistenceEmitter:
             return None
 
         tenant_root = Path(project_root)
-        root_dir = root_dir_for(tenant_root, cycle_id)
+        root_dir = RootCycleDir(root_dir_for(tenant_root, cycle_id))
         session_dir = session_dir_for(tenant_root, session_id)
 
         resume_from: dict[str, Any] | None = None
-        prior_state = root_dir / "dashboard.json"
+        prior_state = Path(root_dir) / "dashboard.json"
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
@@ -620,157 +606,3 @@ class CampaignPersistenceEmitter:
             json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
-
-
-# ===========================================================================
-# RoundRecorder — per-round action trace, flushes to .cache/rounds/round_NNNN.json
-# ===========================================================================
-
-
-def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
-    """Project an LLM action dict into the ``nodes[*]`` block shape."""
-    input_block: dict[str, Any] = {}
-    template_fields = action.get("template_fields")
-    if template_fields is not None:
-        input_block["template_fields"] = template_fields
-    variables = action.get("variables")
-    if variables is not None:
-        input_block["variables"] = variables
-    template_name = action.get("template_name")
-    if template_name is not None:
-        input_block["template_name"] = template_name
-    if not input_block and "messages" in action:
-        input_block["messages"] = action["messages"]
-
-    block: dict[str, Any] = {
-        "input": input_block,
-        "output": {"response": action.get("response")},
-    }
-    if "usage" in action:
-        block["usage"] = action["usage"]
-    if "model" in action:
-        block["model"] = action["model"]
-    if "config" in action:
-        block["config"] = action["config"]
-    if "duration_s" in action:
-        block["duration_s"] = action["duration_s"]
-    if "timestamp" in action:
-        block["timestamp"] = action["timestamp"]
-    return block
-
-
-class RoundRecorder:
-    """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush."""
-
-    def __init__(self, rounds_dir: Path) -> None:
-        self.rounds_dir = rounds_dir
-        self._current_round: int = 0
-        self._nodes: dict[str, dict[str, Any]] = {}
-        # Sticky mirror for the dashboard: each phase-keyed slot keeps its
-        # most-recent fire across round boundaries. Per-key overwrite only;
-        # never wiped by begin_round / flush. Each block carries a
-        # ``"round"`` tag so the reader can tell which round produced it.
-        self._sticky_nodes: dict[str, dict[str, Any]] = {}
-        self._l1_score: dict[str, Any] | None = None
-        self._started_at: str = ""
-
-    def begin_round(self, round_num: int) -> None:
-        """Start recording a new round. Discards any pending node data."""
-        if self._nodes or self._l1_score:
-            logger.warning(
-                "RoundRecorder: unflushed state from round %d discarded",
-                self._current_round,
-            )
-        self._current_round = round_num
-        self._nodes = {}
-        self._l1_score = None
-        self._started_at = datetime.now(UTC).isoformat()
-
-    def rehydrate_sticky(self) -> None:
-        """Pre-populate ``_sticky_nodes`` from the highest existing round file so resumed-cycle dashboards show prior history before the first new write."""
-        if self._sticky_nodes:
-            return
-        if not self.rounds_dir.is_dir():
-            return
-        round_re = re.compile(r"^round_(\d+)\.json$")
-        candidates = []
-        for path in self.rounds_dir.iterdir():
-            m = round_re.match(path.name)
-            if m:
-                candidates.append((int(m.group(1)), path))
-        if not candidates:
-            return
-        round_num, path = max(candidates, key=lambda c: c[0])
-        try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
-        except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("RoundRecorder: failed to rehydrate from %s: %s", path.name, exc)
-            return
-        nodes = payload.get("nodes") or {}
-        for key, block in nodes.items():
-            if key == "l1_score":
-                # l1_score is composed by the emitter from per-round candidates;
-                # not a sticky-node slot.
-                continue
-            if isinstance(block, dict):
-                self._sticky_nodes[key] = {**block, "round": round_num}
-
-    def add_action(self, action: dict[str, Any]) -> None:
-        """Record an LLM node call into the current round; same-type re-entry overwrites."""
-        action.setdefault("timestamp", datetime.now(UTC).isoformat())
-        node_type = str(action.get("type") or "llm_call")
-        block = _action_to_node_block(action)
-        self._nodes[node_type] = block
-        self._sticky_nodes[node_type] = {**block, "round": self._current_round}
-
-    def set_node(self, name: str, block: dict[str, Any]) -> None:
-        """Deposit a prebuilt node block — used when output didn't flow through ``llm_call()``."""
-        self._nodes[name] = block
-        self._sticky_nodes[name] = {**block, "round": self._current_round}
-
-    def set_l1_score(self, block: dict[str, Any]) -> None:
-        """Deposit the scoring-phase block built by the session emitter."""
-        self._l1_score = block
-
-    def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
-        """Phase-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the emitter)."""
-        return dict(self._sticky_nodes)
-
-    def flush(self) -> Path | None:
-        """Write ``round_NNNN.json`` and reset. Returns the written path."""
-        if not self._nodes and self._l1_score is None:
-            return None
-
-        self.rounds_dir.mkdir(parents=True, exist_ok=True)
-
-        nodes_ordered: dict[str, Any] = {}
-        # Prefer a predictable reading order: L1 generate/critique first,
-        # then scoring, then any escalation layers.
-        for preferred in ("l1_generate", "l1_critique"):
-            if preferred in self._nodes:
-                nodes_ordered[preferred] = self._nodes[preferred]
-        if self._l1_score is not None:
-            nodes_ordered["l1_score"] = self._l1_score
-        for key, block in self._nodes.items():
-            if key not in nodes_ordered:
-                nodes_ordered[key] = block
-
-        path = self.rounds_dir / f"round_{self._current_round:04d}.json"
-        payload: dict[str, Any] = {
-            "round": self._current_round,
-            "started_at": self._started_at,
-            "finished_at": datetime.now(UTC).isoformat(),
-            "nodes": nodes_ordered,
-        }
-
-        write_json(path, payload, default=str)
-        logger.debug(
-            "Round %d recorded: %d nodes → %s",
-            self._current_round,
-            len(nodes_ordered),
-            path.name,
-        )
-
-        self._nodes = {}
-        self._l1_score = None
-        return path

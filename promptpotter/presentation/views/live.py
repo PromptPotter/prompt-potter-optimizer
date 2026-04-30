@@ -142,7 +142,7 @@ class LiveDisplay:
 
     # --- RunListener display protocol ---------------------------------
 
-    def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
+    def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
         if self._bars is not None:
             self._bars.on_phase(event)
         if view is not None:
@@ -308,13 +308,13 @@ class LiveDisplay:
 
     def note(self, action: str, body: str = "") -> None:
         """Append a narrative note to ``journal.md`` for Claude."""
-        from promptpotter.infrastructure.persistence import append_journal
+        from promptpotter.infrastructure.projections import append_journal
 
         append_journal(self._resolve_session_dir(), action, body)
 
     def render_claude_notes(self) -> None:
         """Render ``notes.md`` inline so Claude's notes appear in a cell."""
-        from promptpotter.infrastructure.persistence import read_claude_notes
+        from promptpotter.infrastructure.projections import read_claude_notes
         from promptpotter.presentation.views.display import render_markdown_box
 
         content = read_claude_notes(self._resolve_session_dir()).rstrip()

@@ -89,7 +89,7 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.l1 import L1ScoringResult
     from promptpotter.domain.results import CandidateProposal
     from promptpotter.domain.scoring import QueryResult
-    from promptpotter.infrastructure.persistence import RoundRecorder
+    from promptpotter.infrastructure.projections import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
 
@@ -179,7 +179,7 @@ async def llm_call(
     config: dict | None = None,
     trace_meta: dict | None = None,
     json_schema: dict | None = None,
-    recorder: RoundRecorder | None = None,
+    recorder: AuditTrailProjection | None = None,
     **overrides,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides."""
@@ -278,7 +278,7 @@ async def run_optimizer_node(
     temperature: float = 0.0,
     json_schema: dict | None = None,
     user_content: str | None = None,
-    recorder: RoundRecorder | None = None,
+    recorder: AuditTrailProjection | None = None,
     template: PromptTemplate | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
@@ -2109,7 +2109,7 @@ async def run_l1_critique(
     *,
     round_num: int,
     model: str | None = None,
-    recorder: RoundRecorder | None = None,
+    recorder: AuditTrailProjection | None = None,
 ) -> dict:
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict."""
     dispatch_msg = compile_l1_critique_blob(

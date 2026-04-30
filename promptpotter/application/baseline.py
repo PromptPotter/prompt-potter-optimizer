@@ -44,13 +44,11 @@ def build_campaign_emitter(
     resumed_from_round: int | None = None,
     recorder: Any | None = None,
 ) -> Any:
-    """Build the campaign persistence emitter from session + config. Single factory shared by CLI and runner."""
-    from promptpotter.infrastructure.persistence import (
-        CampaignPersistenceEmitter,
-    )
+    """Build the live dashboard projection from session + config. Single factory shared by CLI and runner."""
+    from promptpotter.infrastructure.projections import LiveDashboardProjection
 
     opt = campaign_config.optimization
-    return CampaignPersistenceEmitter.for_session(
+    return LiveDashboardProjection.for_session(
         baseline_accuracy,
         session.state.cycle_id,
         project_root=session.project_root,

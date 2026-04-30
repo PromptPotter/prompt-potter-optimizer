@@ -1,8 +1,8 @@
-"""Artifact parity test — verifies CampaignPersistenceEmitter produces all
+"""Artifact parity test — verifies LiveDashboardProjection produces all
 required per-cycle and per-session artifacts.
 
 If any artifact in CAMPAIGN_ARTIFACTS or SESSION_ARTIFACTS is missing
-after the emitter lifecycle, this test fails.  Sessions and campaigns
+after the projection lifecycle, this test fails.  Sessions and campaigns
 are separate trees; a campaign records its parent session via
 ``index.json::parent_session_id``.
 
@@ -20,7 +20,7 @@ collapse onto the same path — the contract still holds.
 
 The artifact sets are owned by this test — they were never read by
 production code, only by these assertions. New artifacts produced by
-``CampaignPersistenceEmitter`` need an entry here.
+``LiveDashboardProjection`` need an entry here.
 """
 
 from __future__ import annotations
@@ -111,9 +111,10 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
 
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.domain.cycle_paths import RootCycleDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult, RunResult
-    from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
+    from promptpotter.infrastructure.projections import LiveDashboardProjection
     from promptpotter.presentation.views.phase_views import build_phase_view
 
     session_dir, campaign_dir = session_and_campaign_dirs
@@ -126,8 +127,8 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             "degradation_threshold": 0.4,
         }
     )
-    emitter = CampaignPersistenceEmitter(
-        campaign_dir,
+    emitter = LiveDashboardProjection(
+        RootCycleDir(campaign_dir),
         session_dir,
         l1_patience=3,
         n_variants=5,

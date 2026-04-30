@@ -31,7 +31,7 @@ if TYPE_CHECKING:
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
-    from promptpotter.infrastructure.persistence import RoundRecorder
+    from promptpotter.infrastructure.projections import AuditTrailProjection
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 
@@ -176,7 +176,7 @@ class CampaignState:
     obs_campaign_id: str = ""
     resumed_from_round: int = 0
     obs: ObservabilityBridge | None = None
-    round_recorder: RoundRecorder | None = None
+    round_recorder: AuditTrailProjection | None = None
 
 
 @dataclass

@@ -34,7 +34,7 @@ from promptpotter.domain.phases import (
 from promptpotter.domain.results import RoundResult, RunResult
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.persistence import CampaignPersistenceEmitter
+from promptpotter.infrastructure.projections import LiveDashboardProjection
 from promptpotter.presentation.views.log_md import render_log_md
 from promptpotter.presentation.views.phase_views import build_phase_view
 from promptpotter.shared.errors import graceful
@@ -457,7 +457,7 @@ async def run_optimization(
     display: Any = None,
     langfuse_session_id: str | None = None,
     resume_from_round_override: int | None = None,
-    emitter: CampaignPersistenceEmitter | None = None,
+    emitter: LiveDashboardProjection | None = None,
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
 ) -> RunResult:
@@ -541,21 +541,21 @@ async def run_optimization(
     )
 
     # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
-    # minted a new fork cycle and updated ``session.state.cycle_id``. The emitter
-    # is family-root-anchored so its telemetry paths stay correct, but the
-    # ``RoundRecorder`` writes ``.cache/rounds/round_NNN.json`` per cycle and
-    # must be rebuilt to point at the fork's own dir. Output.log gets a
-    # banner so the operator can see the cutover inline.
+    # minted a new fork cycle and updated ``session.state.cycle_id``. The
+    # live dashboard projection is family-root-anchored so its telemetry
+    # paths stay correct, but the ``AuditTrailProjection`` writes
+    # ``.cache/rounds/round_NNN.json`` per cycle and must be rebuilt to
+    # point at the fork's own dir. Output.log gets a banner so the
+    # operator can see the cutover inline.
     forked = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
     if forked and session.state.cycle_id and session.store is not None:
-        from promptpotter.infrastructure.persistence import RoundRecorder
+        from promptpotter.domain.cycle_paths import CycleDir
+        from promptpotter.infrastructure.projections import AuditTrailProjection
 
-        new_rounds_dir = (
-            session.store.campaigns.campaign_dir(session.state.cycle_id) / ".cache" / "rounds"
-        )
-        session.state.round_recorder = RoundRecorder(new_rounds_dir)
+        cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
+        session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
         session.state.round_recorder.rehydrate_sticky()
 
     if emitter is None:
@@ -602,7 +602,7 @@ async def run_optimization(
 def _finalize_run(
     cycle: Cycle,
     session: Session,
-    emitter: CampaignPersistenceEmitter | None,
+    emitter: LiveDashboardProjection | None,
     run_result: RunResult,
     campaign_config: CampaignConfig,
 ) -> None:

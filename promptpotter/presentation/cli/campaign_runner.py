@@ -42,9 +42,9 @@ if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.infrastructure.persistence import (
-        CampaignPersistenceEmitter,
-        RoundRecorder,
+    from promptpotter.infrastructure.projections import (
+        AuditTrailProjection,
+        LiveDashboardProjection,
     )
     from promptpotter.presentation.cli.session import SessionCtx
 
@@ -478,8 +478,8 @@ def _build_run_observers(
     campaign_config: CampaignConfig,
     campaign_dir: Path,
     baseline_acc: float,
-) -> tuple[RunListener, CampaignPersistenceEmitter, RoundRecorder]:
-    """Wire recorder + emitter + display + listener.
+) -> tuple[RunListener, LiveDashboardProjection, AuditTrailProjection]:
+    """Wire audit trail + live dashboard + display + listener.
 
     Built BEFORE baseline so the dashboard ticks through the BASELINE
     phase and per-query output reaches the terminal. Without this, the
@@ -489,11 +489,12 @@ def _build_run_observers(
     """
     from promptpotter.application.baseline import build_campaign_emitter
     from promptpotter.application.runner import RunListener as _RunListener
-    from promptpotter.infrastructure.persistence import (
-        RoundRecorder as _RoundRecorder,
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.projections import (
+        AuditTrailProjection as _AuditTrailProjection,
     )
 
-    recorder = _RoundRecorder(campaign_dir / ".cache" / "rounds")
+    recorder = _AuditTrailProjection.from_cycle_dir(CycleDir(campaign_dir))
     recorder.rehydrate_sticky()
     session.state.round_recorder = recorder
 

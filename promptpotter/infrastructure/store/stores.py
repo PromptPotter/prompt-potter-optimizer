@@ -434,8 +434,6 @@ def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
     return tenant_root / "campaigns" / root / "forks" / cycle_id
 
 
-
-
 class CampaignStore(EntityStore):
     """File I/O for the per-cycle campaign tree."""
 
