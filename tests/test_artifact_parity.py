@@ -13,7 +13,7 @@ Campaign artifacts split into two bands:
   one with no ``parent_cycle_id``); forks share a single continuous
   stream rather than splintering it.
 - ``PER_CYCLE_AUDIT_ARTIFACTS`` — frozen-on-finalization records
-  (index.json, log.md). Each cycle owns its own.
+  (index.json, log.md, review.md). Each cycle owns its own.
 
 For an un-forked campaign root and fork are the same dir, so both bands
 collapse onto the same path — the contract still holds.
@@ -41,6 +41,7 @@ ROOT_TELEMETRY_ARTIFACTS = {
 PER_CYCLE_AUDIT_ARTIFACTS = {
     "index.json",
     "log.md",
+    "review.md",
 }
 
 # Combined campaign-tree contract — what an un-forked cycle dir must contain.
@@ -101,7 +102,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_AUDIT_ARTIFACTS)
     assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
     assert {"dashboard.json", "output.log"} <= ROOT_TELEMETRY_ARTIFACTS
-    assert {"index.json", "log.md"} <= PER_CYCLE_AUDIT_ARTIFACTS
+    assert {"index.json", "log.md", "review.md"} <= PER_CYCLE_AUDIT_ARTIFACTS
 
 
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:
@@ -285,7 +286,8 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
 
     # Mirror runner._finalize_run: fold the run summary into index.json::final
-    # and render log.md from the index + trial dump.
+    # and render log.md + review.md from the index + trial dump.
+    from promptpotter.application.review import render_review_md
     from promptpotter.presentation.views.log_md import render_log_md
 
     final = RunResult(
@@ -303,8 +305,10 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     index_path = campaign_dir / "index.json"
     index_data = json.loads(index_path.read_text(encoding="utf-8")) | {"final": final}
     index_path.write_text(json.dumps(index_data), encoding="utf-8")
-    (campaign_dir / "log.md").write_text(
-        render_log_md(index_data, [round_result.model_dump()]), encoding="utf-8"
+    trial_dump = round_result.model_dump()
+    (campaign_dir / "log.md").write_text(render_log_md(index_data, [trial_dump]), encoding="utf-8")
+    (campaign_dir / "review.md").write_text(
+        render_review_md(index_data, [trial_dump], round_audits=[None]), encoding="utf-8"
     )
     emitter.finalize()
 

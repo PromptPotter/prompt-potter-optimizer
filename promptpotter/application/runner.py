@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
@@ -19,6 +20,7 @@ from promptpotter.application.optimization.cycle import (
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round
+from promptpotter.application.review import render_review_md
 from promptpotter.application.scoring.formula import (
     apply_steer_file,
     apply_zero_signal_exclusions,
@@ -286,6 +288,7 @@ def _persist_round(
                 cycle.checkpoint(round_result, round_num),
             )
         _write_log_md(session)
+        _write_review_md(session, cycle)
 
     if _rr := session.state.round_recorder:
         _rr.flush()
@@ -441,14 +444,91 @@ async def _post_round(
     await _check_stop_or_escalate(cycle, config, session, round_num, cb)
 
 
+async def _run_sweep_generation_only(
+    cycle: Cycle,
+    session: Session,
+    cb: RunListener,
+    round_num: int,
+) -> None:
+    """M10 sweep mode: emit L1 variants for ``round_num`` without scoring them.
+
+    The audit projection captures the ``l1_generate`` node via the recorder,
+    so ``round_NNNN.json`` lands with ``output.response.variants[]`` exactly
+    as a full round would. The trial JSON is a minimal generation-only
+    record (``status="generation_only"``, no composite/accuracy/results).
+    """
+    from promptpotter.application.optimization.l1 import _generate_or_load_candidates
+
+    cb.set_round(round_num)
+    if (ledger := session.state.ledger) is not None:
+        ledger.append(Phase(phase="round", event="enter", round=round_num))
+    elif _rr := session.state.round_recorder:
+        _rr.begin_round(round_num)
+
+    candidates, yield_stats = await _generate_or_load_candidates(
+        round_num,
+        cycle,
+        cb.on_phase,
+        n_eval_queries=0,
+    )
+
+    if session.state.cycle_id:
+        with graceful("Sweep generation-only trial write failed"):
+            session.store.campaigns.add_trial(
+                session.backend_id,
+                session.state.cycle_id,
+                {
+                    "trial_id": f"round_{round_num}",
+                    "round": round_num,
+                    "label": "sweep_gen_only",
+                    "status": "generation_only",
+                    "accuracy": 0.0,
+                    "composite": 0.0,
+                    "hits": 0,
+                    "total": 0,
+                    "improved": False,
+                    "candidates_scored": 0,
+                    "candidate_scores": [],
+                    "decisions": [],
+                    "evaluators": {},
+                    "l1_yield": yield_stats.yield_,
+                    "l1_n_no_op": yield_stats.n_no_op,
+                    "l1_n_duplicate": yield_stats.n_duplicate,
+                    "opt_search_point": cycle.opt_sp.model_dump(),
+                },
+            )
+        _write_log_md(session)
+        _write_review_md(session, cycle)
+
+    if (ledger := session.state.ledger) is not None:
+        ledger.append(
+            Phase(
+                phase="round",
+                event="complete",
+                round=round_num,
+                payload={"status": "generation_only", "n_candidates": len(candidates)},
+            )
+        )
+    elif _rr := session.state.round_recorder:
+        _rr.flush()
+
+
 async def _run_round_loop(
     cycle: Cycle,
     dataset: list[Sample],
     config: CampaignConfig,
     session: Session,
     cb: RunListener,
+    *,
+    sweep: bool = False,
 ) -> StopReason:
-    """Execute the round loop: generate → score → escalate → stop."""
+    """Execute the round loop: generate → score → escalate → stop.
+
+    ``sweep=True`` runs M10's cheap-trial mode: one full scored round, then
+    a generation-only round (L1 produces variants, no scoring) for the
+    review surface to compare against. Halts with ``SWEEP_COMPLETE`` after
+    the gen-only round persists.
+    """
     opt = config.optimization
     hard_cap = opt.hard_cap
     round_num = session.state.resumed_from_round
@@ -551,6 +631,10 @@ async def _run_round_loop(
             round_num += 1
             clean_rounds += 1
 
+            if sweep and clean_rounds >= 1:
+                await _run_sweep_generation_only(cycle, session, cb, round_num)
+                return StopReason.SWEEP_COMPLETE
+
         return StopReason.HARD_CAP if round_num >= hard_cap else StopReason.MAX_ROUNDS
 
     except StopLoop as sl:
@@ -575,12 +659,19 @@ async def run_optimization(
     emitter: LiveDashboardProjection | None = None,
     no_divergence_check: bool = False,
     fork_on_divergence: bool = False,
+    sweep: bool = False,
 ) -> RunResult:
     """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
 
     ``session.session_id`` / ``session.state.cycle_id`` carry the active ids;
     callers set them before calling. When ``session.session_id`` is empty
     (notebook entry path), this auto-mints a fresh session+cycle.
+
+    ``sweep=True`` is M10's cheap-trial mode (Track 5): one full scored
+    round, then a generation-only round (variants emitted but not scored)
+    for the review surface to compare across candidate L1 prompts. The
+    cycle's ``index.json::final.mode`` lands as ``"sweep"`` so the
+    leaderboard can pair sweep cycles with their full counterparts.
     """
     started_at = datetime.now(UTC).isoformat()
 
@@ -715,7 +806,7 @@ async def run_optimization(
             ledger.bind(display)
         cb.ledger = ledger
 
-    stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)
+    stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb, sweep=sweep)
 
     finished_at = datetime.now(UTC).isoformat()
     run_result = RunResult(
@@ -733,7 +824,7 @@ async def run_optimization(
         session_id=session.session_id or None,
         resumed_from_round=session.state.resumed_from_round,
     )
-    _finalize_run(cycle, session, emitter, run_result, campaign_config)
+    _finalize_run(cycle, session, emitter, run_result, campaign_config, sweep=sweep)
     return run_result
 
 
@@ -743,6 +834,8 @@ def _finalize_run(
     emitter: LiveDashboardProjection | None,
     run_result: RunResult,
     campaign_config: CampaignConfig,
+    *,
+    sweep: bool = False,
 ) -> None:
     """Mark cycle finished, fold the run summary into ``index.json::final``,
     render ``log.md`` (with the hard-samples heatmap inlined when the sorter
@@ -806,6 +899,7 @@ def _finalize_run(
             )
 
             final_block["prompt_hashes"] = compute_optimizer_prompt_hashes()
+            final_block["mode"] = "sweep" if sweep else "full"
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
@@ -828,6 +922,7 @@ def _finalize_run(
                     top_k_samples=hs_cfg.top_k_samples,
                 )
         _write_log_md(session, hard_samples_artifact=artifact)
+        _write_review_md(session, cycle)
         emitter.finalize()
 
 
@@ -851,3 +946,53 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
         (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
             content, encoding="utf-8"
         )
+
+
+def _write_review_md(session: Session, cycle: Cycle) -> None:
+    """Render ``campaigns/{cycle_id}/review.md`` from index + trials + round audits.
+
+    M10's prompt-iteration feedback surface — peer of ``log.md``. Reads
+    each round's ``.cache/rounds/round_NNNN.json`` so behaviour checks can
+    evaluate the live L1 variants. Pulls the three context_object items
+    off the cycle's ``task_context`` so the seeded
+    ``context_object_honored`` check has something to match against.
+    """
+    if not session.state.cycle_id or session.store is None:
+        return
+    with graceful("review.md render failed"):
+        store = session.store.campaigns
+        index = store.load(session.backend_id, session.state.cycle_id)
+        if not index:
+            return
+        n_trials = int(index.get("n_trials", 0) or 0)
+        trials = (
+            store.load_trials_range(session.backend_id, session.state.cycle_id, 0, n_trials - 1)
+            if n_trials
+            else []
+        )
+        cycle_dir = store.campaign_dir(session.state.cycle_id)
+        rounds_dir = cycle_dir / ".cache" / "rounds"
+        round_audits: list[dict | None] = []
+        for trial in trials:
+            round_num = int(trial.get("round") or 0)
+            audit_path = rounds_dir / f"round_{round_num:04d}.json"
+            audit: dict | None = None
+            if audit_path.is_file():
+                try:
+                    audit = json.loads(audit_path.read_text(encoding="utf-8"))
+                except (OSError, json.JSONDecodeError):
+                    audit = None
+            round_audits.append(audit)
+        td = cycle.opt_sp.task_context
+        context_object = [
+            td.pipeline_purpose,
+            td.optimization_goals,
+            td.key_challenges,
+        ]
+        content = render_review_md(
+            index,
+            trials,
+            round_audits=round_audits,
+            context_object=context_object,
+        )
+        (cycle_dir / "review.md").write_text(content, encoding="utf-8")

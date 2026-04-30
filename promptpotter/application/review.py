@@ -1,0 +1,272 @@
+"""``review.md`` per-cycle renderer — M10's prompt-iteration feedback surface.
+
+Pure function over loaded dicts (peer of ``presentation/views/log_md.py``).
+No I/O. Wiring + write site live in ``runner.py`` so the renderer stays
+testable as a transformation.
+
+Inputs
+------
+- ``index`` — ``campaigns/{cycle_id}/index.json`` payload (carries
+  baseline / best / final block with ``baseline_composite``,
+  ``prompt_hashes``, ``mode``).
+- ``trials`` — per-round optimizer state from ``trials/trial_NNNN.json``,
+  in round order. Carries ``opt_search_point`` (lineage, l2_directive,
+  critique), composite, accuracy, l1_yield.
+- ``round_audits`` — per-round LLM I/O from ``.cache/rounds/round_NNNN.json``,
+  same length and order as ``trials``. Source of L1 variants for the
+  variants table + behaviour checks. ``None`` for rounds with no audit.
+- ``context_object`` — three task-context strings the wiring layer pulls
+  off ``cycle.task_context`` (pipeline_purpose / optimization_goals /
+  key_challenges by default).
+
+Output is a self-contained markdown document the operator and the
+``potter-review`` skill consume after each round.
+"""
+
+from __future__ import annotations
+
+from typing import Any
+
+from promptpotter.application.l1_behavior_checks import (
+    CHECK_REGISTRY,
+    CheckContext,
+    CheckResult,
+    run_all_checks,
+)
+from promptpotter.application.optimization.l1_stats import L1Stats, compute_l1_stats
+
+__all__ = ["render_review_md"]
+
+
+def render_review_md(
+    index: dict[str, Any],
+    trials: list[dict[str, Any]],
+    *,
+    round_audits: list[dict[str, Any] | None] | None = None,
+    context_object: list[str] | None = None,
+    param_unlock_round: int = 3,
+) -> str:
+    """Render ``review.md`` from index + trials + per-round audit dicts."""
+    audits = list(round_audits or [None] * len(trials))
+    if len(audits) < len(trials):
+        audits.extend([None] * (len(trials) - len(audits)))
+    ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
+
+    behavior_per_round = _compute_behavior_per_round(trials, audits, ctx_items, param_unlock_round)
+    final = index.get("final") or {}
+    baseline_composite = float(final.get("baseline_composite") or 0.0)
+    stats = compute_l1_stats(
+        list(trials),
+        baseline_composite=baseline_composite,
+        behavior_results=behavior_per_round,
+    )
+
+    parts: list[str] = []
+    parts += _render_header(index, final, stats)
+    parts += _render_stats_block(stats)
+    parts += _render_behavior_summary(behavior_per_round)
+    parts += ["## Rounds", ""]
+
+    sweep_mode = (final.get("mode") or "").strip() == "sweep"
+    last_idx = len(trials) - 1
+    for i, trial in enumerate(trials):
+        is_peek = sweep_mode and i == last_idx and _is_generation_only(trial)
+        parts += _render_round(
+            trial,
+            audits[i],
+            behavior_per_round[i] if i < len(behavior_per_round) else [],
+            is_peek=is_peek,
+        )
+
+    return "\n".join(parts).rstrip() + "\n"
+
+
+# --- behaviour-check evaluation -------------------------------------------
+
+
+def _compute_behavior_per_round(
+    trials: list[dict[str, Any]],
+    audits: list[dict[str, Any] | None],
+    context_object: list[str],
+    param_unlock_round: int,
+) -> list[list[CheckResult]]:
+    out: list[list[CheckResult]] = []
+    prior_audits: list[dict[str, Any]] = []
+    for i, trial in enumerate(trials):
+        audit = audits[i] if i < len(audits) else None
+        if audit is None:
+            out.append([])
+            continue
+        round_num = int(trial.get("round") or i)
+        ctx = CheckContext(
+            round_num=round_num,
+            prior_rounds=list(prior_audits),
+            opt_search_point=dict(trial.get("opt_search_point") or {}),
+            context_object=context_object,
+            param_unlock_round=param_unlock_round,
+        )
+        out.append(run_all_checks(audit, ctx))
+        prior_audits.append(audit)
+    return out
+
+
+# --- rendering helpers ----------------------------------------------------
+
+
+def _render_header(index: dict[str, Any], final: dict[str, Any], stats: L1Stats) -> list[str]:
+    cycle_id = index.get("campaign_id") or "(unknown cycle)"
+    mode = (final.get("mode") or "full").strip() or "full"
+    parts: list[str] = [
+        f"# Review — {cycle_id}",
+        "",
+        f"_mode: **{mode}** · round-1 verdict: **{stats.round_1_verdict}**_",
+        "",
+    ]
+    hashes = final.get("prompt_hashes") or {}
+    if hashes:
+        parts.append("**Prompt hashes**")
+        parts.append("")
+        for name in ("l1_generate", "l1_critique", "l2_context", "l3_plan"):
+            short = (hashes.get(name) or "")[:8]
+            if short:
+                parts.append(f"- `{name}`: `{short}`")
+        parts.append("")
+    return parts
+
+
+def _render_stats_block(stats: L1Stats) -> list[str]:
+    rounds_to_95 = "—" if stats.rounds_to_95 is None else str(stats.rounds_to_95)
+    return [
+        "## L1Stats",
+        "",
+        f"- **rounds_to_95**: {rounds_to_95}",
+        f"- yield_rate: {stats.yield_rate:.2f}",
+        f"- top_lift_mean: {stats.top_lift_mean:+.4f}",
+        f"- behavior_pass_rate: {stats.behavior_pass_rate:.2f}",
+        f"- stagnation_max: {stats.stagnation_max}",
+        f"- l2_fires: {stats.l2_fires}",
+        "",
+    ]
+
+
+def _render_behavior_summary(behavior_per_round: list[list[CheckResult]]) -> list[str]:
+    if not behavior_per_round or not any(behavior_per_round):
+        return []
+    parts: list[str] = ["## Behaviour-check summary", ""]
+    for check_id in CHECK_REGISTRY:
+        fails = sum(
+            1
+            for round_res in behavior_per_round
+            for c in round_res
+            if c.check_id == check_id and not c.passed
+        )
+        runs = sum(
+            1 for round_res in behavior_per_round for c in round_res if c.check_id == check_id
+        )
+        marker = "✗" if fails else "✓"
+        parts.append(f"- {marker} `{check_id}` — {runs - fails}/{runs} rounds passed")
+    parts.append("")
+    return parts
+
+
+def _render_round(
+    trial: dict[str, Any],
+    audit: dict[str, Any] | None,
+    checks: list[CheckResult],
+    *,
+    is_peek: bool,
+) -> list[str]:
+    round_num = trial.get("round", "?")
+    osp = trial.get("opt_search_point") or {}
+    lineage = osp.get("lineage") or {}
+    suffix = " (next-gen peek)" if is_peek else ""
+    parts: list[str] = [
+        f"### Round {round_num}{suffix}",
+        "",
+    ]
+    if not is_peek:
+        parts += [
+            f"- accuracy: {float(trial.get('accuracy', 0.0) or 0.0):.1%}",
+            f"- composite: `{float(trial.get('composite', 0.0) or 0.0):.4f}`",
+            f"- improved: **{'yes' if trial.get('improved') else 'no'}**",
+        ]
+    parts += _render_l1_inputs(osp, lineage)
+    parts += _render_check_checklist(checks)
+    parts += _render_variants_table(audit, scored=not is_peek)
+    parts += _render_critique(osp)
+    return parts
+
+
+def _render_l1_inputs(osp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
+    parts: list[str] = ["", "**L1 inputs**", ""]
+    directive = (osp.get("l2_directive") or "").strip()
+    parts.append(f"- L2 directive: {directive or '_(none)_'}")
+    src = (lineage.get("source") or "").strip()
+    if src:
+        parts.append(f"- lineage source: `{src}`")
+    changes = (lineage.get("changes_description") or "").strip()
+    if changes:
+        parts.append(f"- parent changes: {changes}")
+    parts.append("")
+    return parts
+
+
+def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
+    if not checks:
+        return ["**Behaviour checks:** _(no audit available)_", ""]
+    parts: list[str] = ["**Behaviour checks**", ""]
+    for c in checks:
+        marker = "✓" if c.passed else "✗"
+        parts.append(f"- {marker} `{c.check_id}` — {c.evidence}")
+    parts.append("")
+    return parts
+
+
+def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> list[str]:
+    variants = _extract_variants(audit)
+    if not variants:
+        return []
+    parts: list[str] = ["**Variants**", ""]
+    if scored:
+        parts.append("| variant | composite | acc | Δ_parent | Δ_baseline | beat | changes |")
+        parts.append("|---|---|---|---|---|---|---|")
+        # Without per-variant scores in the audit dict the table degrades to
+        # changes_description only — full per-variant scoring lives on the
+        # trial dict's candidate_scores array, surfaced when available.
+        for v in variants:
+            name = str(v.get("variant_name") or "?")
+            changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
+            parts.append(f"| `{name}` | — | — | — | — | — | {changes} |")
+    else:
+        parts.append("| cand_id | changes | derived_axes |")
+        parts.append("|---|---|---|")
+        for v in variants:
+            name = str(v.get("variant_name") or "?")
+            changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
+            axes = ", ".join(sorted((v.get("pipeline_params_override") or {}).keys()))
+            parts.append(f"| `{name}` | {changes} | {axes} |")
+    parts.append("")
+    return parts
+
+
+def _render_critique(osp: dict[str, Any]) -> list[str]:
+    critique = (osp.get("l1_critique_text") or "").strip()
+    if not critique:
+        return []
+    quoted = critique.replace("\n", "\n> ")
+    return ["**Critique**", "", f"> {quoted}", ""]
+
+
+def _extract_variants(audit: dict[str, Any] | None) -> list[dict[str, Any]]:
+    if not audit:
+        return []
+    nodes = audit.get("nodes") or {}
+    node = nodes.get("l1_generate") or {}
+    response = ((node.get("output") or {}).get("response")) or {}
+    if isinstance(response, dict):
+        return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
+    return []
+
+
+def _is_generation_only(trial: dict[str, Any]) -> bool:
+    return str(trial.get("status") or "").strip() == "generation_only"

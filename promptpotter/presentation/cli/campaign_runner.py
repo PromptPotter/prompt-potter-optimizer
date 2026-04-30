@@ -200,6 +200,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="On divergence, mint a sibling cycle (with parent_cycle_id) "
         "and re-run the divergent round under the current scorer.",
     )
+    p_opt.add_argument(
+        "--sweep",
+        dest="sweep",
+        action="store_true",
+        help="M10 cheap-trial mode: baseline → 1 full scored round → "
+        "1 generation-only round (variants emitted, no scoring) → halt. "
+        "index.json::final.mode lands as 'sweep' so the leaderboard can "
+        "pair sweep cycles with their full counterparts.",
+    )
 
     return parser
 
@@ -587,6 +596,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             emitter=emitter,
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=getattr(args, "fork_on_divergence", False),
+            sweep=getattr(args, "sweep", False),
         )
     except ResumeDivergenceError as div:
         return CommandResult(
