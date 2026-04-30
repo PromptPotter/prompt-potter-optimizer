@@ -47,6 +47,7 @@ if TYPE_CHECKING:
         LiveDashboardProjection,
     )
     from promptpotter.presentation.cli.session import SessionCtx
+    from promptpotter.presentation.views.live import LiveDisplay
 
 logger = logging.getLogger("promptpotter.presentation.cli")
 
@@ -490,7 +491,7 @@ def _build_run_observers(
     campaign_config: CampaignConfig,
     campaign_dir: Path,
     baseline_acc: float,
-) -> tuple[RunListener, LiveDashboardProjection, AuditTrailProjection]:
+) -> tuple[RunListener, LiveDashboardProjection, AuditTrailProjection, LiveDisplay]:
     """Wire audit trail + live dashboard + display + listener.
 
     Built BEFORE baseline so the dashboard ticks through the BASELINE
@@ -498,6 +499,8 @@ def _build_run_observers(
     CLI goes dark for the entire BASELINE phase. Recorder is built first
     so the emitter can hold a direct reference (no callback indirection).
     Side-effect: assigns the recorder to ``session.state.round_recorder``.
+    Display is returned as a separate handle so the entry point can pass
+    it to ``run_optimization`` (which binds it to the cycle ledger).
     """
     from promptpotter.application.baseline import build_campaign_emitter
     from promptpotter.application.runner import RunListener as _RunListener
@@ -520,8 +523,8 @@ def _build_run_observers(
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, baseline_acc=baseline_acc
     )
-    listener = _RunListener(emitter=emitter, display=display)
-    return listener, emitter, recorder
+    listener = _RunListener()
+    return listener, emitter, recorder, display
 
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
@@ -565,7 +568,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     logger.info("Campaign: %s", campaign_dir)
 
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
-    listener, emitter, _recorder = _build_run_observers(
+    listener, emitter, _recorder, display = _build_run_observers(
         args, session, campaign_config, campaign_dir, pre_baseline_acc
     )
 
@@ -579,7 +582,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             listener=listener,
             experiment_id=ctx.state["experiment_id"],
             task_context=ctx.task_context,
-            display=listener.display,
+            display=display,
             resume_from_round_override=getattr(args, "resume_from_round", None),
             emitter=emitter,
             no_divergence_check=getattr(args, "no_divergence_check", False),

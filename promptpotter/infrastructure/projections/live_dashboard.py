@@ -8,11 +8,10 @@ derives the root from ``cycle_id`` via ``stores.root_dir_for`` and wraps
 in the newtype before delegating to ``__init__``. A runtime assertion in
 ``__init__`` rejects any path that contains a ``forks/`` segment.
 
-Dual ingress: the class exposes both the legacy per-event callback API
-(``on_phase`` / ``on_sample_started`` / …) the runner calls directly,
-AND the ``Projection`` ``on_record`` hook the per-cycle ``RunLedger``
-fans out to. Phase 5 will retire the callback path and leave the
-ledger as the only ingress.
+Single ingress: the projection consumes only via ``on_record`` from the
+per-cycle ``RunLedger``. The runner emits typed ``Phase`` / ``Snapshot`` /
+``Decision`` records; this class routes each record kind to the
+corresponding internal handler.
 """
 
 from __future__ import annotations
@@ -25,8 +24,8 @@ from pathlib import Path
 from typing import IO, TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
-from promptpotter.domain.phases import CampaignPhase
-from promptpotter.domain.run_records import Decision, Phase, RunRecord
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.run_records import Decision, Phase, RunRecord, Snapshot
 from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -269,9 +268,9 @@ class LiveDashboardProjection:
             recorder=recorder,
         )
 
-    # -- Callbacks -------------------------------------------------------------
+    # -- Internal handlers (called from on_record router) ---------------------
 
-    def on_phase(self, event: PhaseEvent, view: dict | None) -> None:
+    def _on_phase(self, event: PhaseEvent, view: dict | None) -> None:
         s = self._state
         s["phase"] = event.phase
         if event.round is not None:
@@ -329,7 +328,7 @@ class LiveDashboardProjection:
         self._state["cycle_id"] = new_cycle_id
         self._persist()
 
-    def on_candidate_started(
+    def _on_candidate_started(
         self,
         idx: int,
         total: int,
@@ -353,7 +352,7 @@ class LiveDashboardProjection:
         s["candidate"] = f"C{ci + 1}/{ct}"
         s["query"] = f"{qi + 1}/{qt}"
 
-    def on_sample_started(
+    def _on_sample_started(
         self,
         ci: int,
         ct: int,
@@ -369,7 +368,7 @@ class LiveDashboardProjection:
         s["query_started_at"] = datetime.now(UTC).isoformat()
         s["current_query_payload"] = (query_text or "")[:120]
 
-    def on_sample_scored(
+    def _on_sample_scored(
         self,
         ci: int,
         ct: int,
@@ -435,7 +434,7 @@ class LiveDashboardProjection:
         )
         self._persist()
 
-    def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
+    def _on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         s = self._state
         acc = scores.get("accuracy", 0.0)
         hits = scores.get("hits", 0)
@@ -471,7 +470,7 @@ class LiveDashboardProjection:
         # No _persist() here — on_round_complete (or the next candidate's
         # on_sample_scored) flushes the scored candidate to dashboard.json.
 
-    def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
+    def _on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         s = self._state
         acc = round_result.accuracy
         improved = round_result.improved
@@ -575,31 +574,76 @@ class LiveDashboardProjection:
             "output": {"candidates": output_candidates},
         }
 
-    # -- Ledger subscription (Phase 3) ----------------------------------------
+    # -- Ledger subscription (sole ingress) -----------------------------------
 
     def on_record(self, record: RunRecord, offset: int) -> None:
         """Subscribe-side hook: receive a typed record from the ledger.
 
-        Phase 3 of the persistence cleanup: the runner appends every fact
-        to the per-cycle ``RunLedger`` and projections that ``bind`` to
-        the ledger receive each record here. Decisions are mirrored into
-        ``output.log`` so a tail follows the gating events (round-winner,
-        elimination cuts) inline with the per-query stream. Phase events
-        update the layer/phase scalars (the operator's top-of-dashboard
-        view). Per-query/per-candidate snapshots are still driven by the
-        legacy callbacks — Phase 3c will widen the dispatch.
+        Routes each record kind to the corresponding internal handler.
+        The runner-side ``RunListener`` is the only producer; there is
+        no parallel direct-callback path.
         """
+        del offset
         if isinstance(record, Decision):
             self._log_fh.write(
                 f"  [decision:{record.kind.value} round={record.round}] outcome={record.outcome!r}\n"
             )
         elif isinstance(record, Phase):
-            self._state["phase"] = record.phase
-            if record.round is not None:
-                self._state["round"] = record.round
-            self._persist()
-        # Snapshot records are still produced by the per-callback API.
-        _ = (record, offset)
+            self._dispatch_phase(record)
+        elif isinstance(record, Snapshot):
+            self._dispatch_snapshot(record)
+
+    def _dispatch_phase(self, record: Phase) -> None:
+        if record.phase == "round" and record.event == "complete":
+            payload = record.payload or {}
+            round_result = payload.get("round_result")
+            l1_stall = int(payload.get("l1_stall_count") or 0)
+            if round_result is not None:
+                self._on_round_complete(round_result, l1_stall)
+            return
+        payload = record.payload or {}
+        view = payload.get("view")
+        data = payload.get("data") or {}
+        event = PhaseEvent(
+            phase=record.phase,
+            event=record.event,
+            round=record.round,
+            data=data,
+        )
+        self._on_phase(event, view)
+
+    def _dispatch_snapshot(self, record: Snapshot) -> None:
+        ev = record.event
+        payload = record.payload or {}
+        if ev == "sample_started":
+            self._on_sample_started(
+                int(record.candidate_idx or 0),
+                int(record.candidate_total or 0),
+                int(record.sample_idx or 0),
+                int(record.sample_total or 0),
+                payload.get("query_text") or "",
+            )
+        elif ev == "sample_scored":
+            self._on_sample_scored(
+                int(record.candidate_idx or 0),
+                int(record.candidate_total or 0),
+                int(record.sample_idx or 0),
+                int(record.sample_total or 0),
+                payload.get("result") or {},
+            )
+        elif ev == "candidate_started":
+            self._on_candidate_started(
+                int(record.candidate_idx or 0),
+                int(record.candidate_total or 0),
+                payload.get("changes_description") or "",
+                payload.get("pp_override"),
+            )
+        elif ev == "candidate_scored":
+            self._on_candidate_scored(
+                int(record.candidate_idx or 0),
+                int(record.candidate_total or 0),
+                payload.get("scores") or {},
+            )
 
     # -- Lifecycle -------------------------------------------------------------
 

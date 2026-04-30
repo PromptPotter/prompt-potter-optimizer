@@ -25,7 +25,6 @@ __all__ = [
     "Decision",
     "DecisionKind",
     "GatingMode",
-    "Measurement",
     "Phase",
     "RunRecord",
     "Snapshot",
@@ -120,41 +119,23 @@ class Phase(BaseModel):
 class Snapshot(BaseModel):
     """An in-flight live-state snapshot — per-query / per-candidate / per-round.
 
-    Snapshots are display state for the live dashboard. They are not part of
-    the audit trail and need not be replayed; projections that don't care
-    about live state ignore them.
+    Snapshots are display state for the live dashboard and per-query log.
+    The ``event`` discriminator says what the snapshot represents
+    (``sample_started``, ``sample_scored``, ``candidate_started``,
+    ``candidate_scored``); ``payload`` carries the full data the consumer
+    needs (full result dict, full score report, query text, etc.).
     """
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["snapshot"] = "snapshot"
+    event: str
     round: int
     candidate_idx: int | None = None
+    candidate_total: int | None = None
     sample_idx: int | None = None
+    sample_total: int | None = None
     payload: dict[str, Any] = Field(default_factory=dict)
-    timestamp: str = Field(default_factory=_utcnow_iso)
-
-
-class Measurement(BaseModel):
-    """One ``(sample × config → outcome)`` fact, the per-cycle projection of an archive row.
-
-    The tenant-global :class:`~promptpotter.infrastructure.store.measurement_archive.MeasurementArchive`
-    remains the cross-cycle database core (it persists every row across all
-    cycles + sessions + tenants). This record type is the per-cycle slice
-    that lands on the cycle's ``RunLedger`` so a ledger replay sees which
-    measurements this cycle produced — without re-scanning the global
-    archive. The ``run_id`` field links back to the archive row.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["measurement"] = "measurement"
-    run_id: str
-    sample_id: int
-    hit: bool
-    score: float | None = None
-    config_hash: str = ""
-    round: int | None = None
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
@@ -163,6 +144,6 @@ class Measurement(BaseModel):
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 RunRecord = Annotated[
-    Decision | Measurement | Phase | Snapshot,
+    Decision | Phase | Snapshot,
     Field(discriminator="record_type"),
 ]

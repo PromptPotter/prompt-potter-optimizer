@@ -172,12 +172,12 @@ class CampaignState:
     Wiring stays directly on ``Session`` and is shared across all
     cycles minted under one Session lifetime.
 
-    ``ledger`` is the per-cycle ``RunLedger`` (``events.jsonl``); facts
-    about the cycle (decisions, phase boundaries, candidate/sample
-    snapshots, measurements) are appended here in addition to the
-    legacy in-memory accumulators. Projections (``LiveDashboardProjection``,
-    ``AuditTrailProjection``) subscribe via ``ledger.bind`` to receive
-    the same records. Phase 5 will retire the parallel callback path.
+    ``ledger`` is the per-cycle ``RunLedger`` (``events.jsonl``) — the
+    sole ingress for in-loop events. Every fact (decisions, phase
+    boundaries, candidate/sample snapshots) goes through ``RunListener``
+    which appends a typed record; subscribers (``LiveDashboardProjection``,
+    ``AuditTrailProjection``, ``LiveDisplay``) receive each record via
+    ``on_record``.
     """
 
     cycle_id: str = ""

@@ -77,113 +77,134 @@ def build_baseline_cycle_id(
 
 
 class RunListener:
-    """Fan-out to emitter + display sinks. Owns the phase-view ctx so
-    ``build_phase_view`` (stateful — reads/writes ctx) runs once with a
-    consistent state machine. ``l1_stall_count`` lands in ctx on
-    ``on_round_complete`` so the next ``l1_generate:enter`` view sees it.
+    """Single ingress for in-loop events. Builds typed ``RunRecord`` instances
+    and appends them to the per-cycle ``RunLedger``; subscribers (live
+    dashboard projection, audit trail projection, terminal display)
+    consume via ``on_record`` only.
 
-    When ``ledger`` is set (Phase 3 — wired by ``run_optimization`` after
-    the per-cycle ``RunLedger`` is opened), each callback also tees a
-    typed record onto the ledger. Sinks still receive the legacy
-    callbacks during the cleanup; Phase 5 will retire that path and
-    leave the ledger as the only ingress."""
+    Owns the phase-view ctx so ``build_phase_view`` (stateful — reads/writes
+    ctx) runs once per ``PhaseEvent``; the resulting view dict ships on
+    ``Phase.payload['view']`` so subscribers don't re-derive it.
 
-    def __init__(
-        self,
-        *,
-        emitter: Any = None,
-        display: Any = None,
-    ) -> None:
-        self.emitter = emitter
-        self.display = display
-        self.ledger: Any = None  # set by run_optimization after the cycle ledger is opened
+    Pre-binding events (e.g. ``INIT.enter`` fired before the cycle dir is
+    known) buffer in memory; the first append after ``ledger`` is set
+    drains the buffer so subscribers see the full history."""
+
+    def __init__(self, *, ledger: Any = None) -> None:
+        self._ledger: Any = None
         self._phase_ctx: dict[str, Any] = {}
         self._current_round: int = 0
-        # Share the same ctx with the display so its on_round_complete /
-        # on_candidate_scored hooks can read composite-formula and
-        # baseline-composite without going through view dicts.
-        if display is not None and hasattr(display, "_phase_ctx"):
-            display._phase_ctx = self._phase_ctx
+        self._buffer: list[Any] = []
+        self.ledger = ledger  # triggers setter — drains the (empty) buffer
 
     @property
-    def _sinks(self) -> tuple[Any, ...]:
-        return tuple(s for s in (self.emitter, self.display) if s is not None)
+    def ledger(self) -> Any:
+        return self._ledger
+
+    @ledger.setter
+    def ledger(self, value: Any) -> None:
+        """Bind the ledger and drain any pre-binding buffer in order.
+
+        Subscribers must be bound to the ledger BEFORE this assignment so
+        they receive the buffered records via ``on_record`` when the
+        drain fires.
+        """
+        self._ledger = value
+        if value is None or not self._buffer:
+            return
+        pending, self._buffer = self._buffer, []
+        for buffered in pending:
+            with graceful("ledger buffered append failed"):
+                value.append(buffered)
+
+    def _emit(self, record: Any) -> None:
+        if self._ledger is None:
+            self._buffer.append(record)
+            return
+        with graceful("ledger append failed"):
+            self._ledger.append(record)
 
     def on_phase(self, event: Any) -> None:
         view = build_phase_view(event, self._phase_ctx)
-        for sink in self._sinks:
-            sink.on_phase(event, view)
-        if self.ledger is not None:
-            # Payload carries only the data dict's keys — values may hold
-            # complex objects (Cycle/Session/etc.) that don't serialize
-            # cleanly. Legacy callbacks above receive the rich event.
-            with graceful("ledger Phase append failed"):
-                self.ledger.append(
-                    Phase(
-                        phase=str(event.phase),
-                        event=str(event.event),
-                        round=event.round,
-                        payload={"data_keys": sorted((event.data or {}).keys())},
-                    )
-                )
+        self._emit(
+            Phase(
+                phase=str(event.phase),
+                event=str(event.event),
+                round=event.round,
+                payload={"view": view, "data": event.data},
+            )
+        )
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
         self._phase_ctx["l1_stall_count"] = l1_stall_count
-        for sink in self._sinks:
-            sink.on_round_complete(round_result, l1_stall_count)
-        # Round-complete Phase append is owned by ``_persist_round`` so
-        # the payload can include accuracy/composite/improved without
-        # this listener needing to project the RoundResult shape.
+        self._emit(
+            Phase(
+                phase="round",
+                event="complete",
+                round=getattr(round_result, "round", self._current_round),
+                payload={
+                    "round_result": round_result,
+                    "l1_stall_count": l1_stall_count,
+                    "phase_ctx": dict(self._phase_ctx),
+                },
+            )
+        )
 
     def on_candidate_started(
         self, idx: int, total: int, changes_description: str, pp_override: dict | None
     ) -> None:
-        for sink in self._sinks:
-            sink.on_candidate_started(idx, total, changes_description, pp_override)
+        self._emit(
+            Snapshot(
+                event="candidate_started",
+                round=self._current_round,
+                candidate_idx=idx,
+                candidate_total=total,
+                payload={
+                    "changes_description": changes_description,
+                    "pp_override": pp_override,
+                },
+            )
+        )
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        for sink in self._sinks:
-            sink.on_candidate_scored(idx, total, scores)
-        if self.ledger is not None:
-            with graceful("ledger candidate Snapshot append failed"):
-                self.ledger.append(
-                    Snapshot(
-                        round=self._current_round,
-                        candidate_idx=idx,
-                        payload={
-                            "accuracy": scores.get("accuracy"),
-                            "composite": scores.get("composite"),
-                            "hits": scores.get("hits"),
-                            "total": scores.get("total"),
-                            "invalid": bool(scores.get("invalid", False)),
-                        },
-                    )
-                )
+        self._emit(
+            Snapshot(
+                event="candidate_scored",
+                round=self._current_round,
+                candidate_idx=idx,
+                candidate_total=total,
+                payload={
+                    "scores": scores,
+                    "phase_ctx": dict(self._phase_ctx),
+                },
+            )
+        )
 
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
-        for sink in self._sinks:
-            sink.on_sample_started(ci, ct, qi, qt, query_text)
+        self._emit(
+            Snapshot(
+                event="sample_started",
+                round=self._current_round,
+                candidate_idx=ci,
+                candidate_total=ct,
+                sample_idx=qi,
+                sample_total=qt,
+                payload={"query_text": query_text},
+            )
+        )
 
     def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
-        for sink in self._sinks:
-            sink.on_sample_scored(ci, ct, qi, qt, result)
-        if self.ledger is not None:
-            with graceful("ledger sample Snapshot append failed"):
-                pd = result.get("pipeline_data") or {}
-                self.ledger.append(
-                    Snapshot(
-                        round=self._current_round,
-                        candidate_idx=ci,
-                        sample_idx=qi,
-                        payload={
-                            "hit": bool(result.get("hit")),
-                            "score": result.get("score"),
-                            "cached": bool(result.get("cached", False)),
-                            "terminated_at": pd.get("terminated_at") or "",
-                            "sample_id": result.get("sample_id"),
-                        },
-                    )
-                )
+        self._emit(
+            Snapshot(
+                event="sample_scored",
+                round=self._current_round,
+                candidate_idx=ci,
+                candidate_total=ct,
+                sample_idx=qi,
+                sample_total=qt,
+                payload={"result": result},
+            )
+        )
 
     def set_round(self, round_num: int) -> None:
         """Track the active round for Snapshot record context."""
@@ -611,7 +632,7 @@ async def run_optimization(
     else:
         resolved_task_context = TaskDecomposition()
 
-    cb = listener if listener is not None else RunListener(display=display)
+    cb = listener if listener is not None else RunListener()
 
     pre_loop_cycle_id = session.state.cycle_id
 
@@ -682,19 +703,16 @@ async def run_optimization(
             new_cycle_id=session.state.cycle_id,
             from_round=session.state.resumed_from_round or 0,
         )
-    cb.emitter = emitter
-
-    # Phase 3 ledger subscription: bind both projections so they receive
-    # records via ``on_record`` in addition to the legacy callback API.
-    # Live appends fan out automatically; replay (history before bind) is
-    # not needed since the projections were also driven by the callbacks
-    # that produced those records. Phase 5 will retire the parallel
-    # callback path and leave the ledger as the only ingress.
+    # Ledger subscription: every subscriber consumes via ``on_record``;
+    # there is no parallel direct-callback path. Display binds last so
+    # any pre-binding events buffered on the listener (e.g. ``INIT.enter``
+    # fired before the cycle dir was known) flush in order.
     if (ledger := session.state.ledger) is not None:
         ledger.bind(emitter)
         if session.state.round_recorder is not None:
             ledger.bind(session.state.round_recorder)
-        # Wire the listener so its callback tee-points reach the ledger.
+        if display is not None:
+            ledger.bind(display)
         cb.ledger = ledger
 
     stop_reason = await _run_round_loop(cycle, dataset, campaign_config, session, cb)

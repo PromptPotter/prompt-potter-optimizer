@@ -28,7 +28,6 @@ from promptpotter.domain.run_records import (
     Decision,
     DecisionKind,
     GatingMode,
-    Measurement,
     Phase,
     Snapshot,
 )
@@ -89,7 +88,7 @@ def test_no_bare_string_decision_kinds() -> None:
 
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
-    """Append decision/phase/snapshot/measurement, read back via iter() — types preserved."""
+    """Append decision/phase/snapshot, read back via iter() — types preserved."""
     ledger = RunLedger.open(CycleDir(tmp_path / "cyc1"))
 
     d = Decision(
@@ -98,21 +97,23 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
         outcome="c1",
     )
     p = Phase(phase="l1_generate", event="enter", round=1, payload={"n_variants": 3})
-    s = Snapshot(round=1, candidate_idx=0, sample_idx=4, payload={"hit": True})
-    m = Measurement(run_id="run_xyz", sample_id=7, hit=True, score=1.0, round=1)
+    s = Snapshot(
+        event="sample_scored",
+        round=1,
+        candidate_idx=0,
+        sample_idx=4,
+        payload={"hit": True},
+    )
 
     assert ledger.append(d) == 0
     assert ledger.append(p) == 1
     assert ledger.append(s) == 2
-    assert ledger.append(m) == 3
 
     records = list(ledger.iter())
-    assert len(records) == 4
+    assert len(records) == 3
     assert isinstance(records[0], Decision) and records[0].outcome == "c1"
     assert isinstance(records[1], Phase) and records[1].phase == "l1_generate"
     assert isinstance(records[2], Snapshot) and records[2].sample_idx == 4
-    assert isinstance(records[3], Measurement)
-    assert records[3].run_id == "run_xyz" and records[3].hit is True
 
 
 def test_runledger_persists_across_open(tmp_path: Path) -> None:
@@ -170,21 +171,19 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]
 
 
-def test_runlistener_tees_phase_and_snapshot_to_ledger(tmp_path: Path) -> None:
-    """RunListener appends Phase + Snapshot records to its ledger when one is wired.
+def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
+    """RunListener is the single ingress: every callback appends one typed record.
 
-    Phase 3 contract: every callback that fans out to display sinks
-    also tees a typed record onto the per-cycle ledger when
-    ``RunListener.ledger`` is set. The legacy sinks still fire (dual-
-    path) so behaviour is unchanged for callers that don't bind a
-    ledger.
+    Subscribers consume via ``on_record`` only; there is no parallel
+    direct-callback path. The records carry the rich payload subscribers
+    need (full result dicts, full score reports, view dicts) so any
+    consumer can rebuild its view from the ledger alone.
     """
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.phases import PhaseEvent
 
     ledger = RunLedger.open(CycleDir(tmp_path / "cyc1"))
-    cb = RunListener()
-    cb.ledger = ledger
+    cb = RunListener(ledger=ledger)
     cb.set_round(3)
 
     cb.on_phase(PhaseEvent(phase="l1_generate", event="enter", round=3, data={"k": "v"}))
@@ -196,69 +195,40 @@ def test_runlistener_tees_phase_and_snapshot_to_ledger(tmp_path: Path) -> None:
     records = list(ledger.iter())
     assert len(records) == 3
     assert isinstance(records[0], Phase)
-    assert records[0].phase == "l1_generate" and records[0].payload["data_keys"] == ["k"]
+    assert records[0].phase == "l1_generate"
+    assert records[0].payload["data"] == {"k": "v"}
     assert isinstance(records[1], Snapshot)
-    assert records[1].sample_idx == 4 and records[1].payload["hit"] is True
+    assert records[1].event == "sample_scored"
+    assert records[1].sample_idx == 4 and records[1].payload["result"]["hit"] is True
     assert isinstance(records[2], Snapshot)
-    assert records[2].candidate_idx == 0 and records[2].payload["accuracy"] == 0.6
+    assert records[2].event == "candidate_scored"
+    assert records[2].candidate_idx == 0
+    assert records[2].payload["scores"]["accuracy"] == 0.6
 
 
-def test_archive_save_with_ledger_appends_measurement_records(tmp_path: Path) -> None:
-    """``MeasurementArchive.save(ledger=...)`` mirrors each measurement onto the ledger.
+def test_runlistener_buffers_pre_ledger_events(tmp_path: Path) -> None:
+    """Snapshots fired before ``ledger`` is set are buffered, then flushed
+    in order on the first post-binding append. Lifecycle: events emitted
+    before the cycle dir is known must still reach subscribers via the
+    ledger once it opens."""
+    from promptpotter.application.runner import RunListener
 
-    The archive write is the source of truth (tenant-global); the
-    Measurement records are the per-cycle slice so a fork's iter()
-    sees which runs happened without re-scanning the global archive.
-    """
-    from promptpotter.domain.run_records import Measurement as MeasurementRecord
-    from promptpotter.infrastructure.store import build_stores
+    cb = RunListener()
+    cb.set_round(0)
+    cb.on_sample_started(0, 1, 0, 2, "q-pre1")
+    cb.on_sample_started(0, 1, 1, 2, "q-pre2")
 
-    stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc_archive"))
-    stores.archive.save(
-        "any-backend",
-        "run_t1",
-        {
-            "run_id": "run_t1",
-            "name": "run_t1",
-            "content_hash": "hash_t1",
-            "prompt_fields_id": "pf_x",
-            "item_count": 2,
-            "scores": {"accuracy": 0.5, "total": 2},
-            "node_configs": [["llm_only", {"model": "X"}]],
-            "pipeline_params": {"llm_only": {"model": "X"}},
-            "created_at": "2026-04-30T00:00:00Z",
-            "measurements": [
-                {
-                    "sample_id": 0,
-                    "query": "q0",
-                    "ground_truth": "a",
-                    "predicted": "a",
-                    "hit": True,
-                    "score": 1.0,
-                    "pipeline_data": {},
-                },
-                {
-                    "sample_id": 1,
-                    "query": "q1",
-                    "ground_truth": "b",
-                    "predicted": "x",
-                    "hit": False,
-                    "score": 0.0,
-                    "pipeline_data": {},
-                },
-            ],
-        },
-        ledger=ledger,
-        round_num=2,
-    )
+    ledger = RunLedger.open(CycleDir(tmp_path / "cyc_buf"))
+    cb.ledger = ledger
+    cb.on_sample_started(0, 1, 0, 2, "q-post")
 
-    records = [r for r in ledger.iter() if isinstance(r, MeasurementRecord)]
-    assert len(records) == 2
-    assert records[0].sample_id == 0 and records[0].hit is True
-    assert records[0].run_id == "run_t1" and records[0].config_hash == "hash_t1"
-    assert records[1].sample_id == 1 and records[1].hit is False
-    assert {r.round for r in records} == {2}
+    records = list(ledger.iter())
+    queries = [
+        r.payload.get("query_text")
+        for r in records
+        if isinstance(r, Snapshot) and r.event == "sample_started"
+    ]
+    assert queries == ["q-pre1", "q-pre2", "q-post"]
 
 
 def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> None:

@@ -7,13 +7,12 @@ construction site, and ``from_cycle_dir`` derives the standard subpath.
 A runtime assertion in ``__init__`` rejects any path that doesn't end in
 ``/.cache/rounds`` to catch ad-hoc constructions.
 
-Dual ingress: the class exposes both the legacy
-``begin_round`` / ``add_action`` / ``flush`` API the runner calls
-directly, AND the ``Projection`` ``on_record`` hook the per-cycle
-``RunLedger`` fans out to. ``Phase("round","enter")`` records trigger
-``begin_round`` and ``Phase("round","complete")`` triggers ``flush``;
-direct calls remain the no-ledger fallback. Phase 5 will retire the
-direct-call path.
+Round boundaries arrive via ``on_record``: ``Phase("round","enter")``
+triggers ``begin_round`` and ``Phase("round","complete")`` triggers
+``flush``. Per-node action data still arrives via direct calls
+(``add_action`` / ``set_node`` / ``set_l1_score``) from the LLM call
+sites and the live dashboard projection — that data isn't replayable
+and has no other consumer.
 """
 
 from __future__ import annotations
@@ -169,24 +168,17 @@ class AuditTrailProjection:
     def on_record(self, record: RunRecord, offset: int) -> None:
         """Subscribe-side hook: receive a typed record from the ledger.
 
-        Phase 3 of the persistence cleanup: the runner appends every fact
-        to the per-cycle ``RunLedger`` and projections that ``bind`` to
-        the ledger receive each record here. Round boundaries
-        (``Phase("round", "complete")``) flush the recorder to disk;
-        decisions and snapshots are archival under this projection's
-        scope (they shape the per-round node tree but not the recorder's
-        own state). Phase 5 will retire the parallel callback API and
-        leave this as the only ingress.
+        Round boundaries (``Phase("round", "enter"|"complete")``) drive
+        ``begin_round`` and ``flush``. Decision and Snapshot records
+        bypass this projection — decisions are archived in trial JSON
+        and snapshots are display-only.
         """
+        del offset
         if isinstance(record, Phase) and record.phase == "round":
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round)
             elif record.event == "complete":
                 self.flush()
-        # Decision/Snapshot records are not yet absorbed by the audit
-        # writer — the per-round node tree is still composed from the
-        # legacy callbacks. Phase 3c will widen the dispatch.
-        _ = (record, offset)
 
     def flush(self) -> Path | None:
         """Write ``round_NNNN.json`` and reset. Returns the written path."""

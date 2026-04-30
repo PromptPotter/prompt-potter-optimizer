@@ -1,14 +1,14 @@
-"""Live ``RunListener`` adapter — CLI and notebook share one ``LiveDisplay``.
+"""Live ledger subscriber — CLI and notebook share one ``LiveDisplay``.
 
 Surface differentiation via constructor flags, not subclasses:
 - ``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel)
 - ``store`` provided → enables ``note()`` / ``render_claude_notes()`` /
   ``render_journal()`` (notebook ↔ Claude exchange channel)
 
-Per-query / per-candidate / per-round formatters live in sibling modules
-(``render_query``, ``render_individual``, ``render_round``) — this file
-is just the listener orchestration plus the inlined tqdm bar tracker.
-Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
+Single ingress: the display consumes ``RunRecord``s from the per-cycle
+``RunLedger`` via ``on_record``. Per-query / per-candidate / per-round
+formatters live in sibling modules; this file is the dispatch + tqdm
+bar tracker. Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
 from promptpotter.presentation.views.display import (
     _box_bottom,
     _box_bottom_info,
@@ -140,7 +141,77 @@ class LiveDisplay:
         """Post-baseline rewire — replace pre-baseline placeholder."""
         self.baseline_acc = fresh
 
-    # --- RunListener display protocol ---------------------------------
+    # --- Ledger subscription ------------------------------------------
+
+    def on_record(self, record: RunRecord, offset: int) -> None:
+        """Route a typed record to the corresponding internal handler."""
+        del offset
+        if isinstance(record, Phase):
+            if record.phase == "round" and record.event == "complete":
+                payload = record.payload or {}
+                round_result = payload.get("round_result")
+                l1_stall = int(payload.get("l1_stall_count") or 0)
+                if round_result is not None:
+                    # Re-sync phase ctx from listener-side snapshot so the
+                    # composite block reads the same baseline anchors the
+                    # listener saw at emit time.
+                    ctx = payload.get("phase_ctx")
+                    if isinstance(ctx, dict):
+                        self._phase_ctx.update(ctx)
+                    self.on_round_complete(round_result, l1_stall)
+                return
+            payload = record.payload or {}
+            view = payload.get("view")
+            data = payload.get("data") or {}
+            event = PhaseEvent(
+                phase=record.phase,
+                event=record.event,
+                round=record.round,
+                data=data,
+            )
+            self.on_phase(event, view)
+        elif isinstance(record, Snapshot):
+            ev = record.event
+            payload = record.payload or {}
+            if ev == "sample_started":
+                self.on_sample_started(
+                    int(record.candidate_idx or 0),
+                    int(record.candidate_total or 0),
+                    int(record.sample_idx or 0),
+                    int(record.sample_total or 0),
+                    payload.get("query_text") or "",
+                )
+            elif ev == "sample_scored":
+                self.on_sample_scored(
+                    int(record.candidate_idx or 0),
+                    int(record.candidate_total or 0),
+                    int(record.sample_idx or 0),
+                    int(record.sample_total or 0),
+                    payload.get("result") or {},
+                )
+            elif ev == "candidate_started":
+                self.on_candidate_started(
+                    int(record.candidate_idx or 0),
+                    int(record.candidate_total or 0),
+                    payload.get("changes_description") or "",
+                    payload.get("pp_override"),
+                )
+            elif ev == "candidate_scored":
+                ctx = payload.get("phase_ctx")
+                if isinstance(ctx, dict):
+                    self._phase_ctx.update(ctx)
+                self.on_candidate_scored(
+                    int(record.candidate_idx or 0),
+                    int(record.candidate_total or 0),
+                    payload.get("scores") or {},
+                )
+
+    # --- Public callback API ------------------------------------------
+    #
+    # These methods are the direct entry point for callers that don't
+    # route through a ledger (notably ``baseline.py``, which fires before
+    # the per-cycle ledger exists). The ``on_record`` dispatcher above
+    # forwards ledger-driven events into the same handlers.
 
     def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
         if self._bars is not None:

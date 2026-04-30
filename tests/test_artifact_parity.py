@@ -114,6 +114,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.domain.cycle_paths import RootCycleDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult, RunResult
+    from promptpotter.domain.run_records import Phase, Snapshot
     from promptpotter.infrastructure.projections import LiveDashboardProjection
     from promptpotter.presentation.views.phase_views import build_phase_view
 
@@ -136,11 +137,21 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
 
     # ``RunListener`` would call ``build_phase_view`` once per event on a
-    # shared ctx and pass the result to each sink. Mirror that here.
+    # shared ctx and feed Phase records to the ledger; subscribers route
+    # them via ``on_record``. Mirror that here.
     phase_ctx: dict = {}
 
     def fire(event: PhaseEvent) -> None:
-        emitter.on_phase(event, build_phase_view(event, phase_ctx))
+        view = build_phase_view(event, phase_ctx)
+        emitter.on_record(
+            Phase(
+                phase=str(event.phase),
+                event=str(event.event),
+                round=event.round,
+                payload={"view": view, "data": event.data},
+            ),
+            0,
+        )
 
     # Simulate a single round lifecycle.  The emitter only reads a handful of
     # fields off the ``env`` payload (cycle_id, scoring.scoring_dataset, obs,
@@ -194,38 +205,63 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         )
     )
 
+    def fire_snapshot(event: str, payload: dict, **idx: int) -> None:
+        emitter.on_record(
+            Snapshot(
+                event=event,
+                round=0,
+                candidate_idx=idx.get("ci"),
+                candidate_total=idx.get("ct"),
+                sample_idx=idx.get("qi"),
+                sample_total=idx.get("qt"),
+                payload=payload,
+            ),
+            0,
+        )
+
     # Simulate a query measurement
-    emitter.on_sample_scored(
-        0,
-        1,
-        0,
-        2,
+    fire_snapshot(
+        "sample_scored",
         {
-            "query": "test_query",
-            "prediction": "test_pred",
-            "hit": True,
-            "cached": False,
-            "pipeline_data": {"total_time": 0.1, "terminated_at": "llm_ranking"},
+            "result": {
+                "query": "test_query",
+                "prediction": "test_pred",
+                "hit": True,
+                "cached": False,
+                "pipeline_data": {"total_time": 0.1, "terminated_at": "llm_ranking"},
+            },
         },
+        ci=0,
+        ct=1,
+        qi=0,
+        qt=2,
     )
-    emitter.on_sample_scored(
-        0,
-        1,
-        1,
-        2,
+    fire_snapshot(
+        "sample_scored",
         {
-            "query": "test_query_2",
-            "prediction": "test_pred_2",
-            "hit": False,
-            "ground_truth_rank": 3,
-            "n_candidates": 10,
-            "cached": True,
-            "pipeline_data": {"total_time": 0.05, "terminated_at": "llm_ranking"},
+            "result": {
+                "query": "test_query_2",
+                "prediction": "test_pred_2",
+                "hit": False,
+                "ground_truth_rank": 3,
+                "n_candidates": 10,
+                "cached": True,
+                "pipeline_data": {"total_time": 0.05, "terminated_at": "llm_ranking"},
+            },
         },
+        ci=0,
+        ct=1,
+        qi=1,
+        qt=2,
     )
 
     # Simulate candidate scoring
-    emitter.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 1, "total": 2})
+    fire_snapshot(
+        "candidate_scored",
+        {"scores": {"accuracy": 0.6, "hits": 1, "total": 2}},
+        ci=0,
+        ct=1,
+    )
 
     # Simulate round complete
     round_result = RoundResult(
@@ -238,7 +274,15 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         prompt_fields={"instruction": "test"},
         candidates_scored=1,
     )
-    emitter.on_round_complete(round_result, l1_stall_count=0)
+    emitter.on_record(
+        Phase(
+            phase="round",
+            event="complete",
+            round=0,
+            payload={"round_result": round_result, "l1_stall_count": 0},
+        ),
+        0,
+    )
 
     # Mirror runner._finalize_run: fold the run summary into index.json::final
     # and render log.md from the index + trial dump.

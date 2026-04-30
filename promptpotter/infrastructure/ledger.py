@@ -69,9 +69,15 @@ class RunLedger:
         return self._path
 
     def append(self, record: RunRecord) -> int:
-        """Write one record, fan out to subscribers, return its offset."""
+        """Write one record, fan out to subscribers, return its offset.
+
+        ``fallback=str`` lets payload dicts carry arbitrary objects (e.g.
+        Pydantic submodels, dataclasses, enums) without each call site
+        having to project to scalars first; non-JSON values are stringified
+        on disk while subscribers receive the original record in memory.
+        """
         offset = self._next_offset
-        line = _RECORD_ADAPTER.dump_json(record).decode("utf-8")
+        line = _RECORD_ADAPTER.dump_json(record, fallback=str).decode("utf-8")
         self._path.parent.mkdir(parents=True, exist_ok=True)
         with self._open_append() as fh:
             fh.write(line + "\n")
