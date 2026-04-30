@@ -49,3 +49,32 @@ def test_to_job_search_point_projects_prompt_fields_and_few_shot_block():
     assert "Input: a" in sp.prompt_fields["few_shot_block"]
     # Without a prompt-bearing node in the schema, prompt_fields collapses to None.
     assert OptSearchPoint(instruction="X").to_job_search_point().prompt_fields is None
+
+
+def test_copy_memory_carries_l1_surface_overrides_into_adoption_target():
+    """L2-written L1-surface state must survive L2→L3 adoption.
+
+    Regression for the audit finding: ``l1_section_overrides``,
+    ``l1_section_overrides_text`` and ``l1_template_override`` used to live
+    outside ``MEMORY_FIELDS``, so ``copy_memory_to`` silently dropped them
+    when L3 spawned a fresh OSP. Then ``apply_side_effects``'s in-place
+    ``{**existing, **new}`` merge would silently keep stale entries from
+    the OSP that was about to be defeated. Pinning here.
+    """
+    parent = OptSearchPoint(
+        l1_section_overrides={"directive_block": False, "warning_inventory": True},
+        l1_section_overrides_text={"directive_block": "use pattern X"},
+        l1_template_override="reframed body with {{l2_directive}}",
+    )
+    child = OptSearchPoint()
+    parent.copy_memory_to(child)
+
+    assert child.l1_section_overrides == {"directive_block": False, "warning_inventory": True}
+    assert child.l1_section_overrides_text == {"directive_block": "use pattern X"}
+    assert child.l1_template_override == "reframed body with {{l2_directive}}"
+
+    # Deep-copy contract — mutating the child's dicts must NOT affect the parent.
+    child.l1_section_overrides["new_key"] = True
+    child.l1_section_overrides_text["another"] = "v"
+    assert "new_key" not in parent.l1_section_overrides
+    assert "another" not in parent.l1_section_overrides_text

@@ -324,6 +324,17 @@ class OptSearchPoint(PromptTemplate):
         "l2_output_failures",
         "failure_analysis",
         "round_history",
+        # L1-generate surface state owned by L2 — must survive L2→L3
+        # adoption so a fundamental reframing (L3) inherits the in-flight
+        # section toggles / text overrides / template body that L2 set.
+        # Without these, L3 spawns a fresh OSP that drops the parent's
+        # surface state, then ``apply_side_effects``'s ``{**existing, **new}``
+        # merge silently keeps stale entries from the *prior* OSP that
+        # was about to be defeated. See the audit in
+        # ``docs/concepts/l1-generate-surface.md``.
+        "l1_section_overrides",
+        "l1_section_overrides_text",
+        "l1_template_override",
     )
     """Names of the flat optimizer-memory fields preserved across L2/L3
     transitions. The contract that ``OptimizationMemory`` used to bundle —
