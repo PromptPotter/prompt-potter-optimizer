@@ -53,7 +53,7 @@ After scoring, before the next round's generate, the critique step runs. It is t
 
 The critique is the every-round intelligence hub. It's what makes L1 Generate informed rather than random.
 
-`l1_critique → l1_generate` is **not** part of the self-healing canon — it fires every round whether anything failed or not. Self-healing is failure-driven (Loops 1–4 in [self-healing.md](self-healing.md)); this critique loop is performance-driven feedback. Different mechanism, similar plumbing: the critique writes `OptSearchPoint.l1_critique_text` and `failure_analysis`, which L1's prompt reads via the `{{failure_analysis}}` slot in `prompts/l1_generate.json`.
+`l1_critique → l1_generate` is **not** part of the self-healing canon — it fires every round whether anything failed or not. Self-healing is failure-driven (Loops 1–4 in [self-healing.md](self-healing.md)); this critique loop is performance-driven feedback. Different mechanism, similar plumbing: the critique writes `OptSearchPoint.l1_critique_text` and `failure_analysis`, which L1's prompt reads via the `{{failure_analysis}}` slot in `optimizer_pipeline.json::resolved_prompts['l1_generate/1']`.
 
 ## Escalation is additive, not preemptive
 

@@ -148,19 +148,53 @@ _PIPELINE_PATH = Path(__file__).parent / "optimizer_pipeline.json"
 
 
 @functools.lru_cache(maxsize=1)
+def _load_optimizer_manifest() -> dict[str, Any]:
+    """Read the on-disk optimizer-pipeline manifest (cached).
+
+    Single source of truth for nodes, schemas, and prompts. Mirrors
+    TermNorm's ``GET /pipeline`` response shape: ``nodes`` reference
+    ``schema_family``/``schema_version`` + ``prompt_family``/``prompt_version``,
+    and the bodies live in the top-level ``resolved_schemas`` /
+    ``resolved_prompts`` registries.
+    """
+    return json.loads(_PIPELINE_PATH.read_text(encoding="utf-8"))
+
+
+def _resolved_key(family: str, version: Any) -> str:
+    return f"{family}/{version}" if version is not None else family
+
+
+@functools.lru_cache(maxsize=1)
 def get_optimizer_schema() -> PipelineSchema:
-    """Load optimizer_pipeline.json as PipelineSchema (cached)."""
+    """Load optimizer_pipeline.json as PipelineSchema (cached).
+
+    Mirrors TermNorm's pipeline-schema convention: each node's structured
+    output schema is referenced via ``config.schema_family`` /
+    ``config.schema_version`` and resolved against the top-level
+    ``resolved_schemas`` registry — same shape ``parse_pipeline_response``
+    uses for backend pipelines, so the optimizer is itself a pipeline that
+    can later be optimized.
+    """
+    from promptpotter.application.pipeline_discovery import parse_resolved_schema
     from promptpotter.domain.pipeline_schema import PipelineNode
 
-    data = json.loads(_PIPELINE_PATH.read_text())
-    nodes = [
-        PipelineNode(
-            name=name,
-            current_config=node_data.get("config", {}),
-            param_keys=set(node_data.get("optimizer", {}).get("param_keys", [])),
-        )
-        for name, node_data in data.get("nodes", {}).items()
-    ]
+    data = _load_optimizer_manifest()
+    resolved_schemas = data.get("resolved_schemas", {})
+
+    nodes: list[PipelineNode] = []
+    for name, node_data in data.get("nodes", {}).items():
+        nc = node_data.get("config", {})
+        kwargs: dict[str, Any] = {
+            "name": name,
+            "current_config": nc,
+            "param_keys": set(node_data.get("optimizer", {}).get("param_keys", [])),
+        }
+        if sf := nc.get("schema_family"):
+            key = _resolved_key(sf, nc.get("schema_version"))
+            if key in resolved_schemas:
+                kwargs["output_schema"] = parse_resolved_schema(resolved_schemas[key])
+        nodes.append(PipelineNode(**kwargs))
+
     return PipelineSchema(
         name=data.get("name", ""),
         version=data.get("version", ""),
@@ -182,13 +216,24 @@ async def llm_call(
     recorder: AuditTrailProjection | None = None,
     **overrides,
 ) -> LLMResponse:
-    """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides."""
+    """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
+
+    When *json_schema* is not passed and the node carries an
+    ``output_schema.json_schema`` (resolved from the top-level
+    ``resolved_schemas`` registry in ``optimizer_pipeline.json``), that
+    schema is auto-pulled — same TermNorm-style indirection used for
+    backend pipelines.
+    """
     if config is None:
         if node:
             schema_node = get_optimizer_schema().get_node(node)
             if schema_node is None:
                 raise KeyError(f"Unknown optimizer node: {node}")
             config = schema_node.current_config
+            if json_schema is None and schema_node.output_schema is not None:
+                resolved = schema_node.output_schema.json_schema
+                if resolved:
+                    json_schema = resolved
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
@@ -316,19 +361,39 @@ async def run_optimizer_node(
 
 
 # ===========================================================================
-# Section 2 — Prompt loading (Langfuse → local JSON fallback)
+# Section 2 — Prompt loading (Langfuse → optimizer-manifest registry)
 # ===========================================================================
 
-_PROMPT_DIR = Path(__file__).parent / "prompts"
 _LANGFUSE_PREFIX = "optimizer_"
 _LANGFUSE_CACHE_TTL = 300  # seconds
 
 
+def _resolved_prompt_for_node(name: str) -> dict | None:
+    """Look up a node's prompt body in ``resolved_prompts``.
+
+    Joins the node's ``config.prompt_family``/``prompt_version`` against
+    the manifest's ``resolved_prompts`` registry — same TermNorm-style
+    indirection used for backend pipelines.
+    """
+    data = _load_optimizer_manifest()
+    node_cfg = data.get("nodes", {}).get(name, {}).get("config", {})
+    family = node_cfg.get("prompt_family")
+    if not family:
+        return None
+    key = _resolved_key(family, node_cfg.get("prompt_version"))
+    body = data.get("resolved_prompts", {}).get(key)
+    return body if isinstance(body, dict) else None
+
+
 @functools.lru_cache(maxsize=32)
 def _load_local(name: str) -> PromptTemplate:
-    path = _PROMPT_DIR / f"{name}.json"
-    data = json.loads(path.read_text(encoding="utf-8"))
-    return PromptTemplate(**data)
+    body = _resolved_prompt_for_node(name)
+    if body is None:
+        raise KeyError(
+            f"Optimizer prompt '{name}' not found in resolved_prompts registry "
+            f"(check nodes.{name}.config.prompt_family/version)."
+        )
+    return PromptTemplate(**body)
 
 
 def _try_langfuse(name: str) -> PromptTemplate | None:
@@ -361,13 +426,13 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Load optimizer prompt: Langfuse production → local JSON fallback."""
+    """Load optimizer prompt: Langfuse production → manifest registry fallback."""
     lf_prompt = _try_langfuse(name)
     return lf_prompt or _load_local(name)
 
 
 def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
-    """Push local JSON prompt defaults to Langfuse; returns {name: success}."""
+    """Push manifest-registry prompt defaults to Langfuse; returns {name: success}."""
     from promptpotter.infrastructure.tracing import LangfuseLogger
 
     lf = LangfuseLogger.get_instance()
@@ -385,7 +450,7 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
                 config=tpl.model_dump(),
                 labels=[label],
                 tags=["optimizer", "meta-prompt"],
-                commit_message=f"Push local default for {name}",
+                commit_message=f"Push manifest default for {name}",
             )
             results[name] = True
             logger.info("Pushed optimizer prompt %s to Langfuse", name)
@@ -399,8 +464,13 @@ def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
 
 
 def list_optimizer_prompts() -> list[str]:
-    """List available optimizer prompt names from local JSON files."""
-    return sorted(p.stem for p in _PROMPT_DIR.glob("*.json"))
+    """Names of nodes that declare a ``prompt_family`` in the manifest."""
+    data = _load_optimizer_manifest()
+    return sorted(
+        name
+        for name, node in data.get("nodes", {}).items()
+        if node.get("config", {}).get("prompt_family")
+    )
 
 
 def compute_optimizer_prompt_hashes() -> dict[str, str]:

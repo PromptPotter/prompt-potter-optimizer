@@ -44,7 +44,12 @@ Both backends and the optimizer loop declare their pipelines as JSON. The optimi
     "node_name": {
       "type": "llm | llm/structured | llm/meta | agent | deterministic | measurement | web_search",
       "node_role": "cache | candidate_source | enricher | ranker",
-      "config": { },
+      "config": {
+        "prompt_family": "node_name",
+        "prompt_version": 1,
+        "schema_family": "node_name",
+        "schema_version": 1
+      },
       "optimizer": {
         "observation_mappings": [
           {"pipeline_key": "output_key_name", "output_field": "field_in_response"}
@@ -54,11 +59,19 @@ Both backends and the optimizer loop declare their pipelines as JSON. The optimi
   },
   "pipelines": {
     "pipeline_name": ["node1", "node2", "node3"]
+  },
+  "resolved_prompts": {
+    "node_name/1": { "persona": "...", "task_intent": "...", "...": "..." }
+  },
+  "resolved_schemas": {
+    "node_name/1": { "fields": ["..."], "json_schema": { "...": "..." } }
   }
 }
 ```
 
 The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple pipeline sequences.
+
+Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against the top-level `resolved_prompts` / `resolved_schemas` registries — same shape `parse_pipeline_response` (in `application/pipeline_discovery.py`) consumes for backends. The optimizer manifest carries the registries inline; the backend serves them via `GET /pipeline`.
 
 ---
 

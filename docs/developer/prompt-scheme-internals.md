@@ -135,17 +135,17 @@ L1 generate and L2 templates use named per-section holes mapped from `L1Generate
 
 ## Optimizer meta-prompts
 
-The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt file under `promptpotter/application/optimization/prompts/` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
+The optimizer's own prompts are themselves `PromptTemplate` instances — the 8-field decomposition applies recursively. Every meta-prompt body under `optimizer_pipeline.json::resolved_prompts` populates the same 6 string fields (`PROMPT_STRING_FIELDS`), plus `plan` where applicable. Each LLM node references its prompt by `(prompt_family, prompt_version)` in its `config`. This is what lets a future outer loop perturb them the same way the core loop perturbs target-backend prompts.
 
 L1 generate and L2 templates use named per-section holes; L1 critique keeps a single `{{dispatch_msg}}` hole. L3 is multi-hole. The L1-generate surface owner (L2 via OSP overrides) is documented in [l1-generate-surface.md](l1-generate-surface.md); L2's flat-dict output channel in [l2-internals.md](l2-internals.md).
 
-| Template file | Consumer | Compile variables |
+| Registry key | Consumer | Compile variables |
 |---|---|---|
-| `l1_generate.json` | `l1_generate()` | every `L1GenerateField` value (`pipeline_schema_text`, `failure_analysis`, `axes_l1`, `task_context`, `escalation_probe`, `escalation_alert`, `l2_directive`, `plan`, `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`) |
-| `l1_critique.json` | `run_l1_critique()` | `dispatch_msg` |
-| `l2_context.json` | L2 refine transition | `current_params`, `task_context_section`, `escalation_section`, `warning_inventory`, `l2_directive`, `validation_failures`, `runtime_failures`, `axes_l2`, `l1_generate_field_catalogue` |
-| `l3_plan.json` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `axes_digest` |
-| `restructure.json` | `decompose_prompt_fields()` | `consultation_instruction` |
+| `resolved_prompts['l1_generate/1']` | `l1_generate()` | every `L1GenerateField` value (`pipeline_schema_text`, `failure_analysis`, `axes_l1`, `task_context`, `escalation_probe`, `escalation_alert`, `l2_directive`, `plan`, `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`) |
+| `resolved_prompts['l1_critique/1']` | `run_l1_critique()` | `dispatch_msg` |
+| `resolved_prompts['l2_context/1']` | L2 refine transition | `current_params`, `task_context_section`, `escalation_section`, `warning_inventory`, `l2_directive`, `validation_failures`, `runtime_failures`, `axes_l2`, `l1_generate_field_catalogue` |
+| `resolved_prompts['l3_plan/1']` | L3 plan transition | `current_plan`, `l2_summary`, `rendered_prompt`, `pipeline_section`, `runtime_failures_section`, `axes_digest` |
+| `resolved_prompts['restructure/1']` | `decompose_prompt_fields()` | `consultation_instruction` |
 
 Loader and symbol paths: see [code-map.md](code-map.md).
 

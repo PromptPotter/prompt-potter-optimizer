@@ -26,7 +26,7 @@ Every failure attaches to the **candidate that produced it** (direct fields on `
 
 The failures land on `OptSearchPoint.validation_failures`. This is **outer-layer optimizer state** — it lives on the optimizer trace alongside `l1_critique_text`, `l2_directive`, and `escalation_journal`. The target-layer `JobSearchPoint` is untouched, which is why none of the scoring-layer machinery needs to know about validation failures: `score_population()` shortcuts to a synthetic 0 report (Path 1), the inline winner-selection in `l1_score()` naturally deprioritizes the zero-accuracy candidate, and the round checkpoint persists the failure with the rest of the optimizer memory.
 
-**L2 nudges L1.** L2's `refine_strategy` template (`prompts/l2_context.json`) renders a `{{validation_failures}}` section via `_section_validation_failures()` (in `application/optimization/pipeline.py`). L2 writes a directive that points L1 toward the allowed region. The directive lands on `OptSearchPoint.l2_directive` and L1 reads it as primary signal next round.
+**L2 nudges L1.** L2's `refine_strategy` template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders a `{{validation_failures}}` section via `_section_validation_failures()` (in `application/optimization/pipeline.py`). L2 writes a directive that points L1 toward the allowed region. The directive lands on `OptSearchPoint.l2_directive` and L1 reads it as primary signal next round.
 
 **Healing is gradual.** L2's directive shifts L1's distribution toward valid values; it does not guarantee a one-shot fix. If L1 still proposes invalid values next round, the validator fires again, the new failures land in `validation_failures`, and L2 gets another pass with fresh evidence. The renderer guidance reflects this — it does not require L2 to enumerate every disallowed value, only to nudge in the right direction.
 
@@ -57,7 +57,7 @@ Flow: `DegradationCheck → RuntimeFailure attached per candidate → real score
 
 **Trigger.** `escalate_l2` (in `application/optimization/cycle.py`) checks `esc.l2.stall_count >= opt.l2_patience`. When stalled, L3 fires (subject to its own `l3_patience`).
 
-**Inputs.** L3's prompt (`prompts/l3_plan.json`) reads:
+**Inputs.** L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
 - `{{l2_summary}}` — recent L2 adjustments + accuracy delta from `cycle.escalation.l2`.
 - `{{runtime_failures_section}}` — accumulated `RuntimeFailure` trail rendered by `format_runtime_failures_for_l3()`.

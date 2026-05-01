@@ -19,10 +19,10 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["compute_pipeline_view", "parse_pipeline_response"]
+__all__ = ["compute_pipeline_view", "parse_pipeline_response", "parse_resolved_schema"]
 
 
-def _parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
+def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
     """Convert a ``_resolved_schema`` dict from the enriched response."""
     json_schema = resolved.get("json_schema", {})
     props = json_schema.get("properties", {})
@@ -71,7 +71,7 @@ def _extract_resolved_metadata(
             sv = nc.get("schema_version")
             key = f"{sf}/{sv}" if sv is not None else sf
             if key in schemas_raw:
-                entry["output_schema"] = _parse_resolved_schema(schemas_raw[key])
+                entry["output_schema"] = parse_resolved_schema(schemas_raw[key])
 
         if pf := nc.get("prompt_family"):
             pv = nc.get("prompt_version")

@@ -114,7 +114,7 @@ L2 does not mutate pipeline params (that's L3). L2 does not score candidates (th
 - `OptimizerAction` enum: same file
 - `TransitionResult` dataclass: same file
 - `L2RefineStrategy` class: same file (`build_compile_vars`, `build_result`, `apply_side_effects`, `enter_payload`, `exit_payload`)
-- L2 prompt template: `promptpotter/application/optimization/prompts/l2_context.json`
+- L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']` (referenced from `nodes.l2_context.config.prompt_family`/`prompt_version`)
 - OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `l2_directive`, `optimizer_params`, `task_context`, `l1_section_overrides`, `l1_section_overrides_text`, `l1_template_override`
 
 For the structural side, see:

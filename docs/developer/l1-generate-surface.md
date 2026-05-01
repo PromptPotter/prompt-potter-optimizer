@@ -23,7 +23,7 @@ The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output 
 3. Wire `<name>` into `_L1_GENERATE_SECTION_RENDERERS` and `_L1_GENERATE_FIELD_DESCRIPTIONS`.
 4. Append `<name>: str = ""` to `L1GenerateSurface`.
 5. Add `<name>` to `L1_GENERATE_SECTION_FIELDS` and the `to_compile_vars` mapping.
-6. Add `{{<name>}}` to `prompts/l1_generate.json`'s `problem_description` body.
+6. Add `{{<name>}}` to `optimizer_pipeline.json::resolved_prompts['l1_generate/1'].problem_description` body.
 
 **Removing a section:** delete the enum member. The deletion is the deliberate code change. L2 cannot drop a section by emitting an override — it can only gate one off via `scheme_overrides[name] = False`.
 

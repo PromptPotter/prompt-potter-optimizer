@@ -8,15 +8,26 @@
         "temperature": 0.7,
         "output_format": "json",
         "prompt_family": "l1_generate",
-        "context_sources": ["l1_critique", "task_context", "escalation_journal"],
-        "response_parser": "candidate_list"
+        "context_sources": [
+          "l1_critique",
+          "task_context",
+          "escalation_journal"
+        ],
+        "response_parser": "candidate_list",
+        "prompt_version": 1,
+        "schema_family": "l1_generate",
+        "schema_version": 1
       }
     },
     "l1_score": {
       "type": "measurement",
       "config": {
         "improvement_threshold": 0.01,
-        "stale_data_load_protocol": ["rerun", "samplescan", "sampleswitch"],
+        "stale_data_load_protocol": [
+          "rerun",
+          "samplescan",
+          "sampleswitch"
+        ],
         "rerun_trigger_count": 3,
         "samplescan_candidates": 3,
         "samplescan_threshold": 0.5,
@@ -35,7 +46,12 @@
       "type": "agent",
       "config": {
         "temperature": 0.3,
-        "positive_threshold": 0.7
+        "output_format": "json",
+        "positive_threshold": 0.7,
+        "schema_family": "l1_critique",
+        "schema_version": 1,
+        "prompt_family": "l1_critique",
+        "prompt_version": 1
       }
     },
     "l2_context": {
@@ -44,8 +60,13 @@
         "temperature": 0.3,
         "output_format": "json",
         "prompt_family": "l2_context",
-        "context_sources": ["l1_critique", "task_context", "l2_directive"],
-        "response_parser": "transition_result"
+        "context_sources": [
+          "l1_critique",
+          "task_context",
+          "l2_directive"
+        ],
+        "response_parser": "transition_result",
+        "prompt_version": 1
       }
     },
     "l3_plan": {
@@ -54,22 +75,216 @@
         "temperature": 0.5,
         "output_format": "json",
         "prompt_family": "l3_plan",
-        "context_sources": ["l1_critique", "task_context", "plan", "escalation_journal"],
-        "response_parser": "transition_result"
+        "context_sources": [
+          "l1_critique",
+          "task_context",
+          "plan",
+          "escalation_journal"
+        ],
+        "response_parser": "transition_result",
+        "prompt_version": 1
       }
     },
     "restructure": {
       "type": "llm/meta",
       "config": {
         "temperature": 0.3,
-        "output_format": "json"
+        "output_format": "json",
+        "prompt_family": "restructure",
+        "prompt_version": 1
       }
     }
   },
   "pipelines": {
-    "l1_round": ["l1_generate", "l1_score"],
-    "l1_round_with_l1_critique": ["l1_generate", "l1_score", "l1_critique"],
-    "l2_escalation": ["l2_context", "l1_generate", "l1_score", "l1_critique"],
-    "l3_escalation": ["l3_plan", "l2_context", "l1_generate", "l1_score", "l1_critique"]
+    "l1_round": [
+      "l1_generate",
+      "l1_score"
+    ],
+    "l1_round_with_l1_critique": [
+      "l1_generate",
+      "l1_score",
+      "l1_critique"
+    ],
+    "l2_escalation": [
+      "l2_context",
+      "l1_generate",
+      "l1_score",
+      "l1_critique"
+    ],
+    "l3_escalation": [
+      "l3_plan",
+      "l2_context",
+      "l1_generate",
+      "l1_score",
+      "l1_critique"
+    ]
+  },
+  "resolved_schemas": {
+    "l1_critique/1": {
+      "fields": [
+        "positive_critique",
+        "negative_critique",
+        "priority_fix",
+        "suggested_axes",
+        "failure_highlights",
+        "summary"
+      ],
+      "json_schema": {
+        "name": "critique",
+        "strict": false,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "positive_critique": {
+              "type": "string",
+              "maxLength": 300
+            },
+            "negative_critique": {
+              "type": "string",
+              "maxLength": 400
+            },
+            "priority_fix": {
+              "type": "string",
+              "maxLength": 200
+            },
+            "suggested_axes": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 40
+              },
+              "maxItems": 4
+            },
+            "failure_highlights": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 140
+              },
+              "maxItems": 3
+            },
+            "summary": {
+              "type": "string",
+              "maxLength": 400
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "additionalProperties": false
+        }
+      }
+    },
+    "l1_generate/1": {
+      "fields": [
+        "variants"
+      ],
+      "json_schema": {
+        "name": "l1_variants",
+        "strict": false,
+        "schema": {
+          "type": "object",
+          "properties": {
+            "variants": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "properties": {
+                  "variant_name": {
+                    "type": "string"
+                  },
+                  "changes_description": {
+                    "type": "string"
+                  },
+                  "pipeline_params_override": {
+                    "type": "object",
+                    "properties": {
+                      "persona": {
+                        "type": "string"
+                      },
+                      "task_intent": {
+                        "type": "string"
+                      },
+                      "problem_description": {
+                        "type": "string"
+                      },
+                      "instruction": {
+                        "type": "string"
+                      },
+                      "thinking_style": {
+                        "type": "string"
+                      },
+                      "answer_format": {
+                        "type": "string"
+                      },
+                      "downstream_context": {
+                        "type": "string"
+                      },
+                      "upstream_context": {
+                        "type": "string"
+                      }
+                    },
+                    "additionalProperties": false,
+                    "minProperties": 1
+                  }
+                },
+                "required": [
+                  "variant_name",
+                  "changes_description",
+                  "pipeline_params_override"
+                ],
+                "additionalProperties": false
+              }
+            }
+          },
+          "required": [
+            "variants"
+          ],
+          "additionalProperties": false
+        }
+      }
+    }
+  },
+  "resolved_prompts": {
+    "l1_generate/1": {
+      "persona": "You are a pipeline optimization expert.",
+      "task_intent": "Generate {{n_variants}} candidate configurations that improve on the current state shown below. The target pipeline, its domain, and the failures so far are all described in the context — do not assume any specific task type.",
+      "problem_description": "CURRENT STATE ({{accuracy_pct}} accuracy on {{n_queries}} queries):\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_schema_text}}{{failure_analysis}}{{axes_l1}}{{task_context}}{{escalation_probe}}{{escalation_alert}}{{l2_directive}}{{plan}}",
+      "instruction": "Produce {{n_variants}} candidates. Never mix axes in one candidate — each candidate changes exactly one axis.\n\n- Scalar axis: change a single param value.\n- Prompt axis: coherent rewrite of 2–3 subfields from {persona, task_intent, problem_description, instruction, thinking_style}.\n- Structured-output axis: 2–3-edit rewrite of answer_format.\n\nAcross the {{n_variants}}, every candidate must touch a different axis — duplicates are rejected. Empty pipeline_params_override is rejected: each variant MUST mutate at least one field. Clones of the parent waste API budget. For each, give a one-sentence reason grounded in the critique/context.",
+      "thinking_style": "",
+      "answer_format": "Return a JSON object with key \"variants\" containing an array of {{n_variants}} objects, each with:\n  - \"variant_name\": short identifier\n  - \"changes_description\": 1-2 sentence description\n  - \"pipeline_params_override\": dict of changes. MUST include at least one parameter change — empty overrides are rejected. Prompt fields (persona, task_intent, problem_description, instruction, thinking_style, answer_format) go as flat key -> value. Pipeline context fields (upstream_context, downstream_context) go as flat key -> value — these inject pipeline awareness into the target prompt's problem_description. Pipeline node params go nested under node name: {\"node_name\": {\"param\": value}} (e.g. {\"web_search\": {\"max_sites\": 5}}).\n  - \"target_axis\": the primary parameter axis this candidate focuses on\n  - \"reasoning\": why this combination is promising"
+    },
+    "l1_critique/1": {
+      "persona": "You are a pipeline evaluation analyst.",
+      "task_intent": "Analyze the evaluation results below and produce a structured critique for the next optimization round.",
+      "problem_description": "{{dispatch_msg}}",
+      "instruction": "Ground every claim in the stat sections above. Cite the specific axes, values, and failure groups you reference — do not generalize past the data shown. If a RUNTIME FAILURES section is present, you MUST name the offending axis and value in negative_critique and steer suggested_axes and priority_fix away from that value range.",
+      "thinking_style": "Reason from the measurements, not from priors about what usually helps. If the data is thin on an axis, say so rather than guessing.",
+      "answer_format": "Analyze all data above and return JSON:\n{\n  \"positive_critique\": \"<what is working well — patterns to extend>\",\n  \"negative_critique\": \"<what is failing — root causes and blockers>\",\n  \"priority_fix\": \"<what change(s) would have the most impact>\",\n  \"suggested_axes\": [\"<pipeline_param or prompt_field to try next>\"],\n  \"failure_highlights\": [\"<Query: ... | Predicted: ... | GT: ...>\", ...],\n  \"summary\": \"<2-3 sentence actionable critique for the next candidate generator>\"\n}\nRules:\n- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)\n- negative_critique: reference specific stats from the sections above\n- suggested_axes: name parameters or fields visible in the data above\n- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees — choose ones that best illustrate fixable patterns\n- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round — be concise and actionable"
+    },
+    "l2_context/1": {
+      "persona": "You are a prompt optimization expert. You shape the optimizer itself — not the target prompt directly. Your output is a flat dict of fields written onto the optimizer's state record (OptSearchPoint). Set only the fields you want to change; leave the rest unset.",
+      "task_intent": "Read the situation. Decide what — if anything — to change on the optimizer's state record so the next L1 round runs better. You can write a directive, tune optimizer params, refine task context, override individual L1-generate sections, replace L1's whole prompt body, and/or call a probe round.",
+      "problem_description": "CURRENT OPTIMIZER PARAMS: {{current_params}}{{task_context_section}}\n\nL1-GENERATE FIELD CATALOGUE (the menu of variables L1 currently sees — code-derived, never silently dropped):\n{{l1_generate_field_catalogue}}\n\n{{escalation_section}}{{warning_inventory}}{{l2_directive}}{{validation_failures}}{{runtime_failures}}{{axes_l2}}",
+      "instruction": "Write a flat JSON dict. Each field is independent — set only the ones you want to change. Leave the others unset (or empty) and the OSP keeps its current value. The catalogue above lists every L1-generate section + scalar that exists in code; you can toggle sections off, replace their text, or rewrite the whole template body.\n\nFocus on what will have the biggest impact on accuracy. Most rounds you'll write a directive only. Section overrides are situational — use them when a section is misleading L1 or when a section is empty and a deliberate hand-written substitute would help. Whole-template override is a large mutation; reserve it for cases where the framing is fundamentally wrong.",
+      "thinking_style": "Trace each failure pattern back to the axis it lives on before writing anything. A directive that does not name an axis the data supports is a guess. A section override without evidence the section is misleading L1 is churn.",
+      "answer_format": "Return a JSON object with these fields (all optional except where noted):\n  \"action\": \"normal_round\" (DEFAULT — full scoring set) or \"probe_round\" (rare — re-run only the warned-query subset; use when one narrow failure mode dominates AND you have a specific axis hypothesis to test).\n  \"directive\": 2-3 sentence strategic guidance for the next L1 generate prompt — what problem to solve and why, not specific parameter values. Set this when the data supports a specific direction.\n  \"optimizer_params\": dict of meta-setting changes (creativity, n_variants, sp_budget_ttest, variant_strategy). Omit or empty to keep current.\n  \"task_context\": dict of refined domain fields (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges). Omit or empty to keep current.\n  \"scheme_overrides\": dict {<section_name>: false} to gate sections off (or true to re-enable). Section names from the catalogue above.\n  \"text_overrides\": dict {<section_name>: \"replacement text\"} to swap a section's auto-generated text for hand-written content.\n  \"template_override\": full replacement string for L1-generate's problem_description body. Must contain {{l2_directive}} so directives still flow through. Reserve for fundamental reframing.\n  \"rationale\": 1-2 sentence explanation of why these changes.\n\nNote: L1 makes the final decision on pipeline_params. Your job is to refine the situation context, mutate L1's surface, or steer L1's strategy — not to author specific candidate values."
+    },
+    "l3_plan/1": {
+      "persona": "You are an expert optimization strategist.",
+      "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled.",
+      "problem_description": "L2 ADJUSTMENT HISTORY:\n{{l2_summary}}\n\nCURRENT PROMPT:\n---\n{{rendered_prompt}}\n---\n\n{{pipeline_section}}{{runtime_failures_section}}{{l2_output_failures_section}}\n\n{{axes_digest}}",
+      "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. If a runtime failure trail is present above, treat those patterns as discovered constraints on the search space — L2 has already tried to self-heal around them and failed, so your replan must either change pipeline_params to escape the failing region (switch model, raise a param floor, swap a node) or change the plan text to steer L1/L2 around it. Do not propose a plan that re-enters the same failure mode. If an L2 OUTPUT FAILURES block is present, deterministic validators caught L2 producing broken output (duplication, self-repeat, catalogue-redundant overrides) — L3 is L2's nurse here: refine the plan text to steer L2 toward novel mutations and away from the failing strategy mode.",
+      "thinking_style": "Consider:\n- What patterns in the L2 history suggest about why the current approach is failing\n- What fundamentally different strategies the data supports\n- Which pipeline dimensions have been under-explored\n- Which runtime constraints have been discovered and must be respected\n- Whether L2 itself is the problem (validator failures on L2's output) and the plan must coach L2's next pass",
+      "plan": "{{current_plan}}",
+      "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization\n  \"pipeline_params\": {\"step_name\": {\"param\": value}} (or {} for no changes)\n  \"rationale\": 1-2 sentence explanation of the strategic shift"
+    },
+    "restructure/1": {
+      "persona": "You are a prompt engineering assistant.",
+      "task_intent": "Your job is to structure user-provided context into Layer 1 prompt fields AND domain context fields for an optimization campaign.",
+      "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.",
+      "thinking_style": "Prefer the user's own wording for domain terms. Invent nothing — if a field has no source material, leave it sparse rather than padding it.",
+      "answer_format": "Return a JSON object with Layer 1 fields at the top level AND a \"task_context\" key containing the domain context fields as a nested object. {{consultation_instruction}}"
+    }
   }
 }

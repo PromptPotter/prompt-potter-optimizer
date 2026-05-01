@@ -269,8 +269,9 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 
 | Area | Files |
 |------|-------|
-| Optimizer prompts | `promptpotter/application/optimization/prompts/{l1_generate,l1_critique,l2_context,l3_plan}.json` |
-| Prompt loading | `pipeline.py::load_optimizer_prompt` (line 244) |
+| Optimizer prompts | `promptpotter/application/optimization/optimizer_pipeline.json::resolved_prompts['{l1_generate,l1_critique,l2_context,l3_plan,restructure}/1']` |
+| Optimizer output schemas | `optimizer_pipeline.json::resolved_schemas['{l1_generate,l1_critique}/1']` (`l1_generate` is the static envelope; `build_l1_output_schema` grafts per-target node properties on top) |
+| Prompt loading | `pipeline.py::load_optimizer_prompt` (manifest registry → Langfuse override) |
 | Per-round trace | `campaigns/{cycle_id}/.cache/rounds/round_NNNN.json` (`nodes.l1_generate`, `nodes.l1_score`, `nodes.l1_critique`) |
 | Per-round optimizer state | `campaigns/{cycle_id}/trials/trial_NNNN.json` |
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |

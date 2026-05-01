@@ -117,8 +117,29 @@ def _classify_axis(axis_key: str) -> str:
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Construct the JSON schema L1 must conform to (enums tighten param_allowed_values)."""
-    node_properties: dict[str, dict] = {}
+    """Construct the JSON schema L1 must conform to.
+
+    Starts from the static envelope sheltered in the optimizer manifest
+    (``resolved_schemas['l1_generate/1']``) — variants array shape +
+    prompt-string + task-context override fields — and grafts per-target
+    node properties (with ``param_allowed_values`` tightened to JSON-Schema
+    ``enum``) onto ``pipeline_params_override.properties``.
+    """
+    from copy import deepcopy
+
+    from promptpotter.application.optimization.pipeline import get_optimizer_schema
+
+    base_node = get_optimizer_schema().get_node("l1_generate")
+    if base_node is None or base_node.output_schema is None:
+        raise RuntimeError(
+            "optimizer manifest missing l1_generate output_schema envelope "
+            "(resolved_schemas['l1_generate/1'])"
+        )
+    schema = deepcopy(base_node.output_schema.json_schema)
+    override_properties = schema["schema"]["properties"]["variants"]["items"]["properties"][
+        "pipeline_params_override"
+    ]["properties"]
+
     for node in pipeline_schema.nodes:
         if not node.param_keys:
             continue
@@ -128,47 +149,14 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
             if allowed:
                 param_props[param] = {"type": "string", "enum": list(allowed)}
             else:
-                param_props[param] = {}  # any JSON value permitted
-        node_properties[node.name] = {
+                param_props[param] = {}
+        override_properties[node.name] = {
             "type": "object",
             "properties": param_props,
             "additionalProperties": False,
         }
 
-    override_properties: dict[str, dict] = {
-        **{field: {"type": "string"} for field in PROMPT_STRING_FIELDS},
-        **{field: {"type": "string"} for field in TASK_CONTEXT_OVERRIDES},
-        **node_properties,
-    }
-
-    variant_item = {
-        "type": "object",
-        "properties": {
-            "variant_name": {"type": "string"},
-            "changes_description": {"type": "string"},
-            "pipeline_params_override": {
-                "type": "object",
-                "properties": override_properties,
-                "additionalProperties": False,
-                "minProperties": 1,
-            },
-        },
-        "required": ["variant_name", "changes_description", "pipeline_params_override"],
-        "additionalProperties": False,
-    }
-
-    return {
-        "name": "l1_variants",
-        "strict": False,
-        "schema": {
-            "type": "object",
-            "properties": {
-                "variants": {"type": "array", "items": variant_item},
-            },
-            "required": ["variants"],
-            "additionalProperties": False,
-        },
-    }
+    return schema
 
 
 def validate_overrides(

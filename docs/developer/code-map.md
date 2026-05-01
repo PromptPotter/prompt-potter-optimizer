@@ -112,7 +112,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `CampaignStore` | `promptpotter/infrastructure/store/stores.py` |
 | `MeasurementArchive` | `promptpotter/infrastructure/store/measurement_archive.py` |
 | `OpenAICompatibleClient` / `AnthropicClient` | `promptpotter/infrastructure/llm.py` |
-| `parse_pipeline_response` | `promptpotter/application/pipeline_discovery.py` |
+| `parse_pipeline_response`, `parse_resolved_schema` | `promptpotter/application/pipeline_discovery.py` |
 | `SessionStore` | `promptpotter/infrastructure/store/stores.py` |
 | `Stores` | `promptpotter/infrastructure/store/stores.py` |
 | Tracing (events + bridge + sinks + Langfuse + backfill) | `promptpotter/infrastructure/tracing.py` |
@@ -150,4 +150,4 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `datasets/{name}/campaign.json` | Campaign hyperparameters per dataset |
 | `datasets/{name}/pipeline.json` | Pipeline + model + caps per dataset |
 | `datasets/{name}/prompts/{node}.json` | Canonical starting `PromptTemplate` JSON |
-| `promptpotter/application/optimization/optimizer_pipeline.json` | Loop registration + meta-prompt families |
+| `promptpotter/application/optimization/optimizer_pipeline.json` | Optimizer pipeline manifest — node declarations + `resolved_prompts` (PromptTemplate bodies) + `resolved_schemas` (structured-output bodies); referenced from each node by `(prompt_family, prompt_version)` / `(schema_family, schema_version)` |
