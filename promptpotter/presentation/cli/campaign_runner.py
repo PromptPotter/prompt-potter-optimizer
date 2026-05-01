@@ -616,6 +616,11 @@ def _existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, s
     from a root, a fork, a fork-of-fork, or any deeper node; the
     branch point is whatever ``cycle_id`` the active pointer (or
     direct ``--cycle`` arg, when added) names.
+
+    A FORK_CUT pointing at a fork dir that no longer exists is
+    ignored: the ledger is append-only, so an operator who deleted a
+    bogus fork (e.g., post-bug cleanup) would otherwise be permanently
+    blocked from re-running that payload from this parent.
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import DecisionKind
@@ -634,7 +639,7 @@ def _existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, s
             data = getattr(record, "data", {}) or {}
             src = data.get("source_file")
             outcome = getattr(record, "outcome", None)
-            if src and outcome:
+            if src and outcome and store.campaigns.campaign_dir(str(outcome)).exists():
                 out[str(src)] = str(outcome)
     return out
 
