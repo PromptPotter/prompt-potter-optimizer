@@ -25,7 +25,7 @@ from promptpotter.main import app
 
 @pytest.fixture
 def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
-    """Spin up a tenant with one cycle dir containing dashboard / log / log.md / ledger."""
+    """Spin up a tenant with one cycle dir containing dashboard / log.md / ledger."""
     projects_root = tmp_path / "projects"
     datasets_root = tmp_path / "datasets"
     cycle_id = "cycle_apitest_001"
@@ -39,10 +39,6 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
 
     (root_dir / "dashboard.json").write_text(
         json.dumps({"phase": "l1_score", "round": 3, "best": 0.812}),
-        encoding="utf-8",
-    )
-    (root_dir / "output.log").write_text(
-        "\n".join(f"line {i}" for i in range(50)) + "\n",
         encoding="utf-8",
     )
     (cycle_dir / "log.md").write_text(
@@ -94,22 +90,6 @@ def test_dashboard_404_on_missing_cycle(seeded_tenant: tuple[TestClient, str]) -
     client, _ = seeded_tenant
     resp = client.get("/api/v1/campaigns/nonexistent_cycle/dashboard")
     assert resp.status_code == 404
-
-
-def test_log_tail_returns_last_n_lines(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/log?tail=5")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["lines"] == [f"line {i}" for i in range(45, 50)]
-    assert body["truncated"] is True
-
-
-def test_log_tail_not_truncated_when_file_short(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/log?tail=1000")
-    assert resp.status_code == 200
-    assert resp.json()["truncated"] is False
 
 
 def test_log_md_returns_markdown_envelope(seeded_tenant: tuple[TestClient, str]) -> None:

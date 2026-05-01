@@ -92,6 +92,42 @@ __all__ = [
 # that still import from this module.
 
 
+def _build_scoreboard(
+    candidate_scores: list[dict[str, Any]], winner_label: str
+) -> list[dict[str, Any]]:
+    """Rank candidates by composite (desc), then accuracy (desc); tag the winner.
+
+    The trial JSON's ``scoreboard`` field — a renderer-friendly array that
+    callers (CLI, log.md, webapp) read instead of re-deriving from
+    ``candidate_scores``. Source of truth for rank is composite-then-accuracy;
+    the winner is identified by ``changes_description == winner_label``.
+    """
+    ranked = sorted(
+        candidate_scores,
+        key=lambda c: (c.get("composite", c.get("accuracy", 0.0)), c.get("accuracy", 0.0)),
+        reverse=True,
+    )
+    rows: list[dict[str, Any]] = []
+    for i, c in enumerate(ranked, start=1):
+        is_winner = bool(c.get("changes_description")) and c["changes_description"] == winner_label
+        rows.append(
+            {
+                "rank": i,
+                "candidate_id": c.get("candidate_id"),
+                "label": c.get("changes_description", ""),
+                "accuracy": c.get("accuracy"),
+                "composite": c.get("composite"),
+                "hits": c.get("hits"),
+                "total": c.get("total"),
+                "ci_lo": c.get("ci_lo"),
+                "ci_hi": c.get("ci_hi"),
+                "is_winner": is_winner,
+                "escalation_aborted": c.get("escalation_aborted", False),
+            }
+        )
+    return rows
+
+
 @dataclass(frozen=True)
 class Divergence:
     """A recorded decision re-derived to a different outcome under the current scorer."""
@@ -760,6 +796,9 @@ class Cycle:
             "hits": rr.hits,
             "total": rr.total,
             "improved": rr.improved,
+            "p_value": rr.p_value,
+            "baseline_accuracy": rr.baseline_accuracy,
+            "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
             "prompt_fields": rr.prompt_fields,
             "results": rr.results,
             "all_candidate_results": dict(rr.all_candidate_results),

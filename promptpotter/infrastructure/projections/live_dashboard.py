@@ -1,17 +1,24 @@
-"""LiveDashboardProjection — operator-facing ``dashboard.json`` + ``output.log`` writer.
+"""LiveDashboardProjection — operator-facing ``dashboard.json`` writer.
 
-Family-root-bound: one stream per cycle family, shared across all forks
-(the active fork is identified by ``dashboard.json::cycle_id``). The
-constructor takes :data:`RootCycleDir` so a per-cycle audit block cannot
-accidentally land here. ``for_session`` is the standard factory — it
-derives the root from ``cycle_id`` via ``stores.root_dir_for`` and wraps
-in the newtype before delegating to ``__init__``. A runtime assertion in
-``__init__`` rejects any path that contains a ``forks/`` segment.
+Family-root-bound: one ``dashboard.json`` per cycle family, shared across
+all forks (the active fork is identified by ``dashboard.json::cycle_id``).
+The constructor takes :data:`RootCycleDir` so a per-cycle audit block
+cannot accidentally land here. ``for_session`` is the standard factory —
+it derives the root from ``cycle_id`` via ``stores.root_dir_for`` and
+wraps in the newtype before delegating to ``__init__``. A runtime
+assertion in ``__init__`` rejects any path that contains a ``forks/``
+segment.
 
 Single ingress: the projection consumes only via ``on_record`` from the
 per-cycle ``RunLedger``. The runner emits typed ``Phase`` / ``Snapshot`` /
 ``Decision`` records; this class routes each record kind to the
 corresponding internal handler.
+
+(Historical: this writer also produced ``output.log`` — a parallel
+narrative stream. Dropped because the per-line format was strictly
+weaker than ``LiveDisplay`` stderr (truncated query, no pred / gt / io
+tokens / sample id), and the structured fact stream lives on
+``ledger.jsonl``.)
 """
 
 from __future__ import annotations
@@ -21,11 +28,11 @@ import logging
 import time
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import IO, TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import Decision, Phase, RunRecord, Snapshot
+from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
 from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -158,8 +165,8 @@ class LiveDashboardProjection:
         recorder: AuditTrailProjection | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
-        # Forks share one continuous dashboard / output.log stream; per-fork
-        # audit (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
+        # Forks share one continuous dashboard.json; per-fork audit
+        # (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
         # stays in each cycle's own dir, written through dynamic
         # ``session.state.cycle_id`` paths.
         root_path = Path(root_dir)
@@ -170,7 +177,6 @@ class LiveDashboardProjection:
             )
         self.root_dir = root_path
         self.state_path = root_path / "dashboard.json"
-        self.log_path = root_path / "output.log"
         self.session_dir = session_dir
         self._recorder = recorder
 
@@ -200,20 +206,6 @@ class LiveDashboardProjection:
         (session_dir / "journal.md").touch()
         (session_dir / "notes.md").touch()
 
-        # One log handle for the projection's lifetime; closed in ``finalize``.
-        self.log_path.parent.mkdir(parents=True, exist_ok=True)
-        self._log_fh: IO[str] = open(  # noqa: SIM115
-            self.log_path, "a", encoding="utf-8", buffering=1
-        )
-        if resume_from:
-            r = resume_from
-            self._log_fh.write(
-                f"\n{'=' * 70}\n"
-                f"  RESUMED — prior: {r.get('rounds_completed', 0)} rounds, "
-                f"best={r.get('best', 0):.1%}\n"
-                f"{'=' * 70}\n\n"
-            )
-
     @classmethod
     def for_session(
         cls,
@@ -235,7 +227,7 @@ class LiveDashboardProjection:
 
         Telemetry binds to the family root (derived from ``cycle_id`` —
         the prefix before any ``_fork_`` segment). Forks of the same family
-        share that root's dashboard.json / output.log."""
+        share that root's dashboard.json."""
         if not (project_root and session_id and cycle_id):
             return None
 
@@ -311,20 +303,17 @@ class LiveDashboardProjection:
         elif phase in _PHASE_TO_LAYER:
             s["layer"] = _PHASE_TO_LAYER[phase]
 
-        self._log_fh.write(f"--- {event.phase} {event.event} (round {event.round}) ---\n")
         self._persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """Banner in output.log marking a fork-on-divergence cutover.
+        """Mark a fork-on-divergence cutover on the live dashboard.
 
-        Mirrors the resume banner in ``__init__``. Subsequent HIT/MISS lines
-        and phase events belong to the new fork; consumers tailing the
-        family-root output.log see the cutover inline."""
-        self._log_fh.write(
-            f"\n{'=' * 70}\n"
-            f"  FORK {new_cycle_id} from round {from_round} (parent: {old_cycle_id})\n"
-            f"{'=' * 70}\n\n"
-        )
+        Updates ``dashboard.json::cycle_id`` so the active fork is
+        identified to live readers. The structured fork-cut decision is
+        appended to ``ledger.jsonl`` by the runner; this method only
+        keeps the dashboard's identity field current.
+        """
+        del old_cycle_id, from_round
         self._state["cycle_id"] = new_cycle_id
         self._persist()
 
@@ -403,15 +392,6 @@ class LiveDashboardProjection:
         s["last_query_elapsed_s"] = round(query_time, 2)
         self._query_start = None
 
-        q_text = (result.get("query") or "")[:45]
-        pred = (result.get("prediction") or "")[:35]
-        mark = "HIT" if hit else "MISS"
-        cache_mark = " CACHED" if is_cached else ""
-        self._log_fh.write(
-            f"  [{s['total_queries_scored']:>3d}] {query_time:5.1f}s "
-            f"{mark}{cache_mark} {q_text} -> {pred}\n"
-        )
-
         # Lazy-init candidate entry — older paths may skip on_candidate_started.
         cand = self._current_round.setdefault("candidates", {}).setdefault(
             ci, {"idx": ci, "total": ct, "label": "", "samples": [], "scores": None}
@@ -440,9 +420,6 @@ class LiveDashboardProjection:
     def _on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         s = self._state
         acc = scores.get("accuracy", 0.0)
-        hits = scores.get("hits", 0)
-        n = scores.get("total", 0)
-        comp = scores.get("composite")
 
         s["current_acc"] = round(acc, 4)
         # Inline this candidate's resolved evaluator values into the
@@ -455,12 +432,6 @@ class LiveDashboardProjection:
             s["composite_formula_short"] = inline_short_formula_values(
                 self._short_formula_template, scores.get("evaluators")
             )
-
-        comp_str = f"  composite={comp:.3f}" if comp is not None else ""
-        invalid_mark = "  INVALID" if scores.get("invalid") else ""
-        self._log_fh.write(
-            f"  === C{idx + 1}/{total}: {acc:.1%} ({hits}/{n}){comp_str}{invalid_mark} ===\n"
-        )
 
         # Store the report verbatim — single source of truth shared with
         # ``round_result.candidate_scores`` (same dict instance from
@@ -484,13 +455,9 @@ class LiveDashboardProjection:
         s["patience"] = f"{l1_stall_count}/{self._patience_max}"
         s["layer"] = "L1"
 
-        mark = "IMPROVED" if improved else "no improvement"
-        self._log_fh.write(
-            f"\n  >>> Round {round_result.round}: "
-            f"{round_result.label} {acc:.1%} — {mark} "
-            f"(patience {l1_stall_count}) <<<\n\n"
-        )
-
+        del (
+            improved
+        )  # round-complete narrative removed with output.log; ledger carries the decision
         # Deposit l1_score block + HITL onto the active recorder before
         # runner.py flush() — produces one consolidated .cache/rounds/round_NNNN.json.
         self._deposit_round_recorder_state(round_result)
@@ -587,11 +554,11 @@ class LiveDashboardProjection:
         no parallel direct-callback path.
         """
         del offset
-        if isinstance(record, Decision):
-            self._log_fh.write(
-                f"  [decision:{record.kind.value} round={record.round}] outcome={record.outcome!r}\n"
-            )
-        elif isinstance(record, Phase):
+        # Decision records are persisted to ``ledger.jsonl`` by the runner;
+        # this projection only mirrors the live scalar/round state to
+        # ``dashboard.json``. Phases drive scalar updates, snapshots drive
+        # per-round structures.
+        if isinstance(record, Phase):
             self._dispatch_phase(record)
         elif isinstance(record, Snapshot):
             self._dispatch_snapshot(record)
@@ -651,7 +618,7 @@ class LiveDashboardProjection:
     # -- Lifecycle -------------------------------------------------------------
 
     def finalize(self) -> None:
-        self._log_fh.close()
+        """No-op now that ``output.log`` is gone — kept for callers that still wire it through."""
 
     # -- Internal --------------------------------------------------------------
 

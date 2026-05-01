@@ -20,7 +20,6 @@ from promptpotter.presentation.views.display import (
     GREEN,
     RESET,
     YELLOW,
-    _dbox_block,
     _fmt_delta,
     _node_block,
     _node_line,
@@ -180,27 +179,14 @@ def _truncate_kv(items: list[tuple[str, str]], n_max: int = 5, val_max: int = 30
 
 
 def _render_init_enter(view: dict) -> str:
+    """Surface only the warnings here; static config (max rounds, patience, model, …) lives in ``index.json::header`` and ``dashboard.json``."""
     warnings = view.get("warnings") or []
-    out = [""] if warnings else []
+    if not warnings:
+        return ""
+    out = [""]
     for w in warnings:
         out.append(f"{YELLOW}⚠ {BOLD}{w['title']}{RESET}")
         out.append(f"    {YELLOW}{w['detail']}{RESET}")
-
-    max_rounds = view["max_rounds"] or 999
-    l2 = "enabled" if view["l2_enabled"] else "disabled"
-    l3 = "enabled" if view["l3_enabled"] else "disabled"
-    out.append("")
-    out.append(
-        _dbox_block(
-            f"{BOLD}FEEDBACK CYCLE STARTING{RESET}",
-            f"Max rounds     {max_rounds!s:<15s}Patience    {view['patience']}",
-            f"Candidates     {view['n_variants']}",
-            f"Sample size    {view['sp_budget_ttest']} of {view['dataset_size']}",
-            f"Min detectable {YELLOW}±{view['mde']:.1%}{RESET} (α=0.05, 80% power)",  # noqa: RUF001
-            f"Model          {view['model']}",
-            f"L2 (refine)    {l2:<19s}L3 (plan)   {l3}",
-        )
-    )
     return "\n".join(out)
 
 
@@ -263,8 +249,9 @@ def _render_l1_generate_exit(view: dict) -> str:
 
 
 def _render_l1_score_enter(view: dict) -> str:
-    label = f"{view['n_candidates']} × {view['n_queries']} = {view['n_calls']} calls"  # noqa: RUF001
-    return "\n" + _node_top("SCORE", label)
+    """``n × m = N calls`` is derivable from on-disk ``n_variants`` × ``sp_budget_ttest``; banner only here."""
+    del view
+    return "\n" + _node_top("SCORE")
 
 
 def _render_l1_score_exit(view: dict) -> str:

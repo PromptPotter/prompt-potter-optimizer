@@ -11,9 +11,9 @@ imports and the ``StoreDep`` dependency:
    optimization campaigns, nested under ``/backends/{backend_id}/campaigns``.
 
 3. **Per-cycle live reads** (also on ``campaigns_router``) — dashboard
-   passthrough, output.log tail, log.md, ledger reads + filtered views
-   (decisions, forks). The first real consumer of the per-cycle
-   ``RunLedger``; validates the record types carry what a webapp needs.
+   passthrough, log.md, ledger reads + filtered views (decisions,
+   forks). The first real consumer of the per-cycle ``RunLedger``;
+   validates the record types carry what a webapp needs.
 """
 
 import logging
@@ -337,12 +337,6 @@ class DashboardSnapshot(BaseModel):
     data: dict[str, Any] = Field(description="Verbatim dashboard.json contents")
 
 
-class LogTailResponse(BaseModel):
-    cycle_id: str = Field(description="Cycle the log belongs to")
-    lines: list[str] = Field(description="Last N lines of output.log")
-    truncated: bool = Field(description="True if older lines exist beyond this tail")
-
-
 class RunRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
@@ -420,24 +414,6 @@ async def get_cycle_dashboard(store: StoreDep, cycle_id: str):
     except json.JSONDecodeError as exc:
         raise HTTPException(500, f"dashboard.json corrupt: {exc}") from exc
     return DashboardSnapshot(cycle_id=cycle_id, data=data)
-
-
-@campaigns_router.get(
-    "/campaigns/{cycle_id}/log",
-    response_model=LogTailResponse,
-)
-async def get_cycle_log_tail(
-    store: StoreDep,
-    cycle_id: str,
-    tail: int = Query(200, ge=1, le=10_000, description="Last N lines to return"),
-):
-    """Last N lines of output.log (family-root-bound)."""
-    root_dir = root_dir_for(store.base_dir, cycle_id)
-    text = _read_text_or_404(root_dir / "output.log", "output.log")
-    all_lines = text.splitlines()
-    if len(all_lines) <= tail:
-        return LogTailResponse(cycle_id=cycle_id, lines=all_lines, truncated=False)
-    return LogTailResponse(cycle_id=cycle_id, lines=all_lines[-tail:], truncated=True)
 
 
 class LogMdResponse(BaseModel):

@@ -290,6 +290,24 @@ def new_session_state(
     }
 
 
+def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
+    """Header block for ``index.json`` — tool/version/pipeline/backend/dataset identity at cycle creation."""
+    from promptpotter.config.settings import APP_VERSION
+
+    schema = session.pipeline_schema
+    nodes = list(schema.nodes) if schema else []
+    return {
+        "tool": "promptpotter",
+        "version": APP_VERSION,
+        "n_nodes": len(nodes),
+        "steps": [n.name for n in nodes],
+        "backend_url": session.backend_client.base_url,
+        "backend_id": session.backend_id,
+        "dataset_name": session.dataset_name,
+        "dataset_size": dataset_size,
+    }
+
+
 def auto_mint_session(
     session: Session,
     campaign_config: CampaignConfig,
@@ -339,7 +357,12 @@ def auto_mint_session(
 
     if create_campaign_dir:
         session.store.campaigns.create(
-            session.backend_id, cycle_id, {"parent_session_id": session_id}
+            session.backend_id,
+            cycle_id,
+            {
+                "parent_session_id": session_id,
+                "header": _build_index_header(session, dataset_size),
+            },
         )
 
     session.session_id = session_id

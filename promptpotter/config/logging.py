@@ -9,12 +9,16 @@ LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
 
 class _CliFormatter(logging.Formatter):
-    """Bare message at INFO; ``LEVEL: message`` above."""
+    """Bare message at INFO; ``LEVEL: message`` above. Appends traceback when ``exc_info`` is set."""
 
     def format(self, record: logging.LogRecord) -> str:
         if record.levelno >= logging.WARNING:
-            return f"{record.levelname}: {record.getMessage()}"
-        return record.getMessage()
+            line = f"{record.levelname}: {record.getMessage()}"
+        else:
+            line = record.getMessage()
+        if record.exc_info:
+            line = f"{line}\n{self.formatException(record.exc_info)}"
+        return line
 
 
 class _TqdmStreamHandler(logging.StreamHandler):

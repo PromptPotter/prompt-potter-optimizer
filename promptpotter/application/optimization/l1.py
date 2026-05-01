@@ -817,6 +817,7 @@ class L1ScoringResult(BaseModel):
     hits: int
     total: int
     improved: bool
+    p_value: float | None = None
     candidates_scored: int
     candidate_scores: list[CandidateScore]
     winner_results: list[QueryResult]
@@ -914,6 +915,13 @@ async def l1_score(
     )
 
     base = _compute_accuracy(best_results)
+    improved = best_acc > baseline.accuracy + improvement_threshold
+    p_value: float | None = None
+    if improved and base["total"] > 0:
+        from promptpotter.shared.statistics import proportion_test
+
+        bl_hits = round(baseline.accuracy * base["total"])
+        p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
     return L1ScoringResult(
         label=best_label,
         winner_osp=best_osp,
@@ -926,7 +934,8 @@ async def l1_score(
         winner_composite=best_comp,
         hits=base["hits"],
         total=base["total"],
-        improved=best_acc > baseline.accuracy + improvement_threshold,
+        improved=improved,
+        p_value=p_value,
         candidates_scored=len(scored),
         candidate_scores=candidate_scores,
         winner_results=best_results,
@@ -1175,6 +1184,8 @@ async def execute_round(
         hits=scoring_result.hits,
         total=scoring_result.total,
         improved=scoring_result.improved,
+        p_value=scoring_result.p_value,
+        baseline_accuracy=baseline.accuracy,
         prompt_fields=scoring_result.winner_prompt_fields,
         pipeline_params=scoring_result.winner_pipeline_params,
         results=scoring_result.winner_results,

@@ -56,7 +56,6 @@ def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
     )
     try:
         assert proj.state_path == root_dir / "dashboard.json"
-        assert proj.log_path == root_dir / "output.log"
     finally:
         proj.finalize()
 
@@ -113,34 +112,28 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     assert written.exists(), "Phase('round', 'complete') must flush round_NNNN.json"
 
 
-def test_live_dashboard_on_record_writes_decision_line_to_output_log(tmp_path: Path) -> None:
-    """A bound LiveDashboardProjection mirrors decisions into ``output.log``.
+def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
+    """Baseline LLM-call metadata must persist to ``round_baseline.json`` instead of being discarded.
 
-    The operator tailing output.log sees gating events (round-winner,
-    elimination cuts, escalation triggers) inline with the per-query
-    HIT/MISS stream — single tail target, no need to read trial JSONs.
+    The baseline phase emits ``Phase('baseline', 'enter'|'exit')`` before
+    the first round's enter/complete. Pre-fix, baseline node accumulation
+    leaked into round 0's ``begin_round`` slot and was warn-and-discarded.
     """
-    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.domain.run_records import Phase
 
-    root_dir = tmp_path / "campaigns" / "root_xyz"
-    root_dir.mkdir(parents=True)
-    session_dir = tmp_path / "sessions" / "s_test"
+    cycle_dir = tmp_path / "campaigns" / "cyc_baseline"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
 
-    proj = LiveDashboardProjection(
-        RootCycleDir(root_dir),
-        session_dir,
-        l1_patience=3,
-        n_variants=5,
-        sp_budget_ttest=20,
-    )
-    try:
-        proj.on_record(
-            Decision(kind=DecisionKind.ELIMINATION_CUT, outcome=True, round=2),
-            0,
-        )
-    finally:
-        proj.finalize()
+    proj.on_record(Phase(phase="baseline", event="enter", round=0), 0)
+    proj.add_action({"type": "llm_only", "response": "answer"})
+    proj.on_record(Phase(phase="baseline", event="exit", round=0), 1)
+    # Round 0 begins fresh — no warn-and-discard, no leakage of baseline.
+    proj.on_record(Phase(phase="round", event="enter", round=0), 2)
+    proj.add_action({"type": "l1_generate", "response": "ok"})
+    proj.on_record(Phase(phase="round", event="complete", round=0), 3)
 
-    log_text = (root_dir / "output.log").read_text(encoding="utf-8")
-    assert "decision:elimination_cut" in log_text
-    assert "round=2" in log_text
+    baseline_path = cycle_dir / ".cache" / "rounds" / "round_baseline.json"
+    round_0_path = cycle_dir / ".cache" / "rounds" / "round_0000.json"
+    assert baseline_path.exists(), "baseline phase must flush to round_baseline.json"
+    assert round_0_path.exists(), "round 0 must flush independently of baseline"

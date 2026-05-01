@@ -34,6 +34,7 @@ __all__ = ["AuditTrailProjection"]
 
 
 _ROUNDS_SUBPATH = (".cache", "rounds")
+_BASELINE_ROUND_SENTINEL = -1
 
 
 def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
@@ -169,15 +170,26 @@ class AuditTrailProjection:
         """Subscribe-side hook: receive a typed record from the ledger.
 
         Round boundaries (``Phase("round", "enter"|"complete")``) drive
-        ``begin_round`` and ``flush``. Decision and Snapshot records
-        bypass this projection — decisions are archived in trial JSON
-        and snapshots are display-only.
+        ``begin_round`` and ``flush``. The baseline phase emits its own
+        ``Phase("baseline", "enter"|"exit")`` pair before the first round;
+        we treat it as a pseudo-round so its node I/O lands in
+        ``round_baseline.json`` instead of being silently discarded when
+        round 0 begins. Decision and Snapshot records bypass this
+        projection — decisions are archived in trial JSON and snapshots
+        are display-only.
         """
         del offset
-        if isinstance(record, Phase) and record.phase == "round":
+        if not isinstance(record, Phase):
+            return
+        if record.phase == "round":
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round)
             elif record.event == "complete":
+                self.flush()
+        elif record.phase == "baseline":
+            if record.event == "enter":
+                self.begin_round(_BASELINE_ROUND_SENTINEL)
+            elif record.event == "exit":
                 self.flush()
 
     def flush(self) -> Path | None:
@@ -199,7 +211,10 @@ class AuditTrailProjection:
             if key not in nodes_ordered:
                 nodes_ordered[key] = block
 
-        path = self.rounds_dir / f"round_{self._current_round:04d}.json"
+        if self._current_round == _BASELINE_ROUND_SENTINEL:
+            path = self.rounds_dir / "round_baseline.json"
+        else:
+            path = self.rounds_dir / f"round_{self._current_round:04d}.json"
         payload: dict[str, Any] = {
             "round": self._current_round,
             "started_at": self._started_at,

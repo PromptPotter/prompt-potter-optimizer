@@ -2,10 +2,10 @@
 
 Each module here owns one view over the ledger's record stream:
 
-* :mod:`live_dashboard` — the operator-facing ``dashboard.json`` +
-  ``output.log`` stream, family-root-bound (one stream per cycle family,
-  shared across forks). Constructor takes ``RootCycleDir`` so an audit
-  block cannot accidentally land here.
+* :mod:`live_dashboard` — the operator-facing ``dashboard.json`` writer,
+  family-root-bound (one file per cycle family, shared across forks).
+  Constructor takes ``RootCycleDir`` so an audit block cannot
+  accidentally land here.
 * :mod:`audit_trail` — the per-round node I/O recorder that flushes to
   ``campaigns/{cycle_id}/.cache/rounds/round_NNNN.json``. Per-cycle
   scope; constructor takes ``CycleDir`` so a fork's recorder cannot

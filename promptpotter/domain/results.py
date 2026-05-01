@@ -50,6 +50,9 @@ class CandidateScore:
 
     def to_dict(self) -> dict[str, Any]:
         """Flat dict representation for wire format / JSON serialization."""
+        from promptpotter.shared.statistics import wilson_ci
+
+        ci_lo, ci_hi = wilson_ci(self.hits, self.total)
         return {
             "candidate_id": self.candidate_id,
             "changes_description": self.changes_description,
@@ -58,6 +61,8 @@ class CandidateScore:
             "composite": self.composite,
             "hits": self.hits,
             "total": self.total,
+            "ci_lo": ci_lo,
+            "ci_hi": ci_hi,
             "evaluators": dict(self.evaluators),
             "escalation_aborted": self.escalation_aborted,
             "elimination_stopped": self.elimination_stopped,
@@ -122,6 +127,10 @@ class RoundMetadata(BaseModel):
     hits: int
     total: int
     improved: bool
+    # Wilcoxon-paired p-value vs prior round's baseline; populated only when
+    # ``improved`` is True (else None — no test run). Stored so log.md / a
+    # webapp can render significance without re-running the test.
+    p_value: float | None = None
     degraded_queries: int = 0
     # Count of samples discarded as deprecated (fatal warnings) on the
     # round-winner's scoring run; excluded from hits/total/accuracy and
@@ -142,6 +151,10 @@ class RoundDiagnostics(BaseModel):
 
     prompt_fields: dict
     pipeline_params: dict | None = None
+    # Comparison anchor for this round: prior round's accuracy (or campaign
+    # baseline for round 0). Persisted so the scoreboard can render
+    # delta-vs-baseline without resolving the prior trial.
+    baseline_accuracy: float = 0.0
     results: list[dict] = Field(default_factory=list)
     # Per-candidate scored results — persisted so resume can rescore
     # them under a changed scorer and replay decisions without needing
