@@ -222,6 +222,43 @@ def build_parser() -> argparse.ArgumentParser:
         "L2's evolved L1 surface for the operator to promote.",
     )
 
+    p_cmp = sub.add_parser(
+        "compare",
+        help="PoBB-compare cycle winners across the family with adaptive top-up. "
+        "Each cycle's index.json::final.winner_pipeline_params is one arm; "
+        "under-measured arms get one extra score per round until a decisive "
+        "P(best) emerges or the topup budget is exhausted.",
+    )
+    p_cmp.add_argument(
+        "cycle_ids",
+        nargs="*",
+        help="cycle ids to compare (each contributes one arm). "
+        "Omit (or pass --all) to auto-discover every cycle in the active "
+        "family with a final winner.",
+    )
+    p_cmp.add_argument(
+        "--all",
+        action="store_true",
+        dest="all_family",
+        help="Auto-discover every cycle in the active family with a final winner. "
+        "Implied when no positional cycle_ids are given.",
+    )
+    p_cmp.add_argument("--epsilon", type=float, default=0.05, help="PoBB threshold (default 0.05)")
+    p_cmp.add_argument(
+        "--max-topups",
+        type=int,
+        default=16,
+        dest="max_topups",
+        help="Upper bound on extra LLM calls (default 16; -1 = unbounded, Ctrl+C to stop).",
+    )
+    p_cmp.add_argument(
+        "--n-min-per-arm",
+        type=int,
+        default=4,
+        dest="n_min_per_arm",
+        help="Sample floor before SE-driven selection kicks in (default 4)",
+    )
+
     return parser
 
 
@@ -960,9 +997,97 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     )
 
 
+async def cmd_compare(args: argparse.Namespace) -> CommandResult:
+    """PoBB-compare cycle winners across the family with adaptive top-up."""
+    from promptpotter.application.bootstrap import populate_session_scoring
+    from promptpotter.application.config import configure_and_apply_pipeline
+    from promptpotter.application.optimization.elevation import elevate_to_decisive
+    from promptpotter.application.scoring.formula import split_scoring_block
+    from promptpotter.domain.search_point import JobSearchPoint
+    from promptpotter.infrastructure.store.stores import root_cycle_id
+
+    ctx = load_session(args)
+    cycle_ids = list(args.cycle_ids)
+    discover_family = args.all_family or not cycle_ids
+    session = await init_services_cli(**ctx.init_params)
+    session.session_id = ctx.session_id
+    session.state.cycle_id = ctx.cycle_id
+
+    campaign_config = ctx.campaign_config
+    configure_and_apply_pipeline(
+        session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
+    )
+
+    scoring_spec = split_scoring_block(campaign_config.scoring)
+    populate_session_scoring(
+        session,
+        obs=None,
+        scoring_formula=scoring_spec.per_query,
+        scoring_round_formula=scoring_spec.per_round,
+        scorer_id=scoring_spec.scorer_id,
+        experiment_id=ctx.state.get("experiment_id", ""),
+        cycle_id=ctx.cycle_id,
+        max_consecutive_errors=campaign_config.optimization.max_consecutive_errors,
+    )
+
+    if discover_family:
+        family_root = root_cycle_id(ctx.cycle_id)
+        summaries = session.store.campaigns.list_all(session.backend_id)
+        cycle_ids = [
+            s["campaign_id"] for s in summaries if root_cycle_id(s["campaign_id"]) == family_root
+        ]
+        if not cycle_ids:
+            return CommandResult(human=f"ERROR: no cycles found under family {family_root}")
+        logger.info("compare: discovered %d cycle(s) under family %s", len(cycle_ids), family_root)
+
+    arms: dict[str, JobSearchPoint] = {}
+    for cid in cycle_ids:
+        idx = session.store.campaigns.load(session.backend_id, cid)
+        if idx is None:
+            if discover_family:
+                logger.info("compare: skipping %s (not found)", cid)
+                continue
+            return CommandResult(human=f"ERROR: cycle {cid} not found")
+        winner_pp = (idx.get("final") or {}).get("winner_pipeline_params")
+        if not winner_pp:
+            if discover_family:
+                logger.info("compare: skipping %s (no final.winner_pipeline_params)", cid)
+                continue
+            return CommandResult(human=f"ERROR: cycle {cid} has no final.winner_pipeline_params")
+        arms[cid] = JobSearchPoint(pipeline_params=winner_pp)
+
+    if not arms:
+        return CommandResult(human="ERROR: no cycles with final.winner_pipeline_params to compare")
+
+    result = await elevate_to_decisive(
+        arms,
+        session,
+        session.queries or [],
+        epsilon=args.epsilon,
+        max_topups=args.max_topups,
+        n_min_per_arm=args.n_min_per_arm,
+        stream=discover_family or args.max_topups < 0,
+    )
+
+    return CommandResult(
+        data={
+            "decision": result.decision,
+            "best_arm": result.best_arm,
+            "p_best": result.p_best,
+            "topups_per_arm": result.topups_per_arm,
+            "score_histories_n": {k: len(v) for k, v in result.score_histories.items()},
+            "score_means": {
+                k: (sum(v) / len(v) if v else 0.0) for k, v in result.score_histories.items()
+            },
+        },
+        human=result.note,
+    )
+
+
 COMMANDS = {
     "init": cmd_init,
     "optimize": cmd_optimize,
+    "compare": cmd_compare,
 }
 
 
