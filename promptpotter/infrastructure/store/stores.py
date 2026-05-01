@@ -750,9 +750,6 @@ class CampaignStore(EntityStore):
             data["best_accuracy"] = trial["accuracy"]
             data["best_trial_id"] = trial_id
 
-        if round_num == 0:
-            data["baseline_accuracy"] = trial["accuracy"]
-
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(campaign_path, data)
 

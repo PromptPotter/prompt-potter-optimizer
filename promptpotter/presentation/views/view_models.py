@@ -25,6 +25,7 @@ __all__ = [
     "EscalationEnterView",
     "EscalationExitView",
     "FinalWinnerView",
+    "ForkSummaryView",
     "HardSamplesView",
     "InitEnterView",
     "InitExitView",
@@ -288,6 +289,23 @@ class FinalWinnerView:
 
 
 @dataclass(frozen=True)
+class ForkSummaryView:
+    """One row of the family-root log.md's ``## Forks`` section.
+
+    Built from each fork's ``index.json``; the family root is the only
+    cycle that renders these (forks themselves get an empty tuple)."""
+
+    cycle_id: str
+    mode: str
+    status: str
+    best_accuracy: float
+    baseline_accuracy: float
+    n_rounds: int
+    stop_reason: str
+    finished_at: str | None
+
+
+@dataclass(frozen=True)
 class LogMdView:
     """Composite — the full log.md document is one of these."""
 
@@ -297,6 +315,8 @@ class LogMdView:
     baseline_composite: float | None
     hard_samples: HardSamplesView | None
     final: FinalWinnerView | None
+    forks: tuple[ForkSummaryView, ...] = ()
+    family_best: tuple[float, str] | None = None
 
 
 AnyView = (
@@ -315,4 +335,5 @@ AnyView = (
     | PlanExitView
     | LogMdView
     | FinalWinnerView
+    | ForkSummaryView
 )

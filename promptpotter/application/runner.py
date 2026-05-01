@@ -6,6 +6,7 @@ import asyncio
 import json
 import logging
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.baseline import CampaignBaseline
@@ -1070,7 +1071,13 @@ def _finalize_run(
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
-                {"final": final_block},
+                {
+                    "final": final_block,
+                    # Seal top-level baseline against the truth source so it
+                    # cannot drift from ``final.baseline_accuracy``. Belt-and-
+                    # braces over Fix 2 in ``bootstrap_cycle``.
+                    "baseline_accuracy": run_result.baseline_accuracy,
+                },
             )
 
     if emitter:
@@ -1097,32 +1104,72 @@ def _finalize_run(
 
 
 def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
-    """Render ``campaigns/{cycle_id}/log.md`` from index + trials. Pure derived
-    view; wrapped in ``graceful()`` so a render bug never breaks the run."""
+    """Render ``log.md`` for the current cycle. When the current cycle is a
+    fork, also re-render the family root's ``log.md`` so its ``## Forks``
+    section reflects this fork's latest result. Pure derived view; wrapped
+    in ``graceful()`` so a render bug never breaks the run."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
         store = session.store.campaigns
-        index = store.load(session.backend_id, session.state.cycle_id)
-        if not index:
-            return
-        n_trials = int(index.get("n_trials", 0) or 0)
-        trials = (
-            store.load_trials_range(session.backend_id, session.state.cycle_id, 0, n_trials - 1)
-            if n_trials
-            else []
+        cycle_id = session.state.cycle_id
+        _render_log_md_for(store, session.backend_id, cycle_id, hard_samples_artifact)
+        from promptpotter.infrastructure.store.stores import root_cycle_id
+
+        root_id = root_cycle_id(cycle_id)
+        if root_id != cycle_id:
+            # Fork finished — refresh the family root's log.md so its Forks
+            # section picks up this fork's latest best/baseline/stop_reason.
+            _render_log_md_for(store, session.backend_id, root_id, None)
+
+
+def _render_log_md_for(
+    store: Any,
+    backend_id: str,
+    cycle_id: str,
+    hard_samples_artifact: dict | None,
+) -> None:
+    index = store.load(backend_id, cycle_id)
+    if not index:
+        return
+    n_trials = int(index.get("n_trials", 0) or 0)
+    trials = store.load_trials_range(backend_id, cycle_id, 0, n_trials - 1) if n_trials else []
+    cycle_dir = store.campaign_dir(cycle_id)
+    streams_dir = cycle_dir / "streams"
+    fork_indices = _load_fork_indices(cycle_dir)
+    content = to_markdown(
+        from_disk_log(
+            index,
+            trials,
+            hard_samples_artifact=hard_samples_artifact,
+            streams_dir=streams_dir,
+            fork_indices=fork_indices,
         )
-        cycle_dir = store.campaign_dir(session.state.cycle_id)
-        streams_dir = cycle_dir / "streams"
-        content = to_markdown(
-            from_disk_log(
-                index,
-                trials,
-                hard_samples_artifact=hard_samples_artifact,
-                streams_dir=streams_dir,
-            )
-        )
-        (cycle_dir / "log.md").write_text(content, encoding="utf-8")
+    )
+    (cycle_dir / "log.md").write_text(content, encoding="utf-8")
+
+
+def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
+    """Read every fork's ``index.json`` under ``cycle_dir/forks/``.
+
+    Returns ``None`` when the dir doesn't exist (i.e. the cycle is itself a
+    fork, or no forks have been minted yet) so ``from_disk_log`` knows to
+    skip the Forks section."""
+    forks_dir = cycle_dir / "forks"
+    if not forks_dir.is_dir():
+        return None
+    out: list[dict] = []
+    for fork_dir in sorted(forks_dir.iterdir()):
+        if not fork_dir.is_dir():
+            continue
+        idx = fork_dir / "index.json"
+        if not idx.is_file():
+            continue
+        try:
+            out.append(json.loads(idx.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError):
+            continue
+    return out
 
 
 def _refresh_tenant_leaderboards(session: Session) -> None:

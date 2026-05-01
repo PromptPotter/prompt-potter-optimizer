@@ -112,6 +112,12 @@ def bootstrap_cycle(
                 if cfg_updated and stored_cfg:
                     store.update(session.backend_id, resolved, {"config": stored_cfg})
                     logger.info("Updated loop-control config for %s", resolved)
+            # Diag forks inherit baseline_accuracy from the parent at fork-
+            # creation time, but they re-measure baseline against their own
+            # JSP. Refresh the top-level field so it reflects the cycle's
+            # actual baseline measurement, not the stale inherited value.
+            if existing.get("baseline_accuracy") != baseline_accuracy:
+                store.update(session.backend_id, resolved, {"baseline_accuracy": baseline_accuracy})
             return resolved, len(existing.get("trials", []))
         store.create(
             session.backend_id,

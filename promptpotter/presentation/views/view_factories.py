@@ -39,6 +39,7 @@ from promptpotter.presentation.views.view_models import (
     EscalationEnterView,
     EscalationExitView,
     FinalWinnerView,
+    ForkSummaryView,
     HardSamplesView,
     InitEnterView,
     InitExitView,
@@ -602,8 +603,14 @@ def from_disk_log(
     hard_samples_artifact: dict[str, Any] | None = None,
     sample_query_lookup: dict[int, str] | None = None,
     streams_dir: Path | None = None,
+    fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """Build the ``log.md`` view from ``index.json`` + a list of trial dicts."""
+    """Build the ``log.md`` view from ``index.json`` + a list of trial dicts.
+
+    ``fork_indices`` is the list of fork ``index.json`` blobs (one per fork
+    of the family); rendered as the ``## Forks`` section on the family-root
+    log.md. Forks themselves pass ``None`` and get an empty tuple.
+    """
     final = index.get("final") or {}
     status = DigestStatusView(
         campaign_id=str(index.get("campaign_id") or ""),
@@ -663,6 +670,29 @@ def from_disk_log(
         if hard_samples_artifact
         else None
     )
+    fork_views: tuple[ForkSummaryView, ...] = ()
+    family_best: tuple[float, str] | None = None
+    if fork_indices:
+        # Drop uninitialized forks (created but never ran a round) — their
+        # all-zeros row is noise. Sort survivors by best desc so the top
+        # contender surfaces first.
+        live = [fi for fi in fork_indices if int(fi.get("n_trials") or 0) > 0]
+        fork_views = tuple(
+            sorted(
+                (_fork_summary_from_index(fi) for fi in live),
+                key=lambda v: v.best_accuracy,
+                reverse=True,
+            )
+        )
+        # Family-best across the root + all forks. Cycle id of the holder
+        # disambiguates which sibling carries the headline.
+        candidates: list[tuple[float, str]] = [
+            (float(index.get("best_accuracy", 0.0)), str(index.get("campaign_id") or ""))
+        ]
+        for fv in fork_views:
+            candidates.append((fv.best_accuracy, fv.cycle_id))
+        family_best = max(candidates, key=lambda c: c[0])
+
     return LogMdView(
         status=status,
         rounds=tuple(rounds),
@@ -670,4 +700,20 @@ def from_disk_log(
         baseline_composite=final.get("baseline_composite"),
         hard_samples=hard,
         final=final_view,
+        forks=fork_views,
+        family_best=family_best,
+    )
+
+
+def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
+    final = fork_index.get("final") or {}
+    return ForkSummaryView(
+        cycle_id=str(fork_index.get("campaign_id") or ""),
+        mode=str(final.get("mode") or fork_index.get("fork_kind") or ""),
+        status=str(fork_index.get("status", "active")),
+        best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
+        baseline_accuracy=float(fork_index.get("baseline_accuracy", 0.0)),
+        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_trials", 0) or 0),
+        stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
+        finished_at=final.get("finished_at") or fork_index.get("finished_at"),
     )

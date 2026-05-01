@@ -12,6 +12,7 @@ import json
 from typing import Any
 
 from promptpotter.presentation.views.view_models import (
+    ForkSummaryView,
     HardSamplesView,
     LogMdView,
     RoundDigestView,
@@ -229,6 +230,25 @@ def _render_hard_samples(view: HardSamplesView | None) -> list[str]:
     return ["## Hard Samples", "", "```", heatmap, "```", ""]
 
 
+def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
+    if not forks:
+        return []
+    parts = ["## Forks", ""]
+    for f in forks:
+        short = f.cycle_id.split("_", 1)[-1] if "_" in f.cycle_id else f.cycle_id
+        rounds_word = "round" if f.n_rounds == 1 else "rounds"
+        line = (
+            f"- `{short}` — {f.mode or '(unknown)'} · "
+            f"best {_fmt_pct(f.best_accuracy)} "
+            f"(baseline {_fmt_pct(f.baseline_accuracy)}, {f.n_rounds} {rounds_word})"
+        )
+        if f.stop_reason:
+            line += f" · {f.stop_reason}"
+        parts.append(line)
+    parts.append("")
+    return parts
+
+
 def to_markdown(view: LogMdView) -> str:
     """Render a ``LogMdView`` into the full ``log.md`` document."""
     status = view.status
@@ -249,13 +269,18 @@ def to_markdown(view: LogMdView) -> str:
             f"- best: {_fmt_pct(status.best_accuracy)}"
             + (f" (round {status.best_round})" if status.best_round is not None else "")
         ),
-        f"- rounds completed: {status.rounds_completed}",
     ]
+    if view.family_best is not None:
+        fb_acc, fb_holder = view.family_best
+        if fb_acc > status.best_accuracy and fb_holder != status.campaign_id:
+            short = fb_holder.split("_", 1)[-1] if "_" in fb_holder else fb_holder
+            parts.append(f"- family best: {_fmt_pct(fb_acc)} (in fork `{short}`)")
+    parts.append(f"- rounds completed: {status.rounds_completed}")
     if status.started_at:
         parts.append(f"- started: {status.started_at}")
     if status.finished_at:
         parts.append(f"- finished: {status.finished_at}")
-    parts += ["", "## Rounds", ""]
+    parts += ["", *_render_forks(view.forks), "## Rounds", ""]
 
     if not view.rounds:
         parts += ["_No rounds yet._", ""]
