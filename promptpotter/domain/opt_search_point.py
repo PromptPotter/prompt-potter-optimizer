@@ -492,12 +492,22 @@ def _fmt_pp_val(v: object) -> str:
 
 
 def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
-    """Flatten SearchPoint dimensions into dot-notation display dict.
+    """Flatten SearchPoint dimensions into a display dict with disjoint keyspaces.
 
-    - Scalar pipeline params: ``key`` -> formatted value
+    Node-param keys are always prefixed by their owning node — ``node.param``.
+    Prompt-string fields ride on a separate top-level keyspace (written by
+    ``build_candidate_flat`` from ``candidate_meta["prompt_fields"]``), so the
+    two layers can never collide on the same key. This is the structural
+    invariant: anything written by this function is namespaced under a node;
+    bare top-level keys belong exclusively to ``PROMPT_STRING_FIELDS``.
+
+    - Scalar pipeline params at the top level: ``key`` -> formatted value
+      (unusual; valid input is always nested under a node).
     - JSON Schema params (type=object with properties): expand to
-      ``key.field_name`` -> description string
-    - Mutation-tuple lists: expand ``['+', name, ...]`` to ``key.name`` -> desc
+      ``node.field_name`` -> description string.
+    - Mutation-tuple lists: expand ``['+', name, ...]`` to ``node.name`` -> desc.
+    - Plain nested dicts (the regular pipeline_params shape): expand to
+      ``node.sub_key`` -> formatted value.
     """
     flat: dict[str, str] = {}
 
@@ -519,30 +529,32 @@ def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
                     flat[f"{k}.{mutation[2]}"] = mutation[5]
         elif isinstance(v, dict):
             for sub_k, sub_v in v.items():
-                flat[sub_k] = _fmt_pp_val(sub_v)
+                flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
         else:
             flat[k] = _fmt_pp_val(v)
     return flat
 
 
 def build_candidate_flat(parent: dict[str, str], candidate_meta: dict) -> dict[str, str]:
-    """Merge candidate overrides onto parent flat dict.
+    """Merge a candidate's overrides onto the parent flat dict.
 
-    When a candidate overrides a schema key, parent's dot-notation children
-    for that key are removed first, then the candidate's expanded fields are
-    added. Prompt-field rewrites ride on ``candidate_meta["prompt_fields"]``
-    and overlay as top-level keys.
+    Two disjoint keyspaces are layered, in order:
+
+    1. Pipeline-param keys (always ``node.param``) flow from
+       ``candidate_meta["pipeline_params_override"]`` through
+       ``flatten_sp_summary`` and overwrite parent's same-key entries.
+    2. Prompt-string fields (always top-level — ``thinking_style``,
+       ``answer_format``, …) flow from ``candidate_meta["prompt_fields"]``.
+
+    These two layers cannot collide because their keyspaces never overlap;
+    that's the invariant that keeps the SP-diff display honest. If a future
+    node grows a param whose name matches a prompt field, it still lands at
+    ``node.param`` and stays out of the prompt-field namespace.
     """
     flat = parent.copy()
     pp = candidate_meta.get("pipeline_params_override")
     if pp:
-        for k in pp:
-            prefix = f"{k}."
-            to_remove = [pk for pk in flat if pk.startswith(prefix)]
-            for pk in to_remove:
-                del flat[pk]
-        override_flat = flatten_sp_summary(pp)
-        flat.update(override_flat)
+        flat.update(flatten_sp_summary(pp))
     prompt_fields = candidate_meta.get("prompt_fields") or {}
     for field_name, value in prompt_fields.items():
         if value:
@@ -554,7 +566,14 @@ def group_diff_keys(
     diff_keys: list[str],
     node_param_keys: dict[str, list[str]] | None,
 ) -> list[tuple[str, list[str]]]:
-    """Group diff keys by pipeline node in execution order."""
+    """Group diff keys by pipeline node in execution order.
+
+    Recognises both the canonical prefixed form (``node.param``, written by
+    :func:`flatten_sp_summary`) and bare top-level keys (prompt-string
+    fields, written by :func:`build_candidate_flat` from
+    ``candidate_meta["prompt_fields"]``). Prompt-field keys land in the
+    default ``""`` group so they render as a separate section.
+    """
     if not node_param_keys:
         return [("", diff_keys)]
 
@@ -562,11 +581,14 @@ def group_diff_keys(
     for sname, keys in node_param_keys.items():
         for k in keys:
             key_to_node[k] = sname
+            key_to_node[f"{sname}.{k}"] = sname
+    node_names = set(node_param_keys)
     for k in diff_keys:
-        if k not in key_to_node:
-            base = k.split(".")[0]
-            if base in key_to_node:
-                key_to_node[k] = key_to_node[base]
+        if k in key_to_node:
+            continue
+        base = k.split(".", 1)[0]
+        if base in node_names:
+            key_to_node[k] = base
 
     groups: dict[str, list[str]] = {sname: [] for sname in node_param_keys}
     groups[""] = []

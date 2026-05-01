@@ -66,13 +66,29 @@ _NW = NODE_FRAME_WIDTH
 
 
 def _h_rule_labeled(
-    lc: str, rc: str, label: str = "", label_right: str = "", *, width: int = _W, fill: str = "─"
+    lc: str,
+    rc: str,
+    label: str = "",
+    label_right: str = "",
+    *,
+    label_middle: str = "",
+    width: int = _W,
+    fill: str = "─",
 ) -> str:
-    """Horizontal rule with embedded labels: ``LC─ label ───── label_right ─RC``."""
+    """Horizontal rule with embedded labels: ``LC─ label ──mid── label_right ─RC``.
+
+    ``label_middle`` is a section name embedded in the fill (no surrounding
+    spaces) so callers can self-identify the rendered element — used by the
+    per-candidate box top to mark the post-scoring summary as ``SCORE header``.
+    """
     inner = width - 4
     left = f" {label} " if label else ""
     right = f" {label_right} " if label_right else ""
-    pad = inner - _visible_len(left) - _visible_len(right)
+    pad = inner - _visible_len(left) - _visible_len(right) - _visible_len(label_middle)
+    if label_middle:
+        half = max(pad // 2, 1)
+        rest = max(pad - half, 1)
+        return f"{lc}{fill}{left}{fill * half}{label_middle}{fill * rest}{right}{fill}{rc}"
     return f"{lc}{fill}{left}{fill * max(pad, 1)}{right}{fill}{rc}"
 
 
@@ -88,8 +104,14 @@ def _h_text(lw: str, rw: str, text: str, *, width: int = _W) -> str:
     return f"{lw}  {text}{' ' * pad}{rw}"
 
 
-def _box_top(label: str = "", label_right: str = "", width: int = _W) -> str:
-    return _h_rule_labeled("┌", "┐", label, label_right, width=width)
+def _box_top(
+    label: str = "",
+    label_right: str = "",
+    *,
+    label_middle: str = "",
+    width: int = _W,
+) -> str:
+    return _h_rule_labeled("┌", "┐", label, label_right, label_middle=label_middle, width=width)
 
 
 def _box_bottom(width: int = _W) -> str:

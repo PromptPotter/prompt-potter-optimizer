@@ -252,7 +252,7 @@ class LiveDisplay:
         if (
             event.phase == CampaignPhase.INIT
             and event.event == "exit"
-            and event.data["env"].resumed_from_round > 0
+            and event.data["env"].state.resumed_from_round > 0
         ):
             del self.campaign_rounds[self.initial_len :]
         # Mirror an interactive-steer formula swap onto the shared phase
@@ -332,7 +332,9 @@ class LiveDisplay:
         baseline_comp = self._phase_ctx.get("baseline_composite")
         summary = build_individual_summary(scores, baseline_acc, baseline_composite=baseline_comp)
 
-        self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
+        self._write(
+            f"  {_box_top(f'{label}/{total}', summary.tag, label_middle='SCORE header', width=w)}"
+        )
         if summary.body_line:
             self._write(f"  {_box_line(summary.body_line, width=w)}")
         for line in summary.detail_lines[:-1]:
