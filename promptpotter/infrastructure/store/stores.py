@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -661,6 +662,41 @@ class CampaignStore(EntityStore):
                     "finished_at": finished_at,
                 },
             )
+
+    def prune_dead_forks(
+        self,
+        backend_id: str,
+        family_root_cycle_id: str,
+        *,
+        min_age_seconds: float = 3600.0,
+    ) -> list[str]:
+        """Delete fork dirs that ran zero trials and were created at least
+        ``min_age_seconds`` ago (default 1 hour). Returns the cycle_ids
+        that were removed. Operator-callable; never auto-fired.
+
+        ``min_age_seconds`` guards against racing with an in-progress fork
+        whose ``add_trial`` hasn't fired yet."""
+        family_dir = self._campaign_dir(backend_id, family_root_cycle_id)
+        forks_dir = family_dir / "forks"
+        if not forks_dir.is_dir():
+            return []
+        now_ts = datetime.now(UTC).timestamp()
+        removed: list[str] = []
+        for fork_dir in sorted(forks_dir.iterdir()):
+            if not fork_dir.is_dir():
+                continue
+            idx = fork_dir / "index.json"
+            data = read_json_optional(idx) or {}
+            if int(data.get("n_trials") or 0) > 0:
+                continue
+            if data.get("final"):
+                continue
+            age_seconds = now_ts - fork_dir.stat().st_mtime
+            if age_seconds < min_age_seconds:
+                continue
+            shutil.rmtree(fork_dir, ignore_errors=False)
+            removed.append(fork_dir.name)
+        return removed
 
     def load_many(
         self,

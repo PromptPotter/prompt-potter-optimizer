@@ -612,6 +612,7 @@ def from_disk_log(
     log.md. Forks themselves pass ``None`` and get an empty tuple.
     """
     final = index.get("final") or {}
+    gen_only = sum(1 for t in trials if str(t.get("status") or "") == "generation_only")
     status = DigestStatusView(
         campaign_id=str(index.get("campaign_id") or ""),
         parent_session_id=index.get("parent_session_id"),
@@ -623,6 +624,7 @@ def from_disk_log(
         rounds_completed=int(index.get("n_trials", 0)),
         started_at=final.get("started_at"),
         finished_at=final.get("finished_at"),
+        gen_only_rounds=gen_only,
     )
 
     rounds: list[RoundDigestView] = []

@@ -243,6 +243,11 @@ class DigestStatusView:
     rounds_completed: int
     started_at: str | None
     finished_at: str | None
+    # Trials marked ``status: "generation_only"`` (diag mode's preview
+    # round, sweep mode's no-score follow-up). Counted into
+    # ``rounds_completed`` on disk but rendered separately so the operator
+    # sees how many of the trials were actually scored.
+    gen_only_rounds: int = 0
 
 
 @dataclass(frozen=True)
