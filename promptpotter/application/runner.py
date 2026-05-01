@@ -634,6 +634,7 @@ async def _run_round_loop(
                 round_eval_data,
                 cb,
                 degradation_checks=round_checks,
+                skip_critique=sweep,
             )
             cycle.record_round(round_result, round_num)
 

@@ -22,6 +22,30 @@ def validate_path_component(name: str) -> str:
     return name
 
 
+def _long_path(p: str | Path) -> str:
+    r"""Return *p* with the Windows ``\\?\`` long-path prefix applied.
+
+    Windows ``MAX_PATH`` is 260 chars. Sweep-fork audit dirs nest deep
+    (``campaigns/{root}/sweeps/{batch}/forks/{cycle}_sweep_{batch}_{hash}/langfuse/traces/{32hex}.json``)
+    and the trailing 32-hex filename routinely pushes the full path past
+    260, which makes ``CreateFileW`` / ``CreateDirectoryW`` / ``MoveFileExW``
+    fail with ``ERROR_PATH_NOT_FOUND`` (WinError 3) unless ``LongPathsEnabled``
+    is set in the registry. Prefixing an absolute path with ``\\?\`` bypasses
+    the limit without touching the registry. No-op on POSIX.
+    """
+    s = str(p)
+    if os.name != "nt":
+        return s
+    if s.startswith(("\\\\?\\", "\\\\.\\")):
+        return s
+    return "\\\\?\\" + os.path.abspath(s)
+
+
+def _ensure_parent(path: Path) -> None:
+    """``mkdir(parents=True, exist_ok=True)`` for *path*'s parent, long-path safe."""
+    os.makedirs(_long_path(path.parent), exist_ok=True)
+
+
 def write_json(
     path: Path,
     data: Any,
@@ -31,28 +55,30 @@ def write_json(
     """Write *data* as pretty-printed JSON atomically.
 
     Writes to a temp file in the same directory, then uses ``os.replace()``
-    to atomically swap it into place.  This prevents partial/corrupt files
-    if the process crashes mid-write.
+    to atomically swap it into place. This prevents partial/corrupt files
+    if the process crashes mid-write. Both args of ``os.replace`` are
+    routed through :func:`_long_path` so destinations past Windows
+    ``MAX_PATH=260`` succeed.
 
-    On Windows, ``os.replace()`` fails with PermissionError (WinError 5)
-    when the destination is briefly held by another process — OneDrive
-    sync, antivirus, a stale reader. Retry up to 3 times with 100 ms back-off
-    before giving up; POSIX never hits the retry branch.
+    On Windows, ``os.replace()`` can also fail with ``PermissionError``
+    (WinError 5) when the destination is briefly held by another process —
+    OneDrive sync, antivirus, a stale reader. Retry once with 100 ms
+    back-off; POSIX never hits the retry branch.
 
     ``default`` is forwarded to ``json.dump`` for non-native types (e.g.
     pass ``str`` to coerce enums / datetimes to their ``str`` form).
     """
     import time
 
-    path.parent.mkdir(parents=True, exist_ok=True)
-    fd, tmp = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    _ensure_parent(path)
+    fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
             json.dump(data, f, indent=2, ensure_ascii=False, default=default)
         last_exc: OSError | None = None
         for attempt in range(3):
             try:
-                os.replace(tmp, path)
+                os.replace(_long_path(tmp), _long_path(path))
                 return
             except PermissionError as exc:
                 last_exc = exc
@@ -61,7 +87,6 @@ def write_json(
         if last_exc is not None:
             raise last_exc
     except Exception:
-        # Clean up temp file on failure (fd already closed by os.fdopen)
         with contextlib.suppress(OSError):
             os.unlink(tmp)
         raise
@@ -69,14 +94,15 @@ def write_json(
 
 def write_text(path: Path, content: str) -> None:
     """Write *content* to *path*, creating parent directories if needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(content, encoding="utf-8")
+    _ensure_parent(path)
+    with open(_long_path(path), "w", encoding="utf-8") as f:
+        f.write(content)
 
 
 def append_text(path: Path, line: str) -> None:
     """Append *line* to *path*, creating parent directories if needed."""
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
+    _ensure_parent(path)
+    with open(_long_path(path), "a", encoding="utf-8") as f:
         f.write(line)
 
 
@@ -86,8 +112,8 @@ def write_yaml_kv(path: Path, data: dict) -> None:
     Handles None → ``null``, bools → lowercase, lists → JSON arrays.
     Used for MLflow meta.yaml files.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
+    _ensure_parent(path)
+    with open(_long_path(path), "w", encoding="utf-8") as f:
         for key, value in data.items():
             f.write(f"{key}: {_yaml_value(value)}\n")
 
@@ -107,7 +133,7 @@ def _yaml_value(v: Any) -> str:
 
 def read_json(path: Path) -> Any:
     """Read and parse JSON from *path*."""
-    with open(path, encoding="utf-8") as f:
+    with open(_long_path(path), encoding="utf-8") as f:
         return json.load(f)
 
 
@@ -123,8 +149,8 @@ def append_jsonl(path: Path, item: dict) -> Path:
 
     Creates parent directories if needed.  Returns *path*.
     """
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
+    _ensure_parent(path)
+    with open(_long_path(path), "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
         f.flush()
     return path

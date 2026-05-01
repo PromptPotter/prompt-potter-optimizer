@@ -630,6 +630,7 @@ async def _run_sweep_batch(
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
+    from promptpotter.domain.phases import StopReason
     from promptpotter.infrastructure.store import build_stores
     from promptpotter.infrastructure.store.base import write_json
     from promptpotter.infrastructure.store.stores import (
@@ -684,6 +685,7 @@ async def _run_sweep_batch(
     )
 
     new_cycle_ids: list[str] = []
+    status_by_source: dict[str, str] = {}
     for path, payload in sweep_payloads:
         if path.name in existing:
             logger.info(
@@ -736,7 +738,7 @@ async def _run_sweep_batch(
             args, fork_session, campaign_config, fork_campaign_dir, 0.0
         )
 
-        await _orch_run_optimization(
+        fork_result = await _orch_run_optimization(
             train_data,
             campaign_config,
             session=fork_session,
@@ -749,6 +751,23 @@ async def _run_sweep_batch(
             fork_payload=payload,
         )
         new_cycle_ids.append(new_cycle_id)
+        if fork_result.stop_reason == StopReason.INTERRUPTED:
+            # Ctrl+C inside _run_round_loop is caught + returned as
+            # INTERRUPTED instead of propagating; without this break the
+            # batch silently rolls into the next fork and the operator has
+            # to Ctrl+C once per remaining payload.
+            status_by_source[path.name] = "interrupted"
+            logger.warning(
+                "Sweep fork %d/%d interrupted: %s (payload=%s) — halting "
+                "batch. Resume the partial fork with `optimize` against "
+                "that cycle, or re-run --sweep to pick up remaining payloads.",
+                len(new_cycle_ids),
+                len(sweep_payloads),
+                new_cycle_id,
+                path.name,
+            )
+            break
+        status_by_source[path.name] = "completed"
         logger.info(
             "Sweep fork %d/%d complete: %s (payload=%s)",
             len(new_cycle_ids),
@@ -770,7 +789,10 @@ async def _run_sweep_batch(
     for entry in batch_index["payloads"]:
         if entry["status"] == "pending":
             cid = cid_by_source.get(entry["source_file"], "")
-            entry["status"] = "completed" if cid else "skipped"
+            if cid:
+                entry["status"] = status_by_source.get(entry["source_file"], "completed")
+            else:
+                entry["status"] = "skipped"
             entry["cycle_id"] = cid
     write_json(batch_index_path, batch_index)
 

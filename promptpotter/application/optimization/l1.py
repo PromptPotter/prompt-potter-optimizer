@@ -1177,8 +1177,16 @@ async def execute_round(
     scoring_dataset: list[Sample],
     callbacks: RunListener,
     degradation_checks: list[StopRule] | None = None,
+    *,
+    skip_critique: bool = False,
 ) -> RoundResult:
-    """Execute one L1 round: generate → score+select → critique → persist to memory."""
+    """Execute one L1 round: generate → score+select → critique → persist to memory.
+
+    ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
+    Sweep mode passes this so the cheap-trial fork stays one full live LLM
+    call (round 2 generate-only); the round-1 critique would otherwise dwarf
+    that call and is the same across all forks since round 1 is identical.
+    """
     session = cycle.session
     config = cycle.config
     opt = config.optimization
@@ -1254,18 +1262,25 @@ async def execute_round(
     )
 
     critique_text = ""
-    if scoring_result.winner_results:
+    if scoring_result.winner_results and not skip_critique:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
-        critique_result = await run_l1_critique(
-            cycle,
-            scoring_result,
-            session.pipeline_schema,
-            crit_llm,
-            round_num=round_num,
-            model=config.optimizer_llm.model,
-            recorder=session.state.round_recorder,
-        )
-        critique_text = format_l1_critique_for_prompt(critique_result)
+        # Wrap the critique LLM call: a truncated/malformed response (e.g.
+        # finish_reason=length producing invalid JSON) raised JSONDecodeError
+        # all the way to asyncio.run and crashed the whole campaign.
+        # Critique is round-over-round feedback — surviving its loss costs at
+        # most one round of degraded L1-generate context, far better than a
+        # hard exit.
+        with graceful("L1 critique failed; continuing without round-over-round feedback"):
+            critique_result = await run_l1_critique(
+                cycle,
+                scoring_result,
+                session.pipeline_schema,
+                crit_llm,
+                round_num=round_num,
+                model=config.optimizer_llm.model,
+                recorder=session.state.round_recorder,
+            )
+            critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(

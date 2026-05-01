@@ -1,0 +1,4 @@
+{
+  "reason": "V2 — Failure-mode taxonomy. Past runs showed candidates failing silently at 0% with no per-sample reason; L1 then re-emitted the same generic 'step-by-step' nudge. Force L1 to classify each failed sample before proposing variants.",
+  "directive": "Before generating any variant, classify every failed sample from the previous round into exactly one of: rule_chain_break (failed to apply a multi-antecedent or chained rule), format_violation (answer not in required shape, wrong span bolded, hedging), truncation (reasoning ran out of budget before emitting an answer), answer_pattern_mismatch (invented a token outside the allowed vocabulary), other. State the category counts in your reasoning. Each generated variant must declare which one failure category it targets and how its specific mutation addresses that category. Do not emit a variant whose targeted category is empty."
+}
