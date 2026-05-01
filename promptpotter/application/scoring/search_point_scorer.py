@@ -38,7 +38,38 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["QueryLoopResult", "score_search_point"]
+__all__ = ["QueryLoopResult", "merge_with_unprocessed_priors", "score_search_point"]
+
+
+def merge_with_unprocessed_priors(
+    results: list[QueryResult],
+    *,
+    prior_results: dict[str, QueryResult],
+    dataset_queries: set[str],
+    evicted_priors: dict[str, QueryResult],
+    scorer: Scorer | None,
+    scorer_id: str,
+    scorer_formula: str | None,
+) -> list[QueryResult]:
+    """Union ``results`` with prior-cache entries for dataset queries not yet
+    processed. The archive save is a full overwrite — without this merge a
+    partial run (cache hits + 1 fresh + Ctrl+C) would shrink an already-full
+    archive to whatever made it into ``results``. Filtered to the current
+    dataset so we never write off-dataset queries into this run_id's file.
+    ``evicted_priors`` (deprecated rows) are excluded — they must re-measure,
+    not get re-archived as-is. Unprocessed priors are rescored under the
+    active scorer so the round-level composite is consistent; timings and
+    other raw trace fields are preserved untouched."""
+    processed = {r["query"] for r in results}
+    merged = list(results)
+    for q, prior in prior_results.items():
+        if q not in dataset_queries or q in processed or q in evicted_priors:
+            continue
+        entry = cast(QueryResult, dict(prior))
+        if scorer is not None:
+            rescore_results([cast(dict, entry)], scorer, scorer_id, scorer_formula)
+        merged.append(entry)
+    return merged
 
 
 @dataclass
@@ -406,9 +437,11 @@ async def score_search_point(
 
     Two cache tiers (prior-result + per-node) share one prefix chain. Each
     fresh measurement is persisted immediately so retried deprecated samples
-    and any in-progress baseline/candidate work survive a Ctrl+C. Cache hits
-    do not write — the on-disk row is unchanged. Obs logging fires on the
-    final completion save.
+    and any in-progress baseline/candidate work survive a Ctrl+C. Persists
+    are union-merged with any prior-cache entries for queries not yet
+    processed (dataset-filtered, ``evicted_priors`` excluded), so an aborted
+    partial run never shrinks an already-fuller archive. Obs logging fires
+    on the final completion save.
     """
     store = session.store
     backend_id = session.backend_id
@@ -438,17 +471,46 @@ async def score_search_point(
         )
 
     display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
+    dataset_queries = {s.query for s in dataset}
+
+    # Preamble: when the JSP-keyed archive already covers some/all of this
+    # dataset's queries, announce the split so the operator sees inline
+    # whether the upcoming per-query lines are cache replays vs fresh
+    # measurements. Suppressed when no priors match the current dataset.
+    cached_in_dataset = sum(
+        1 for q in prior_results if q in dataset_queries and q not in evicted_priors
+    )
+    if cached_in_dataset:
+        total = len(dataset)
+        fresh = total - cached_in_dataset
+        print(
+            f"{label} cache: {cached_in_dataset}/{total} already measured for this JSP "
+            f"— will replay {cached_in_dataset}, measure {fresh} fresh.",
+            flush=True,
+        )
+
+    def _merged_view(results: list[QueryResult]) -> list[QueryResult]:
+        return merge_with_unprocessed_priors(
+            results,
+            prior_results=prior_results,
+            dataset_queries=dataset_queries,
+            evicted_priors=evicted_priors,
+            scorer=session.scoring.scorer,
+            scorer_id=session.scoring.scorer_id,
+            scorer_formula=session.scoring.scorer_formula,
+        )
 
     def _save_run(results: list[QueryResult], scores: dict[str, Any]) -> None:
         if not (store and backend_id):
             return
+        merged = _merged_view(results)
         run_data = build_dataset_run_data(
             run_id,
             display_name,
             content_hash,
             search_point,
             scores,
-            results,
+            merged,
             source=source,
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
@@ -458,8 +520,9 @@ async def score_search_point(
     def _persist_fresh(results: list[QueryResult]) -> None:
         if not (store and backend_id):
             return
+        merged = _merged_view(results)
         scores = compute_composite_score(
-            results,
+            merged,
             pipeline_schema,
             round_scorer=session.scoring.round_scorer,
             l1_diversity=l1_diversity,

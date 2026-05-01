@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
@@ -407,12 +408,18 @@ def build_stores(
 # ===========================================================================
 
 
-def root_cycle_id(cycle_id: str) -> str:
-    """Family-root cycle id — the prefix before the first ``_fork_`` segment.
+_SIBLING_SEP_RE = re.compile(r"_(fork|diag)_")
 
-    ``_fork_at_divergence`` is the only producer of ``_fork_`` in cycle ids,
-    so a string split is sufficient — no I/O, no parent-chain walk."""
-    return cycle_id.split("_fork_", 1)[0]
+
+def root_cycle_id(cycle_id: str) -> str:
+    """Family-root cycle id — the prefix before the first sibling separator.
+
+    Two separators are recognized: ``_fork_`` (divergence forks, minted by
+    ``_fork_at_divergence``) and ``_diag_`` (diagnostic-BFS siblings, minted
+    by ``_fork_for_diag_sibling``). Both are deterministic prefixes — no
+    I/O, no parent-chain walk."""
+    m = _SIBLING_SEP_RE.search(cycle_id)
+    return cycle_id[: m.start()] if m else cycle_id
 
 
 def root_dir_for(tenant_root: Path, cycle_id: str) -> Path:

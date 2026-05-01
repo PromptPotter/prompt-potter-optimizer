@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import logging
+import re
 import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
@@ -72,6 +73,7 @@ __all__ = [
     "ForkResult",
     "LayerCounter",
     "ReplayContext",
+    "_fork_for_diag_sibling",
     "apply_sweep_payload_to_osp",
     "build_escalation_entry",
     "escalate_l2",
@@ -486,6 +488,100 @@ def _fork_at_divergence(
         old_cycle_id,
         new_cycle_id,
         fork_from_round,
+    )
+    return new_cycle_id
+
+
+def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -> str:
+    """Allocate the next ``{root}_diag_NNN`` id by counting existing siblings.
+
+    Scans the family-root's ``forks/`` dir for entries already matching
+    ``{root}_diag_NNN`` and returns ``NNN+1`` zero-padded to 3 digits. Diag
+    siblings of nested cycles still root at the family root so the BFS tree
+    flattens to one level under ``campaigns/{root}/forks/``."""
+    from promptpotter.infrastructure.store.stores import root_cycle_id
+
+    root_id = root_cycle_id(parent_cycle_id)
+    forks_dir = campaign_store.campaign_dir(root_id) / "forks"
+    pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
+    max_n = 0
+    if forks_dir.is_dir():
+        for entry in forks_dir.iterdir():
+            if not entry.is_dir():
+                continue
+            m = pattern.match(entry.name)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+    return f"{root_id}_diag_{max_n + 1:03d}"
+
+
+def _fork_for_diag_sibling(
+    campaign_store: CampaignStore,
+    tenant_id: str,
+    session_id: str,
+    parent_cycle_id: str,
+) -> str:
+    """Mint a diag-BFS sibling cycle that re-runs from round 0 with no
+    inherited trials.
+
+    Each ``optimize --diag`` re-invocation against a finalized diag cycle
+    branches off a new sibling instead of overwriting the parent's archive.
+    The sibling shares the parent's baseline measurements via the JSP-keyed
+    measurement archive (no copy needed). Records a ``Decision(kind=FORK_CUT)``
+    on the parent's ledger so a tail of the parent's events captures the
+    cutover. Active pointer retargets to the new sibling."""
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.store.base import read_json_optional, write_json
+    from promptpotter.infrastructure.store.stores import save_active_pointer
+
+    new_cycle_id = _next_diag_sibling_id(campaign_store, parent_cycle_id)
+    parent_dir = campaign_store.campaign_dir(parent_cycle_id)
+    new_dir = campaign_store.campaign_dir(new_cycle_id)
+    if new_dir.exists():
+        raise FileExistsError(f"diag sibling dir already exists: {new_dir}")
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(UTC).isoformat()
+    with graceful("FORK_CUT decision append failed"):
+        parent_ledger = RunLedger.open(CycleDir(parent_dir))
+        parent_ledger.append(
+            Decision(
+                kind=DecisionKind.FORK_CUT,
+                inputs_ref={"from_round": 0},
+                outcome=new_cycle_id,
+                data={"forked_at": now, "kind": "diag_sibling"},
+            )
+        )
+
+    parent_index = read_json_optional(parent_dir / "index.json") or {}
+    new_index: dict[str, Any] = {
+        "campaign_id": new_cycle_id,
+        "type": parent_index.get("type", "optimization_loop"),
+        "config": parent_index.get("config", {}),
+        "connector_type": parent_index.get("connector_type", ""),
+        "backend_id": parent_index.get("backend_id", ""),
+        "parent_cycle_id": parent_cycle_id,
+        "parent_session_id": parent_index.get("parent_session_id", ""),
+        "forked_from_round": 0,
+        "forked_at": now,
+        "fork_kind": "diag_sibling",
+        "trials": [],
+        "n_trials": 0,
+        "best_accuracy": 0.0,
+        "best_trial_id": None,
+        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    write_json(new_dir / "index.json", new_index)
+
+    save_active_pointer(tenant_id, session_id, new_cycle_id)
+    logger.info(
+        "Diag sibling: %s → %s (active pointer retargeted)",
+        parent_cycle_id,
+        new_cycle_id,
     )
     return new_cycle_id
 

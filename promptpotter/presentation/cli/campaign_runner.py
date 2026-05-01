@@ -765,6 +765,28 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     session.session_id = ctx.session_id
     session.state.cycle_id = ctx.cycle_id
 
+    # Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
+    # off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
+    # parent's archive. Each probe is its own cycle with ``parent_cycle_id``
+    # set; baseline measurements stay shared via the JSP-keyed archive.
+    if (
+        getattr(args, "diag", False)
+        and ctx.cycle_id
+        and getattr(args, "resume_from_round", None) is None
+    ):
+        existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
+        if (existing_index.get("final") or {}).get("mode") == "diag":
+            from promptpotter.application.optimization.cycle import _fork_for_diag_sibling
+
+            new_cycle_id = _fork_for_diag_sibling(
+                session.store.campaigns,
+                session.tenant.tenant_id if session.tenant else "default",
+                ctx.session_id,
+                ctx.cycle_id,
+            )
+            ctx.cycle_id = new_cycle_id
+            session.state.cycle_id = new_cycle_id
+
     log_startup_summary(
         session,
         pipeline_params,
