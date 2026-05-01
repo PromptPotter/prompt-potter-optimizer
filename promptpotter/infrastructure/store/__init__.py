@@ -1,6 +1,7 @@
 """Focused store modules for file-based persistence."""
 
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.infrastructure.store.optimizer_call_cache import OptimizerCallCache
 from promptpotter.infrastructure.store.stores import (
     BackendStore,
     CampaignStore,
@@ -17,6 +18,7 @@ __all__ = [
     "BackendStore",
     "CampaignStore",
     "MeasurementArchive",
+    "OptimizerCallCache",
     "SessionStore",
     "Stores",
     "build_stores",

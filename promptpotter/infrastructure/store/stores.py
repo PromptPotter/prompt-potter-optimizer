@@ -31,6 +31,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
 )
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+from promptpotter.infrastructure.store.optimizer_call_cache import OptimizerCallCache
 
 logger = logging.getLogger(__name__)
 
@@ -376,6 +377,7 @@ class Stores:
     sessions: SessionStore
     campaigns: CampaignStore
     archive: MeasurementArchive
+    optimizer_calls: OptimizerCallCache
 
 
 def build_stores(
@@ -402,6 +404,7 @@ def build_stores(
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
         archive=MeasurementArchive(tenant_dir),
+        optimizer_calls=OptimizerCallCache(tenant_dir),
     )
 
 

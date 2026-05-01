@@ -81,6 +81,10 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
+from promptpotter.infrastructure.store.optimizer_call_cache import (
+    OptimizerCallCache,
+    hash_call,
+)
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
@@ -214,6 +218,7 @@ async def llm_call(
     trace_meta: dict | None = None,
     json_schema: dict | None = None,
     recorder: AuditTrailProjection | None = None,
+    cache: OptimizerCallCache | None = None,
     **overrides,
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
@@ -223,6 +228,12 @@ async def llm_call(
     ``resolved_schemas`` registry in ``optimizer_pipeline.json``), that
     schema is auto-pulled — same TermNorm-style indirection used for
     backend pipelines.
+
+    When *cache* is provided, the resolved ``(messages, model, temperature,
+    json_schema, provider)`` tuple is hashed and looked up before firing
+    the LLM. A hit replays the stored ``LLMResponse`` (and feeds the
+    recorder with ``cached: true``) instead of calling the provider —
+    cross-cycle and cross-fork by construction.
     """
     if config is None:
         if node:
@@ -238,53 +249,75 @@ async def llm_call(
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
 
+    cache_key: str | None = None
+    cached_payload: dict | None = None
+    if cache is not None:
+        cache_key = hash_call(
+            messages=messages,
+            model=merged.get("model"),
+            provider=type(llm_client).__name__,
+            temperature=merged["temperature"],
+            json_schema=json_schema,
+        )
+        cached_payload = cache.load(cache_key)
+
     _t0 = time.monotonic()
 
-    effective_output_format = cast(
-        Literal["text", "json", "json_schema"],
-        "json_schema" if json_schema else merged["output_format"],
-    )
-
-    # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
-    # if missing or attempts run out, surface the SDK exception unchanged.
-    for attempt in range(MAX_429_ATTEMPTS):
-        try:
-            response = await llm_client.chat(
-                messages=messages,
-                model=merged.get("model"),
-                temperature=merged["temperature"],
-                max_tokens=merged.get("max_tokens"),
-                output_format=effective_output_format,
-                json_schema=json_schema,
-            )
-            break
-        except Exception as exc:
-            if getattr(exc, "status_code", None) != 429:
-                raise
-            resp = getattr(exc, "response", None)
-            wait = parse_retry_after(getattr(resp, "headers", None) if resp is not None else None)
-            if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
-                raise
-            logger.warning(
-                "Rate limit on %s (attempt %d/%d); waiting %.1fs",
-                node or "llm_call",
-                attempt + 1,
-                MAX_429_ATTEMPTS,
-                wait,
-            )
-            await wait_with_countdown(wait + 1.0, node or "optimizer")
-
-    duration_s = round(time.monotonic() - _t0, 2)
-
-    emit_token_usage(
-        TokenUsage(
-            node=node or "llm_call",
-            kind="optimizer",
-            input_tokens=response.usage.get("prompt_tokens", 0),
-            output_tokens=response.usage.get("completion_tokens", 0),
-            duration_s=duration_s,
+    if cached_payload is not None:
+        response = LLMResponse.model_validate(cached_payload)
+        duration_s = round(time.monotonic() - _t0, 2)
+        logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
+    else:
+        effective_output_format = cast(
+            Literal["text", "json", "json_schema"],
+            "json_schema" if json_schema else merged["output_format"],
         )
-    )
+
+        # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
+        # if missing or attempts run out, surface the SDK exception unchanged.
+        for attempt in range(MAX_429_ATTEMPTS):
+            try:
+                response = await llm_client.chat(
+                    messages=messages,
+                    model=merged.get("model"),
+                    temperature=merged["temperature"],
+                    max_tokens=merged.get("max_tokens"),
+                    output_format=effective_output_format,
+                    json_schema=json_schema,
+                )
+                break
+            except Exception as exc:
+                if getattr(exc, "status_code", None) != 429:
+                    raise
+                resp = getattr(exc, "response", None)
+                wait = parse_retry_after(
+                    getattr(resp, "headers", None) if resp is not None else None
+                )
+                if wait is None or wait <= 0 or attempt == MAX_429_ATTEMPTS - 1:
+                    raise
+                logger.warning(
+                    "Rate limit on %s (attempt %d/%d); waiting %.1fs",
+                    node or "llm_call",
+                    attempt + 1,
+                    MAX_429_ATTEMPTS,
+                    wait,
+                )
+                await wait_with_countdown(wait + 1.0, node or "optimizer")
+
+        duration_s = round(time.monotonic() - _t0, 2)
+
+        emit_token_usage(
+            TokenUsage(
+                node=node or "llm_call",
+                kind="optimizer",
+                input_tokens=response.usage.get("prompt_tokens", 0),
+                output_tokens=response.usage.get("completion_tokens", 0),
+                duration_s=duration_s,
+            )
+        )
+
+        if cache is not None and cache_key is not None:
+            cache.save(cache_key, response.model_dump())
 
     if recorder is not None:
         response_data: dict | str
@@ -305,6 +338,8 @@ async def llm_call(
             "model": response.model,
             "duration_s": duration_s,
         }
+        if cached_payload is not None:
+            action["cached"] = True
         if trace_meta:
             action.update(trace_meta)
         else:
@@ -325,6 +360,7 @@ async def run_optimizer_node(
     user_content: str | None = None,
     recorder: AuditTrailProjection | None = None,
     template: PromptTemplate | None = None,
+    cache: OptimizerCallCache | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
 
@@ -332,6 +368,9 @@ async def run_optimizer_node(
     by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt
     body by writing ``template_override`` on its OSP). The trace metadata
     still records ``template_name`` so observability stays continuous.
+
+    When *cache* is provided, it is forwarded to :func:`llm_call` for
+    content-addressed cross-cycle reuse of optimizer LLM responses.
     """
     if template is None:
         template = load_optimizer_prompt(template_name)
@@ -351,6 +390,7 @@ async def run_optimizer_node(
         temperature=temperature,
         json_schema=json_schema,
         recorder=recorder,
+        cache=cache,
         trace_meta={
             "template_name": template_name,
             "template_fields": template.prompt_field_dict(),
@@ -2192,6 +2232,7 @@ async def run_l1_critique(
         llm_client=llm_client,
         model=model,
         recorder=recorder,
+        cache=cycle.session.store.optimizer_calls,
     )
     logger.info(
         "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",
@@ -2298,6 +2339,7 @@ class LayerTransition:
             model=model,
             temperature=self.default_temperature if temperature is None else temperature,
             recorder=cycle.session.state.round_recorder,
+            cache=cycle.session.store.optimizer_calls,
         )
         return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 

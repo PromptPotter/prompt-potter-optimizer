@@ -267,6 +267,7 @@ async def l1_generate(
         json_schema=output_schema,
         recorder=cycle.session.state.round_recorder,
         template=template,
+        cache=cycle.session.store.optimizer_calls,
     )
     section_sizes = sorted(
         (
