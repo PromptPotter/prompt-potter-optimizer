@@ -39,8 +39,9 @@ from promptpotter.domain.run_records import Phase, Snapshot, SweepPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.projections import LiveDashboardProjection
-from promptpotter.presentation.views.log_md import render_log_md
 from promptpotter.presentation.views.phase_views import build_phase_view
+from promptpotter.presentation.views.render_markdown import to_markdown
+from promptpotter.presentation.views.view_factories import from_disk_log
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -1076,7 +1077,9 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
             if n_trials
             else []
         )
-        content = render_log_md(index, trials, hard_samples_artifact=hard_samples_artifact)
+        content = to_markdown(
+            from_disk_log(index, trials, hard_samples_artifact=hard_samples_artifact)
+        )
         (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
             content, encoding="utf-8"
         )
@@ -1103,7 +1106,7 @@ def _refresh_tenant_leaderboards(session: Session) -> None:
         format_leaderboard,
         format_sweep_leaderboard,
     )
-    from promptpotter.presentation.views.log_md import render_hard_sample_heatmap
+    from promptpotter.presentation.views.render_markdown import render_hard_sample_heatmap
 
     if session.store is None:
         return

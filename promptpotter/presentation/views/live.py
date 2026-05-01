@@ -28,7 +28,7 @@ from promptpotter.presentation.views.display import (
     _node_line,
     _node_top,
 )
-from promptpotter.presentation.views.phase_events import render_phase_event
+from promptpotter.presentation.views.render_text import to_text
 from promptpotter.presentation.views.round_render import (
     _fmt_query_result,
     build_individual_summary,
@@ -217,13 +217,16 @@ class LiveDisplay:
         if self._bars is not None:
             self._bars.on_phase(event)
         if view is not None:
+            from promptpotter.presentation.views.view_factories import view_from_record
+
             record = {
                 "phase": event.phase,
                 "event": event.event,
                 "round": event.round,
                 "view": view,
             }
-            if rendered := render_phase_event(record):
+            typed = view_from_record(record)
+            if typed is not None and (rendered := to_text(typed)):
                 self._write(rendered)
             # Track the running baseline directly from view dicts. INIT:exit
             # carries the post-baseline accuracy; L1_SCORE:exit promotes the

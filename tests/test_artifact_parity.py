@@ -287,7 +287,8 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     # Mirror runner._finalize_run: fold the run summary into index.json::final
     # and render log.md + review.md from the index + trial dump.
     from promptpotter.application.review import render_review_md
-    from promptpotter.presentation.views.log_md import render_log_md
+    from promptpotter.presentation.views.render_markdown import to_markdown
+    from promptpotter.presentation.views.view_factories import from_disk_log
 
     final = RunResult(
         rounds=[round_result],
@@ -305,7 +306,9 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     index_data = json.loads(index_path.read_text(encoding="utf-8")) | {"final": final}
     index_path.write_text(json.dumps(index_data), encoding="utf-8")
     trial_dump = round_result.model_dump()
-    (campaign_dir / "log.md").write_text(render_log_md(index_data, [trial_dump]), encoding="utf-8")
+    (campaign_dir / "log.md").write_text(
+        to_markdown(from_disk_log(index_data, [trial_dump])), encoding="utf-8"
+    )
     (campaign_dir / "review.md").write_text(
         render_review_md(index_data, [trial_dump], round_audits=[None]), encoding="utf-8"
     )

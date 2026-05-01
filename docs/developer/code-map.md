@@ -122,8 +122,9 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | Symbol | Module |
 |--------|--------|
 | `LiveDisplay` | `promptpotter/presentation/views/live.py` |
-| `render_hard_sample_heatmap` | `promptpotter/presentation/views/log_md.py` |
-| `render_log_md` | `promptpotter/presentation/views/log_md.py` |
+| `from_disk_log` / `from_disk_round` / `from_phase_event` | `promptpotter/presentation/views/view_factories.py` |
+| `render_hard_sample_heatmap` / `to_markdown` | `promptpotter/presentation/views/render_markdown.py` |
+| `to_text` | `promptpotter/presentation/views/render_text.py` |
 | `RunListener` | `promptpotter/application/runner.py` |
 
 ## Configuration
