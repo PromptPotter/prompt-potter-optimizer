@@ -290,6 +290,8 @@ def _persist_round(
             )
         _write_log_md(session)
         _write_review_md(session, cycle)
+        with graceful("Tenant leaderboard refresh failed"):
+            _refresh_tenant_leaderboards(session)
 
     if _rr := session.state.round_recorder:
         _rr.flush()
