@@ -39,9 +39,12 @@ from promptpotter.domain.run_records import Phase, Snapshot, SweepPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.projections import LiveDashboardProjection
-from promptpotter.presentation.views.phase_views import build_phase_view
 from promptpotter.presentation.views.render_markdown import to_markdown
-from promptpotter.presentation.views.view_factories import from_disk_log
+from promptpotter.presentation.views.view_factories import (
+    from_disk_log,
+    from_phase_event,
+    view_to_wire_dict,
+)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -86,9 +89,10 @@ class RunListener:
     dashboard projection, audit trail projection, terminal display)
     consume via ``on_record`` only.
 
-    Owns the phase-view ctx so ``build_phase_view`` (stateful — reads/writes
-    ctx) runs once per ``PhaseEvent``; the resulting view dict ships on
-    ``Phase.payload['view']`` so subscribers don't re-derive it.
+    Owns the phase-view ctx so ``from_phase_event`` (stateful — reads/writes
+    ctx) runs once per ``PhaseEvent``; the typed view is serialised via
+    ``view_to_wire_dict`` onto ``Phase.payload['view']`` so subscribers
+    don't re-derive it.
 
     Pre-binding events (e.g. ``INIT.enter`` fired before the cycle dir is
     known) buffer in memory; the first append after ``ledger`` is set
@@ -129,7 +133,7 @@ class RunListener:
             self._ledger.append(record)
 
     def on_phase(self, event: Any) -> None:
-        view = build_phase_view(event, self._phase_ctx)
+        view = view_to_wire_dict(from_phase_event(event, self._phase_ctx))
         self._emit(
             Phase(
                 phase=str(event.phase),

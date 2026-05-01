@@ -116,7 +116,10 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.domain.results import RoundResult, RunResult
     from promptpotter.domain.run_records import Phase, Snapshot
     from promptpotter.infrastructure.projections import LiveDashboardProjection
-    from promptpotter.presentation.views.phase_views import build_phase_view
+    from promptpotter.presentation.views.view_factories import (
+        from_phase_event,
+        view_to_wire_dict,
+    )
 
     session_dir, campaign_dir = session_and_campaign_dirs
     config = CampaignConfig(
@@ -136,13 +139,13 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         sp_budget_ttest=20,
     )
 
-    # ``RunListener`` would call ``build_phase_view`` once per event on a
-    # shared ctx and feed Phase records to the ledger; subscribers route
-    # them via ``on_record``. Mirror that here.
+    # ``RunListener`` would call ``from_phase_event`` once per event on a
+    # shared ctx, serialise via ``view_to_wire_dict``, and feed Phase records
+    # to the ledger; subscribers route them via ``on_record``. Mirror that here.
     phase_ctx: dict = {}
 
     def fire(event: PhaseEvent) -> None:
-        view = build_phase_view(event, phase_ctx)
+        view = view_to_wire_dict(from_phase_event(event, phase_ctx))
         emitter.on_record(
             Phase(
                 phase=str(event.phase),
