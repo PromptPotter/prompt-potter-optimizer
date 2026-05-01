@@ -766,7 +766,10 @@ def _finalize_loop_state(
 
     if resolved_cycle_id:
         session.state.cycle_id = resolved_cycle_id
-        session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
+        # Idempotent: runner.py may pre-open the ledger so baseline events
+        # land on subscribers live; only open here when nobody did.
+        if session.state.ledger is None:
+            session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.obs_campaign_id = obs_campaign_id
     session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
     session.scoring.degradation_checks = build_degradation_checks(config)

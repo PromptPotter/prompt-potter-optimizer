@@ -367,6 +367,9 @@ class LiveDashboardProjection:
         s["query_in_flight"] = True
         s["query_started_at"] = datetime.now(UTC).isoformat()
         s["current_query_payload"] = (query_text or "")[:120]
+        # Flush so an operator tailing dashboard.json sees query_in_flight + payload
+        # during the in-flight call, not only after sample_scored persists.
+        self._persist()
 
     def _on_sample_scored(
         self,

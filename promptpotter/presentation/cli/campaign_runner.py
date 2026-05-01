@@ -696,12 +696,6 @@ async def _run_sweep_batch(
         listener, emitter, _recorder, display = _build_run_observers(
             args, fork_session, campaign_config, fork_campaign_dir, 0.0
         )
-        logger.info(
-            "Sweep observers built: emitter=%s recorder=%s display=%s",
-            type(emitter).__name__,
-            type(_recorder).__name__,
-            type(display).__name__ if display else None,
-        )
 
         await _orch_run_optimization(
             train_data,
@@ -714,12 +708,6 @@ async def _run_sweep_batch(
             emitter=emitter,
             sweep=True,
             fork_payload=payload,
-        )
-        logger.info(
-            "Sweep fork %s post-run: session.state.ledger=%s buffered_events=%d",
-            new_cycle_id,
-            "set" if fork_session.state.ledger is not None else "None",
-            len(getattr(listener, "_buffer", [])),
         )
         new_cycle_ids.append(new_cycle_id)
         logger.info(

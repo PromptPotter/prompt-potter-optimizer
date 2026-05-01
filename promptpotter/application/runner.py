@@ -722,6 +722,53 @@ async def run_optimization(
     leaderboard can pair sweep cycles with their full counterparts.
     """
     started_at = datetime.now(UTC).isoformat()
+    cb = listener if listener is not None else RunListener()
+
+    # Bind the cycle ledger + subscribers BEFORE baseline scoring so the
+    # per-query events from prepare_scoring_context flow to dashboard.json
+    # and CLI stdout live, instead of buffering on RunListener until the
+    # late bind block below. CLI builds emitter+display ahead of time
+    # (see ``_build_run_observers``); we just need a ledger to plug them
+    # into. Skipped when no store is wired (test fixtures) or when the
+    # caller already scored baseline (notebook path with baseline != None).
+    early_bind_done = False
+    if baseline is None and emitter is not None and session.store is not None:
+        from promptpotter.application.baseline import load_baseline_prompt
+        from promptpotter.application.bootstrap import auto_mint_session
+        from promptpotter.domain.cycle_paths import CycleDir
+        from promptpotter.infrastructure.ledger import RunLedger
+
+        prompt_nodes = (
+            session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
+        )
+        baseline_osp_for_id = load_baseline_prompt(
+            session.experiment_extract or {},
+            prompt_node_names=prompt_nodes,
+            dataset_name=campaign_config.dataset_name,
+        )
+        if not session.session_id:
+            auto_mint_session(
+                session,
+                campaign_config,
+                cycle_id=build_baseline_cycle_id(
+                    baseline_osp_for_id, session.pipeline_schema, dataset
+                ),
+                baseline_acc=0.0,
+                baseline_prompt_fields=baseline_osp_for_id.prompt_field_dict(),
+                dataset_size=len(dataset),
+                experiment_id=experiment_id,
+            )
+        if session.state.cycle_id:
+            cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
+            session.state.ledger = RunLedger.open(cycle_dir)
+            ledger = session.state.ledger
+            ledger.bind(emitter)
+            if session.state.round_recorder is not None:
+                ledger.bind(session.state.round_recorder)
+            if display is not None:
+                ledger.bind(display)
+            cb.ledger = ledger
+            early_bind_done = True
 
     if baseline is None:
         from promptpotter.application.baseline import (
@@ -736,7 +783,7 @@ async def run_optimization(
             pipeline_params=session.pipeline_params,
             pipeline_schema=session.pipeline_schema,
             svc=session,
-            listener=listener,
+            listener=cb,
         )
         baseline = extract_campaign_baseline(campaign_rounds)
         if display is not None and hasattr(display, "set_baseline"):
@@ -770,8 +817,6 @@ async def run_optimization(
         resolved_task_context = TaskDecomposition.from_dict(task_context)
     else:
         resolved_task_context = TaskDecomposition()
-
-    cb = listener if listener is not None else RunListener()
 
     pre_loop_cycle_id = session.state.cycle_id
 
@@ -850,17 +895,26 @@ async def run_optimization(
             new_cycle_id=session.state.cycle_id,
             from_round=session.state.resumed_from_round or 0,
         )
+    elif early_bind_done and emitter._recorder is None:
+        # Recorder may have been built by init_optimization_loop after
+        # we early-bound the emitter; patch it on so per-round node
+        # snapshots reach dashboard.json::current_round.nodes.
+        emitter._recorder = session.state.round_recorder
     # Ledger subscription: every subscriber consumes via ``on_record``;
     # there is no parallel direct-callback path. Display binds last so
     # any pre-binding events buffered on the listener (e.g. ``INIT.enter``
-    # fired before the cycle dir was known) flush in order.
-    if (ledger := session.state.ledger) is not None:
-        ledger.bind(emitter)
+    # fired before the cycle dir was known) flush in order. When early
+    # bind already ran we still re-bind on fork-on-divergence (fork ledger
+    # replaced session.state.ledger) but skip the no-fork case to avoid
+    # double-subscribing.
+    late_ledger = session.state.ledger
+    if late_ledger is not None and (not early_bind_done or forked):
+        late_ledger.bind(emitter)
         if session.state.round_recorder is not None:
-            ledger.bind(session.state.round_recorder)
+            late_ledger.bind(session.state.round_recorder)
         if display is not None:
-            ledger.bind(display)
-        cb.ledger = ledger
+            late_ledger.bind(display)
+        cb.ledger = late_ledger
 
     stop_reason = await _run_round_loop(
         cycle, dataset, campaign_config, session, cb, sweep=sweep, diag=diag
