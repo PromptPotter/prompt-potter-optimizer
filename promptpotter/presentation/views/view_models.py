@@ -317,4 +317,5 @@ AnyView = (
     | PlanEnterView
     | PlanExitView
     | LogMdView
+    | FinalWinnerView
 )

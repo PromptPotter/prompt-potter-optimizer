@@ -38,6 +38,8 @@ from promptpotter.presentation.views.display import (
     render_pipeline_overrides,
 )
 from promptpotter.presentation.views.live import LiveDisplay
+from promptpotter.presentation.views.render_html import to_html
+from promptpotter.presentation.views.view_models import FinalWinnerView
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -49,8 +51,40 @@ __all__ = [
     "init_notebook_session",
     "prepare_scoring_context_notebook",
     "render_completion",
+    "render_completion_html",
     "run_optimization_notebook",
 ]
+
+
+def render_completion_html(result: RunResult) -> str:
+    """HTML render of the final-winner summary, for inline notebook display.
+
+    Reads the on-disk ``index.json`` for the cycle so the rendered shape
+    matches what ``log.md`` would carry. Empty string when the result
+    can't resolve a cycle (no final winner block to render).
+    """
+    if not result.winner_prompt_fields:
+        return ""
+    final = FinalWinnerView(
+        winner_prompt_fields=dict(result.winner_prompt_fields),
+        winner_pipeline_params=dict(result.winner_pipeline_params or {}),
+    )
+    return to_html(final)
+
+
+def _try_display_html(html_body: str) -> bool:
+    """If running inside IPython, render ``html_body`` inline; else return False."""
+    if not html_body:
+        return False
+    try:
+        from IPython import get_ipython
+        from IPython.display import HTML, display
+    except ImportError:
+        return False
+    if get_ipython() is None:
+        return False
+    display(HTML(html_body))
+    return True
 
 
 def render_completion(
@@ -247,6 +281,7 @@ async def run_optimization_notebook(
 
     best = max(campaign_rounds, key=lambda r: r["accuracy"])
     print(render_completion(result, best_round=best, pipeline_schema=session.pipeline_schema))
+    _try_display_html(render_completion_html(result))
 
     if result.stop_reason == "interrupted":
         print(

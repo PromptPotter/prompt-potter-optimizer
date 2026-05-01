@@ -18,11 +18,15 @@ from __future__ import annotations
 from dataclasses import replace
 
 from promptpotter.domain.phases import PhaseEvent
+from promptpotter.presentation.views.render_html import to_html
 from promptpotter.presentation.views.view_factories import (
     from_disk_round,
     from_phase_event,
 )
-from promptpotter.presentation.views.view_models import RoundCompleteView
+from promptpotter.presentation.views.view_models import (
+    FinalWinnerView,
+    RoundCompleteView,
+)
 from promptpotter.shared.statistics import wilson_ci
 
 
@@ -223,3 +227,32 @@ def test_round_complete_view_no_improvement() -> None:
     assert live_view.delta == 0.0
     assert live_view.p_value is None
     assert live_view == disk_view
+
+
+def test_html_target_dispatches_for_supported_views() -> None:
+    """to_html returns non-empty for the views the stub covers, empty otherwise."""
+    round_view = RoundCompleteView(
+        round=0,
+        baseline_acc=0.3,
+        scores=(),
+        winner_label="C1",
+        winner_accuracy=0.5,
+        winner_composite=0.55,
+        winner_evaluators={},
+        winner_hits=10,
+        winner_total=20,
+        improved=True,
+        delta=0.2,
+        p_value=0.04,
+        next_action="",
+        l1_critique_text="",
+        composite_formula=None,
+        composite_formula_short=None,
+        baseline_composite=None,
+    )
+    final_view = FinalWinnerView(
+        winner_prompt_fields={"persona": "x"},
+        winner_pipeline_params={"steps": ["llm_only"]},
+    )
+    assert "IMPROVED" in to_html(round_view)
+    assert "Final Winner" in to_html(final_view)
