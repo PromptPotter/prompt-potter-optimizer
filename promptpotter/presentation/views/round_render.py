@@ -108,6 +108,23 @@ def format_elimination_summary(ctx: dict, prior_label: str | None = None) -> str
     )
 
 
+def format_leader_locked_summary(ctx: dict) -> str:
+    """One-line leader-locked-candidate summary.
+
+    Example: ``✓ leader locked q8/20  p_best=98.5% (of 3 priors)``.
+    Fired when PoBB confirms the current candidate is the round leader past
+    the lock-in threshold and the round terminates early.
+    """
+    q = int(ctx.get("queries_scored", 0))
+    qt = int(ctx.get("total_queries", 0))
+    p_best = float(ctx.get("p_best", 0.0))
+    n_priors = int(ctx.get("n_priors", 0))
+    return (
+        f"{GREEN}✓ leader locked q{q}/{qt}{RESET}  "
+        f"p_best={p_best:.1%} (of {n_priors} prior{'s' if n_priors != 1 else ''})"
+    )
+
+
 @dataclass(frozen=True)
 class IndividualSummary:
     """Structured candidate render — displays pick plain vs box wrapping.
@@ -200,10 +217,12 @@ def build_individual_summary(
     body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
+    elim_ctx_raw = scores.get("elimination_context") or {}
     if scores.get("elimination_stopped"):
-        elim_ctx = scores["elimination_context"]
-        prior_label = elim_ctx.get("triggered_by_prior_label")
-        detail_lines.append(format_elimination_summary(elim_ctx, prior_label))
+        prior_label = elim_ctx_raw.get("triggered_by_prior_label")
+        detail_lines.append(format_elimination_summary(elim_ctx_raw, prior_label))
+    elif elim_ctx_raw.get("leader_locked"):
+        detail_lines.append(format_leader_locked_summary(elim_ctx_raw))
 
     comp = scores.get("composite")
     degraded = scores.get("degraded_queries", 0)

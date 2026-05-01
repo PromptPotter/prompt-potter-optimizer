@@ -571,8 +571,11 @@ def _handle_scored_candidate(
     elimination_stopped = (
         signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
     )
+    leader_locked = signal is not None and signal.target == EscalationTarget.LEADER_LOCKED
     scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
-    aborted = bool(signal) and (scoring_error_abort or len(results) < len(dataset))
+    aborted = (
+        bool(signal) and not leader_locked and (scoring_error_abort or len(results) < len(dataset))
+    )
 
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
     if len(results) == len(dataset) and not aborted:
@@ -614,7 +617,11 @@ def _handle_scored_candidate(
         osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
 
     elim_ctx: dict | None = None
-    if elimination_stopped and signal is not None and signal.check_name == "elimination":
+    if (
+        (elimination_stopped or leader_locked)
+        and signal is not None
+        and signal.check_name == "elimination"
+    ):
         cr = signal.check_result
         elim_ctx = {
             "p_best": float(cr.get("p_best", 0.0)),
@@ -623,6 +630,7 @@ def _handle_scored_candidate(
             "queries_scored": int(cr.get("queries_scored", len(results))),
             "total_queries": int(cr.get("total_queries", len(dataset))),
             "n_priors": int(cr.get("n_priors", 0)),
+            "leader_locked": leader_locked,
         }
 
     report = _build_score_report(
@@ -637,7 +645,7 @@ def _handle_scored_candidate(
         new_runtime_failure=new_rf,
         l1_diversity=l1_diversity,
     )
-    residual = None if (elimination_stopped or not signal) else signal
+    residual = None if (elimination_stopped or leader_locked or not signal) else signal
     return report, residual
 
 
@@ -684,6 +692,39 @@ def _record_elimination_cut(
         )
 
 
+def _record_leader_lock_in(
+    signal: EscalationSignal,
+    osp_c: OptSearchPoint,
+    elim_check: Any,
+    priors_at_test: list[str],
+    decisions: list[Decision] | None,
+    round_num: int,
+    n_results: int,
+) -> None:
+    """Append leader_lock_in decision for divergence replay."""
+    if decisions is None:
+        return
+    cr = signal.check_result
+    record_decision(
+        decisions,
+        DecisionKind.LEADER_LOCK_IN,
+        {
+            "candidate_id": osp_c.lineage.id,
+            "prior_candidate_ids": priors_at_test,
+            "queries_scored": int(cr.get("queries_scored", n_results)),
+            "lock_in": float(elim_check.lock_in),
+            "lock_in_n_min": int(elim_check.lock_in_n_min),
+            "round_num": round_num,
+        },
+        True,
+        data={
+            "p_best": float(cr.get("p_best", 0.0)),
+            "leader_id": str(cr.get("leader_id", "")),
+            "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+        },
+    )
+
+
 async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
@@ -695,6 +736,8 @@ async def score_population(
     callbacks: RunListener,
     elimination_n_min: int,
     pobb_epsilon: float,
+    pobb_lock_in: float = 0.95,
+    pobb_lock_in_n_min: int = 8,
     pobb_mc_samples: int = 1000,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
@@ -709,7 +752,13 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = PoBBCheck(n_min=elimination_n_min, epsilon=pobb_epsilon, n_queries=len(dataset))
+    elim_check = PoBBCheck(
+        n_min=elimination_n_min,
+        epsilon=pobb_epsilon,
+        lock_in=pobb_lock_in,
+        lock_in_n_min=pobb_lock_in_n_min,
+        n_queries=len(dataset),
+    )
 
     def _fire(idx: int, report: CandidateScore) -> None:
         candidate_scores.append(report)
@@ -825,8 +874,25 @@ async def score_population(
                 round_num,
                 len(results),
             )
+        leader_locked = (
+            signal is not None
+            and signal.target == EscalationTarget.LEADER_LOCKED
+            and signal.check_name == elim_check.name
+        )
+        if leader_locked and signal is not None:
+            _record_leader_lock_in(
+                signal,
+                osp_c,
+                elim_check,
+                priors_at_test,
+                decisions,
+                round_num,
+                len(results),
+            )
         _fire(idx, report)
 
+        if leader_locked:
+            break  # round leader confirmed — skip remaining candidates
         if residual is not None:
             escalation_signal = residual
             break  # true degradation — abort remaining candidates
@@ -880,6 +946,8 @@ async def l1_score(
     degradation_checks: list | None = None,
     elimination_n_min: int,
     pobb_epsilon: float,
+    pobb_lock_in: float = 0.95,
+    pobb_lock_in_n_min: int = 8,
     pobb_mc_samples: int = 1000,
     round_num: int = 0,
     yield_stats: L1YieldStats,
@@ -901,6 +969,8 @@ async def l1_score(
         callbacks=callbacks,
         elimination_n_min=elimination_n_min,
         pobb_epsilon=pobb_epsilon,
+        pobb_lock_in=pobb_lock_in,
+        pobb_lock_in_n_min=pobb_lock_in_n_min,
         pobb_mc_samples=pobb_mc_samples,
         round_num=round_num,
         decisions=decisions,
@@ -1163,6 +1233,8 @@ async def execute_round(
             degradation_checks=degradation_checks,
             elimination_n_min=opt.elimination_n_min,
             pobb_epsilon=opt.pobb_epsilon,
+            pobb_lock_in=opt.pobb_lock_in,
+            pobb_lock_in_n_min=opt.pobb_lock_in_n_min,
             pobb_mc_samples=opt.pobb_mc_samples,
             round_num=round_num,
             yield_stats=yield_stats,

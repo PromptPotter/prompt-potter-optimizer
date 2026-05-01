@@ -80,6 +80,7 @@ class EscalationTarget(enum.StrEnum):
     L2 = "l2"
     L3 = "l3"
     ELIMINATE_CANDIDATE = "eliminate_candidate"
+    LEADER_LOCKED = "leader_locked"
     ABORT_CAMPAIGN = "abort_campaign"
 
 

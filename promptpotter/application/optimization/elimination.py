@@ -233,6 +233,20 @@ def _eliminate(
     )
 
 
+def _leader_locked(
+    name: str, check_result: dict, candidate_idx: int, n_total_candidates: int
+) -> EscalationSignal:
+    """Lock in the current candidate as round leader; skip remaining candidates."""
+    return EscalationSignal(
+        check_name=name,
+        target=EscalationTarget.LEADER_LOCKED,
+        check_result=check_result,
+        candidate_idx=candidate_idx,
+        candidates_scored=candidate_idx + 1,
+        candidates_skipped=n_total_candidates - candidate_idx - 1,
+    )
+
+
 class DegradationCheck:
     """Fatal-classification fast-path + rate-based degradation.
 
@@ -324,9 +338,19 @@ class PoBBCheck:
 
     name = "elimination"
 
-    def __init__(self, *, n_min: int = 4, epsilon: float = 0.05, n_queries: int) -> None:
+    def __init__(
+        self,
+        *,
+        n_min: int = 4,
+        epsilon: float = 0.05,
+        lock_in: float = 0.95,
+        lock_in_n_min: int = 8,
+        n_queries: int,
+    ) -> None:
         self.n_min = n_min
         self.epsilon = epsilon
+        self.lock_in = lock_in
+        self.lock_in_n_min = lock_in_n_min
         self.n_queries = n_queries
         self.priors: dict[str, list[float]] = {}
         self.prior_ids: list[str] = []
@@ -371,10 +395,36 @@ class PoBBCheck:
             self._on_snapshot(snap)
 
         p_best_current = snapshot.get(cid, 1.0)
+        leader_id = max(snapshot.items(), key=lambda kv: kv[1])[0]
+
+        # Leader lock-in (preempts loser elimination): when current is the
+        # leader and its posterior P(best) ≥ lock_in threshold past the
+        # lock-in floor, terminate the round early. Disabled when lock_in≥1.
+        if (
+            self.lock_in < 1.0
+            and n >= self.lock_in_n_min
+            and leader_id == cid
+            and p_best_current >= self.lock_in
+        ):
+            return _leader_locked(
+                self.name,
+                {
+                    "queries_scored": n,
+                    "total_queries": self.n_queries,
+                    "n_priors": len(self.priors),
+                    "p_best": float(p_best_current),
+                    "lock_in": float(self.lock_in),
+                    "lock_in_n_min": int(self.lock_in_n_min),
+                    "p_best_snapshot": snapshot,
+                    "leader_id": leader_id,
+                },
+                candidate_idx,
+                n_total_candidates,
+            )
+
         if not pobb_should_stop(p_best_current, self.epsilon):
             return None
 
-        leader_id = max(snapshot.items(), key=lambda kv: kv[1])[0]
         return _eliminate(
             self.name,
             {

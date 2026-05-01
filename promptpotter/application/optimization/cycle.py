@@ -299,6 +299,38 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return pobb_should_stop(snapshot.get(candidate_id, 1.0), epsilon)
 
 
+@replayer(DecisionKind.LEADER_LOCK_IN)
+def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
+    """Re-run the PoBB lock-in gate under rescored scores.
+
+    Mirrors ``_replay_elimination_cut`` but checks the leader condition:
+    current candidate is the snapshot argmax AND its P(best) ≥ lock_in
+    threshold AND it had at least ``lock_in_n_min`` queries.
+    """
+    from promptpotter.shared.statistics import posterior_best_probabilities
+
+    all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
+    candidate_id = str(inputs_ref.get("candidate_id", ""))
+    prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
+    n = int(inputs_ref.get("queries_scored", 0))
+    lock_in = float(inputs_ref.get("lock_in", 0.95))
+    lock_in_n_min = int(inputs_ref.get("lock_in_n_min", 8))
+
+    if n < lock_in_n_min:
+        return False
+    current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
+    priors = {
+        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
+    }
+    priors = {pid: p for pid, p in priors.items() if p}
+    if not priors or len(current) < 2:
+        return False
+    histories = {**priors, candidate_id: current}
+    snapshot = posterior_best_probabilities(histories)
+    leader = max(snapshot.items(), key=lambda kv: kv[1])[0]
+    return leader == candidate_id and snapshot.get(candidate_id, 0.0) >= lock_in
+
+
 def _derive_stall_count(
     prior_trials: list[dict[str, Any]],
     entry_round: int,

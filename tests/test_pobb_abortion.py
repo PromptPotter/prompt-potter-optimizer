@@ -11,6 +11,7 @@ from promptpotter.application.optimization.elimination import (  # noqa: E402
     PoBBCheck,
     PoBBSnapshot,
 )
+from promptpotter.domain.analysis import EscalationTarget  # noqa: E402
 from promptpotter.shared.statistics import (  # noqa: E402
     pobb_should_stop,
     posterior_best_probabilities,
@@ -110,3 +111,40 @@ def test_pobb_check_fires_snapshot_callback_per_query():
     assert received[0].n_queries == 4
     assert "winner" in received[0].p_best
     assert "loser" in received[0].p_best
+
+
+def test_pobb_locks_in_dominant_leader():
+    """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
+    check = PoBBCheck(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, n_queries=20)
+    # Prior: weak candidate. Current: clear leader.
+    check.register_completed([0.0] * 20, candidate_id="weak_prior")
+    check.set_current("strong_current")
+    sig = check.check([{"score": 1.0}] * 8, candidate_idx=1, n_total_candidates=3)
+    assert sig is not None
+    assert sig.target == EscalationTarget.LEADER_LOCKED
+    cr = sig.check_result
+    assert cr["leader_id"] == "strong_current"
+    assert cr["p_best"] >= 0.95
+    assert cr["queries_scored"] == 8
+    # Two candidates remain unscored (idx=1 of 3).
+    assert sig.candidates_skipped == 1
+
+
+def test_pobb_no_lock_in_below_n_min():
+    """Even with overwhelming signal, lock-in waits for lock_in_n_min queries."""
+    check = PoBBCheck(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8, n_queries=20)
+    check.register_completed([0.0] * 20, candidate_id="weak_prior")
+    check.set_current("strong_current")
+    # Only 5 queries — past elim n_min (4) but below lock_in_n_min (8).
+    sig = check.check([{"score": 1.0}] * 5, candidate_idx=1, n_total_candidates=2)
+    assert sig is None  # leader p_best is high but n < lock_in_n_min
+
+
+def test_pobb_lock_in_disabled_at_threshold_one():
+    """``lock_in=1.0`` disables the lock-in branch entirely."""
+    check = PoBBCheck(n_min=4, epsilon=0.05, lock_in=1.0, lock_in_n_min=4, n_queries=20)
+    check.register_completed([0.0] * 20, candidate_id="weak_prior")
+    check.set_current("strong_current")
+    # Past lock_in_n_min and dominating — would lock in if enabled.
+    sig = check.check([{"score": 1.0}] * 10, candidate_idx=1, n_total_candidates=2)
+    assert sig is None  # lock_in=1.0 short-circuits the branch

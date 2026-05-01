@@ -41,6 +41,7 @@ class DecisionKind(enum.StrEnum):
 
     ROUND_WINNER = "round_winner"
     ELIMINATION_CUT = "elimination_cut"
+    LEADER_LOCK_IN = "leader_lock_in"
     L2_ESCALATION_TRIGGER = "l2_escalation_trigger"
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
     PROBE_ROUND_COMMITMENT = "probe_round_commitment"
@@ -65,6 +66,7 @@ class GatingMode(enum.StrEnum):
 DECISION_GATING: dict[DecisionKind, GatingMode] = {
     DecisionKind.ROUND_WINNER: GatingMode.REPLAYED,
     DecisionKind.ELIMINATION_CUT: GatingMode.REPLAYED,
+    DecisionKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
     DecisionKind.L2_ESCALATION_TRIGGER: GatingMode.REPLAYED,
     DecisionKind.L3_ESCALATION_TRIGGER: GatingMode.REPLAYED,
     DecisionKind.PROBE_ROUND_COMMITMENT: GatingMode.ARCHIVAL,

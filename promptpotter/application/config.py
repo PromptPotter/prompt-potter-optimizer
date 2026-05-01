@@ -226,6 +226,18 @@ class OptimizationConfig(BaseModel):
         description="Stop a candidate when its posterior probability of being the "
         "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
     )
+    pobb_lock_in: float = Field(
+        0.95,
+        description="Lock in the current candidate as round leader and terminate "
+        "the round when its posterior P(best) reaches this threshold. Default 95%; "
+        "1.0 disables lock-in. Saves compute when the leader is already confirmed.",
+    )
+    pobb_lock_in_n_min: int = Field(
+        8,
+        description="Minimum queries before PoBB lock-in can fire. Higher than "
+        "elimination_n_min because locker-in commits the round-winner — needs more "
+        "samples for posterior stability than the loser-elimination floor.",
+    )
     pobb_mc_samples: int = Field(
         1000,
         description="Monte Carlo joint-draw count for posterior_best_probabilities. "

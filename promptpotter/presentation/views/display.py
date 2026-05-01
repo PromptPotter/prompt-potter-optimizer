@@ -49,6 +49,32 @@ def _visible_len(text: str) -> int:
     return len(_ANSI_RE.sub("", text))
 
 
+def _truncate_visible(text: str, max_visible: int) -> str:
+    """Truncate ``text`` to at most ``max_visible`` visible chars, preserving
+    ANSI escape sequences and appending RESET if any sequence was emitted."""
+    if max_visible <= 0:
+        return ""
+    out: list[str] = []
+    visible = 0
+    saw_ansi = False
+    i = 0
+    n = len(text)
+    while i < n and visible < max_visible:
+        if text[i] == "\033" and i + 1 < n and text[i + 1] == "[":
+            j = text.find("m", i + 2)
+            if j != -1:
+                out.append(text[i : j + 1])
+                saw_ansi = True
+                i = j + 1
+                continue
+        out.append(text[i])
+        visible += 1
+        i += 1
+    if saw_ansi:
+        out.append("\033[0m")
+    return "".join(out)
+
+
 # ANSI foreground colors
 RESET = "\033[0m"
 BOLD = "\033[1m"
@@ -98,9 +124,17 @@ def _h_rule(lc: str, rc: str, *, width: int = _W, fill: str = "─") -> str:
 
 
 def _h_text(lw: str, rw: str, text: str, *, width: int = _W) -> str:
-    """Content line walled with ``LW`` / ``RW``: ``LW  text ...  RW``."""
+    """Content line walled with ``LW`` / ``RW``: ``LW  text ...  RW``.
+
+    Truncates with ``…`` when ``text`` exceeds inner width so the closing
+    wall always lands at column ``width - 1``.
+    """
     inner = width - 4
-    pad = max(inner - _visible_len(text), 0)
+    vis = _visible_len(text)
+    if vis > inner:
+        text = _truncate_visible(text, inner - 1) + "…"
+        vis = inner
+    pad = inner - vis
     return f"{lw}  {text}{' ' * pad}{rw}"
 
 
