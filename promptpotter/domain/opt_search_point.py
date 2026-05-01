@@ -203,6 +203,8 @@ class OptSearchPoint(PromptTemplate):
     configuration with target-pipeline scoring outcomes.
     """
 
+    model_config = ConfigDict(extra="forbid")
+
     # -- Lineage -------------------------------------------------------------
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 

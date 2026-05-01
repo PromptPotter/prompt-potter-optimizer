@@ -134,7 +134,10 @@ def load_baseline_prompt(
         label = names[0] if names else matched_key
         return OptSearchPoint(
             instruction=matched_prompt["template"],
-            changes_description=f"Baseline prompt from {label} registry",
+            lineage=IndividualLineage(
+                changes_description=f"Baseline prompt from {label} registry",
+                source="baseline",
+            ),
         )
 
     if dataset_name and names:
