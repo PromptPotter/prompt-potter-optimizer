@@ -67,4 +67,4 @@ The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/
 
 Five LLM call sites in the loop: `restructure` (one-time prompt decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`.
 
-Individual fitness comparison uses paired Wilcoxon signed-rank with Holm-Bonferroni correction — see [candidate-elimination.md](../methods/candidate-elimination.md).
+Individual fitness comparison uses Bayesian Posterior-of-Being-Best (PoBB) — population-aware joint posterior over candidate accuracy, MC argmax, stop when `P(c is best) < ε`. See [candidate-elimination.md](../methods/candidate-elimination.md).

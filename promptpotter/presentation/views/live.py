@@ -205,6 +205,12 @@ class LiveDisplay:
                     int(record.candidate_total or 0),
                     payload.get("scores") or {},
                 )
+            elif ev == "p_best_update":
+                self.on_p_best_update(
+                    str(payload.get("current_id") or ""),
+                    int(payload.get("n_queries") or 0),
+                    {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
+                )
 
     # --- Public callback API ------------------------------------------
     #
@@ -279,6 +285,30 @@ class LiveDisplay:
         )
         if self._bars is not None:
             self._bars.on_sample_scored()
+
+    def on_p_best_update(self, current_id: str, n_queries: int, p_best: dict[str, float]) -> None:
+        """One-line per-query Posterior-of-Being-Best snapshot.
+
+        Top-5 candidates by P(best); current candidate marked with asterisks;
+        arrow glyphs show direction of change since the previous query.
+        """
+        if not p_best:
+            return
+        last: dict[str, float] = getattr(self, "_last_p_best", {})
+        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
+        parts: list[str] = []
+        for cid, prob in top:
+            prev = last.get(cid)
+            arrow = ""
+            if prev is not None:
+                if prob > prev + 1e-4:
+                    arrow = "▲"  # BLACK UP-POINTING TRIANGLE
+                elif prob < prev - 1e-4:
+                    arrow = "▼"  # BLACK DOWN-POINTING TRIANGLE
+            tag = f"*{cid[:6]}*" if cid == current_id else cid[:6]
+            parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
+        self._write(f"       p_best q{n_queries}: " + " ".join(parts))
+        self._last_p_best = dict(p_best)
 
     def on_candidate_started(
         self,

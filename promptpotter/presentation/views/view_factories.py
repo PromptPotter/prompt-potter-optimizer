@@ -22,7 +22,9 @@ typed views from on-disk artifacts. The named round-trip invariant
 
 from __future__ import annotations
 
+import json
 from dataclasses import asdict
+from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.opt_search_point import (
@@ -567,12 +569,49 @@ def from_disk_round(
     )
 
 
+def _load_p_best_trajectory(
+    streams_dir: Path | None, round_num: int
+) -> tuple[dict[str, list[float]], dict[str, int]]:
+    """Load per-query P(best) snapshots from the JSONL stream for a single round.
+
+    Returns ``(trajectory, stopped_at)`` — trajectory is candidate_id →
+    list of P(best) values across queries; stopped_at is candidate_id →
+    last-query-idx-before-the-current-candidate-stopped, populated when a
+    candidate's value drops to / below ``ε`` (best-effort: the stream
+    doesn't carry ε, so we infer "stopped" as the query at which the
+    current candidate's snapshot disappears).
+    """
+    if streams_dir is None or not streams_dir.is_dir():
+        return {}, {}
+    path = streams_dir / f"round_{round_num:04d}_p_best.jsonl"
+    if not path.is_file():
+        return {}, {}
+    trajectory: dict[str, list[float]] = {}
+    last_seen: dict[str, int] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            qi = int(rec.get("query_idx", -1))
+            for cid, prob in (rec.get("p_best") or {}).items():
+                trajectory.setdefault(str(cid), []).append(float(prob))
+                last_seen[str(cid)] = qi
+    except OSError:
+        return {}, {}
+    return trajectory, last_seen
+
+
 def from_disk_log(
     index: dict[str, Any],
     trials: list[dict[str, Any]],
     *,
     hard_samples_artifact: dict[str, Any] | None = None,
     sample_query_lookup: dict[int, str] | None = None,
+    streams_dir: Path | None = None,
 ) -> LogMdView:
     """Build the ``log.md`` view from ``index.json`` + a list of trial dicts."""
     final = index.get("final") or {}
@@ -595,6 +634,7 @@ def from_disk_log(
         lineage = osp.get("lineage") or {}
         rnd_raw = t.get("round")
         rnd = rnd_raw if isinstance(rnd_raw, int) else 0
+        traj, stopped = _load_p_best_trajectory(streams_dir, rnd)
         rounds.append(
             RoundDigestView(
                 round=rnd,
@@ -612,6 +652,8 @@ def from_disk_log(
                 l1_n_duplicate=int(t.get("l1_n_duplicate", 0)),
                 candidates_scored=int(t.get("candidates_scored", 0)),
                 evaluators=dict(t.get("evaluators") or {}),
+                p_best_trajectory=traj,
+                p_best_stopped=stopped,
             )
         )
 

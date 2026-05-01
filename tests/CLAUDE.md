@@ -17,9 +17,10 @@ A test earns its place only if it guards one of these:
    (`CAMPAIGN_ARTIFACTS` / `SESSION_ARTIFACTS`), rescore-on-load +
    decision-replay + fork, `score_search_point` as the single scoring gateway,
    nested-only `pipeline_params`, round-boundary dataset mutation.
-2. **Statistical / numerical correctness.** Wilcoxon signed-rank,
-   Holm-Bonferroni, composite scoring, per-dataset scorer formulas. The math
-   must be wrong-reveal, not wrapper-smoke.
+2. **Statistical / numerical correctness.** Bayesian Posterior-of-Being-Best
+   (joint Normal-CLT posterior, Monte Carlo argmax), composite scoring,
+   per-dataset scorer formulas. The math must be wrong-reveal, not
+   wrapper-smoke.
 3. **Wire / schema contracts with external systems.** Backend `GET /pipeline`
    parse, LLM retry (503/429 vs. 400), Pydantic `extra='forbid'` on user
    config.

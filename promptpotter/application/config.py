@@ -26,11 +26,10 @@ __all__ = [
     "EXPERIMENT_EXTRACTORS",
     "TRACE_GT_RESOLVERS",
     "CampaignConfig",
-    "HardSampleSorterConfig",
+    "ExplorationConfig",
     "OptimizationConfig",
     "OptimizerLLMConfig",
     "PreflightWarning",
-    "ScoringSetConfig",
     "compute_preflight_metrics",
     "configure_and_apply_pipeline",
     "create_llm_client",
@@ -140,25 +139,29 @@ EXPERIMENT_EXTRACTORS["termnorm"] = lambda d: (_extract_queries(d), _extract_ind
 TRACE_GT_RESOLVERS["termnorm"] = lambda d, q: _extract_ground_truth_map(d).get(_split_query(q)[0])
 
 
-class ScoringSetConfig(BaseModel):
-    """Round-level scoring-set evolution (Rasch + KG).
+class ExplorationConfig(BaseModel):
+    """Round-level Rasch IRT — fits one posterior per round, used for both
+    scoring-set evolution (in-memory swap of understood ↔ high-info samples)
+    and the round-end hard-sample heatmap rendered into ``log.md``.
 
-    On by default — ``evolve_scoring_set()`` runs after each round, refits
-    Rasch on accumulated observations, and swaps low-info samples (narrow
-    CI on δ_s) out for high-KG samples not currently in the scoring set.
-    Set ``enabled=False`` to fall back to the static
-    ``sample_dataset(dataset, sp_budget_ttest)`` slice.
+    Replaces the prior split between ``ScoringSetConfig`` and
+    ``HardSampleSorterConfig`` — they consumed the same Rasch fit, so they
+    share one config block and one posterior object.
     """
 
     model_config = ConfigDict(extra="forbid")
 
-    enabled: bool = Field(True, description="Master switch — true = Rasch + KG evolution active.")
+    enabled: bool = Field(
+        True,
+        description="Master switch — true = Rasch + KG scoring-set evolution active. "
+        "Independent of ``hard_sample_sorter_enabled``: a disabled exploration loop "
+        "still produces the round-end hard-sample heatmap if requested.",
+    )
     swap_out_delta_se: float = Field(
         0.7,
         description="Swap-out threshold: SE on delta_s below which a sample is 'understood' "
         "(~95% CI half-width of ~1.4 logits). Sized so the swap fires round 1->2 on the "
-        "typical 20-sample / 5-candidate budget. Not a user knob — change only when "
-        "altering loop-budget invariants.",
+        "typical 20-sample / 5-candidate budget.",
     )
     swap_in_kg_threshold: float = Field(
         0.01,
@@ -173,35 +176,18 @@ class ScoringSetConfig(BaseModel):
         1.5,
         description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
     )
-
-
-class HardSampleSorterConfig(BaseModel):
-    """Hard-sample-sorter artifact at campaign finalize.
-
-    Independent of ``ScoringSetConfig`` — even when scoring-set evolution is
-    off, the sorter fits its own Rasch posterior on accumulated observations
-    and emits a θ_c-ranked candidates × δ_s-ranked samples × hit/miss/unmeasured
-    matrix. The matrix is rendered inline into ``log.md`` as a
-    scroll-discoverable section (no longer persisted as a standalone
-    ``hard_samples.json`` file). Capped to top-K when rendered; the full
-    matrix is recomputable on demand via ``build_hard_samples_artifact(rounds,
-    top_k_candidates=None, top_k_samples=None)``.
-    """
-
-    model_config = ConfigDict(extra="forbid")
-
-    enabled: bool = Field(
+    hard_sample_sorter_enabled: bool = Field(
         True,
-        description="Master switch — on by default. Off writes a stub artifact.",
+        description="Render the candidate-by-sample heatmap section inside log.md at "
+        "round-end. Independent of ``enabled``.",
     )
     top_k_candidates: int = Field(
         40,
-        description="Cap on persisted candidate axis (θ_c desc). None in the builder "
-        "signature disables capping for on-demand full retrieval.",
+        description="Cap on persisted candidate axis (θ_c desc) in the heatmap.",
     )
     top_k_samples: int = Field(
         40,
-        description="Cap on persisted sample axis (δ_s desc).",
+        description="Cap on persisted sample axis (δ_s desc) in the heatmap.",
     )
 
 
@@ -230,8 +216,21 @@ class OptimizationConfig(BaseModel):
 
     degradation_threshold: float = Field(...)
 
-    elimination_n_min: int = Field(4)
-    elimination_alpha: float = Field(0.2)
+    elimination_n_min: int = Field(
+        4,
+        description="Minimum queries before PoBB starts firing (floor on n for "
+        "the Normal-CLT posterior to be meaningful).",
+    )
+    pobb_epsilon: float = Field(
+        0.05,
+        description="Stop a candidate when its posterior probability of being the "
+        "round's best drops below this threshold. Default 5%; smaller → fewer stops.",
+    )
+    pobb_mc_samples: int = Field(
+        1000,
+        description="Monte Carlo joint-draw count for posterior_best_probabilities. "
+        "Default 1000; MC error √(p(1-p)/N) ≈ 0.7% at p=0.05.",
+    )
 
     max_consecutive_errors: int = Field(3)
     hard_cap: int = Field(100)
@@ -243,8 +242,7 @@ class OptimizationConfig(BaseModel):
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
 
-    scoring_set: ScoringSetConfig = Field(default_factory=ScoringSetConfig)
-    hard_sample_sorter: HardSampleSorterConfig = Field(default_factory=HardSampleSorterConfig)
+    exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
 
 
 class OptimizerLLMConfig(BaseModel):

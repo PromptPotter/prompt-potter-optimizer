@@ -131,6 +131,50 @@ def _json_block(label: str, value: Any) -> list[str]:
     ]
 
 
+_SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
+
+
+def _spark(values: list[float]) -> str:
+    """ASCII sparkline for a [0, 1] series using Unicode block elements."""
+    if not values:
+        return ""
+    out: list[str] = []
+    for v in values:
+        v_clamped = min(1.0, max(0.0, float(v)))
+        idx = min(len(_SPARK_BLOCKS) - 1, int(v_clamped * len(_SPARK_BLOCKS)))
+        out.append(_SPARK_BLOCKS[idx])
+    return "".join(out)
+
+
+def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
+    """Render the per-round P(best) trajectory sparkline section.
+
+    Skipped silently when the JSONL stream wasn't available (resumed
+    cycles, pre-PoBB rounds).
+    """
+    if not rd.p_best_trajectory:
+        return []
+    # Sort by final P(best) desc so the round winner reads first.
+    ordered = sorted(
+        rd.p_best_trajectory.items(),
+        key=lambda kv: -(kv[1][-1] if kv[1] else 0.0),
+    )
+    lines: list[str] = ["", "P(best) trajectory:", "```"]
+    for cid, traj in ordered[:8]:
+        if not traj:
+            continue
+        spark = _spark(traj)
+        final = traj[-1] * 100
+        suffix = ""
+        if final >= 50.0:
+            suffix = " [winner]"
+        elif final < 5.0:
+            suffix = " [stopped]"
+        lines.append(f"  {cid[:10]:<10} {spark}  {final:5.1f}%{suffix}")
+    lines.append("```")
+    return lines
+
+
 def _render_round(
     rd: RoundDigestView,
     *,
@@ -168,6 +212,7 @@ def _render_round(
         parts += ["", "```", *composite_block, "```"]
     if rd.l1_critique_text:
         parts += ["", "> " + rd.l1_critique_text.replace("\n", "\n> ")]
+    parts += _render_p_best_trajectory(rd)
     parts.append("")
     return parts
 

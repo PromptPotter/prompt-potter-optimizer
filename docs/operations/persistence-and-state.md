@@ -46,6 +46,8 @@ Full tree:
       langfuse/                        # trace persistence (incl. events.jsonl mirror — not read for state)
       prompts/{family}/{version}/      # rendered optimizer prompts
       archived/resumed_at_{ts}/        # mid-cycle rewind history
+      streams/                         # append-only per-query observability streams
+        round_NNNN_p_best.jsonl        # PoBB Posterior-of-Being-Best snapshot per query
       .cache/                          # internal resume + audit state (hidden by convention)
         candidates/round_NNNN.json     # pre-scoring candidate checkpoint
         rounds/round_NNNN.json         # per-round node I/O (l1_generate, l1_critique, l1_score, l2/l3)

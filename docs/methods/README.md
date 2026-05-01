@@ -4,7 +4,7 @@ Statistical and algorithmic foundations of PromptPotter. Two independent procedu
 
 | Page | What it covers |
 |------|----------------|
-| [Individual elimination](candidate-elimination.md) | Paired Wilcoxon signed-rank test + Holm-Bonferroni correction — how individuals are eliminated before consuming full budget |
+| [Individual elimination](candidate-elimination.md) | Bayesian Posterior-of-Being-Best (PoBB) — population-aware joint-posterior MC; stops a candidate when its P(round-best) drops below ε |
 | [Exploration / exploitation sample selection](exploration-exploitation.md) | Rasch + Knowledge Gradient scoring-set evolution, sample tiering, zero-signal filter. Companion capability: [hard-sample sorter](../specs/hard-sample-sorter.md) |
 | [Manual prompt tuning](manual-prompt-tuning.md) | M10's iteration framework — round-1 gate, sweep mode, behaviour checks, `/potter-review` skill, `proxy_lift_corr` validation procedure |
 

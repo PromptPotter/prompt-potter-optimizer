@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
-from promptpotter.application.optimization.elimination import EliminationCheck
+from promptpotter.application.optimization.elimination import PoBBCheck
 from promptpotter.application.optimization.pipeline import (
     candidate_summaries,
     compile_l1_surface,
@@ -302,6 +302,33 @@ async def l1_generate(
                 tc_changes[k] = pv
             else:
                 node_overrides[k] = pv
+
+        # Symmetric safety net: un-nest prompt / task_context fields the LLM
+        # emitted under a node name (e.g. {"llm_only": {"answer_format": ...}}).
+        # Without this, the prompt mutation never reaches the OSP and the diff
+        # table mislabels the candidate as a clone of its parent.
+        for node_name in list(node_overrides.keys()):
+            nested = node_overrides[node_name]
+            if not isinstance(nested, dict):
+                continue
+            for sub_k in list(nested.keys()):
+                sub_kind = _classify_axis(sub_k)
+                if sub_kind == "prompt_field":
+                    logger.warning(
+                        "l1_generate: un-nesting prompt field %r from node %r",
+                        sub_k,
+                        node_name,
+                    )
+                    prompt_changes[sub_k] = nested.pop(sub_k)
+                elif sub_kind == "task_context":
+                    logger.warning(
+                        "l1_generate: un-nesting task_context field %r from node %r",
+                        sub_k,
+                        node_name,
+                    )
+                    tc_changes[sub_k] = nested.pop(sub_k)
+            if not nested:
+                del node_overrides[node_name]
 
         # Safety net: auto-nest flat params the LLM may still emit
         if pipeline_schema:
@@ -590,8 +617,9 @@ def _handle_scored_candidate(
     if elimination_stopped and signal is not None and signal.check_name == "elimination":
         cr = signal.check_result
         elim_ctx = {
-            "triggered_p": float(cr.get("triggered_p", 1.0)),
-            "triggered_by_prior_idx": int(cr.get("triggered_by_prior", -1)),
+            "p_best": float(cr.get("p_best", 0.0)),
+            "epsilon": float(cr.get("epsilon", 0.05)),
+            "leader_id": str(cr.get("leader_id", "")),
             "queries_scored": int(cr.get("queries_scored", len(results))),
             "total_queries": int(cr.get("total_queries", len(dataset))),
             "n_priors": int(cr.get("n_priors", 0)),
@@ -626,15 +654,14 @@ def _record_elimination_cut(
 ) -> None:
     """Decorate report + append elimination_cut decision for divergence replay."""
     cr = signal.check_result
-    trigger_idx = int(cr.get("triggered_by_prior", -1))
-    if 0 <= trigger_idx < len(priors_at_test):
-        prior_id = priors_at_test[trigger_idx]
+    leader_id = str(cr.get("leader_id", ""))
+    if leader_id and leader_id in priors_at_test:
         prior_label = next(
-            (f"C{i + 1}" for i, r in enumerate(candidate_scores) if r.candidate_id == prior_id),
+            (f"C{i + 1}" for i, r in enumerate(candidate_scores) if r.candidate_id == leader_id),
             None,
         )
         if prior_label and report.elimination_context:
-            report.elimination_context["triggered_by_prior_label"] = prior_label
+            report.elimination_context["leader_label"] = prior_label
 
     if decisions is not None:
         record_decision(
@@ -644,14 +671,15 @@ def _record_elimination_cut(
                 "candidate_id": osp_c.lineage.id,
                 "prior_candidate_ids": priors_at_test,
                 "queries_scored": int(cr.get("queries_scored", n_results)),
-                "alpha": float(elim_check.alpha),
+                "epsilon": float(elim_check.epsilon),
                 "n_min": int(elim_check.n_min),
                 "round_num": round_num,
             },
             True,
             data={
-                "triggered_p": float(cr.get("triggered_p", 0.0)),
-                "triggered_by_prior": trigger_idx,
+                "p_best": float(cr.get("p_best", 0.0)),
+                "leader_id": leader_id,
+                "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
             },
         )
 
@@ -666,7 +694,8 @@ async def score_population(
     degradation_checks: list | None = None,
     callbacks: RunListener,
     elimination_n_min: int,
-    elimination_alpha: float,
+    pobb_epsilon: float,
+    pobb_mc_samples: int = 1000,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
     l1_diversity: float = 1.0,
@@ -675,13 +704,12 @@ async def score_population(
     session = cycle.session
     obs = session.state.obs
     n = len(population)
+    _ = pobb_mc_samples  # reserved for future plumbing into posterior_best_probabilities
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = EliminationCheck(
-        n_min=elimination_n_min, alpha=elimination_alpha, n_queries=len(dataset)
-    )
+    elim_check = PoBBCheck(n_min=elimination_n_min, epsilon=pobb_epsilon, n_queries=len(dataset))
 
     def _fire(idx: int, report: CandidateScore) -> None:
         candidate_scores.append(report)
@@ -699,6 +727,14 @@ async def score_population(
     for idx, osp_c in enumerate(population):
         override = proposals[idx].node_overrides or None
         callbacks.on_candidate_started(idx, n, osp_c.lineage.changes_description or "", override)
+        # Bind the PoBBCheck to this candidate so its per-query snapshot
+        # lands on the live telemetry stream tagged with the right id.
+        _candidate_idx = idx
+
+        def _emit_p_best(snap, _ci=_candidate_idx) -> None:
+            callbacks.on_p_best_update(round_num, _ci, n, snap)
+
+        elim_check.set_current(osp_c.lineage.id, on_snapshot=_emit_p_best)
 
         # Path 1 — validation-skip synthetic-0.
         if osp_c.validation_failures:
@@ -843,7 +879,8 @@ async def l1_score(
     callbacks: RunListener,
     degradation_checks: list | None = None,
     elimination_n_min: int,
-    elimination_alpha: float,
+    pobb_epsilon: float,
+    pobb_mc_samples: int = 1000,
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> L1ScoringResult:
@@ -863,7 +900,8 @@ async def l1_score(
         degradation_checks=degradation_checks,
         callbacks=callbacks,
         elimination_n_min=elimination_n_min,
-        elimination_alpha=elimination_alpha,
+        pobb_epsilon=pobb_epsilon,
+        pobb_mc_samples=pobb_mc_samples,
         round_num=round_num,
         decisions=decisions,
         l1_diversity=yield_stats.yield_,
@@ -1124,7 +1162,8 @@ async def execute_round(
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             elimination_n_min=opt.elimination_n_min,
-            elimination_alpha=opt.elimination_alpha,
+            pobb_epsilon=opt.pobb_epsilon,
+            pobb_mc_samples=opt.pobb_mc_samples,
             round_num=round_num,
             yield_stats=yield_stats,
         )

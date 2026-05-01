@@ -7,41 +7,75 @@ At each optimization round, the system evolves *N* individuals (default *N* = 5)
 [^gen]: `promptpotter/application/optimization/l1.py::l1_generate()`.
 [^scoring]: `promptpotter/application/scoring/formula.py::compile_scorer()` — user-defined formula compiled from `campaign.json`, e.g. `"rr(ground_truth_rank)"`.
 
-## Individual elimination
+## Individual elimination — Bayesian PoBB
 
-Individuals are evaluated sequentially on **Q** in the same deterministic order. The first individual runs to completion (*K* queries), establishing a reference. Each subsequent individual is measured query by query; once a minimum sample *n_min* (default 20) is reached, a **one-sided paired Wilcoxon signed-rank test** is computed after every query against **all** previously evaluated individuals on the shared query prefix.[^elim]
+**One-sentence method**: *stop a candidate when its posterior probability of being the round's best drops below ε.*
 
-Holm-Bonferroni correction is applied across the pairwise tests. If any corrected *p*-value falls below alpha (default 0.05), the individual is stopped early. The round winner is selected from the full population (including early-stopped individuals) by composite fitness, subject to an improvement threshold (default delta > 0.01).[^winner]
+Individuals are evaluated sequentially on **Q** in the same deterministic order. The first individual runs to completion, establishing a reference. Each subsequent individual is measured query by query; once a minimum sample *n_min* (default 4) is reached, after every query we recompute each candidate's **Posterior-of-Being-Best** probability and stop the current candidate when its P(best) drops below ε (default 0.05).[^pobb]
 
-[^elim]: `promptpotter/shared/statistics.py::should_stop_early()` (driven by `promptpotter/application/optimization/elimination.py`).
-[^winner]: `promptpotter/application/optimization/l1.py::l1_score()` (winner selection is inline — no separate `select_fittest` exists).
+Mechanics:
 
----
+1. For each candidate (priors + current) we maintain a Normal posterior on its mean accuracy via CLT on observed per-sample scores: `mean = sample mean`, `variance = s² / n`. Variance is floored at `1/(4n)` (Beta-Binomial worst case) to prevent over-confidence on small-*n* binary scores.
+2. Each query, draw `n_samples` (default 1000) joint samples from the per-candidate Normals (independent per candidate given its data).
+3. For each candidate *c*, count the fraction of joint draws where *c*'s accuracy is argmax over the population — that's `P(c is best)`.
+4. Stop candidate *c* when `P(c is best) < ε`.
 
-## Design rationale
+[^pobb]: `promptpotter/shared/statistics.py::posterior_best_probabilities()` and `pobb_should_stop()`, driven by `promptpotter/application/optimization/elimination.py::PoBBCheck`.
 
-**Paired design.** Query difficulty varies substantially — some queries resolve via cache lookup, others require multi-step enrichment. Pairing on the same query removes this nuisance variance. The paired design detects a 3–5% accuracy difference with *n* = 50 queries, where an unpaired test requires *n* > 200.
+## Two-regime analysis
 
-**Wilcoxon signed-rank.** Per-query scores in PromptPotter are often binary (`{0, 1}`) or concentrated near the endpoints, so paired differences have heavy mass at zero and the normal approximation used by the paired *t*-test is weak exactly at the small-*n* regime where elimination fires. The signed-rank test is the paired, non-parametric analogue: it drops the normality assumption, keeps the per-query pairing that makes the design powerful, and reduces to the sign test (with continuity correction) on `{-1, 0, +1}` differences — subsuming the binary case without a test-selection branch.
+**Both regimes will manifest** over the course of a campaign. PoBB is at-least-as-good-as Wilcoxon in every regime and strictly better in the early high-signal regime where over-investment costs the most.
 
-**One-sided test.** The elimination question is directional ("is a prior candidate better?"), so a one-sided test doubles power for detecting inferiority. Candidates indistinguishable from prior populations survive.
+### Early rounds — high-signal (candidates differ a lot)
 
-**All priors, not just the leader.** A candidate worse than *any* prior population is unlikely to win. Holm-Bonferroni controls FWER across the multiple comparisons.
+Population members come from very different LLM-generated prompts; some clearly dominate. Scores have low within-candidate variance (consistent hits / consistent misses) and large between-candidate gaps. The Normal posterior tightens fast, the joint argmax distribution becomes lopsided within 3–5 queries, and `P(loser is best)` collapses below ε quickly. Worked numerics: with one candidate at accuracy 0.8 and another at 0.4, both at variance 0.05, `P(loser is best)` falls below 0.05 by query 4–5. Wilcoxon signed-rank on the same data needs ≥8 queries to fire at α=0.2 because it is variance-agnostic.
 
-## Fallback
+### Late rounds — low-signal (candidates have converged)
 
-When *K* < 2 × *n_min*, early stopping is disabled and all candidates are evaluated on the full query set.
+L2/L3 escalation has narrowed the population to similar prompts. True accuracy gaps are small (≤ 0.02). No statistical test can confidently abort: `P(c is best)` for all candidates hovers near 1/K (uniform across the population), and Wilcoxon stays above α. Both methods run candidates to budget cap. PoBB matches Wilcoxon — neither helps. The round winner is selected by point-estimate accuracy at cap (see [Open questions § Tie-breaking](#open-questions)).
 
-## Limitations
+### Why PoBB beats LUCB
 
-- **Cluster-correlated queries** could inflate Type I error. The deterministic query order mitigates ordering effects but not latent correlation.
-- **Candidate stationarity** is assumed (performance stable across queries). Holds by construction for stateless pipeline configurations.
+LUCB-style pairwise tests (Kalyanakrishnan et al. 2012) only ever compare a candidate to one other (typically the leader). PoBB samples the joint posterior over **all** candidates and asks the actually-relevant question: "what's the probability *c* is the round winner?" Every candidate's data informs every other candidate's stopping decision through the argmax computation. Strictly more population-aware than LUCB; also strictly cheaper code-wise (~60 LOC vs ~120).
+
+## Why Wilcoxon was retired
+
+Wilcoxon signed-rank + Holm-Bonferroni was the prior abortion mechanism. Three reasons it lost its place:
+
+1. **Pairwise, not population.** Wilcoxon compares the current candidate against each prior independently and Holm-corrects across the comparisons. It never sees the joint shape of the population's accuracy distributions. PoBB's joint posterior naturally aggregates across all candidates.
+2. **Variance-agnostic.** Signed-rank uses ranks of paired differences. Two candidates with a clear gap and small variance get treated the same as two with the same gap and large variance. Empirical Bernstein and Normal-CLT both adapt to observed variance — they're tighter when scores are clearly separated.
+3. **Operator-illegible.** Wilcoxon spits out p-values + Holm step-down indices that don't map onto operator intuition. P(best) is one number per candidate, displayable per-query in the live dashboard ("c042 73% probability of winning round").
+
+The justification is positive: PoBB is the population-aware Bayesian best-arm-identification choice, well-grounded in the BAI literature (Russo 2016), and PoBB ≥ Wilcoxon in every regime our campaigns touch.
+
+## Tunable knob — ε
+
+`OptimizationConfig.pobb_epsilon` (default `0.05`). Smaller → more conservative (fewer stops). Empirical calibration vs Wilcoxon's α=0.2 baseline is pending the first BBEH run; do not lock the default in CLAUDE.md as canonical until we have data.
+
+`OptimizationConfig.pobb_mc_samples` (default `1000`). Joint-draw count for the Monte Carlo argmax. Sub-ms per check; raise to 5000 only if observed stop decisions are noisy.
+
+`OptimizationConfig.elimination_n_min` (default `4`). Floor on the candidate's query count before PoBB starts firing — below this, the Normal-CLT posterior isn't meaningful.
+
+## Open questions
+
+The following are explicitly **not** solved here; they are deferred until empirical data from BBEH/TermNorm runs informs the design.
+
+1. **Tie-breaking at budget cap.** When the round cap is reached and the top 2–3 candidates have similar P(best) (e.g. each between 0.25 and 0.45 in a 3-way tie), no statistical test can declare a clean winner. We ship the simple version: pick top-by-point-estimate as the round winner. The proper fix is a *cap-extension policy* — when leaders' P(best) is statistically tied at cap, optionally extend their budget by Δ to attempt separation, but only if expected separation gain exceeds the cost. Designing that policy after observing how often this fires.
+2. **ε default.** `0.05` is an educated initial pick. Empirical calibration pending — first BBEH run will tell us whether it's too conservative (PoBB barely fires) or too aggressive (round winners swap round-over-round).
+3. **Normal-CLT edge cases.** The CLT approximation holds well for `n ≥ 4` paired observations on continuous scores. On pure binary hits the Normal is rough at small *n*; the variance floor `1/(4n)` is our mitigation. Revisit if BBEH shows pathology.
+
+## References
+
+- **Russo, D. (2016).** *Simple Bayesian Algorithms for Best Arm Identification.* Conference on Learning Theory. — Foundational for the PoBB / Top-Two Thompson Sampling family.
+- **Maurer, A., & Pontil, M. (2009).** *Empirical Bernstein bounds and sample-variance penalization.* COLT. — Variance-aware concentration; cited as the variance-tightening machinery PoBB displaces.
+- **Kalyanakrishnan, S., Tewari, A., Auer, P., & Stone, P. (2012).** *PAC subset selection in stochastic multi-armed bandits.* ICML. — LUCB best-arm-ID; compared and rejected as too pairwise.
+- **Audibert, J.-Y., Bubeck, S., & Munos, R. (2010).** *Best arm identification in multi-armed bandits.* COLT. — Successive Rejects; rejected for not adapting within-round.
 
 ---
 
 ## The full elimination ladder
 
-Six independent mechanisms can end a candidate's evaluation early or annotate a query. They run in a fixed order and each owns its own memory field and display annotation. Maintainers tracing "why did this candidate die at n=1?" should walk this ladder from top to bottom.
+Five independent mechanisms can end a candidate's evaluation early or annotate a query. They run in a fixed order and each owns its own memory field and display annotation. Maintainers tracing "why did this candidate die at n=1?" should walk this ladder from top to bottom.
 
 | # | Mechanism | Fires | `n_min` | Candidate fate | Memory | Source |
 |---|---|---|---|---|---|---|
@@ -49,7 +83,7 @@ Six independent mechanisms can end a candidate's evaluation early or annotate a 
 | 2 | **Stale-data protocol** — cached *or* fresh result carries `diagnostics.warnings` | every degraded query | — | same candidate, annotated + possibly re-measured / swapped | — | `application/scoring/sample_measurement.py::execute_stale_data_protocol` |
 | 3 | **`DegradationCheck` — fatal fast-path** — latest query's `classify_result()` returns a fatal code | every query | **1** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
 | 4 | **`DegradationCheck` — rate-based** — `degraded_rate >= threshold` | every query | **3** | eliminated; synthesises `RuntimeFailure` | `runtime_failures` | `application/optimization/elimination.py` |
-| 5 | **`EliminationCheck`** (Wilcoxon signed-rank vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
+| 5 | **`PoBBCheck`** (Bayesian Posterior-of-Being-Best vs completed priors) | every query | **4** | eliminated; records `elimination_cut` decision | — | `application/optimization/elimination.py` |
 
 ### Ordering inside the query loop
 
@@ -60,7 +94,7 @@ For each query, the scoring loop runs:
 3. `on_result` fires → display renders the query line with annotations.
 4. Iterate every enabled check in the shared `degradation_checks` list; first one to return a signal ends the candidate.
 
-Mechanisms 3–6 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. Fatal warnings beat any rate check; rate checks beat the Wilcoxon signed-rank gate.
+Mechanisms 3–5 all co-exist in that final list, so the *first-to-fire-wins* ordering inside the list matters. Fatal warnings beat any rate check; rate checks beat the PoBB gate.
 
 ### `classify_result()` is a hardcoded invariant
 

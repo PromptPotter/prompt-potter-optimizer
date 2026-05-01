@@ -33,7 +33,7 @@ The `concepts/` folder explains the ideas behind PromptPotter in plain language.
 
 ## Methods — the statistics
 
-- [Candidate elimination](../methods/candidate-elimination.md) — Wilcoxon signed-rank + Holm-Bonferroni
+- [Candidate elimination](../methods/candidate-elimination.md) — Bayesian Posterior-of-Being-Best (PoBB): we estimate the probability that each candidate will win the round; once a candidate's win-probability falls below 5%, we stop measuring it
 - [Exploration / exploitation sample selection](../methods/exploration-exploitation.md) — Rasch + Knowledge Gradient
 
 ## Research — benchmarks and the paper

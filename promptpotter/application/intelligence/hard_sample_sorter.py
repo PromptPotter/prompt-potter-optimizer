@@ -113,18 +113,25 @@ def build_hard_samples_artifact(
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
+    posterior: RaschPosterior | None = None,
 ) -> dict:
     """Build the hard-samples artifact dict from round observations.
 
     Thin wrapper over :func:`build_hard_samples_artifact_from_observations`
     that projects ``cycle.rounds`` into ``(candidate, sample, hit)`` triples
-    via :func:`build_observations` first. Pure function: no I/O.
+    via :func:`build_observations` first. If ``posterior`` is supplied (e.g.
+    cached from the round-end ``evolve_scoring_set`` call), the redundant
+    refit is skipped — the heatmap and the scoring-set evolution share one
+    Rasch fit per round.
+
+    Pure function: no I/O.
     """
     return build_hard_samples_artifact_from_observations(
         build_observations(rounds),
         cycle_id=cycle_id,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,
+        posterior=posterior,
     )
 
 
@@ -134,24 +141,27 @@ def build_hard_samples_artifact_from_observations(
     cycle_id: str | None = None,
     top_k_candidates: int | None = 40,
     top_k_samples: int | None = 40,
+    posterior: RaschPosterior | None = None,
 ) -> dict:
     """Same as :func:`build_hard_samples_artifact` but takes pre-built
     observations directly. Used by the cross-cycle archive aggregator
     (``hard_sample_archive``) which builds observations from the
     ``MeasurementArchive`` instead of a single cycle's ``rounds``.
 
-    Fits Rasch on all observations (so θ_c and δ_s reflect the full evidence),
-    then truncates the persisted axes to the top-K on the spec's sort contract.
-    Cells are restricted to the intersection ``(c ∈ candidate_order × s ∈
-    sample_order)``. Pass ``top_k_*=None`` to disable capping — the caller gets
-    the full matrix without any second code path.
+    Fits Rasch on all observations (so θ_c and δ_s reflect the full evidence)
+    unless a pre-computed ``posterior`` is supplied; then truncates the
+    persisted axes to the top-K on the spec's sort contract. Cells are
+    restricted to the intersection ``(c ∈ candidate_order × s ∈
+    sample_order)``. Pass ``top_k_*=None`` to disable capping — the caller
+    gets the full matrix without any second code path.
 
     Pure function: no I/O, no mutation of ``observations``.
     """
     if not observations:
         return empty_artifact(cycle_id=cycle_id)
 
-    posterior = fit_rasch(observations)
+    if posterior is None:
+        posterior = fit_rasch(observations)
     hit_rates = _candidate_hit_rates(observations)
     miss_rates = _sample_miss_rates(observations)
 

@@ -139,10 +139,10 @@ The fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (in `domain/opt_search_p
 | Check | Fires | Self-healing loop? |
 |---|---|---|
 | **Validation** (`L1_SCHEMA_COMPLIANCE`) | L1 parse time, before evaluation | Loop 1 |
-| **`EliminationCheck`** | Mid-evaluation, after `n_min` queries (Wilcoxon) | No — pure statistical termination, no failure record |
+| **`PoBBCheck`** | Mid-evaluation, after `n_min` queries (Bayesian Posterior-of-Being-Best) | No — pure statistical termination, no failure record |
 | **`DegradationCheck`** | Mid-evaluation, after 3 queries (or first fatal) | Loop 2 |
 
-`EliminationCheck` is *not* self-healing — it stops scoring this candidate (Wilcoxon signed-rank says it can't beat the leader), but no failure record is created and no LLM is informed. See [../methods/candidate-elimination.md](../methods/candidate-elimination.md).
+`PoBBCheck` is *not* self-healing — it stops scoring this candidate (its posterior probability of being the round's best fell below ε), but no failure record is created and no LLM is informed. See [../methods/candidate-elimination.md](../methods/candidate-elimination.md).
 
 ---
 

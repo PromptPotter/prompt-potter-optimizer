@@ -1,13 +1,14 @@
-"""Pure statistics utilities — Wilson CI, two-proportion z-test, MDE, sequential elimination.
+"""Pure statistics utilities — Wilson CI, two-proportion z-test, MDE, Bayesian PoBB.
 
-Leaf-level: depends only on stdlib + scipy. No domain or service imports.
+Leaf-level: depends only on stdlib + numpy + scipy. No domain or service imports.
 Requires ``scipy`` (``pip install -e ".[stats]"``).
 """
 
 from __future__ import annotations
 
 import math
-from typing import Any
+
+import numpy as np
 
 
 def wilson_ci(hits: int, total: int, alpha: float = 0.05) -> tuple[float, float]:
@@ -88,93 +89,83 @@ def min_sample_size(target_mde: float, alpha: float = 0.05, power: float = 0.8) 
 
 
 # ---------------------------------------------------------------------------
-# Sequential candidate elimination — paired Wilcoxon signed-rank + Holm-Bonferroni
+# Bayesian best-arm identification — Posterior-of-Being-Best (PoBB)
+# ---------------------------------------------------------------------------
+#
+# One sentence: stop a candidate when its posterior probability of being the
+# round's best drops below ε. Joint Normal-CLT posterior over per-candidate
+# mean accuracy; argmax-over-population computed by Monte Carlo.
+#
+# References: Russo (2016) "Simple Bayesian Algorithms for Best Arm Identification";
+# OCBA (Chen 2000); Top-Two Thompson Sampling family.
 # ---------------------------------------------------------------------------
 
 
-def _paired_signed_rank_pvalue(current: list[float], prior: list[float]) -> float:
-    """One-sided paired Wilcoxon signed-rank p-value (H_a: prior > current).
+def _normal_posterior(scores: list[float]) -> tuple[float, float]:
+    """Normal posterior (mean, se) on the population mean of *scores*.
 
-    Non-parametric replacement for the paired t-test: valid on binary,
-    ordinal, and continuous per-query scores without a normality
-    assumption. Returns 1.0 when scipy rejects the input (all-zero
-    differences or all diffs of the same sign at very small n).
+    SE clipped to ``1/(4n)`` (Beta-Binomial worst-case for bounded [0,1]
+    scores) so we don't over-confidently stop on small-sample binary regimes.
     """
-    from scipy.stats import wilcoxon  # type: ignore[import-untyped]
-
-    n = min(len(current), len(prior))
-    if n < 2:
-        return 1.0
-
-    # scipy.wilcoxon with zero_method="wilcox" raises when every paired
-    # difference is zero; short-circuit to preserve "no evidence → don't
-    # reject" semantics.
-    if all(prior[i] == current[i] for i in range(n)):
-        return 1.0
-
-    try:
-        _, p = wilcoxon(
-            prior[:n],
-            current[:n],
-            alternative="greater",
-            zero_method="wilcox",
-        )
-    except ValueError:
-        return 1.0
-
-    return float(p) if not math.isnan(p) else 1.0
+    n = len(scores)
+    if n == 0:
+        return (0.0, 1.0)
+    arr = np.asarray(scores, dtype=np.float64)
+    mean = float(arr.mean())
+    if n == 1:
+        # No within-sample variance estimate; use Beta-Binomial worst-case.
+        return (mean, 0.5)
+    variance = float(arr.var(ddof=1))
+    se = math.sqrt(variance / n)
+    se_floor = 1.0 / (4.0 * n)
+    return (mean, max(se, se_floor))
 
 
-def _holm_bonferroni(p_values: list[float], alpha: float) -> list[bool]:
-    """Holm-Bonferroni step-down correction.
+def posterior_best_probabilities(
+    score_histories: dict[str, list[float]],
+    n_samples: int = 1000,
+    rng: np.random.Generator | None = None,
+) -> dict[str, float]:
+    """Posterior probability that each candidate has the round's highest mean accuracy.
 
-    Returns a list of booleans (same order as *p_values*) indicating
-    which null hypotheses are rejected at family-wise *alpha*.
-    """
-    m = len(p_values)
-    if m == 0:
-        return []
+    For each candidate we maintain a Normal posterior on its mean accuracy
+    (CLT on observed per-sample scores). We sample ``n_samples`` joint draws
+    from the independent per-candidate Normals and count, for each candidate,
+    the fraction of draws in which it is argmax over the population.
 
-    indexed = sorted(enumerate(p_values), key=lambda x: x[1])
-    rejected = [False] * m
-
-    for rank, (orig_idx, p) in enumerate(indexed):
-        threshold = alpha / (m - rank)
-        if p < threshold:
-            rejected[orig_idx] = True
-        else:
-            break
-
-    return rejected
-
-
-def should_stop_early(
-    current_scores: list[float],
-    prior_populations: list[list[float]],
-    alpha: float = 0.05,
-) -> tuple[bool, dict[str, Any]]:
-    """Decide whether to eliminate the current candidate.
-
-    Runs a one-sided paired Wilcoxon signed-rank test against each prior
-    population on the shared query prefix, then applies Holm-Bonferroni
-    correction.
+    Args:
+        score_histories: candidate_id → observed score list (one entry per
+            measured sample).
+        n_samples: Monte Carlo joint-draw count. Default 1000; MC error on
+            P(best) is √(p(1-p)/N) ≈ 0.7% at p=0.05.
+        rng: optional pre-seeded numpy Generator for reproducible draws.
 
     Returns:
-        ``(stop, context)`` where *context* carries p-values and the
-        index of the prior that triggered rejection (if any).
+        candidate_id → P(c is best). Probabilities sum to 1.0 ± MC error.
+        Empty input returns an empty dict.
     """
-    if not prior_populations:
-        return False, {}
+    if not score_histories:
+        return {}
 
-    p_values = [_paired_signed_rank_pvalue(current_scores, prior) for prior in prior_populations]
-    rejections = _holm_bonferroni(p_values, alpha)
+    cand_ids = list(score_histories.keys())
+    means = np.empty(len(cand_ids), dtype=np.float64)
+    ses = np.empty(len(cand_ids), dtype=np.float64)
+    for i, cid in enumerate(cand_ids):
+        m, s = _normal_posterior(score_histories[cid])
+        means[i] = m
+        ses[i] = s
 
-    ctx: dict[str, Any] = {"p_values": p_values, "rejections": rejections}
+    gen = rng if rng is not None else np.random.default_rng()
+    # Joint draws: shape (n_samples, n_cands). Per-candidate Normal is
+    # mean[i] + se[i] * standard_normal.
+    z = gen.standard_normal((n_samples, len(cand_ids)))
+    draws = means[None, :] + ses[None, :] * z
+    argmax_idx = draws.argmax(axis=1)
+    counts = np.bincount(argmax_idx, minlength=len(cand_ids))
+    probs = counts / float(n_samples)
+    return {cid: float(probs[i]) for i, cid in enumerate(cand_ids)}
 
-    if any(rejections):
-        trigger_idx = rejections.index(True)
-        ctx["triggered_by_prior"] = trigger_idx
-        ctx["triggered_p"] = p_values[trigger_idx]
-        return True, ctx
 
-    return False, ctx
+def pobb_should_stop(p_best: float, epsilon: float) -> bool:
+    """Trivial threshold check — kept as a named function for call-site clarity."""
+    return p_best < epsilon

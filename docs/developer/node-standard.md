@@ -104,7 +104,7 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 | Resource | What it covers |
 |----------|---------------|
 | [self-healing-internals.md](self-healing-internals.md) | Four LLM-to-LLM healing loops in full |
-| [../methods/candidate-elimination.md](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through Wilcoxon cutoff |
+| [../methods/candidate-elimination.md](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through Bayesian PoBB cutoff |
 | [prompt-scheme-internals.md](prompt-scheme-internals.md) | Prompt field decomposition, `PromptTemplate` |
 | [../operations/observability.md](../operations/observability.md) | Node tracing and Langfuse integration |
 | [code-layout.md](code-layout.md) | Pipeline exit points, cache reuse |

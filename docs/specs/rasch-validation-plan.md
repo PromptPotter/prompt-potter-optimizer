@@ -28,7 +28,7 @@ Verify 1d+1e by resuming any pre-2026-03 cycle and confirming the shim log fires
 
 ## Step 2 — Configure the validation run
 
-No edits needed. `swap_out_delta_se=0.7` is now the schema default in `ScoringSetConfig`, sized to fire round 1→2 on the typical 20-sample / 5-candidate budget. L2/L3 stay on (defaults). If you want a shorter validation, just pass `max_rounds=3` to `run_bbeh_campaign` from the notebook.
+No edits needed. `swap_out_delta_se=0.7` is now the schema default in `ExplorationConfig`, sized to fire round 1→2 on the typical 20-sample / 5-candidate budget. L2/L3 stay on (defaults). If you want a shorter validation, just pass `max_rounds=3` to `run_bbeh_campaign` from the notebook.
 
 ---
 

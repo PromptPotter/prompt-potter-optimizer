@@ -26,10 +26,12 @@ from promptpotter.infrastructure.projections.journal import (
     read_claude_notes,
 )
 from promptpotter.infrastructure.projections.live_dashboard import LiveDashboardProjection
+from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamProjection
 
 __all__ = [
     "AuditTrailProjection",
     "LiveDashboardProjection",
+    "PoBBStreamProjection",
     "append_journal",
     "read_claude_notes",
 ]

@@ -39,7 +39,8 @@ Alphabetical index of Python symbols and the module that owns each. When prose i
 | `compile_l1_surface` | `promptpotter/application/optimization/pipeline.py` |
 | `compile_l2_surface` | `promptpotter/application/optimization/pipeline.py` |
 | `DegradationCheck` | `promptpotter/application/optimization/elimination.py` |
-| `EliminationCheck` | `promptpotter/application/optimization/elimination.py` |
+| `PoBBCheck` | `promptpotter/application/optimization/elimination.py` |
+| `posterior_best_probabilities` | `promptpotter/shared/statistics.py` |
 | `EscalationSignal` | `promptpotter/domain/analysis.py` |
 | `EscalationState` | `promptpotter/application/optimization/cycle.py` |
 | `execute_round` | `promptpotter/application/optimization/l1.py` |
@@ -97,7 +98,7 @@ Meta-prompt template names (`l2_context`, `l3_plan`) are declared as `ClassVar[s
 | `hard_sample_sorter` | `promptpotter/application/intelligence/hard_sample_sorter.py` |
 | `Rasch` (joint logistic-IRT fit) | `promptpotter/application/intelligence/exploration.py` |
 | `SampleIndex` | `promptpotter/application/intelligence/indexes.py` |
-| `ScoringSetConfig` | `promptpotter/application/intelligence/exploration.py` |
+| `ExplorationConfig` | `promptpotter/application/config.py` |
 
 ## Infrastructure
 

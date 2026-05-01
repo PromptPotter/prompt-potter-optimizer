@@ -614,6 +614,48 @@ class LiveDashboardProjection:
                 int(record.candidate_total or 0),
                 payload.get("scores") or {},
             )
+        elif ev == "p_best_update":
+            self._on_p_best_update(
+                int(record.candidate_idx or 0),
+                int(record.candidate_total or 0),
+                payload.get("current_id") or "",
+                int(payload.get("n_queries") or 0),
+                {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
+            )
+
+    def _on_p_best_update(
+        self,
+        idx: int,
+        total: int,
+        current_id: str,
+        n_queries: int,
+        p_best: dict[str, float],
+    ) -> None:
+        """Merge per-query P(best) into the candidate slot + top-5 leaderboard.
+
+        Stores each candidate's ``p_best``, signed delta vs prior query, and
+        a capped trajectory list. Also publishes the round-wide top-5 sorted
+        view at ``current_round.p_best_top``.
+        """
+        cand = self._current_round.setdefault("candidates", {}).setdefault(
+            idx, {"idx": idx, "total": total}
+        )
+        prev = float(cand.get("p_best", p_best.get(current_id, 0.0)))
+        current = float(p_best.get(current_id, 0.0))
+        history: list[float] = list(cand.get("p_best_history") or [])
+        history.append(current)
+        # Cap history at 64 entries — round size rarely exceeds 40.
+        if len(history) > 64:
+            history = history[-64:]
+        cand["p_best"] = current
+        cand["p_best_delta"] = current - prev
+        cand["p_best_history"] = history
+        cand["p_best_n_queries"] = n_queries
+
+        # Round-wide leaderboard (top-5 by P(best)).
+        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
+        self._current_round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top]
+        self._persist()
 
     # -- Lifecycle -------------------------------------------------------------
 

@@ -263,24 +263,40 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
 
 @replayer(DecisionKind.ELIMINATION_CUT)
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-run the Wilcoxon signed-rank gate under rescored scores."""
-    from promptpotter.shared.statistics import should_stop_early
+    """Re-run the Bayesian PoBB gate under rescored scores.
+
+    Inputs accept both the new ``epsilon`` knob and (for backward-compat
+    on archived ledgers) the legacy ``alpha`` field; either resolves to the
+    same threshold semantics — stop when the candidate's P(best) drops
+    below it.
+    """
+    from promptpotter.shared.statistics import (
+        pobb_should_stop,
+        posterior_best_probabilities,
+    )
 
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
     n = int(inputs_ref.get("queries_scored", 0))
-    alpha = float(inputs_ref.get("alpha", 0.2))
+    # Prefer the PoBB knob; fall back to legacy ``alpha`` (which used a
+    # 0.2 family-wise default) re-mapped to a more conservative ε so old
+    # ledgers don't replay as confident stops.
+    epsilon_val = inputs_ref.get("epsilon")
+    if epsilon_val is None:
+        epsilon_val = float(inputs_ref.get("alpha", 0.2)) * 0.25
+    epsilon = float(epsilon_val)
 
     current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
-    priors = [
-        [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
-    ]
-    priors = [p for p in priors if p]
+    priors = {
+        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
+    }
+    priors = {pid: p for pid, p in priors.items() if p}
     if not priors or len(current) < 2:
         return False
-    stop, _ = should_stop_early(current, priors, alpha)
-    return bool(stop)
+    histories = {**priors, candidate_id: current}
+    snapshot = posterior_best_probabilities(histories)
+    return pobb_should_stop(snapshot.get(candidate_id, 1.0), epsilon)
 
 
 def _derive_stall_count(
@@ -583,6 +599,12 @@ class Cycle:
     pending_decisions: list[Decision] = field(default_factory=list)
 
     state_version: int = 1
+
+    # Round-end Rasch posterior cached for finalize-time hard-sample
+    # heatmap reuse (one fit per round, used by both scoring-set evolution
+    # and the heatmap renderer). Not persisted across resume — recomputed
+    # at the next round-end if needed.
+    last_rasch_posterior: Any = None
 
     @classmethod
     def start(

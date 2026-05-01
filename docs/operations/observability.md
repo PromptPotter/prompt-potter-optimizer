@@ -14,6 +14,36 @@ For the allowlist of phase events and what each emits, see [../developer/informa
 
 ---
 
+## Per-query P(best) stream
+
+The Bayesian PoBB abortion mechanism (see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md)) emits a per-query Posterior-of-Being-Best snapshot for every candidate. Today the round-end leaderboards refresh once per round; PoBB updates strictly faster (per query) and is surfaced on every monitoring channel:
+
+| Channel | Path | Cadence | Format |
+|---|---|---|---|
+| Live dashboard fields | `campaigns/{root_cycle_id}/dashboard.json::current_round.nodes.candidates[].p_best` (also `.p_best_delta`, `.p_best_history`, `.p_best_n_queries`) plus the round-wide `current_round.p_best_top` (top-5 sorted) | per-query overwrite | scalar floats |
+| CLI / notebook live display | stderr, via `LiveDisplay` | per-query | one line per query: `p_best q14: *c042* 44.0%▲ c017 28.4%▼ ...` |
+| Append-only stream | `campaigns/{cycle_id}/streams/round_NNNN_p_best.jsonl` | per-query append | one JSON record per line: `{round, query_idx, current_id, n_queries, p_best, p_best_delta}` |
+| Round-end digest | `campaigns/{cycle_id}/log.md` § P(best) trajectory | once per round | per-candidate Unicode block-element sparkline + final P(best) % |
+
+**Tail-it-yourself** while a campaign is live:
+
+```powershell
+# PowerShell — watch dashboard scalars rewrite per query
+Get-Content -Path .promptpotter\projects\default\campaigns\<cycle_id>\dashboard.json -Wait
+# Or watch the JSONL stream for a specific round
+Get-Content -Path .promptpotter\projects\default\campaigns\<cycle_id>\streams\round_0003_p_best.jsonl -Wait
+```
+
+```bash
+# POSIX — equivalent
+tail -f .promptpotter/projects/default/campaigns/<cycle_id>/dashboard.json
+tail -f .promptpotter/projects/default/campaigns/<cycle_id>/streams/round_0003_p_best.jsonl
+```
+
+The JSONL stream is the canonical replay surface — plotting tools and post-hoc analysis read it. The dashboard fields and log.md sparkline are derived views over the same data; nothing reads them for state reconstruction.
+
+---
+
 ## Langfuse integration
 
 When `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` / `LANGFUSE_HOST` are set in `.env`, traces also go to Langfuse cloud. The integration and sink both live in `promptpotter/infrastructure/tracing.py`.

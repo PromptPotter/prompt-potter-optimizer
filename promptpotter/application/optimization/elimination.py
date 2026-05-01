@@ -21,21 +21,25 @@ Three layers in one file:
    — pure read-only helpers over a result dict / pipeline schema. Consumed by
    elimination, L1 execute, L1 critique, scoring, and the display layer.
 
-3. **Mid-round checks** (``DegradationCheck``, ``EliminationCheck``) —
+3. **Mid-round checks** (``DegradationCheck``, ``PoBBCheck``) —
    first-to-fire wins; produce ``EscalationSignal`` to terminate a candidate.
+   ``PoBBCheck`` is the Bayesian Posterior-of-Being-Best stop rule (Russo
+   2016): joint Normal-CLT posterior over candidates' mean accuracy, MC over
+   independent Normals to compute each candidate's argmax probability, stop
+   when current candidate's P(best) drops below ε.
 """
 
 from __future__ import annotations
 
 from collections import Counter
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.shared.errors import is_error_result
-from promptpotter.shared.statistics import should_stop_early
+from promptpotter.shared.statistics import pobb_should_stop, posterior_best_probabilities
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -44,7 +48,8 @@ if TYPE_CHECKING:
 
 __all__ = [
     "DegradationCheck",
-    "EliminationCheck",
+    "PoBBCheck",
+    "PoBBSnapshot",
     "ResultClassification",
     "build_degradation_checks",
     "candidate_keys_from_schema",
@@ -290,21 +295,62 @@ class DegradationCheck:
         )
 
 
-class EliminationCheck:
-    """Paired one-sided Wilcoxon signed-rank vs completed priors (Holm-Bonferroni)."""
+@dataclass(frozen=True)
+class PoBBSnapshot:
+    """Per-query Posterior-of-Being-Best snapshot for telemetry.
+
+    ``p_best`` maps every candidate id (priors + current) to its posterior
+    probability of being the round's best at this query. ``current_id`` and
+    ``n_queries`` identify which candidate is mid-evaluation and how many
+    queries it has under its belt at snapshot time.
+    """
+
+    p_best: dict[str, float]
+    current_id: str
+    n_queries: int
+
+
+class PoBBCheck:
+    """Bayesian Posterior-of-Being-Best mid-round stop rule.
+
+    For each candidate we maintain a Normal posterior on its mean accuracy
+    (CLT on observed per-sample scores). We sample the joint posterior, compute
+    each candidate's posterior probability of being argmax over the population,
+    and stop the current candidate when its P(best) drops below ε.
+
+    Reference: Russo (2016), "Simple Bayesian Algorithms for Best Arm
+    Identification."
+    """
 
     name = "elimination"
 
-    def __init__(self, *, n_min: int = 4, alpha: float = 0.2, n_queries: int) -> None:
+    def __init__(self, *, n_min: int = 4, epsilon: float = 0.05, n_queries: int) -> None:
         self.n_min = n_min
-        self.alpha = alpha
+        self.epsilon = epsilon
         self.n_queries = n_queries
-        self.priors: list[list[float]] = []
+        self.priors: dict[str, list[float]] = {}
         self.prior_ids: list[str] = []
+        self._current_id: str = ""
+        self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
+        self._last_snapshot: PoBBSnapshot | None = None
+
+    def set_current(
+        self,
+        candidate_id: str,
+        on_snapshot: Callable[[PoBBSnapshot], None] | None = None,
+    ) -> None:
+        """Bind the candidate-under-evaluation; reset per-candidate snapshot state."""
+        self._current_id = candidate_id
+        self._on_snapshot = on_snapshot
+        self._last_snapshot = None
 
     def register_completed(self, scores: list[float], candidate_id: str = "") -> None:
-        self.priors.append(scores)
+        """Add a completed candidate's score history to the priors pool."""
+        self.priors[candidate_id] = list(scores)
         self.prior_ids.append(candidate_id)
+
+    def latest_snapshot(self) -> PoBBSnapshot | None:
+        return self._last_snapshot
 
     def check(
         self, results: list[dict], candidate_idx: int, n_total_candidates: int
@@ -314,17 +360,31 @@ class EliminationCheck:
         n = len(results)
         if n < self.n_min:
             return None
+
         scores = [r.get("score", 0.0) for r in results]
-        stop, ctx = should_stop_early(scores, self.priors, self.alpha)
-        if not stop:
+        cid = self._current_id or "__current__"
+        histories: dict[str, list[float]] = {**self.priors, cid: scores}
+        snapshot = posterior_best_probabilities(histories)
+        snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_queries=n)
+        self._last_snapshot = snap
+        if self._on_snapshot is not None:
+            self._on_snapshot(snap)
+
+        p_best_current = snapshot.get(cid, 1.0)
+        if not pobb_should_stop(p_best_current, self.epsilon):
             return None
+
+        leader_id = max(snapshot.items(), key=lambda kv: kv[1])[0]
         return _eliminate(
             self.name,
             {
                 "queries_scored": n,
                 "total_queries": self.n_queries,
                 "n_priors": len(self.priors),
-                **ctx,
+                "p_best": float(p_best_current),
+                "epsilon": float(self.epsilon),
+                "p_best_snapshot": snapshot,
+                "leader_id": leader_id,
             },
             candidate_idx,
             n_total_candidates,
@@ -332,7 +392,7 @@ class EliminationCheck:
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[Any]:
-    """Per-query checks (degradation). EliminationCheck is built by the runner."""
+    """Per-query checks (degradation). PoBBCheck is built by the runner."""
     opt = config.optimization
     checks: list[Any] = []
     if opt.degradation_threshold > 0:

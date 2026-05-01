@@ -35,7 +35,7 @@ The number of candidates per round is controlled by your campaign config.
 
 ### Evaluate
 
-Each individual's fitness is measured query-by-query against the backend pipeline. After a minimum sample, a paired Wilcoxon signed-rank test against completed individuals can stop scoring an inferior one early — see [candidate-elimination.md](../methods/candidate-elimination.md).
+Each individual's fitness is measured query-by-query against the backend pipeline. After a minimum sample (`elimination_n_min=4`), Bayesian Posterior-of-Being-Best (PoBB) can stop scoring an inferior one early — see [candidate-elimination.md](../methods/candidate-elimination.md).
 
 ### Critique
 

@@ -6,7 +6,7 @@
 
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
-**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle — an **LLM-driven program evolution** engine that jointly searches prompts and pipeline parameters with statistical early-stopping (Wilcoxon), cross-run memory, and self-healing rails. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
+**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle — an **LLM-driven program evolution** engine that jointly searches prompts and pipeline parameters with population-aware Bayesian early-stopping (Posterior-of-Being-Best), cross-run memory, and self-healing rails. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
 
 ## Why PromptPotter?
 
@@ -51,7 +51,7 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
 - **Auto-injected scoring:** define your scoring formula once in `campaign.json`. It's wired into every evaluation path automatically. No glue code.
 - **IDE-native operation:** drive a full optimization campaign from your terminal via the `/potter-run` Claude Code skill. No notebook required.
 - **🔁 Self-healing optimization:** when a proposed setting isn't valid for your task workflow, the verification harness catches it (deterministic) and tells the strategy layer (L2 or L3) what went wrong, which in turn updates the prompt of the model that proposed the invalid setting. Full architecture: [self-healing.md](docs/concepts/self-healing.md).
-- **Statistical early-stopping:** unfit individuals are eliminated after a handful of queries via paired Wilcoxon signed-rank tests, instead of burning the full budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
+- **Statistical early-stopping:** unfit individuals are eliminated after a handful of queries via Bayesian Posterior-of-Being-Best — population-aware joint posterior, stop when `P(c is best) < ε` — instead of burning the full budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
 - **Cross-run learning:** every fitness measurement flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
 
 ## How It Works
@@ -106,17 +106,17 @@ Structurally, **AutoResearch is the degenerate case of PromptPotter**:
 - One sample, one scoring run = the 5-min training loss
 - Single PromptTemplate field, e.g. `program_md`
 
-It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Wilcoxon signed-rank + Holm–Bonferroni elimination across seeds, L2/L3 escalation, self-healing rails, and the hard-sample sorter on top.
+It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Bayesian Posterior-of-Being-Best elimination across seeds, L2/L3 escalation, self-healing rails, and the hard-sample sorter on top.
 
 | | AutoResearch | PromptPotter |
 |---|---|---|
 | Evolved artifact | Python source code (`train.py`) | Structured prompt fields + `pipeline_params` |
 | Fitness signal | 5-min nanochat training loss | Dataset accuracy (per-sample, scorer formula) |
-| Search | 1 agent, try-keep-revert | Population (`n_variants`), Wilcoxon-eliminated rounds |
+| Search | 1 agent, try-keep-revert | Population (`n_variants`), PoBB-eliminated rounds |
 | Loop layers | Flat — one agent, one loop | L1 generate/critique + L2 refine + L3 replan |
 | Recovery | None — agent reverts on regression | Self-healing rails (`ValidationFailure` / `RuntimeFailure`) per individual |
 | Sample selection | Fixed nanochat run | Rasch + KG scoring-set evolution; hard-sample sorter |
-| Statistical guarantees | None — single noisy trial | Wilcoxon signed-rank + Holm–Bonferroni elimination |
+| Statistical guarantees | None — single noisy trial | Bayesian Posterior-of-Being-Best (population-aware best-arm-ID) |
 | Domain | ML training research | Prompt/pipeline optimization for production LLM apps |
 
 ## Documentation

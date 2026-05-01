@@ -7,6 +7,17 @@ Format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ## [Unreleased]
 
 ### Changed
+- Replaced Wilcoxon+Holm sequential elimination with Bayesian Posterior-of-Being-Best (PoBB)
+  population-aware stopping. New `OptimizationConfig.pobb_epsilon` (default 0.05) replaces
+  `elimination_alpha`. PoBB uses joint Normal-CLT posterior over candidate accuracy means;
+  per-query Monte Carlo argmax computes each candidate's `P(round-best)`; stop when below ε.
+- Consolidated `ScoringSetConfig` + `HardSampleSorterConfig` into one `ExplorationConfig`.
+- Trimmed redundant Rasch refit: `hard_sample_sorter` now reuses the round-end posterior
+  cached on `Cycle.last_rasch_posterior` instead of refitting at finalize.
+- Per-query P(best) snapshot stream: new `streams/round_NNNN_p_best.jsonl` (append-only),
+  surfaced on `dashboard.json::current_round.candidates[].p_best` + `current_round.p_best_top`,
+  in CLI/notebook live display, and as ASCII sparklines in `log.md` round digests.
+- New `PoBBStreamProjection` (subscribes to the per-cycle ledger, writes JSONL).
 - Modernized all type hints to PEP 604 (`X | None`, `list[str]`, `dict[K, V]`) across 12 files
 - Replaced `print()` with `logger.warning()` in evaluators
 - Fixed all 12 ruff lint errors (E501 line length, E402 import order)

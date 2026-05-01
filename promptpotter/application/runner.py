@@ -214,6 +214,29 @@ class RunListener:
             )
         )
 
+    def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:
+        """Per-query Posterior-of-Being-Best snapshot from PoBBCheck.
+
+        Archive-only — observability stream, not a divergence-gated decision.
+        Subscribed by the live dashboard projection (merges into
+        ``current_round.nodes.candidates[].p_best``) and the JSONL stream
+        projection (one record per query).
+        """
+        self._emit(
+            Snapshot(
+                event="p_best_update",
+                round=round_num,
+                candidate_idx=ci,
+                candidate_total=ct,
+                sample_idx=int(snapshot.n_queries) - 1,
+                payload={
+                    "current_id": str(snapshot.current_id),
+                    "n_queries": int(snapshot.n_queries),
+                    "p_best": dict(snapshot.p_best),
+                },
+            )
+        )
+
     def set_round(self, round_num: int) -> None:
         """Track the active round for Snapshot record context."""
         self._current_round = round_num
@@ -377,8 +400,8 @@ def _evolve_scoring_set_if_enabled(
     Off by default. Trades understood samples for high-info samples in
     ``session.scoring.scoring_dataset`` (in-memory only — never disk).
     """
-    ss_cfg = config.optimization.scoring_set
-    if not (ss_cfg.enabled and cycle.rounds):
+    exp_cfg = config.optimization.exploration
+    if not (exp_cfg.enabled and cycle.rounds):
         return
 
     from promptpotter.application.intelligence.exploration import (
@@ -391,9 +414,12 @@ def _evolve_scoring_set_if_enabled(
             full_dataset=dataset,
             current_scoring_set=session.scoring.scoring_dataset,
             rounds=cycle.rounds,
-            config=ss_cfg,
+            config=exp_cfg,
             elimination_n_min=config.optimization.elimination_n_min,
         )
+        # Cache the posterior on the cycle so finalize can reuse it.
+        if ss_result.rasch is not None:
+            cycle.last_rasch_posterior = ss_result.rasch
         if not (ss_result.swapped_in or ss_result.swapped_out):
             return
         session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
@@ -774,6 +800,9 @@ async def run_optimization(
                 ledger.bind(session.state.round_recorder)
             if display is not None:
                 ledger.bind(display)
+            from promptpotter.infrastructure.projections import PoBBStreamProjection
+
+            ledger.bind(PoBBStreamProjection.from_cycle_dir(cycle_dir))
             cb.ledger = ledger
             early_bind_done = True
 
@@ -921,6 +950,15 @@ async def run_optimization(
             late_ledger.bind(session.state.round_recorder)
         if display is not None:
             late_ledger.bind(display)
+        if session.state.cycle_id and session.store is not None:
+            from promptpotter.domain.cycle_paths import CycleDir
+            from promptpotter.infrastructure.projections import PoBBStreamProjection
+
+            late_ledger.bind(
+                PoBBStreamProjection.from_cycle_dir(
+                    CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
+                )
+            )
         cb.ledger = late_ledger
 
     stop_reason = await _run_round_loop(
@@ -1048,15 +1086,16 @@ def _finalize_run(
             build_hard_samples_artifact,
         )
 
-        hs_cfg = campaign_config.optimization.hard_sample_sorter
+        exp_cfg = campaign_config.optimization.exploration
         artifact: dict | None = None
-        if hs_cfg.enabled:
+        if exp_cfg.hard_sample_sorter_enabled:
             with graceful("Hard-sample artifact build failed"):
                 artifact = build_hard_samples_artifact(
                     cycle.rounds,
                     cycle_id=session.state.cycle_id,
-                    top_k_candidates=hs_cfg.top_k_candidates,
-                    top_k_samples=hs_cfg.top_k_samples,
+                    top_k_candidates=exp_cfg.top_k_candidates,
+                    top_k_samples=exp_cfg.top_k_samples,
+                    posterior=getattr(cycle, "last_rasch_posterior", None),
                 )
         _write_log_md(session, hard_samples_artifact=artifact)
         _write_review_md(session, cycle)
@@ -1081,12 +1120,17 @@ def _write_log_md(session: Session, *, hard_samples_artifact: dict | None = None
             if n_trials
             else []
         )
+        cycle_dir = store.campaign_dir(session.state.cycle_id)
+        streams_dir = cycle_dir / "streams"
         content = to_markdown(
-            from_disk_log(index, trials, hard_samples_artifact=hard_samples_artifact)
+            from_disk_log(
+                index,
+                trials,
+                hard_samples_artifact=hard_samples_artifact,
+                streams_dir=streams_dir,
+            )
         )
-        (store.campaign_dir(session.state.cycle_id) / "log.md").write_text(
-            content, encoding="utf-8"
-        )
+        (cycle_dir / "log.md").write_text(content, encoding="utf-8")
 
 
 def _refresh_tenant_leaderboards(session: Session) -> None:

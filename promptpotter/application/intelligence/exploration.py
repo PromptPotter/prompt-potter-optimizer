@@ -22,7 +22,7 @@ from typing import TYPE_CHECKING, NamedTuple
 import numpy as np
 
 if TYPE_CHECKING:
-    from promptpotter.application.config import ScoringSetConfig
+    from promptpotter.application.config import ExplorationConfig
     from promptpotter.domain.results import RoundResult
     from promptpotter.domain.sample import Sample
 
@@ -270,7 +270,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
 def _select_swap_outs(
     posterior: RaschPosterior,
     scoring_set_sample_ids: set[int],
-    config: ScoringSetConfig,
+    config: ExplorationConfig,
     min_scoring_set_size: int,
     max_swaps: int,
 ) -> list[int]:
@@ -297,7 +297,7 @@ def _select_swap_ins(
     scoring_set_sample_ids: set[int],
     full_dataset: list[Sample],
     surviving_candidates: list[str],
-    config: ScoringSetConfig,
+    config: ExplorationConfig,
     n_slots: int,
 ) -> list[int]:
     """Samples not in the scoring set, ranked by max-over-candidates KG.
@@ -368,7 +368,7 @@ def evolve_scoring_set(
     full_dataset: list[Sample],
     current_scoring_set: list[Sample],
     rounds: list[RoundResult],
-    config: ScoringSetConfig,
+    config: ExplorationConfig,
     *,
     elimination_n_min: int,
     surviving_candidates: list[str] | None = None,

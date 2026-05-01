@@ -12,7 +12,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from promptpotter.application.config import ScoringSetConfig
+from promptpotter.application.config import ExplorationConfig
 from promptpotter.application.intelligence.exploration import (
     Observation,
     evolve_scoring_set,
@@ -116,7 +116,7 @@ def test_evolve_scoring_set_respects_min_size() -> None:
     }
     rounds = [_make_round(0, candidate_results)]
 
-    cfg = ScoringSetConfig(
+    cfg = ExplorationConfig(
         enabled=True,
         swap_out_delta_se=10.0,  # extremely permissive — every scoring-set sample qualifies
         swap_in_kg_threshold=0.0,
@@ -144,7 +144,7 @@ def test_evolve_scoring_set_does_not_mutate_inputs(enabled: bool) -> None:
             {f"c{ci}": [{"sample_id": s.id, "hit": True} for s in samples] for ci in range(3)},
         )
     ]
-    cfg = ScoringSetConfig(enabled=enabled)
+    cfg = ExplorationConfig(enabled=enabled)
     evolve_scoring_set(
         full_dataset=samples,
         current_scoring_set=samples,
