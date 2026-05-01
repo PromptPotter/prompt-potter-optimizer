@@ -27,6 +27,7 @@ import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from pathlib import Path
 from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.optimization.pipeline import (
@@ -398,6 +399,7 @@ def _fork_at_divergence(
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
     extra_data: dict[str, Any] | None = None,
+    sweep_batch_id: str | None = None,
 ) -> str:
     """Mint a sibling cycle that re-runs round ``fork_from_round``.
 
@@ -413,6 +415,12 @@ def _fork_at_divergence(
     passes nothing; the M10 sweep caller threads the parsed
     ``SweepPayload`` (under key ``sweep_payload``) so leaderboard
     rendering and downstream review can attribute the fork.
+
+    ``sweep_batch_id``, when set, marks this fork as part of a sweep
+    batch — the new cycle id encodes ``_sweep_{batch_id}_`` so
+    ``campaign_dir_for`` routes it to ``sweeps/{batch_id}/forks/``
+    instead of the operator-divergence ``forks/`` dir. ``batch_id``
+    must contain no underscores (use hyphens or alnum only).
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import RunLedger
@@ -421,7 +429,12 @@ def _fork_at_divergence(
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
-    new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
+    if sweep_batch_id is not None:
+        if "_" in sweep_batch_id:
+            raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
+        new_cycle_id = f"{old_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
+    else:
+        new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
     old_dir = campaign_store.campaign_dir(old_cycle_id)
     new_dir = campaign_store.campaign_dir(new_cycle_id)
     if new_dir.exists():
@@ -468,11 +481,17 @@ def _fork_at_divergence(
     )
     write_json(new_dir / "index.json", index)
 
-    for sub, prefix in (("trials", "trial_"), ("candidates", "round_")):
-        src = old_dir / sub
+    copy_specs: tuple[tuple[Path, Path, str], ...] = (
+        (old_dir / "trials", new_dir / "trials", "trial_"),
+        (
+            old_dir / ".runtime" / "cache" / "candidates",
+            new_dir / ".runtime" / "cache" / "candidates",
+            "round_",
+        ),
+    )
+    for src, dst, prefix in copy_specs:
         if not src.exists():
             continue
-        dst = new_dir / sub
         dst.mkdir(parents=True, exist_ok=True)
         for p in sorted(src.glob(f"{prefix}*.json")):
             try:
@@ -497,11 +516,11 @@ def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -
     from promptpotter.infrastructure.store.stores import root_cycle_id
 
     root_id = root_cycle_id(parent_cycle_id)
-    forks_dir = campaign_store.campaign_dir(root_id) / "forks"
+    diag_dir = campaign_store.campaign_dir(root_id) / "diag"
     pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
     max_n = 0
-    if forks_dir.is_dir():
-        for entry in forks_dir.iterdir():
+    if diag_dir.is_dir():
+        for entry in diag_dir.iterdir():
             if not entry.is_dir():
                 continue
             m = pattern.match(entry.name)

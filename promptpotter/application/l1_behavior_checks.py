@@ -1,7 +1,7 @@
 """L1 behaviour checks — programmatic conformance for one round of L1 output.
 
 Each check is a pure ``(round_dict, ctx) -> CheckResult`` function with no
-I/O. ``round_dict`` is one ``.cache/rounds/round_NNNN.json`` payload as
+I/O. ``round_dict`` is one ``.runtime/cache/rounds/round_NNNN.json`` payload as
 written by ``AuditTrailProjection.flush``; ``ctx`` carries the per-round
 context the check needs (prior rounds, OSP at round-start, the three
 ``context_object`` items, the ``param_unlock_round`` knob).

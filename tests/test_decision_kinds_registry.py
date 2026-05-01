@@ -151,9 +151,9 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     """``_open_cycle_ledger`` opens the ledger under the per-cycle audit dir.
 
     Phase 3 plumbing: the ledger MUST live at
-    ``campaigns/{cycle_id}/ledger.jsonl`` (per-cycle scope) so a fork's
-    facts never bleed into the family-root telemetry stream. Returns
-    ``None`` when no store is wired (test-bypass paths).
+    ``campaigns/{cycle_id}/.runtime/ledger.jsonl`` (per-cycle scope) so a
+    fork's facts never bleed into the family-root telemetry stream.
+    Returns ``None`` when no store is wired (test-bypass paths).
     """
     from types import SimpleNamespace
 
@@ -165,7 +165,7 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
 
     ledger = _open_cycle_ledger(fake_session, "cycle_x")  # type: ignore[arg-type]
     assert ledger is not None
-    assert ledger.path == stores.campaigns.campaign_dir("cycle_x") / "ledger.jsonl"
+    assert ledger.path == stores.campaigns.campaign_dir("cycle_x") / ".runtime" / "ledger.jsonl"
 
     # Storeless session (test-bypass path) → no ledger; loop still proceeds.
     assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]

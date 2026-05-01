@@ -60,9 +60,10 @@ class RunLedger:
 
     @classmethod
     def open(cls, cycle_dir: CycleDir) -> RunLedger:
-        """Open (creating if absent) the ledger for a cycle dir."""
-        Path(cycle_dir).mkdir(parents=True, exist_ok=True)
-        return cls(Path(cycle_dir) / "ledger.jsonl")
+        """Open (creating if absent) the ledger at ``{cycle_dir}/.runtime/ledger.jsonl``."""
+        runtime_dir = Path(cycle_dir) / ".runtime"
+        runtime_dir.mkdir(parents=True, exist_ok=True)
+        return cls(runtime_dir / "ledger.jsonl")
 
     @property
     def path(self) -> Path:

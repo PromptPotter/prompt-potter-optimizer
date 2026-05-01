@@ -270,7 +270,7 @@ class RoundDigestView:
     candidates_scored: int
     evaluators: dict[str, float]
     # Optional: per-candidate P(best) trajectory for this round, parsed
-    # from ``streams/round_NNNN_p_best.jsonl``. Outer dict is candidate_id;
+    # from ``.runtime/streams/round_NNNN_p_best.jsonl``. Outer dict is candidate_id;
     # inner list is the sequence of P(best) values across queries. Empty
     # when the stream isn't available (resumed cycles, pre-PoBB rounds).
     p_best_trajectory: dict[str, list[float]] = field(default_factory=dict)

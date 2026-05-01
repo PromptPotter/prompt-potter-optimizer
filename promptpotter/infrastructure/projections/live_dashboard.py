@@ -166,13 +166,13 @@ class LiveDashboardProjection:
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
         # Forks share one continuous dashboard.json; per-fork audit
-        # (index.json, log.md, .cache/candidates/, trials/, .cache/rounds/)
-        # stays in each cycle's own dir, written through dynamic
-        # ``session.state.cycle_id`` paths.
+        # (index.json, log.md, trials/, .runtime/) stays in each cycle's
+        # own dir, written through dynamic ``session.state.cycle_id`` paths.
         root_path = Path(root_dir)
-        if "forks" in root_path.parts:
+        sibling_kinds = {"forks", "diag", "sweeps"}
+        if sibling_kinds & set(root_path.parts):
             raise ValueError(
-                f"LiveDashboardProjection root_dir must be a family root, not a fork dir; "
+                f"LiveDashboardProjection root_dir must be a family root, not a sibling dir; "
                 f"got {root_path}"
             )
         self.root_dir = root_path
@@ -459,7 +459,7 @@ class LiveDashboardProjection:
             improved
         )  # round-complete narrative removed with output.log; ledger carries the decision
         # Deposit l1_score block + HITL onto the active recorder before
-        # runner.py flush() — produces one consolidated .cache/rounds/round_NNNN.json.
+        # runner.py flush() — produces one consolidated .runtime/cache/rounds/round_NNNN.json.
         self._deposit_round_recorder_state(round_result)
 
         self._current_round = {"round": round_result.round + 1, "candidates": {}}

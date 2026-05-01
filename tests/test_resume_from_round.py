@@ -3,7 +3,7 @@
 Covers the primitive behind ``optimize --from <round>``:
 
 - Archiving later trial + candidate files into
-  ``archived/resumed_at_<ts>/{trials,candidates}/``
+  ``.runtime/archived/resumed_at_<ts>/{trials,candidates}/``
 - Rebuilding the in-memory trial index to reflect only surviving trials
 - Raising ``LookupError`` for a round that has no trial on disk
 """
@@ -56,7 +56,7 @@ class TestRewindToRound:
 
         cycle_dir = store.campaign_dir("cycle_a")
         trials_dir = cycle_dir / "trials"
-        candidates_dir = cycle_dir / "candidates"
+        candidates_dir = cycle_dir / ".runtime" / "cache" / "candidates"
         assert (trials_dir / "trial_0000.json").exists()
         assert (trials_dir / "trial_0001.json").exists()
         assert (trials_dir / "trial_0002.json").exists()
@@ -65,7 +65,7 @@ class TestRewindToRound:
         assert not (candidates_dir / "round_0003.json").exists()
         assert not (candidates_dir / "round_0004.json").exists()
 
-        archived_roots = list((cycle_dir / "archived").iterdir())
+        archived_roots = list((cycle_dir / ".runtime" / "archived").iterdir())
         assert len(archived_roots) == 1
         archived = archived_roots[0]
         assert (archived / "trials" / "trial_0003.json").exists()
@@ -114,4 +114,4 @@ class TestRewindToRound:
         cycle_dir = store.campaign_dir("cycle_a")
         assert (cycle_dir / "trials" / "trial_0002.json").exists()
         # Nothing newer existed, so no archive dir is created.
-        assert not (cycle_dir / "archived").exists()
+        assert not (cycle_dir / ".runtime" / "archived").exists()

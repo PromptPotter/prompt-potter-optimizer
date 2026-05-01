@@ -2,13 +2,13 @@
 
 Each projection in ``promptpotter/infrastructure/projections/`` accepts a
 specific dir newtype. ``LiveDashboardProjection`` takes ``RootCycleDir``
-(the family-root path, never a fork's nested dir). ``AuditTrailProjection``
-takes ``CycleDir`` via ``from_cycle_dir`` and derives the
-``.cache/rounds`` subpath, or accepts a raw rounds_dir path that MUST end
-in ``.cache/rounds``. A runtime assertion in each ``__init__`` rejects a
-mismatched path so a fork can never accidentally write to the parent's
-tree (and a parent can never write per-cycle audit data into the
-family-root telemetry stream).
+(the family-root path, never a sibling dir under ``forks/``, ``diag/``, or
+``sweeps/``). ``AuditTrailProjection`` takes ``CycleDir`` via
+``from_cycle_dir`` and derives the ``.runtime/cache/rounds`` subpath, or
+accepts a raw rounds_dir path that MUST end in ``.runtime/cache/rounds``.
+A runtime assertion in each ``__init__`` rejects a mismatched path so a
+fork can never accidentally write to the parent's tree (and a parent can
+never write per-cycle audit data into the family-root telemetry stream).
 """
 
 from __future__ import annotations
@@ -24,9 +24,10 @@ from promptpotter.infrastructure.projections import (
 )
 
 
-def test_live_dashboard_rejects_fork_path(tmp_path: Path) -> None:
-    """A fork dir (containing 'forks/' segment) cannot host the live dashboard."""
-    fork_dir = tmp_path / "campaigns" / "root_xyz" / "forks" / "root_xyz_fork_abc"
+@pytest.mark.parametrize("kind", ["forks", "diag", "sweeps"])
+def test_live_dashboard_rejects_sibling_path(tmp_path: Path, kind: str) -> None:
+    """A sibling dir (under ``forks/``, ``diag/``, or ``sweeps/``) cannot host the live dashboard."""
+    fork_dir = tmp_path / "campaigns" / "root_xyz" / kind / f"root_xyz_{kind}_abc"
     fork_dir.mkdir(parents=True)
     session_dir = tmp_path / "sessions" / "s_test"
     session_dir.mkdir(parents=True)
@@ -61,19 +62,19 @@ def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
 
 
 def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:
-    """A rounds_dir must terminate in ``.cache/rounds`` — anything else is ad-hoc routing."""
+    """A rounds_dir must terminate in ``.runtime/cache/rounds`` — anything else is ad-hoc routing."""
     bad = tmp_path / "campaigns" / "cyc1"
     bad.mkdir(parents=True)
-    with pytest.raises(ValueError, match="\\.cache/rounds"):
+    with pytest.raises(ValueError, match=r"\.runtime/cache/rounds"):
         AuditTrailProjection(bad)
 
 
 def test_audit_trail_from_cycle_dir_derives_subpath(tmp_path: Path) -> None:
-    """The standard factory derives ``.cache/rounds`` from a cycle dir."""
+    """The standard factory derives ``.runtime/cache/rounds`` from a cycle dir."""
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
-    assert proj.rounds_dir == cycle_dir / ".cache" / "rounds"
+    assert proj.rounds_dir == cycle_dir / ".runtime" / "cache" / "rounds"
 
 
 def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
@@ -82,7 +83,7 @@ def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
     fork_dir = root_dir / "forks" / "root_xyz_fork_abc"
     fork_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(fork_dir))
-    assert proj.rounds_dir == fork_dir / ".cache" / "rounds"
+    assert proj.rounds_dir == fork_dir / ".runtime" / "cache" / "rounds"
     assert root_dir not in proj.rounds_dir.parents or "forks" in proj.rounds_dir.parts
 
 
@@ -108,7 +109,7 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     # Round-complete triggers the disk write.
     proj.on_record(Phase(phase="round", event="complete", round=4), 2)
 
-    written = cycle_dir / ".cache" / "rounds" / "round_0004.json"
+    written = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0004.json"
     assert written.exists(), "Phase('round', 'complete') must flush round_NNNN.json"
 
 
@@ -133,7 +134,7 @@ def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
     proj.add_action({"type": "l1_generate", "response": "ok"})
     proj.on_record(Phase(phase="round", event="complete", round=0), 3)
 
-    baseline_path = cycle_dir / ".cache" / "rounds" / "round_baseline.json"
-    round_0_path = cycle_dir / ".cache" / "rounds" / "round_0000.json"
+    baseline_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_baseline.json"
+    round_0_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"
     assert baseline_path.exists(), "baseline phase must flush to round_baseline.json"
     assert round_0_path.exists(), "round 0 must flush independently of baseline"

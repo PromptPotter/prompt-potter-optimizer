@@ -7,7 +7,7 @@ Each module here owns one view over the ledger's record stream:
   Constructor takes ``RootCycleDir`` so an audit block cannot
   accidentally land here.
 * :mod:`audit_trail` — the per-round node I/O recorder that flushes to
-  ``campaigns/{cycle_id}/.cache/rounds/round_NNNN.json``. Per-cycle
+  ``campaigns/{cycle_id}/.runtime/cache/rounds/round_NNNN.json``. Per-cycle
   scope; constructor takes ``CycleDir`` so a fork's recorder cannot
   accidentally write to the parent's tree.
 * :mod:`journal` — operator narrative helpers (``journal.md`` +

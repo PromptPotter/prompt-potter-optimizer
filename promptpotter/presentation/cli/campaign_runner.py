@@ -16,6 +16,7 @@ import asyncio
 import json
 import logging
 import sys
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -623,12 +624,21 @@ async def _run_sweep_batch(
     ``data.source_file`` in the parent's FORK_CUT records — already
     forked payloads are skipped.
     """
+    import secrets
+
     from promptpotter.application.optimization.cycle import _fork_at_divergence
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.infrastructure.store import build_stores
-    from promptpotter.infrastructure.store.stores import save_active_pointer
+    from promptpotter.infrastructure.store.base import write_json
+    from promptpotter.infrastructure.store.stores import (
+        root_cycle_id as _root_cycle_id,
+    )
+    from promptpotter.infrastructure.store.stores import (
+        save_active_pointer,
+        sweep_batch_dir_for,
+    )
 
     tenant_id = getattr(args, "tenant", "default")
     store = build_stores(tenant_id=tenant_id)
@@ -645,6 +655,33 @@ async def _run_sweep_batch(
     # whose source_file already has a FORK_CUT in this parent's
     # ledger.
     existing = _existing_fork_source_files(store, parent_cycle_id)
+
+    # Mint one batch_id per sweep invocation. Format: utc-ts + 4 random
+    # hex chars (no underscores — sweep_batch_id is forbidden from
+    # carrying underscores so the cycle-id regex can extract it cleanly).
+    batch_id = datetime.now(UTC).strftime("b%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(2)
+    family_root = _root_cycle_id(parent_cycle_id)
+    batch_dir = sweep_batch_dir_for(store.campaigns._base_dir, family_root, batch_id)
+    batch_dir.mkdir(parents=True, exist_ok=True)
+    batch_index_path = batch_dir / "index.json"
+    write_json(
+        batch_index_path,
+        {
+            "batch_id": batch_id,
+            "parent_cycle_id": parent_cycle_id,
+            "family_root": family_root,
+            "started_at": datetime.now(UTC).isoformat(),
+            "status": "running",
+            "payloads": [
+                {
+                    "source_file": p.name,
+                    "status": ("skipped_already_forked" if p.name in existing else "pending"),
+                    "cycle_id": existing.get(p.name, ""),
+                }
+                for p, _ in sweep_payloads
+            ],
+        },
+    )
 
     new_cycle_ids: list[str] = []
     for path, payload in sweep_payloads:
@@ -666,7 +703,9 @@ async def _run_sweep_batch(
             extra_data={
                 "sweep_payload": payload.model_dump(mode="json"),
                 "source_file": path.name,
+                "sweep_batch_id": batch_id,
             },
+            sweep_batch_id=batch_id,
         )
         # _fork_at_divergence retargeted the active pointer to new_cycle_id.
         # Re-load context for this fork and build a fresh session bound to it.
@@ -719,19 +758,57 @@ async def _run_sweep_batch(
         )
 
     save_active_pointer(tenant_id, root_ctx.session_id, parent_cycle_id)
+
+    # Finalize batch index + render summary.md so the operator has a
+    # one-shot read for the whole batch.
+    batch_index = json.loads(batch_index_path.read_text(encoding="utf-8"))
+    batch_index["status"] = "completed"
+    batch_index["completed_at"] = datetime.now(UTC).isoformat()
+    cid_by_source = {
+        p.name: cid for (p, _), cid in zip(sweep_payloads, new_cycle_ids, strict=False)
+    }
+    for entry in batch_index["payloads"]:
+        if entry["status"] == "pending":
+            cid = cid_by_source.get(entry["source_file"], "")
+            entry["status"] = "completed" if cid else "skipped"
+            entry["cycle_id"] = cid
+    write_json(batch_index_path, batch_index)
+
+    summary_lines = [
+        f"# Sweep batch {batch_id}",
+        "",
+        f"- Parent cycle: `{parent_cycle_id}`",
+        f"- Family root: `{family_root}`",
+        f"- Started: {batch_index['started_at']}",
+        f"- Completed: {batch_index['completed_at']}",
+        f"- Forks minted: {len(new_cycle_ids)} of {len(sweep_payloads)}",
+        "",
+        "## Payloads",
+        "",
+        "| Source | Status | Cycle |",
+        "|---|---|---|",
+    ]
+    for entry in batch_index["payloads"]:
+        summary_lines.append(
+            f"| `{entry['source_file']}` | {entry['status']} | `{entry['cycle_id']}` |"
+        )
+    (batch_dir / "summary.md").write_text("\n".join(summary_lines) + "\n", encoding="utf-8")
+
     logger.info(
-        "Sweep batch complete: %d forks under %s; active pointer restored",
+        "Sweep batch %s complete: %d forks under %s; active pointer restored",
+        batch_id,
         len(new_cycle_ids),
         parent_cycle_id,
     )
     return CommandResult(
         data={
             "sweep_batch": new_cycle_ids,
+            "batch_id": batch_id,
             "parent_cycle_id": parent_cycle_id,
             "n_forks": len(new_cycle_ids),
         },
         human=(
-            f"Sweep batch: {len(new_cycle_ids)} forks under {parent_cycle_id}\n"
+            f"Sweep batch {batch_id}: {len(new_cycle_ids)} forks under {parent_cycle_id}\n"
             + "\n".join(f"  - {c}" for c in new_cycle_ids)
         ),
     )

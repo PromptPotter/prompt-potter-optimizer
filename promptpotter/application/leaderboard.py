@@ -218,7 +218,7 @@ def _load_round_audits(
 ) -> list[dict[str, Any] | None]:
     import json
 
-    rounds_dir = cycle_dir / ".cache" / "rounds"
+    rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
     out: list[dict[str, Any] | None] = []
     for trial in trials:
         round_num = int(trial.get("round") or 0)

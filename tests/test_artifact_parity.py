@@ -6,17 +6,22 @@ after the projection lifecycle, this test fails.  Sessions and campaigns
 are separate trees; a campaign records its parent session via
 ``index.json::parent_session_id``.
 
-Campaign artifacts split into two bands:
+Campaign artifacts split into three bands:
 
 - ``ROOT_TELEMETRY_ARTIFACTS`` — the live observability stream
   (``dashboard.json``). Binds to the family root cycle (the one with no
   ``parent_cycle_id``); forks share the single continuous stream rather
   than splintering it.
-- ``PER_CYCLE_AUDIT_ARTIFACTS`` — frozen-on-finalization records
-  (index.json, log.md, review.md). Each cycle owns its own.
+- ``PER_CYCLE_OPERATOR_ARTIFACTS`` — frozen-on-finalization records the
+  operator reads directly (``index.json``, ``log.md``, ``review.md``,
+  ``trials/``, ``prompts/``, ``langfuse/``). Each cycle owns its own.
+- ``PER_CYCLE_INTERNAL_UMBRELLA`` — the ``.runtime/`` subdir holding
+  internals (ledger spine, streams, cache, archived). Operators normally
+  don't read these.
 
-For an un-forked campaign root and fork are the same dir, so both bands
-collapse onto the same path — the contract still holds.
+``SIBLING_GROUP_DIRS`` are the three sibling-cycle parents
+(``forks/``, ``diag/``, ``sweeps/``) that may appear at the family
+root, holding nested fork dirs.
 
 The artifact sets are owned by this test — they were never read by
 production code, only by these assertions. New artifacts produced by
@@ -36,15 +41,30 @@ ROOT_TELEMETRY_ARTIFACTS = {
     "dashboard.json",
 }
 
-# Per-cycle artifacts (frozen audit, owned by each fork).
-PER_CYCLE_AUDIT_ARTIFACTS = {
+# Per-cycle operator-facing artifacts (frozen audit + drill-in dirs the
+# operator reads directly).
+PER_CYCLE_OPERATOR_ARTIFACTS = {
     "index.json",
     "log.md",
     "review.md",
+    # Subdirs are conditional — only present when content was produced.
+    # The minimum-required set asserted by ``test_emitter_produces_all_artifacts``
+    # is the three top-level files.
 }
 
-# Combined campaign-tree contract — what an un-forked cycle dir must contain.
-CAMPAIGN_ARTIFACTS = ROOT_TELEMETRY_ARTIFACTS | PER_CYCLE_AUDIT_ARTIFACTS
+# Per-cycle internal umbrella — opaque to operators. Holds the ledger spine,
+# pobb streams, the round/candidate caches, and rewind sweepup. Existence
+# of the umbrella dir is the contract; the contents are projection-owned.
+PER_CYCLE_INTERNAL_UMBRELLA = ".runtime"
+
+# Sibling-group dirs that may appear at the family root, each holding
+# nested fork cycle dirs.
+SIBLING_GROUP_DIRS = {"forks", "diag", "sweeps"}
+
+# Combined campaign-tree contract — what an un-forked cycle dir must contain
+# at minimum (operator-facing files only; the internal umbrella is asserted
+# separately).
+CAMPAIGN_ARTIFACTS = ROOT_TELEMETRY_ARTIFACTS | PER_CYCLE_OPERATOR_ARTIFACTS
 
 # Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
 # is owned by SessionStore; the emitter ensures the rest exist from mint.
@@ -95,13 +115,17 @@ def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
 def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     """CAMPAIGN_ARTIFACTS and SESSION_ARTIFACTS must never overlap; each
     fixed key must land in the expected set. The two campaign bands
-    (``ROOT_TELEMETRY_ARTIFACTS`` and ``PER_CYCLE_AUDIT_ARTIFACTS``) must
-    also be disjoint — telemetry is not per-cycle, audit is not at root."""
+    (``ROOT_TELEMETRY_ARTIFACTS`` and ``PER_CYCLE_OPERATOR_ARTIFACTS``) must
+    also be disjoint — telemetry is not per-cycle, audit is not at root.
+    Sibling-group dirs are not artifacts — they hold nested cycles."""
     assert CAMPAIGN_ARTIFACTS.isdisjoint(SESSION_ARTIFACTS)
-    assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_AUDIT_ARTIFACTS)
+    assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_OPERATOR_ARTIFACTS)
+    assert SIBLING_GROUP_DIRS.isdisjoint(CAMPAIGN_ARTIFACTS)
+    assert PER_CYCLE_INTERNAL_UMBRELLA not in CAMPAIGN_ARTIFACTS
     assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
     assert {"dashboard.json"} <= ROOT_TELEMETRY_ARTIFACTS
-    assert {"index.json", "log.md", "review.md"} <= PER_CYCLE_AUDIT_ARTIFACTS
+    assert {"index.json", "log.md", "review.md"} <= PER_CYCLE_OPERATOR_ARTIFACTS
+    assert {"forks", "diag", "sweeps"} == SIBLING_GROUP_DIRS
 
 
 def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, Path]) -> None:
@@ -321,6 +345,14 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     assert not missing_campaign, f"Campaign-tree parity violated — missing: {missing_campaign}"
     missing_session = [a for a in SESSION_ARTIFACTS if not (session_dir / a).exists()]
     assert not missing_session, f"Session-tree parity violated — missing: {missing_session}"
+
+    # Internals: ``.runtime/`` umbrella with ``cache/rounds/`` is created
+    # by ``AuditTrailProjection.flush`` whenever a round records node
+    # I/O. The legacy top-level ``ledger.jsonl`` / ``streams/`` /
+    # ``.cache/`` paths must NOT exist next to operator files.
+    assert not (campaign_dir / "ledger.jsonl").exists(), "ledger.jsonl moved under .runtime/"
+    assert not (campaign_dir / ".cache").exists(), ".cache/ replaced by .runtime/cache/"
+    assert not (campaign_dir / "streams").exists(), "streams/ moved under .runtime/"
 
 
 def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, Path]) -> None:

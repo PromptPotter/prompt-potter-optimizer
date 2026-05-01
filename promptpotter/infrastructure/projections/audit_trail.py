@@ -1,11 +1,11 @@
-"""AuditTrailProjection — per-cycle round-recorder, flushes to ``.cache/rounds/round_NNNN.json``.
+"""AuditTrailProjection — per-cycle round-recorder, flushes to ``.runtime/cache/rounds/round_NNNN.json``.
 
 Per-cycle scope: a fork's recorder MUST point at the fork's own
-``.cache/rounds/`` directory, never at the parent's. The constructor takes
-``CycleDir`` (not a raw ``Path``) so the routing is explicit at every
+``.runtime/cache/rounds/`` directory, never at the parent's. The constructor
+takes ``CycleDir`` (not a raw ``Path``) so the routing is explicit at every
 construction site, and ``from_cycle_dir`` derives the standard subpath.
 A runtime assertion in ``__init__`` rejects any path that doesn't end in
-``/.cache/rounds`` to catch ad-hoc constructions.
+``/.runtime/cache/rounds`` to catch ad-hoc constructions.
 
 Round boundaries arrive via ``on_record``: ``Phase("round","enter")``
 triggers ``begin_round`` and ``Phase("round","complete")`` triggers
@@ -33,7 +33,7 @@ logger = logging.getLogger(__name__)
 __all__ = ["AuditTrailProjection"]
 
 
-_ROUNDS_SUBPATH = (".cache", "rounds")
+_ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
 _BASELINE_ROUND_SENTINEL = -1
 
 
@@ -73,15 +73,15 @@ class AuditTrailProjection:
     """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush.
 
     Construct via :meth:`from_cycle_dir` so the ``rounds_dir`` is derived
-    from the cycle dir's ``.cache/rounds`` subpath in one place. The
+    from the cycle dir's ``.runtime/cache/rounds`` subpath in one place. The
     direct ``__init__`` is supported for tests that already hold a
     rounds-dir path; both code paths assert the path lives under
-    ``.cache/rounds`` so a fork can never accidentally point at the
+    ``.runtime/cache/rounds`` so a fork can never accidentally point at the
     parent's tree.
     """
 
     def __init__(self, rounds_dir: Path) -> None:
-        if rounds_dir.parts[-2:] != _ROUNDS_SUBPATH:
+        if rounds_dir.parts[-len(_ROUNDS_SUBPATH) :] != _ROUNDS_SUBPATH:
             raise ValueError(
                 f"AuditTrailProjection rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
                 f"got {rounds_dir}"
@@ -99,8 +99,8 @@ class AuditTrailProjection:
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailProjection:
-        """Build a projection rooted at ``{cycle_dir}/.cache/rounds``."""
-        return cls(Path(cycle_dir) / _ROUNDS_SUBPATH[0] / _ROUNDS_SUBPATH[1])
+        """Build a projection rooted at ``{cycle_dir}/.runtime/cache/rounds``."""
+        return cls(Path(cycle_dir).joinpath(*_ROUNDS_SUBPATH))
 
     def begin_round(self, round_num: int) -> None:
         """Start recording a new round. Discards any pending node data."""

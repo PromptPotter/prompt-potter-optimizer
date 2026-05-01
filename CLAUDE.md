@@ -118,16 +118,27 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 
 2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live.py::LiveDisplay`](promptpotter/presentation/views/live.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
 
-3. **Drill into peer files when the dashboard isn't enough.** Layout splits into two bands:
-   - At `campaigns/{root_cycle_id}/` (telemetry, shared across all forks of the family): `dashboard.json` is the live scalar state. (No append-only narrative log — `LiveDisplay` stderr is the per-query stream.)
-   - At `campaigns/{cycle_id}/` (per-cycle audit, one set per fork):
+3. **Drill into peer files when the dashboard isn't enough.** Layout splits into three bands per cycle dir, plus three sibling-group dirs at the family root:
+   - **Family telemetry** at `campaigns/{root_cycle_id}/`, shared across all forks of the family: `dashboard.json` is the live scalar state. (No append-only narrative log — `LiveDisplay` stderr is the per-query stream.)
+   - **Per-cycle operator audit** at the cycle dir's top level (root cycle and every fork has its own):
+     - `index.json` — campaign metadata + trial index + the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
      - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
+     - `review.md` — per-cycle review surface (M10).
      - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
-     - `index.json` — campaign metadata + trial index, plus the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
-     - `.cache/candidates/round_NNNN.json` — pre-scoring candidate checkpoint (resume state). Internal; overwritten next round.
-     - `.cache/rounds/round_NNN.json` — per-round LLM action audit (developer artifact). Internal.
+     - `prompts/` — prompt-version archive (per L2 mutation).
+     - `langfuse/` — LLM trace mirror (debug drill-in: events.jsonl, traces, observations, scores, datasets, state.json).
+   - **Per-cycle internals** at `{cycle_dir}/.runtime/` — opaque to operators, projection-owned:
+     - `ledger.jsonl` — RunLedger spine (every fact for this cycle).
+     - `streams/round_NNNN_p_best.jsonl` — per-query PoBB telemetry (rendered as a sparkline inside `log.md`).
+     - `cache/rounds/round_NNN.json` — per-round LLM action audit.
+     - `cache/candidates/round_NNNN.json` — pre-scoring candidate checkpoint (resume state); overwritten next round.
+     - `archived/resumed_at_<ts>/` — `--from <round>` rewind sweepup.
+   - **Sibling cycles** at the family root, split by kind:
+     - `forks/{cycle_id}/` — `--fork-on-divergence` operator-divergence forks.
+     - `diag/{cycle_id}/` — diagnostic-BFS auto-spawned siblings.
+     - `sweeps/{batch_id}/` — sweep batches; carries `index.json` + `summary.md` for the batch and `forks/{cycle_id}/` per payload.
 
-`optimize_result.json` and `hard_samples.json` were folded away this cycle: the final-run summary now lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md` instead of being its own file. Langfuse mirrors live under `campaigns/{cycle_id}/langfuse/` (including `langfuse/events.jsonl`); none of those are read for state reconstruction.
+`optimize_result.json` and `hard_samples.json` were folded away earlier: the final-run summary lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md`.
 
 **Alternatives to the dashboard.json-tail workflow:**
 
@@ -141,7 +152,7 @@ The cleanest live-monitoring setup for an operator running `python -m promptpott
 
 **Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
 - `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
-- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`, `output.log`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `trials/`, `langfuse/`, `prompts/`, plus `.cache/candidates/` and `.cache/rounds/` for internal resume state). Forks of this family nest under `campaigns/{root_cycle_id}/forks/{cycle_id}/` (audit only — telemetry stays at the root). Pre-existing flat-layout fork dirs are auto-migrated on store init (one-time, idempotent).
+- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `review.md`, `trials/`, `langfuse/`, `prompts/`) and a `.runtime/` umbrella for internals (`ledger.jsonl`, `streams/`, `cache/{rounds,candidates}/`, `archived/`). Sibling cycles nest under three kind-specific dirs: `forks/{cycle_id}/` (operator divergence forks), `diag/{cycle_id}/` (diagnostic-BFS auto-forks), and `sweeps/{batch_id}/forks/{cycle_id}/` (sweep-batch forks; the batch dir carries its own `index.json` + `summary.md`). Each sibling carries its own per-cycle audit + `.runtime/`; telemetry stays at the family root only.
 - `{tenant_id}/library/` — **the measurement archive — the database core, cross-cycle, cross-session, cross-tenant.** One row = `(sample × config → outcome)`. Two retrieval views, both first-class: `MeasurementArchive.measurements_for_sample(sample_id)` (by training example) and `MeasurementArchive.measurements_for_config(predicate)` (by searchpoint). Both return `list[Measurement]`. Cache reuse and LLM digests are derived views over this same archive. See [`docs/concepts/measurement-archive.md`](docs/concepts/measurement-archive.md) and [`docs/developer/measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md). Layout: `library/measurements/{run_id}.json` (facts), `library/measurements.json` (index), plus `backends/`, datasets, `prompt_aliases.json`. Both digest layers (`AxisIndex` and `SampleIndex`) are in-memory only — rebuilt from the archive every refresh, no on-disk file.
 
 Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/projections/`, `infrastructure/ledger.py`, and `application/runner.py`.

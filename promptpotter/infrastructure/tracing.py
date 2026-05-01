@@ -49,6 +49,7 @@ from promptpotter.infrastructure.store.base import (
     write_json,
     write_text,
 )
+from promptpotter.infrastructure.store.stores import campaign_dir_for
 from promptpotter.shared.errors import graceful
 
 
@@ -332,7 +333,9 @@ class FileSink:
 
     def _scope_dir(self) -> Path:
         if self._cycle_id:
-            return self._tenant_root / "campaigns" / self._cycle_id
+            # Route through campaign_dir_for so fork cycle_ids land in their
+            # nested fork dir, not at flat-layout campaigns/{cycle_id}/.
+            return campaign_dir_for(self._tenant_root, self._cycle_id)
         # Orphan fallback for out-of-campaign file_only() emits.
         return self._tenant_root / "library" / "obs"
 
@@ -738,7 +741,7 @@ class LangfuseSink:
 
     def _session_state_path(self, session_id: str) -> Path:
         # session_id == cycle_id here; state is per-campaign.
-        return self._base / "campaigns" / session_id / "langfuse" / "state.json"
+        return campaign_dir_for(self._base, session_id) / "langfuse" / "state.json"
 
     def _bind_session(self, session_id: str) -> None:
         if self._state_session_id == session_id:

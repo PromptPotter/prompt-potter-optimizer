@@ -12,7 +12,7 @@ Inputs
 - ``trials`` — per-round optimizer state from ``trials/trial_NNNN.json``,
   in round order. Carries ``opt_search_point`` (lineage, l2_directive,
   critique), composite, accuracy, l1_yield.
-- ``round_audits`` — per-round LLM I/O from ``.cache/rounds/round_NNNN.json``,
+- ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
   same length and order as ``trials``. Source of L1 variants for the
   variants table + behaviour checks. ``None`` for rounds with no audit.
 - ``context_object`` — three task-context strings the wiring layer pulls

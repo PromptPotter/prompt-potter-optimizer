@@ -342,7 +342,9 @@ def test_fork_for_diag_sibling_mints_counted_id_and_clears_trials(
     assert sib2 == f"{parent}_diag_002"
 
     sib1_dir = stores.campaigns.campaign_dir(sib1)
-    assert sib1_dir.parent.name == "forks", "diag siblings nest under forks/ like fork siblings"
+    assert sib1_dir.parent.name == "diag", (
+        "diag siblings nest under diag/ (separate from operator forks/)"
+    )
 
     sib1_index = json.loads((sib1_dir / "index.json").read_text(encoding="utf-8"))
     assert sib1_index["parent_cycle_id"] == parent

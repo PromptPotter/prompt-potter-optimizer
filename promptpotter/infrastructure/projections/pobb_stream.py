@@ -1,14 +1,14 @@
 """PoBBStreamProjection — appends per-query Posterior-of-Being-Best snapshots
-to ``campaigns/{cycle_id}/streams/round_NNNN_p_best.jsonl``.
+to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 
 Subscribed to the same ``RunLedger`` as the other projections. Filters on
 ``Snapshot.event == "p_best_update"`` and writes one JSONL record per
 PoBBCheck snapshot — operator-tailable in real time, replayable after the
 fact for trajectory plots and post-hoc analysis.
 
-Per-cycle scope: each fork's projection points at its own ``streams/``
-directory under the fork's audit tree (parallel to ``.cache/rounds/``). A
-runtime check rejects misrouted construction.
+Per-cycle scope: each fork's projection points at its own
+``.runtime/streams/`` directory under the fork's audit tree (parallel to
+``.runtime/cache/rounds/``). A runtime check rejects misrouted construction.
 """
 
 from __future__ import annotations
@@ -25,14 +25,14 @@ logger = logging.getLogger(__name__)
 
 __all__ = ["PoBBStreamProjection"]
 
-_STREAMS_SUBDIR = "streams"
+_STREAMS_SUBPATH = (".runtime", "streams")
 
 
 class PoBBStreamProjection:
     """Appends per-query P(best) snapshots to one JSONL file per round.
 
-    File path: ``streams/round_NNNN_p_best.jsonl`` under the cycle's audit
-    dir. Each line is a JSON object with ``round``, ``query_idx``,
+    File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
+    audit dir. Each line is a JSON object with ``round``, ``query_idx``,
     ``current_id``, ``p_best`` (cid → prob), ``p_best_delta`` (cid → delta
     vs previous query), and ``stopped`` (cids whose p_best fell below ε
     on this query — currently encoded as the singleton ``[current_id]``
@@ -40,9 +40,9 @@ class PoBBStreamProjection:
     """
 
     def __init__(self, streams_dir: Path) -> None:
-        if streams_dir.name != _STREAMS_SUBDIR:
+        if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:
             raise ValueError(
-                f"PoBBStreamProjection streams_dir must end in /{_STREAMS_SUBDIR}; "
+                f"PoBBStreamProjection streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
                 f"got {streams_dir}"
             )
         self.streams_dir = streams_dir
@@ -52,8 +52,8 @@ class PoBBStreamProjection:
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamProjection:
-        """Build a projection rooted at ``{cycle_dir}/streams``."""
-        return cls(Path(cycle_dir) / _STREAMS_SUBDIR)
+        """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
+        return cls(Path(cycle_dir).joinpath(*_STREAMS_SUBPATH))
 
     def on_record(self, record: RunRecord, offset: int) -> None:
         del offset

@@ -880,7 +880,7 @@ async def run_optimization(
     # minted a new fork cycle and updated ``session.state.cycle_id``. The
     # live dashboard projection is family-root-anchored so its telemetry
     # paths stay correct, but the ``AuditTrailProjection`` writes
-    # ``.cache/rounds/round_NNN.json`` per cycle and must be rebuilt to
+    # ``.runtime/cache/rounds/round_NNN.json`` per cycle and must be rebuilt to
     # point at the fork's own dir. Output.log gets a banner so the
     # operator can see the cutover inline.
     forked = (
@@ -1135,7 +1135,7 @@ def _render_log_md_for(
     n_trials = int(index.get("n_trials", 0) or 0)
     trials = store.load_trials_range(backend_id, cycle_id, 0, n_trials - 1) if n_trials else []
     cycle_dir = store.campaign_dir(cycle_id)
-    streams_dir = cycle_dir / "streams"
+    streams_dir = cycle_dir / ".runtime" / "streams"
     fork_indices = _load_fork_indices(cycle_dir)
     content = to_markdown(
         from_disk_log(
@@ -1150,16 +1150,28 @@ def _render_log_md_for(
 
 
 def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
-    """Read every fork's ``index.json`` under ``cycle_dir/forks/``.
+    """Read every sibling cycle's ``index.json`` under the family root.
 
-    Returns ``None`` when the dir doesn't exist (i.e. the cycle is itself a
-    fork, or no forks have been minted yet) so ``from_disk_log`` knows to
-    skip the Forks section."""
-    forks_dir = cycle_dir / "forks"
-    if not forks_dir.is_dir():
+    Walks all three sibling kinds: ``forks/``, ``diag/``, and
+    ``sweeps/*/forks/``. Returns ``None`` when no sibling dirs exist (i.e.
+    the cycle is itself a fork, or no siblings have been minted yet) so
+    ``from_disk_log`` knows to skip the Forks section.
+    """
+    sibling_dirs: list[Path] = []
+    for sibling_kind in ("forks", "diag"):
+        parent = cycle_dir / sibling_kind
+        if parent.is_dir():
+            sibling_dirs.extend(sorted(parent.iterdir()))
+    sweeps_dir = cycle_dir / "sweeps"
+    if sweeps_dir.is_dir():
+        for batch_dir in sorted(sweeps_dir.iterdir()):
+            batch_forks = batch_dir / "forks"
+            if batch_forks.is_dir():
+                sibling_dirs.extend(sorted(batch_forks.iterdir()))
+    if not sibling_dirs:
         return None
     out: list[dict] = []
-    for fork_dir in sorted(forks_dir.iterdir()):
+    for fork_dir in sibling_dirs:
         if not fork_dir.is_dir():
             continue
         idx = fork_dir / "index.json"
@@ -1241,7 +1253,7 @@ def _write_review_md(session: Session, cycle: Cycle) -> None:
     """Render ``campaigns/{cycle_id}/review.md`` from index + trials + round audits.
 
     M10's prompt-iteration feedback surface — peer of ``log.md``. Reads
-    each round's ``.cache/rounds/round_NNNN.json`` so behaviour checks can
+    each round's ``.runtime/cache/rounds/round_NNNN.json`` so behaviour checks can
     evaluate the live L1 variants. Pulls the three context_object items
     off the cycle's ``task_context`` so the seeded
     ``context_object_honored`` check has something to match against.
@@ -1260,7 +1272,7 @@ def _write_review_md(session: Session, cycle: Cycle) -> None:
             else []
         )
         cycle_dir = store.campaign_dir(session.state.cycle_id)
-        rounds_dir = cycle_dir / ".cache" / "rounds"
+        rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
         round_audits: list[dict | None] = []
         for trial in trials:
             round_num = int(trial.get("round") or 0)
