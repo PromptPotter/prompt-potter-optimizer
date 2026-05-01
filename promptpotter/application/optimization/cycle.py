@@ -75,6 +75,7 @@ __all__ = [
     "LayerCounter",
     "ReplayContext",
     "_fork_for_diag_sibling",
+    "_fork_for_sweep_sibling",
     "apply_sweep_payload_to_osp",
     "build_escalation_entry",
     "escalate_l2",
@@ -398,10 +399,15 @@ def _fork_at_divergence(
     old_cycle_id: str,
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
-    extra_data: dict[str, Any] | None = None,
-    sweep_batch_id: str | None = None,
 ) -> str:
-    """Mint a sibling cycle that re-runs round ``fork_from_round``.
+    """Mint an operator-divergence sibling that re-runs round ``fork_from_round``.
+
+    Resume semantics: the fork inherits the parent's prior-round
+    artifacts (``trials/trial_NNNN.json`` and the
+    ``.runtime/cache/candidates/round_NNNN.json`` checkpoints) for
+    every round below ``fork_from_round`` so the resumed loop replays
+    those rounds deterministically before re-running round
+    ``fork_from_round`` under the current scorer.
 
     Records a ``Decision(kind=FORK_CUT, ...)`` on the parent's ledger
     naming the new cycle id and the fork-from-round so any downstream
@@ -410,17 +416,11 @@ def _fork_at_divergence(
     not including) the FORK_CUT — wired in :mod:`runner` after the
     fork is detected.
 
-    ``extra_data`` is an optional dict merged into the FORK_CUT
-    decision's archival ``data`` block. The scoring-divergence caller
-    passes nothing; the M10 sweep caller threads the parsed
-    ``SweepPayload`` (under key ``sweep_payload``) so leaderboard
-    rendering and downstream review can attribute the fork.
-
-    ``sweep_batch_id``, when set, marks this fork as part of a sweep
-    batch — the new cycle id encodes ``_sweep_{batch_id}_`` so
-    ``campaign_dir_for`` routes it to ``sweeps/{batch_id}/forks/``
-    instead of the operator-divergence ``forks/`` dir. ``batch_id``
-    must contain no underscores (use hyphens or alnum only).
+    Sibling forks that intentionally re-explore from round 0 (sweep,
+    diag-BFS) must NOT pass through this function — they would inherit
+    the parent's stale round-0 candidate checkpoint and short-circuit
+    L1 generation. Use :func:`_fork_for_sweep_sibling` or
+    :func:`_fork_for_diag_sibling` for clean-slate siblings.
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import RunLedger
@@ -429,24 +429,13 @@ def _fork_at_divergence(
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
-    if sweep_batch_id is not None:
-        if "_" in sweep_batch_id:
-            raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
-        new_cycle_id = f"{old_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
-    else:
-        new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
+    new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
     old_dir = campaign_store.campaign_dir(old_cycle_id)
     new_dir = campaign_store.campaign_dir(new_cycle_id)
     if new_dir.exists():
         raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
     new_dir.mkdir(parents=True, exist_ok=True)
 
-    # Parent ledger gets a FORK_CUT record naming the new cycle so a
-    # tail of the parent sees the cutover. Best-effort — a missing or
-    # corrupt ledger doesn't block the fork from minting.
-    decision_data: dict[str, Any] = {"forked_at": datetime.now(UTC).isoformat()}
-    if extra_data:
-        decision_data.update(extra_data)
     with graceful("FORK_CUT decision append failed"):
         parent_ledger = RunLedger.open(CycleDir(old_dir))
         parent_ledger.append(
@@ -454,7 +443,7 @@ def _fork_at_divergence(
                 kind=DecisionKind.FORK_CUT,
                 inputs_ref={"from_round": fork_from_round},
                 outcome=new_cycle_id,
-                data=decision_data,
+                data={"forked_at": datetime.now(UTC).isoformat()},
             )
         )
 
@@ -588,6 +577,106 @@ def _fork_for_diag_sibling(
         "Diag sibling: %s → %s (active pointer retargeted)",
         parent_cycle_id,
         new_cycle_id,
+    )
+    return new_cycle_id
+
+
+def _fork_for_sweep_sibling(
+    campaign_store: CampaignStore,
+    tenant_id: str,
+    session_id: str,
+    parent_cycle_id: str,
+    sweep_batch_id: str,
+    payload_source_file: str,
+    payload: SweepPayload,
+) -> str:
+    """Mint a sweep-batch sibling — clean slate, no inherited round artifacts.
+
+    Sweep forks explore the parent's problem under a per-payload L1
+    directive that ``apply_sweep_payload_to_osp`` stamps onto the fresh
+    OSP at runtime. Round 0 must regenerate via L1 to actually
+    exercise that directive; inheriting the parent's
+    ``round_0000.json`` candidate checkpoint (as
+    :func:`_fork_at_divergence` does for resume semantics) would
+    short-circuit L1 generation and make every fork score the parent's
+    pre-existing population — defeating the sweep.
+
+    The cycle id encodes ``_sweep_{batch_id}_`` so ``campaign_dir_for``
+    routes the fork under ``sweeps/{batch_id}/forks/``.
+    ``sweep_batch_id`` must contain no underscores (use hyphens or
+    alnum only) — the cycle-id regex extracts it by splitting on ``_``.
+
+    The FORK_CUT record archives ``sweep_payload`` + ``source_file`` +
+    ``sweep_batch_id`` so :func:`_existing_fork_source_files` can dedupe
+    re-runs of the same payload from the same parent.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.store.base import read_json_optional, write_json
+    from promptpotter.infrastructure.store.stores import save_active_pointer
+
+    if "_" in sweep_batch_id:
+        raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
+    ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
+    suffix = hashlib.sha256(f"{parent_cycle_id}|{ts}|{payload_source_file}".encode()).hexdigest()[
+        :8
+    ]
+    new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
+    parent_dir = campaign_store.campaign_dir(parent_cycle_id)
+    new_dir = campaign_store.campaign_dir(new_cycle_id)
+    if new_dir.exists():
+        raise FileExistsError(f"sweep sibling dir already exists: {new_dir}")
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(UTC).isoformat()
+    with graceful("FORK_CUT decision append failed"):
+        parent_ledger = RunLedger.open(CycleDir(parent_dir))
+        parent_ledger.append(
+            Decision(
+                kind=DecisionKind.FORK_CUT,
+                inputs_ref={"from_round": 0},
+                outcome=new_cycle_id,
+                data={
+                    "forked_at": now,
+                    "kind": "sweep_fork",
+                    "sweep_batch_id": sweep_batch_id,
+                    "source_file": payload_source_file,
+                    "sweep_payload": payload.model_dump(mode="json"),
+                },
+            )
+        )
+
+    parent_index = read_json_optional(parent_dir / "index.json") or {}
+    new_index: dict[str, Any] = {
+        "campaign_id": new_cycle_id,
+        "type": parent_index.get("type", "optimization_loop"),
+        "config": parent_index.get("config", {}),
+        "connector_type": parent_index.get("connector_type", ""),
+        "backend_id": parent_index.get("backend_id", ""),
+        "parent_cycle_id": parent_cycle_id,
+        "parent_session_id": parent_index.get("parent_session_id", ""),
+        "forked_from_round": 0,
+        "forked_at": now,
+        "fork_kind": "sweep_fork",
+        "sweep_batch_id": sweep_batch_id,
+        "trials": [],
+        "n_trials": 0,
+        "best_accuracy": 0.0,
+        "best_trial_id": None,
+        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+    }
+    write_json(new_dir / "index.json", new_index)
+
+    save_active_pointer(tenant_id, session_id, new_cycle_id)
+    logger.info(
+        "Sweep sibling: %s → %s (batch=%s, payload=%s; active pointer retargeted)",
+        parent_cycle_id,
+        new_cycle_id,
+        sweep_batch_id,
+        payload_source_file,
     )
     return new_cycle_id
 

@@ -663,7 +663,7 @@ async def _run_sweep_batch(
     """
     import secrets
 
-    from promptpotter.application.optimization.cycle import _fork_at_divergence
+    from promptpotter.application.optimization.cycle import _fork_for_sweep_sibling
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -732,21 +732,16 @@ async def _run_sweep_batch(
                 existing[path.name],
             )
             continue
-        new_cycle_id = _fork_at_divergence(
+        new_cycle_id = _fork_for_sweep_sibling(
             campaign_store=store.campaigns,
             tenant_id=tenant_id,
             session_id=root_ctx.session_id,
-            old_cycle_id=parent_cycle_id,
-            fork_from_round=1,
-            surviving_trials=[],
-            extra_data={
-                "sweep_payload": payload.model_dump(mode="json"),
-                "source_file": path.name,
-                "sweep_batch_id": batch_id,
-            },
+            parent_cycle_id=parent_cycle_id,
             sweep_batch_id=batch_id,
+            payload_source_file=path.name,
+            payload=payload,
         )
-        # _fork_at_divergence retargeted the active pointer to new_cycle_id.
+        # _fork_for_sweep_sibling retargeted the active pointer to new_cycle_id.
         # Re-load context for this fork and build a fresh session bound to it.
         fork_ctx = load_session(args)
         fork_session = await init_services_cli(**fork_ctx.init_params)

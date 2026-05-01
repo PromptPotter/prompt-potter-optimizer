@@ -9,12 +9,14 @@ from promptpotter.application.optimization.cycle import (
     REPLAYERS,
     _fork_at_divergence,
     _fork_for_diag_sibling,
+    _fork_for_sweep_sibling,
     replay_decisions,
 )
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
 from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
 )
+from promptpotter.domain.run_records import SweepPayload
 from promptpotter.infrastructure.store.stores import build_stores, root_cycle_id
 
 
@@ -385,3 +387,105 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 0}
     assert (cut.data or {}).get("kind") == "diag_sibling"
+
+
+def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
+    tmp_path: Path, monkeypatch
+) -> None:
+    """Sweep forks must start with no candidate-cache files copied from the
+    parent — round 0 has to regenerate via L1 to actually exercise the
+    payload's directive. ``_fork_at_divergence`` inherits prior rounds for
+    resume semantics; ``_fork_for_sweep_sibling`` deliberately doesn't, and
+    a regression here silently makes every fork in a batch score the
+    parent's pre-existing population.
+    """
+    tenant = "default"
+    parent = "cycle_sweepparent"
+    _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
+    # Lay down the candidate-cache file at the runtime path (the seed helper
+    # writes to a legacy ``candidates/`` subdir that the production code
+    # doesn't read; sweep inheritance hits ``.runtime/cache/candidates/``).
+    parent_runtime_cands = (
+        tmp_path / tenant / "campaigns" / parent / ".runtime" / "cache" / "candidates"
+    )
+    parent_runtime_cands.mkdir(parents=True)
+    (parent_runtime_cands / "round_0000.json").write_text(
+        '[{"osp": {"persona": "stale parent population"}}]', encoding="utf-8"
+    )
+    ptr = tmp_path / ".promptpotter" / "active_session.json"
+    monkeypatch.setattr("promptpotter.infrastructure.store.stores._ACTIVE_SESSION_PATH", ptr)
+
+    stores = build_stores(tmp_path, tenant_id=tenant)
+    payload = SweepPayload(reason="probe", directive="explore persona axis")
+    new_cycle = _fork_for_sweep_sibling(
+        stores.campaigns,
+        tenant_id=tenant,
+        session_id="s_test",
+        parent_cycle_id=parent,
+        sweep_batch_id="b1abc",
+        payload_source_file="01_persona_axis.json",
+        payload=payload,
+    )
+
+    new_dir = stores.campaigns.campaign_dir(new_cycle)
+    # Path: campaigns/{root}/sweeps/{batch}/forks/{cycle_id}
+    assert new_dir.parent.name == "forks"
+    assert new_dir.parent.parent.name == "b1abc"
+    assert new_dir.parent.parent.parent.name == "sweeps", (
+        "sweep forks nest under sweeps/{batch}/forks/, not the operator forks/ dir"
+    )
+    fork_runtime_cands = new_dir / ".runtime" / "cache" / "candidates" / "round_0000.json"
+    assert not fork_runtime_cands.exists(), (
+        "sweep fork must NOT inherit the parent's round-0 candidate cache; "
+        "L1 generation would short-circuit and ignore the sweep payload's directive"
+    )
+    assert not (new_dir / "trials" / "trial_0000.json").exists(), (
+        "sweep fork must NOT inherit any parent trials; sweep starts fresh from baseline"
+    )
+
+    index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
+    assert index["parent_cycle_id"] == parent
+    assert index["fork_kind"] == "sweep_fork"
+    assert index["sweep_batch_id"] == "b1abc"
+    assert index["forked_from_round"] == 0
+    assert index["trials"] == []
+
+
+def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, monkeypatch) -> None:
+    """The parent's FORK_CUT must carry sweep_payload + source_file +
+    sweep_batch_id so ``_existing_fork_source_files`` can dedupe re-runs and
+    downstream review can attribute the fork to the operator's hypothesis.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.infrastructure.ledger import RunLedger
+
+    tenant = "default"
+    parent = "cycle_sweepparent2"
+    _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
+    ptr = tmp_path / ".promptpotter" / "active_session.json"
+    monkeypatch.setattr("promptpotter.infrastructure.store.stores._ACTIVE_SESSION_PATH", ptr)
+
+    stores = build_stores(tmp_path, tenant_id=tenant)
+    parent_dir = stores.campaigns.campaign_dir(parent)
+    payload = SweepPayload(reason="probe", directive="explore persona axis")
+    new_cycle = _fork_for_sweep_sibling(
+        stores.campaigns,
+        tenant_id=tenant,
+        session_id="s_test",
+        parent_cycle_id=parent,
+        sweep_batch_id="b2def",
+        payload_source_file="02_persona_axis.json",
+        payload=payload,
+    )
+
+    parent_ledger = RunLedger.open(CycleDir(parent_dir))
+    cut = list(parent_ledger.iter())[-1]
+    assert isinstance(cut, Decision)
+    assert cut.kind is DecisionKind.FORK_CUT
+    assert cut.outcome == new_cycle
+    data = cut.data or {}
+    assert data.get("kind") == "sweep_fork"
+    assert data.get("source_file") == "02_persona_axis.json"
+    assert data.get("sweep_batch_id") == "b2def"
+    assert (data.get("sweep_payload") or {}).get("directive") == "explore persona axis"
