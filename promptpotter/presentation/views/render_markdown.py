@@ -63,13 +63,15 @@ def render_hard_sample_heatmap(
     label_w = max(_HEATMAP_LABEL_W, min(24, max(len(c) for c in candidate_order)))
     cell_w = _HEATMAP_CELL_W
 
+    cand_str = f"{n_cand} of {total_cand}" + (
+        " (truncated)" if truncated and n_cand < total_cand else ""
+    )
+    samp_str = f"{n_samp} of {total_samp}" + (
+        " (truncated)" if truncated and n_samp < total_samp else ""
+    )
     lines = [
-        "\nHARD-SAMPLE HEATMAP",
-        "=" * 70,
-        f"  candidates : {n_cand} of {total_cand}"
-        + (" (truncated)" if truncated and n_cand < total_cand else ""),
-        f"  samples    : {n_samp} of {total_samp}"
-        + (" (truncated)" if truncated and n_samp < total_samp else ""),
+        f"  individuals : {cand_str}",
+        f"  samples     : {samp_str}",
         f"  observed cells : {artifact['n_observations']}",
         f"  legend : {_HIT} hit   {_MISS} miss   {_UNMEASURED} not measured",
     ]

@@ -336,8 +336,9 @@ class FileSink:
             # Route through campaign_dir_for so fork cycle_ids land in their
             # nested fork dir, not at flat-layout campaigns/{cycle_id}/.
             return campaign_dir_for(self._tenant_root, self._cycle_id)
-        # Orphan fallback for out-of-campaign file_only() emits.
-        return self._tenant_root / "library" / "obs"
+        # Orphan fallback for out-of-campaign file_only() emits — tucked
+        # under .archive/ so library/ top stays operator-facing.
+        return self._tenant_root / "library" / ".archive" / "obs"
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = _utcnow_iso()

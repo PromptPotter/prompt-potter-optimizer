@@ -1,17 +1,16 @@
 """Cross-cycle review CLI — read-only pivot over a tenant's campaigns.
 
-Default view ranks every cycle by ``(l1_generate_hash, rounds_to_95)``;
-``--sweep`` filters to sweep-mode cycles ranked by round-1 top_lift.
-``proxy_lift_corr`` (Spearman) reported in the footer when ≥4 paired
-``l1_generate_hash``es exist across both modes — the validity check on
-M10's "round 1 predicts full cycle" hypothesis.
+Renders the same body as ``library/runs.md`` to stdout: every cycle
+grouped by ``l1_generate_hash``, with a ``## Sweep view`` section when
+sweep-mode cycles exist. ``proxy_lift_corr`` (Spearman) reported in the
+footer when ≥4 paired ``l1_generate_hash``es exist across both modes —
+the validity check on M10's "round 1 predicts full cycle" hypothesis.
 
 Stdout only. Not a write verb.
 
 Examples::
 
     python scripts/ppot_review.py
-    python scripts/ppot_review.py --sweep
     python scripts/ppot_review.py --tenant default --projects-root ./projects
 """
 
@@ -28,8 +27,7 @@ if str(_REPO_ROOT) not in sys.path:
 from promptpotter.application.leaderboard import (  # noqa: E402
     build_leaderboard_rows,
     compute_proxy_lift_corr,
-    format_leaderboard,
-    format_sweep_leaderboard,
+    format_runs_md,
 )
 from promptpotter.infrastructure.store import build_stores  # noqa: E402
 
@@ -47,11 +45,6 @@ def main() -> int:
         help="Datasets root for store init (default: datasets)",
     )
     parser.add_argument("--tenant", default="default", help="Tenant id (default: default)")
-    parser.add_argument(
-        "--sweep",
-        action="store_true",
-        help="Show only sweep-mode cycles, ranked by round-1 top_lift desc.",
-    )
     args = parser.parse_args()
 
     projects_root = Path(args.projects_root).resolve()
@@ -66,10 +59,7 @@ def main() -> int:
         print("(no cycles found)")
         return 0
 
-    if args.sweep:
-        print(format_sweep_leaderboard(rows))
-    else:
-        print(format_leaderboard(rows))
+    print(format_runs_md(rows))
 
     corr, n_pairs = compute_proxy_lift_corr(rows)
     if corr is not None:

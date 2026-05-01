@@ -42,10 +42,11 @@ DEFAULT_TENANT_ID = "default"
 class BackendStore:
     """File I/O for backend registration and synced API responses.
 
-    Backends live under ``library/backends/{backend_id}/`` — peer entities
-    within the tenant, not outer axes themselves. Named datasets live
-    outside the tenant tree at ``{datasets_root}/{name}/cache.json`` so
-    they survive ``.promptpotter/`` resets.
+    Backends live under ``library/.archive/backends/{backend_id}/`` —
+    machine state the runtime needs (registration record, sync responses,
+    connector profile). Named datasets live outside the tenant tree at
+    ``{datasets_root}/{name}/cache.json`` so they survive
+    ``.promptpotter/`` resets.
     """
 
     def __init__(self, base_dir: Path, datasets_root: Path):
@@ -53,7 +54,7 @@ class BackendStore:
         self._datasets_root = datasets_root
 
     def _backends_root(self) -> Path:
-        return self._base_dir / "library" / "backends"
+        return self._base_dir / "library" / ".archive" / "backends"
 
     def _backend_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)

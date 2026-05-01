@@ -1,13 +1,11 @@
 """Cross-cycle leaderboard — read-only pivot over a tenant's campaigns.
 
 Walks every cycle under a ``Stores.campaigns`` tree, computes per-cycle
-``L1Stats`` + behaviour pass rates, and renders two views:
-
-- **Default** — every cycle, sorted by (l1_generate_hash, rounds_to_95
-  asc with None last, behavior_pass_rate desc). The "are we converging"
-  view.
-- **Sweep** — sweep-mode cycles only, sorted by round-1 top_lift desc.
-  The "which candidate L1 prompt is most promising" view.
+``L1Stats`` + behaviour pass rates, and renders the operator-facing
+``library/runs.md`` and ``library/individuals.md``. Cycles group by
+``l1_generate_hash`` (one heading per canonical L1-generate template).
+Sweep-mode cycles get their own ``## Sweep view`` section in the same
+file; absent when no sweep cycles exist.
 
 Computes ``proxy_lift_corr`` — Spearman rank correlation between
 sweep-mode round-1 top_lift and full-mode rounds_to_95-or-final-acc,
@@ -31,12 +29,11 @@ from promptpotter.application.optimization.l1_stats import (
 __all__ = [
     "JSPRow",
     "LeaderboardRow",
-    "build_jsp_leaderboard_rows",
+    "build_individuals_rows",
     "build_leaderboard_rows",
     "compute_proxy_lift_corr",
-    "format_jsp_leaderboard",
-    "format_leaderboard",
-    "format_sweep_leaderboard",
+    "format_individuals_md",
+    "format_runs_md",
 ]
 
 
@@ -134,27 +131,100 @@ def compute_proxy_lift_corr(rows: list[LeaderboardRow]) -> tuple[float | None, i
     return float(corr), n_pairs
 
 
-def format_leaderboard(rows: list[LeaderboardRow]) -> str:
-    """Default view: all cycles, grouped by l1_generate_hash."""
-    sorted_rows = sorted(
-        rows,
-        key=lambda r: (
-            r.l1_generate_hash,
-            (r.rounds_to_95 if r.rounds_to_95 is not None else 999),
-            -r.behavior_pass_rate,
-        ),
-    )
-    return _format_table(sorted_rows, _DEFAULT_COLS)
+def format_runs_md(rows: list[LeaderboardRow]) -> str:
+    """Markdown body for ``library/runs.md`` — every cycle, grouped by template.
 
+    One H2 per ``l1_generate_hash`` carries the constants (template hash +
+    dataset + pipeline) so the table inside each group can stay narrow
+    (cycle, mode, baseline → best, rounds, L2 fires, behavior, round 1).
 
-def format_sweep_leaderboard(rows: list[LeaderboardRow]) -> str:
-    """Sweep view: sweep cycles only, sorted by round-1 top_lift desc."""
-    sweep_rows = [r for r in rows if r.mode == "sweep"]
-    sorted_rows = sorted(
-        sweep_rows,
+    Sweep-mode cycles surface as a separate ``## Sweep view`` H2 sorted by
+    round-1 top_lift desc. The section is omitted entirely when zero sweep
+    cycles exist — no "(no rows)" placeholder.
+    """
+    if not rows:
+        return "_No cycles yet — run `python -m promptpotter optimize`._\n"
+
+    parts: list[str] = [
+        "Every cycle this tenant has produced. Grouped by L1-generate template —",
+        "cycles sharing one group used the same canonical L1-generate prompt. Within",
+        "a group, **mode** (`full` / `diag` / `sweep`) tells you what the cycle was for.",
+        "",
+    ]
+
+    grouped: dict[tuple[str, str, str], list[LeaderboardRow]] = {}
+    for r in rows:
+        grouped.setdefault((r.l1_generate_hash, r.dataset, r.pipeline), []).append(r)
+
+    for (l1g, dataset, pipeline), group_rows in sorted(grouped.items()):
+        group_rows.sort(
+            key=lambda r: (
+                (r.rounds_to_95 if r.rounds_to_95 is not None else 999),
+                -r.behavior_pass_rate,
+                r.cycle_id,
+            )
+        )
+        parts.append(f"## L1-generate `{l1g or '?'}` · {dataset} · {pipeline}")
+        parts.append("")
+        parts += _runs_table([_run_row_cells(r) for r in group_rows])
+        parts.append("")
+
+    sweep_rows = sorted(
+        (r for r in rows if r.mode == "sweep"),
         key=lambda r: (-r.round_1_top_lift, -r.behavior_pass_rate),
     )
-    return _format_table(sorted_rows, _SWEEP_COLS)
+    if sweep_rows:
+        parts.append("## Sweep view")
+        parts.append("")
+        parts.append("Sweep-mode cycles ranked by round-1 top-lift — used to narrow down")
+        parts.append("candidate L1 prompts before promoting to full runs.")
+        parts.append("")
+        parts += _sweep_table([_sweep_row_cells(r) for r in sweep_rows])
+        parts.append("")
+
+    return "\n".join(parts).rstrip() + "\n"
+
+
+_RUN_HEADERS = ("cycle", "mode", "baseline → best", "rounds", "L2 fires", "behavior", "round 1")
+_SWEEP_HEADERS = ("cycle", "round 1", "top lift", "yield", "behavior", "baseline")
+
+
+def _run_row_cells(r: LeaderboardRow) -> tuple[str, ...]:
+    return (
+        r.cycle_id,
+        r.mode or "?",
+        f"{r.baseline_acc:.2f} → {r.best_acc:.2f}",
+        str(r.rounds_completed),
+        str(r.l2_fires),
+        f"{r.behavior_pass_rate * 100:.0f}%",
+        r.round_1_verdict or "—",
+    )
+
+
+def _sweep_row_cells(r: LeaderboardRow) -> tuple[str, ...]:
+    return (
+        r.cycle_id,
+        r.round_1_verdict or "—",
+        f"{r.round_1_top_lift:+.3f}",
+        f"{r.round_1_yield * 100:.0f}%",
+        f"{r.behavior_pass_rate * 100:.0f}%",
+        f"{r.baseline_acc:.2f}",
+    )
+
+
+def _runs_table(rows: list[tuple[str, ...]]) -> list[str]:
+    return _md_table(_RUN_HEADERS, rows)
+
+
+def _sweep_table(rows: list[tuple[str, ...]]) -> list[str]:
+    return _md_table(_SWEEP_HEADERS, rows)
+
+
+def _md_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
+    header = "| " + " | ".join(headers) + " |"
+    sep = "|" + "|".join("-" * (len(h) + 2) for h in headers) + "|"
+    body = ["| " + " | ".join(cells) + " |" for cells in rows]
+    return [header, sep, *body]
 
 
 # --- per-cycle row construction ------------------------------------------
@@ -265,97 +335,31 @@ def _lookup_dataset(stores: Any, session_id: str) -> str:
     )
 
 
-# --- table formatting -----------------------------------------------------
-
-_DEFAULT_COLS: tuple[tuple[str, str], ...] = (
-    ("cycle_id", "cycle"),
-    ("dataset", "dataset"),
-    ("l1_generate_hash", "l1g"),
-    ("l1_critique_hash", "l1c"),
-    ("mode", "mode"),
-    ("rounds_to_95", "→95"),
-    ("round_1_verdict", "r1"),
-    ("round_1_top_lift", "r1Δ"),
-    ("best_acc", "best"),
-    ("baseline_acc", "base"),
-    ("delta_acc", "Δacc"),
-    ("behavior_pass_rate", "beh"),
-    ("rounds_completed", "n"),
-    ("l2_fires", "l2"),
-    ("stop_reason", "stop"),
-)
-
-_SWEEP_COLS: tuple[tuple[str, str], ...] = (
-    ("cycle_id", "cycle"),
-    ("dataset", "dataset"),
-    ("l1_generate_hash", "l1g"),
-    ("round_1_verdict", "r1"),
-    ("round_1_top_lift", "r1Δ"),
-    ("round_1_yield", "yield"),
-    ("behavior_pass_rate", "beh"),
-    ("baseline_acc", "base"),
-    ("stop_reason", "stop"),
-)
-
-
-def _format_table(rows: list[Any], cols: tuple[tuple[str, str], ...]) -> str:
-    if not rows:
-        return "(no rows)\n"
-    cells: list[list[str]] = [[label for _, label in cols]]
-    for r in rows:
-        cells.append([_fmt(getattr(r, attr)) for attr, _ in cols])
-    widths = [max(len(c) for c in col) for col in zip(*cells, strict=True)]
-    lines = []
-    for i, row in enumerate(cells):
-        lines.append("  ".join(c.ljust(w) for c, w in zip(row, widths, strict=True)))
-        if i == 0:
-            lines.append("  ".join("-" * w for w in widths))
-    return "\n".join(lines) + "\n"
-
-
-def _fmt(value: Any) -> str:
-    if value is None:
-        return "—"
-    if isinstance(value, bool):
-        return "y" if value else "n"
-    if isinstance(value, float):
-        return f"{value:+.3f}" if abs(value) < 10 else f"{value:.2f}"
-    if isinstance(value, tuple | list):
-        if not value:
-            return "—"
-        if len(value) == 1:
-            return str(value[0])
-        return f"{value[0]} (+{len(value) - 1})"
-    return str(value)
-
-
 # ===========================================================================
-# JSP (config) leaderboard — peer of the cycle leaderboard, ranks individual
-# JobSearchPoints across the tenant's measurement archive. Each archive index
-# entry is one JSP (content_hash unique in index — see MeasurementArchive.save).
+# Individuals view — ranks JobSearchPoints across the tenant's measurement
+# archive. Each archive index entry is one individual (content_hash unique
+# in index — see MeasurementArchive.save).
 # ===========================================================================
 
 
 @dataclass(frozen=True)
 class JSPRow:
-    """One JSP's aggregate performance across the tenant's archive."""
+    """One individual's aggregate performance across the tenant's archive."""
 
-    jsp_hash: str  # content_hash[:12]
-    n_samples: int  # samples measured under this JSP
-    n_hits: int
+    jsp_hash: str  # content_hash[:8]
+    n_samples: int  # samples measured under this individual
     mean_score: float
-    hit_rate: float
-    last_seen: str  # ISO timestamp from the archive entry's created_at
-    pipeline_short: str  # 1-line summary derived from node_configs
+    measured_at: str  # short timestamp from the archive entry's created_at
+    origin_cycle: str  # experiment_id (cycle prefix) of the originating cycle
 
 
-def build_jsp_leaderboard_rows(stores: Any, backend_id: str) -> list[JSPRow]:
-    """Walk the archive, build one JSPRow per measured config.
+def build_individuals_rows(stores: Any, backend_id: str) -> list[JSPRow]:
+    """Walk the archive, build one row per measured individual.
 
-    Each archive index entry maps 1:1 to a JSP (the archive replaces by
-    content_hash on save). For each entry, load the detail file to
-    aggregate per-sample hit/score and produce the row. Skips entries
-    with unreadable detail.
+    Each archive index entry maps 1:1 to an individual (the archive
+    replaces by ``content_hash`` on save). For each entry, load the
+    detail file to aggregate per-sample score, then build the row.
+    Skips entries with unreadable detail.
     """
     archive = stores.archive
     rows: list[JSPRow] = []
@@ -371,15 +375,12 @@ def build_jsp_leaderboard_rows(stores: Any, backend_id: str) -> list[JSPRow]:
             continue
         items = detail.get("measurements") or []
         n_samples = 0
-        n_hits = 0
         score_sum = 0.0
         score_n = 0
         for item in items:
             if item.get("error") or item.get("predicted") == "ERROR":
                 continue
             n_samples += 1
-            if bool(item.get("hit")):
-                n_hits += 1
             s = item.get("score")
             if s is not None:
                 score_sum += float(s)
@@ -387,43 +388,49 @@ def build_jsp_leaderboard_rows(stores: Any, backend_id: str) -> list[JSPRow]:
         if n_samples == 0:
             continue
         mean_score = (score_sum / score_n) if score_n else 0.0
-        hit_rate = n_hits / n_samples
         rows.append(
             JSPRow(
-                jsp_hash=content_hash[:12],
+                jsp_hash=content_hash[:8],
                 n_samples=n_samples,
-                n_hits=n_hits,
                 mean_score=mean_score,
-                hit_rate=hit_rate,
-                last_seen=str(entry.get("created_at") or ""),
-                pipeline_short=_pipeline_short(entry.get("node_configs")),
+                measured_at=_short_ts(str(entry.get("created_at") or "")),
+                origin_cycle=str(entry.get("experiment_id") or "—"),
             )
         )
     return rows
 
 
-def _pipeline_short(node_configs: Any) -> str:
-    """One-line node-list summary for the leaderboard's pipeline column."""
-    if not node_configs:
-        return "?"
-    names: list[str] = []
-    for pair in node_configs:
-        if isinstance(pair, list | tuple) and len(pair) == 2:
-            names.append(str(pair[0]))
-    return "→".join(names) if names else "?"
+def format_individuals_md(rows: list[JSPRow]) -> str:
+    """Markdown body for ``library/individuals.md`` — every measured individual."""
+    if not rows:
+        return "_No measurements yet — run a cycle first._\n"
 
-
-def format_jsp_leaderboard(rows: list[JSPRow]) -> str:
-    """JSP table sorted by mean_score desc, tiebreak by n_samples desc."""
     sorted_rows = sorted(rows, key=lambda r: (-r.mean_score, -r.n_samples, r.jsp_hash))
-    return _format_table(sorted_rows, _JSP_COLS)
+    parts: list[str] = [
+        "Every individual (a target-layer JobSearchPoint — `pipeline_params` plus",
+        "the canonical prompt) the system has scored across all cycles. Ranked by",
+        "mean score.",
+        "",
+    ]
+    headers = ("individual", "mean score", "samples", "measured", "origin cycle")
+    body: list[tuple[str, ...]] = []
+    for r in sorted_rows:
+        body.append(
+            (
+                r.jsp_hash,
+                f"{r.mean_score:.2f}",
+                str(r.n_samples),
+                r.measured_at or "—",
+                r.origin_cycle,
+            )
+        )
+    parts += _md_table(headers, body)
+    parts.append("")
+    return "\n".join(parts).rstrip() + "\n"
 
 
-_JSP_COLS: tuple[tuple[str, str], ...] = (
-    ("jsp_hash", "jsp"),
-    ("mean_score", "score"),
-    ("hit_rate", "hits"),
-    ("n_samples", "n"),
-    ("pipeline_short", "pipeline"),
-    ("last_seen", "last_seen"),
-)
+def _short_ts(ts: str) -> str:
+    """ISO timestamp → ``YYYY-MM-DD HH:MM`` (drops seconds + tz). Empty → ''."""
+    if not ts or len(ts) < 16:
+        return ts
+    return ts[:10] + " " + ts[11:16]

@@ -5,8 +5,8 @@ Guards three things:
 1. ``StopReason.DIAG_COMPLETE`` is a named member (M10 diag mode wire shape).
 2. ``build_archive_observations`` keys candidates by ``content_hash[:12]``
    and skips error/missing-id rows (the input contract Rasch fitting relies on).
-3. ``build_jsp_leaderboard_rows`` aggregates per-sample hit/score correctly
-   and ``format_jsp_leaderboard`` sorts by ``mean_score`` desc.
+3. ``build_individuals_rows`` aggregates per-sample score correctly across
+   archive entries (the numerical contract behind ``individuals.md``).
 """
 
 from __future__ import annotations
@@ -21,8 +21,7 @@ from promptpotter.application.intelligence.hard_sample_archive import (
     build_archive_observations,
 )
 from promptpotter.application.leaderboard import (
-    JSPRow,
-    build_jsp_leaderboard_rows,
+    build_individuals_rows,
 )
 from promptpotter.domain.phases import StopReason
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
@@ -99,9 +98,9 @@ def test_archive_observations_use_content_hash_prefix(archive: MeasurementArchiv
     assert {o.sample_id for o in obs} == {1, 2}
 
 
-def test_jsp_leaderboard_aggregates_and_filters_errors(archive: MeasurementArchive) -> None:
-    """One row per ``content_hash``, hit_rate / mean_score computed from
-    non-error items only. The numerical contract the leaderboard rests on."""
+def test_individuals_rows_aggregate_and_filter_errors(archive: MeasurementArchive) -> None:
+    """One row per ``content_hash``; ``mean_score`` computed from non-error
+    items only. The numerical contract behind ``individuals.md``."""
     _seed(
         archive,
         run_id="run_a",
@@ -123,55 +122,11 @@ def test_jsp_leaderboard_aggregates_and_filters_errors(archive: MeasurementArchi
         ],
     )
     stores = SimpleNamespace(archive=archive)
-    rows = build_jsp_leaderboard_rows(stores, "bk")
+    rows = build_individuals_rows(stores, "bk")
     by_hash = {r.jsp_hash: r for r in rows}
-    a = by_hash["hash_aaaaaaa"]
-    b = by_hash["hash_bbbbbbb"]
-    assert a.n_samples == 3 and a.n_hits == 2
-    assert a.hit_rate == pytest.approx(2 / 3)
+    a = by_hash["hash_aaa"]
+    b = by_hash["hash_bbb"]
+    assert a.n_samples == 3
     assert a.mean_score == pytest.approx((1.0 + 0.5 + 0.0) / 3)
-    assert b.n_samples == 2 and b.n_hits == 0
-    assert b.hit_rate == 0.0
+    assert b.n_samples == 2
     assert b.mean_score == 0.0
-
-
-def test_jsp_leaderboard_sort_contract() -> None:
-    """``format_jsp_leaderboard`` sorts by mean_score desc, tiebreak by
-    n_samples desc. Tests the sort key directly, not rendered output."""
-    from promptpotter.application.leaderboard import format_jsp_leaderboard
-
-    rows = [
-        JSPRow(
-            jsp_hash="low",
-            n_samples=5,
-            n_hits=1,
-            mean_score=0.2,
-            hit_rate=0.2,
-            last_seen="",
-            pipeline_short="x",
-        ),
-        JSPRow(
-            jsp_hash="high",
-            n_samples=3,
-            n_hits=3,
-            mean_score=0.9,
-            hit_rate=1.0,
-            last_seen="",
-            pipeline_short="x",
-        ),
-        JSPRow(
-            jsp_hash="mid",
-            n_samples=10,
-            n_hits=5,
-            mean_score=0.5,
-            hit_rate=0.5,
-            last_seen="",
-            pipeline_short="x",
-        ),
-    ]
-    out = format_jsp_leaderboard(rows)
-    # First data row (after header + separator) is highest-score.
-    body = out.splitlines()
-    assert body[2].startswith("high"), body
-    assert body[3].startswith("mid"), body
-    assert body[4].startswith("low"), body
