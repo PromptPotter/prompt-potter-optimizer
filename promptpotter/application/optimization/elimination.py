@@ -38,6 +38,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.scoring.metrics import count_degraded_queries
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
+from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import pobb_should_stop, posterior_best_probabilities
 
@@ -262,7 +263,7 @@ class DegradationCheck:
         self.min_queries = min_queries
 
     def check(
-        self, results: list[dict], candidate_idx: int, n_total_candidates: int
+        self, results: list[QueryResult], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if results:
             classification = classify_result(results[-1])
@@ -377,7 +378,7 @@ class PoBBCheck:
         return self._last_snapshot
 
     def check(
-        self, results: list[dict], candidate_idx: int, n_total_candidates: int
+        self, results: list[QueryResult], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if not self.priors:
             return None
@@ -441,10 +442,10 @@ class PoBBCheck:
         )
 
 
-def build_degradation_checks(config: CampaignConfig) -> list[Any]:
+def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
     """Per-query checks (degradation). PoBBCheck is built by the runner."""
     opt = config.optimization
-    checks: list[Any] = []
+    checks: list[StopRule] = []
     if opt.degradation_threshold > 0:
         checks.append(DegradationCheck(threshold=opt.degradation_threshold))
     return checks

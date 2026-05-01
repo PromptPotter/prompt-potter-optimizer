@@ -476,87 +476,33 @@ class OptSearchPoint(PromptTemplate):
 
 
 # ---------------------------------------------------------------------------
-# Search-point diff helpers (formerly ``promptpotter.shared.sp_diff_model``)
+# Search-point diff helpers — pure shape munging, consumed by the views layer.
 # ---------------------------------------------------------------------------
-#
-# Pure dict/list shape munging. Co-located with OptSearchPoint because the
-# diff view-model pairs with it; consumers cross layers (campaign/phase_views
-# in application, presentation/views/phase_events in presentation).
 
 
 def _fmt_pp_val(v: object) -> str:
-    """Format a pipeline param value for display. No truncation."""
     if isinstance(v, float):
         return f"{v:g}"
     return str(v)
 
 
 def flatten_sp_summary(pp: dict | None) -> dict[str, str]:
-    """Flatten SearchPoint dimensions into a display dict with disjoint keyspaces.
-
-    Node-param keys are always prefixed by their owning node — ``node.param``.
-    Prompt-string fields ride on a separate top-level keyspace (written by
-    ``build_candidate_flat`` from ``candidate_meta["prompt_fields"]``), so the
-    two layers can never collide on the same key. This is the structural
-    invariant: anything written by this function is namespaced under a node;
-    bare top-level keys belong exclusively to ``PROMPT_STRING_FIELDS``.
-
-    - Scalar pipeline params at the top level: ``key`` -> formatted value
-      (unusual; valid input is always nested under a node).
-    - JSON Schema params (type=object with properties): expand to
-      ``node.field_name`` -> description string.
-    - Mutation-tuple lists: expand ``['+', name, ...]`` to ``node.name`` -> desc.
-    - Plain nested dicts (the regular pipeline_params shape): expand to
-      ``node.sub_key`` -> formatted value.
-    """
+    """Flatten ``{node: {param: value}}`` pipeline_params into a ``node.param`` display dict."""
     flat: dict[str, str] = {}
-
     for k, v in (pp or {}).items():
-        if k == "steps":
+        if k == "steps" or not isinstance(v, dict):
             continue
-        if isinstance(v, dict) and v.get("type") == "object" and "properties" in v:
-            for prop_name, prop_def in v["properties"].items():
-                desc = prop_def.get("description", prop_def.get("type", "?"))
-                flat[f"{k}.{prop_name}"] = desc
-        elif isinstance(v, list) and v and isinstance(v[0], list):
-            for mutation in v:
-                if not mutation:
-                    continue
-                op = mutation[0]
-                if op == "+" and len(mutation) >= 5:
-                    flat[f"{k}.{mutation[1]}"] = mutation[4]
-                elif op == "~" and len(mutation) >= 6:
-                    flat[f"{k}.{mutation[2]}"] = mutation[5]
-        elif isinstance(v, dict):
-            for sub_k, sub_v in v.items():
-                flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
-        else:
-            flat[k] = _fmt_pp_val(v)
+        for sub_k, sub_v in v.items():
+            flat[f"{k}.{sub_k}"] = _fmt_pp_val(sub_v)
     return flat
 
 
 def build_candidate_flat(parent: dict[str, str], candidate_meta: dict) -> dict[str, str]:
-    """Merge a candidate's overrides onto the parent flat dict.
-
-    Two disjoint keyspaces are layered, in order:
-
-    1. Pipeline-param keys (always ``node.param``) flow from
-       ``candidate_meta["pipeline_params_override"]`` through
-       ``flatten_sp_summary`` and overwrite parent's same-key entries.
-    2. Prompt-string fields (always top-level — ``thinking_style``,
-       ``answer_format``, …) flow from ``candidate_meta["prompt_fields"]``.
-
-    These two layers cannot collide because their keyspaces never overlap;
-    that's the invariant that keeps the SP-diff display honest. If a future
-    node grows a param whose name matches a prompt field, it still lands at
-    ``node.param`` and stays out of the prompt-field namespace.
-    """
+    """Merge candidate overrides onto parent; pipeline_params and prompt_fields layer into disjoint keyspaces."""
     flat = parent.copy()
-    pp = candidate_meta.get("pipeline_params_override")
-    if pp:
+    if pp := candidate_meta.get("pipeline_params_override"):
         flat.update(flatten_sp_summary(pp))
-    prompt_fields = candidate_meta.get("prompt_fields") or {}
-    for field_name, value in prompt_fields.items():
+    for field_name, value in (candidate_meta.get("prompt_fields") or {}).items():
         if value:
             flat[field_name] = str(value)
     return flat
@@ -566,34 +512,12 @@ def group_diff_keys(
     diff_keys: list[str],
     node_param_keys: dict[str, list[str]] | None,
 ) -> list[tuple[str, list[str]]]:
-    """Group diff keys by pipeline node in execution order.
-
-    Recognises both the canonical prefixed form (``node.param``, written by
-    :func:`flatten_sp_summary`) and bare top-level keys (prompt-string
-    fields, written by :func:`build_candidate_flat` from
-    ``candidate_meta["prompt_fields"]``). Prompt-field keys land in the
-    default ``""`` group so they render as a separate section.
-    """
+    """Group ``node.param`` diff keys by node in execution order; prompt fields land in the ``""`` group."""
     if not node_param_keys:
         return [("", diff_keys)]
-
-    key_to_node: dict[str, str] = {}
-    for sname, keys in node_param_keys.items():
-        for k in keys:
-            key_to_node[k] = sname
-            key_to_node[f"{sname}.{k}"] = sname
-    node_names = set(node_param_keys)
-    for k in diff_keys:
-        if k in key_to_node:
-            continue
-        base = k.split(".", 1)[0]
-        if base in node_names:
-            key_to_node[k] = base
-
     groups: dict[str, list[str]] = {sname: [] for sname in node_param_keys}
     groups[""] = []
     for k in diff_keys:
-        sname = key_to_node.get(k, "")
-        groups.setdefault(sname, []).append(k)
-
+        prefix = k.split(".", 1)[0]
+        groups[prefix if prefix in groups else ""].append(k)
     return [(sname, sorted(keys)) for sname, keys in groups.items() if keys]

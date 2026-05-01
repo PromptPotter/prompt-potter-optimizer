@@ -39,7 +39,6 @@ __all__ = [
     "RoundDigestView",
     "RoundStartView",
     "ScoreEntry",
-    "ScoringStartView",
     "SpDiffView",
     "WarningEntry",
 ]
@@ -125,13 +124,6 @@ class CandidatesGeneratedView:
     l1_n_duplicate: int
     clone_labels: tuple[str, ...]
     sp_diff: SpDiffView
-
-
-@dataclass(frozen=True)
-class ScoringStartView:
-    """L1 score enter — banner only."""
-
-    pass
 
 
 @dataclass(frozen=True)
@@ -312,7 +304,6 @@ AnyView = (
     | InitExitView
     | RoundStartView
     | CandidatesGeneratedView
-    | ScoringStartView
     | RoundCompleteView
     | EscalationEnterView
     | EscalationExitView

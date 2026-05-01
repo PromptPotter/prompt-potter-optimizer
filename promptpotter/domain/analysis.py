@@ -98,6 +98,31 @@ class EscalationSignal:
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
 
+    @property
+    def is_elimination(self) -> bool:
+        return self.target is EscalationTarget.ELIMINATE_CANDIDATE
+
+    @property
+    def is_leader_lock(self) -> bool:
+        return self.target is EscalationTarget.LEADER_LOCKED
+
+    @property
+    def terminates_candidate(self) -> bool:
+        """True iff this signal ends the candidate's run cleanly (cut or lock)."""
+        return self.target in (
+            EscalationTarget.ELIMINATE_CANDIDATE,
+            EscalationTarget.LEADER_LOCKED,
+        )
+
+    @property
+    def routes_to_optimizer(self) -> bool:
+        """True iff the cycle layer should escalate to L2/L3 self-healing."""
+        return self.target in (EscalationTarget.L2, EscalationTarget.L3)
+
+    @property
+    def is_abort(self) -> bool:
+        return self.target is EscalationTarget.ABORT_CAMPAIGN
+
 
 @dataclass
 class ValidationFailure:

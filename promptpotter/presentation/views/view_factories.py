@@ -53,7 +53,6 @@ from promptpotter.presentation.views.view_models import (
     RoundDigestView,
     RoundStartView,
     ScoreEntry,
-    ScoringStartView,
     SpDiffView,
     WarningEntry,
 )
@@ -233,12 +232,6 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
     )
 
 
-def _l1_score_enter(d: dict, ctx: dict) -> ScoringStartView:
-    if (pp := d.get("current_pipeline_params")) is not None:
-        ctx["current_pipeline_params"] = pp
-    return ScoringStartView()
-
-
 def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     raw_scores = list(d.get("candidate_scores", []))
     score_entries: list[ScoreEntry] = []
@@ -379,7 +372,6 @@ _BUILDERS: dict[str, Any] = {
     "init:exit": _init_exit,
     "l1_generate:enter": _l1_generate_enter,
     "l1_generate:exit": _l1_generate_exit,
-    "l1_score:enter": _l1_score_enter,
     "l1_score:exit": _l1_score_exit,
     "refine_strategy:enter": _refine_enter,
     "refine_strategy:exit": _refine_exit,
@@ -473,8 +465,6 @@ def view_from_record(record: dict[str, Any]) -> AnyView | None:
             clone_labels=tuple(v.get("clone_labels") or []),
             sp_diff=_sp_diff_from_dict(v.get("sp_diff")),
         )
-    if key == "l1_score:enter":
-        return ScoringStartView()
     if key == "l1_score:exit":
         return RoundCompleteView(
             **{k: v[k] for k in v if k != "scores"},

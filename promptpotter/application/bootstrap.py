@@ -27,10 +27,10 @@ if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes import SampleIndex
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
+    from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import RunLedger
     from promptpotter.infrastructure.projections import AuditTrailProjection
     from promptpotter.infrastructure.tracing import ObservabilityBridge
@@ -159,7 +159,7 @@ class ScoringContext:
     scorer_round_formula: str | None = None
     scoring_dataset: list[Sample] = field(default_factory=list)
     sample_index: SampleIndex | None = None
-    degradation_checks: list[DegradationCheck] = field(default_factory=list)
+    degradation_checks: list[StopRule] = field(default_factory=list)
 
 
 @dataclass

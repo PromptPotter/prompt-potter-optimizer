@@ -222,6 +222,8 @@ class LiveDisplay:
     def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
         if self._bars is not None:
             self._bars.on_phase(event)
+        if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
+            self._write("\n" + _node_top("SCORE"))
         if view is not None:
             from promptpotter.presentation.views.view_factories import view_from_record
 

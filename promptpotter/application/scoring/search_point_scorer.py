@@ -21,6 +21,7 @@ from promptpotter.application.scoring.sample_measurement import (
 )
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import QueryResult, Scorer
+from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
     ErrorCategory,
     error_category,
@@ -347,7 +348,7 @@ async def _run_query_loop(
     evicted_priors: dict[str, QueryResult],
     on_result: Callable[[QueryResult, int, int], None] | None,
     on_start: Callable[[str, int, int], None] | None,
-    degradation_checks: list | None,
+    degradation_checks: list[StopRule] | None,
     candidate_idx: int,
     n_total_candidates: int,
     axes: AxisIndex | None,
@@ -427,7 +428,7 @@ async def score_search_point(
     on_result: Callable[[QueryResult, int, int], None] | None = None,
     on_start: Callable[[str, int, int], None] | None = None,
     source: str = "",
-    degradation_checks: list | None = None,
+    degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,

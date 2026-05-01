@@ -24,7 +24,6 @@ from promptpotter.presentation.views.display import (
     _fmt_delta,
     _node_block,
     _node_line,
-    _node_top,
     _round_rule,
     _scoreboard,
     fmt_pvalue,
@@ -44,7 +43,6 @@ from promptpotter.presentation.views.view_models import (
     ProbeExitView,
     RoundCompleteView,
     RoundStartView,
-    ScoringStartView,
     SpDiffView,
 )
 from promptpotter.shared.composite import (
@@ -250,10 +248,6 @@ def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
     )
 
 
-def _render_scoring_start(_v: ScoringStartView) -> str:
-    return "\n" + _node_top("SCORE")
-
-
 def _render_round_complete(v: RoundCompleteView) -> str:
     out: list[str] = []
     score_dicts = [
@@ -433,8 +427,6 @@ def to_text(view: AnyView) -> str:
         return _render_round_start(view)
     if isinstance(view, CandidatesGeneratedView):
         return _render_candidates_generated(view)
-    if isinstance(view, ScoringStartView):
-        return _render_scoring_start(view)
     if isinstance(view, RoundCompleteView):
         return _render_round_complete(view)
     if isinstance(view, EscalationEnterView):

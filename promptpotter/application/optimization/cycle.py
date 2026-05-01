@@ -493,12 +493,7 @@ def _fork_at_divergence(
 
 
 def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -> str:
-    """Allocate the next ``{root}_diag_NNN`` id by counting existing siblings.
-
-    Scans the family-root's ``forks/`` dir for entries already matching
-    ``{root}_diag_NNN`` and returns ``NNN+1`` zero-padded to 3 digits. Diag
-    siblings of nested cycles still root at the family root so the BFS tree
-    flattens to one level under ``campaigns/{root}/forks/``."""
+    """Next ``{root}_diag_NNN`` id; siblings always root at the family root so the BFS tree stays one level deep."""
     from promptpotter.infrastructure.store.stores import root_cycle_id
 
     root_id = root_cycle_id(parent_cycle_id)
@@ -521,15 +516,7 @@ def _fork_for_diag_sibling(
     session_id: str,
     parent_cycle_id: str,
 ) -> str:
-    """Mint a diag-BFS sibling cycle that re-runs from round 0 with no
-    inherited trials.
-
-    Each ``optimize --diag`` re-invocation against a finalized diag cycle
-    branches off a new sibling instead of overwriting the parent's archive.
-    The sibling shares the parent's baseline measurements via the JSP-keyed
-    measurement archive (no copy needed). Records a ``Decision(kind=FORK_CUT)``
-    on the parent's ledger so a tail of the parent's events captures the
-    cutover. Active pointer retargets to the new sibling."""
+    """Mint a diag-BFS sibling rooted at round 0; records ``FORK_CUT`` on the parent ledger and retargets the active pointer."""
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import RunLedger
     from promptpotter.infrastructure.store.base import read_json_optional, write_json
@@ -587,15 +574,7 @@ def _fork_for_diag_sibling(
 
 
 def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
-    """Stamp ``SweepPayload`` L1-surface deltas onto the cycle's starting OSP.
-
-    Mirrors the merge pattern in
-    :meth:`L2RefineStrategy.apply_side_effects` so a sweep-supplied
-    override behaves identically to one L2 would have written. Called
-    after ``bootstrap_cycle`` returns the cycle and before the round
-    loop reads ``cycle.opt_sp`` — the override then rides the
-    cycle's existing checkpoint code into the trial JSON.
-    """
+    """Merge sweep-supplied L1 surface deltas onto the OSP — same shape ``L2RefineStrategy.apply_side_effects`` writes."""
     if payload.l1_section_overrides:
         opt_sp.l1_section_overrides = {
             **opt_sp.l1_section_overrides,
@@ -677,21 +656,20 @@ class EscalationState:
 
     @classmethod
     def from_checkpoint_dict(cls, d: dict) -> EscalationState:
-        """Restore — every key defaults so gen-only trials (sweep/diag stubs
-        that never wrote escalation state) restore as a fresh counter."""
+        """Inverse of ``to_checkpoint_dict``; every trial writer must spread the full block."""
         return cls(
-            l1_stall_count=d.get("l1_stall_count", 0),
+            l1_stall_count=d["l1_stall_count"],
             l2=LayerCounter(
-                round=d.get("l2_round", 0),
-                stall_count=d.get("l2_stall_count", 0),
-                best_accuracy_at_entry=d.get("l2_best_accuracy_at_entry", 0.0),
-                best_composite_at_entry=d.get("l2_best_composite_at_entry", 0.0),
+                round=d["l2_round"],
+                stall_count=d["l2_stall_count"],
+                best_accuracy_at_entry=d["l2_best_accuracy_at_entry"],
+                best_composite_at_entry=d["l2_best_composite_at_entry"],
             ),
             l3=LayerCounter(
-                round=d.get("l3_round", 0),
-                stall_count=d.get("l3_stall_count", 0),
-                best_accuracy_at_entry=d.get("l3_best_accuracy_at_entry", 0.0),
-                best_composite_at_entry=d.get("l3_best_composite_at_entry", 0.0),
+                round=d["l3_round"],
+                stall_count=d["l3_stall_count"],
+                best_accuracy_at_entry=d["l3_best_accuracy_at_entry"],
+                best_composite_at_entry=d["l3_best_composite_at_entry"],
             ),
         )
 

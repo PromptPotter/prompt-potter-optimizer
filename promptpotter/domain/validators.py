@@ -1,11 +1,10 @@
-"""Validators on LLM-node output.
+"""LLM-output validators and mid-round stop rules.
 
-A validator is a deterministic check on an LLM node's parsed output dict.
-Each validator emits a :class:`ValidatorOutcome` that carries an Evaluator-
-shaped payload (``id``, ``passed``, ``score``, ``evidence``) plus a
-``nurse_target`` naming which other LLM heals the producer.
+Two contracts live here, named to keep callers from mixing them up:
 
-Pattern:
+**LLM-output validator** — :class:`LLMOutputValidator`. Deterministic check on
+an LLM node's parsed output dict; emits a :class:`ValidatorOutcome` whose
+``nurse_target`` names which other LLM heals the producer. Drives self-healing.
 
     L1's output --[L1 validator]--> ValidatorOutcome (nurse_target="l2") --> L2 heals L1
     L2's output --[L2 validator]--> ValidatorOutcome (nurse_target="l3") --> L3 heals L2
@@ -13,13 +12,24 @@ Pattern:
 The ``score`` field mirrors ``Evaluator.compute``'s return shape (1.0 = clean,
 0.0 = full failure) so future L4 composite scoring can read validator outcomes
 through the same channel as evaluators.
+
+**Stop rule** — :class:`StopRule`. Mid-round check on the running result stream
+of a candidate-under-evaluation; emits an :class:`EscalationSignal` carrying
+an :class:`EscalationTarget` that terminates the round early
+(``ELIMINATE_CANDIDATE`` / ``LEADER_LOCKED``) or routes to the optimizer
+(``L2`` / ``L3`` / ``ABORT_CAMPAIGN``). Concrete stop rules: ``DegradationCheck``,
+``PoBBCheck`` in ``application/optimization/elimination.py``.
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
+
+if TYPE_CHECKING:
+    from promptpotter.domain.analysis import EscalationSignal
+    from promptpotter.domain.scoring import QueryResult
 
 NurseTarget = Literal["l2", "l3"]
 
@@ -54,3 +64,24 @@ class LLMOutputValidator:
 
     def run(self, source_output: Mapping[str, Any], **context: Any) -> ValidatorOutcome | None:
         return self.check(source_output, **context)
+
+
+@runtime_checkable
+class StopRule(Protocol):
+    """Mid-round stop rule on a running candidate's results stream.
+
+    Implementations may carry additional state and methods — e.g. ``PoBBCheck``
+    tracks priors, snapshot callbacks, and lock-in thresholds — but only
+    ``name`` and ``check`` are part of the Protocol contract. The registry
+    consumed by ``score_population`` is ``list[StopRule]``: first non-None
+    signal wins.
+    """
+
+    name: str
+
+    def check(
+        self,
+        results: list[QueryResult],
+        candidate_idx: int,
+        n_total_candidates: int,
+    ) -> EscalationSignal | None: ...

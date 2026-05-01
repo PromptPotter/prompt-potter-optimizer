@@ -47,7 +47,6 @@ from promptpotter.application.scoring.search_point_scorer import score_search_po
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.analysis import (
     EscalationSignal,
-    EscalationTarget,
     RuntimeFailure,
     ValidationFailure,
 )
@@ -62,7 +61,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.run_records import DecisionKind
 from promptpotter.domain.scoring import QueryResult
-from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
+from promptpotter.domain.validators import LLMOutputValidator, StopRule, ValidatorOutcome
 
 # Module-level alias for test monkeypatching.
 from promptpotter.infrastructure import llm as _llm_client
@@ -80,7 +79,6 @@ from promptpotter.infrastructure.tracing import (
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.elimination import DegradationCheck
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
@@ -568,10 +566,8 @@ def _handle_scored_candidate(
     l1_diversity: float = 1.0,
 ) -> tuple[CandidateScore, EscalationSignal | None]:
     """Build report for a scored candidate; attach RuntimeFailure on elimination."""
-    elimination_stopped = (
-        signal is not None and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
-    )
-    leader_locked = signal is not None and signal.target == EscalationTarget.LEADER_LOCKED
+    elimination_stopped = signal is not None and signal.is_elimination
+    leader_locked = signal is not None and signal.is_leader_lock
     scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
     aborted = (
         bool(signal) and not leader_locked and (scoring_error_abort or len(results) < len(dataset))
@@ -732,7 +728,7 @@ async def score_population(
     proposals: list[CandidateProposal],
     dataset: list,
     *,
-    degradation_checks: list | None = None,
+    degradation_checks: list[StopRule] | None = None,
     callbacks: RunListener,
     elimination_n_min: int,
     pobb_epsilon: float,
@@ -858,11 +854,7 @@ async def score_population(
             round_num,
             l1_diversity=l1_diversity,
         )
-        if (
-            signal is not None
-            and signal.target == EscalationTarget.ELIMINATE_CANDIDATE
-            and signal.check_name == elim_check.name
-        ):
+        if signal is not None and signal.is_elimination and signal.check_name == elim_check.name:
             _record_elimination_cut(
                 signal,
                 osp_c,
@@ -875,9 +867,7 @@ async def score_population(
                 len(results),
             )
         leader_locked = (
-            signal is not None
-            and signal.target == EscalationTarget.LEADER_LOCKED
-            and signal.check_name == elim_check.name
+            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
         )
         if leader_locked and signal is not None:
             _record_leader_lock_in(
@@ -943,7 +933,7 @@ async def l1_score(
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
     callbacks: RunListener,
-    degradation_checks: list | None = None,
+    degradation_checks: list[StopRule] | None = None,
     elimination_n_min: int,
     pobb_epsilon: float,
     pobb_lock_in: float = 0.95,
@@ -1186,7 +1176,7 @@ async def execute_round(
     round_num: int,
     scoring_dataset: list[Sample],
     callbacks: RunListener,
-    degradation_checks: list[DegradationCheck] | None = None,
+    degradation_checks: list[StopRule] | None = None,
 ) -> RoundResult:
     """Execute one L1 round: generate → score+select → critique → persist to memory."""
     session = cycle.session

@@ -26,7 +26,6 @@ from promptpotter.application.scoring.formula import (
     apply_steer_file,
     apply_zero_signal_exclusions,
 )
-from promptpotter.domain.analysis import EscalationTarget
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
     CampaignPhase,
@@ -486,15 +485,7 @@ async def _run_sweep_generation_only(
     *,
     label: str = "sweep_gen_only",
 ) -> None:
-    """Emit L1 variants for ``round_num`` without scoring them.
-
-    Used by both M10 sweep mode (``label="sweep_gen_only"``) and M10 diag
-    mode (``label="diag_gen_only"``). The audit projection captures the
-    ``l1_generate`` node via the recorder, so ``round_NNNN.json`` lands
-    with ``output.response.variants[]`` exactly as a full round would. The
-    trial JSON is a minimal generation-only record
-    (``status="generation_only"``, no composite/accuracy/results).
-    """
+    """Emit L1 variants without scoring; audit projection captures ``l1_generate`` via the recorder, trial JSON is the minimal ``status="generation_only"`` record."""
     from promptpotter.application.optimization.l1 import _generate_or_load_candidates
 
     cb.set_round(round_num)
@@ -533,6 +524,7 @@ async def _run_sweep_generation_only(
                     "l1_n_no_op": yield_stats.n_no_op,
                     "l1_n_duplicate": yield_stats.n_duplicate,
                     "opt_search_point": cycle.opt_sp.model_dump(),
+                    **cycle.escalation.to_checkpoint_dict(),
                 },
             )
         _write_log_md(session)
@@ -667,7 +659,7 @@ async def _run_round_loop(
                     degraded_rate=signal.check_result.get("degraded_rate"),
                     warning_types=signal.check_result.get("warning_types"),
                 )
-                if signal.target in (EscalationTarget.L2, EscalationTarget.L3) and opt.enable_l2:
+                if signal.routes_to_optimizer and opt.enable_l2:
                     cycle.opt_sp.append_escalation(
                         build_escalation_entry(
                             round_num,
@@ -683,7 +675,7 @@ async def _run_round_loop(
                         cb,
                         escalation_check_result=signal.check_result,
                     )
-                elif signal.target == EscalationTarget.ABORT_CAMPAIGN:
+                elif signal.is_abort:
                     raise StopLoop(StopReason.ABORT)
                 if session.state.cycle_id:
                     session.store.campaigns.delete_round_candidates(
