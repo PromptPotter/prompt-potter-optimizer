@@ -31,7 +31,7 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Item | Notes |
 |------|-------|
 | Multimodal / non-text modalities | RNAseq, X-ray, image, audio. Requires modality-specific evaluation, dataset formats, scoring functions |
-| Pipeline variant comparison | Compare pipelines (not just searchpoints within a pipeline). Needs ConnectorProtocol from M12 |
+| Pipeline variant comparison | Compare pipelines (not just searchpoints within a pipeline). Needs second connector from M12 |
 | Non-prompt targets | Optimize scoring functions, fuzzy matchers, retrieval queries, GA settings — not just prompt strings |
 | Evolutionary operators | Population-based search (GA / DE) as an alternative to critique-guided generation |
 | MCP server mode | Expose PromptPotter as MCP tools to Claude Code and other MCP clients |

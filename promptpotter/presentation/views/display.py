@@ -263,7 +263,7 @@ def _scoreboard(
 
 # Display tags — populated from _build_display_tags() at init.
 # Mutated in place by set_display_tags so importers can keep a stable
-# reference (``from .display_primitives import DISPLAY_TAGS``).
+# reference (``from .display import DISPLAY_TAGS``).
 DISPLAY_TAGS: dict[str, str] = {}
 
 _WIRE_TYPE_TAGS: dict[str, str] = {

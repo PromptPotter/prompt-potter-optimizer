@@ -1,10 +1,14 @@
-"""LLM client error translation — narrow contract on top of the SDK's retry policy.
+"""LLM client error translation + RateLimiter rolling-window gating.
 
-The SDK owns transient-retry. PromptPotter owns translation:
-  * 404 → ValueError("not found")
-  * 413/429 with parsable body → RequestTooLargeError(limit, requested)
-  * 400 json_validate_failed with failed_generation → salvaged LLMResponse
-  * Anything else re-raises unchanged (no app-level retry)
+Two named invariants:
+  1. ``OpenAICompatibleClient`` translates HTTP errors at the boundary:
+     404 → ValueError("not found"), 413/429 (terminal) → RequestTooLargeError
+     with parsed limit/requested, 400 ``json_validate_failed`` →
+     salvaged LLMResponse via ``failed_generation``. Anything else
+     re-raises unchanged (no app-level retry — the SDK owns 5xx retry).
+  2. ``RateLimiter`` blocks until the rolling window rolls (RPM cap and
+     TPM cap), and ``record_actual`` retroactively corrects an over-
+     reservation so subsequent ``acquire`` calls don't block.
 """
 
 from unittest.mock import AsyncMock
@@ -12,8 +16,12 @@ from unittest.mock import AsyncMock
 import pytest
 from _helpers import MockCompletion, MockHTTPError, make_http_error
 
-from promptpotter.infrastructure.llm import OpenAICompatibleClient
+from promptpotter.infrastructure.llm import OpenAICompatibleClient, RateLimiter
 from promptpotter.shared.errors import RequestTooLargeError
+
+# ===========================================================================
+# OpenAICompatibleClient — error translation
+# ===========================================================================
 
 
 class _RawResponse:
@@ -99,3 +107,63 @@ async def test_happy_path_calls_sdk_once(llm_client):
     )
     resp = await client.chat(messages=[{"role": "user", "content": "x"}])
     assert resp.content == '{"result": "ok"}'
+
+
+# ===========================================================================
+# RateLimiter — rolling-window RPM + TPM
+# ===========================================================================
+
+
+class _Clock:
+    def __init__(self) -> None:
+        self.now = 0.0
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, delta: float) -> None:
+        self.now += delta
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    c = _Clock()
+    monkeypatch.setattr("promptpotter.infrastructure.llm.time.monotonic", c)
+    return c
+
+
+@pytest.fixture
+def fast_sleep(monkeypatch, clock):
+    async def _sleep(seconds):
+        clock.advance(seconds)
+
+    monkeypatch.setattr("promptpotter.infrastructure.llm.asyncio.sleep", _sleep)
+
+
+@pytest.mark.asyncio
+async def test_rpm_cap_blocks_until_window_rolls(clock, fast_sleep):
+    rl = RateLimiter(rpm=3, window_s=60.0)
+    for _ in range(3):
+        await rl.acquire(100)
+    assert clock.now == 0.0
+    await rl.acquire(100)  # 4th must wait for the oldest reservation to age out
+    assert clock.now == pytest.approx(60.0)
+
+
+@pytest.mark.asyncio
+async def test_tpm_cap_blocks_until_tokens_age_out(clock, fast_sleep):
+    rl = RateLimiter(tpm=8000, window_s=60.0)
+    await rl.acquire(3000)
+    await rl.acquire(3000)
+    assert clock.now == 0.0
+    await rl.acquire(3000)  # 9000 > 8000, wait for oldest 3000 to expire
+    assert clock.now == pytest.approx(60.0)
+
+
+@pytest.mark.asyncio
+async def test_record_actual_corrects_reservation(clock, fast_sleep):
+    rl = RateLimiter(tpm=8000, window_s=60.0)
+    await rl.acquire(5000)
+    rl.record_actual(5000, 1000)  # actual usage was much smaller
+    await rl.acquire(6000)  # 1000 + 6000 ≤ 8000 → no block
+    assert clock.now == 0.0

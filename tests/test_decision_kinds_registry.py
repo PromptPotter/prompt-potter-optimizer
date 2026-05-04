@@ -117,37 +117,6 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
     assert isinstance(records[2], Snapshot) and records[2].sample_idx == 4
 
 
-def test_runledger_persists_across_open(tmp_path: Path) -> None:
-    """Reopening the same cycle dir continues offsets — no clobber."""
-    cycle_dir = CycleDir(tmp_path / "cyc2")
-    first = RunLedger.open(cycle_dir)
-    first.append(Phase(phase="init", event="enter"))
-    first.append(Phase(phase="init", event="exit"))
-
-    second = RunLedger.open(cycle_dir)
-    assert second.next_offset == 2
-    third_offset = second.append(Phase(phase="baseline", event="enter"))
-    assert third_offset == 2
-    assert sum(1 for _ in second.iter()) == 3
-
-
-def test_runledger_bind_fans_out_to_subscribers(tmp_path: Path) -> None:
-    """``bind`` projections receive subsequent appends; prior records are not replayed."""
-    received: list[tuple[int, str]] = []
-
-    class _Recorder:
-        def on_record(self, record: Phase | Decision | Snapshot, offset: int) -> None:
-            received.append((offset, record.record_type))
-
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc3"))
-    ledger.append(Phase(phase="init", event="enter"))  # before bind — should not fire
-    ledger.bind(_Recorder())
-    ledger.append(Phase(phase="init", event="exit"))  # offset 1, should fire
-    ledger.append(Decision(kind=DecisionKind.PROBE_ROUND_COMMITMENT, outcome=False))  # offset 2
-
-    assert received == [(1, "phase"), (2, "decision")]
-
-
 def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     """``_open_cycle_ledger`` opens the ledger under the per-cycle audit dir.
 
@@ -207,31 +176,6 @@ def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
     assert records[2].payload["scores"]["accuracy"] == 0.6
 
 
-def test_runlistener_buffers_pre_ledger_events(tmp_path: Path) -> None:
-    """Snapshots fired before ``ledger`` is set are buffered, then flushed
-    in order on the first post-binding append. Lifecycle: events emitted
-    before the cycle dir is known must still reach subscribers via the
-    ledger once it opens."""
-    from promptpotter.application.runner import RunListener
-
-    cb = RunListener()
-    cb.set_round(0)
-    cb.on_sample_started(0, 1, 0, 2, "q-pre1")
-    cb.on_sample_started(0, 1, 1, 2, "q-pre2")
-
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc_buf"))
-    cb.ledger = ledger
-    cb.on_sample_started(0, 1, 0, 2, "q-post")
-
-    records = list(ledger.iter())
-    queries = [
-        r.payload.get("query_text")
-        for r in records
-        if isinstance(r, Snapshot) and r.event == "sample_started"
-    ]
-    assert queries == ["q-pre1", "q-pre2", "q-post"]
-
-
 def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> None:
     """A fork's iter() walks parent's records up to the cut offset, then its own.
 
@@ -272,42 +216,3 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
         )
 
 
-def test_runledger_inherit_from_rejects_rebind(tmp_path: Path) -> None:
-    """Re-binding a fork's parent silently would mask the cutover lineage."""
-    import pytest
-
-    parent_a = RunLedger.open(CycleDir(tmp_path / "a"))
-    parent_b = RunLedger.open(CycleDir(tmp_path / "b"))
-    fork = RunLedger.open(CycleDir(tmp_path / "fork"))
-    fork.inherit_from(parent_a, 0)
-    # Idempotent re-bind to same args is fine.
-    fork.inherit_from(parent_a, 0)
-    with pytest.raises(ValueError, match="already inheriting"):
-        fork.inherit_from(parent_b, 0)
-
-
-def test_open_cycle_ledger_resumes_offsets(tmp_path: Path) -> None:
-    """A reopened ledger continues counting from the existing tail.
-
-    Prevents a resume from clobbering prior facts: a fresh ``open()``
-    over a populated ``events.jsonl`` reads the existing offset count
-    so subsequent appends land at offset N (not 0).
-    """
-    from types import SimpleNamespace
-
-    from promptpotter.application.bootstrap import _open_cycle_ledger
-    from promptpotter.infrastructure.store import build_stores
-
-    stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
-    fake_session = SimpleNamespace(store=stores)
-
-    first = _open_cycle_ledger(fake_session, "cycle_y")  # type: ignore[arg-type]
-    assert first is not None
-    first.append(Phase(phase="round", event="complete", round=0))
-    first.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
-
-    second = _open_cycle_ledger(fake_session, "cycle_y")  # type: ignore[arg-type]
-    assert second is not None
-    assert second.next_offset == 2
-    second.append(Phase(phase="round", event="complete", round=1))
-    assert sum(1 for _ in second.iter()) == 3

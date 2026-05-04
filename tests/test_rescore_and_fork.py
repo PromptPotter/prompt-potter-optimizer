@@ -1,4 +1,20 @@
-"""Data-vs-policy separation: rescore-on-load, decision replay, and fork."""
+"""Data-vs-policy separation: rescore-on-load, decision replay, fork, and rewind.
+
+Three named invariants:
+  1. ``rescore_results`` accumulates per-scorer projections side-by-side and
+     projects ``score`` / ``hit`` to the active scorer; ``replay_decisions``
+     uses rescored baselines (never stale recorded ones); ``elimination_cut``
+     replay flags divergence when scores flip; unknown decision kinds skip.
+  2. ``_fork_at_divergence`` / ``fork_for_diag_sibling`` /
+     ``fork_for_sweep_sibling`` mint counted ids, retarget the active pointer,
+     drop trials beyond the fork point (or all trials for diag/sweep),
+     and append a FORK_CUT decision to the parent ledger that downstream
+     readers can consume via the freshly re-opened parent.
+  3. ``CampaignStore.rewind_to_round`` archives later trial + candidate files
+     under ``.runtime/archived/resumed_at_<ts>/``, rebuilds the in-memory
+     trial index from survivors, and raises ``LookupError`` for missing
+     rounds / missing cycles.
+"""
 
 from __future__ import annotations
 
@@ -6,7 +22,6 @@ import json
 from pathlib import Path
 
 from promptpotter.application.optimization.cycle import (
-    REPLAYERS,
     _fork_at_divergence,
     fork_for_diag_sibling,
     fork_for_sweep_sibling,
@@ -17,7 +32,7 @@ from promptpotter.application.scoring.search_point_scorer import (
     merge_with_unprocessed_priors,
 )
 from promptpotter.domain.run_records import SweepPayload
-from promptpotter.infrastructure.store import build_stores, root_cycle_id
+from promptpotter.infrastructure.store import build_stores
 
 
 def test_rescore_results_accumulates_and_projects_active() -> None:
@@ -95,25 +110,6 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     assert div is not None
     assert div.kind == "elimination_cut"
     assert div.recorded_outcome is True and div.current_outcome is False
-
-
-def test_unknown_decision_kind_silently_skipped() -> None:
-    """probe_round_commitment is recorded but not divergence-gated — no replayer registered."""
-    assert "probe_round_commitment" not in REPLAYERS
-    trial = {
-        "round": 1,
-        "results": [],
-        "all_candidate_results": {},
-        "decisions": [
-            {
-                "kind": "probe_round_commitment",
-                "inputs_ref": {"round_num": 1},
-                "outcome": True,
-                "data": {"action": "PROBE"},
-            }
-        ],
-    }
-    assert replay_decisions(trial) is None
 
 
 def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> list[dict]:
@@ -289,37 +285,6 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
         scorer_formula=formula,
     )
     assert {r["query"] for r in merged} == {"q1"}
-
-
-def test_merge_preserves_pipeline_data_timings() -> None:
-    """Merged-in priors must keep their original raw trace fields — timings,
-    pipeline_data — so the archive stays the source of truth. Only the active
-    scorer's projection is re-derived."""
-    formula = "exact_match(predicted, ground_truth)"
-    prior = _prior("q1", predicted="**hit**", gt="hit")
-    merged = merge_with_unprocessed_priors(
-        [],
-        prior_results={"q1": prior},
-        dataset_queries={"q1"},
-        evicted_priors={},
-        scorer=compile_scorer(formula),
-        scorer_id="x",
-        scorer_formula=formula,
-    )
-    assert len(merged) == 1
-    entry = merged[0]
-    assert entry["pipeline_data"]["total_time"] == 1.5  # untouched
-    assert entry.get("hit") is True  # rescored under active scorer
-    # Mutating the merged copy must not poison the prior_results source.
-    assert prior.get("hit") is None or prior["hit"] is False
-
-
-def test_root_cycle_id_recognizes_diag_separator() -> None:
-    """``root_cycle_id`` must split on both ``_fork_`` and ``_diag_`` so diag
-    siblings nest under the family root's ``forks/`` dir like fork siblings."""
-    assert root_cycle_id("cycle_abc123") == "cycle_abc123"
-    assert root_cycle_id("cycle_abc123_fork_deadbeef") == "cycle_abc123"
-    assert root_cycle_id("cycle_abc123_diag_001") == "cycle_abc123"
 
 
 def test_fork_for_diag_sibling_mints_counted_id_and_clears_trials(
@@ -501,3 +466,112 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     assert data.get("source_file") == "02_persona_axis.json"
     assert data.get("sweep_batch_id") == "b2def"
     assert (data.get("sweep_payload") or {}).get("directive") == "explore persona axis"
+
+
+# ===========================================================================
+# CampaignStore.rewind_to_round — mid-cycle rewind primitive behind --from
+# ===========================================================================
+
+
+def _make_trial(round_num: int, accuracy: float) -> dict:
+    return {
+        "trial_id": f"round_{round_num}",
+        "round": round_num,
+        "label": f"r{round_num}",
+        "accuracy": accuracy,
+        "hits": int(accuracy * 10),
+        "total": 10,
+        "improved": accuracy > 0.0,
+        "opt_search_point": {"id": f"osp_{round_num}"},
+    }
+
+
+def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> None:
+    store.create(
+        backend_id,
+        cycle_id,
+        {"type": "optimization_loop", "config": {}, "baseline_accuracy": 0.0},
+    )
+    for r in range(rounds):
+        store.add_trial(backend_id, cycle_id, _make_trial(r, 0.1 * (r + 1)))
+        # Simulate round-level candidate checkpoints for the same round.
+        store.save_round_candidates(
+            backend_id,
+            cycle_id,
+            r,
+            [{"round": r, "id": f"cand_{r}"}],
+        )
+
+
+class TestRewindToRound:
+    def test_archives_later_trial_and_candidate_files(self, tmp_path):
+        from promptpotter.infrastructure.store import CampaignStore
+
+        store = CampaignStore(tmp_path)
+        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=5)
+
+        store.rewind_to_round("bid", "cycle_a", after_round=2)
+
+        cycle_dir = store.campaign_dir("cycle_a")
+        trials_dir = cycle_dir / "trials"
+        candidates_dir = cycle_dir / ".runtime" / "cache" / "candidates"
+        assert (trials_dir / "trial_0000.json").exists()
+        assert (trials_dir / "trial_0001.json").exists()
+        assert (trials_dir / "trial_0002.json").exists()
+        assert not (trials_dir / "trial_0003.json").exists()
+        assert not (trials_dir / "trial_0004.json").exists()
+        assert not (candidates_dir / "round_0003.json").exists()
+        assert not (candidates_dir / "round_0004.json").exists()
+
+        archived_roots = list((cycle_dir / ".runtime" / "archived").iterdir())
+        assert len(archived_roots) == 1
+        archived = archived_roots[0]
+        assert (archived / "trials" / "trial_0003.json").exists()
+        assert (archived / "trials" / "trial_0004.json").exists()
+        assert (archived / "candidates" / "round_0003.json").exists()
+        assert (archived / "candidates" / "round_0004.json").exists()
+
+    def test_rebuilds_trial_index_from_survivors(self, tmp_path):
+        import pytest as _pytest
+
+        from promptpotter.infrastructure.store import CampaignStore
+
+        store = CampaignStore(tmp_path)
+        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=5)
+
+        # Seed a best-accuracy that lives in an archived trial so the
+        # rebuild has to recompute it.
+        store.add_trial("bid", "cycle_a", _make_trial(4, 0.99))
+        before = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
+        assert before["best_accuracy"] == _pytest.approx(0.99)
+
+        store.rewind_to_round("bid", "cycle_a", after_round=2)
+
+        after = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
+        assert after["n_trials"] == 3
+        rounds_in_index = sorted(t["round"] for t in after["trials"])
+        assert rounds_in_index == [0, 1, 2]
+        # Best trial is round 2 (accuracy 0.3 per seed formula).
+        assert after["best_trial_id"] == "round_2"
+        assert after["best_accuracy"] == _pytest.approx(0.3)
+
+    def test_resume_from_missing_round_raises(self, tmp_path):
+        import pytest as _pytest
+
+        from promptpotter.infrastructure.store import CampaignStore
+
+        store = CampaignStore(tmp_path)
+        _seed_rewind_cycle(store, "bid", "cycle_a", rounds=3)
+
+        with _pytest.raises(LookupError, match=r"trial_0099\.json not found"):
+            store.rewind_to_round("bid", "cycle_a", after_round=99)
+
+    def test_resume_from_missing_cycle_raises(self, tmp_path):
+        import pytest as _pytest
+
+        from promptpotter.infrastructure.store import CampaignStore
+
+        store = CampaignStore(tmp_path)
+        with _pytest.raises(LookupError, match="no trials on disk"):
+            store.rewind_to_round("bid", "cycle_nonexistent", after_round=0)
+

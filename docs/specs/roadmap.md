@@ -35,7 +35,7 @@ Archived specs (M0-M7, governance docs, old M9, M9 hierarchy refactor) live in `
 
 The destination. Three deliverables, one milestone:
 
-1. **Multi-connector architecture.** Abstract `BackendClient` into `ConnectorProtocol`, build a connector registry, make evaluation backend-agnostic, ship a query parser registry. Resolves the remaining TermNorm chokepoints (4, 5, 7, 10, 11, 12, 13) and the workflow nodes deferred from M6 Wave 4. A second backend connector lands in the same milestone to prove the abstraction holds up under a real second concrete shape.
+1. **Multi-connector architecture.** Foundation shipped (`ed95509`): `Connector` shape + registry at `promptpotter/connectors/`, `BackendClient` connector-agnostic, TermNorm migrated. Outstanding: register a second connector to prove the boundary end-to-end, drive lookup from `pipeline.json::backend_type`, hoist the query parser per-connector, and land the workflow nodes deferred from M6 Wave 4.
 2. **Competitor comparison.** Publication picks up its head-to-head numbers — MIPROv2 reproduction if reviewers demand it, cited numbers otherwise. The BBEH backbone from M11 is the substrate; M12 is the pass that turns it into "vs. competitors" rather than "ours alone."
 3. **Webapp Phase 2.** Campaign launcher, live monitoring over WebSocket / SSE, API extensions for control. The M11 read-only views become a full operator surface.
 
@@ -156,7 +156,7 @@ Full spec: [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
 | Feature | Notes |
 |---------|-------|
 | Multimodal / non-textual modalities | Extend beyond Q&A text to other input types (RNAseq, X-ray, image, audio). Requires modality-specific evaluation, dataset formats, and scoring functions. |
-| Pipeline Variant Comparison | Needs ConnectorProtocol + pipeline comparison (post-M12) |
+| Pipeline Variant Comparison | Needs second connector + pipeline comparison (post-M12) |
 | Web scrape ablation | Quality vs cost/latency tradeoff |
 | Public service deployment | Auth, rate limiting, multi-tenancy |
 | Non-prompt targets | Scoring functions, fuzzy matchers, retrieval queries, GA settings |

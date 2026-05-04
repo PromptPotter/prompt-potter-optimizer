@@ -1,40 +1,36 @@
-"""Artifact parity test — verifies LiveDashboardProjection produces all
-required per-cycle and per-session artifacts.
+"""Structural invariants — artifact parity + hexagonal layer-import rules.
 
-If any artifact in CAMPAIGN_ARTIFACTS or SESSION_ARTIFACTS is missing
-after the projection lifecycle, this test fails.  Sessions and campaigns
-are separate trees; a campaign records its parent session via
-``index.json::parent_session_id``.
-
-Campaign artifacts split into three bands:
-
-- ``ROOT_TELEMETRY_ARTIFACTS`` — the live observability stream
-  (``dashboard.json``). Binds to the family root cycle (the one with no
-  ``parent_cycle_id``); forks share the single continuous stream rather
-  than splintering it.
-- ``PER_CYCLE_OPERATOR_ARTIFACTS`` — frozen-on-finalization records the
-  operator reads directly (``index.json``, ``log.md``, ``review.md``,
-  ``trials/``, ``prompts/``, ``langfuse/``). Each cycle owns its own.
-- ``PER_CYCLE_INTERNAL_UMBRELLA`` — the ``.runtime/`` subdir holding
-  internals (ledger spine, streams, cache, archived). Operators normally
-  don't read these.
-
-``SIBLING_GROUP_DIRS`` are the three sibling-cycle parents
-(``forks/``, ``diag/``, ``sweeps/``) that may appear at the family
-root, holding nested fork dirs.
-
-The artifact sets are owned by this test — they were never read by
-production code, only by these assertions. New artifacts produced by
-``LiveDashboardProjection`` need an entry here.
+Two named invariants:
+  1. ``LiveDashboardProjection`` lifecycle produces every per-cycle and
+     per-session artifact in ``CAMPAIGN_ARTIFACTS`` / ``SESSION_ARTIFACTS``.
+     Campaign artifacts split into ``ROOT_TELEMETRY_ARTIFACTS`` (shared
+     across forks) and ``PER_CYCLE_OPERATOR_ARTIFACTS`` (per-cycle frozen
+     records). Internals (``.runtime/``) live under that umbrella;
+     ``ledger.jsonl`` / ``streams/`` / ``.cache/`` MUST NOT exist next to
+     operator files. ``FileSink`` Langfuse shadow uses camelCase fields and
+     nests node spans under round spans via ``parentObservationId``.
+  2. Hexagonal runtime imports: ``domain/`` is a sink (imports nothing),
+     ``application/intelligence/`` MUST NOT import from
+     ``application/optimization/``, and ``infrastructure/`` MUST NOT
+     import application/intelligence/optimization. ``cycle.py`` does NOT
+     import prompt-surface modules at runtime (those modules import cycle;
+     a back-edge re-introduces the cycle). The ``KNOWN_VIOLATIONS``
+     allowlist must stay accurate — stale entries fail too.
 """
 
 from __future__ import annotations
 
+import ast
 import json
+import pathlib
 from pathlib import Path
 from typing import Any, cast
 
 import pytest
+
+# ===========================================================================
+# Artifact parity
+# ===========================================================================
 
 # Per-family-root artifacts (telemetry stream, shared across forks).
 ROOT_TELEMETRY_ARTIFACTS = {
@@ -466,3 +462,152 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
         assert "dataType" in score
         for snake in ("trace_id", "data_type"):
             assert snake not in score, f"snake_case field {snake!r} leaked into score"
+
+
+# ===========================================================================
+# Hexagonal layer-import rule guard
+# ===========================================================================
+
+ROOT = pathlib.Path(__file__).parent.parent / "promptpotter"
+
+
+# Documented runtime cross-layer imports. The codebase is currently clean
+# at runtime; this allowlist exists so that any *intentional* future
+# violation can be tracked here with a TODO pointer rather than slipping
+# in silently. Stale entries fail the test, so the list cannot drift.
+KNOWN_VIOLATIONS: frozenset[tuple[str, str]] = frozenset()
+
+
+def _layer(rel_posix: str) -> str | None:
+    """Map a source file path to its hexagonal layer."""
+    if "/domain/" in rel_posix:
+        return "domain"
+    if "/application/intelligence/" in rel_posix:
+        return "intelligence"
+    if "/application/optimization/" in rel_posix:
+        return "optimization"
+    if "/application/" in rel_posix:
+        return "application"
+    if "/infrastructure/" in rel_posix:
+        return "infrastructure"
+    if "/presentation/" in rel_posix:
+        return "presentation"
+    return None
+
+
+def _target_layer(module: str) -> str | None:
+    """Map an imported promptpotter module to its hexagonal layer."""
+    if module.startswith("promptpotter.domain"):
+        return "domain"
+    if module.startswith("promptpotter.application.intelligence"):
+        return "intelligence"
+    if module.startswith("promptpotter.application.optimization"):
+        return "optimization"
+    if module.startswith("promptpotter.application"):
+        return "application"
+    if module.startswith("promptpotter.infrastructure"):
+        return "infrastructure"
+    if module.startswith("promptpotter.presentation"):
+        return "presentation"
+    return None
+
+
+def _is_violation(src: str, tgt: str) -> bool:
+    """The runtime-import rules. Tightest at the bottom (domain), loosest at the top."""
+    if src == "domain" and tgt != "domain":
+        return True
+    if src == "intelligence" and tgt == "optimization":
+        return True
+    return src == "infrastructure" and tgt in {"application", "intelligence", "optimization"}
+
+
+class _RuntimeImports(ast.NodeVisitor):
+    """Collect imports, skipping ``if TYPE_CHECKING:`` blocks."""
+
+    def __init__(self) -> None:
+        self.modules: list[str] = []
+
+    def visit_If(self, node: ast.If) -> None:
+        if "TYPE_CHECKING" in ast.unparse(node.test):
+            for n in node.orelse:
+                self.visit(n)
+            return
+        self.generic_visit(node)
+
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
+        if node.module:
+            self.modules.append(node.module)
+
+    def visit_Import(self, node: ast.Import) -> None:
+        for alias in node.names:
+            self.modules.append(alias.name)
+
+
+def _scan_violations() -> set[tuple[str, str]]:
+    found: set[tuple[str, str]] = set()
+    for path in ROOT.rglob("*.py"):
+        rel = path.relative_to(ROOT.parent).as_posix()
+        src_layer = _layer(rel)
+        if src_layer is None:
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+        visitor = _RuntimeImports()
+        visitor.visit(tree)
+        for module in visitor.modules:
+            tgt_layer = _target_layer(module)
+            if tgt_layer is None:
+                continue
+            if _is_violation(src_layer, tgt_layer):
+                found.add((rel, module))
+    return found
+
+
+_CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
+    {
+        "promptpotter.application.optimization.dispatch",
+        "promptpotter.application.optimization.l1_surface",
+        "promptpotter.application.optimization.l2_surface",
+        "promptpotter.application.optimization.l1_critique",
+        "promptpotter.application.optimization.transitions",
+        "promptpotter.application.optimization.escalation",
+    }
+)
+
+
+def test_cycle_does_not_import_prompt_surface() -> None:
+    """Cycle must not import from prompt-surface or escalation modules.
+
+    The cycle ↔ pipeline back-edge (cycle.py importing L2/L3 strategies
+    from pipeline.py at module top) was the structural smell that drove
+    the C1 split. Reasserting it would re-introduce the circular
+    workaround. Guard: cycle.py imports neither the surface compilers
+    nor the escalation driver — escalation imports cycle, never the
+    reverse.
+    """
+    cycle_path = ROOT / "application" / "optimization" / "cycle.py"
+    tree = ast.parse(cycle_path.read_text(encoding="utf-8"))
+    visitor = _RuntimeImports()
+    visitor.visit(tree)
+    forbidden = sorted(set(visitor.modules) & _CYCLE_FORBIDDEN_PROMPT_SURFACE)
+    assert not forbidden, (
+        "cycle.py must not import from prompt-surface modules at runtime — "
+        "those modules import cycle. A back-edge re-introduces the cycle.\n"
+        "Forbidden imports detected:\n  " + "\n  ".join(forbidden)
+    )
+
+
+def test_no_unexpected_runtime_layer_violations() -> None:
+    found = _scan_violations()
+    new = found - KNOWN_VIOLATIONS
+    stale = KNOWN_VIOLATIONS - found
+    assert not new, (
+        "New runtime layer-import violations detected. "
+        "Either fix the import, or — if intentional and pending a rework — add it "
+        "to KNOWN_VIOLATIONS with a TODO pointer.\nNew violations:\n  "
+        + "\n  ".join(f"{src}: {tgt}" for src, tgt in sorted(new))
+    )
+    assert not stale, (
+        "KNOWN_VIOLATIONS contains entries that no longer occur in the source. "
+        "Remove them to keep the allowlist accurate.\nStale entries:\n  "
+        + "\n  ".join(f"{src}: {tgt}" for src, tgt in sorted(stale))
+    )
