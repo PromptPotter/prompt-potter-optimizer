@@ -113,6 +113,40 @@ def _scan_violations() -> set[tuple[str, str]]:
     return found
 
 
+_CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
+    {
+        "promptpotter.application.optimization.dispatch",
+        "promptpotter.application.optimization.l1_surface",
+        "promptpotter.application.optimization.l2_surface",
+        "promptpotter.application.optimization.l1_critique",
+        "promptpotter.application.optimization.transitions",
+        "promptpotter.application.optimization.escalation",
+    }
+)
+
+
+def test_cycle_does_not_import_prompt_surface() -> None:
+    """Cycle must not import from prompt-surface or escalation modules.
+
+    The cycle ↔ pipeline back-edge (cycle.py importing L2/L3 strategies
+    from pipeline.py at module top) was the structural smell that drove
+    the C1 split. Reasserting it would re-introduce the circular
+    workaround. Guard: cycle.py imports neither the surface compilers
+    nor the escalation driver — escalation imports cycle, never the
+    reverse.
+    """
+    cycle_path = ROOT / "application" / "optimization" / "cycle.py"
+    tree = ast.parse(cycle_path.read_text(encoding="utf-8"))
+    visitor = _RuntimeImports()
+    visitor.visit(tree)
+    forbidden = sorted(set(visitor.modules) & _CYCLE_FORBIDDEN_PROMPT_SURFACE)
+    assert not forbidden, (
+        "cycle.py must not import from prompt-surface modules at runtime — "
+        "those modules import cycle. A back-edge re-introduces the cycle.\n"
+        "Forbidden imports detected:\n  " + "\n  ".join(forbidden)
+    )
+
+
 def test_no_unexpected_runtime_layer_violations() -> None:
     found = _scan_violations()
     new = found - KNOWN_VIOLATIONS

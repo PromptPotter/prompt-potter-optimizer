@@ -247,7 +247,9 @@ class L2RefineStrategy:
         if result.template_override:
             cycle.opt_sp.l1_template_override = result.template_override
         cycle.opt_sp.l2_output_failures = list(result.l2_output_failures)
-        cycle.escalation.l2.record_entry(cycle.best_accuracy, cycle.best_composite)
+        cycle.escalation.l2.record_entry(
+            cycle.tracking.best_accuracy, cycle.tracking.best_composite
+        )
 
         is_probe = result.action == OptimizerAction.PROBE_ROUND
         _cycle_mod.record_decision(
@@ -276,8 +278,8 @@ class L2RefineStrategy:
             "l2_round": cycle.escalation.l2.round,
             "l1_stall_count": cycle.escalation.l1_stall_count,
             "current_params": cycle.opt_sp.optimizer_params,
-            "current_accuracy": cycle.current_accuracy,
-            "best_accuracy": cycle.best_accuracy,
+            "current_accuracy": cycle.tracking.current_accuracy,
+            "best_accuracy": cycle.tracking.best_accuracy,
         }
 
     def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
@@ -377,8 +379,10 @@ class L3ModifyPlan:
         )
 
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-        cycle.escalation.l3.record_entry(cycle.best_accuracy, cycle.best_composite)
-        cycle.escalation.reset_for_l3(cycle.best_accuracy, cycle.best_composite)
+        cycle.escalation.l3.record_entry(
+            cycle.tracking.best_accuracy, cycle.tracking.best_composite
+        )
+        cycle.escalation.reset_for_l3(cycle.tracking.best_accuracy, cycle.tracking.best_composite)
         logger.debug(
             "L3 modify_plan at round %d (l3_round=%d)", round_num, cycle.escalation.l3.round
         )
@@ -420,9 +424,9 @@ async def _run_transition(
     escalation_check_result: dict | None = None,
 ) -> Any:
     """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
-    assert cycle.current_sp is not None
+    assert cycle.tracking.current_sp is not None
     client = _llm_client.get_llm_client(config.optimizer_llm.provider)
-    current_pp = cycle.current_sp.pipeline_params
+    current_pp = cycle.tracking.current_sp.pipeline_params
 
     emit_phase(
         on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle)
@@ -447,7 +451,7 @@ async def _run_transition(
     new_opt = result.opt_search_point
     cycle.opt_sp.copy_memory_to(new_opt)
     cycle.opt_sp = new_opt
-    cycle.current_sp = new_opt.to_job_search_point(
+    cycle.tracking.current_sp = new_opt.to_job_search_point(
         base_pipeline_params=result.pipeline_params or current_pp,
         schema=pipeline_schema,
     )
@@ -484,7 +488,7 @@ async def escalate_l2(
     """L1→L2 (and optional L2→L3) escalation; vanilla patience-exhausts → next layer / stop."""
     opt = config.optimization
     esc = cycle.escalation
-    esc.l2.record_outcome(cycle.best_composite)
+    esc.l2.record_outcome(cycle.tracking.best_composite)
 
     l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
     # entry_round = round whose rescored best_composite is the stall baseline (-1 = never fired).
@@ -502,8 +506,8 @@ async def escalate_l2(
             "l2_round": esc.l2.round,
             "stall_count": esc.l2.stall_count,
             "best_composite_at_entry": esc.l2.best_composite_at_entry,
-            "best_composite_this_round": cycle.best_composite,
-            "best_accuracy": cycle.best_accuracy,
+            "best_composite_this_round": cycle.tracking.best_composite,
+            "best_accuracy": cycle.tracking.best_accuracy,
         },
     )
     if not l2_stalled:
@@ -546,7 +550,7 @@ async def escalate_l2(
         logger.debug("L2 patience exhausted (%d stalls) at round %d", esc.l2.stall_count, round_num)
         return StopReason.L2_PATIENCE
 
-    esc.l3.record_outcome(cycle.best_composite)
+    esc.l3.record_outcome(cycle.tracking.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
     entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
     _cycle_mod.record_decision(
@@ -562,7 +566,7 @@ async def escalate_l2(
             "l3_round": esc.l3.round,
             "stall_count": esc.l3.stall_count,
             "best_composite_at_entry": esc.l3.best_composite_at_entry,
-            "best_composite_this_round": cycle.best_composite,
+            "best_composite_this_round": cycle.tracking.best_composite,
         },
     )
     if not l3_exhausted:

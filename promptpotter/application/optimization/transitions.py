@@ -135,7 +135,8 @@ def compile_l3_extras(cycle: Cycle, pipeline_params: dict | None) -> dict[str, s
         {
             "l2_round": cycle.escalation.l2.round,
             "optimizer_params": opt_sp.optimizer_params,
-            "accuracy_change": cycle.best_composite - cycle.escalation.l3.best_composite_at_entry,
+            "accuracy_change": cycle.tracking.best_composite
+            - cycle.escalation.l3.best_composite_at_entry,
         }
     ]
     l2_summary = "\n".join(

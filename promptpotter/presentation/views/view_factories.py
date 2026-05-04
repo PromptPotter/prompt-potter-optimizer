@@ -115,8 +115,8 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
 def _init_exit(d: dict, ctx: dict) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
-    ctx["baseline_accuracy"] = cycle.current_accuracy
-    ctx["baseline_composite"] = getattr(cycle, "current_composite", cycle.current_accuracy)
+    ctx["baseline_accuracy"] = cycle.tracking.current_accuracy
+    ctx["baseline_composite"] = cycle.tracking.current_composite
     schema = getattr(session, "pipeline_schema", None)
     explicit = getattr(session, "scorer_round_formula", None)
     if explicit:
@@ -142,7 +142,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
 
     crit = cycle.opt_sp.l1_critique_text or ""
     return InitExitView(
-        baseline_acc=cycle.current_accuracy,
+        baseline_acc=cycle.tracking.current_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_dataset),
         obs_on=session.state.obs is not None,

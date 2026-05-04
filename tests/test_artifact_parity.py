@@ -134,7 +134,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from types import SimpleNamespace
 
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.application.optimization.cycle import Cycle, TrackingState
     from promptpotter.domain.cycle_paths import RootCycleDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult, RunResult
@@ -188,7 +188,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     init_state = Cycle(
         session=cast("Any", SimpleNamespace(pipeline_schema=None)),
         config=config,
-        current_accuracy=0.5,
+        tracking=TrackingState(current_accuracy=0.5),
     )
     init_env = SimpleNamespace(
         state=SimpleNamespace(

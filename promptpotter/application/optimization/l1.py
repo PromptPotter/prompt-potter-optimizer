@@ -259,8 +259,8 @@ async def l1_generate(
         opt_sp,
         extras={
             "n_variants": str(n_variants),
-            "accuracy_pct": f"{cycle.current_accuracy:.1%}",
-            "n_queries": str(len(cycle.current_results)),
+            "accuracy_pct": f"{cycle.tracking.current_accuracy:.1%}",
+            "n_queries": str(len(cycle.tracking.current_results)),
             "rendered_prompt": opt_sp.render(),
         },
     )
@@ -1008,19 +1008,19 @@ async def _generate_or_load_candidates(
     _creativity = opt_params.get("creativity", opt.creativity)
     prompt_preview = cycle.opt_sp.render()[:120]
 
-    assert cycle.current_sp is not None
+    assert cycle.tracking.current_sp is not None
     emit_phase(
         on_phase,
         CampaignPhase.L1_GENERATE,
         "enter",
         round=round_num,
-        current_accuracy=cycle.current_accuracy,
+        current_accuracy=cycle.tracking.current_accuracy,
         prompt_preview=prompt_preview,
         n_variants=_n_variants,
         creativity=_creativity,
         model=model or "(default)",
         has_l1_critique=bool(cycle.opt_sp.l1_critique_text),
-        pipeline_params=cycle.current_sp.pipeline_params,
+        pipeline_params=cycle.tracking.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
 
@@ -1134,7 +1134,7 @@ async def execute_round(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
     )
 
-    assert cycle.current_sp is not None
+    assert cycle.tracking.current_sp is not None
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
@@ -1142,9 +1142,9 @@ async def execute_round(
         round=round_num,
         n_candidates=len(candidates),
         n_queries=len(scoring_dataset),
-        current_best_accuracy=cycle.current_accuracy,
+        current_best_accuracy=cycle.tracking.current_accuracy,
         improvement_threshold=opt.improvement_threshold,
-        current_pipeline_params=cycle.current_sp.pipeline_params,
+        current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
     )
     baseline = cycle.baseline_for_round(scoring_dataset, round_num)
     async with observed_node(
@@ -1160,7 +1160,7 @@ async def execute_round(
             candidates,
             scoring_dataset,
             baseline,
-            pipeline_params=cycle.current_sp.pipeline_params,
+            pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,

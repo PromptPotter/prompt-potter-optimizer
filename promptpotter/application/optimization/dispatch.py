@@ -266,8 +266,8 @@ def build_dispatch_state(
         axis_digest=_layer_axis_digest(layer, cycle),
         critique=critique,
         l1_stall_count=cycle.escalation.l1_stall_count,
-        best_accuracy=cycle.best_accuracy,
-        best_round=cycle.best_round,
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_round=cycle.tracking.best_round,
         rounds=list(cycle.rounds),
         probe_next_round=cycle.probe_next_round,
     )

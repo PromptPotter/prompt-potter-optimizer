@@ -274,7 +274,7 @@ class LiveDashboardProjection:
             loop_env = data["env"]
             config = data["config"]
             s["cycle_id"] = loop_env.state.cycle_id
-            s["baseline"] = cycle.current_accuracy
+            s["baseline"] = cycle.tracking.current_accuracy
             self._patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self._patience_max}"
             if view is not None:

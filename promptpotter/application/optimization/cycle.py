@@ -722,13 +722,15 @@ class EscalationState:
 
 
 @dataclass
-class Cycle:
-    """Mutable orchestration state for the feedback cycle round loop."""
+class TrackingState:
+    """Current/best searchpoint trajectory — extracted from Cycle.
 
-    session: Session
-    config: CampaignConfig
+    Holds the round-loop's per-round mutable read-out: the current scored
+    searchpoint, the best one seen so far, and the campaign's frozen
+    baseline composite (the origin for trajectory rendering — lets log.md
+    print ``Δ from baseline=0.5012`` at any depth).
+    """
 
-    rounds: list[RoundResult] = field(default_factory=list)
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
     current_composite: float = 0.0
@@ -737,10 +739,18 @@ class Cycle:
     best_composite: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
-    # Frozen at ``start()`` — the baseline composite that anchors the
-    # campaign's "origin" for trajectory rendering. Lets renderers print
-    # ``Δ from baseline=0.5012`` even at deep rounds.
     baseline_composite: float = 0.0
+
+
+@dataclass
+class Cycle:
+    """Mutable orchestration state for the feedback cycle round loop."""
+
+    session: Session
+    config: CampaignConfig
+
+    rounds: list[RoundResult] = field(default_factory=list)
+    tracking: TrackingState = field(default_factory=TrackingState)
 
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
 
@@ -796,15 +806,17 @@ class Cycle:
         return cls(
             session=session,
             config=config,
-            current_sp=sp,
-            current_accuracy=baseline_accuracy,
-            current_composite=composite,
-            current_results=baseline_results or [],
-            best_accuracy=baseline_accuracy,
-            best_composite=composite,
-            best_sp=sp,
+            tracking=TrackingState(
+                current_sp=sp,
+                current_accuracy=baseline_accuracy,
+                current_composite=composite,
+                current_results=baseline_results or [],
+                best_accuracy=baseline_accuracy,
+                best_composite=composite,
+                best_sp=sp,
+                baseline_composite=composite,
+            ),
             opt_sp=opt_sp,
-            baseline_composite=composite,
         )
 
     def restore_from_trial(self, trial: dict[str, Any]) -> None:
@@ -815,6 +827,7 @@ class Cycle:
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
         schema = self.session.pipeline_schema
+        tr = self.tracking
         self.rounds.append(rr)
         self.opt_sp.round_history.append(
             RoundSummary(
@@ -829,21 +842,19 @@ class Cycle:
         )
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
-        assert self.current_sp is not None
+        assert tr.current_sp is not None
         _pp = (
-            rr.pipeline_params
-            if rr.pipeline_params is not None
-            else self.current_sp.pipeline_params
+            rr.pipeline_params if rr.pipeline_params is not None else tr.current_sp.pipeline_params
         )
-        self.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
-        self.current_accuracy = rr.accuracy
-        self.current_composite = rr.composite
-        self.current_results = list(rr.results)
-        if self.current_composite > self.best_composite:
-            self.best_composite = self.current_composite
-            self.best_accuracy = self.current_accuracy
-            self.best_round = round_num
-            self.best_sp = self.current_sp
+        tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
+        tr.current_accuracy = rr.accuracy
+        tr.current_composite = rr.composite
+        tr.current_results = list(rr.results)
+        if tr.current_composite > tr.best_composite:
+            tr.best_composite = tr.current_composite
+            tr.best_accuracy = tr.current_accuracy
+            tr.best_round = round_num
+            tr.best_sp = tr.current_sp
 
     def record_decision(self, d: Decision) -> None:
         """Queue a decision produced outside the normal round flow (escalation/probe)."""
@@ -889,12 +900,13 @@ class Cycle:
         without subset-rescore would always look like regression).
         """
         schema = self.session.pipeline_schema
-        accuracy = self.current_accuracy
-        composite = self.current_composite
-        results: list[dict] = list(self.current_results)
-        if self.probe_next_round and self.current_results and schema is not None:
+        tr = self.tracking
+        accuracy = tr.current_accuracy
+        composite = tr.current_composite
+        results: list[dict] = list(tr.current_results)
+        if self.probe_next_round and tr.current_results and schema is not None:
             probe_queries = {s.query for s in scoring_dataset}
-            subset = [r for r in self.current_results if r.get("query") in probe_queries]
+            subset = [r for r in tr.current_results if r.get("query") in probe_queries]
             if subset:
                 subset_scores = compute_composite_score(
                     cast("list[QueryResult]", subset),
@@ -976,7 +988,7 @@ def resume_with_divergence_check(
                 sc.scorer_formula,
             )
 
-    baseline_results_rescored = list(cycle.current_results or [])
+    baseline_results_rescored = list(cycle.tracking.current_results or [])
     rescore_results(
         baseline_results_rescored,
         sc.scorer,
