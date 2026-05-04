@@ -1,23 +1,4 @@
-"""L1 phase — generation → measurement → scoring → round execution.
-
-Four labeled sections, one per L1 sub-phase:
-
-1. **Generation** (``l1_generate``, ``build_l1_output_schema``,
-   ``validate_overrides``) — produce candidate variants via LLM
-   meta-prompt; validate node-overrides against the pipeline schema.
-2. **Measurement** (``L1YieldStats``, ``detect_invariants``,
-   ``parse_population``, ``score_population``) — post-process proposals
-   (no-op + duplicate detection), parse + merge pipeline params, and
-   dispatch each candidate over the three scoring exit paths
-   (validation-skip / cache-hit / scored). See
-   ``docs/developer/self-healing-internals.md``.
-3. **Scoring orchestration** (``L1ScoringResult``, ``l1_score``) — score
-   candidates and select the round winner; record the ``round_winner``
-   decision for divergence replay.
-4. **Round execution** (``execute_round``) — top-level L1 round driver
-   that ties all four sub-phases together (generate → score → critique
-   → persist).
-"""
+"""L1 phase: generate → measure → score → execute round."""
 
 from __future__ import annotations
 
@@ -41,6 +22,7 @@ from promptpotter.application.optimization.l1_critique import (
     run_l1_critique,
 )
 from promptpotter.application.optimization.llm_call import (
+    get_optimizer_schema,
     load_optimizer_prompt,
     run_optimizer_node,
 )
@@ -112,25 +94,14 @@ __all__ = [
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Construct the JSON schema L1 must conform to.
-
-    Starts from the static envelope sheltered in the optimizer manifest
-    (``resolved_schemas['l1_generate/1']``) — variants array shape +
-    prompt-string + task-context override fields — and grafts per-target
-    node properties (with ``param_allowed_values`` tightened to JSON-Schema
-    ``enum``) onto ``pipeline_params_override.properties``.
-    """
-    from copy import deepcopy
-
-    from promptpotter.application.optimization.llm_call import get_optimizer_schema
-
+    """Static l1_generate envelope + per-node param_allowed_values grafted as enums."""
     base_node = get_optimizer_schema().get_node("l1_generate")
     if base_node is None or base_node.output_schema is None:
         raise RuntimeError(
             "optimizer manifest missing l1_generate output_schema envelope "
             "(resolved_schemas['l1_generate/1'])"
         )
-    schema = deepcopy(base_node.output_schema.json_schema)
+    schema = copy.deepcopy(base_node.output_schema.json_schema)
     override_properties = schema["schema"]["properties"]["variants"]["items"]["properties"][
         "pipeline_params_override"
     ]["properties"]
@@ -195,14 +166,7 @@ def _check_l1_schema_compliance(
     pipeline_schema: PipelineSchema,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    """L1-output validator wrapping :func:`validate_overrides`.
-
-    Source output is the candidate's ``node_overrides`` dict (parse-time
-    projection of L1's ``pipeline_params_override``). Produces a single
-    ValidatorOutcome carrying every detected ``ValidationFailure`` as
-    evidence. Nurse target: L2 — L2 reads the failures next round and
-    writes a directive that names the disallowed value.
-    """
+    """Wrap validate_overrides → ValidatorOutcome (nurse_target=L2)."""
     if not source_output or not pipeline_schema:
         return None
     failures = validate_overrides(source_output, pipeline_schema)
@@ -219,14 +183,56 @@ def _check_l1_schema_compliance(
 
 L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
     id="l1_schema_compliance",
-    description=(
-        "Verify L1's pipeline_params_override against the pipeline schema's "
-        "available_models and param_allowed_values. Failures attach to the "
-        "candidate as ValidationFailures and drive the synthetic-0 path."
-    ),
+    description="Verify L1's pipeline_params_override vs schema's allowed values.",
     nurse_target="l2",
     check=_check_l1_schema_compliance,
 )
+
+
+def _normalize_pp_override(
+    pp_override: dict, pipeline_schema: PipelineSchema | None
+) -> tuple[dict, dict, dict]:
+    """Split LLM pp_override → (prompt, task_context, node_overrides); un-nest, auto-nest, drop unknown nodes."""
+    pp_override.pop("steps", None)  # LLM must not override pipeline composition
+    prompt_changes: dict = {}
+    tc_changes: dict = {}
+    node_overrides: dict = {}
+    for k, pv in pp_override.items():
+        if k in PROMPT_STRING_FIELDS:
+            prompt_changes[k] = pv
+        elif k in TASK_CONTEXT_OVERRIDES:
+            tc_changes[k] = pv
+        else:
+            node_overrides[k] = pv
+
+    # Un-nest prompt/task_context fields LLM emitted under a node name
+    # (e.g. {"llm_only": {"answer_format": ...}}).
+    for node_name in list(node_overrides.keys()):
+        nested = node_overrides[node_name]
+        if not isinstance(nested, dict):
+            continue
+        for sub_k in list(nested.keys()):
+            if sub_k in PROMPT_STRING_FIELDS:
+                logger.warning("l1_generate: un-nesting prompt field %r from %r", sub_k, node_name)
+                prompt_changes[sub_k] = nested.pop(sub_k)
+            elif sub_k in TASK_CONTEXT_OVERRIDES:
+                logger.warning("l1_generate: un-nesting task_context %r from %r", sub_k, node_name)
+                tc_changes[sub_k] = nested.pop(sub_k)
+        if not nested:
+            del node_overrides[node_name]
+
+    if pipeline_schema:
+        # Auto-nest flat params + drop hallucinated nodes.
+        for fk in [k for k, val in node_overrides.items() if not isinstance(val, dict)]:
+            owner = pipeline_schema.node_for_param(fk)
+            if owner:
+                logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
+                node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
+        for bk in [k for k in node_overrides if not pipeline_schema.has_node(k)]:
+            logger.warning("l1_generate: dropping hallucinated node %r", bk)
+            del node_overrides[bk]
+
+    return prompt_changes, tc_changes, node_overrides
 
 
 async def l1_generate(
@@ -300,56 +306,9 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        pp_override = v.get("pipeline_params_override") or {}
-        pp_override.pop("steps", None)  # LLM must not override pipeline composition
-        prompt_changes: dict = {}
-        tc_changes: dict = {}
-        node_overrides: dict = {}
-        for k, pv in pp_override.items():
-            if k in PROMPT_STRING_FIELDS:
-                prompt_changes[k] = pv
-            elif k in TASK_CONTEXT_OVERRIDES:
-                tc_changes[k] = pv
-            else:
-                node_overrides[k] = pv
-
-        # Symmetric safety net: un-nest prompt / task_context fields the LLM
-        # emitted under a node name (e.g. {"llm_only": {"answer_format": ...}}).
-        for node_name in list(node_overrides.keys()):
-            nested = node_overrides[node_name]
-            if not isinstance(nested, dict):
-                continue
-            for sub_k in list(nested.keys()):
-                if sub_k in PROMPT_STRING_FIELDS:
-                    logger.warning(
-                        "l1_generate: un-nesting prompt field %r from node %r", sub_k, node_name
-                    )
-                    prompt_changes[sub_k] = nested.pop(sub_k)
-                elif sub_k in TASK_CONTEXT_OVERRIDES:
-                    logger.warning(
-                        "l1_generate: un-nesting task_context field %r from node %r",
-                        sub_k,
-                        node_name,
-                    )
-                    tc_changes[sub_k] = nested.pop(sub_k)
-            if not nested:
-                del node_overrides[node_name]
-
-        # Safety net: auto-nest flat params the LLM may still emit
-        if pipeline_schema:
-            _flat_keys = [k for k, v in node_overrides.items() if not isinstance(v, dict)]
-            for fk in _flat_keys:
-                owner = pipeline_schema.node_for_param(fk)
-                if owner:
-                    logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
-                    node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
-
-            # Filter out hallucinated nodes that don't exist in the pipeline
-            _bad_nodes = [k for k in node_overrides if not pipeline_schema.has_node(k)]
-            for bk in _bad_nodes:
-                logger.warning("l1_generate: dropping hallucinated node %r", bk)
-                del node_overrides[bk]
-
+        prompt_changes, tc_changes, node_overrides = _normalize_pp_override(
+            v.get("pipeline_params_override") or {}, pipeline_schema
+        )
         # Override validation is deferred to parse_population — one producer of truth.
         child = opt_sp.mutate(
             changes_description=v.get("changes_description", ""),
@@ -393,19 +352,11 @@ _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
 def detect_invariants(
     proposals: list[CandidateProposal], parent_osp: OptSearchPoint
 ) -> L1YieldStats:
-    """Attach ``ValidationFailure`` to no-op / duplicate variants; return round-level stats.
+    """Attach no_op_variant / duplicate_variant failures; return yield stats.
 
-    A candidate is a *no-op* when its mutation signature vs ``parent_osp`` is
-    empty (every prompt field, task-context entry, and node-override matches
-    parent). A *duplicate* signature equals one already seen earlier in the
-    batch. Failures attach to ``cp.osp.validation_failures`` so the existing
-    synthetic-0 path (``score_population`` Path 1) skips scoring with zero
-    LLM cost; L2 ingests them next round and the resulting ``l2_directive``
-    teaches L1 to diversify.
-
-    Idempotent: pre-existing ``no_op_variant`` / ``duplicate_variant``
-    entries are dropped before the pass so resume-from-disk doesn't
-    accumulate duplicates.
+    Failures route through score_population's synthetic-0 path (Path 1) so
+    invariant variants don't burn LLM calls. Idempotent — pre-existing
+    invariant failures are dropped first so resume-from-disk doesn't dup.
     """
     for cp in proposals:
         cp.osp.validation_failures = [
@@ -547,6 +498,15 @@ def _build_score_report(
         runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
         elimination_context=dict(elimination_context) if elimination_context else {},
     )
+
+
+def _pobb_decision_data(cr: dict) -> dict[str, Any]:
+    """Shared archival data for PoBB elimination + leader-lock decisions."""
+    return {
+        "p_best": float(cr.get("p_best", 0.0)),
+        "leader_id": str(cr.get("leader_id", "")),
+        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+    }
 
 
 _INVALID_SCORES: dict[str, Any] = {
@@ -756,7 +716,11 @@ async def score_population(
         )
         residual = None if (elimination_stopped or leader_locked_loose or not signal) else signal
 
-        # Decision-record the PoBB-elimination cut (divergence-replayed on resume).
+        # PoBB-elimination cut + leader lock-in: decision-record both
+        # (divergence-replayed on resume); leader_locked also breaks the loop.
+        leader_locked = (
+            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
+        )
         if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
             cr = signal.check_result
             leader_id = str(cr.get("leader_id", ""))
@@ -784,17 +748,8 @@ async def score_population(
                         "round_num": round_num,
                     },
                     True,
-                    data={
-                        "p_best": float(cr.get("p_best", 0.0)),
-                        "leader_id": leader_id,
-                        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
-                    },
+                    data=_pobb_decision_data(cr),
                 )
-
-        # PoBB-only leader lock-in (early-break + decision record).
-        leader_locked = (
-            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
-        )
         if leader_locked and signal is not None and decisions is not None:
             cr = signal.check_result
             record_decision(
@@ -809,11 +764,7 @@ async def score_population(
                     "round_num": round_num,
                 },
                 True,
-                data={
-                    "p_best": float(cr.get("p_best", 0.0)),
-                    "leader_id": str(cr.get("leader_id", "")),
-                    "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
-                },
+                data=_pobb_decision_data(cr),
             )
 
         _fire(idx, report)
@@ -1198,12 +1149,8 @@ async def execute_round(
     critique_text = ""
     if scoring_result.winner_results and not skip_critique:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
-        # Wrap the critique LLM call: a truncated/malformed response (e.g.
-        # finish_reason=length producing invalid JSON) raised JSONDecodeError
-        # all the way to asyncio.run and crashed the whole campaign.
-        # Critique is round-over-round feedback — surviving its loss costs at
-        # most one round of degraded L1-generate context, far better than a
-        # hard exit.
+        # Critique is round-over-round feedback; survive a malformed LLM
+        # response rather than crash the campaign.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             critique_result = await run_l1_critique(
                 cycle,

@@ -1,14 +1,4 @@
-"""L1-critique prompt surface — round-end critique blob + LLM call.
-
-L1-critique has no per-section override channel (nothing external mutates
-its surface), so its prompt template carries a single ``{{dispatch_msg}}``
-hole filled by ``compile_l1_critique_blob`` walking the four section
-renderers in registration order; empties drop out.
-
-``run_l1_critique`` is the round-end LLM call that produces the raw 6-field
-critique dict; ``format_l1_critique_for_prompt`` projects that dict into
-the compact text L1 / L2 see in the next round.
-"""
+"""L1-critique blob + LLM call. Single ``{{dispatch_msg}}`` hole — no overrides."""
 
 from __future__ import annotations
 

@@ -210,12 +210,7 @@ class OptSearchPoint(PromptTemplate):
 
     # -- L2 state ----------------------------------------------------------
     optimizer_params: dict[str, Any] = Field(default_factory=dict)
-    task_context: TaskDecomposition = Field(
-        default_factory=TaskDecomposition,
-        description="Structured domain context (domain, pipeline_purpose, "
-        "data_characteristics, optimization_goals, key_challenges). "
-        "Set from TASK_DESCRIPTION decomposition, refinable by L2.",
-    )
+    task_context: TaskDecomposition = Field(default_factory=TaskDecomposition)
 
     @field_validator("task_context", mode="before")
     @classmethod
@@ -226,96 +221,25 @@ class OptSearchPoint(PromptTemplate):
             return TaskDecomposition.from_dict(v)
         return TaskDecomposition()
 
-    # -- Optimization memory (flattened) -----------------------------------
-    # The fields below are bundled by MEMORY_FIELDS so they can be copied
-    # atomically across L2/L3 transitions (see :meth:`copy_memory_to`).
-    l1_critique_text: str = Field(
-        default="",
-        description="Latest L1 critique summary fed to L1 when no l2_directive "
-        "is active. One-round window — cleared by clear_volatile() on "
-        "improvement, same lifecycle as l2_directive.",
-    )
-    escalation_journal: list[dict[str, Any]] = Field(
-        default_factory=list,
-        description="Cross-round degradation investigation memory.",
-    )
-    warning_inventory: dict[str, dict[str, Any]] = Field(
-        default_factory=dict,
-        description="Per-query warning inventory across rounds.",
-    )
-    l2_directive: str = Field(
-        default="",
-        description="L2's diagnostic reasoning + action guidance for L1. "
-        "One-round window — cleared by clear_volatile() on improvement.",
-    )
-    validation_failures: list[ValidationFailure] = Field(
-        default_factory=list,
-        description="Parse-time invariant violations on this candidate "
-        "(e.g. proposed `model: gpt-4o` when the user-declared allowed "
-        "set is `[openai/gpt-oss-120b]`). A non-empty list makes the "
-        "SearchPoint structurally invalid; score_search_point() short-"
-        "circuits to a synthetic 0 instead of running the backend. See "
-        "docs/developer/self-healing-internals.md.",
-    )
-    runtime_failures: list[RuntimeFailure] = Field(
-        default_factory=list,
-        description="Runtime-observed health failures on this candidate "
-        "(e.g. max_tokens=150 classifying as 100%% reasoning_budget_exhausted "
-        "on reasoning models). Populated AFTER the backend ran, not at parse "
-        "time. Does not synthetic-0 — the real score stands — but flows to "
-        "L2 as self-healing evidence so the next round's directive names the "
-        "disallowed value range. Attached per candidate, so a losing "
-        "candidate's runtime issues never disrupt the round winner.",
-    )
-    l2_output_failures: list[ValidatorOutcome] = Field(
-        default_factory=list,
-        description="Deterministic validator outcomes on L2's own output for "
-        "this round. Populated post-parse by the L2-validator registry "
-        "(cross-field duplication, verbatim self-repeat, catalogue "
-        "redundancy). A non-empty list forces L3 escalation this round — "
-        "L3 is the nurse-LLM that heals L2, analogue of how L2 heals L1 "
-        "via validation_failures. See "
-        "docs/developer/self-healing-internals.md.",
-    )
-    failure_analysis: FailureAnalysis | None = Field(
-        default=None,
-        description="Latest round's clustered failure analysis over the "
-        "winner's results. Consumed by L1 as a dispatch_msg section; replaced "
-        "each round. Carried across L2/L3 mutate + adopt_transition "
-        "by copy_memory_to().",
-    )
-    round_history: list[RoundSummary] = Field(
-        default_factory=list,
-        description="Compact per-round trajectory ledger. Sufficient for "
-        "``build_trajectory_report`` (accuracy). Full ``RoundResult`` "
-        "objects with raw query results stay transient on ``Cycle.rounds``; "
-        "this persisted mirror survives trial checkpoints.",
-    )
+    # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
+    l1_critique_text: str = ""
+    escalation_journal: list[dict[str, Any]] = Field(default_factory=list)
+    warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
+    l2_directive: str = ""
+    validation_failures: list[ValidationFailure] = Field(default_factory=list)
+    runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
+    l2_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
+    failure_analysis: FailureAnalysis | None = None
+    round_history: list[RoundSummary] = Field(default_factory=list)
 
     # -- L1-generate surface state (owned by L2 mutations) ----------------
-    l1_section_overrides: dict[str, bool] = Field(
-        default_factory=dict,
-        description="Per-section visibility toggles for L1-generate. Keys are "
-        'section names from ``LAYER_CONFIGS[Layer.L1_GENERATE].sections``; ``False`` gates a section off (renders ``""``); '
-        "``True`` or absent renders normally. Set by L2 when it fires; "
-        "persists round-over-round until L2 flips it.",
-    )
-    l1_section_overrides_text: dict[str, str] = Field(
-        default_factory=dict,
-        description="Per-section text overrides for L1-generate. Keys are "
-        "section names from ``LAYER_CONFIGS[Layer.L1_GENERATE].sections``; the value replaces that section's rendered "
-        "output. Set by L2 when it fires. Wins over default rendering, "
-        "loses to a section being toggled off.",
-    )
-    l1_template_override: str = Field(
-        default="",
-        description="Whole-body override for L1-generate's ``problem_description`` "
-        "template. When non-empty, this string replaces the default body and is "
-        "compiled with the same named-hole substitutions. Set by L2 on a "
-        "fundamental reframing fire. Should contain ``{{l2_directive}}`` so "
-        "directives still flow through.",
-    )
+    l1_section_overrides: dict[str, bool] = Field(default_factory=dict)
+    l1_section_overrides_text: dict[str, str] = Field(default_factory=dict)
+    l1_template_override: str = ""
 
+    # Fields preserved across L2/L3 transitions via copy_memory_to.
+    # L1 surface overrides MUST be in here so L3-spawned children inherit
+    # in-flight L2 toggles instead of being silently merged from a stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "l1_critique_text",
         "escalation_journal",
@@ -326,21 +250,10 @@ class OptSearchPoint(PromptTemplate):
         "l2_output_failures",
         "failure_analysis",
         "round_history",
-        # L1-generate surface state owned by L2 — must survive L2→L3
-        # adoption so a fundamental reframing (L3) inherits the in-flight
-        # section toggles / text overrides / template body that L2 set.
-        # Without these, L3 spawns a fresh OSP that drops the parent's
-        # surface state, then ``apply_side_effects``'s ``{**existing, **new}``
-        # merge silently keeps stale entries from the *prior* OSP that
-        # was about to be defeated. See the audit in
-        # ``docs/concepts/l1-generate-surface.md``.
         "l1_section_overrides",
         "l1_section_overrides_text",
         "l1_template_override",
     )
-    """Names of the flat optimizer-memory fields preserved across L2/L3
-    transitions. The contract that ``OptimizationMemory`` used to bundle —
-    now a ClassVar so :meth:`copy_memory_to` can iterate."""
 
     # -- Memory helpers ----------------------------------------------------
 
@@ -360,22 +273,14 @@ class OptSearchPoint(PromptTemplate):
         self.l1_critique_text = ""
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
-        """Append a journal entry; fill the previous entry's pending outcome.
-
-        Pure memory operation — the caller shapes the dict (see
-        ``application/optimization/layer_escalation.py::build_escalation_entry``).
-        """
+        """Append a journal entry; fill the previous entry's pending outcome."""
         journal = self.escalation_journal
         if journal and journal[-1]["outcome_degraded_rate"] is None:
             journal[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
         journal.append(entry)
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
-        """Deep-copy the :data:`MEMORY_FIELDS` from ``self`` onto *target* in place.
-
-        Preserves the parent's accumulated optimizer memory (escalation
-        journal, failure analyses, etc.) when L2/L3 adopts a transition.
-        """
+        """Deep-copy MEMORY_FIELDS onto *target* (in place) for L2/L3 adopt."""
         for f in self.MEMORY_FIELDS:
             setattr(target, f, copy.deepcopy(getattr(self, f)))
 
@@ -399,16 +304,11 @@ class OptSearchPoint(PromptTemplate):
         *,
         schema: PipelineSchema | None = None,
     ) -> JobSearchPoint:
-        """Project into a JobSearchPoint for target-layer scoring.
+        """Render → inject into pipeline_params → return frozen JobSearchPoint.
 
-        Renders prompt fields → injects into pipeline_params → creates
-        a frozen JobSearchPoint with ``prompt_fields`` populated for
-        variant derivation.
-
-        When *schema* is provided, derives ``active_steps`` and
-        ``prompt_node`` from it — pipeline composition is immutable per
-        campaign and must not depend on what ``base_pipeline_params``
-        carries.
+        Pipeline composition (active_steps, prompt_node) is read from *schema*
+        when provided — it's immutable per campaign and must not be inferred
+        from whatever ``base_pipeline_params`` happens to carry.
         """
         from promptpotter.domain.search_point import JobSearchPoint
 
@@ -440,13 +340,10 @@ class OptSearchPoint(PromptTemplate):
     # -- Candidate derivation ------------------------------------------------
 
     def mutate(self, **changes: Any) -> OptSearchPoint:
-        """Create a child OptSearchPoint with prompt field modifications.
+        """Child OSP with prompt + L2/L3 state copied; memory NOT copied.
 
-        Sets lineage.parent_id to this instance's lineage.id. Generates a
-        new id/timestamp via a fresh IndividualLineage. Copies prompt
-        decomposition + L2/L3 state. ``memory`` is *not* copied — children
-        start fresh and only inherit accumulated memory when L2/L3
-        transitions adopt them via ``Cycle.apply_transition``.
+        Memory only flows on L2/L3 adopt (Cycle.apply_transition →
+        copy_memory_to). Children start with empty memory.
         """
         data: dict[str, Any] = {}
         # Copy prompt decomposition fields

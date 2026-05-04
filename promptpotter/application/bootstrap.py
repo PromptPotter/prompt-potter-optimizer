@@ -82,14 +82,11 @@ def bootstrap_cycle(
     parent_session_id: str = "",
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resume an existing cycle or create a new one via ``session.store.campaigns``.
+    """Resume an existing cycle or create one. Returns (cycle_id, resumed_from_round).
 
-    Returns ``(cycle_id, resumed_from_round)``. Hot-updateable config keys
-    on the existing cycle are refreshed from the current snapshot when
-    ``cycle_id_override`` is set.
+    Hot-updateable config keys refresh from the current snapshot when
+    cycle_id_override is set.
     """
-    import json
-
     from promptpotter.application.runner import cycle_config_identity
 
     if not session.backend_id:
@@ -104,18 +101,17 @@ def bootstrap_cycle(
         if existing is not None:
             if cycle_id_override:
                 stored_cfg = existing.get("config", {}) or {}
-                cfg_updated = False
-                for k in HOT_UPDATEABLE_KEYS:
-                    if stored_cfg.get(k) != config_snapshot.get(k):
-                        stored_cfg[k] = config_snapshot.get(k)
-                        cfg_updated = True
-                if cfg_updated and stored_cfg:
+                changed = {
+                    k: config_snapshot.get(k)
+                    for k in HOT_UPDATEABLE_KEYS
+                    if stored_cfg.get(k) != config_snapshot.get(k)
+                }
+                if changed:
+                    stored_cfg.update(changed)
                     store.update(session.backend_id, resolved, {"config": stored_cfg})
                     logger.info("Updated loop-control config for %s", resolved)
-            # Diag forks inherit baseline_accuracy from the parent at fork-
-            # creation time, but they re-measure baseline against their own
-            # JSP. Refresh the top-level field so it reflects the cycle's
-            # actual baseline measurement, not the stale inherited value.
+            # Diag forks inherit parent's baseline_accuracy but re-measure
+            # against their own JSP — refresh top-level field if drift.
             if existing.get("baseline_accuracy") != baseline_accuracy:
                 store.update(session.backend_id, resolved, {"baseline_accuracy": baseline_accuracy})
             return resolved, len(existing.get("trials", []))
@@ -144,25 +140,15 @@ class TenantContext:
 
 @dataclass
 class ScoringContext:
-    """Per-cycle scoring policy + the active scoring set.
-
-    The compiled per-query ``scorer`` and per-round ``round_scorer`` plus
-    their source formulas (kept for audit + the interactive
-    ``scoring_steer.json`` hot-swap), the active ``scoring_dataset``
-    slice, the ``sample_index`` digest, and the ``degradation_checks``
-    that travel with the scoring set. All eight fields are populated
-    after Session is built, in ``populate_session_scoring`` and
-    ``init_optimization_loop`` — Session is constructed before the
-    active config's scoring block compiles.
-    """
+    """Per-cycle scoring policy + active scoring set; populated post-Session-init."""
 
     scorer: Scorer | None = None
     scorer_id: str = "none"
     scorer_formula: str | None = None
     round_scorer: RoundScorer | None = None
-    # ``None`` = registry default; otherwise the formula string — kept so
-    # ``scoring_steer.json`` can record what it replaced.
-    scorer_round_formula: str | None = None
+    scorer_round_formula: str | None = (
+        None  # None = registry default; else what scoring_steer.json replaced.
+    )
     scoring_dataset: list[Sample] = field(default_factory=list)
     sample_index: SampleIndex | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
@@ -170,21 +156,7 @@ class ScoringContext:
 
 @dataclass
 class CampaignState:
-    """Per-cycle mutable state — bound when ``init_optimization_loop`` fires.
-
-    ``cycle_id`` and ``obs_campaign_id`` flip on fork; ``obs``,
-    ``round_recorder``, and ``ledger`` rebind to the new fork's
-    directories. ``resumed_from_round`` records where the loop picked up.
-    Wiring stays directly on ``Session`` and is shared across all
-    cycles minted under one Session lifetime.
-
-    ``ledger`` is the per-cycle ``RunLedger`` (``events.jsonl``) — the
-    sole ingress for in-loop events. Every fact (decisions, phase
-    boundaries, candidate/sample snapshots) goes through ``RunListener``
-    which appends a typed record; subscribers (``LiveDashboardProjection``,
-    ``AuditTrailProjection``, ``LiveDisplay``) receive each record via
-    ``on_record``.
-    """
+    """Per-cycle mutable state — flips on fork; ledger is the sole event ingress."""
 
     cycle_id: str = ""
     obs_campaign_id: str = ""
@@ -196,16 +168,7 @@ class CampaignState:
 
 @dataclass
 class Session:
-    """Session-scoped identity + wire-up + loop-cycle infra + scoring.
-
-    Field groups (top-down):
-    - Wiring: store + backend client + pipeline schema/params + dataset
-      (set at ``init_services`` time; mostly immutable thereafter).
-    - ``session_id`` + ``experiment_id``: session-stable identity.
-    - ``state``: per-cycle mutable bundle (``CampaignState``).
-    - ``scoring``: per-cycle scoring policy (``ScoringContext``).
-    - Runtime config + lifecycle hook.
-    """
+    """Session-scoped wiring + identity + per-cycle bundles."""
 
     # -- Wiring ----------------------------------------------------------
     store: Stores
@@ -281,7 +244,7 @@ def new_session_state(
     pipeline_params: dict,
     active_steps: list[str],
 ) -> dict[str, Any]:
-    """Build a fresh campaign session-state dict — shared by CLI init and the orchestrator."""
+    """Fresh campaign session-state dict (shared by CLI init + orchestrator)."""
     return {
         "phase": "init",
         "init_params": init_params,
@@ -297,7 +260,7 @@ def new_session_state(
 
 
 def _build_index_header(session: Session, dataset_size: int) -> dict[str, Any]:
-    """Header block for ``index.json`` — tool/version/pipeline/backend/dataset identity at cycle creation."""
+    """index.json header — tool/version/pipeline/backend/dataset identity."""
     from promptpotter.config.settings import APP_VERSION
 
     schema = session.pipeline_schema
@@ -327,14 +290,7 @@ def auto_mint_session(
     active_steps: list[str] | None = None,
     create_campaign_dir: bool = True,
 ) -> tuple[str, str]:
-    """Mint (session_id, cycle_id), write session state, claim active pointer.
-
-    ``cycle_id`` must be the full prefixed form (``"cycle_<hash>"``).
-    Mutates ``session.session_id`` and ``session.state.cycle_id`` in place
-    so callers don't repeat the bind. Creates the campaign dir by default
-    (CLI ``init`` wants the dir to exist before ``optimize``); set
-    ``create_campaign_dir=False`` to defer to ``bootstrap_cycle``.
-    """
+    """Mint session_id, write session state, claim active pointer; mutates session in place."""
     from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
     from promptpotter.infrastructure.store.base import validate_path_component
 
@@ -380,12 +336,7 @@ def auto_mint_session(
 
 
 def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str], None]) -> None:
-    """Refuse tenant drift unless ``take_over=True``; clears pointer when taking over.
-
-    The smoke tool / notebook is sessionless by design (M9 gap), so when
-    taking over we clear the pointer entirely rather than writing a
-    partial one that downstream ``load_session()`` would mis-resolve.
-    """
+    """Refuse tenant drift unless take_over=True; on take-over, clear the pointer."""
     from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
     from promptpotter.shared.errors import ActiveSessionMismatchError
 
@@ -408,8 +359,7 @@ async def _resolve_pipeline_schema(
     dataset_name: str | None,
     status: Callable[[str], None],
 ) -> PipelineSchema | None:
-    """Resolve the active pipeline schema: static ``datasets/{name}/pipeline.json`` first,
-    fall back to the backend's ``GET /pipeline``.  Returns ``None`` when both fail."""
+    """Static datasets/{name}/pipeline.json → backend GET /pipeline fallback. None on both fail."""
     from promptpotter.application.pipeline_discovery import parse_pipeline_response
 
     if dataset_name:
@@ -437,8 +387,7 @@ async def _resolve_pipeline_schema(
 def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
-    """Populate ``session.queries`` + ``session.index_terms`` from the dataset store
-    (or the ``DATASET_LOADERS`` registry on first use). Raises when neither resolves."""
+    """Populate session.queries + index_terms from DatasetStore or DATASET_LOADERS."""
     from promptpotter.application.datasets.datasets import DATASET_LOADERS, samples_from_dicts
 
     ds = session.store.backends.load_dataset(dataset_name)
@@ -468,9 +417,7 @@ async def _sync_and_extract_experiment(
     experiment_id: str,
     status: Callable[[str], None],
 ) -> None:
-    """Populate ``session.queries`` + ``session.index_terms`` + ``experiment_extract`` from
-    the experiment trace. Auto-syncs from the backend if the on-disk extract is missing
-    or trace-less. Logs a warning + returns silently when no data is available."""
+    """Populate queries/index_terms/experiment_extract; auto-sync from backend if missing."""
     from promptpotter.application.datasets.datasets import samples_from_dicts
 
     backend_id = session.backend_id
@@ -591,10 +538,7 @@ async def _emit_preflight_and_init_session(
     cb: RunListener,
     session: Session,
 ) -> None:
-    """Run preflight checks, emit ``INIT.enter``, and call backend init_session.
-
-    Side-effects only.
-    """
+    """Preflight + emit INIT.enter + backend.init_session."""
     from promptpotter.application.config import run_preflight_checks
     from promptpotter.domain.phases import CampaignPhase, emit_phase
 
@@ -625,13 +569,7 @@ def _build_cycle_and_bootstrap(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, OptSearchPoint, str | None, int]:
-    """Build the baseline ``OptSearchPoint`` + ``Cycle.start`` and bootstrap cycle storage.
-
-    Returns ``(cycle, baseline_osp, resolved_cycle_id, resumed_from_round)``.
-    The ``baseline_osp`` is returned so the resume/fork stage can register
-    its prompt alias without re-deriving it. Raises ``ValueError`` when
-    ``baseline.baseline_ps`` is missing — required for OSP construction.
-    """
+    """Build baseline OSP + Cycle.start + bootstrap storage; raise on missing baseline_ps."""
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.scoring.formula import compile_round_scorer
 
@@ -683,11 +621,7 @@ def _start_observability_and_scoring(
     scoring_round_formula: str | None,
     scorer_id: str,
 ) -> tuple[str, ObservabilityBridge | None]:
-    """Start the ObservabilityBridge for this cycle and populate scoring on ``session``.
-
-    Returns ``(obs_campaign_id, obs)``. ``obs`` may be ``None`` when the
-    bridge can't be built (no project_root/backend_id, or graceful failure).
-    """
+    """Start ObservabilityBridge + populate scoring; obs may be None on failure."""
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
     opt = config.optimization
@@ -726,9 +660,7 @@ def _apply_resume_fork(
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    """Replay decisions on resume; fork on divergence when configured. Register the
-    baseline prompt alias. Returns the (possibly rebound) ``(cycle_id, resumed_from_round)``.
-    """
+    """Replay decisions; fork on divergence; register baseline alias. Returns possibly-rebound (id, round)."""
     from promptpotter.application.optimization.cycle import resume_with_divergence_check
 
     if resumed_from_round > 0 and resolved_cycle_id:
@@ -753,12 +685,7 @@ def _apply_resume_fork(
 
 
 def _open_cycle_ledger(session: Session, cycle_id: str) -> RunLedger | None:
-    """Open the per-cycle ``RunLedger`` (``events.jsonl``) under the cycle's audit dir.
-
-    Returns ``None`` if no store is wired (some test paths bypass storage).
-    Idempotent: re-opens with cumulative offsets so resumed cycles continue
-    appending after the existing tail.
-    """
+    """Open per-cycle RunLedger; None when no store; idempotent (offsets cumulate)."""
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.infrastructure.ledger import RunLedger
 
@@ -795,8 +722,7 @@ def _finalize_loop_state(
 
     if resolved_cycle_id:
         session.state.cycle_id = resolved_cycle_id
-        # Idempotent: runner.py may pre-open the ledger so baseline events
-        # land on subscribers live; only open here when nobody did.
+        # Idempotent: runner.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
     session.state.obs_campaign_id = obs_campaign_id
@@ -834,7 +760,7 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-    """Build Cycle + attach loop-cycle infra onto ``session``: baseline, cycle resume, obs, scoring, axis index."""
+    """Build Cycle + attach loop infra: baseline, resume/fork, obs, scoring, axes."""
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
     cycle, baseline_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(

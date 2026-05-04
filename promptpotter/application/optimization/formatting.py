@@ -1,11 +1,4 @@
-"""Formatting helpers — pure string builders for L1/L2/L3 prompt sections.
-
-Consumed by section renderers (in ``l1_surface.py``, ``l2_surface.py``,
-``l1_critique.py``) and by L3 transition extras (``transitions.py``).
-Every function here is pure: takes plain dicts/lists/domain models, returns
-a string. Cross-candidate diff + trajectory classification land here too —
-they're consumed by L1-critique but they have no LLM dependency.
-"""
+"""Pure string builders for L1/L2/L3 prompt sections — no LLM, no I/O."""
 
 from __future__ import annotations
 

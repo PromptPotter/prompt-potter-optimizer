@@ -1,17 +1,9 @@
-"""L1-generate prompt surface — section renderers + the L1 fan-in catalogue.
+"""L1-generate section renderers + L2-visible field catalogue.
 
-L1-generate's prompt template has named ``{{template_var}}`` holes, each
-filled by a section renderer registered in ``L1_SECTION_RENDERERS`` and
-consumed by ``dispatch.compile_prompt_vars`` via ``LAYER_CONFIGS``.
-
-L1's surface is the only one with an override channel: L2 may write
+The only layer with an override channel: L2 writes
 ``l1_section_overrides`` (visibility) / ``l1_section_overrides_text``
-(verbatim replacement) onto the OSP, and ``compile_prompt_vars`` honours
-both before falling back to the registered renderer.
-
-``L1_SECTION_DESCRIPTIONS`` + ``L1_SCALAR_DESCRIPTIONS`` feed the L2
-catalogue (``_format_l1_generate_field_catalogue``) so L2 always sees
-every section that exists in code — even ones currently toggled off.
+(replacement) onto the OSP; ``compile_prompt_vars`` honours both before
+falling back to the registered renderer.
 """
 
 from __future__ import annotations

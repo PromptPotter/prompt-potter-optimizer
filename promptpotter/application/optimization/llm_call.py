@@ -1,15 +1,8 @@
-"""Optimizer LLM call primitive + prompt loading.
+"""Optimizer LLM chokepoint — every meta-prompt call goes through here.
 
-The single chokepoint every optimizer node passes through. Two responsibilities:
-
-1. **LLM call primitive** (``llm_call``, ``run_optimizer_node``,
-   ``get_optimizer_schema``) — schema loader + 429-Retry-After loop +
-   token emission + recorder hook + optional cross-cycle cache.
-
-2. **Prompt loading** (``load_optimizer_prompt``, ``_load_local``,
-   ``_try_langfuse``, ``push_all_to_langfuse``, ``list_optimizer_prompts``,
-   ``compute_optimizer_prompt_hashes``) — Langfuse production label →
-   local optimizer-manifest registry fallback.
+``llm_call`` (429-retry + token emit + recorder + cross-cycle cache),
+``run_optimizer_node`` (template → compile → call → parse), schema loader,
+and Langfuse-production → local-manifest prompt loading.
 """
 
 from __future__ import annotations

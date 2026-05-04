@@ -1,21 +1,8 @@
-"""Optimization cycle state — pure optimizer progress tracking.
+"""Cycle state + decision ledger + fork helpers.
 
-Two layers in one file:
-
-1. **Decision ledger** (``Decision``, ``Divergence``, ``record_decision``,
-   ``replay_decisions``, ``REPLAYERS``) — recorded decisions that drive
-   resume divergence-checking. Each decision is two-tier: ``inputs_ref`` +
-   ``outcome`` are compared on resume; ``data`` is archival.
-
-2. **Cycle state** (``LayerCounter``, ``EscalationState``, ``Cycle``,
-   ``build_escalation_entry``, fork helpers) — the mutable orchestration
-   state for the feedback cycle round loop. ``Cycle`` aggregates rounds,
-   current/best tracking, escalation counters, and pending decisions.
-
-The action driver itself (``escalate_l2``, the L2/L3 strategy classes,
-``apply_sweep_payload_to_osp``) lives in
-:mod:`promptpotter.application.optimization.escalation` — one-way arrow:
-``escalation`` imports from ``cycle``, never the reverse.
+Decisions are two-tier: (inputs_ref + outcome) compared on resume; data is
+archival. Action driver (escalate_l2 + L2/L3 strategies) lives in escalation.py
+— one-way arrow, enforced by tests/test_layer_imports.py.
 """
 
 from __future__ import annotations
@@ -93,26 +80,13 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# Decision ledger — records that drive resume divergence-checking
-# ---------------------------------------------------------------------------
-#
-# ``Decision`` and ``DecisionKind`` are defined in
-# :mod:`promptpotter.domain.run_records` so the broader ledger spine can
-# reach them. They are re-exported here for compatibility with call sites
-# that still import from this module.
+# Decision / DecisionKind live in domain/run_records.py; re-exported here.
 
 
 def _build_scoreboard(
     candidate_scores: list[dict[str, Any]], winner_label: str
 ) -> list[dict[str, Any]]:
-    """Rank candidates by composite (desc), then accuracy (desc); tag the winner.
-
-    The trial JSON's ``scoreboard`` field — a renderer-friendly array that
-    callers (CLI, log.md, webapp) read instead of re-deriving from
-    ``candidate_scores``. Source of truth for rank is composite-then-accuracy;
-    the winner is identified by ``changes_description == winner_label``.
-    """
+    """Trial-JSON `scoreboard`: rank by (composite, accuracy) desc; tag winner."""
     ranked = sorted(
         candidate_scores,
         key=lambda c: (c.get("composite", c.get("accuracy", 0.0)), c.get("accuracy", 0.0)),
@@ -175,12 +149,7 @@ def record_decision(
     *,
     data: dict[str, Any] | None = None,
 ) -> Any:
-    """Append a ``Decision`` to *decisions* and return *outcome* for passthrough.
-
-    ``Decision.to_dict()`` projects to the legacy wire shape when the
-    in-memory list is folded into ``RoundResult.decisions`` (which stays
-    ``list[dict]`` for Pydantic + JSON wire compatibility).
-    """
+    """Append Decision to *decisions*; return outcome for passthrough."""
     decisions.append(
         Decision(
             kind=kind,
@@ -248,65 +217,48 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     return winner_id
 
 
-def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-run the Bayesian PoBB gate under rescored scores.
-
-    Inputs accept both the new ``epsilon`` knob and (for backward-compat
-    on archived ledgers) the legacy ``alpha`` field; either resolves to the
-    same threshold semantics — stop when the candidate's P(best) drops
-    below it.
-    """
+def _pobb_replay_snapshot(
+    ctx: ReplayContext, inputs_ref: dict[str, Any]
+) -> tuple[str, dict[str, float], list[float]] | None:
+    """Build (candidate_id, posterior snapshot, current scores) for PoBB replay; None when underspecified."""
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
     n = int(inputs_ref.get("queries_scored", 0))
-    # Prefer the PoBB knob; fall back to legacy ``alpha`` (which used a
-    # 0.2 family-wise default) re-mapped to a more conservative ε so old
-    # ledgers don't replay as confident stops.
+    current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
+    priors = {
+        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
+    }
+    priors = {pid: p for pid, p in priors.items() if p}
+    if not priors or len(current) < 2:
+        return None
+    return candidate_id, posterior_best_probabilities({**priors, candidate_id: current}), current
+
+
+def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
+    """PoBB gate under rescored scores; legacy `alpha` re-mapped to conservative ε."""
+    snap = _pobb_replay_snapshot(ctx, inputs_ref)
+    if snap is None:
+        return False
+    candidate_id, snapshot, _ = snap
     epsilon_val = inputs_ref.get("epsilon")
     if epsilon_val is None:
         epsilon_val = float(inputs_ref.get("alpha", 0.2)) * 0.25
-    epsilon = float(epsilon_val)
-
-    current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
-    priors = {
-        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
-    }
-    priors = {pid: p for pid, p in priors.items() if p}
-    if not priors or len(current) < 2:
-        return False
-    histories = {**priors, candidate_id: current}
-    snapshot = posterior_best_probabilities(histories)
-    return pobb_should_stop(snapshot.get(candidate_id, 1.0), epsilon)
+    return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(epsilon_val))
 
 
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-run the PoBB lock-in gate under rescored scores.
-
-    Mirrors ``_replay_elimination_cut`` but checks the leader condition:
-    current candidate is the snapshot argmax AND its P(best) ≥ lock_in
-    threshold AND it had at least ``lock_in_n_min`` queries.
-    """
-    all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
-    candidate_id = str(inputs_ref.get("candidate_id", ""))
-    prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
-    n = int(inputs_ref.get("queries_scored", 0))
-    lock_in = float(inputs_ref.get("lock_in", 0.95))
-    lock_in_n_min = int(inputs_ref.get("lock_in_n_min", 8))
-
-    if n < lock_in_n_min:
+    """PoBB leader-lock under rescored scores; argmax + P(best) ≥ lock_in + n ≥ lock_in_n_min."""
+    if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
         return False
-    current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
-    priors = {
-        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
-    }
-    priors = {pid: p for pid, p in priors.items() if p}
-    if not priors or len(current) < 2:
+    snap = _pobb_replay_snapshot(ctx, inputs_ref)
+    if snap is None:
         return False
-    histories = {**priors, candidate_id: current}
-    snapshot = posterior_best_probabilities(histories)
+    candidate_id, snapshot, _ = snap
     leader = max(snapshot.items(), key=lambda kv: kv[1])[0]
-    return leader == candidate_id and snapshot.get(candidate_id, 0.0) >= lock_in
+    return leader == candidate_id and snapshot.get(candidate_id, 0.0) >= float(
+        inputs_ref.get("lock_in", 0.95)
+    )
 
 
 def _derive_stall_count(
@@ -342,26 +294,25 @@ def _derive_stall_count(
     return rounds_after if baseline is not None else 0
 
 
-def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-derive L2 fire/patience-defer."""
-    patience = inputs_ref.get("l2_patience")
-    if patience is None:
-        return True
-    entry_round = int(inputs_ref.get("entry_round", -1))
-    this_round = int(inputs_ref.get("round_num", -1))
-    stalls = _derive_stall_count(ctx.prior_trials, entry_round, this_round)
-    return stalls < int(patience)
+def _replay_layer_trigger(patience_key: str) -> Replayer:
+    """Build a replayer that re-derives `triggered = stalls < patience` from prior trials."""
+
+    def _replay(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
+        patience = inputs_ref.get(patience_key)
+        if patience is None:
+            return True
+        stalls = _derive_stall_count(
+            ctx.prior_trials,
+            int(inputs_ref.get("entry_round", -1)),
+            int(inputs_ref.get("round_num", -1)),
+        )
+        return stalls < int(patience)
+
+    return _replay
 
 
-def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """Re-derive whether L3 fires. Same shape as ``l2_escalation_trigger``."""
-    patience = inputs_ref.get("l3_patience")
-    if patience is None:
-        return True
-    entry_round = int(inputs_ref.get("entry_round", -1))
-    this_round = int(inputs_ref.get("round_num", -1))
-    stalls = _derive_stall_count(ctx.prior_trials, entry_round, this_round)
-    return stalls < int(patience)
+_replay_l2_trigger = _replay_layer_trigger("l2_patience")
+_replay_l3_trigger = _replay_layer_trigger("l3_patience")
 
 
 # Flat registry: DecisionKind → replayer. ARCHIVAL kinds (per ``DECISION_GATING``)
@@ -466,19 +417,10 @@ def _fork_at_divergence(
     fork_from_round: int,
     surviving_trials: list[dict[str, Any]],
 ) -> str:
-    """Mint an operator-divergence sibling that re-runs round ``fork_from_round``.
+    """Divergence-fork that inherits parent's < fork_from_round artifacts (deterministic replay).
 
-    Inherits the parent's prior-round artifacts (``trials/trial_NNNN.json``
-    and the ``.runtime/cache/candidates/round_NNNN.json`` checkpoints) for
-    every round below ``fork_from_round`` so the resumed loop replays those
-    rounds deterministically before re-running round ``fork_from_round``
-    under the current scorer.
-
-    Sibling forks that intentionally re-explore from round 0 (sweep,
-    diag-BFS) must NOT pass through this function — they would inherit
-    the parent's stale round-0 candidate checkpoint and short-circuit L1
-    generation. Use :func:`_fork_for_sweep_sibling` or
-    :func:`_fork_for_diag_sibling` for clean-slate siblings.
+    NOT for clean-slate siblings (sweep/diag) — those would short-circuit
+    L1 on the inherited round-0 checkpoint. Use _fork_for_{sweep,diag}_sibling.
     """
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
@@ -586,20 +528,8 @@ def _fork_for_sweep_sibling(
     payload_source_file: str,
     payload: SweepPayload,
 ) -> str:
-    """Mint a sweep-batch sibling — clean slate, no inherited round artifacts.
-
-    Sweep forks explore the parent's problem under a per-payload L1
-    directive that ``apply_sweep_payload_to_osp`` stamps onto the fresh
-    OSP at runtime. Round 0 must regenerate via L1 to actually exercise
-    that directive; inheriting the parent's ``round_0000.json`` candidate
-    checkpoint would short-circuit L1 generation and make every fork
-    score the parent's pre-existing population — defeating the sweep.
-
-    The cycle id encodes ``_sweep_{batch_id}_`` so ``campaign_dir_for``
-    routes the fork under ``sweeps/{batch_id}/forks/``. ``sweep_batch_id``
-    must contain no underscores — the cycle-id regex extracts it by
-    splitting on ``_``. The FORK_CUT record archives ``sweep_payload`` +
-    ``source_file`` + ``sweep_batch_id`` so dedup can match re-runs.
+    """Sweep-batch sibling — clean slate. cycle_id encodes _sweep_{batch_id}_;
+    sweep_batch_id must not contain '_' (cycle-id regex splits on it).
     """
     if "_" in sweep_batch_id:
         raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
@@ -673,9 +603,17 @@ class LayerCounter:
         self.best_composite_at_entry = best_composite
 
 
+_LAYER_COUNTER_FIELDS = (
+    "round",
+    "stall_count",
+    "best_accuracy_at_entry",
+    "best_composite_at_entry",
+)
+
+
 @dataclass
 class EscalationState:
-    """All escalation-layer tracking — L1 stall counter + L2/L3 ``LayerCounter`` instances."""
+    """L1 stall counter + L2/L3 LayerCounter instances."""
 
     l1_stall_count: int = 0
     l2: LayerCounter = field(default_factory=LayerCounter)
@@ -688,48 +626,24 @@ class EscalationState:
         )
 
     def to_checkpoint_dict(self) -> dict[str, Any]:
-        """Serialize for trial dict — entry baselines required so resume preserves L2/L3 patience."""
-        return {
-            "l1_stall_count": self.l1_stall_count,
-            "l2_round": self.l2.round,
-            "l3_round": self.l3.round,
-            "l2_stall_count": self.l2.stall_count,
-            "l3_stall_count": self.l3.stall_count,
-            "l2_best_accuracy_at_entry": self.l2.best_accuracy_at_entry,
-            "l2_best_composite_at_entry": self.l2.best_composite_at_entry,
-            "l3_best_accuracy_at_entry": self.l3.best_accuracy_at_entry,
-            "l3_best_composite_at_entry": self.l3.best_composite_at_entry,
-        }
+        out: dict[str, Any] = {"l1_stall_count": self.l1_stall_count}
+        for layer in ("l2", "l3"):
+            counter: LayerCounter = getattr(self, layer)
+            for f in _LAYER_COUNTER_FIELDS:
+                out[f"{layer}_{f}" if f != "round" else f"{layer}_round"] = getattr(counter, f)
+        return out
 
     @classmethod
     def from_checkpoint_dict(cls, d: dict) -> EscalationState:
-        """Inverse of ``to_checkpoint_dict``; every trial writer must spread the full block."""
-        return cls(
-            l1_stall_count=d["l1_stall_count"],
-            l2=LayerCounter(
-                round=d["l2_round"],
-                stall_count=d["l2_stall_count"],
-                best_accuracy_at_entry=d["l2_best_accuracy_at_entry"],
-                best_composite_at_entry=d["l2_best_composite_at_entry"],
-            ),
-            l3=LayerCounter(
-                round=d["l3_round"],
-                stall_count=d["l3_stall_count"],
-                best_accuracy_at_entry=d["l3_best_accuracy_at_entry"],
-                best_composite_at_entry=d["l3_best_composite_at_entry"],
-            ),
-        )
+        def _counter(prefix: str) -> LayerCounter:
+            return LayerCounter(**{f: d[f"{prefix}_{f}"] for f in _LAYER_COUNTER_FIELDS})
+
+        return cls(l1_stall_count=d["l1_stall_count"], l2=_counter("l2"), l3=_counter("l3"))
 
 
 @dataclass
 class TrackingState:
-    """Current/best searchpoint trajectory — extracted from Cycle.
-
-    Holds the round-loop's per-round mutable read-out: the current scored
-    searchpoint, the best one seen so far, and the campaign's frozen
-    baseline composite (the origin for trajectory rendering — lets log.md
-    print ``Δ from baseline=0.5012`` at any depth).
-    """
+    """Current/best searchpoint trajectory + frozen baseline composite."""
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
@@ -751,23 +665,14 @@ class Cycle:
 
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: TrackingState = field(default_factory=TrackingState)
-
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
-
     probe_next_round: bool = False
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
-
-    # Flushed into the next trial's ``decisions`` list before ``campaign_store.add_trial``.
-    # Stored as ``Decision`` instances; converted to dict at the RoundResult boundary.
+    # Flushed into the next trial's `decisions` before campaign_store.add_trial.
     pending_decisions: list[Decision] = field(default_factory=list)
-
     state_version: int = 1
-
-    # Round-end Rasch posterior cached for finalize-time hard-sample
-    # heatmap reuse (one fit per round, used by both scoring-set evolution
-    # and the heatmap renderer). Not persisted across resume — recomputed
-    # at the next round-end if needed.
+    # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None
 
     @classmethod
@@ -893,12 +798,7 @@ class Cycle:
                 self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
 
     def baseline_for_round(self, scoring_dataset: list[Sample], round_num: int) -> RoundBaseline:
-        """Build the round's baseline — probe-aware.
-
-        On a probe round, the previous winner's accuracy is recomputed over the
-        probe subset (probe queries are typically harder, so a probe round
-        without subset-rescore would always look like regression).
-        """
+        """Build round baseline; on probe rounds, rescore over the probe subset."""
         schema = self.session.pipeline_schema
         tr = self.tracking
         accuracy = tr.current_accuracy
@@ -925,7 +825,7 @@ class Cycle:
         )
 
     def checkpoint(self, rr: RoundResult, round_num: int) -> dict[str, Any]:
-        """Build the trial dict for ``campaign_store.add_trial`` — self-contained replay."""
+        """Trial dict for campaign_store.add_trial — self-contained replay."""
         return {
             "trial_id": f"round_{round_num}",
             "round": round_num,
@@ -971,30 +871,21 @@ def resume_with_divergence_check(
 ) -> ForkResult | None:
     """Rescore prior trials under the active scorer; halt or fork on divergence."""
     sc = session.scoring
-    assert sc.scorer is not None, "session.scoring.scorer required for divergence replay"
+    scorer = sc.scorer
+    assert scorer is not None, "session.scoring.scorer required for divergence replay"
     prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)
-    for t in prior:
-        rescore_results(
-            list(t.get("results") or []),
-            sc.scorer,
-            sc.scorer_id,
-            sc.scorer_formula,
-        )
-        for items in (t.get("all_candidate_results") or {}).values():
-            rescore_results(
-                list(items or []),
-                sc.scorer,
-                sc.scorer_id,
-                sc.scorer_formula,
-            )
 
-    baseline_results_rescored = list(cycle.tracking.current_results or [])
-    rescore_results(
-        baseline_results_rescored,
-        sc.scorer,
-        sc.scorer_id,
-        sc.scorer_formula,
-    )
+    def _rescore(items: Any) -> list:
+        out = list(items or [])
+        rescore_results(out, scorer, sc.scorer_id, sc.scorer_formula)
+        return out
+
+    for t in prior:
+        _rescore(t.get("results"))
+        for items in (t.get("all_candidate_results") or {}).values():
+            _rescore(items)
+
+    baseline_results_rescored = _rescore(cycle.tracking.current_results)
 
     if not skip_divergence_check:
         for i, t in enumerate(prior):

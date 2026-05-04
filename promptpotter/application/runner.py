@@ -7,9 +7,16 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.baseline import CampaignBaseline
+from promptpotter.application.baseline import (
+    CampaignBaseline,
+    build_campaign_emitter,
+    extract_campaign_baseline,
+    load_baseline_prompt,
+    prepare_scoring_context,
+)
 from promptpotter.application.bootstrap import (
     Session,
+    auto_mint_session,
     init_optimization_loop,
 )
 from promptpotter.application.config import CampaignConfig
@@ -21,7 +28,7 @@ from promptpotter.application.optimization.escalation import (
     apply_sweep_payload_to_osp,
     escalate_l2,
 )
-from promptpotter.application.optimization.l1 import execute_round
+from promptpotter.application.optimization.l1 import _generate_or_load_candidates, execute_round
 from promptpotter.application.presentation_writers import (
     refresh_tenant_leaderboards,
     write_log_md,
@@ -30,7 +37,9 @@ from promptpotter.application.presentation_writers import (
 from promptpotter.application.scoring.formula import (
     apply_steer_file,
     apply_zero_signal_exclusions,
+    split_scoring_block,
 )
+from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
     CampaignPhase,
@@ -39,10 +48,15 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.results import RoundResult, RunResult
-from promptpotter.domain.run_records import Phase, Snapshot, SweepPayload
+from promptpotter.domain.run_records import Decision, Phase, Snapshot, SweepPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.projections import LiveDashboardProjection
+from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.projections import (
+    AuditTrailProjection,
+    LiveDashboardProjection,
+    PoBBStreamProjection,
+)
 from promptpotter.presentation.views.view_factories import (
     from_phase_event,
     view_to_wire_dict,
@@ -86,19 +100,13 @@ def build_baseline_cycle_id(
 
 
 class RunListener:
-    """Single ingress for in-loop events. Builds typed ``RunRecord`` instances
-    and appends them to the per-cycle ``RunLedger``; subscribers (live
-    dashboard projection, audit trail projection, terminal display)
-    consume via ``on_record`` only.
+    """Single ingress: callbacks → typed RunRecord → per-cycle RunLedger.
 
-    Owns the phase-view ctx so ``from_phase_event`` (stateful — reads/writes
-    ctx) runs once per ``PhaseEvent``; the typed view is serialised via
-    ``view_to_wire_dict`` onto ``Phase.payload['view']`` so subscribers
-    don't re-derive it.
-
-    Pre-binding events (e.g. ``INIT.enter`` fired before the cycle dir is
-    known) buffer in memory; the first append after ``ledger`` is set
-    drains the buffer so subscribers see the full history."""
+    Subscribers consume via ``on_record`` only. Phase-view ctx is owned
+    here (``from_phase_event`` is stateful) and serialised onto
+    ``Phase.payload['view']``. Events emitted before ``ledger`` is set
+    are buffered and drained on the first post-binding append.
+    """
 
     def __init__(self, *, ledger: Any = None) -> None:
         self._ledger: Any = None
@@ -113,12 +121,7 @@ class RunListener:
 
     @ledger.setter
     def ledger(self, value: Any) -> None:
-        """Bind the ledger and drain any pre-binding buffer in order.
-
-        Subscribers must be bound to the ledger BEFORE this assignment so
-        they receive the buffered records via ``on_record`` when the
-        drain fires.
-        """
+        """Bind ledger + drain pre-binding buffer. Subscribers must bind first."""
         self._ledger = value
         if value is None or not self._buffer:
             return
@@ -160,87 +163,68 @@ class RunListener:
             )
         )
 
-    def on_candidate_started(
-        self, idx: int, total: int, changes_description: str, pp_override: dict | None
+    def _snapshot(
+        self,
+        event: str,
+        ci: int,
+        ct: int,
+        payload: dict,
+        *,
+        round_num: int | None = None,
+        sample_idx: int | None = None,
+        sample_total: int | None = None,
     ) -> None:
         self._emit(
             Snapshot(
-                event="candidate_started",
-                round=self._current_round,
-                candidate_idx=idx,
-                candidate_total=total,
-                payload={
-                    "changes_description": changes_description,
-                    "pp_override": pp_override,
-                },
+                event=event,
+                round=self._current_round if round_num is None else round_num,
+                candidate_idx=ci,
+                candidate_total=ct,
+                sample_idx=sample_idx,
+                sample_total=sample_total,
+                payload=payload,
             )
+        )
+
+    def on_candidate_started(
+        self, idx: int, total: int, changes_description: str, pp_override: dict | None
+    ) -> None:
+        self._snapshot(
+            "candidate_started",
+            idx,
+            total,
+            {"changes_description": changes_description, "pp_override": pp_override},
         )
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        self._emit(
-            Snapshot(
-                event="candidate_scored",
-                round=self._current_round,
-                candidate_idx=idx,
-                candidate_total=total,
-                payload={
-                    "scores": scores,
-                    "phase_ctx": dict(self._phase_ctx),
-                },
-            )
+        self._snapshot(
+            "candidate_scored", idx, total, {"scores": scores, "phase_ctx": dict(self._phase_ctx)}
         )
 
     def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
-        self._emit(
-            Snapshot(
-                event="sample_started",
-                round=self._current_round,
-                candidate_idx=ci,
-                candidate_total=ct,
-                sample_idx=qi,
-                sample_total=qt,
-                payload={"query_text": query_text},
-            )
+        self._snapshot(
+            "sample_started", ci, ct, {"query_text": query_text}, sample_idx=qi, sample_total=qt
         )
 
     def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
-        self._emit(
-            Snapshot(
-                event="sample_scored",
-                round=self._current_round,
-                candidate_idx=ci,
-                candidate_total=ct,
-                sample_idx=qi,
-                sample_total=qt,
-                payload={"result": result},
-            )
-        )
+        self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:
-        """Per-query Posterior-of-Being-Best snapshot from PoBBCheck.
-
-        Archive-only — observability stream, not a divergence-gated decision.
-        Subscribed by the live dashboard projection (merges into
-        ``current_round.nodes.candidates[].p_best``) and the JSONL stream
-        projection (one record per query).
-        """
-        self._emit(
-            Snapshot(
-                event="p_best_update",
-                round=round_num,
-                candidate_idx=ci,
-                candidate_total=ct,
-                sample_idx=int(snapshot.n_queries) - 1,
-                payload={
-                    "current_id": str(snapshot.current_id),
-                    "n_queries": int(snapshot.n_queries),
-                    "p_best": dict(snapshot.p_best),
-                },
-            )
+        """Per-query PoBB snapshot — archive-only, not divergence-gated."""
+        self._snapshot(
+            "p_best_update",
+            ci,
+            ct,
+            {
+                "current_id": str(snapshot.current_id),
+                "n_queries": int(snapshot.n_queries),
+                "p_best": dict(snapshot.p_best),
+            },
+            round_num=round_num,
+            sample_idx=int(snapshot.n_queries) - 1,
         )
 
     def set_round(self, round_num: int) -> None:
-        """Track the active round for Snapshot record context."""
         self._current_round = round_num
 
 
@@ -281,23 +265,16 @@ def _advance_l1_stall(cycle: Cycle, round_result: RoundResult, cb: RunListener) 
 def _persist_round(
     cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
 ) -> None:
-    """Flush pending decisions onto the round, mirror to ledger, write trial + log.md, flush recorder.
-
-    Ledger dual-write is Phase 3 of the persistence cleanup: every
-    decision and the round-boundary phase event land on the per-cycle
-    ``events.jsonl`` alongside the legacy trial-JSON write. Phase 5
-    will retire the legacy paths and let projections subscribe to the
-    ledger for their views.
-    """
+    """Flush decisions, mirror to ledger, write trial + log.md/review.md, flush recorder."""
+    flushed: list[Decision] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
         round_result.decisions.extend(d.to_dict() for d in flushed)
-        if (ledger := session.state.ledger) is not None:
-            for d in flushed:
-                ledger.append(d.model_copy(update={"round": round_num}))
 
     if (ledger := session.state.ledger) is not None:
+        for d in flushed:
+            ledger.append(d.model_copy(update={"round": round_num}))
         ledger.append(
             Phase(
                 phase="round",
@@ -336,13 +313,7 @@ def _refresh_axes_and_filter(
     round_num: int,
     cb: RunListener,
 ) -> None:
-    """Refresh AxisIndex from the archive, then prune zero-signal queries when enabled.
-
-    The zero-signal filter is round-boundary mutation #1: it physically
-    moves always-hit/always-miss queries to ``datasets/{name}.json::excluded``
-    once an axis has ≥ N observations, and drops them from the active
-    scoring set in memory.
-    """
+    """Refresh AxisIndex; round-boundary mutation #1 — prune zero-signal queries."""
     if not cycle.axes:
         return
 
@@ -398,11 +369,7 @@ def _evolve_scoring_set_if_enabled(
     session: Session,
     cb: RunListener,
 ) -> None:
-    """Round-boundary mutation #2: Rasch + KG swap on the active scoring set.
-
-    Off by default. Trades understood samples for high-info samples in
-    ``session.scoring.scoring_dataset`` (in-memory only — never disk).
-    """
+    """Round-boundary mutation #2 (off by default): Rasch+KG swap, in-memory only."""
     exp_cfg = config.optimization.exploration
     if not (exp_cfg.enabled and cycle.rounds):
         return
@@ -469,10 +436,8 @@ async def _post_round(
     _advance_l1_stall(cycle, round_result, cb)
     _persist_round(cycle, round_result, round_num, session)
 
-    # Operator-driven composite-score steering: hot-swap the per-round
-    # formula when ``campaigns/{cycle_id}/scoring_steer.json`` is present.
-    # Sits before the round-boundary mutation block so the next round's
-    # candidates are evaluated under the new formula.
+    # Hot-swap composite formula via scoring_steer.json BEFORE round-boundary
+    # mutations so next round evaluates under the new formula.
     with graceful("Scoring steer apply failed"):
         apply_steer_file(session, round_num, cb.on_phase)
 
@@ -489,9 +454,7 @@ async def _run_sweep_generation_only(
     *,
     label: str = "sweep_gen_only",
 ) -> None:
-    """Emit L1 variants without scoring; audit projection captures ``l1_generate`` via the recorder, trial JSON is the minimal ``status="generation_only"`` record."""
-    from promptpotter.application.optimization.l1 import _generate_or_load_candidates
-
+    """L1 variants without scoring; trial JSON is minimal status='generation_only'."""
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
         ledger.append(Phase(phase="round", event="enter", round=round_num))
@@ -554,13 +517,7 @@ async def _force_l2(
     round_num: int,
     cb: RunListener,
 ) -> None:
-    """Fire L2-context unconditionally — diag mode's bridge between round 1
-    and the round-2 generation peek.
-
-    Wraps :func:`_escalate_or_stop` with a ``forced=diag_mode`` marker so
-    L2 reads round-1 evidence and writes its directive + L1-surface
-    overrides onto ``cycle.opt_sp`` even though no stall has accumulated.
-    """
+    """Force L2 (bypass stall counter) — diag-mode bridge to round-2 peek."""
     await _escalate_or_stop(
         cycle,
         config,
@@ -581,18 +538,7 @@ async def _run_round_loop(
     sweep: bool = False,
     diag: bool = False,
 ) -> StopReason:
-    """Execute the round loop: generate → score → escalate → stop.
-
-    ``sweep=True`` runs M10's cheap-trial mode: one full scored round, then
-    a generation-only round (L1 produces variants, no scoring) for the
-    review surface to compare against. Halts with ``SWEEP_COMPLETE`` after
-    the gen-only round persists.
-
-    ``diag=True`` runs M10's diagnostic mode: one full scored round, then
-    L2-context fires (forced, regardless of stall counter), then a
-    generation-only round 2 with L2's overrides applied. Halts with
-    ``DIAG_COMPLETE``.
-    """
+    """Round loop: generate → score → escalate → stop. sweep/diag halt after round 2."""
     opt = config.optimization
     hard_cap = opt.hard_cap
     round_num = session.state.resumed_from_round
@@ -621,10 +567,8 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            # Round-enter on the ledger drives AuditTrailProjection.begin_round
-            # via on_record. Direct begin_round is kept as the no-ledger path
-            # (test fixtures, headless tools) so behaviour is unchanged when
-            # session.state.ledger is None.
+            # Ledger drives AuditTrailProjection.begin_round; direct call is
+            # kept as no-ledger fallback (test fixtures, headless tools).
             cb.set_round(round_num)
             if (ledger := session.state.ledger) is not None:
                 ledger.append(Phase(phase="round", event="enter", round=round_num))
@@ -703,10 +647,8 @@ async def _run_round_loop(
                 return StopReason.SWEEP_COMPLETE
 
             if diag and clean_rounds >= 1:
-                # Force L2 to fire on round-1 evidence (bypasses stall counter),
-                # then run the round-2 L1-generate peek with L2's overrides
-                # applied. ``round_num`` was incremented after _post_round, so
-                # the just-completed round is ``round_num - 1``.
+                # Force L2 on round-1 evidence (bypass stall), then peek round 2
+                # with L2 overrides. round_num was incremented after _post_round.
                 await _force_l2(cycle, config, session, round_num - 1, cb)
                 await _run_sweep_generation_only(
                     cycle, session, cb, round_num, label="diag_gen_only"
@@ -741,35 +683,14 @@ async def run_optimization(
     diag: bool = False,
     fork_payload: SweepPayload | None = None,
 ) -> RunResult:
-    """Run optimization end-to-end. Runs baseline when ``baseline`` is None. Returns RunResult.
-
-    ``session.session_id`` / ``session.state.cycle_id`` carry the active ids;
-    callers set them before calling. When ``session.session_id`` is empty
-    (notebook entry path), this auto-mints a fresh session+cycle.
-
-    ``sweep=True`` is M10's cheap-trial mode (Track 5): one full scored
-    round, then a generation-only round (variants emitted but not scored)
-    for the review surface to compare across candidate L1 prompts. The
-    cycle's ``index.json::final.mode`` lands as ``"sweep"`` so the
-    leaderboard can pair sweep cycles with their full counterparts.
-    """
+    """Run optimization end-to-end; auto-mint session+cycle if not pre-set."""
     started_at = datetime.now(UTC).isoformat()
     cb = listener if listener is not None else RunListener()
 
-    # Bind the cycle ledger + subscribers BEFORE baseline scoring so the
-    # per-query events from prepare_scoring_context flow to dashboard.json
-    # and CLI stdout live, instead of buffering on RunListener until the
-    # late bind block below. CLI builds emitter+display ahead of time
-    # (see ``_build_run_observers``); we just need a ledger to plug them
-    # into. Skipped when no store is wired (test fixtures) or when the
-    # caller already scored baseline (notebook path with baseline != None).
+    # Early-bind ledger + subscribers BEFORE baseline scoring so per-query
+    # events from prepare_scoring_context reach dashboard.json + CLI live.
     early_bind_done = False
     if baseline is None and emitter is not None and session.store is not None:
-        from promptpotter.application.baseline import load_baseline_prompt
-        from promptpotter.application.bootstrap import auto_mint_session
-        from promptpotter.domain.cycle_paths import CycleDir
-        from promptpotter.infrastructure.ledger import RunLedger
-
         prompt_nodes = (
             session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
         )
@@ -799,18 +720,11 @@ async def run_optimization(
                 ledger.bind(session.state.round_recorder)
             if display is not None:
                 ledger.bind(display)
-            from promptpotter.infrastructure.projections import PoBBStreamProjection
-
             ledger.bind(PoBBStreamProjection.from_cycle_dir(cycle_dir))
             cb.ledger = ledger
             early_bind_done = True
 
     if baseline is None:
-        from promptpotter.application.baseline import (
-            extract_campaign_baseline,
-            prepare_scoring_context,
-        )
-
         _, _, campaign_rounds, _ = await prepare_scoring_context(
             session.experiment_extract,
             dataset,
@@ -825,8 +739,6 @@ async def run_optimization(
             display.set_baseline(baseline.baseline_acc)
 
     if not session.session_id:
-        from promptpotter.application.bootstrap import auto_mint_session
-
         ps = baseline.baseline_ps
         baseline_prompt_fields = (
             ps.prompt_field_dict() if isinstance(ps, OptSearchPoint) else (ps or {})
@@ -841,8 +753,6 @@ async def run_optimization(
             dataset_size=len(dataset),
             experiment_id=experiment_id,
         )
-
-    from promptpotter.application.scoring.formula import split_scoring_block
 
     scoring_spec = split_scoring_block(campaign_config.scoring)
 
@@ -874,39 +784,22 @@ async def run_optimization(
         started_at=started_at,
     )
 
-    # Sweep-fork override stamp. After bootstrap returns the cycle but
-    # before the round loop reads ``cycle.opt_sp``, apply the operator's
-    # L1-surface deltas. The cycle's existing checkpoint code then
-    # persists the stamped OSP into trial JSONs via the same path that
-    # JobSearchPoint already round-trips.
+    # Sweep-fork: stamp operator's L1-surface deltas onto the fresh OSP.
     if fork_payload is not None:
         apply_sweep_payload_to_osp(cycle.opt_sp, fork_payload)
 
-    # Fork-on-divergence rebinding. ``init_optimization_loop`` may have
-    # minted a new fork cycle and updated ``session.state.cycle_id``. The
-    # live dashboard projection is family-root-anchored so its telemetry
-    # paths stay correct, but the ``AuditTrailProjection`` writes
-    # ``.runtime/cache/rounds/round_NNN.json`` per cycle and must be rebuilt to
-    # point at the fork's own dir. Output.log gets a banner so the
-    # operator can see the cutover inline.
+    # Fork-on-divergence: rebind AuditTrailProjection to the fork's own dir
+    # (live dashboard stays family-root-anchored).
     forked = (
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
     if forked and session.state.cycle_id and session.store is not None:
-        from promptpotter.domain.cycle_paths import CycleDir
-        from promptpotter.infrastructure.ledger import RunLedger
-        from promptpotter.infrastructure.projections import AuditTrailProjection
-
         cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
         session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
         session.state.round_recorder.rehydrate_sticky()
         fork_ledger = RunLedger.open(cycle_dir)
-        # Re-open the parent so the offset count reflects ``_fork_at_divergence``'s
-        # FORK_CUT append (which used a separate RunLedger instance and so
-        # didn't bump the in-memory cursor of ``session.state.ledger``).
-        # The fork inherits the parent's full history up to the fresh tail
-        # so a tail of ``fork.iter()`` sees the FORK_CUT marker before the
-        # fork's own appends.
+        # Re-open parent so the offset reflects _fork_at_divergence's FORK_CUT
+        # append (which used a separate RunLedger instance).
         if pre_loop_cycle_id:
             parent_dir = CycleDir(session.store.campaigns.campaign_dir(pre_loop_cycle_id))
             fresh_parent = RunLedger.open(parent_dir)
@@ -914,8 +807,6 @@ async def run_optimization(
         session.state.ledger = fork_ledger
 
     if emitter is None:
-        from promptpotter.application.baseline import build_campaign_emitter
-
         emitter = build_campaign_emitter(
             session,
             campaign_config,
@@ -931,17 +822,10 @@ async def run_optimization(
             from_round=session.state.resumed_from_round or 0,
         )
     elif early_bind_done and emitter._recorder is None:
-        # Recorder may have been built by init_optimization_loop after
-        # we early-bound the emitter; patch it on so per-round node
-        # snapshots reach dashboard.json::current_round.nodes.
+        # init_optimization_loop built the recorder after early-bind; patch on.
         emitter._recorder = session.state.round_recorder
-    # Ledger subscription: every subscriber consumes via ``on_record``;
-    # there is no parallel direct-callback path. Display binds last so
-    # any pre-binding events buffered on the listener (e.g. ``INIT.enter``
-    # fired before the cycle dir was known) flush in order. When early
-    # bind already ran we still re-bind on fork-on-divergence (fork ledger
-    # replaced session.state.ledger) but skip the no-fork case to avoid
-    # double-subscribing.
+    # Late-bind subscribers: skip when early-bind already ran on the same
+    # ledger (would double-subscribe), but always re-bind on fork.
     late_ledger = session.state.ledger
     if late_ledger is not None and (not early_bind_done or forked):
         late_ledger.bind(emitter)
@@ -950,9 +834,6 @@ async def run_optimization(
         if display is not None:
             late_ledger.bind(display)
         if session.state.cycle_id and session.store is not None:
-            from promptpotter.domain.cycle_paths import CycleDir
-            from promptpotter.infrastructure.projections import PoBBStreamProjection
-
             late_ledger.bind(
                 PoBBStreamProjection.from_cycle_dir(
                     CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
@@ -996,9 +877,7 @@ def _finalize_run(
     sweep: bool = False,
     diag: bool = False,
 ) -> None:
-    """Mark cycle finished, fold the run summary into ``index.json::final``,
-    render ``log.md`` (with the hard-samples heatmap inlined when the sorter
-    ran), finalize the emitter. Mutates ``run_result.langfuse_trace_id``."""
+    """Mark cycle finished, fold summary into index.json::final, render log.md, finalize emitter."""
     stop_reason = run_result.stop_reason
     if session.state.cycle_id:
         status_map = {
@@ -1065,8 +944,8 @@ def _finalize_run(
             else:
                 final_block["mode"] = "full"
             if diag:
-                # Diag mode's payload: the L2-evolved L1 surface that operator
-                # promotes by running plain optimize on the diag fork.
+                # L2-evolved L1 surface that operator promotes by running
+                # plain optimize on the diag fork.
                 osp = cycle.opt_sp
                 final_block["diag"] = {
                     "l2_directive": (osp.l2_directive or "").strip(),
@@ -1076,16 +955,11 @@ def _finalize_run(
                     ),
                     "l1_template_override": bool(osp.l1_template_override),
                 }
+            # Seal top-level baseline against final.baseline_accuracy drift.
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
-                {
-                    "final": final_block,
-                    # Seal top-level baseline against the truth source so it
-                    # cannot drift from ``final.baseline_accuracy``. Belt-and-
-                    # braces over Fix 2 in ``bootstrap_cycle``.
-                    "baseline_accuracy": run_result.baseline_accuracy,
-                },
+                {"final": final_block, "baseline_accuracy": run_result.baseline_accuracy},
             )
 
     if emitter:

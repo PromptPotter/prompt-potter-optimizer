@@ -1,11 +1,8 @@
-"""L2/L3 transition primitives — types + the shared LLM-call template.
+"""L2/L3 transition primitives — layer-agnostic types + LLM-call template.
 
-``L2RefineStrategy`` and ``L3ModifyPlan`` (the strategy classes that own
-``apply_side_effects`` and the cycle mutation perimeter) live in
-``escalation.py``. This module owns the LAYER-AGNOSTIC transition
-primitives — ``OptimizerAction``, ``TransitionResult``, the
-``run_layer_transition`` shared template, and the L3 prompt-extras builder
-``compile_l3_extras`` (counterpart to ``l2_surface.compile_l2_extras``).
+The actual ``L2`` / ``L3`` ``LayerStrategy`` instances live in
+``escalation.py``; this module is what they share — ``OptimizerAction``,
+``TransitionResult``, ``run_layer_transition``, and the L3 extras builder.
 """
 
 from __future__ import annotations
@@ -29,7 +26,7 @@ from promptpotter.infrastructure.llm import LLMClientBase
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.escalation import L2RefineStrategy, L3ModifyPlan
+    from promptpotter.application.optimization.escalation import LayerStrategy
 
 __all__ = [
     "OptimizerAction",
@@ -83,7 +80,7 @@ class TransitionResult:
 
 
 async def run_layer_transition(
-    transition: L2RefineStrategy | L3ModifyPlan,
+    transition: LayerStrategy,
     cycle: Cycle,
     llm_client: LLMClientBase,
     *,

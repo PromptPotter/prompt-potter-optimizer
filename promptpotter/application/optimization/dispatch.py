@@ -1,20 +1,9 @@
-"""Layer dispatch — per-call payload + layer-fan-in registry.
+"""Layer dispatch — per-call DispatchState + LAYER_CONFIGS fan-in.
 
-Every optimizer LLM call follows the same flow:
-``archive → AxisIndex (cached) → DispatchState (per-call state) →
-LAYER_CONFIGS[layer] (per-layer {var: section_renderer} table) →
-compile_prompt_vars (applies OSP overrides, merges per-call extras) → LLM``.
-
-L1-generate is fan-in: its config wires ``plan`` (from L3, persistent on
-OSP) and ``l2_directive`` (from L2, one-round window) alongside its other
-sections, and L2 owns the section visibility / text / whole-template
-overrides via ``OptSearchPoint`` fields. L2 / L3 / L1-critique have no
-override channel — their non-section vars ride in as ``extras``.
-
-The ``LAYER_CONFIGS`` dict is built lazily via ``get_layer_configs()`` so
-section-renderer modules (``l1_surface``, ``l2_surface``) can import
-``Layer`` / ``DispatchState`` / ``LayerConfig`` from this module without a
-circular dep.
+Flow: archive → AxisIndex → DispatchState → LAYER_CONFIGS[layer]
+({var: renderer} table) → compile_prompt_vars (applies OSP overrides +
+extras) → LLM. ``get_layer_configs()`` is lazy to break the
+dispatch ↔ surface-modules import cycle.
 """
 
 from __future__ import annotations

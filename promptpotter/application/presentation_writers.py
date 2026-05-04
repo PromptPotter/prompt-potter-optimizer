@@ -1,12 +1,7 @@
-"""Operator-facing markdown writers — log.md, review.md, library/*.md.
+"""Operator-facing markdown writers — log.md / review.md / library/*.md.
 
-Pure read+write helpers called from runner orchestration milestones (round
-boundary + finalize). Not from ``RunListener`` — per ``CLAUDE.md``,
-``RunListener`` MUST NOT write to disk; presentation artifacts live here
-instead so the listener stays display-only.
-
-Each function is self-contained: it opens the campaign store, derives the
-artifact, writes it. No state shared across calls.
+Called from runner orchestration milestones, NOT from RunListener (which
+must stay display-only per CLAUDE.md).
 """
 
 from __future__ import annotations
@@ -34,10 +29,7 @@ __all__ = [
 
 
 def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
-    """Render ``log.md`` for the current cycle. When the current cycle is a
-    fork, also re-render the family root's ``log.md`` so its ``## Forks``
-    section reflects this fork's latest result. Pure derived view; wrapped
-    in ``graceful()`` so a render bug never breaks the run."""
+    """Render log.md for the active cycle; on a fork, also refresh the family root's."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("log.md render failed"):
@@ -78,13 +70,7 @@ def _render_log_md_for(
 
 
 def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
-    """Read every sibling cycle's ``index.json`` under the family root.
-
-    Walks all three sibling kinds: ``forks/``, ``diag/``, and
-    ``sweeps/*/forks/``. Returns ``None`` when no sibling dirs exist (i.e.
-    the cycle is itself a fork, or no siblings have been minted yet) so
-    ``from_disk_log`` knows to skip the Forks section.
-    """
+    """Sibling index.json under forks/, diag/, sweeps/*/forks/. None when no siblings."""
     sibling_dirs: list[Path] = []
     for sibling_kind in ("forks", "diag"):
         parent = cycle_dir / sibling_kind
@@ -113,14 +99,7 @@ def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
 
 
 def refresh_tenant_leaderboards(session: Session) -> None:
-    """Refresh the four operator-facing dashboards at ``library/`` top.
-
-    Tenant-scoped, idempotent overwrites: ``runs.md`` (every cycle, grouped
-    by L1-generate template, sweep view conditional), ``individuals.md``
-    (every measured JSP ranked), ``hard_samples.md`` (cross-cycle Rasch
-    fit + heatmap), and ``README.md`` (10-line orientation). Each .md is
-    a complete view — open one and read it without context.
-    """
+    """Refresh tenant library/ dashboards: runs.md, individuals.md, hard_samples.md, README.md."""
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
     )
@@ -183,12 +162,7 @@ def _pick_dataset_label(rows: list[Any]) -> str:
 
 
 def _build_sample_query_lookup(archive: Any, backend_id: str) -> dict[int, str]:
-    """First-seen ``sample_id → query`` map across the entire archive.
-
-    Walks index entries and the first measurement file that yields the
-    sample_id. Cheap because callers only need the *text* of the top-K
-    hardest samples; we still scan everything for correctness.
-    """
+    """First-seen ``sample_id → query`` map across the archive."""
     out: dict[int, str] = {}
     for entry in archive.list_all(backend_id):
         run_id = entry.get("run_id")
@@ -229,14 +203,7 @@ def _render_library_readme() -> str:
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
-    """Render ``campaigns/{cycle_id}/review.md`` from index + trials + round audits.
-
-    M10's prompt-iteration feedback surface — peer of ``log.md``. Reads
-    each round's ``.runtime/cache/rounds/round_NNNN.json`` so behaviour checks can
-    evaluate the live L1 variants. Pulls the three context_object items
-    off the cycle's ``task_context`` so the seeded
-    ``context_object_honored`` check has something to match against.
-    """
+    """Render review.md from index + trials + per-round audit JSONs (M10 surface)."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("review.md render failed"):

@@ -1,11 +1,4 @@
-"""L2 prompt surface — section renderers + the L2 extras builder.
-
-L2's prompt template fan-in is read-only: L2 is the producer of section
-overrides for L1, but L2 itself has no override channel. Its non-section
-template vars (``current_params``, ``task_context_section``,
-``l1_generate_field_catalogue``) ride in via :func:`compile_l2_extras`
-on the ``extras`` argument of ``dispatch.compile_prompt_vars``.
-"""
+"""L2 section renderers + extras builder. L2 has no override channel."""
 
 from __future__ import annotations
 

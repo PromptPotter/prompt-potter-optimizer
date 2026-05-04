@@ -1,9 +1,7 @@
-"""Prompt decomposition — one-time restructure pass.
+"""One-time restructure pass: raw context → 8-field prompt + TaskDecomposition.
 
-Turns raw operator context into the 8-field prompt scheme + ``TaskDecomposition``.
-Disk-cached under ``{store_base_dir}/{backend_id}/restructure_cache.json`` keyed
-by content hash so re-running ``init`` against an unchanged ``task_description.md``
-short-circuits without an LLM call.
+Disk-cached at ``{base_dir}/{backend_id}/restructure_cache.json`` keyed by
+content hash; idempotent ``init`` against an unchanged task_description.md.
 """
 
 from __future__ import annotations
