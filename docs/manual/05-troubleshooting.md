@@ -6,14 +6,14 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Groq returns 429 "rate limit"
 
-**What you see:** The campaign halts or slows dramatically. Logs mention `429` errors from Groq.
+**What you see:** Campaign halts or crawls. Logs mention `429` errors from Groq.
 
-**Why:** You've hit Groq's free-tier rate limit. PromptPotter honors the `Retry-After` header and waits, but if the limit is tight the campaign will crawl.
+**Why:** Groq's free-tier rate limit. PromptPotter honors `Retry-After`, but a tight limit makes the campaign crawl.
 
 **What to try:**
-- Wait a few minutes and resume with `python -m promptpotter optimize`. No re-init needed.
-- Switch to a smaller model by editing `.env`: `LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct`.
-- Upgrade to a paid tier if rate limits persist.
+- Wait a few minutes and resume: `python -m promptpotter optimize`. No re-init needed.
+- Switch to a smaller model in `.env`: `LLM_MODEL=meta-llama/llama-4-scout-17b-16e-instruct`.
+- Upgrade to a paid tier.
 
 ---
 
@@ -45,12 +45,11 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ## Validation failures on many candidates every round
 
-**What you see:** Many candidates receive a synthetic score of zero. The optimizer logs mention "validation failure" or "invalid proposal."
+**What you see:** Many candidates receive synthetic score zero. Logs mention "validation failure" or "invalid proposal."
 
-**Why:** L1 is proposing a parameter value outside the allowed set for that pipeline node. The `L1_SCHEMA_COMPLIANCE` validator catches this before any backend call runs (Loop 1 in [self-healing](../concepts/self-healing.md)).
+**Why:** L1 proposed a parameter value outside the allowed set for a pipeline node. `L1_SCHEMA_COMPLIANCE` catches this before any backend call (Loop 1 in [self-healing](../concepts/self-healing.md)).
 
-**What to try:**
-- L2's directive should fix this within 1–2 rounds by naming the forbidden value explicitly. If it persists beyond that, check the `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured on the backend side.
+**What to try:** L2's directive fixes this within 1–2 rounds by naming the forbidden value. If it persists, check `param_allowed_values` in your pipeline schema — the allowed set may be misconfigured backend-side.
 
 ---
 

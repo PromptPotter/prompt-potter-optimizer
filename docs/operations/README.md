@@ -1,15 +1,12 @@
 # Operations
 
-Running, integrating, and operating PromptPotter. If you're driving the system — not studying its internals — this is your folder.
+Running, integrating, and operating PromptPotter.
 
-| Page | What it covers |
-|------|----------------|
-| [CLI reference](cli-reference.md) | Every subcommand, flag, and worked example |
-| [Environment](environment.md) | Env variables, optional extras bundles, Docker |
-| [Backend integration](backend-integration.md) | Contract a backend must implement (`/matches`, `/pipeline`, `/status`) and REST API endpoints |
-| [Persistence and state](persistence-and-state.md) | The `.promptpotter/` tree, active session pointer, cycle directory schema |
-| [Rewind and fork](rewind-and-fork.md) | `optimize --from N` and `optimize --fork-on-divergence` — recovering from bad trajectories or scorer changes |
-| [Improvement tracking](improvement-tracking.md) | Reading the composite score, watching its trajectory, hot-swapping the per-round formula via `scoring_steer.json` |
-| [Observability](observability.md) | Langfuse integration and what gets traced |
+| Page | Covers |
+|------|--------|
+| [CLI reference](cli-reference.md) | Every subcommand, flag, env variable, optional extras |
+| [Backend integration](backend-integration.md) | Contract a backend must implement (`/matches`, `/pipeline`, `/status`) and PromptPotter's REST API |
+| [Persistence and state](persistence-and-state.md) | The `.promptpotter/` tree, active session, cycle directory, resume / rewind / fork / sweep, scoring steer |
+| [Observability](observability.md) | What gets traced, Langfuse integration, P(best) stream, display conventions |
 
-New to PromptPotter? Start in [`../manual/`](../manual/README.md), not here.
+New to PromptPotter? Start in [`../manual/`](../manual/README.md).

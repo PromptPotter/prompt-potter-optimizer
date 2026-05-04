@@ -60,7 +60,7 @@ Every change L2 makes is on this record. Nothing is lost between rounds because 
 
 ## See also
 
-- [what-is-l2.md](what-is-l2.md) — the main writer of the record's strategy fields.
-- [l1-generate-surface.md](l1-generate-surface.md) — the surface fields on the record.
-- [scoring-and-traces.md](scoring-and-traces.md) — how the record interacts with the scoring archive.
+- [`l2.md`](l2.md) — the main writer of the record's strategy fields.
+- [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) — the surface fields on the record.
+- [`scoring-and-traces.md`](scoring-and-traces.md) — how the record interacts with the scoring archive.
 - `promptpotter/domain/opt_search_point.py` — the `OptSearchPoint` class definition and field list.

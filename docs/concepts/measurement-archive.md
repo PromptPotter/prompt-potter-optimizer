@@ -1,53 +1,35 @@
-# Measurement Archive — the database core
+# Measurement Archive
 
-The **measurement archive** is PromptPotter's persistent memory of every measurement ever taken. It lives at `library/` under each tenant root and is **the central data interface** of the system — append-only, content-addressed, cross-cycle, cross-session, cross-tenant.
+PromptPotter's persistent memory of every measurement ever taken. Lives at `library/` under each tenant root. Append-only, content-addressed, cross-cycle, cross-session, cross-tenant. **The central data interface** — if you want to know what PromptPotter has learned, you read the archive.
 
-One row of the archive = one **measurement** = `(sample × config → outcome)`.
-
-If you want to know what PromptPotter has learned, you read the archive.
-
-## Why a separate concept
-
-Three things use accumulated data:
-
-1. The **optimizer loop** reuses prior measurements as cache (skip backend calls when an identical config already ran a sample). This is the cache-reuse path.
-2. **LLM digests** project the archive into short text strings injected into L1/L2/L3 prompts (`AxisIndex.digest_for_*`).
-3. **Operators / webapp / scripts** want direct, structured access — *"what did we measure for sample 42?"*, *"every measurement under model X?"*
-
-(1) and (2) used to dominate; (3) had no first-class API. The archive concept exposes (3) directly. (1) and (2) are now derived views over the same store.
+One row = one **measurement** = `(sample × config → outcome)`.
 
 ## Two natural keys, both first-class
 
-Every measurement is keyed by two dimensions equally. The archive supports retrieval along either, with the same return shape:
+| View | Group by | Question | Method |
+|------|----------|----------|--------|
+| By training example | `sample_id` | "Every measurement of this example, every config." | `measurements_for_sample(sample_id)` |
+| By searchpoint | pipeline config (predicate) | "Every measurement under this config, every sample." | `measurements_for_config(predicate)` |
 
-| View | Group by | Question | Method on `MeasurementArchive` |
-|---|---|---|---|
-| **By training example** | `sample_id` | *"Show me every measurement of this example, under every config it's ever run against."* | `measurements_for_sample(sample_id)` |
-| **By searchpoint** | pipeline config (predicate) | *"Show me every measurement under this config, across every sample, every campaign."* | `measurements_for_config(predicate)` |
+Both return `list[Measurement]`. They compose:
 
-Both return `list[Measurement]` — the same denormalized row type. They compose:
-
-- *"How does config X handle the hard examples?"* — start with `measurements_for_config({"llm_only": {"model": "X"}})`, group by `sample_id`.
-- *"Which configs got sample 42 right?"* — start with `measurements_for_sample(42)`, group by `node_configs`.
+- *"How does config X handle the hard examples?"* → `measurements_for_config({"llm_only": {"model": "X"}})`, group by `sample_id`.
+- *"Which configs got sample 42 right?"* → `measurements_for_sample(42)`, group by `node_configs`.
 
 ## On-disk layout
 
 ```
 {tenant_id}/library/
-├── measurements/              ← MeasurementArchive: facts (append-only)
-│   ├── {run_id}.json          ← one batch = one config × dataset pass
-│   └── ...
-└── measurements.json          ← index over the batches
+├── measurements/{run_id}.json    ← facts, append-only
+└── measurements.json             ← index over the batches
 ```
 
-Both digest layers (`AxisIndex` axis-keyed, `SampleIndex` sample-keyed) are in-memory only — rebuilt from the archive on every refresh, no on-disk file.
+Files are content-addressed by `JobSearchPoint.content_hash(dataset)` — same config + same dataset upserts the same file. This is what makes the archive cross-cycle: cycle A and cycle B that evaluate the same `(config, dataset)` share one stored measurement.
 
 Each `measurements/{run_id}.json` carries:
 
 - **Run-level**: `run_id`, `content_hash`, `node_configs`, `pipeline_params`, `scores`, `created_at`.
-- **`measurements: list[Measurement]`** (the items): each has `sample_id`, `query`, `ground_truth`, `predicted`, `hit`, `score`, `pipeline_data`.
-
-Files are content-addressed by `JobSearchPoint.content_hash(dataset)` — running the same config against the same dataset upserts the same file. This is what makes the archive cross-cycle: cycle A and cycle B that happen to evaluate the same `(config, dataset)` share one stored measurement.
+- **`measurements: list[Measurement]`**: each has `sample_id`, `query`, `ground_truth`, `predicted`, `hit`, `score`, `pipeline_data`.
 
 ## The `Measurement` row
 
@@ -68,7 +50,7 @@ class Measurement:
     run_scores: dict
 ```
 
-Frozen, denormalized — every row carries enough context (`node_configs`, `created_at`, `run_scores`) that you can group, filter, or render without a second lookup.
+Frozen, denormalized — every row carries enough context to group, filter, or render without a second lookup.
 
 ## Predicate shape (config-keyed retrieval)
 
@@ -78,39 +60,56 @@ Frozen, denormalized — every row carries enough context (`node_configs`, `crea
 {"web_search": {"max_sites": 5}}                 # exact value
 {"llm_only": {"model": "openai/gpt-oss-120b"}}   # exact value
 {"web_search": {}, "llm_rerank": {}}             # node presence (any config)
-{"llm_only": {}}                                  # any run with llm_only in chain
 ```
 
-A run matches iff for every `(node, subdict)` in the predicate, the run's `node_configs` contains a `[node, cfg]` pair where `subdict.items() <= cfg.items()`. Empty subdict = node presence test. **Empty predicate returns `[]`** (an unbounded query is rejected so callers don't accidentally retrieve everything).
+A run matches iff for every `(node, subdict)` in the predicate, the run's `node_configs` contains a `[node, cfg]` pair where `subdict.items() <= cfg.items()`. Empty subdict = node presence test. **Empty predicate returns `[]`** (unbounded queries are rejected).
 
 ## Lifecycle
 
-- **Write**: every `score_search_point()` call appends one batch to `measurements/{run_id}.json` via `MeasurementArchive.save(...)`. Content-hash collision means upsert (replaces), not duplicate.
-- **Read for cache reuse**: `score_search_point()` calls `load_reusable_results(node_configs, ...)` — a positional-prefix-exact lookup that returns a `dict[query → QueryResult]` for the active config. Skips the backend on hit.
-- **Read for discovery**: operators / scripts call `measurements_for_sample(...)` / `measurements_for_config(...)` — see above.
-- **Read for digests**: `AxisIndex.refresh()` walks new entries via `load_since(...)` for the sample side, then rebuilds the axis side from `list_all(...)` in memory. Pure derivation — no parallel persistence.
+- **Write**: every `score_search_point()` call appends one batch via `MeasurementArchive.save(...)`. Content-hash collision = upsert.
+- **Cache reuse read**: `score_search_point()` calls `load_reusable_results(node_configs, ...)` — positional-prefix-exact lookup. Skips the backend on hit.
+- **Discovery read**: operators / scripts call `measurements_for_sample(...)` / `measurements_for_config(...)`.
+- **Digest read**: `AxisIndex.refresh()` walks new entries via `load_since(...)`.
 
-## Relationship to cache reuse
+Cache reuse and discovery share one matcher (`_node_config_matches`) with two modes: `prefix_exact` (cache reuse — positional, full equality, stops at first mismatch) and `subset` (discovery — unordered, per-node subset).
 
-Both cache reuse and discovery retrieval use one shared matcher (`_node_config_matches`) with two modes:
+## Derived views — `SampleIndex` + `AxisIndex`
 
-| Mode | Used by | Semantics |
-|---|---|---|
-| `prefix_exact` | `find_by_node_configs` (cache reuse) | Positional, full dict equality, stops at first mismatch — for safety. A "matching" prior run is one we can reuse outputs from up to the matched node. |
-| `subset` | `measurements_for_config` (discovery) | Unordered, per-node dict subset — for inspection. A "matching" run is one whose chain satisfies the predicate. |
+```
+MeasurementArchive   ← facts (append-only, persisted)
+   │
+   ├── SampleIndex   ← per-sample derived view (in-memory; rebuilt every refresh)
+   └── AxisIndex     ← axis-keyed derived view (in-memory; rebuilt every refresh)
+```
 
-Same archive, same matcher primitive, two viewpoints.
+Both digest layers are **in-memory only** — rebuilt from the archive on every refresh, no on-disk file.
+
+The archive answers *"what was actually measured?"* The axis index answers *"across all measurements, which axes shifted fitness?"* The sample index answers *"which queries are informative?"*
+
+`AxisIndex` tracks three things:
+
+- **Parameter impact** — effect size of each axis. Classified `consistently impactful / sometimes impactful / dead`. Drives which axes L1 prioritises.
+- **Query patterns** — hits/misses per query across all configs. Informative queries are *discriminating* (some hit, some miss); always-easy and always-hard are noise. The zero-signal filter physically excludes the noise; scoring-set evolution gently swaps it out.
+- **Failure modes** — where in the pipeline failures cluster. *"40% of misses fail at web_search"* is the strategic signal L3 needs.
+
+Each digest method (`digest_for_l1_generate`, `digest_for_l1_critique`, `digest_for_l2`, `digest_for_l3`) is the LLM-context surface for that prompt site:
+
+| Consumer | Sees |
+|----------|------|
+| L1 Generate | Failure clusters, dead queries, top axes, best values |
+| L1 Critique | Discriminating queries, failure clusters, tractability, exhausted axes, value trends |
+| L2 Refine | Axis rankings, bottleneck distribution, failure × axis correlations, persistent failures |
+| L3 Plan | Axis rankings, bottleneck distribution, failure clusters, persistent failures |
 
 ## What the archive is *not*
 
-- **Not a cache.** The cache is the archive viewed in `prefix_exact` mode. There is no separate runtime cache (no `IntermediateCache` class — that was an aspirational note that never landed).
+- **Not a cache.** The cache is the archive viewed in `prefix_exact` mode. No separate runtime cache.
 - **Not the optimizer's working state.** That's `OptSearchPoint` + per-cycle `campaigns/{cycle_id}/trials/`.
 - **Not session metadata.** Sessions / journals / dashboards live under `sessions/{session_id}/` and `campaigns/{cycle_id}/`.
-- **Not the LLM-digest layer.** `AxisIndex` sits *on top of* the archive — a pure derived view that projects it into prompt-injectable text.
+- **Not the LLM-digest layer.** `AxisIndex` sits *on top of* the archive — a pure derived view.
 
 ## See also
 
 - [`../developer/README.md § Cross-run memory`](../developer/README.md) — `Measurement` dataclass, write/read paths, extension seams.
-- [`docs/operations/persistence-and-state.md`](../operations/persistence-and-state.md) — full tenant-tree reference, including non-archive surfaces (sessions, campaigns).
-- [`docs/concepts/scoring-and-traces.md`](scoring-and-traces.md) — how measurements are written: rescore-on-load, decision-replay, fork.
-- [`docs/concepts/axis-index.md`](axis-index.md) — the digest layer that consumes the archive.
+- [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) — full tenant-tree reference.
+- [`scoring-and-traces.md`](scoring-and-traces.md) — how measurements are written: rescore-on-load, decision-replay, fork.

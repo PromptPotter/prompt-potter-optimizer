@@ -6,7 +6,7 @@ Four steps. Takes a couple of minutes.
 
 Sign up at [console.groq.com](https://console.groq.com) and create an API key. The free tier works.
 
-Groq is the default optimizer LLM provider. If you prefer OpenAI, see [`operations/environment.md`](../operations/environment.md) for the alternative variables.
+Groq is the default optimizer LLM provider. If you prefer OpenAI, see [`operations/cli-reference.md § Environment`](../operations/cli-reference.md#environment) for the alternative variables.
 
 ## 2. Clone the repo
 
@@ -36,7 +36,7 @@ To use Anthropic, OpenAI, or OpenRouter instead of (or alongside) Groq, set the 
 pip install -e ".[all]"
 ```
 
-`[all]` bundles every optional feature (Jupyter, benchmarks, observability, Excel loaders, etc.). If you want a minimal install or a specific extra, see [`operations/environment.md`](../operations/environment.md).
+`[all]` bundles every optional feature (Jupyter, benchmarks, observability, Excel loaders, etc.). For a minimal install or a specific extra, see [`operations/cli-reference.md § Optional dependency bundles`](../operations/cli-reference.md#optional-dependency-bundles).
 
 ## 5. Reload Claude Code
 
