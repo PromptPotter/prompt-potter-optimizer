@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter, defaultdict
+from collections.abc import KeysView
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
@@ -82,6 +83,10 @@ class SampleIndex:
 
     def sample(self, sample_id: int) -> Sample | None:
         return self._samples.get(sample_id)
+
+    def sample_ids(self) -> KeysView[int]:
+        """Live view of registered sample ids — iterates without copying."""
+        return self._samples.keys()
 
     def measurements(
         self,

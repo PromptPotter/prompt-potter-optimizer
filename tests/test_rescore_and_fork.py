@@ -8,8 +8,8 @@ from pathlib import Path
 from promptpotter.application.optimization.cycle import (
     REPLAYERS,
     _fork_at_divergence,
-    _fork_for_diag_sibling,
-    _fork_for_sweep_sibling,
+    fork_for_diag_sibling,
+    fork_for_sweep_sibling,
     replay_decisions,
 )
 from promptpotter.application.scoring.formula import compile_scorer, rescore_results
@@ -343,8 +343,8 @@ def test_fork_for_diag_sibling_mints_counted_id_and_clears_trials(
     )
 
     stores = build_stores(tmp_path, tenant_id=tenant)
-    sib1 = _fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
-    sib2 = _fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
+    sib1 = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
+    sib2 = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
 
     assert sib1 == f"{parent}_diag_001"
     assert sib2 == f"{parent}_diag_002"
@@ -385,7 +385,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(parent)
-    new_cycle = _fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
+    new_cycle = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
 
     parent_ledger = RunLedger.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
@@ -403,7 +403,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
     """Sweep forks must start with no candidate-cache files copied from the
     parent — round 0 has to regenerate via L1 to actually exercise the
     payload's directive. ``_fork_at_divergence`` inherits prior rounds for
-    resume semantics; ``_fork_for_sweep_sibling`` deliberately doesn't, and
+    resume semantics; ``fork_for_sweep_sibling`` deliberately doesn't, and
     a regression here silently makes every fork in a batch score the
     parent's pre-existing population.
     """
@@ -427,7 +427,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     payload = SweepPayload(reason="probe", directive="explore persona axis")
-    new_cycle = _fork_for_sweep_sibling(
+    new_cycle = fork_for_sweep_sibling(
         stores.campaigns,
         tenant_id=tenant,
         session_id="s_test",
@@ -481,7 +481,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(parent)
     payload = SweepPayload(reason="probe", directive="explore persona axis")
-    new_cycle = _fork_for_sweep_sibling(
+    new_cycle = fork_for_sweep_sibling(
         stores.campaigns,
         tenant_id=tenant,
         session_id="s_test",

@@ -19,6 +19,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
+from promptpotter.infrastructure.store.base import read_text_optional
 from promptpotter.presentation.views.display import (
     _box_bottom,
     _box_bottom_info,
@@ -430,6 +431,5 @@ class LiveDisplay:
         """Render ``journal.md`` inline - mirror of notes."""
         from promptpotter.presentation.views.display import render_markdown_box
 
-        path = self._resolve_session_dir() / "journal.md"
-        content = path.read_text(encoding="utf-8").rstrip() if path.exists() else ""
+        content = read_text_optional(self._resolve_session_dir() / "journal.md").rstrip()
         print(render_markdown_box("JOURNAL", content, "(no journal entries yet)"))

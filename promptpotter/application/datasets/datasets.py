@@ -35,6 +35,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint, PromptTemplate
 from promptpotter.domain.sample import Sample
+from promptpotter.infrastructure.store.base import read_json_optional
 from promptpotter.shared.hashing import HASH_TRUNCATE
 
 if TYPE_CHECKING:
@@ -425,19 +426,19 @@ def load_node_prompt(
     """
     d = dataset_prompt_dir(dataset)
     node_path = d / f"{node_name}.json"
-    if node_path.exists():
-        data = json.loads(node_path.read_text(encoding="utf-8"))
+    data = read_json_optional(node_path)
+    if data is not None:
         return PromptTemplate(**data)
 
     variant_path = d / f"{variant}.json"
-    if variant_path.exists():
-        data = json.loads(variant_path.read_text(encoding="utf-8"))
+    data = read_json_optional(variant_path)
+    if data is not None:
         return PromptTemplate(**data)
 
     raise FileNotFoundError(
         f"Canonical prompt template not found for dataset={dataset!r} node={node_name!r}. "
         f"Expected either {node_path} (per-node) or {variant_path} (dataset default). "
-        f"Author one as a PromptTemplate JSON; see docs/concepts/prompts-and-individuals.md."
+        f"Author one as a PromptTemplate JSON; see docs/concepts/state-record.md."
     )
 
 

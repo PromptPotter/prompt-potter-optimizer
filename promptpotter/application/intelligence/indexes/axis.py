@@ -273,7 +273,7 @@ class AxisIndex:
         for cluster in clusters:
             mode = cluster.failure_mode
             sids: set[int] = set()
-            for sid in self.sample_index._samples:
+            for sid in self.sample_index.sample_ids():
                 modes = self.sample_index.failure_modes(sid)
                 if modes and Counter(modes).most_common(1)[0][0] == mode:
                     sids.add(sid)

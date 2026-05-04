@@ -263,8 +263,8 @@ def _scoreboard(
 
 # Display tags — populated from _build_display_tags() at init.
 # Mutated in place by set_display_tags so importers can keep a stable
-# reference (``from .display_primitives import _DISPLAY_TAGS``).
-_DISPLAY_TAGS: dict[str, str] = {}
+# reference (``from .display_primitives import DISPLAY_TAGS``).
+DISPLAY_TAGS: dict[str, str] = {}
 
 _WIRE_TYPE_TAGS: dict[str, str] = {
     "generation": "ai",
@@ -299,18 +299,18 @@ def _build_display_tags(schema) -> dict[str, str]:
 def set_display_tags(schema) -> None:
     """Set display tags from a PipelineSchema. Call once at pipeline init.
 
-    Mutates ``_DISPLAY_TAGS`` in place so other modules importing it keep
+    Mutates ``DISPLAY_TAGS`` in place so other modules importing it keep
     a live reference.
     """
-    _DISPLAY_TAGS.clear()
+    DISPLAY_TAGS.clear()
     if schema:
-        _DISPLAY_TAGS.update(_build_display_tags(schema))
+        DISPLAY_TAGS.update(_build_display_tags(schema))
 
 
 def _step_tag(step_name: str | None) -> str:
     if step_name is None:
         return ""
-    return f"[{_DISPLAY_TAGS.get(step_name, step_name[:4])}]"
+    return f"[{DISPLAY_TAGS.get(step_name, step_name[:4])}]"
 
 
 # ===========================================================================

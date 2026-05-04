@@ -37,7 +37,7 @@ from promptpotter.infrastructure.store import (
     read_active_pointer,
     save_active_pointer,
 )
-from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.infrastructure.store.base import read_json_optional, validate_path_component
 from promptpotter.shared.errors import ActiveSessionMismatchError
 
 if TYPE_CHECKING:
@@ -373,10 +373,10 @@ async def _resolve_pipeline_schema(
 ) -> PipelineSchema | None:
     """Static datasets/{name}/pipeline.json → backend GET /pipeline fallback. None on both fail."""
     if dataset_name:
-        cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
-        if cfg_path.exists():
+        raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
+        if raw is not None:
             try:
-                schema = parse_pipeline_response(json.loads(cfg_path.read_text(encoding="utf-8")))
+                schema = parse_pipeline_response(raw)
                 status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
                 return schema
             except Exception as exc:

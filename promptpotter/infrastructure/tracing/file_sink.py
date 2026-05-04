@@ -8,7 +8,6 @@ read back for state reconstruction. Resume + fork are driven by
 from __future__ import annotations
 
 import hashlib
-import json
 import logging
 import uuid
 from pathlib import Path
@@ -17,6 +16,7 @@ from typing import Any, ClassVar
 from promptpotter.infrastructure.store import campaign_dir_for
 from promptpotter.infrastructure.store.base import (
     append_jsonl,
+    read_json_optional,
     write_json,
     write_text,
 )
@@ -137,9 +137,9 @@ class FileSink:
         metadata_extra: dict[str, Any] | None = None,
     ) -> None:
         obs_path = self._scope_dir() / "langfuse" / "observations" / trace_id / f"{obs_id}.json"
-        if not obs_path.exists():
+        obs_data = read_json_optional(obs_path)
+        if obs_data is None:
             return
-        obs_data = json.loads(obs_path.read_text(encoding="utf-8"))
         obs_data["output"] = output
         obs_data["endTime"] = utcnow_iso()
         if metadata_extra:
@@ -407,8 +407,8 @@ class FileSink:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
             trace_path = self._scope_dir() / "langfuse" / "traces" / f"{trace_id}.json"
-            if trace_path.exists():
-                trace_data = json.loads(trace_path.read_text(encoding="utf-8"))
+            trace_data = read_json_optional(trace_path)
+            if trace_data is not None:
                 trace_data["output"] = {
                     "best_accuracy": event.best_accuracy,
                     "n_rounds": event.n_rounds,

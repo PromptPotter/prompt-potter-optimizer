@@ -20,6 +20,17 @@ incremental-refresh contract (``_seen_runs`` cursors) and the archive's
 
 Failure-group × axis correlations are recomputed on every refresh — cheap
 at current scale and avoids drift from a throttle.
+
+**Cursor pattern, not a base class.** All three carry a ``_seen_runs`` set
+for incremental refresh, but the shapes around that set diverge: SampleIndex
+and ConfigIndex consume run *details* from ``archive.load_since`` (full
+``measurements`` list per run), while AxisIndex walks ``archive.list_all``
+*index entries* (pipeline_params + scores only) under a separate
+``_axis_seen_runs`` cursor and tracks ``touched_axes`` for per-axis cache
+invalidation. A shared ``IncrementalIndexer`` base would have to abstract
+which archive call drives the walk, the per-entry payload schema, cursor
+ownership, and cache-invalidation hooks — four divergent shapes for three
+implementations. Deliberately not unified.
 """
 
 from promptpotter.application.intelligence.indexes.axis import (

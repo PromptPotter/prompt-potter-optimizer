@@ -20,9 +20,9 @@ from typing import TYPE_CHECKING, Literal
 from promptpotter.application.optimization.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.presentation.views.display import (
-    _DISPLAY_TAGS,
     CYAN,
     DIM,
+    DISPLAY_TAGS,
     GREEN,
     RED,
     RESET,
@@ -355,7 +355,7 @@ def _fmt_query_result(
     # tag (source is unambiguous). The standalone step tag is kept only as
     # the cache-marker anchor — `HIT [ai]📖 io=…` when cached, `HIT io=…`
     # when not.
-    single_node = len(_DISPLAY_TAGS) == 1
+    single_node = len(DISPLAY_TAGS) == 1
     step_tokens = pd.get("step_tokens") or {}
     tok_col = ""
     if step_tokens:
@@ -366,7 +366,7 @@ def _fmt_query_result(
             if single_node:
                 groups.append(io_seg)
             else:
-                tag_name = _DISPLAY_TAGS.get(node_name, node_name[:4])
+                tag_name = DISPLAY_TAGS.get(node_name, node_name[:4])
                 groups.append(f"[{tag_name}] {io_seg}")
         tok_col = " " + " ".join(groups)
 

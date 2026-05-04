@@ -41,7 +41,7 @@ def _long_path(p: str | Path) -> str:
     return "\\\\?\\" + os.path.abspath(s)
 
 
-def _ensure_parent(path: Path) -> None:
+def ensure_parent_dir(path: Path) -> None:
     """``mkdir(parents=True, exist_ok=True)`` for *path*'s parent, long-path safe."""
     os.makedirs(_long_path(path.parent), exist_ok=True)
 
@@ -70,7 +70,7 @@ def write_json(
     """
     import time
 
-    _ensure_parent(path)
+    ensure_parent_dir(path)
     fd, tmp = tempfile.mkstemp(dir=_long_path(path.parent), suffix=".tmp")
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as f:
@@ -94,14 +94,14 @@ def write_json(
 
 def write_text(path: Path, content: str) -> None:
     """Write *content* to *path*, creating parent directories if needed."""
-    _ensure_parent(path)
+    ensure_parent_dir(path)
     with open(_long_path(path), "w", encoding="utf-8") as f:
         f.write(content)
 
 
 def append_text(path: Path, line: str) -> None:
     """Append *line* to *path*, creating parent directories if needed."""
-    _ensure_parent(path)
+    ensure_parent_dir(path)
     with open(_long_path(path), "a", encoding="utf-8") as f:
         f.write(line)
 
@@ -112,7 +112,7 @@ def write_yaml_kv(path: Path, data: dict) -> None:
     Handles None → ``null``, bools → lowercase, lists → JSON arrays.
     Used for MLflow meta.yaml files.
     """
-    _ensure_parent(path)
+    ensure_parent_dir(path)
     with open(_long_path(path), "w", encoding="utf-8") as f:
         for key, value in data.items():
             f.write(f"{key}: {_yaml_value(value)}\n")
@@ -144,12 +144,20 @@ def read_json_optional(path: Path) -> Any | None:
     return read_json(path)
 
 
+def read_text_optional(path: Path, default: str = "") -> str:
+    """Read text from *path*, returning ``default`` if it does not exist."""
+    if not path.exists():
+        return default
+    with open(_long_path(path), encoding="utf-8") as f:
+        return f.read()
+
+
 def append_jsonl(path: Path, item: dict) -> Path:
     """Append one JSON object as a line to a JSONL file.
 
     Creates parent directories if needed.  Returns *path*.
     """
-    _ensure_parent(path)
+    ensure_parent_dir(path)
     with open(_long_path(path), "a", encoding="utf-8") as f:
         f.write(json.dumps(item, ensure_ascii=False) + "\n")
         f.flush()

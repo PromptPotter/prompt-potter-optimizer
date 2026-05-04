@@ -28,7 +28,7 @@ from promptpotter.application.optimization.escalation import (
     apply_sweep_payload_to_osp,
     escalate_l2,
 )
-from promptpotter.application.optimization.l1 import _generate_or_load_candidates, execute_round
+from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
 from promptpotter.application.presentation_writers import (
     refresh_tenant_leaderboards,
     write_log_md,
@@ -461,7 +461,7 @@ async def _run_sweep_generation_only(
     elif _rr := session.state.round_recorder:
         _rr.begin_round(round_num)
 
-    candidates, yield_stats = await _generate_or_load_candidates(
+    candidates, yield_stats = await generate_or_load_candidates(
         round_num,
         cycle,
         cb.on_phase,

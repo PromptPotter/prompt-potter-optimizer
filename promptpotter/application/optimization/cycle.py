@@ -71,9 +71,9 @@ __all__ = [
     "ForkResult",
     "LayerCounter",
     "ReplayContext",
-    "_fork_for_diag_sibling",
-    "_fork_for_sweep_sibling",
     "build_escalation_entry",
+    "fork_for_diag_sibling",
+    "fork_for_sweep_sibling",
     "record_decision",
     "replay_decisions",
     "resume_with_divergence_check",
@@ -492,7 +492,7 @@ def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -
     return f"{root_id}_diag_{max_n + 1:03d}"
 
 
-def _fork_for_diag_sibling(
+def fork_for_diag_sibling(
     campaign_store: CampaignStore,
     tenant_id: str,
     session_id: str,
@@ -516,7 +516,7 @@ def _fork_for_diag_sibling(
     return new_cycle_id
 
 
-def _fork_for_sweep_sibling(
+def fork_for_sweep_sibling(
     campaign_store: CampaignStore,
     tenant_id: str,
     session_id: str,

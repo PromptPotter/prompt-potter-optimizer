@@ -33,6 +33,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
+from promptpotter.infrastructure.store.base import read_text_optional
 from promptpotter.presentation.cli.session import (
     load_campaign_config,
     load_session,
@@ -326,10 +327,9 @@ async def _maybe_decompose_task(
     elif task_text:
         task_description = task_text
     else:
-        default_task_path = Path("datasets") / dataset_name / "task_description.md"
-        if not default_task_path.exists():
-            return
-        task_description = default_task_path.read_text(encoding="utf-8")
+        task_description = read_text_optional(
+            Path("datasets") / dataset_name / "task_description.md"
+        )
 
     if not task_description:
         return
@@ -683,7 +683,7 @@ async def _run_sweep_batch(
     """
     import secrets
 
-    from promptpotter.application.optimization.cycle import _fork_for_sweep_sibling
+    from promptpotter.application.optimization.cycle import fork_for_sweep_sibling
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
@@ -752,7 +752,7 @@ async def _run_sweep_batch(
                 existing[path.name],
             )
             continue
-        new_cycle_id = _fork_for_sweep_sibling(
+        new_cycle_id = fork_for_sweep_sibling(
             campaign_store=store.campaigns,
             tenant_id=tenant_id,
             session_id=root_ctx.session_id,
@@ -761,7 +761,7 @@ async def _run_sweep_batch(
             payload_source_file=path.name,
             payload=payload,
         )
-        # _fork_for_sweep_sibling retargeted the active pointer to new_cycle_id.
+        # fork_for_sweep_sibling retargeted the active pointer to new_cycle_id.
         # Re-load context for this fork and build a fresh session bound to it.
         fork_ctx = load_session(args)
         fork_session = await init_services_cli(**fork_ctx.init_params)
@@ -927,9 +927,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     ):
         existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
         if (existing_index.get("final") or {}).get("mode") == "diag":
-            from promptpotter.application.optimization.cycle import _fork_for_diag_sibling
+            from promptpotter.application.optimization.cycle import fork_for_diag_sibling
 
-            new_cycle_id = _fork_for_diag_sibling(
+            new_cycle_id = fork_for_diag_sibling(
                 session.store.campaigns,
                 session.tenant.tenant_id if session.tenant else "default",
                 ctx.session_id,

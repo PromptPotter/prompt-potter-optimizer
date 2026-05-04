@@ -29,7 +29,7 @@ def root_cycle_id(cycle_id: str) -> str:
 
     Three separators are recognized: ``_fork_`` (divergence forks, minted by
     ``_fork_at_divergence``), ``_diag_`` (diagnostic-BFS siblings, minted by
-    ``_fork_for_diag_sibling``), and ``_sweep_`` (sweep-batch forks, minted
+    ``fork_for_diag_sibling``), and ``_sweep_`` (sweep-batch forks, minted
     by ``_run_sweep_batch``). All deterministic — no I/O, no parent walk.
 
     Uses FIRST separator: a sweep-of-fork like ``cycle_X_fork_Y_sweep_b1_abc``

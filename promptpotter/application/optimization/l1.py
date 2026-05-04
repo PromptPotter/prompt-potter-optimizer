@@ -572,7 +572,7 @@ async def l1_score(
 # ---------------------------------------------------------------------------
 
 
-async def _generate_or_load_candidates(
+async def generate_or_load_candidates(
     round_num: int,
     cycle: Cycle,
     on_phase=None,
@@ -713,7 +713,7 @@ async def execute_round(
         with graceful("RoundStart emit failed"):
             obs.emit(RoundStart(campaign_id=session.state.obs_campaign_id, round_num=round_num))
 
-    candidates, yield_stats = await _generate_or_load_candidates(
+    candidates, yield_stats = await generate_or_load_candidates(
         round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
     )
 
