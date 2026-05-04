@@ -1,32 +1,13 @@
-"""Candidate elimination — classification, result helpers, and mid-round checks.
+"""Candidate elimination — classify_result, result helpers, mid-round checks.
 
-Three layers in one file:
+classify_result(result) → fatal codes from advisory + finish_reason + reasoning:
+  llm_only:content_empty + length + reasoning>0 → reasoning_budget_exhausted
+  llm_only:content_empty + length + reasoning=0 → output_truncated
+  llm_only:content_empty + stop                 → empty_response
+  *:content_filtered                            → passthrough as fatal
 
-1. **Classification** (``classify_result`` / ``ResultClassification``) — derives
-   *fatal codes* from raw response shape (advisory + ``finish_reason`` +
-   ``reasoning_tokens``). A fatal code marks a measurement as
-   deterministic-for-the-config: one sighting proves the candidate will fail
-   the same way on every remaining query, so spending more backend calls is
-   waste. Rule table — extend here, not in callers:
-
-       advisory                            finish_reason   reasoning   →  fatal
-       ----------------------------------  --------------  ----------  ----------
-       llm_only:content_empty              length          > 0         reasoning_budget_exhausted
-       llm_only:content_empty              length          0 / unset   output_truncated
-       llm_only:content_empty              stop / other    any         empty_response
-       *:content_filtered                  any             any         (passthrough as fatal)
-
-2. **Result helpers** (``extract_warning_types``, ``is_deprecated``,
-   ``candidate_keys_from_schema``, ``get_candidates``, ``update_query_tracker``)
-   — pure read-only helpers over a result dict / pipeline schema. Consumed by
-   elimination, L1 execute, L1 critique, scoring, and the display layer.
-
-3. **Mid-round checks** (``DegradationCheck``, ``PoBBCheck``) —
-   first-to-fire wins; produce ``EscalationSignal`` to terminate a candidate.
-   ``PoBBCheck`` is the Bayesian Posterior-of-Being-Best stop rule (Russo
-   2016): joint Normal-CLT posterior over candidates' mean accuracy, MC over
-   independent Normals to compute each candidate's argmax probability, stop
-   when current candidate's P(best) drops below ε.
+PoBBCheck = Bayesian Posterior-of-Being-Best (Russo 2016): joint Normal-CLT
+posterior, MC argmax, stop when current's P(best) < ε.
 """
 
 from __future__ import annotations
@@ -50,6 +31,7 @@ if TYPE_CHECKING:
 __all__ = [
     "DegradationCheck",
     "PoBBCheck",
+    "PoBBConfig",
     "PoBBSnapshot",
     "ResultClassification",
     "build_degradation_checks",
@@ -69,12 +51,7 @@ __all__ = [
 
 @dataclass(frozen=True)
 class ResultClassification:
-    """Codes seen on a single result.
-
-    ``advisory_codes`` is everything the backend emitted (and any synthesized
-    error code). ``fatal_codes`` is what PromptPotter's policy classifies as
-    deterministic-for-config; non-empty fatal_codes ⇒ row is deprecated.
-    """
+    """advisory_codes = everything observed; fatal_codes = deterministic-for-config."""
 
     advisory_codes: frozenset[str]
     fatal_codes: frozenset[str]
@@ -85,12 +62,10 @@ class ResultClassification:
 
     @property
     def all_codes(self) -> list[str]:
-        """Union for callers that just want to display every code seen."""
         return sorted(self.advisory_codes | self.fatal_codes)
 
     @property
     def dominant_fatal(self) -> str | None:
-        """First fatal code (sorted) — used as ``RoundClassification.dominant_warning``."""
         return next(iter(sorted(self.fatal_codes)), None)
 
 
@@ -108,11 +83,7 @@ def _collect_advisories(result: Mapping[str, Any]) -> set[str]:
 
 
 def _llm_only_shape(result: Mapping[str, Any]) -> tuple[str | None, int]:
-    """Extract (finish_reason, reasoning_tokens) from ``step_tokens.llm_only``.
-
-    Returns ``(None, 0)`` when the backend didn't surface the field — typical
-    for legacy archives or non-LLM-bearing pipelines.
-    """
+    """(finish_reason, reasoning_tokens) from step_tokens.llm_only; (None, 0) if missing."""
     pd = result.get("pipeline_data") or {}
     st = (pd.get("step_tokens") or {}).get("llm_only") or {}
     fr = st.get("finish_reason")
@@ -249,12 +220,7 @@ def _leader_locked(
 
 
 class DegradationCheck:
-    """Fatal-classification fast-path + rate-based degradation.
-
-    Fatal codes come from :func:`classify_result` — derived from raw response
-    shape (finish_reason + reasoning_tokens), not from string-matching a
-    backend warning. One sighting ends the candidate; not a tunable.
-    """
+    """Fatal-classification fast-path (one sighting ends candidate) + rate-based check."""
 
     name = "degradation"
 
@@ -312,46 +278,33 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-query Posterior-of-Being-Best snapshot for telemetry.
-
-    ``p_best`` maps every candidate id (priors + current) to its posterior
-    probability of being the round's best at this query. ``current_id`` and
-    ``n_queries`` identify which candidate is mid-evaluation and how many
-    queries it has under its belt at snapshot time.
-    """
+    """Per-query PoBB snapshot for telemetry."""
 
     p_best: dict[str, float]
     current_id: str
     n_queries: int
 
 
+@dataclass(frozen=True)
+class PoBBConfig:
+    """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
+
+    n_min: int = 4
+    epsilon: float = 0.05
+    lock_in: float = 0.95
+    lock_in_n_min: int = 8
+
+
 class PoBBCheck:
-    """Bayesian Posterior-of-Being-Best mid-round stop rule.
-
-    For each candidate we maintain a Normal posterior on its mean accuracy
-    (CLT on observed per-sample scores). We sample the joint posterior, compute
-    each candidate's posterior probability of being argmax over the population,
-    and stop the current candidate when its P(best) drops below ε.
-
-    Reference: Russo (2016), "Simple Bayesian Algorithms for Best Arm
-    Identification."
-    """
+    """Bayesian Posterior-of-Being-Best stop rule (Russo 2016)."""
 
     name = "elimination"
 
-    def __init__(
-        self,
-        *,
-        n_min: int = 4,
-        epsilon: float = 0.05,
-        lock_in: float = 0.95,
-        lock_in_n_min: int = 8,
-        n_queries: int,
-    ) -> None:
-        self.n_min = n_min
-        self.epsilon = epsilon
-        self.lock_in = lock_in
-        self.lock_in_n_min = lock_in_n_min
+    def __init__(self, config: PoBBConfig, *, n_queries: int) -> None:
+        self.n_min = config.n_min
+        self.epsilon = config.epsilon
+        self.lock_in = config.lock_in
+        self.lock_in_n_min = config.lock_in_n_min
         self.n_queries = n_queries
         self.priors: dict[str, list[float]] = {}
         self.prior_ids: list[str] = []

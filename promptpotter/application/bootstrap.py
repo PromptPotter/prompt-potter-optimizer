@@ -10,6 +10,12 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.config import EXPERIMENT_EXTRACTORS
+from promptpotter.application.datasets.datasets import (
+    DATASET_LOADERS,
+    samples_from_dicts,
+)
+from promptpotter.application.pipeline_discovery import parse_pipeline_response
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -20,7 +26,16 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.scoring import RoundScorer, Scorer
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.store import Stores, build_stores
+from promptpotter.infrastructure.store import (
+    Stores,
+    build_stores,
+    clear_active_pointer,
+    mint_session_id,
+    read_active_pointer,
+    save_active_pointer,
+)
+from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.shared.errors import ActiveSessionMismatchError
 
 if TYPE_CHECKING:
     from promptpotter.application.baseline import CampaignBaseline
@@ -291,9 +306,6 @@ def auto_mint_session(
     create_campaign_dir: bool = True,
 ) -> tuple[str, str]:
     """Mint session_id, write session state, claim active pointer; mutates session in place."""
-    from promptpotter.infrastructure.store import mint_session_id, save_active_pointer
-    from promptpotter.infrastructure.store.base import validate_path_component
-
     cycle_hash = cycle_id.removeprefix("cycle_")
     validate_path_component(cycle_hash)
     session_id = mint_session_id()
@@ -337,9 +349,6 @@ def auto_mint_session(
 
 def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str], None]) -> None:
     """Refuse tenant drift unless take_over=True; on take-over, clear the pointer."""
-    from promptpotter.infrastructure.store import clear_active_pointer, read_active_pointer
-    from promptpotter.shared.errors import ActiveSessionMismatchError
-
     active_tid, active_sid, _ = read_active_pointer()
     if not (active_tid and active_tid != tenant_id):
         return
@@ -360,8 +369,6 @@ async def _resolve_pipeline_schema(
     status: Callable[[str], None],
 ) -> PipelineSchema | None:
     """Static datasets/{name}/pipeline.json → backend GET /pipeline fallback. None on both fail."""
-    from promptpotter.application.pipeline_discovery import parse_pipeline_response
-
     if dataset_name:
         cfg_path = project_root / "datasets" / dataset_name / "pipeline.json"
         if cfg_path.exists():
@@ -388,8 +395,6 @@ def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
     """Populate session.queries + index_terms from DatasetStore or DATASET_LOADERS."""
-    from promptpotter.application.datasets.datasets import DATASET_LOADERS, samples_from_dicts
-
     ds = session.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
         status(f"Loading dataset '{dataset_name}' from registry ...")
@@ -418,8 +423,6 @@ async def _sync_and_extract_experiment(
     status: Callable[[str], None],
 ) -> None:
     """Populate queries/index_terms/experiment_extract; auto-sync from backend if missing."""
-    from promptpotter.application.datasets.datasets import samples_from_dicts
-
     backend_id = session.backend_id
     extract = session.store.backends.load_sync(backend_id, f"experiments/{experiment_id}.json")
     has_traces = bool(extract and extract.get("runs") and extract["runs"][0].get("traces"))
@@ -447,8 +450,6 @@ async def _sync_and_extract_experiment(
         )
         status("WARNING: No experiment data available")
         return
-
-    from promptpotter.application.config import EXPERIMENT_EXTRACTORS
 
     schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
     extractor = EXPERIMENT_EXTRACTORS.get(schema_key)

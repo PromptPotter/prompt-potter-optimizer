@@ -18,7 +18,6 @@ __all__ = [
     "build_cross_candidate_diff",
     "build_trajectory_report",
     "candidate_summaries",
-    "extract_runtime_failure_fields",
     "format_axis_digest_block",
     "format_escalation_report",
     "format_l2_output_failures_for_l3",
@@ -69,23 +68,18 @@ def format_axis_digest_block(
     return "\n".join([header, *entries]) if header else "\n".join(entries)
 
 
-def extract_runtime_failure_fields(rf: dict) -> tuple[int, str, str, int]:
-    """Parse the common (rate_pct, dominant, cfg_str, n_evaluated) tuple from an RF dict."""
-    rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
-    dominant = rf.get("dominant_warning", "unknown")
-    cfg = rf.get("observed_config") or {}
-    cfg_parts = [f"{k}={v}" for k, v in cfg.items() if k != "prompt"]
-    cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
-    return rate_pct, dominant, cfg_str, rf.get("total_scored", 0)
-
-
 def format_runtime_failure_line(rf: dict, label: str = "") -> list[str]:
     """Render one runtime-failure dict as a 2-line warning block."""
-    rate_pct, dominant, cfg_str, n = extract_runtime_failure_fields(rf)
-    if label:
-        head = f"  ⚠ {label[:60]} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
-    else:
-        head = f"  ⚠ {dominant} — {rate_pct}% degraded on {n} queries"
+    rate_pct = round(float(rf.get("degraded_rate", 0.0)) * 100)
+    dominant = rf.get("dominant_warning", "unknown")
+    cfg_parts = [f"{k}={v}" for k, v in (rf.get("observed_config") or {}).items() if k != "prompt"]
+    cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
+    n = rf.get("total_scored", 0)
+    head = (
+        f"  ⚠ {label[:60]} — {rate_pct}% degraded on {n} queries, dominant={dominant}"
+        if label
+        else f"  ⚠ {dominant} — {rate_pct}% degraded on {n} queries"
+    )
     return [head, f"    observed_config: {cfg_str}"]
 
 

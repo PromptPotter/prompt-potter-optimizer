@@ -52,15 +52,11 @@ def merge_with_unprocessed_priors(
     scorer_id: str,
     scorer_formula: str | None,
 ) -> list[QueryResult]:
-    """Union ``results`` with prior-cache entries for dataset queries not yet
-    processed. The archive save is a full overwrite — without this merge a
-    partial run (cache hits + 1 fresh + Ctrl+C) would shrink an already-full
-    archive to whatever made it into ``results``. Filtered to the current
-    dataset so we never write off-dataset queries into this run_id's file.
-    ``evicted_priors`` (deprecated rows) are excluded — they must re-measure,
-    not get re-archived as-is. Unprocessed priors are rescored under the
-    active scorer so the round-level composite is consistent; timings and
-    other raw trace fields are preserved untouched."""
+    """Union results with cache priors for unprocessed dataset queries; rescore via active scorer.
+
+    Without this, partial runs (cache hits + Ctrl+C) shrink the archive on
+    overwrite. Evicted (deprecated) priors must re-measure, not re-archive.
+    """
     processed = {r["query"] for r in results}
     merged = list(results)
     for q, prior in prior_results.items():
@@ -75,11 +71,7 @@ def merge_with_unprocessed_priors(
 
 @dataclass
 class QueryLoopResult:
-    """Return value from ``_run_query_loop()``.
-
-    ``completed`` + ``stop_reason`` signal graceful/force stops; ``escalation_signal``
-    carries the first triggered degradation check.
-    """
+    """_run_query_loop return: results + completed/stop_reason + first escalation_signal."""
 
     results: list[QueryResult]
     completed: bool = True
@@ -96,19 +88,7 @@ def _materialize_cached(
     scorer_id: str,
     scorer_formula: str | None,
 ) -> QueryResult:
-    """Stamp a prior-cache item as cached with zeroed timing, rescored.
-
-    ``hit``/``score`` persisted on the prior run are a stale view — the
-    active scorer owns those fields on load, and its result lands in
-    ``r["scored"][scorer_id]`` so the trace accumulates a multi-scorer
-    audit map (see ``shared/scoring.py::rescore_results``).
-
-    Drift detection: when the cached item was previously scored (carried a
-    ``hit`` field on disk) and rescoring flips the outcome, emit a warning
-    so policy divergences don't silently accumulate. The known-benign case
-    is bold-wrapper stripping (``**answer**`` vs ``answer``) — when the
-    predicted string contains ``**…**`` markers we silently overwrite.
-    """
+    """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
     archived_hit = item.get("hit") if "hit" in item else None
     r: dict = {**item, "cached": True}
     pd = r.get("pipeline_data")
@@ -175,7 +155,7 @@ def _build_scoring_error_signal(
 def _filter_deprecated_priors(
     prior_results: dict[str, QueryResult],
 ) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
-    """Split prior-results cache into ``(kept, evicted)``; evicted entries force a fresh backend call so the optimizer doesn't replay known-bad measurements (load-side filter only — disk archive untouched)."""
+    """Load-side cache split: (kept, evicted=deprecated rows for fresh re-measure)."""
     from promptpotter.application.optimization.elimination import is_deprecated
 
     evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}
@@ -245,11 +225,7 @@ def _classify_abort(
     state: _LoopState,
     session: Session,
 ) -> str:
-    """Return abort reason for an errored result, or "" to continue.
-
-    Mutates ``state.consecutive_errors``: increments on server-side errors,
-    resets to 0 here (caller must reset on success path separately).
-    """
+    """Abort reason on error or "" to continue. Mutates state.consecutive_errors."""
     cat = error_category(result.get("error"))
     if cat in {ErrorCategory.CLIENT, ErrorCategory.PIPELINE}:
         return f"skipped_after_{cat or 'pipeline'}_error"
@@ -294,12 +270,7 @@ async def _process_fresh_sample(
     ctx: _LoopContext,
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
-    """Backend-measure one sample, classify errors, check escalation.
-
-    When the query had a deprecated prior, render the original cached row
-    (rescored under the active scorer) before the fresh measurement so the
-    operator sees the broken DEPR row immediately above its retry.
-    """
+    """Backend-measure one sample; render rescored DEPR row before retry; classify errors."""
     if (cached_deprecated := ctx.evicted_priors.get(sample.query)) is not None:
         display_cached = _materialize_cached(
             cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
@@ -434,16 +405,7 @@ async def score_search_point(
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
-    """Score a search point via backend with chain-addressed caching.
-
-    Two cache tiers (prior-result + per-node) share one prefix chain. Each
-    fresh measurement is persisted immediately so retried deprecated samples
-    and any in-progress baseline/candidate work survive a Ctrl+C. Persists
-    are union-merged with any prior-cache entries for queries not yet
-    processed (dataset-filtered, ``evicted_priors`` excluded), so an aborted
-    partial run never shrinks an already-fuller archive. Obs logging fires
-    on the final completion save.
-    """
+    """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe)."""
     store = session.store
     backend_id = session.backend_id
     pipeline_schema = session.pipeline_schema

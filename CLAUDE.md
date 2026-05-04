@@ -73,6 +73,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 - **CLI timeouts: 30s default for ALL commands.** Increase only when told "ready for data collection". **Never run `campaign_runner` with `run_in_background`** — always foreground.
 - **Commit messages: HARD CAP 800 chars total** (incl. trailer). Title <70. Terse bullets — no motivation essays. Over 800 → rewrite, do not commit-and-fix-later. Conventional commits (`feat:`, `fix:`, `docs:`, …).
 - Comments default to none — only non-obvious *why*.
+- **Docstring trimming is out of charter for LOC-shrink work.** Existing module / class / function docstrings explain WHY (invariants, contracts, hidden constraints) and are user-facing value. Do **not** trim them as a shortcut to a smaller diff. Real LOC wins come from pattern unification (one shape covers two cases), dead-code removal, inlining single-use helpers, fixing god-objects — never from shrinking explainers. If a docstring is genuinely an essay restating what the code does, ask first.
 
 ## Known issues
 

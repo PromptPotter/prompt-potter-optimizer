@@ -422,19 +422,7 @@ def apply_steer_file(
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
 ) -> str | None:
-    """Look for ``scoring_steer.json`` in the cycle dir; hot-swap if present.
-
-    Returns the new formula on success, ``None`` if no file was found or
-    the file failed to validate. On success the file is moved to
-    ``scoring_steer.applied.{ts}.json`` so a subsequent round-end won't
-    re-apply it. On failure the file is left in place so the operator
-    can fix the formula and let it apply on the next round.
-
-    Per-query steering is intentionally not supported here — changing the
-    per-query scorer mid-run rewrites recorded ``hit``/``score`` semantics
-    and triggers divergence-replay, which the operator should opt into via
-    ``optimize --fork-on-divergence`` rather than a silent file-drop.
-    """
+    """Hot-swap per_round formula via cycle/scoring_steer.json; archive on success."""
     if not session.state.cycle_id or session.store is None:
         return None
 
@@ -509,13 +497,7 @@ def apply_zero_signal_exclusions(
     min_observations: int,
     campaign_id: str = "",
 ) -> list[dict[str, Any]]:
-    """Prune zero-signal samples from the active dataset and persist.
-
-    Queries always-hit or always-miss across every SearchPoint tried carry
-    no optimization signal. ``active_dataset`` is ``list[Sample]``; the
-    list is mutated in place so the next round's loop iterates the smaller
-    set. Off by default — enable via ``CampaignConfig.optimization``.
-    """
+    """Prune always-hit / always-miss queries; mutates active_dataset in place."""
     dead = axes.sample_index.dead(min_observations=min_observations)
     if not dead:
         return []

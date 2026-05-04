@@ -15,7 +15,7 @@ from promptpotter.application.optimization.dispatch import (
     build_dispatch_state,
     compile_prompt_vars,
 )
-from promptpotter.application.optimization.elimination import PoBBCheck
+from promptpotter.application.optimization.elimination import PoBBCheck, PoBBConfig
 from promptpotter.application.optimization.formatting import candidate_summaries
 from promptpotter.application.optimization.l1_critique import (
     format_l1_critique_for_prompt,
@@ -65,6 +65,7 @@ from promptpotter.infrastructure.tracing import (
     observed_node,
 )
 from promptpotter.shared.errors import graceful
+from promptpotter.shared.statistics import proportion_test
 
 if TYPE_CHECKING:
     from promptpotter.application.runner import RunListener
@@ -528,10 +529,7 @@ async def score_population(
     *,
     degradation_checks: list[StopRule] | None = None,
     callbacks: RunListener,
-    elimination_n_min: int,
-    pobb_epsilon: float,
-    pobb_lock_in: float = 0.95,
-    pobb_lock_in_n_min: int = 8,
+    pobb_config: PoBBConfig,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
     l1_diversity: float = 1.0,
@@ -544,13 +542,7 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = PoBBCheck(
-        n_min=elimination_n_min,
-        epsilon=pobb_epsilon,
-        lock_in=pobb_lock_in,
-        lock_in_n_min=pobb_lock_in_n_min,
-        n_queries=len(dataset),
-    )
+    elim_check = PoBBCheck(pobb_config, n_queries=len(dataset))
 
     def _fire(idx: int, report: CandidateScore) -> None:
         candidate_scores.append(report)
@@ -822,10 +814,7 @@ async def l1_score(
     improvement_threshold: float = 0.01,
     callbacks: RunListener,
     degradation_checks: list[StopRule] | None = None,
-    elimination_n_min: int,
-    pobb_epsilon: float,
-    pobb_lock_in: float = 0.95,
-    pobb_lock_in_n_min: int = 8,
+    pobb_config: PoBBConfig,
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> L1ScoringResult:
@@ -844,10 +833,7 @@ async def l1_score(
         dataset,
         degradation_checks=degradation_checks,
         callbacks=callbacks,
-        elimination_n_min=elimination_n_min,
-        pobb_epsilon=pobb_epsilon,
-        pobb_lock_in=pobb_lock_in,
-        pobb_lock_in_n_min=pobb_lock_in_n_min,
+        pobb_config=pobb_config,
         round_num=round_num,
         decisions=decisions,
         l1_diversity=yield_stats.yield_,
@@ -902,8 +888,6 @@ async def l1_score(
     improved = best_acc > baseline.accuracy + improvement_threshold
     p_value: float | None = None
     if improved and base["total"] > 0:
-        from promptpotter.shared.statistics import proportion_test
-
         bl_hits = round(baseline.accuracy * base["total"])
         p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
     return L1ScoringResult(
@@ -1115,10 +1099,12 @@ async def execute_round(
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
-            elimination_n_min=opt.elimination_n_min,
-            pobb_epsilon=opt.pobb_epsilon,
-            pobb_lock_in=opt.pobb_lock_in,
-            pobb_lock_in_n_min=opt.pobb_lock_in_n_min,
+            pobb_config=PoBBConfig(
+                n_min=opt.elimination_n_min,
+                epsilon=opt.pobb_epsilon,
+                lock_in=opt.pobb_lock_in,
+                lock_in_n_min=opt.pobb_lock_in_n_min,
+            ),
             round_num=round_num,
             yield_stats=yield_stats,
         )

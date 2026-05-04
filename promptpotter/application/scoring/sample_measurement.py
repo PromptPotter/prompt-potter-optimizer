@@ -1,16 +1,4 @@
-"""Sample measurement — single-sample pipeline execution and scoring.
-
-Measures one Sample at a time via the backend query endpoint.
-Dataset-level scoring and prior-result matching live in
-``search_point_scorer``.
-
-Prompt interpolation
---------------------
-Prompt templates can contain ``{{variable}}`` placeholders filled at
-measurement time from the Sample's fields.  Syntax uses double-brace
-``{{name}}`` — same convention as ``PromptTemplate.compile_prompt()``.
-``ground_truth`` is always excluded to prevent data leakage.
-"""
+"""Single-sample pipeline execution + scoring; {{var}} interpolation excludes ground_truth."""
 
 from __future__ import annotations
 
@@ -53,12 +41,7 @@ _EXCLUDED_FIELDS: frozenset[str] = frozenset(
 
 
 def interpolate_prompt(text: str, variables: dict[str, Any]) -> str:
-    """Replace ``{{key}}`` placeholders in *text* from *variables*.
-
-    - Keys in ``_EXCLUDED_FIELDS`` are silently skipped (data-leakage guard).
-    - Missing keys are left as-is (no crash, logged at debug level).
-    - Values are stringified via ``str()``.
-    """
+    """Replace {{key}} from variables; skip _EXCLUDED_FIELDS; missing keys left as-is."""
     expected = set(_TEMPLATE_VAR_RE.findall(text))
     if not expected:
         return text
