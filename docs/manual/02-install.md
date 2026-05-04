@@ -38,6 +38,10 @@ pip install -e ".[all]"
 
 `[all]` bundles every optional feature (Jupyter, benchmarks, observability, Excel loaders, etc.). If you want a minimal install or a specific extra, see [`operations/environment.md`](../operations/environment.md).
 
+## 5. Reload Claude Code
+
+If Claude Code (CLI, desktop app, or IDE extension) was already open, **reload your session or restart VS Code now** — otherwise it won't see the `/potter-run` skill that ships with the repo.
+
 ## Done
 
 Next: [Your first campaign](03-first-campaign.md).

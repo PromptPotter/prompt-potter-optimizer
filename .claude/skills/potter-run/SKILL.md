@@ -49,6 +49,16 @@ Read these. Don't recommend parameter tweaks unless the user asks. Don't classif
 
 **Reading per-query display lines:** when the dataset loader assigns `sample_id` (BBEH today), each line carries a `#NNN` column right after the time — e.g. `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'`. Use the ID to refer to specific samples across runs.
 
+## Phase −1: Bootstrap (only on cold start, otherwise silent)
+
+Trigger if any of: `.env` missing, backend `/status` unreachable, or requested dataset has no loader. Run sub-flows in order; each one's success unblocks the next phase.
+
+**Missing `.env`.** Ask the operator for `GROQ_API_KEY` (free tier at [console.groq.com](https://console.groq.com) is the default optimizer LLM). Add OpenAI/Anthropic/OpenRouter only if explicitly named. Write `.env` with `GROQ_API_KEY=…` + `LLM_MODEL=openai/gpt-oss-120b`; `.env.example` is the full template.
+
+**Backend `/status` unreachable.** TermNorm is the canonical test backend. If it isn't local yet, offer `git clone https://github.com/runfish5/TermNorm-excel` to `../TermNorm-excel` (sibling of PromptPotter; operator can override the path). Once present, tell the operator to run `start-server-py-LLMs.bat` in their own terminal — same hand-off model as Phase 4 (`optimize`). Wait for `/status` 200 before continuing. *Future improvement: spawn a dedicated terminal automatically once that capability lands.*
+
+**Dataset has no loader.** Anything already in `promptpotter/application/datasets/datasets.py::DATASET_LOADERS` (bundled benchmarks + `lca-termnorm` via `load_excel_ground_truth`) needs nothing — `init` picks them up. **New dataset:** the skill writes a custom loader for the operator. Vocabulary: a function returning `list[Sample]` (`promptpotter/domain/sample.py` — `query` + `ground_truth` + optional `id`/extras). Read the operator's data shape (CSV, Excel, JSON, HuggingFace, …), generate `load_<name>(...)`, and register it in `DATASET_LOADERS`. Then draft `datasets/<name>/{pipeline.json, campaign.json, dataset.md, prompts/<node>.json}` against the patterns in `datasets/bbeh/`. The operator just describes their data and answer keys — Claude does the wiring.
+
 ## Phase 0: Audit (silent)
 
 1. Read `datasets/{name}/dataset.md` + `campaign.json` + `pipeline.json` (+ BBEH notebook).

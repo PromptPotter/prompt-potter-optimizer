@@ -20,7 +20,7 @@ Under the hood, PromptPotter just collects a lot of datapoints. Every evaluation
 **Core path (what everyone runs):**
 
 1. **Provide a labeled dataset.** Input/output pairs (plus any extra context).
-2. **Provide your `pipeline.json`.** Your backend declares every node, its parameters, and their allowed values. The optimizer searches only what's declared — nothing else is touched.
+2. **Drop in your `pipeline.json`.** This file lists what your pipeline does and which settings PromptPotter is allowed to change — models, temperature, prompts, thresholds, anything you put on the list. It only touches what's on the list. Nothing else. (The `/potter-run` skill can help you write it from a chat — you don't have to hand-author the JSON.)
 3. **Optimize:** run the critique-guided feedback cycle — PromptPotter's flavour of **LLM-driven program evolution**. The optimization loop is self-contained. It measures the baseline, generates candidates, scores them, runs L1 critique on failures, and iterates.
 
 > [!IMPORTANT]

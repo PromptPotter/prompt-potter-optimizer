@@ -115,3 +115,42 @@ Every L2 fire serializes its writes to the trial JSON. Open `campaigns/{cycle_id
 - `nodes.l2_context.output` — the raw LLM JSON dict L2 emitted.
 
 For a complete reference, see [`../developer/l2-internals.md`](../developer/l2-internals.md).
+
+---
+
+## Live monitoring (operator drill-in)
+
+The cleanest live-monitoring setup for an operator running `python -m promptpotter optimize`:
+
+1. **Open `campaigns/{root_cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence). For forked cycles, telemetry binds to the **family root** (the cycle with no `parent_cycle_id`); the active fork is identified by `dashboard.json::cycle_id` so a single tail covers the whole family.
+
+2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live.py::LiveDisplay`](../../promptpotter/presentation/views/live.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
+
+3. **Drill into peer files when the dashboard isn't enough.** Layout splits into three bands per cycle dir, plus three sibling-group dirs at the family root:
+
+   - **Family telemetry** at `campaigns/{root_cycle_id}/`, shared across all forks of the family: `dashboard.json` is the live scalar state.
+   - **Per-cycle operator audit** at the cycle dir's top level (root cycle and every fork has its own):
+     - `index.json` — campaign metadata + trial index + the `final` block (best / baseline / stop_reason / winner) once the cycle finishes.
+     - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
+     - `review.md` — per-cycle review surface (M10).
+     - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
+     - `prompts/` — prompt-version archive (per L2 mutation).
+     - `langfuse/` — LLM trace mirror (debug drill-in: events.jsonl, traces, observations, scores, datasets, state.json).
+   - **Per-cycle internals** at `{cycle_dir}/.runtime/` — opaque to operators, projection-owned:
+     - `ledger.jsonl` — RunLedger spine (every fact for this cycle).
+     - `streams/round_NNNN_p_best.jsonl` — per-query PoBB telemetry (rendered as a sparkline inside `log.md`).
+     - `cache/rounds/round_NNN.json` — per-round LLM action audit.
+     - `cache/candidates/round_NNNN.json` — pre-scoring candidate checkpoint (resume state); overwritten next round.
+     - `archived/resumed_at_<ts>/` — `--from <round>` rewind sweepup.
+   - **Sibling cycles** at the family root, split by kind:
+     - `forks/{cycle_id}/` — `--fork-on-divergence` operator-divergence forks.
+     - `diag/{cycle_id}/` — diagnostic-BFS auto-spawned siblings.
+     - `sweeps/{batch_id}/` — sweep batches; carries `index.json` + `summary.md` for the batch and `forks/{cycle_id}/` per payload.
+
+`optimize_result.json` and `hard_samples.json` were folded away earlier: the final-run summary lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md`.
+
+### Alternatives to the dashboard.json-tail workflow
+
+- **`/potter-run` skill** ([`.claude/skills/potter-run/SKILL.md`](../../.claude/skills/potter-run/SKILL.md)) — chat-driven operator session that preps configs, runs `optimize`, reads dashboard.json + trials between rounds, and summarizes. Combines well with the dashboard.json tail.
+- **Notebook** (`notebooks/optimization_campaign.ipynb`) — drives the same loop in-process; live-phase per-query rendering is currently notebook-only.
+- **Webapp** — minimal read-only dashboard planned on top of the FastAPI surface (`promptpotter/main.py`); zero code today.

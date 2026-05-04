@@ -1,208 +1,88 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+## What this is
 
-## What This Is
+PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. The backend declares tunable params via `GET /pipeline`; the optimizer runs critique-guided generate→score→critique with PoBB elimination (ε=0.05, n_min=4), cross-run memory, and self-healing rails. Python 3.13+, hexagonal. **Orchestration is the product — backends are pluggable.** TermNorm is the only registered extractor today (`EXPERIMENT_EXTRACTORS` / `TRACE_GT_RESOLVERS` in `application/config.py`); BBEH is the headline benchmark.
 
-PromptPotter is an **LLM-driven program evolution** system for prompts and pipelines. Given a dataset + an LLM pipeline endpoint, each round it evolves a population of candidate configurations through a 3-layer loop: **L1** (generate population → measure fitness → critique), **L2** (refine the search neighbourhood on stall), **L3** (replan the meta-strategy when L2 stalls). Four LLM nodes: `restructure` (one-time), `l1` (`l1_generate` + `l1_critique` sub-phases), `l2_context`, `l3_plan`. Backend can be a single LLM call or a multi-step pipeline. Tested with TermNorm; primary publication benchmark is BBEH.
-
-**Recon archived.** The sensitivity-scan / recon pass had no callers in the active loop and was deleted from `main`. Code is preserved at the `recon-archive` git tag; restore with `git checkout recon-archive -- promptpotter/application/recon/`.
-
-**Self-healing — four LLM-to-LLM healing loops.** Failures attach to the individual that produced them (per-individual `OptSearchPoint.memory`), never to the round. **Healing is gradual** — each fire produces one nudge; if it doesn't take, the loop retriggers next round with fresh evidence. (1) L2 nurses L1 on `ValidationFailure` — `L1_SCHEMA_COMPLIANCE` validator fires at parse time, L2 shifts L1 toward the allowed region. (2) L2 nurses L1 on `RuntimeFailure` — `DegradationCheck` fires mid-eval, L2 adjusts its own strategy; trail accumulates (NEW vs ACCUMULATED). (3) L3 replans on L2 stall (`l2_patience`). (4) L3 nurses L2 on `ValidatorOutcome` — three deterministic L2-output validators (cross-field duplication, verbatim self-repeat, catalogue redundancy) force L3 immediately if L2's parsed output is broken, bypassing patience. Validators are Evaluator-shaped (`id, passed, score, evidence, nurse_target`); the `score` field is the seam for future L4 composite scoring. `l1_critique → l1_generate` is round-over-round feedback, not part of the canon (fires every round, not failure-driven). Full mechanics in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
-
-**L1-generate surface on OSP, owned by L2.** L1's prompt is built from a closed registry (`L1GenerateField`: 8 sections + 4 scalars). Section visibility and text live as override fields on the individual (`OptSearchPoint.l1_section_overrides`, `l1_section_overrides_text`, `l1_template_override`). L2 fires on stall and writes any subset of these fields directly (plus directive, optimizer_params, task_context, action). The catalogue is code-authoritative so capabilities cannot be silently dropped. Conceptual: [`docs/concepts/what-is-l2.md`](docs/concepts/what-is-l2.md), [`docs/concepts/l1-generate-surface.md`](docs/concepts/l1-generate-surface.md). Implementation: [`docs/developer/l2-internals.md`](docs/developer/l2-internals.md), [`docs/developer/l1-generate-surface.md`](docs/developer/l1-generate-surface.md).
-
-**Data vs. scoring policy — rescore-on-load + decision-replay + fork.** Traces are facts; scores are policy. Each trace carries a ledger of `{scorer_id: {score, hit, formula}}`; every load boundary rescores under the active scorer. On resume, recorded decisions are replayed against rescored inputs — first mismatch halts so the operator can review. Rerun with `optimize --fork-on-divergence` to mint a sibling cycle rooted at the divergence point (with a `parent_cycle_id` pointer) and continue under the current scorer. Recorded kinds: `round_winner`, `elimination_cut`, `l2_escalation_trigger`, `l3_escalation_trigger`, `probe_round_commitment`; the first four are divergence-gated, probe is archive-only (LLM-output projection, invariant under pure scorer swap). Each record is two-tier — `inputs_ref` + `outcome` drive divergence, `data` sidecar archives LLM output / diagnostics and is never compared. Full mechanics in [`docs/concepts/scoring-and-traces.md`](docs/concepts/scoring-and-traces.md) and [`docs/operations/rewind-and-fork.md`](docs/operations/rewind-and-fork.md).
-
-**Exploration / exploitation sample selection — Rasch + Knowledge Gradient.** On by default (`CampaignConfig.optimization.exploration.enabled`). Between rounds, the `evolve_scoring_set()` step in `runner.py` refits a Rasch IRT posterior on accumulated `(candidate, sample, hit)` triples, then trades understood samples for high-info ones in the active scoring set (which sample IDs are in play next round). The same `RaschPosterior` is reused at finalize for the hard-sample heatmap — one fit per round, two consumers. Full mechanics: [`docs/methods/exploration-exploitation.md`](docs/methods/exploration-exploitation.md). The δ_s leaderboard this produces is the seed of a standalone capability — [`docs/specs/hard-sample-sorter.md`](docs/specs/hard-sample-sorter.md).
-
-**Mid-round abortion — Bayesian Posterior-of-Being-Best (PoBB).** One sentence: stop a candidate when its posterior probability of being the round's best drops below ε (default `pobb_epsilon=0.05`, after `elimination_n_min=4` queries). Per query we maintain a Normal-CLT posterior over each candidate's mean accuracy, sample the joint posterior, and count argmax-fraction per candidate. Population-aware (every candidate's data informs every other's stop decision); variance-adaptive (high-signal regimes abort within 3–5 queries, low-signal regimes diffuse near 1/K and run to budget cap). Per-query P(best) snapshots stream to `dashboard.json::current_round.p_best_top`, the CLI live display, and `streams/round_NNNN_p_best.jsonl`; the round-end `log.md` digest renders an ASCII sparkline trajectory per candidate. Full mechanics: [`docs/methods/candidate-elimination.md`](docs/methods/candidate-elimination.md). BAI literature positioning: [`docs/research/related-work.md § Best-arm identification`](docs/research/related-work.md).
+The user is the operator and the project file tree IS their dashboard — no webapp yet (M11/M12 plan one over FastAPI). Onboarding: install → restart VS Code → `/potter-run` (downloads TermNorm, starts its `.bat`, converts datasets, prompts for API keys).
 
 ## Commands
 
 ```bash
-# Install (dev — everything bundled)
 pip install -e ".[all,dev]"
-
-# Verify everything (~5s, minimal output)
-python -m ruff check promptpotter/ tests/ -q && python -m ruff format --check promptpotter/ tests/ -q && python -m deptry . && python -m mypy promptpotter/ --no-error-summary && python -m pytest tests/ --tb=no -q -p no:warnings
-
-# Individual checks
-python -m ruff check promptpotter/ tests/     # lint
-python -m ruff format promptpotter/ tests/    # format (auto-fix)
-python -m mypy promptpotter/                  # type check
-python -m pytest tests/                       # all tests
-python -m pytest tests/ -k "test_name"        # single test
-
-# Run API server
-uvicorn promptpotter.main:app --port 8001 --reload
-
-# CLI workflow — only two write verbs.
-python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/lca-termnorm/campaign.json
-python -m promptpotter optimize             # full loop; Ctrl+C to stop
+ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain
+python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json
+python -m promptpotter optimize                              # resume default; Ctrl+C: 1st saves, 2nd force-quits
+python -m promptpotter optimize --from N                     # rewind in place
+python -m promptpotter optimize --fork-on-divergence         # sibling cycle at divergence point
+uvicorn promptpotter.main:app --port 8001                    # read-only API
 ```
 
-**CLI mental model.** The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening the on-disk artifact tree (`sessions/{id}/`, `campaigns/{cycle_id}/`) — `dashboard.json` for live state, `log.md` for the digest, `index.json` for the final summary including `stop_reason`. Stop with Ctrl+C (first finishes in-flight and saves; second force-quits) — there is no mid-run pause/resume.
-
-CI runs: `ruff check` → `ruff format --check` → `deptry` → `mypy` → `pytest`. All must pass.
-
-## Code Conventions
-
-- **Python 3.13+**. Type hints: PEP 604 (`X | None`, `list[str]`) — no `Optional`, no `List`.
-- **Ruff** line-length 100.
-- **Logging** via `logging` module, never `print()`. Setup in `promptpotter/config/logging.py`.
-- **No backward compatibility** — freely break signatures, rename, restructure. No shims.
-- Pipeline components are called **nodes**, not "building blocks" or "services".
-- **Terminology** — "eval" (and `evaluate` / `evaluation`) is banned from identifiers and code prose, with **one sanctioned exception**: the `Evaluator` class in `application/scoring/evaluators.py` and its direct registry consumers (the `evaluators: dict[str, float]` field that carries per-round registry values, plus `all_evaluators()`, `materialize_round_values`, `materialize_query_values`). Anywhere else, use **loop**, **round**, **searchpoint**, **sample**, **measurement**, **scoring**, **match**, **fitness**, **trial**, **critique**. User-facing display copy and external-wire field names (e.g. TermNorm's `evaluation_results`) may use natural English. Python's `eval()` builtin in `application/scoring/formula.py` is the language keyword, not the term — fine. **Domain framing** — PromptPotter is an instance of **LLM-driven program evolution**; new identifiers, doc sentences, and display copy should draw vocabulary from that domain: *evolve / evolution*, *generation*, *population*, *fitness*, *mutation*, *selection*, *individual*.
-- **Direct field access**: `dict[key]` not `.get(key, fallback)` for guaranteed fields.
-- **No fallbacks** in service code. Sole sanctioned exception: `score_population()` validation-failure synthetic-0 — when `OptSearchPoint.validation_failures` is non-empty the candidate loop synthesizes a `{accuracy: 0.0, invalid: True}` report instead of running an invalid SearchPoint. The **deprecated-sample exclusion** in `_compute_accuracy` and the cache eviction in `score_search_point::_filter_deprecated_priors` are not fallbacks — they are load-boundary data-quality gates that drop measurements whose `classify_result()` (in `application/optimization/elimination.py`) returns a non-empty `fatal_codes` set (e.g. `llm_only:reasoning_budget_exhausted`) before the scoring layer runs, count them separately as `deprecated`, and force a fresh backend call on next encounter (tag: `retry_of_deprecated_cache`). The classifier derives fatal codes from raw response shape (advisory + `finish_reason` + `reasoning_tokens`) rather than string-matching a backend warning; rule table lives in `elimination.py`. Trace records are still archived to `library/dataset_runs/`. See [`docs/concepts/scoring-and-traces.md`](docs/concepts/scoring-and-traces.md#deprecated-samples) and [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md#classify_result--fatal-classification). Any new fallback must be documented alongside these.
-- **Init never evaluates**: `init` is pure prep (load prompt + dataset, compute cycle hash, create session dir). The baseline runs as phase 0 of `optimize` on the **same top-N slice L1 uses** (`sample_dataset(dataset, sp_budget_ttest)` — deterministic prefix; datasets are already shuffled at creation, no second RNG). Identical call, identical output, so baseline fills the per-query cache in the exact shape L1 round 1 consumes. `sp_budget_ttest` stays on `CampaignConfig.optimization` and never enters `pipeline_params`, so the `JobSearchPoint` hash is target-layer-pure. **Budget contract:** baseline runs the *full* `sp_budget_ttest` slice with no early-stop (it is the t-test prior). Each round's candidates run *up to* `sp_budget_ttest`, but `EliminationCheck` (`elimination_n_min=4`, `elimination_alpha=0.2`, Wilcoxon signed-rank + Holm-Bonferroni) can truncate a clearly-inferior candidate as early as query 4. There is no `--skip-baseline` flag.
-- **CLI timeouts**: 30 seconds default for ALL CLI commands. Only increase when told "ready for data collection".
-- **No background CLI commands**: Never run `campaign_runner` with `run_in_background`. Always foreground.
-- Version: `APP_VERSION` in `promptpotter/config/settings.py`.
-- **Commit messages: HARD CAP 800 chars total** — including `Co-Authored-By` trailer. Title under 70, body terse bullets only. NO multi-paragraph prose, NO motivation essays, NO "this commit does X to enable Y so that Z" chains. If the message describes more than the diff, you have failed. This rule is the most often-ignored — when in doubt, cut it in half. Re-read your message before `git commit`; if it's over 800 you rewrite it shorter, you do not commit and "fix later."
-- **Sample IDs**: `sample_id: int` is optional on each sample (`QueryResult.sample_id`). It's an **internal positional index** assigned by the loader over the final merged list — not a canonical upstream ID. BBEH assigns sequential ints over its flattened 23-task mini list; display shows `#NNN` in the per-query line when present.
+`.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required. Provider is per-campaign in `campaign.json::optimizer_llm.provider`.
 
 ## Architecture
 
-Hexagonal layout: `domain/` (pure models) → `application/` (use cases) → `infrastructure/` (I/O adapters) → `presentation/` (entry points), plus leaf `shared/` and `config/`.
+**Hexagonal.** `domain/` (pure) → `application/` (use cases) → `infrastructure/` (I/O) → `presentation/` (entry adapters), plus leaf `shared/`, `config/`. **Strict:** `application/intelligence/` MUST NOT import from `application/optimization/` (`tests/test_layer_imports.py`).
+
+**SearchPoint hierarchy.** `JobSearchPoint` (frozen target spec, content-hashed) + `PromptTemplate` (8-field scheme) → `OptSearchPoint` (optimizer state: lineage, L2/L3 overrides, per-individual memory). Twin tracing: target → `library/measurements/{run_id}.json` (content-addressed, the DB core); optimizer → `campaigns/{cycle_id}/trials/trial_NNNN.json`. **New optimizer state MUST flow through `OptSearchPoint`** — no sidecar state.
+
+**Three-layer loop + four healing loops** (gradual, one nudge per fire). L1 generates/measures/scores/critiques every round. L2 fires on L1 stall — writes to `OptSearchPoint` (directive, `l1_section_overrides`, optimizer-param tweaks); never touches pipeline_params. L3 fires on L2 stall — replans the strategy. Healing: L2 nurses L1 on `ValidationFailure` and on `RuntimeFailure` (DegradationCheck mid-eval); L3 replans on L2 patience; L3 nurses L2 on validator outcome (cross-field dup, verbatim self-repeat, catalogue redundancy). Compression chain: eval results → L1 critique → L2 directive → L1 generate. **No prompt site summarizes its own data** — fields enter prompts only via `LayerContext` → sections → surface.
+
+**Three I/O kinds (invariant, not guideline).** Allowlists owned by `tests/test_artifact_parity.py`. (1) **Persistence:** sole ingress is per-cycle `RunLedger` (`infrastructure/ledger.py`, `events.jsonl`). Two newtype-guarded projections under `infrastructure/projections/`: `LiveDashboardProjection` (root-only; `dashboard.json`, `output.log`); `AuditTrailProjection` (per cycle/fork; `.cache/rounds/round_NNNN.json`). Forks via `RunLedger.inherit_from(parent, offset)`. `DecisionKind` + `DECISION_GATING` (`domain/run_records.py`) are the SoT for replayed-vs-archival gating. (2) **Display:** `RunListener` (`application/runner.py`); MUST NOT write to disk. (3) **Control:** `stop_check` on `Session`; MUST NOT write campaign artifacts. **Entry points MUST NOT write campaign artifacts directly.**
+
+**Pipeline params** — always nested dicts keyed by node (`{"llm_only": {"model": ...}}`). No flat format, no `override_map`, no `resolve_flat_param()`. `PROMPT_STRING_FIELDS` (`config/settings.py`) splits prompt fields from node params. `PipelineSchema` is built entirely from `GET /pipeline` — zero backend constants in PromptPotter. Canonical prompts at `datasets/{name}/prompts/{node}.json` as `PromptTemplate` JSON; monolithic `prompt` strings in `pipeline.json` are deprecated.
+
+**Scoring — traces are facts, scores are policy.** `score_search_point()` is the single gateway. Each trace carries `{scorer_id: {score, hit, formula}}`; every load rescores under the active scorer. Resume replays decisions against rescored inputs — first mismatch halts; `--fork-on-divergence` mints a sibling rooted there. Hot-swap composite via `campaigns/{cycle_id}/scoring_steer.json` → `{"per_round": "..."}`; next round-end recompiles `session.round_scorer` after validation.
+
+**Cycle identity.** Cycle hash = baseline `JobSearchPoint.content_hash(dataset)` (folds in pipeline_params + rendered prompt + dataset; excludes loop-control knobs). `cmd_optimize` recomputes per run; mismatch with active session → fresh session+cycle auto-minted.
+
+**Round-boundary scoring-set mutations — two sanctioned writers, in order:** (1) zero-signal filter (off by default; mutates `datasets/{name}.json::excluded`); (2) scoring-set evolution (off by default; in-memory `session.scoring_dataset` only). No third writer is sanctioned.
+
+## Persistence
 
 ```
-promptpotter/
-├── domain/          # JobSearchPoint, OptSearchPoint, PipelineSchema — pure, no I/O
-├── application/
-│   ├── runner.py / bootstrap.py / baseline.py / config.py / resume.py  # campaign lifecycle
-│   ├── optimization/  # THE CORE LOOP — l1.py (L1 generate/measure/score/critique),
-│   │                  # cycle.py (decisions + state machine + L2/L3 escalation),
-│   │                  # elimination.py (DegradationCheck + classify_result),
-│   │                  # pipeline.py (llm_call, prompt loading, layer transitions)
-│   ├── intelligence/  # SHARED materialized view — indexes.py (AxisIndex + SampleIndex),
-│   │                  # exploration.py (Rasch + scoring-set evolution),
-│   │                  # hard_sample_sorter.py
-│   ├── scoring/       # score_search_point gateway, formula.py (compile_scorer + steer)
-│   └── datasets/datasets.py
-├── infrastructure/  # backend.py, llm.py, ledger.py, projections/, tracing.py, store/
-├── presentation/    # api.py, cli/, views/ — thin per-surface adapters
-├── shared/          # leaf utilities (errors, hashing, statistics, composite)
-└── config/          # settings (incl. PROMPT_STRING_FIELDS, APP_VERSION), logging
+.promptpotter/
+  active_session.json                              # {tenant_id, session_id, cycle_id}
+  projects/{tenant_id}/
+    sessions/{session_id}/                         # session.json, journal.md, notes.md
+    campaigns/{root_cycle_id}/                     # FAMILY ROOT
+      dashboard.json output.log                    # telemetry, root only (shared across forks)
+      index.json log.md trials/ prompts/ langfuse/
+      .cache/rounds/{NNNN}.json                    # per-round LLM audit
+      forks/{cycle_id}/ diag/ sweeps/              # per-fork audit; telemetry stays at root
+    library/measurements/{run_id}.json             # MeasurementArchive — DB core
 ```
 
-**Directionality rule (strict):** `intelligence/` MUST NOT import from `optimization/` — it's shared ground.
+`library/` is cross-cycle/session/tenant. One row = `(sample × config → outcome)`. Retrieval views: `measurements_for_sample()`, `measurements_for_config(predicate)`. Cache reuse + LLM digests are derived views over this archive. **Reads happen by opening files** — no read CLI.
 
-**Three-layer I/O architecture (INVARIANT):**
-- **Persistence** (shared, mandatory) — two newtype-guarded projections under `infrastructure/projections/`: `LiveDashboardProjection` (takes `RootCycleDir`, owns `dashboard.json` bound to the family-root cycle) and `AuditTrailProjection` (takes `CycleDir`, owns `.cache/rounds/round_NNNN.json` per cycle/fork). Both subscribe to the per-cycle `RunLedger` (`infrastructure/ledger.py`) as the **sole ingress** — every fact (`Decision` / `Phase` / `Snapshot`) flows through `RunListener` (in `application/runner.py`) which appends a typed record; subscribers receive each record via the `Projection.on_record` hook. `RunListener` buffers pre-binding events so subscribers see the full history once the cycle ledger opens. Forks are first-class via `RunLedger.inherit_from(parent, offset)`; a fork's `iter()` walks the parent's records up to the cut (including the parent's `FORK_CUT` marker), then its own appends. The `DecisionKind` enum + `DECISION_GATING` table in `domain/run_records.py` are the single source of truth for replayed-vs-archival gating; adding a new kind without an entry fails `tests/test_decision_kinds_registry.py`. The remaining per-cycle audit shape (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `archived/`, plus `.cache/candidates/` for resume state) lives in each cycle's own dir. The allowlists (`ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_AUDIT_ARTIFACTS`, `CAMPAIGN_ARTIFACTS`, `SESSION_ARTIFACTS`) live in `tests/test_artifact_parity.py` — the test owns the contract. Entry points MUST NOT write campaign artifacts directly.
-- **Display** (per-entry-point) — `LiveDisplay` (in `presentation/views/live.py`) binds to the cycle ledger and consumes records via `on_record`. Direct `on_phase`/`on_sample_*` calls remain available for the pre-cycle baseline path (in `application/baseline.py`) where no ledger exists yet. MUST NOT write to disk.
-- **Control** (per-entry-point) — `stop_check` callable on `Session` (CLI polls a flag; notebook uses kernel interrupt). MUST NOT write campaign artifacts.
+## Per-dataset configuration
 
-**SearchPoint hierarchy** — `JobSearchPoint` (frozen target spec, pipeline_params) and `PromptTemplate` → `OptSearchPoint` (optimizer state + memory). All services: `f(SearchPoint, PipelineSchema, dataset) → scores`. Every state traced at both layers: `JobSearchPoint` → `dataset_runs/` (content-addressed, shared); `OptSearchPoint` → trial JSON in `campaigns/{cycle_id}/` (per-round checkpoint). Details in [`docs/developer/code-layout.md`](docs/developer/code-layout.md).
+`datasets/{name}/`: `pipeline.json` (full pipeline + backend metadata), `campaign.json` (knobs, scoring formula, optimizer LLM), `task_description.md` (decomposed at `init` into `task_context`), `prompts/{node}.json`, `dataset.md`. **Configs are the source of truth.** No parallel default ladders elsewhere.
 
-**Scoring pipeline** — `score_search_point()` in `application/scoring/search_point_scorer.py` is the single gateway. Three early-exit paths (validation-failure synthetic-0, full-run cache hit, mid-eval escalation) live in `application/optimization/l1.py::score_population` and are detailed in [`docs/developer/self-healing-internals.md`](docs/developer/self-healing-internals.md).
+## Conventions (non-derivable)
 
-**Pipeline params** — always nested dicts keyed by node name. `PROMPT_STRING_FIELDS` (in `config/settings.py`) is the canonical prompt-vs-node-param split. `PipelineSchema` is built entirely from backend's `GET /pipeline` — zero backend-specific constants in PromptPotter.
+- **PEP 604** type hints; `logging` module only (no `print()` in `promptpotter/`); ruff line-length **100**; `APP_VERSION` in `config/settings.py`.
+- **No backward compatibility** — break, rename, restructure freely. No compat shims, no `// removed` comments. Replace contract → delete old test.
+- **No fallbacks in service code.** Two sanctioned exceptions: `score_population()` synthetic-0 on `validation_failures`; load-boundary deprecated-sample gate (uses `classify_result()` fatal codes). Any new fallback must be documented alongside these.
+- **`eval` banned from identifiers and prose.** Exception: the `Evaluator` class + direct registry consumers (`evaluators` field, `all_evaluators()`, `materialize_*_values`). Use loop / round / searchpoint / sample / measurement / scoring / fitness / trial / critique. Domain vocabulary: evolve, generation, population, mutation, selection, individual.
+- Pipeline components are **nodes**.
+- Optimizer LLM calls go through `llm_call()` (`application/optimization/pipeline.py`), never `chat()`.
+- Escalation flows via return value (`QueryLoopResult.escalation_signal`), not exception. Use `graceful()` (`shared/errors.py`) where exceptions must escape.
+- **Tests are subtractive.** Each guards a named invariant (`tests/CLAUDE.md`). No volume tests, ≤2–3 monkeypatches per test.
+- **Direct field access** — `dict[key]` for guaranteed fields, not `.get(key, fallback)`.
+- **CLI timeouts: 30s default for ALL commands.** Increase only when told "ready for data collection". **Never run `campaign_runner` with `run_in_background`** — always foreground.
+- **Commit messages: HARD CAP 800 chars total** (incl. trailer). Title <70. Terse bullets — no motivation essays. Over 800 → rewrite, do not commit-and-fix-later. Conventional commits (`feat:`, `fix:`, `docs:`, …).
+- Comments default to none — only non-obvious *why*.
 
-## Entry Points (Maturity Order)
+## Known issues
 
-1. **Notebook** (primary): `notebooks/optimization_campaign.ipynb`; calls `application/` directly + `presentation/views/` for rendering. Display via the shared `LiveDisplay` (`presentation/views/live.py`); notebook orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) lives in `presentation/views/notebook_run.py`.
-2. **CLI**: `python -m promptpotter` at `presentation/cli/`. Core path: `init → optimize`. Reads happen by opening `campaigns/{cycle_id}/`.
-3. **Claude skill `/potter-run`**: `.claude/skills/potter-run/SKILL.md` — operator-style entry point that drives the CLI from a chat session; resume-by-default, dataset-aware.
-4. **FastAPI REST API**: `promptpotter/main.py` mounts `presentation/api.py` — currently read-only.
-5. **Next.js webapp** (planned M11/M12): zero code today; consumes FastAPI API.
-
-Features land left → right. Post-hoc renderers (campaign summary, flip tracking, lineage, progress, dashboard, status) are shared between CLI and notebook via `presentation/views/`; live-phase per-query output is notebook-only pending M9 Track 4.
-
-## Superuser Monitoring (live runs)
-
-The cleanest live-monitoring setup for an operator running `python -m promptpotter optimize`:
-
-1. **Open `campaigns/{root_cycle_id}/dashboard.json` in an editor that auto-reloads.** This is the live scalar state — phase, round, candidate, query, baseline / best / current accuracy, in-flight query payload, and `current_round.nodes` (the per-round node I/O snapshot, including per-candidate per-sample HIT/MISS lines under `l1_score.output.candidates[].samples`). Rewritten on every callback (per-query to per-candidate cadence). For forked cycles, telemetry binds to the **family root** (the cycle with no `parent_cycle_id`); the active fork is identified by `dashboard.json::cycle_id` so a single tail covers the whole family.
-
-2. **Watch CLI stdout in the terminal that's running `optimize`.** [`presentation/views/live.py::LiveDisplay`](promptpotter/presentation/views/live.py) prints per-query HIT/MISS lines, per-candidate summaries, and round-complete banners — same data dashboard.json carries, but in narrative order with tqdm progress bars.
-
-3. **Drill into peer files when the dashboard isn't enough.** Layout splits into three bands per cycle dir, plus three sibling-group dirs at the family root:
-   - **Family telemetry** at `campaigns/{root_cycle_id}/`, shared across all forks of the family: `dashboard.json` is the live scalar state. (No append-only narrative log — `LiveDisplay` stderr is the per-query stream.)
-   - **Per-cycle operator audit** at the cycle dir's top level (root cycle and every fork has its own):
-     - `index.json` — campaign metadata + trial index + the `final` block (best/baseline/stop_reason/winner) once the cycle finishes.
-     - `log.md` — derived markdown digest, regenerated on every round-complete and at finalize. Status block, per-round critique / L2 directive / changes, hard-samples heatmap (when sorter enabled), final winner. Pure render over `index.json` + `trials/`; safe to delete and recompute.
-     - `review.md` — per-cycle review surface (M10).
-     - `trials/trial_NNNN.json` — per-round optimizer checkpoint (critique text, l2_directive, escalation state).
-     - `prompts/` — prompt-version archive (per L2 mutation).
-     - `langfuse/` — LLM trace mirror (debug drill-in: events.jsonl, traces, observations, scores, datasets, state.json).
-   - **Per-cycle internals** at `{cycle_dir}/.runtime/` — opaque to operators, projection-owned:
-     - `ledger.jsonl` — RunLedger spine (every fact for this cycle).
-     - `streams/round_NNNN_p_best.jsonl` — per-query PoBB telemetry (rendered as a sparkline inside `log.md`).
-     - `cache/rounds/round_NNN.json` — per-round LLM action audit.
-     - `cache/candidates/round_NNNN.json` — pre-scoring candidate checkpoint (resume state); overwritten next round.
-     - `archived/resumed_at_<ts>/` — `--from <round>` rewind sweepup.
-   - **Sibling cycles** at the family root, split by kind:
-     - `forks/{cycle_id}/` — `--fork-on-divergence` operator-divergence forks.
-     - `diag/{cycle_id}/` — diagnostic-BFS auto-spawned siblings.
-     - `sweeps/{batch_id}/` — sweep batches; carries `index.json` + `summary.md` for the batch and `forks/{cycle_id}/` per payload.
-
-`optimize_result.json` and `hard_samples.json` were folded away earlier: the final-run summary lives at `index.json::final`, and the hard-samples heatmap is rendered as a section inside `log.md`.
-
-**Alternatives to the dashboard.json-tail workflow:**
-
-- **`/potter-run` skill** ([`.claude/skills/potter-run/SKILL.md`](.claude/skills/potter-run/SKILL.md)) — chat-driven operator session that preps configs, runs `optimize`, reads dashboard.json + trials between rounds, and summarizes. Combines well with the dashboard.json tail.
-- **Notebook** (`notebooks/optimization_campaign.ipynb`) — drives the same loop in-process; live-phase per-query rendering is currently notebook-only.
-- **Webapp** — minimal read-only dashboard planned on top of the FastAPI surface (`promptpotter/main.py`); zero code today.
-
-**Composite-score steering** (operator hot-swap): drop `campaigns/{cycle_id}/scoring_steer.json` with `{"per_round": "..."}` and the next round-end recompiles `session.round_scorer` against the new formula. Validation happens before the swap so a typo leaves state untouched. The default formula already includes a 5%-weighted `prompt_compactness` term that linearly penalizes prompts past 4 000 chars; crank the weight via the steer file when prompts grow round-over-round. Full playbook: [`docs/operations/improvement-tracking.md`](docs/operations/improvement-tracking.md).
-
-**Active session pointer** (`.promptpotter/active_session.json`): stores `{tenant_id, session_id, cycle_id}`. Written by `init`, read by `optimize`. `--session <id>` overrides `session_id`; `--tenant <id>` selects the partition (default `"default"`).
-
-**Persistence: two trees (sessions + campaigns).** Sessions and campaigns are separate concepts. Today the relation is 1:1; the layout is wired so a session can host multiple campaigns later (1:N) without a reorg.
-- `{tenant_id}/sessions/{session_id}/` — operator session metadata: `session.json`, `journal.md` / `notes.md` (notebook ↔ Claude exchange). The currently-active cycle for the workspace is recorded in `.promptpotter/active_session.json` (single source of truth).
-- `{tenant_id}/campaigns/{root_cycle_id}/` — root cycle's dir holds the family's telemetry stream (`dashboard.json`) plus the root's own per-cycle audit (`index.json` with `parent_session_id`, `log.md`, `review.md`, `trials/`, `langfuse/`, `prompts/`) and a `.runtime/` umbrella for internals (`ledger.jsonl`, `streams/`, `cache/{rounds,candidates}/`, `archived/`). Sibling cycles nest under three kind-specific dirs: `forks/{cycle_id}/` (operator divergence forks), `diag/{cycle_id}/` (diagnostic-BFS auto-forks), and `sweeps/{batch_id}/forks/{cycle_id}/` (sweep-batch forks; the batch dir carries its own `index.json` + `summary.md`). Each sibling carries its own per-cycle audit + `.runtime/`; telemetry stays at the family root only.
-- `{tenant_id}/library/` — **the measurement archive — the database core, cross-cycle, cross-session, cross-tenant.** One row = `(sample × config → outcome)`. Two retrieval views, both first-class: `MeasurementArchive.measurements_for_sample(sample_id)` (by training example) and `MeasurementArchive.measurements_for_config(predicate)` (by searchpoint). Both return `list[Measurement]`. Cache reuse and LLM digests are derived views over this same archive. See [`docs/concepts/measurement-archive.md`](docs/concepts/measurement-archive.md) and [`docs/developer/measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md). Layout: `library/measurements/{run_id}.json` (facts), `library/measurements.json` (index), plus `backends/`, datasets, `prompt_aliases.json`. Both digest layers (`AxisIndex` and `SampleIndex`) are in-memory only — rebuilt from the archive every refresh, no on-disk file.
-
-Full tree in [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md); state schema and resume flow in `infrastructure/projections/`, `infrastructure/ledger.py`, and `application/runner.py`.
-
-## Key Patterns
-
-- **Two-object boundary**: user knobs live on `CampaignConfig` (Pydantic, nested sub-models, `extra='forbid'` — typos raise at load, not silently drop); everything else (session identity, loop infra, scoring env) lives on `Session` in `application/bootstrap.py`. Services take whichever they need. Nothing mutates user config; `configure_and_apply_pipeline` writes derived `pipeline_params` onto `session`, not onto `campaign_config`.
-- **Store**: `Stores` bundle + `build_stores(projects_root, tenant_id="default")` — frozen composite over focused leaf stores. `Stores.archive` is the `MeasurementArchive` (database core); peers are `BackendStore`, `SessionStore`, `CampaignStore`.
-- **Error handling**: `graceful()` context manager in `shared/errors.py`. Escalation flows via `QueryLoopResult.escalation_signal` (return value, not exception).
-- **Graceful interrupt**: First Ctrl+C finishes in-flight call and saves; second force-quits. There is no mid-run pause/resume — re-running `optimize` resumes from the latest completed round.
-- **Optimizer LLM calls**: all go through `llm_call()` in `application/optimization/pipeline.py`, not `chat()` directly.
-- **Cycle identity**: cycle hash is the baseline `JobSearchPoint`'s `content_hash(dataset)` (truncated, `cycle_` prefix). `JobSearchPoint.pipeline_params` already carries the active-steps list + per-node target-layer config (model, temperature, max_tokens, …) and `content_hash` folds in the rendered prompt + dataset, so changing the target LLM, prompt, pipeline composition, or dataset starts a new cycle root. Loop-control / strategy knobs on `CampaignConfig` (max_rounds, optimizer-LLM, patience, n_variants, …) are not part of `JobSearchPoint` and are excluded. `cmd_optimize` recomputes the hash from the live `pipeline.json` on every run; if it differs from the active session pointer's `cycle_id`, a fresh session+cycle is auto-minted before baseline runs. See `cycle_config_identity()` in `application/runner.py` and `_compute_cycle_id()` in `presentation/cli/campaign_runner.py`.
-- **Two-tier sampling**: `sp_budget_ttest` controls the optimization loop scoring set. Sequential elimination early-stops inferior candidates via Bayesian Posterior-of-Being-Best (`pobb_epsilon=0.05`, `elimination_n_min=4`).
-- **Canonical prompt authoring**: dataset starting prompts live in `datasets/{name}/prompts/{node}.json` (or `default.json`) as `PromptTemplate` JSON. Monolithic `prompt` strings in `pipeline.json` are deprecated.
-- **Round-boundary scoring-set mutations** — two sanctioned writers, in this order: (1) **Zero-signal filter** (off by default, `min_observations=5`): queries with 0 variance across ≥ N samples physically moved to `datasets/{name}.json::excluded`; mutates the on-disk dataset. (2) **Scoring-set evolution** (off by default, code symbol `scoring_set`): Rasch + KG swaps understood samples ↔ high-info samples in the in-memory `session.scoring_dataset` only; never touches disk. No other mutation of either is sanctioned.
-
-## Known Issues
-
-### Notebook ↔ CLI Session Parity
-
-**Campaign path closed:** `run_optimization` auto-mints a session+cycle pair when caller passes `session_id=""`, producing the same `CAMPAIGN_ARTIFACTS` + `SESSION_ARTIFACTS` as CLI `init`.
-
-**M9 Track 4:** Shared file-directory view model — renderer unification is still that track's work.
-
-### TermNorm Backend
-
-- **Backend repo lives at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`.** It is the user's own project — edits to backend code (logging, pipeline metadata, node behaviour) are fair game when a change needs to land alongside a PromptPotter change. Coordinate cross-repo edits explicitly.
-- **`llm_ranking` broken — always exclude.** Produces `json_validate_failed` on ~50% of queries. Set `"exclude_nodes": ["llm_ranking"]`. Effective pipeline: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
-- **Without `llm_ranking`, prompt string fields have no effect.** Only `entity_profiling` has an LLM. Optimization focuses on pipeline params.
+- **TermNorm backend at** `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`. User's own project — cross-repo edits authorized; coordinate explicitly.
+- **`llm_ranking` broken — always set `"exclude_nodes": ["llm_ranking"]`** (`json_validate_failed` ~50% of queries). Effective pipeline: `cache_lookup → fuzzy_matching → web_search → entity_profiling → token_matching`.
 
 ## Roadmap
 
-**M12 is the headline** — multi-connector architecture (`ConnectorProtocol`, connector registry, second backend), competitor head-to-head, webapp Phase 2 (launch + live monitoring). **M10 (prompt-iteration framework + L1-generate tuning, targeting ≥95% in ≤5 rounds) is the next active milestone**; it doubles as the L4 partial implementation (most of self-optimization's credit-assignment infrastructure, operated manually — see [`docs/specs/m12-plus-backlog.md § Self-optimization`](docs/specs/m12-plus-backlog.md)). M11 (BBEH benchmarks, ablation, webapp read-only) follows. Both are backbone work in front of M12, not destinations. M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; ≥95% in ≤5 rounds. **M11** — BBEH benchmarks, ablation, webapp read-only. M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
-## Testing
+## Pointers
 
-Minimal suite — only stable contracts tested. No volume tests, no O(n) complexity. Mock: `monkeypatch` for async, stdlib `unittest.mock`. See `tests/CLAUDE.md`.
-
-## Navigation
-
-**Manual (users)**: [`manual/`](docs/manual/README.md) — numbered walkthrough, install → first run → reading output → troubleshooting.
-
-**Concepts (how it works, concept-first)**: [`measurement-archive.md`](docs/concepts/measurement-archive.md), [`campaign-lifecycle.md`](docs/concepts/campaign-lifecycle.md), [`three-layer-loop.md`](docs/concepts/three-layer-loop.md), [`self-healing.md`](docs/concepts/self-healing.md), [`scoring-and-traces.md`](docs/concepts/scoring-and-traces.md), [`axis-index.md`](docs/concepts/axis-index.md), [`prompts-and-individuals.md`](docs/concepts/prompts-and-individuals.md), [`nodes-and-pipelines.md`](docs/concepts/nodes-and-pipelines.md), [`glossary.md`](docs/concepts/glossary.md)
-
-**Developer (implementation)**: [`code-layout.md`](docs/developer/code-layout.md), [`information-flow.md`](docs/developer/information-flow.md), [`measurement-archive-internals.md`](docs/developer/measurement-archive-internals.md), [`node-standard.md`](docs/developer/node-standard.md), [`prompt-scheme-internals.md`](docs/developer/prompt-scheme-internals.md), [`axis-index-internals.md`](docs/developer/axis-index-internals.md), [`self-healing-internals.md`](docs/developer/self-healing-internals.md), [`display-conventions.md`](docs/developer/display-conventions.md), [`code-map.md`](docs/developer/code-map.md)
-
-**Operations**: [`cli-reference.md`](docs/operations/cli-reference.md), [`environment.md`](docs/operations/environment.md), [`backend-integration.md`](docs/operations/backend-integration.md), [`persistence-and-state.md`](docs/operations/persistence-and-state.md), [`rewind-and-fork.md`](docs/operations/rewind-and-fork.md), [`improvement-tracking.md`](docs/operations/improvement-tracking.md), [`observability.md`](docs/operations/observability.md)
-
-**Methods**: [`candidate-elimination.md`](docs/methods/candidate-elimination.md), [`exploration-exploitation.md`](docs/methods/exploration-exploitation.md)
-
-**Research**: [`benchmarks.md`](docs/research/benchmarks.md), [`metrics.md`](docs/research/metrics.md), [`related-work.md`](docs/research/related-work.md)
-
-**Specs**: [`docs/specs/`](docs/specs/CLAUDE.md) — active (M9, M10, M11, M12, M12+), archived (M8, old M9)
+`docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/code-layout.md` + `code-map.md` symbol→file index (**single point of update when code moves**) · `docs/developer/information-flow.md` what data enters which prompt · `tests/CLAUDE.md` test charter.
