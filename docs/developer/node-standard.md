@@ -4,26 +4,7 @@ The optimizer loop (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) and e
 
 Built-in nodes cover fixed-config deterministic steps (lookup, fuzzy matching), LLM nodes, and multi-step agent nodes. PromptPotter ships a basic database-backed candidate-assignment pipe. In practice most pipelines reduce to one or more LLM nodes.
 
-Concept-level: [`../concepts/nodes-and-pipelines.md`](../concepts/nodes-and-pipelines.md).
-
-## Wiring a new node
-
-Reference: `web_search`. Default chain works for any target node that emits warnings.
-
-| Step | What | Required? |
-|------|------|-----------|
-| **1** | Emit `diagnostics.warnings[]` with `{step, code, message}` from the backend | **Yes** |
-| **2** | Add routing strategy for `{step}:{code}` | No (defaults to L2) |
-| **3** | Add anomaly detector | No |
-| **4** | Set `degradation_threshold` in campaign config | **Yes** (0 = disabled) |
-
-Example — adding `entity_profiling` error detection:
-
-```json
-{"step": "entity_profiling", "code": "schema_error", "message": "Failed to parse JSON"}
-```
-
-`DegradationCheck` counts the warning, synthesises a `RuntimeFailure` on the offending candidate, the round completes normally. L2 reads the failure next round and steers L1 away from the failing config region. Pattern persists → L3 replans. Mechanics: [`self-healing-internals.md`](self-healing-internals.md).
+Concept-level: [`../concepts/nodes-and-pipelines.md`](../concepts/nodes-and-pipelines.md). Operator integration walk-through (wiring a new node into self-healing): [`../operations/backend-integration.md § Wiring a new node into self-healing`](../operations/backend-integration.md).
 
 ## Pipeline declaration format
 

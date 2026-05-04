@@ -1,6 +1,6 @@
 # L2 Internals
 
-L2 fires when L1 has stalled (per `l1_patience`), reads cycle state, and writes any subset of OSP fields to steer the next round. Concept role: [`../concepts/l2.md`](../concepts/l2.md).
+L2 fires when L1 has stalled (per `l1_patience`), reads cycle state, and writes any subset of OSP fields to steer the next round. Concept role: [`../concepts/the-loop.md § L2 in detail`](../concepts/the-loop.md).
 
 ## Trigger
 

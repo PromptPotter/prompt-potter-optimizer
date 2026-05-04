@@ -1,4 +1,4 @@
-# The Fork Tree and the Sweep Primitive
+# The Campaign Tree
 
 A campaign is a tree. The root cycle ran first. Every fork branches from a specific round of its parent. Every sweep payload asks the tree to grow another sibling.
 
@@ -43,13 +43,9 @@ The primitive does not know which caller fired. The caller passes a small `extra
 
 A branch's ledger inherits from its parent up to the cut, so reading a fork's history walks parent's records, then fork's own.
 
-**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `library/` row — that's why the second fork's "baseline" costs zero LLM calls.
+**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `library/` row — that's why the second fork's "baseline" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
 
-## OSP is branch-state, not tree-structure
-
-OSP is the optimizer's working memory for one branch. Mutable across rounds; checkpointed into `trials/trial_NNNN.json` at every round-end; reloaded into the round loop on resume. See [`optsearchpoint-as-state.md`](optsearchpoint-as-state.md).
-
-OSP is *not* tree-structure. The fork primitive doesn't read OSP — it only knows about cycles, ledgers, parent pointers. When sweep mints a fork with overrides, the override fields ride into the fork *as payload* (written into FORK_CUT's `data.fork.sweep_payload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). The cycle's existing checkpoint code dumps OSP into `trials/trial_0001.json` exactly as for every other round.
+OSP is the optimizer's working memory for one branch — not part of the tree structure. When sweep mints a fork with overrides, the override fields ride into the fork as payload (written into FORK_CUT's `data.fork.sweep_payload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). For what OSP carries: [`state-record.md`](state-record.md).
 
 ## The primitive's three checks
 
@@ -75,6 +71,5 @@ This is L4 with the operator as the policy. The data accumulating in `campaigns/
 ## See also
 
 - [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) — operator how-to (rewind, fork, sweep).
-- [`optsearchpoint-as-state.md`](optsearchpoint-as-state.md) — what OSP carries.
-- [`scoring-and-traces.md`](scoring-and-traces.md) — facts vs policy split underlying fork.
-- [`three-layer-loop.md`](three-layer-loop.md) — L1/L2/L3 and the open seat L4 will fill.
+- [`scoring-and-memory.md`](scoring-and-memory.md) — facts vs policy split underlying fork.
+- [`the-loop.md`](the-loop.md) — L1/L2/L3 and the open seat L4 will fill.

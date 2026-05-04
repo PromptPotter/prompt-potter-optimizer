@@ -6,7 +6,7 @@ cross-tenant within a tenant root. Two natural views: by training example
 (``measurements_for_sample``) and by searchpoint / config
 (``measurements_for_config``). Cache reuse uses positional prefix-exact match;
 discovery retrieval uses ``_matches_subset``. See
-``docs/concepts/measurement-archive.md``.
+``docs/concepts/scoring-and-memory.md``.
 
 The archive is the single source of truth for measurements — derived
 per-cycle views (e.g. AxisIndex, ConfigIndex) refresh from ``list_all``

@@ -21,15 +21,12 @@ CONTEXT and PLAN live on disk inside each trial file — the loop's actual confi
 
 | Page | Covers |
 |------|--------|
-| [Three-layer loop](three-layer-loop.md) | L1 / L2 / L3 cadence and what each writes |
-| [L2](l2.md) | L2's role + 5-scenario decision table |
-| [The individual record](optsearchpoint-as-state.md) | The OSP carrying CONTEXT, PLAN, and L1 overrides |
+| [The three-layer loop](the-loop.md) | L1 / L2 / L3 cadence, how they communicate, and L2 in detail |
 | [Self-healing](self-healing.md) | Four LLM-to-LLM healing loops |
-| [Scoring and traces](scoring-and-traces.md) | Traces are facts; scores are policy |
-| [Measurement archive](measurement-archive.md) | Cross-run database core + AxisIndex / SampleIndex digest layers |
-| [Fork tree and sweep](fork-tree-and-sweep.md) | Campaigns as cycle trees |
-| [Prompts and individuals](prompts-and-individuals.md) | The 8-field prompt decomposition |
-| [Nodes and pipelines](nodes-and-pipelines.md) | Pipeline node anatomy |
+| [State record](state-record.md) | The OSP carrying CONTEXT, PLAN, prompt fields, and L2 overrides |
+| [Scoring and memory](scoring-and-memory.md) | Traces are facts; scores are policy; the measurement archive |
+| [Campaign tree](campaign-tree.md) | Cycles, forks, and the sweep primitive |
+| [Nodes and pipelines](nodes-and-pipelines.md) | Backend pipeline node anatomy |
 | [Glossary](glossary.md) | Terms used across the docs |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
 | [Hard-sample dashboard](../methods/exploration-exploitation.md) | Sample selection in detail |

@@ -1,6 +1,6 @@
 # L1-Generate Surface
 
-The closed catalogue of every text block injectable into L1's meta-prompt. L2 controls which sections are visible and what their text says, never the catalogue itself. Concept role: [`l2.md`](../concepts/l2.md).
+The closed catalogue of every text block injectable into L1's meta-prompt. L2 controls which sections are visible and what their text says, never the catalogue itself. Concept role: [`the-loop.md § L2 in detail`](../concepts/the-loop.md).
 
 ## What "surface" means
 

@@ -17,7 +17,7 @@ Capabilities are opt-in. A deterministic lookup node declares none of them. An L
 
 ### Extra capabilities for LLM nodes
 
-- **Prompt exposure.** An LLM node exposes its prompt so PromptPotter can read, display, and optimize it. The prompt is broken into named fields — see [prompts-and-individuals.md](prompts-and-individuals.md) for the decomposition.
+- **Prompt exposure.** An LLM node exposes its prompt so PromptPotter can read, display, and optimize it. The prompt is broken into named fields — see [state-record.md](state-record.md) for the decomposition.
 - **Optimizer-discoverable parameters.** The node declares which parameters it accepts and their valid values. PromptPotter picks these up automatically as optimization axes — no hardcoding required on either side. This is what makes a node tunable without any PromptPotter code knowing the node's internals.
 - **Validation-failure healing (Loop 1).** If the optimizer proposes a parameter value the node doesn't accept, the proposal is rejected before any run. The optimizer learns and won't propose it again. See [self-healing.md](self-healing.md).
 - **Runtime-failure healing (Loop 2).** If a candidate's configuration produces degraded results consistently, the failure is pinned to that configuration and the optimizer adjusts strategy. See [self-healing.md](self-healing.md).

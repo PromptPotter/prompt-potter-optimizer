@@ -32,7 +32,7 @@ Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter a
 
 ## 🔄 The 3-layer loop
 
-A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round; **L2** escalates on stall, **L3** escalates when L2 stalls. Full mechanics in [three-layer-loop.md](docs/concepts/three-layer-loop.md).
+A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round; **L2** escalates on stall, **L3** escalates when L2 stalls. Full mechanics in [the-loop.md](docs/concepts/the-loop.md).
 
 ```
   ┌──────────────────────────────────────────────────────────┐
@@ -130,12 +130,11 @@ It is *not literally* a configuration of PromptPotter today — running AutoRese
 
 | 🧠 Concepts | ⚙ Operations | 🔬 Research |
 |---|---|---|
-| [Campaign lifecycle](docs/concepts/campaign-lifecycle.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
-| [Three-layer loop](docs/concepts/three-layer-loop.md) | [Environment](docs/operations/environment.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
-| [Self-healing](docs/concepts/self-healing.md) | [🔌Backend integration](docs/operations/backend-integration.md) | [Related work](docs/research/related-work.md) |
-| [Scoring and traces](docs/concepts/scoring-and-traces.md) | [Persistence and state](docs/operations/persistence-and-state.md) | |
-| [Search memory](docs/concepts/search-memory.md) | [Rewind and fork](docs/operations/rewind-and-fork.md) | |
-| [Prompts and individuals](docs/concepts/prompts-and-individuals.md) | [Observability](docs/operations/observability.md) | |
+| [Three-layer loop](docs/concepts/the-loop.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
+| [State record](docs/concepts/state-record.md) | [Backend integration](docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
+| [Self-healing](docs/concepts/self-healing.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
+| [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |
+| [Campaign tree](docs/concepts/campaign-tree.md) | | |
 | [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
 
 Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).
@@ -151,11 +150,11 @@ While `python -m promptpotter optimize` is running, the cleanest setup is **`cam
 
 ## Common questions
 
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`prompts-and-individuals.md`](docs/concepts/prompts-and-individuals.md).
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
 - **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
 - **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run) above.
-- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-traces.md`](docs/concepts/scoring-and-traces.md).
-- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/concepts/self-healing.md)); stalls escalate L1 → L2 → L3 ([three-layer-loop](docs/concepts/three-layer-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
+- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
+- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/concepts/self-healing.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
 
 ## Citation
 

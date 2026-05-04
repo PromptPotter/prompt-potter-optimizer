@@ -36,7 +36,7 @@ One wild mutation can't waste the round; round winners are unaffected. This is w
 
 ## Round-over-round feedback (separate)
 
-`l1_critique → l1_generate` fires every round, regardless of failure. Not in the canon — it's performance-driven feedback, not failure-driven healing. See [three-layer-loop.md](three-layer-loop.md).
+`l1_critique → l1_generate` fires every round, regardless of failure. Not in the canon — it's performance-driven feedback, not failure-driven healing. See [the-loop.md](the-loop.md).
 
 ## How user-visible
 

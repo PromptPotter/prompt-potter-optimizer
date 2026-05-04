@@ -17,6 +17,21 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 
 ---
 
+## Groq daily token limit exhausted on 120b
+
+**What you see:** Daily volume on `openai/gpt-oss-120b` hits Groq's per-model ceiling and queries start failing.
+
+**Why:** `120b` is the canonical default but has a tighter daily limit than `20b`.
+
+**What to try:**
+- Swap the `model` field in the relevant `datasets/<name>/pipeline.json` to `openai/gpt-oss-20b` and keep iterating. Flip back to `120b` for benchmarks.
+- Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
+- `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` — provider ceiling applies. Raise it per-cycle via `campaign.json::pipeline_overrides`.
+- Target-layer model lives in `datasets/<name>/pipeline.json::llm_only.config` (and needs `provider` if not Groq); optimizer-layer model lives in `datasets/<name>/campaign.json::optimizer_llm`. They're independent.
+- Full per-dataset matrix: [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md).
+
+---
+
 ## Backend connection refused
 
 **What you see:** `[CONNECTION]` errors, or init fails with "could not connect to backend."

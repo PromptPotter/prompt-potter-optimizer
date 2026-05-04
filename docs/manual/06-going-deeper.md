@@ -6,11 +6,11 @@ You've run a campaign. Pointers below for the next layer.
 
 | Page | Covers |
 |------|--------|
-| [Three-layer loop](../concepts/three-layer-loop.md) | Why L1/L2/L3 exist and when each fires |
+| [Three-layer loop](../concepts/the-loop.md) | Why L1/L2/L3 exist and when each fires |
 | [Self-healing](../concepts/self-healing.md) | Recovery from bad proposals + degraded runs |
-| [Scoring and traces](../concepts/scoring-and-traces.md) | Why traces are facts, scores are policy |
-| [Measurement archive](../concepts/measurement-archive.md) | Cross-campaign knowledge accumulation |
-| [Prompts and individuals](../concepts/prompts-and-individuals.md) | The 8-field prompt decomposition |
+| [Scoring and memory](../concepts/scoring-and-memory.md) | Traces are facts, scores are policy + the cross-campaign archive |
+| [State record](../concepts/state-record.md) | The OSP carrying CONTEXT, PLAN, prompt fields, L2 overrides |
+| [Campaign tree](../concepts/campaign-tree.md) | Cycles, forks, and the sweep primitive |
 | [Nodes and pipelines](../concepts/nodes-and-pipelines.md) | Pipeline node anatomy |
 | [Glossary](../concepts/glossary.md) | Terms used across the docs |
 

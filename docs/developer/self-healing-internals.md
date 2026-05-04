@@ -133,7 +133,7 @@ Three load-boundary effects (consumed via `is_deprecated()`):
 2. **Cache eviction** — `score_search_point` runs `_filter_deprecated_priors` on `archive.load_reusable_results` and drops every entry the classifier marks fatal. Fresh re-measurements receive `retry_of_deprecated_cache=True`.
 3. **Stats exclusion** — `_compute_accuracy` partitions deprecated rows into a separate `deprecated` count and excludes them from `hits`, `total`, `errors`, accuracy denominator.
 
-This is a load-boundary filter, not a score-time fallback. Trace records continue to be archived (forensic value); only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the `score_population()` validation-failure synthetic-0 — see [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples).
+This is a load-boundary filter, not a score-time fallback. Trace records continue to be archived (forensic value); only cache reuse and primary-stat aggregation are blocked. Sanctioned alongside the `score_population()` validation-failure synthetic-0 — see [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
 ## Adding a new mechanism
 

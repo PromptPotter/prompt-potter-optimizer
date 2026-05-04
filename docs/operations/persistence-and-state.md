@@ -23,7 +23,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
 
 - `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`, `journal.md` / `notes.md`.
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle artifacts. Three bands: **root telemetry** (live observability — `dashboard.json`) at the family root cycle; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `trials/`, `langfuse/`, `prompts/`) at each cycle's top level; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Sibling cycles split by kind into `forks/`, `diag/`, `sweeps/`.
-- `{tenant_id}/library/` — the **measurement archive**, cross-cycle/session/tenant. See [`../concepts/measurement-archive.md`](../concepts/measurement-archive.md).
+- `{tenant_id}/library/` — the **measurement archive**, cross-cycle/session/tenant. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
 ```
 .promptpotter/
@@ -71,7 +71,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
 
 Prior evaluation results replay without backend calls when a new config shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume / rewind are driven entirely by `trials/trial_NNNN.json`.
 
-**Deprecated-sample eviction.** Entries whose `classify_result()` returns a fatal code are written normally for forensic analysis but evicted at load — never served as cache. Next encounter gets a fresh backend call, tagged `retry_of_deprecated_cache`. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md#deprecated-samples).
+**Deprecated-sample eviction.** Entries whose `classify_result()` returns a fatal code are written normally for forensic analysis but evicted at load — never served as cache. Next encounter gets a fresh backend call, tagged `retry_of_deprecated_cache`. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
 ---
 
@@ -128,7 +128,7 @@ Three workflows over the same fork primitive.
 | **Fork on divergence** | `optimize --fork-on-divergence` | On scorer divergence, mint a sibling `cycle_id` rooted at the divergence point and continue under the current scorer. |
 | **Sweep batch** | `optimize --sweep` (with payloads) | Mint N siblings under one root from operator-authored override files; run a 2-round sweep on each. |
 
-Conceptual picture: [`../concepts/fork-tree-and-sweep.md`](../concepts/fork-tree-and-sweep.md).
+Conceptual picture: [`../concepts/campaign-tree.md`](../concepts/campaign-tree.md).
 
 ### Rewind — `optimize --from N`
 
@@ -162,7 +162,7 @@ Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence tri
 
 To monitor a forked run: tail the **root**, not the fork. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `trials/`.
 
-**Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-traces.md`](../concepts/scoring-and-traces.md).
+**Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
 ### Sweep batch — `optimize --sweep` with payloads
 

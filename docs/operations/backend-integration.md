@@ -39,6 +39,25 @@ Returns 200 OK when the backend is up. Used by `init` and by `/potter-run`'s aud
 
 [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) — AI terminology normalization. 5-node active pipeline: cache, fuzzy matching, web search, entity profiling, token matching. LLM ranking exists but is excluded due to bugs.
 
+## Wiring a new node into self-healing
+
+Reference: `web_search`. Default chain works for any target node that emits warnings.
+
+| Step | What | Required? |
+|------|------|-----------|
+| **1** | Emit `diagnostics.warnings[]` with `{step, code, message}` from the backend | **Yes** |
+| **2** | Add routing strategy for `{step}:{code}` | No (defaults to L2) |
+| **3** | Add anomaly detector | No |
+| **4** | Set `degradation_threshold` in campaign config | **Yes** (0 = disabled) |
+
+Example — adding `entity_profiling` error detection:
+
+```json
+{"step": "entity_profiling", "code": "schema_error", "message": "Failed to parse JSON"}
+```
+
+`DegradationCheck` counts the warning, synthesises a `RuntimeFailure` on the offending candidate, the round completes normally. L2 reads the failure next round and steers L1 away from the failing config region. Pattern persists → L3 replans. Mechanics: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+
 ## REST API (PromptPotter's own)
 
 | Endpoint | Description |

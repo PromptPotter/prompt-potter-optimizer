@@ -156,10 +156,4 @@ pip install -e ".[all]"            # Everything except [dev]
 pip install -e ".[all,dev]"        # Everything — recommended for contributors
 ```
 
-### Groq daily-volume model swap
-
-`openai/gpt-oss-120b` is the canonical default. When daily volume on `120b` is exhausted, swap the `model` field in the relevant `datasets/<name>/pipeline.json` to `openai/gpt-oss-20b` and keep iterating; flip back to `120b` for benchmarks. Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget. Full table: [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md).
-
-`max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` — provider ceiling applies. Operators raise the cap per-cycle via `campaign.json::pipeline_overrides`.
-
-The target-layer model lives in `datasets/<name>/pipeline.json::llm_only.config` (and needs `provider` if not Groq); the optimizer-layer model lives in `datasets/<name>/campaign.json::optimizer_llm`. They're independent.
+Groq daily-volume model swap (when `120b` exhausts): [`../manual/05-troubleshooting.md § Groq daily token limit exhausted on 120b`](../manual/05-troubleshooting.md).

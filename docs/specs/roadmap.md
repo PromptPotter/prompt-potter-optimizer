@@ -103,7 +103,7 @@ Three-layer I/O architecture (persistence / display / control). `LiveDashboardPr
 
 Made campaigns smarter and faster through accumulated data. Four pillars: (1) per-node intermediate caching — prompt variants skip redundant upstream computation (~60% speedup), (2) adaptive sensitivity scan with statistical pruning (Wilson CI overlap, minimum detectable effect), (3) SearchMemory — cross-campaign materialized view over dataset_runs (parameter impact, query patterns, failure modes), (4) three-tier intelligence architecture feeding L1/L2/L3/l1_critique/scan advisor with accumulated analysis. All 17 waves complete.
 
-Architecture: [`../concepts/search-memory.md`](../concepts/search-memory.md), [`../developer/search-memory-internals.md`](../developer/search-memory-internals.md), [`../concepts/three-layer-loop.md`](../concepts/three-layer-loop.md). Original spec preserved in git history.
+Architecture: [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md), [`../concepts/the-loop.md`](../concepts/the-loop.md). Original spec preserved in git history.
 
 ---
 

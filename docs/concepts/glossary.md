@@ -1,69 +1,36 @@
 # Glossary
 
-Authoritative definitions of terms used across the documentation. If a doc uses one of these terms in a different sense, that's a bug — flag it.
+Term → one-line gloss → page that owns the full definition.
 
----
-
-**Active session** — the pointer that tells every command which campaign is current. Lives at `.promptpotter/active_session.json`. Set by `init`; read by everything else. Lets you run `optimize` without passing any flags.
-
-**Backend** — the service PromptPotter sends queries to for scoring. Must expose `/matches` (evaluate a query), `/pipeline` (describe its structure), and `/status` (health). Can be a single LLM call or a multi-step pipeline.
-
-**Baseline** — the score of the starting prompt on the scoring slice, computed at the start of every campaign as phase 0 of `optimize`. Every round's winner must beat this baseline to become the new best.
-
-**Campaign** — one complete optimization run. Fixed dataset, fixed pipeline endpoint, fixed starting prompt. A campaign is a sequence of rounds. Synonymous with *cycle* at the identity level (every campaign has a `cycle_id`).
-
-**Candidate** — alias for *individual* used in scoring and elimination contexts where the comparison-among-options framing dominates. See *Individual*.
-
-**Critique** — the L1 analysis step that reads raw per-query results from a completed round and writes a structured summary: what worked, what failed, what to try next. Feeds the next round's L1 Generate.
-
-**Cycle** — the identity layer of a campaign. The `cycle_id` hashes the problem configuration and locates the campaign's artifact directory. A campaign and its cycle are the same run seen from two angles.
-
-**Dataset** — the collection of queries and ground-truth answers used to score candidates. Ships in `datasets/{name}/` with its own config, starting prompt, and task description.
-
-**Fork** — mint a new campaign from a divergence point in an existing one. Used when the scoring formula changed mid-campaign and resume would be unsafe. The old campaign stays intact as a record.
-
-**Individual** — one member of a round's population: a specific combination of prompt fields and pipeline parameters. The fittest individual that clears the improvement threshold advances as the round winner.
-
-**L1 / Layer 1** — the normal generation layer: evolve a population, measure fitness, critique. Fires every round.
-
-**L2 / Layer 2** — the optimizer's strategist. Fires on L1 stall (per `l1_patience`). When it fires, writes any subset of fields onto the individual: a directive, optimizer params, task context, L1-surface section/text/template overrides, plus an `action` choice between `normal_round` and `probe_round`. Stays dormant when L1 is improving on its own. Does not touch pipeline parameters directly. See [`l2.md`](l2.md).
-
-**L1-generate surface** — the closed catalogue of every variable injected into L1's meta-prompt. Eight sections + four scalars, defined by the `L1GenerateField` enum. Sections are L2-mutable; scalars are factual. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
-
-**Section override** — L2's write onto the individual that toggles a section off (`l1_section_overrides`) or replaces its text (`l1_section_overrides_text`). Persists across rounds until L2 flips it again.
-
-**Catalogue** — the menu of L1-generate sections + scalars rendered into L2's prompt. Built from `L1GenerateField` so it is code-derived; the optimizer cannot accidentally drop a section without a deliberate code change.
-
-**Probe round** — a round scoped to warned queries only, called by L2 setting `action = "probe_round"`. Used when one narrow failure mode dominates and L2 has a specific axis hypothesis to test on the smaller subset.
-
-**Normal round** — the default round mode (`action = "normal_round"`). Runs the full scoring set.
-
-**OSP mutation** — L2's canonical motion when it fires. L2 writes onto `OptSearchPoint` (the individual record); the next round's L1 reads from the same record. State that's not on the OSP does not survive between rounds.
-
-**L3 / Layer 3** — engaged when L2 also hasn't helped. Rewrites the strategic plan — a high-level framework that changes how L1 approaches the search. Rare.
-
-**Node** — one step of the backend pipeline. Can be an LLM call, a retrieval step, a cache lookup, a ranking step, anything. PromptPotter discovers nodes from `GET /pipeline` and optimizes their exposed parameters.
-
-**Patience** — the consecutive-no-improvement counter per layer. When L1's patience hits `l1_patience`, L2 fires. When L2's patience hits `l2_patience`, L3 fires. Resets on improvement.
-
-**Pipeline** — the multi-step computation the backend runs for each query. Can be a single node (one LLM call) or many nodes chained together.
-
-**Pipeline parameters** — nested dicts keyed by node name. Everything in a candidate other than prompt fields. Example: `{"web_search": {"max_sites": 5}, "token_matching": {"threshold": 0.8}}`.
-
-**Prompt fields** — the six prompt-string fields (`PROMPT_STRING_FIELDS`: persona, task intent, problem description, instruction, thinking style, answer format) that render into the prompt, plus two appended sections (few-shot examples, plan). Some or all may be exposed by a given pipeline node.
-
-**Rewind** — restart an active campaign from an earlier round, discarding later trials. Same `cycle_id`, archived history. Run via `optimize --from N`.
-
-**Round** — one generation: evolve a population, measure fitness, select the winner, write a critique. A campaign is a sequence of rounds.
-
-**Scorer** — the function that converts a pipeline output into a numeric score against a ground-truth answer. Per-dataset; configured in `campaign.json::scoring`.
-
-**Scoring slice** — the subset of the dataset each round uses for candidate comparison. Controlled by `sp_budget_ttest`. The baseline uses the full slice; individual candidates may be early-stopped.
-
-**Search memory** — the materialized intelligence view that accumulates across campaigns. Tracks parameter impact, query patterns, and failure modes. Feeds a digest into every L1, L2, and L3 round.
-
-**Session** — the operator workspace. A session can host multiple campaigns (1:N today used as 1:1). Session-level artifacts (journal, notes) live in `sessions/{session_id}/`.
-
-**Trial** — the per-round serialized snapshot of optimizer state. Resume reads from the latest trial. `trials/trial_NNNN.json` is the resume source of truth.
-
-**Winner** — the fittest individual of a round, provided it clears the improvement threshold over the current best. A round can have no winner.
+| Term | Gloss | Owner |
+|------|-------|-------|
+| **Active session** | Pointer at `.promptpotter/active_session.json` telling every command which campaign is current. | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
+| **Backend** | The service PromptPotter sends queries to. Must expose `/matches`, `/pipeline`, `/status`. | [`../operations/backend-integration.md`](../operations/backend-integration.md) |
+| **Baseline** | Score of the starting prompt on the scoring slice; phase 0 of `optimize`. | [`../operations/cli-reference.md`](../operations/cli-reference.md) |
+| **Campaign / Cycle** | One complete optimization run. `cycle_id` hashes pipeline + prompts + dataset. | [`campaign-tree.md`](campaign-tree.md) |
+| **Candidate / Individual** | One member of a round's population: prompt fields + pipeline parameters. | [`state-record.md`](state-record.md) |
+| **Catalogue** | Code-derived menu of L1-generate sections + scalars rendered into L2's prompt. | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |
+| **Critique** | L1's per-round analysis step. Reads raw per-query results; feeds L1-generate next round. | [`the-loop.md`](the-loop.md) |
+| **Dataset** | Queries + ground-truth answers, in `datasets/{name}/`. | [`../manual/03-first-campaign.md`](../manual/03-first-campaign.md) |
+| **Fork** | New cycle minted from a divergence point in an existing one. | [`campaign-tree.md`](campaign-tree.md) |
+| **L1 / L2 / L3** | Generate / Refine / Plan. Three layers of the loop. | [`the-loop.md`](the-loop.md) |
+| **L1-generate surface** | Closed catalogue of every variable injected into L1's meta-prompt. | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |
+| **Measurement archive** | Append-only `library/` of every `(sample × config → outcome)`. | [`scoring-and-memory.md`](scoring-and-memory.md) |
+| **Node** | One step of a pipeline. Discovered from `GET /pipeline`. | [`nodes-and-pipelines.md`](nodes-and-pipelines.md) |
+| **OSP** | `OptSearchPoint` — the per-round state record. | [`state-record.md`](state-record.md) |
+| **OSP mutation** | L2's canonical write onto the record. State that's not on the OSP doesn't survive between rounds. | [`state-record.md`](state-record.md) |
+| **Patience** | Consecutive-no-improvement counter per layer. `l1_patience` triggers L2; `l2_patience` triggers L3. | [`the-loop.md`](the-loop.md) |
+| **Pipeline** | Multi-step computation the backend runs per query. | [`nodes-and-pipelines.md`](nodes-and-pipelines.md) |
+| **Pipeline parameters** | Nested dicts keyed by node name. Everything in a candidate other than prompt fields. | [`state-record.md`](state-record.md) |
+| **Probe round** | Round scoped to warned queries only. `action = "probe_round"`. | [`the-loop.md`](the-loop.md) |
+| **Prompt fields** | Six prompt-string fields plus two appended sections (few-shot, plan). | [`state-record.md`](state-record.md) |
+| **Rewind** | Restart an active campaign from an earlier round. `optimize --from N`. | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
+| **Round / Winner** | One generation. Winner is the fittest individual that clears the improvement threshold. | [`the-loop.md`](the-loop.md) |
+| **Scorer** | Per-dataset function turning pipeline output into a numeric score. | [`scoring-and-memory.md`](scoring-and-memory.md) |
+| **Scoring slice** | Subset of the dataset each round uses for candidate comparison. | [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) |
+| **Search memory** | Cross-campaign axis-keyed digest. Feeds L1, L2, L3. | [`scoring-and-memory.md`](scoring-and-memory.md) |
+| **Section override** | L2's write that toggles a section off or replaces its text on the OSP. Persists across rounds. | [`state-record.md`](state-record.md) |
+| **Self-healing loops** | Four LLM-to-LLM failure repair loops (Loop 1–4). | [`self-healing.md`](self-healing.md) |
+| **Session** | Operator workspace at `sessions/{session_id}/`. Hosts campaigns. | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
+| **Sweep** | Breadth-first comparison of N L1-prompt hypotheses via fork siblings. | [`campaign-tree.md`](campaign-tree.md) |
+| **Trial** | Per-round serialized OSP snapshot at `trials/trial_NNNN.json`. | [`state-record.md`](state-record.md) |
