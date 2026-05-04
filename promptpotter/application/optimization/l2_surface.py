@@ -44,13 +44,11 @@ _L2_AXIS_LABELS: dict[str, str] = {
 def _escalation_report_text(ctx: DispatchState) -> str:
     if not ctx.escalation_check_result:
         return ""
-    cycle = ctx.cycle
-    schema = cycle.session.pipeline_schema
     text = format_escalation_report(
         ctx.escalation_check_result,
-        cycle.opt_sp.escalation_journal or None,
+        ctx.opt_sp.escalation_journal or None,
         ctx.pipeline_params,
-        pipeline_schema=schema,
+        pipeline_schema=ctx.pipeline_schema,
     )
     return text or ""
 
@@ -59,7 +57,7 @@ def _section_warning_inventory(ctx: DispatchState) -> str:
     """L2 fallback: per-query warning inventory when no escalation section."""
     if _escalation_report_text(ctx):
         return ""
-    inventory = ctx.cycle.opt_sp.warning_inventory
+    inventory = ctx.opt_sp.warning_inventory
     if not inventory:
         return ""
     text = summarize_warning_inventory(inventory)
@@ -93,7 +91,7 @@ def _section_validation_failures(ctx: DispatchState) -> str:
 
 
 def _section_runtime_failures(ctx: DispatchState) -> str:
-    rfs = [rf.to_dict() for rf in ctx.cycle.opt_sp.runtime_failures]
+    rfs = [rf.to_dict() for rf in ctx.opt_sp.runtime_failures]
     if not rfs:
         return ""
     rfs_new = [rf for rf in rfs if rf.get("first_seen_round", 0) == ctx.round_num]

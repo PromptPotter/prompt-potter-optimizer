@@ -68,7 +68,6 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
         return ""
     sr = ctx.scoring_result
     cr = ctx.critique
-    cycle = ctx.cycle
     parts: list[str] = []
 
     # Scoring summary.
@@ -79,8 +78,8 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
             f"Accuracy: {sr.winner_accuracy:.1%} | "
             f"Composite: {sr.winner_composite:.4f} | "
             f"Degraded: {sr.degraded_queries}/{n_results}",
-            f"Round {ctx.round_num} | L1 stall count: {cycle.escalation.l1_stall_count} | "
-            f"Best so far: {cycle.best_accuracy:.1%} (round {cycle.best_round})",
+            f"Round {ctx.round_num} | L1 stall count: {ctx.l1_stall_count} | "
+            f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
         ]
         if cr.prompt_chars:
             bloat = (
@@ -135,7 +134,7 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
         cast("dict[str, list[dict]]", sr.all_candidate_results),
         [cs.to_dict() for cs in sr.candidate_scores],
     )
-    trajectory = build_trajectory_report(cycle.rounds)
+    trajectory = build_trajectory_report(ctx.rounds)
     this_round_parts: list[str] = []
     if trajectory and trajectory.classification != "healthy":
         this_round_parts.append(

@@ -22,7 +22,7 @@ from __future__ import annotations
 import enum
 from collections.abc import Callable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.elimination import (
     candidate_keys_from_schema,
@@ -198,9 +198,15 @@ class DispatchState:
     transition by :func:`build_dispatch_state` from the cycle, scoring
     result, and (cached) axis digest; consumed by the layer's section
     table to produce ``{template_var → str}`` for the prompt template.
+
+    Carries explicit slices of cycle state (``opt_sp``, ``l1_stall_count``,
+    ``best_accuracy`` / ``best_round``, ``rounds``, ``probe_next_round``)
+    rather than a ``Cycle`` reference — renderers no longer transitively
+    depend on the orchestration state, so they can be unit-tested with a
+    plain dataclass and moved between modules without dragging Cycle.
     """
 
-    cycle: Cycle
+    opt_sp: OptSearchPoint
     layer: Layer
     round_num: int = 0
     pipeline_schema: PipelineSchema | None = None
@@ -210,6 +216,12 @@ class DispatchState:
     scoring_result: L1ScoringResult | None = None
     axis_digest: dict[str, str] | None = None
     critique: CritiqueContext | None = None
+    # Cycle slices renderers reach into.
+    l1_stall_count: int = 0
+    best_accuracy: float = 0.0
+    best_round: int = -1
+    rounds: list[Any] = field(default_factory=list)
+    probe_next_round: bool = False
 
 
 def _layer_axis_digest(layer: Layer, cycle: Cycle) -> dict[str, str] | None:
@@ -243,7 +255,7 @@ def build_dispatch_state(
     if layer is Layer.L1_CRITIQUE and scoring_result is not None:
         critique = compile_critique_context(cycle, scoring_result, pipeline_schema)
     return DispatchState(
-        cycle=cycle,
+        opt_sp=cycle.opt_sp,
         layer=layer,
         round_num=round_num,
         pipeline_schema=pipeline_schema,
@@ -253,6 +265,11 @@ def build_dispatch_state(
         scoring_result=scoring_result,
         axis_digest=_layer_axis_digest(layer, cycle),
         critique=critique,
+        l1_stall_count=cycle.escalation.l1_stall_count,
+        best_accuracy=cycle.best_accuracy,
+        best_round=cycle.best_round,
+        rounds=list(cycle.rounds),
+        probe_next_round=cycle.probe_next_round,
     )
 
 
@@ -349,7 +366,7 @@ def compile_prompt_vars(
 
 
 def _section_l2_directive(ctx: DispatchState) -> str:
-    v = ctx.cycle.opt_sp.l2_directive
+    v = ctx.opt_sp.l2_directive
     if not v:
         return ""
     label = "DIRECTIVE:" if ctx.layer is Layer.L1_GENERATE else "PREVIOUS DIRECTIVE:"
@@ -357,7 +374,7 @@ def _section_l2_directive(ctx: DispatchState) -> str:
 
 
 def _section_plan(ctx: DispatchState) -> str:
-    v = ctx.cycle.opt_sp.plan
+    v = ctx.opt_sp.plan
     return f"PLAN:\n{v}" if v else ""
 
 

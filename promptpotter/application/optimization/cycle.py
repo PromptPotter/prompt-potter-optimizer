@@ -31,8 +31,16 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
+from promptpotter.application.optimization.elimination import update_query_tracker
+from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.application.scoring.metrics import (
+    compile_failure_analysis,
+    compute_composite_score,
+)
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.opt_search_point import OptSearchPoint, RoundSummary
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import (
     DECISION_GATING,
@@ -42,7 +50,17 @@ from promptpotter.domain.run_records import (
     SweepPayload,
 )
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.shared.errors import graceful
+from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.store.base import (
+    read_json_optional,
+    write_json,
+)
+from promptpotter.infrastructure.store.stores import root_cycle_id, save_active_pointer
+from promptpotter.shared.errors import ResumeDivergenceError, graceful
+from promptpotter.shared.statistics import (
+    pobb_should_stop,
+    posterior_best_probabilities,
+)
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap import Session
@@ -238,11 +256,6 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     same threshold semantics — stop when the candidate's P(best) drops
     below it.
     """
-    from promptpotter.shared.statistics import (
-        pobb_should_stop,
-        posterior_best_probabilities,
-    )
-
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
@@ -274,8 +287,6 @@ def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bo
     current candidate is the snapshot argmax AND its P(best) ≥ lock_in
     threshold AND it had at least ``lock_in_n_min`` queries.
     """
-    from promptpotter.shared.statistics import posterior_best_probabilities
-
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
@@ -386,11 +397,6 @@ def _fork_sibling_setup(
     Returns ``(parent_dir, new_dir, now_iso, parent_index)``. Caller writes
     ``new_dir/index.json`` and any per-fork artifacts.
     """
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import RunLedger
-    from promptpotter.infrastructure.store.base import read_json_optional
-    from promptpotter.infrastructure.store.stores import save_active_pointer
-
     parent_dir = campaign_store.campaign_dir(parent_cycle_id)
     new_dir = campaign_store.campaign_dir(new_cycle_id)
     if new_dir.exists():
@@ -474,8 +480,6 @@ def _fork_at_divergence(
     generation. Use :func:`_fork_for_sweep_sibling` or
     :func:`_fork_for_diag_sibling` for clean-slate siblings.
     """
-    from promptpotter.infrastructure.store.base import write_json
-
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
     new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
@@ -535,8 +539,6 @@ def _fork_at_divergence(
 
 def _next_diag_sibling_id(campaign_store: CampaignStore, parent_cycle_id: str) -> str:
     """Next ``{root}_diag_NNN`` id; siblings always root at the family root so the BFS tree stays one level deep."""
-    from promptpotter.infrastructure.store.stores import root_cycle_id
-
     root_id = root_cycle_id(parent_cycle_id)
     diag_dir = campaign_store.campaign_dir(root_id) / "diag"
     pattern = re.compile(rf"^{re.escape(root_id)}_diag_(\d+)$")
@@ -558,8 +560,6 @@ def _fork_for_diag_sibling(
     parent_cycle_id: str,
 ) -> str:
     """Mint a diag-BFS sibling rooted at round 0; records ``FORK_CUT`` and retargets the active pointer."""
-    from promptpotter.infrastructure.store.base import write_json
-
     new_cycle_id = _next_diag_sibling_id(campaign_store, parent_cycle_id)
     _, new_dir, now, parent_index = _fork_sibling_setup(
         campaign_store,
@@ -601,8 +601,6 @@ def _fork_for_sweep_sibling(
     splitting on ``_``. The FORK_CUT record archives ``sweep_payload`` +
     ``source_file`` + ``sweep_batch_id`` so dedup can match re-runs.
     """
-    from promptpotter.infrastructure.store.base import write_json
-
     if "_" in sweep_batch_id:
         raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
@@ -776,8 +774,6 @@ class Cycle:
         config: CampaignConfig,
     ) -> Cycle:
         """Construct a fresh Cycle from a scored baseline."""
-        from promptpotter.application.scoring.metrics import compute_composite_score
-
         composite = (
             compute_composite_score(
                 baseline_results,  # type: ignore[arg-type]
@@ -818,9 +814,6 @@ class Cycle:
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
-        from promptpotter.config.settings import PROMPT_STRING_FIELDS
-        from promptpotter.domain.opt_search_point import RoundSummary
-
         schema = self.session.pipeline_schema
         self.rounds.append(rr)
         self.opt_sp.round_history.append(
@@ -863,9 +856,6 @@ class Cycle:
         warning_inventory (from all candidate results), runtime_failures
         (deduped by source/warning/observed-config).
         """
-        from promptpotter.application.optimization.elimination import update_query_tracker
-        from promptpotter.application.scoring.metrics import compile_failure_analysis
-
         schema = self.session.pipeline_schema
 
         self.opt_sp.l1_critique_text = critique_text
@@ -898,8 +888,6 @@ class Cycle:
         probe subset (probe queries are typically harder, so a probe round
         without subset-rescore would always look like regression).
         """
-        from promptpotter.application.scoring.metrics import compute_composite_score
-
         schema = self.session.pipeline_schema
         accuracy = self.current_accuracy
         composite = self.current_composite
@@ -970,9 +958,6 @@ def resume_with_divergence_check(
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
     """Rescore prior trials under the active scorer; halt or fork on divergence."""
-    from promptpotter.application.scoring.formula import rescore_results
-    from promptpotter.shared.errors import ResumeDivergenceError
-
     sc = session.scoring
     assert sc.scorer is not None, "session.scoring.scorer required for divergence replay"
     prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)

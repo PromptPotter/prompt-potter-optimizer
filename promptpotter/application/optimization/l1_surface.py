@@ -115,7 +115,7 @@ def _section_pipeline_schema_text(ctx: DispatchState) -> str:
 
 
 def _section_failure_analysis(ctx: DispatchState) -> str:
-    fa = ctx.cycle.opt_sp.failure_analysis
+    fa = ctx.opt_sp.failure_analysis
     if not fa or not fa.patterns:
         return ""
     lines = [f"FAILURE ANALYSIS ({fa.total_failures} failures / {fa.total_results} total):"]
@@ -141,7 +141,7 @@ def _section_axes_l1(ctx: DispatchState) -> str:
 
 
 def _section_task_context(ctx: DispatchState) -> str:
-    tc = ctx.cycle.opt_sp.task_context
+    tc = ctx.opt_sp.task_context
     if not tc:
         return ""
     lines = "\n".join(
@@ -152,17 +152,16 @@ def _section_task_context(ctx: DispatchState) -> str:
 
 def _section_escalation_probe(ctx: DispatchState) -> str:
     """Probe-round per-query warning block — fires only when probe AND journal present."""
-    cycle = ctx.cycle
-    if not cycle.probe_next_round:
+    if not ctx.probe_next_round:
         return ""
-    journal = cycle.opt_sp.escalation_journal
+    journal = ctx.opt_sp.escalation_journal
     if not journal:
         return ""
     lines = [
         "PROBE ROUND: queries have recurring pipeline warnings. "
         "Generate candidates that address pipeline robustness."
     ]
-    warning_inventory = cycle.opt_sp.warning_inventory or None
+    warning_inventory = ctx.opt_sp.warning_inventory or None
     if warning_inventory:
         inv = summarize_warning_inventory(warning_inventory)
         if inv:
@@ -186,12 +185,11 @@ def _section_escalation_probe(ctx: DispatchState) -> str:
 
 def _section_escalation_alert(ctx: DispatchState) -> str:
     """Non-probe aggregated alert — suppressed by an active l2_directive."""
-    cycle = ctx.cycle
-    if cycle.probe_next_round:
+    if ctx.probe_next_round:
         return ""
-    if cycle.opt_sp.l2_directive:
+    if ctx.opt_sp.l2_directive:
         return ""
-    journal = cycle.opt_sp.escalation_journal
+    journal = ctx.opt_sp.escalation_journal
     if not journal:
         return ""
     latest = journal[-1]
