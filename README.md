@@ -44,6 +44,11 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
   │  stall?       ──► l2_refine_strategy ──► resume L1        │
   │  degradation? ──► l2_refine_strategy ──► resume L1        │
   │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
+  │                                                          │
+  │  Bus = OptSearchPoint:                                    │
+  │    L2 writes  l2_directive  ─►  read by l1_generate       │
+  │    L3 writes  plan          ─►  read by l1_generate, l2   │
+  │    (symmetric injection: l3→{l1,l2}, l2→l1)              │
   └──────────────────────────────────────────────────────────┘
 ```
 

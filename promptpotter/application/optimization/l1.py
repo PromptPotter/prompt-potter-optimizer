@@ -31,8 +31,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
 from promptpotter.application.optimization.elimination import PoBBCheck
 from promptpotter.application.optimization.pipeline import (
+    Layer,
+    build_dispatch_state,
     candidate_summaries,
-    compile_l1_surface,
+    compile_prompt_vars,
     format_l1_critique_for_prompt,
     load_optimizer_prompt,
     run_l1_critique,
@@ -241,8 +243,23 @@ async def l1_generate(
     pipeline_schema = cycle.session.pipeline_schema
     obs_campaign_id = cycle.session.state.obs_campaign_id
 
-    surface = compile_l1_surface(cycle, round_num=round_num, n_variants=n_variants)
-    compile_vars = surface.to_compile_vars()
+    state = build_dispatch_state(
+        Layer.L1_GENERATE,
+        cycle,
+        round_num=round_num,
+        pipeline_schema=pipeline_schema,
+    )
+    compile_vars = compile_prompt_vars(
+        Layer.L1_GENERATE,
+        state,
+        opt_sp,
+        extras={
+            "n_variants": str(n_variants),
+            "accuracy_pct": f"{cycle.current_accuracy:.1%}",
+            "n_queries": str(len(cycle.current_results)),
+            "rendered_prompt": opt_sp.render(),
+        },
+    )
 
     template = load_optimizer_prompt("l1_generate")
     if opt_sp.l1_template_override:
@@ -733,9 +750,7 @@ async def score_population(
             new_runtime_failure=new_rf,
             l1_diversity=l1_diversity,
         )
-        residual = (
-            None if (elimination_stopped or leader_locked_loose or not signal) else signal
-        )
+        residual = None if (elimination_stopped or leader_locked_loose or not signal) else signal
 
         # Decision-record the PoBB-elimination cut (divergence-replayed on resume).
         if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
@@ -774,9 +789,7 @@ async def score_population(
 
         # PoBB-only leader lock-in (early-break + decision record).
         leader_locked = (
-            signal is not None
-            and signal.is_leader_lock
-            and signal.check_name == elim_check.name
+            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
         )
         if leader_locked and signal is not None and decisions is not None:
             cr = signal.check_result

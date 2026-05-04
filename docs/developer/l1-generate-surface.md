@@ -19,7 +19,7 @@ The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output 
 
 **Adding a section:**
 1. Add an enum member to `L1GenerateField`.
-2. Implement a `_section_<name>(ctx: LayerContext) -> str` renderer.
+2. Implement a `_section_<name>(state: DispatchState) -> str` renderer.
 3. Wire `<name>` into `_L1_GENERATE_SECTION_RENDERERS` and `_L1_GENERATE_FIELD_DESCRIPTIONS`.
 4. Append `<name>: str = ""` to `L1GenerateSurface`.
 5. Add `<name>` to `L1_GENERATE_SECTION_FIELDS` and the `to_compile_vars` mapping.

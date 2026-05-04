@@ -29,7 +29,7 @@ Each layer wraps the template with a typed *surface* compiled from a closed regi
 | L2 context | `L2Surface` (includes L1's field catalogue) | L3 |
 | L3 plan | multi-hole template (6 holes) | (top of stack) |
 
-Render chain: `archive → AxisIndex → LayerContext → sections → surface → LLM`. Sections are pure formatters `(ctx) → str`; the surface is the typed payload that lands in `{{variable}}` holes.
+Render chain: `archive → AxisIndex → DispatchState → sections → surface → LLM`. Sections are pure formatters `(state) → str`; the surface is the typed payload that lands in `{{variable}}` holes.
 
 **Invariant:** no prompt site summarizes its own data. If a field isn't in the surface registry, it doesn't enter a prompt. L2 owns L1's surface; L3 owns L2's. The catalogue is code-derived, so capabilities can't silently disappear.
 

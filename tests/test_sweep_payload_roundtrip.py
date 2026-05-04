@@ -8,9 +8,9 @@ on resume.
 
 The user has previously validated the JobSearchPoint trace; OSP traces
 share the same checkpoint path but had not been independently checked.
-This test pins the OSP fields used by ``compile_l1_surface`` so a
-future refactor that demotes one to a non-persisted attribute fails
-loudly.
+This test pins the OSP fields used by ``compile_prompt_vars`` (L1-generate
+section overrides) so a future refactor that demotes one to a non-persisted
+attribute fails loudly.
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
     apply_sweep_payload_to_osp(osp, payload)
 
-    # The fields land where compile_l1_surface reads them.
+    # The fields land where compile_prompt_vars reads them (L1-generate overrides).
     assert osp.l2_directive == payload.directive
     assert osp.l1_section_overrides == {"axes_l1": False}
     assert osp.l1_section_overrides_text == {"task_context": "hard reasoning framing"}

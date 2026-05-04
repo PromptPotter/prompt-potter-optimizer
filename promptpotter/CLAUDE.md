@@ -22,6 +22,8 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
+Channel: `l2_directive` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Wired declaratively in `LAYER_CONFIGS[Layer.L1_GENERATE]` (`pipeline.py`).
+
 ## L2-layer — l2_context
 
 Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
@@ -30,6 +32,8 @@ Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_cr
 - optional `l1_section_overrides` + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
 
 The directive is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative directives ("maybe try X") are out of contract. Sliding window of 1: a new directive supersedes the prior; cleared on improvement (when the L2-layer doesn't fire). The next directive evolves from the prior, not from scratch.
+
+Channel: written to `OptSearchPoint.l2_directive`; read only by `l1_generate`. Cleared by `clear_volatile()` on improvement.
 
 The L2-layer also **heals `l1_generate`** on:
 
@@ -49,7 +53,7 @@ The L2-layer escalating to L3 is **rare** — only when the failure mode is outs
 
 Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panels plus `l2_summary` (the prior directives + their measured lift) and the runtime-failure trail. `l3_plan` produces:
 
-- a **strategic replan** — rewrites the directive surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant.
+- a **strategic replan** — rewrites the directive surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant. Channel: written to `OptSearchPoint.plan` (persistent — survives `clear_volatile`) and read by **both** `l1_generate` (constraint on candidates) and `l2_context` (operating context for directives) — the symmetric injection of L2's directive into L1.
 
 The L3-layer also **heals the L2-layer** on validator outcomes:
 

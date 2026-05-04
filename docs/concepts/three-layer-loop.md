@@ -34,6 +34,16 @@ Each layer fires at a different cadence: L1 every generation, L2 on consecutive-
 
 L2 does not prescribe parameter values. It reframes *how* L1 searches — by writing onto the individual record (the `OptSearchPoint`) — and L1 still picks the specific values. Same relationship between L3 and L2. L2's full role is documented in [what-is-l2.md](what-is-l2.md), [l2-decision-tree.md](l2-decision-tree.md), [l1-generate-surface.md](l1-generate-surface.md), and [optsearchpoint-as-state.md](optsearchpoint-as-state.md).
 
+## How layers communicate
+
+The layers don't call each other. They write to a shared record — the `OptSearchPoint` — and the next layer reads what it needs from there:
+
+- **L2 → L1.** L2 writes a 2–3 sentence `directive` to `OptSearchPoint.l2_directive`. L1-generate reads it next round as primary signal. One-round window: cleared on improvement.
+- **L3 → {L1, L2}.** L3 writes a strategic framework to `OptSearchPoint.plan`. **Both** L1-generate and L2 read it: L1 treats it as a constraint on candidate generation; L2 treats it as operating context for its directive. Persistent — survives until L3 next replaces it.
+- **L1-generate is fan-in.** It reads `plan` (from L3) and `l2_directive` (from L2) in the same round.
+
+In code, every optimizer LLM call shares one mechanism: a per-call `DispatchState` snapshot, a per-layer `LAYER_CONFIGS` table mapping `{template_var → section_renderer}`, and `compile_prompt_vars` that walks the table. See [../developer/information-flow.md](../developer/information-flow.md) for field tables and code anchors.
+
 ## What L1 proposes each round
 
 L1 Generate chooses among three kinds of knobs, all discovered from the target pipeline's active nodes:

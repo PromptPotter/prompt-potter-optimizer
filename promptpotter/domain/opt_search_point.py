@@ -296,14 +296,14 @@ class OptSearchPoint(PromptTemplate):
     l1_section_overrides: dict[str, bool] = Field(
         default_factory=dict,
         description="Per-section visibility toggles for L1-generate. Keys are "
-        '``L1GenerateField`` names; ``False`` gates a section off (renders ``""``); '
+        'section names from ``LAYER_CONFIGS[Layer.L1_GENERATE].sections``; ``False`` gates a section off (renders ``""``); '
         "``True`` or absent renders normally. Set by L2 when it fires; "
         "persists round-over-round until L2 flips it.",
     )
     l1_section_overrides_text: dict[str, str] = Field(
         default_factory=dict,
         description="Per-section text overrides for L1-generate. Keys are "
-        "``L1GenerateField`` names; the value replaces that section's rendered "
+        "section names from ``LAYER_CONFIGS[Layer.L1_GENERATE].sections``; the value replaces that section's rendered "
         "output. Set by L2 when it fires. Wins over default rendering, "
         "loses to a section being toggled off.",
     )

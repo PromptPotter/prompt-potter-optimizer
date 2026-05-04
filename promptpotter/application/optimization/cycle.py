@@ -491,7 +491,11 @@ def _fork_at_divergence(
     new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
 
     old_dir, new_dir, now, index = _fork_sibling_setup(
-        campaign_store, tenant_id, session_id, old_cycle_id, new_cycle_id,
+        campaign_store,
+        tenant_id,
+        session_id,
+        old_cycle_id,
+        new_cycle_id,
         from_round=fork_from_round,
     )
 
@@ -568,8 +572,13 @@ def _fork_for_diag_sibling(
 
     new_cycle_id = _next_diag_sibling_id(campaign_store, parent_cycle_id)
     _, new_dir, now, parent_index = _fork_sibling_setup(
-        campaign_store, tenant_id, session_id, parent_cycle_id, new_cycle_id,
-        from_round=0, fork_data={"kind": "diag_sibling"},
+        campaign_store,
+        tenant_id,
+        session_id,
+        parent_cycle_id,
+        new_cycle_id,
+        from_round=0,
+        fork_data={"kind": "diag_sibling"},
     )
     write_json(
         new_dir / "index.json",
@@ -613,7 +622,11 @@ def _fork_for_sweep_sibling(
     new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
 
     _, new_dir, now, parent_index = _fork_sibling_setup(
-        campaign_store, tenant_id, session_id, parent_cycle_id, new_cycle_id,
+        campaign_store,
+        tenant_id,
+        session_id,
+        parent_cycle_id,
+        new_cycle_id,
         from_round=0,
         fork_data={
             "kind": "sweep_fork",
@@ -626,7 +639,11 @@ def _fork_for_sweep_sibling(
     write_json(
         new_dir / "index.json",
         _fresh_sibling_index(
-            parent_index, new_cycle_id, parent_cycle_id, "sweep_fork", now,
+            parent_index,
+            new_cycle_id,
+            parent_cycle_id,
+            "sweep_fork",
+            now,
             sweep_batch_id=sweep_batch_id,
         ),
     )
@@ -853,9 +870,7 @@ class Cycle:
             if rr.pipeline_params is not None
             else self.current_sp.pipeline_params
         )
-        self.current_sp = self.opt_sp.to_job_search_point(
-            base_pipeline_params=_pp, schema=schema
-        )
+        self.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         self.current_accuracy = rr.accuracy
         self.current_composite = rr.composite
         self.current_results = list(rr.results)
