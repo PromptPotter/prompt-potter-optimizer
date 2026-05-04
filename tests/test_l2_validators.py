@@ -1,12 +1,12 @@
 """L2 output validators — Loop 4 (L3 nurses L2 on validator failure)."""
 
+from promptpotter.application.optimization.formatting import format_l2_output_failures_for_l3
 from promptpotter.application.optimization.l2_validators import (
     L2_CATALOGUE_REDUNDANCY,
     L2_CROSS_FIELD_DUPLICATION,
     L2_VERBATIM_SELF_REPEAT,
     run_l2_output_validators,
 )
-from promptpotter.application.optimization.pipeline import format_l2_output_failures_for_l3
 from promptpotter.domain.opt_search_point import OptSearchPoint
 
 

@@ -15,7 +15,7 @@ attribute fails loudly.
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.cycle import apply_sweep_payload_to_osp
+from promptpotter.application.optimization.escalation import apply_sweep_payload_to_osp
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.run_records import SweepPayload
 

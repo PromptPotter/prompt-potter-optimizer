@@ -4,7 +4,7 @@ Mirrors :class:`MeasurementArchive`'s file-per-record pattern. Storage is
 tenant-global at ``<base_dir>/library/.archive/optimizer_calls/{hash}.json``.
 Lookups are point-keyed; no index file.
 
-The cache is consumed by :func:`promptpotter.application.optimization.pipeline.llm_call`
+The cache is consumed by :func:`promptpotter.application.optimization.llm_call.llm_call`
 — if a hash hits, the stored ``LLMResponse.model_dump()`` is replayed and the
 real LLM call is skipped. Cross-cycle / cross-fork by construction.
 """

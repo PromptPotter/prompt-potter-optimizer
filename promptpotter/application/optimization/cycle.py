@@ -1,20 +1,21 @@
 """Optimization cycle state — pure optimizer progress tracking.
 
-Three layers in one file:
+Two layers in one file:
 
 1. **Decision ledger** (``Decision``, ``Divergence``, ``record_decision``,
    ``replay_decisions``, ``REPLAYERS``) — recorded decisions that drive
    resume divergence-checking. Each decision is two-tier: ``inputs_ref`` +
    ``outcome`` are compared on resume; ``data`` is archival.
 
-2. **Cycle state** (``LayerCounter``, ``EscalationState``, ``Cycle``) —
-   the mutable orchestration state for the feedback cycle round loop.
-   ``Cycle`` aggregates rounds, current/best tracking, escalation counters,
-   and pending decisions.
+2. **Cycle state** (``LayerCounter``, ``EscalationState``, ``Cycle``,
+   ``build_escalation_entry``, fork helpers) — the mutable orchestration
+   state for the feedback cycle round loop. ``Cycle`` aggregates rounds,
+   current/best tracking, escalation counters, and pending decisions.
 
-3. **Layer escalation** (``escalate_l2``, ``build_escalation_entry``) —
-   the action driver that fires L2 (and optionally L3) transitions when
-   patience exhausts. Uses ``record_decision`` to log trigger gates.
+The action driver itself (``escalate_l2``, the L2/L3 strategy classes,
+``apply_sweep_payload_to_osp``) lives in
+:mod:`promptpotter.application.optimization.escalation` — one-way arrow:
+``escalation`` imports from ``cycle``, never the reverse.
 """
 
 from __future__ import annotations
@@ -30,14 +31,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
-from promptpotter.application.optimization.pipeline import (
-    L2RefineStrategy,
-    L3ModifyPlan,
-    run_layer_transition,
-)
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.phases import PhaseEvent, StopReason, emit_phase
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import (
     DECISION_GATING,
@@ -47,8 +42,6 @@ from promptpotter.domain.run_records import (
     SweepPayload,
 )
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure import llm as _llm_client
-from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -61,7 +54,6 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryResult
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store import CampaignStore
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
 
 logger = logging.getLogger(__name__)
 
@@ -76,9 +68,7 @@ __all__ = [
     "ReplayContext",
     "_fork_for_diag_sibling",
     "_fork_for_sweep_sibling",
-    "apply_sweep_payload_to_osp",
     "build_escalation_entry",
-    "escalate_l2",
     "record_decision",
     "replay_decisions",
     "resume_with_divergence_check",
@@ -650,24 +640,6 @@ def _fork_for_sweep_sibling(
     return new_cycle_id
 
 
-def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
-    """Merge sweep-supplied L1 surface deltas onto the OSP — same shape ``L2RefineStrategy.apply_side_effects`` writes."""
-    if payload.l1_section_overrides:
-        opt_sp.l1_section_overrides = {
-            **opt_sp.l1_section_overrides,
-            **payload.l1_section_overrides,
-        }
-    if payload.l1_section_overrides_text:
-        opt_sp.l1_section_overrides_text = {
-            **opt_sp.l1_section_overrides_text,
-            **payload.l1_section_overrides_text,
-        }
-    if payload.l1_template_override:
-        opt_sp.l1_template_override = payload.l1_template_override
-    if payload.directive:
-        opt_sp.l2_directive = payload.directive
-
-
 # ---------------------------------------------------------------------------
 # Cycle state — escalation counters + per-round mutation
 # ---------------------------------------------------------------------------
@@ -1078,7 +1050,8 @@ def resume_with_divergence_check(
 
 
 # ---------------------------------------------------------------------------
-# Layer escalation — L1→L2 (and optional L2→L3) action driver
+# Escalation journal helper — shapes a journal entry from DegradationCheck.
+# The action driver itself lives in :mod:`escalation`.
 # ---------------------------------------------------------------------------
 
 
@@ -1099,181 +1072,3 @@ def build_escalation_entry(
         "warning_types": check_result.get("warning_types", {}),
         "outcome_degraded_rate": None,
     }
-
-
-_TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
-
-
-async def _run_transition(
-    transition: L2RefineStrategy | L3ModifyPlan,
-    cycle: Cycle,
-    config: CampaignConfig,
-    pipeline_schema: Any,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None,
-    *,
-    obs: ObservabilityBridge | None,
-    obs_campaign_id: str,
-    escalation_check_result: dict | None = None,
-) -> Any:
-    """Unified L2/L3 orchestrator: enter → call → adopt → LayerApplied → side-effects → exit."""
-    assert cycle.current_sp is not None
-    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
-    current_pp = cycle.current_sp.pipeline_params
-
-    emit_phase(
-        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle)
-    )
-    async with observed_node(
-        f"{transition.template_name}_r{round_num}",
-        "llm/meta",
-        obs=obs,
-        campaign_id=obs_campaign_id,
-        round_num=round_num,
-    ):
-        result = await run_layer_transition(
-            transition,
-            cycle,
-            client,
-            model=config.optimizer_llm.model,
-            temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer]),
-            pipeline_params=current_pp,
-            round_num=round_num,
-            escalation_check_result=escalation_check_result,
-        )
-    new_opt = result.opt_search_point
-    cycle.opt_sp.copy_memory_to(new_opt)
-    cycle.opt_sp = new_opt
-    cycle.current_sp = new_opt.to_job_search_point(
-        base_pipeline_params=result.pipeline_params or current_pp,
-        schema=pipeline_schema,
-    )
-    if obs is not None:
-        with graceful(f"LayerApplied({transition.layer}) emit failed"):
-            obs.emit_write_point(
-                LayerApplied,
-                layer=transition.layer,
-                campaign_id=obs_campaign_id,
-                round_num=round_num,
-                changes_description=result.opt_search_point.lineage.changes_description or "",
-            )
-    transition.apply_side_effects(cycle, result, round_num)
-    emit_phase(
-        on_phase,
-        transition.phase,
-        "exit",
-        round=round_num,
-        **transition.exit_payload(cycle, result),
-    )
-    return result
-
-
-async def escalate_l2(
-    cycle: Cycle,
-    config: CampaignConfig,
-    pipeline_schema: Any,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
-    obs: ObservabilityBridge | None = None,
-    obs_campaign_id: str = "",
-    escalation_check_result: dict | None = None,
-) -> StopReason | None:
-    """L1→L2 (and optional L2→L3) escalation; vanilla patience-exhausts → next layer / stop."""
-    opt = config.optimization
-    esc = cycle.escalation
-    esc.l2.record_outcome(cycle.best_composite)
-
-    l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
-    # entry_round = round whose rescored best_composite is the stall baseline (-1 = never fired).
-    entry_round_l2 = esc.l2.round if esc.l2.round > 0 else -1
-    record_decision(
-        cycle.pending_decisions,
-        DecisionKind.L2_ESCALATION_TRIGGER,
-        {
-            "round_num": round_num,
-            "l2_patience": opt.l2_patience,
-            "entry_round": entry_round_l2,
-        },
-        not l2_stalled,
-        data={
-            "l2_round": esc.l2.round,
-            "stall_count": esc.l2.stall_count,
-            "best_composite_at_entry": esc.l2.best_composite_at_entry,
-            "best_composite_this_round": cycle.best_composite,
-            "best_accuracy": cycle.best_accuracy,
-        },
-    )
-    if not l2_stalled:
-        await _run_transition(
-            L2RefineStrategy(),
-            cycle,
-            config,
-            pipeline_schema,
-            round_num,
-            on_phase,
-            obs=obs,
-            obs_campaign_id=obs_campaign_id,
-            escalation_check_result=escalation_check_result,
-        )
-
-        # Loop 4 — post-L2 validator force: if L2 produced broken output,
-        # L3 fires immediately to heal L2, bypassing l2_patience and
-        # l3_patience. The trigger is deterministic from L2's output (which
-        # itself rides on the trial JSON), so resume reproduces it without
-        # needing a separate decision record.
-        if cycle.opt_sp.l2_output_failures and opt.enable_l3:
-            logger.info(
-                "L3 force-triggered by %d L2-output validator failure(s) at round %d",
-                len(cycle.opt_sp.l2_output_failures),
-                round_num,
-            )
-            await _run_transition(
-                L3ModifyPlan(),
-                cycle,
-                config,
-                pipeline_schema,
-                round_num,
-                on_phase,
-                obs=obs,
-                obs_campaign_id=obs_campaign_id,
-            )
-        return None
-
-    if not opt.enable_l3:
-        logger.debug("L2 patience exhausted (%d stalls) at round %d", esc.l2.stall_count, round_num)
-        return StopReason.L2_PATIENCE
-
-    esc.l3.record_outcome(cycle.best_composite)
-    l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
-    entry_round_l3 = esc.l3.round if esc.l3.round > 0 else -1
-    record_decision(
-        cycle.pending_decisions,
-        DecisionKind.L3_ESCALATION_TRIGGER,
-        {
-            "round_num": round_num,
-            "l3_patience": opt.l3_patience,
-            "entry_round": entry_round_l3,
-        },
-        not l3_exhausted,
-        data={
-            "l3_round": esc.l3.round,
-            "stall_count": esc.l3.stall_count,
-            "best_composite_at_entry": esc.l3.best_composite_at_entry,
-            "best_composite_this_round": cycle.best_composite,
-        },
-    )
-    if not l3_exhausted:
-        await _run_transition(
-            L3ModifyPlan(),
-            cycle,
-            config,
-            pipeline_schema,
-            round_num,
-            on_phase,
-            obs=obs,
-            obs_campaign_id=obs_campaign_id,
-        )
-        return None
-
-    logger.debug("L3 patience exhausted (%d stalls) at round %d", esc.l3.stall_count, round_num)
-    return StopReason.L3_PATIENCE

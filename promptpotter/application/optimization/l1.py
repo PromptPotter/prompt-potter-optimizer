@@ -29,15 +29,19 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
-from promptpotter.application.optimization.elimination import PoBBCheck
-from promptpotter.application.optimization.pipeline import (
+from promptpotter.application.optimization.dispatch import (
     Layer,
     build_dispatch_state,
-    candidate_summaries,
     compile_prompt_vars,
+)
+from promptpotter.application.optimization.elimination import PoBBCheck
+from promptpotter.application.optimization.formatting import candidate_summaries
+from promptpotter.application.optimization.l1_critique import (
     format_l1_critique_for_prompt,
-    load_optimizer_prompt,
     run_l1_critique,
+)
+from promptpotter.application.optimization.llm_call import (
+    load_optimizer_prompt,
     run_optimizer_node,
 )
 from promptpotter.application.scoring.metrics import (
@@ -118,7 +122,7 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
     """
     from copy import deepcopy
 
-    from promptpotter.application.optimization.pipeline import get_optimizer_schema
+    from promptpotter.application.optimization.llm_call import get_optimizer_schema
 
     base_node = get_optimizer_schema().get_node("l1_generate")
     if base_node is None or base_node.output_schema is None:

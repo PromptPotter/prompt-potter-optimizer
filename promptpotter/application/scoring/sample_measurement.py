@@ -367,7 +367,7 @@ async def execute_stale_data_protocol(
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step
     that resolved the query, or ``"exhausted"``.
     """
-    from promptpotter.application.optimization.pipeline import get_optimizer_schema
+    from promptpotter.application.optimization.llm_call import get_optimizer_schema
 
     node = get_optimizer_schema().get_node("l1_score")
     assert node is not None, "l1_score node missing from optimizer schema"

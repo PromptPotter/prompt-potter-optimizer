@@ -66,7 +66,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 - **No fallbacks in service code.** Two sanctioned exceptions: `score_population()` synthetic-0 on `validation_failures`; load-boundary deprecated-sample gate (uses `classify_result()` fatal codes). Any new fallback must be documented alongside these.
 - **`eval` banned from identifiers and prose.** Exception: the `Evaluator` class + direct registry consumers (`evaluators` field, `all_evaluators()`, `materialize_*_values`). Use loop / round / searchpoint / sample / measurement / scoring / fitness / trial / critique. Domain vocabulary: evolve, generation, population, mutation, selection, individual.
 - Pipeline components are **nodes**.
-- Optimizer LLM calls go through `llm_call()` (`application/optimization/pipeline.py`), never `chat()`.
+- Optimizer LLM calls go through `llm_call()` (`application/optimization/llm_call.py`), never `chat()`.
 - Escalation flows via return value (`QueryLoopResult.escalation_signal`), not exception. Use `graceful()` (`shared/errors.py`) where exceptions must escape.
 - **Tests are subtractive.** Each guards a named invariant (`tests/CLAUDE.md`). No volume tests, ≤2–3 monkeypatches per test.
 - **Direct field access** — `dict[key]` for guaranteed fields, not `.get(key, fallback)`.

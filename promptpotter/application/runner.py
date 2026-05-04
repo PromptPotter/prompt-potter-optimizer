@@ -17,8 +17,10 @@ from promptpotter.application.bootstrap import (
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import (
     Cycle,
-    apply_sweep_payload_to_osp,
     build_escalation_entry,
+)
+from promptpotter.application.optimization.escalation import (
+    apply_sweep_payload_to_osp,
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round
@@ -1047,7 +1049,7 @@ def _finalize_run(
             final_block["scorer_round_formula"] = formula_full
             final_block["scorer_round_formula_short"] = formula_short
             final_block["baseline_composite"] = baseline_composite
-            from promptpotter.application.optimization.pipeline import (
+            from promptpotter.application.optimization.llm_call import (
                 compute_optimizer_prompt_hashes,
             )
 
