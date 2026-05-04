@@ -236,15 +236,12 @@ def _pobb_replay_snapshot(
 
 
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
-    """PoBB gate under rescored scores; legacy `alpha` re-mapped to conservative ε."""
+    """PoBB gate under rescored scores."""
     snap = _pobb_replay_snapshot(ctx, inputs_ref)
     if snap is None:
         return False
     candidate_id, snapshot, _ = snap
-    epsilon_val = inputs_ref.get("epsilon")
-    if epsilon_val is None:
-        epsilon_val = float(inputs_ref.get("alpha", 0.2)) * 0.25
-    return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(epsilon_val))
+    return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(inputs_ref["epsilon"]))
 
 
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:

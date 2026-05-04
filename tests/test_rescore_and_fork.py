@@ -82,7 +82,7 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
                     "candidate_id": "c2",
                     "prior_candidate_ids": ["c0", "c1"],
                     "queries_scored": 6,
-                    "alpha": 0.2,
+                    "epsilon": 0.05,
                     "n_min": 4,
                     "round_num": 2,
                 },

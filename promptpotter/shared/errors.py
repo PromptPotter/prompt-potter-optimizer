@@ -131,8 +131,7 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
 
     Catches all error forms:
     - Truthy ``error`` field (tagged error message from exception handling)
-    - ``predicted == "ERROR"`` (backend returned ERROR as candidate name,
-      or legacy cached data with ``error=""`` / ``error=None``)
+    - ``predicted == "ERROR"`` (backend returned ERROR as candidate name)
     """
     return bool(result.get("error")) or result.get("predicted") == "ERROR"
 

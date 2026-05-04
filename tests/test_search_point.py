@@ -5,6 +5,7 @@ import pytest
 
 from promptpotter.domain.opt_search_point import FewShotExample, OptSearchPoint
 from promptpotter.domain.pipeline_schema import NodePromptMeta, PipelineNode, PipelineSchema
+from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.shared.hashing import content_hash
 
@@ -21,7 +22,7 @@ def test_construct_frozen_and_render_reads_pipeline_params():
 
 
 def test_content_hash_distinguishes_pipeline_params():
-    dataset = [{"query": "q", "ground_truth": "a"}]
+    dataset = [Sample(id=1, query="q", ground_truth="a")]
     sp_a = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
     sp_b = JobSearchPoint(pipeline_params={"steps": ["fuzzy_matching"]})
     assert sp_a.content_hash(dataset) != sp_b.content_hash(dataset)

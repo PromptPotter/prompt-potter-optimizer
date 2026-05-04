@@ -13,11 +13,6 @@ Each module here owns one view over the ledger's record stream:
 * :mod:`journal` — operator narrative helpers (``journal.md`` +
   ``notes.md`` under ``sessions/{session_id}/``). Session-scoped, no
   ledger subscription.
-
-Phase 2 of the persistence/decision-replay/measurement-archive cleanup:
-classes here still expose the legacy callback API so the runner can
-drive them directly. Phase 3 will replace those callbacks with
-``ledger.append(...)`` + the ``Projection`` ``on_record`` hook.
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection

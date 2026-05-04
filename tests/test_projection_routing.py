@@ -55,10 +55,7 @@ def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
         n_variants=5,
         sp_budget_ttest=20,
     )
-    try:
-        assert proj.state_path == root_dir / "dashboard.json"
-    finally:
-        proj.finalize()
+    assert proj.state_path == root_dir / "dashboard.json"
 
 
 def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:

@@ -97,7 +97,7 @@ class Decision(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
     def to_dict(self) -> dict[str, Any]:
-        """Wire shape — keys match the legacy trial-JSON ``decisions`` payload."""
+        """Wire shape for trial-JSON ``decisions`` payload."""
         return {
             "kind": self.kind.value,
             "inputs_ref": dict(self.inputs_ref),

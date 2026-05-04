@@ -5,8 +5,6 @@ Sections:
 1. **Ground-truth loaders + train/test splitter** — Excel, HuggingFace,
    plus the dataset-cache reader used by ``init`` / ``optimize``. Each
    loader returns ``list[Sample]`` (the canonical per-sample domain object).
-   Legacy dicts are no longer returned; conversion happens at load time
-   via ``Sample.from_dict`` for any on-disk data predating pass 2.
 
 2. **Per-dataset starting-point prompt store** — ``load_node_prompt`` /
    ``load_dataset_prompt`` / ``dataset_prompt_dir`` etc. The single source

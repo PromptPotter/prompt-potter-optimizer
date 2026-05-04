@@ -182,7 +182,7 @@ def build_individual_summary(
     don't dump 60 lines of identical formula text into the terminal. The
     formula + per-evaluator breakdown lands once per round in the round
     summary block. ``PROMPTPOTTER_COMPACT_DISPLAY=1`` reverts to the
-    legacy ``composite=0.4f`` bottom rule (only when composite ≠ accuracy).
+    single-line ``composite=0.4f`` bottom rule (only when composite ≠ accuracy).
 
     *baseline_composite* anchors the Δ against the campaign's first-round
     composite — even at deep rounds the operator sees how far the run
@@ -228,7 +228,7 @@ def build_individual_summary(
     degraded = scores.get("degraded_queries", 0)
 
     # Two render modes:
-    #   - compact (env var set): legacy single-line bottom rule,
+    #   - compact (env var set): single-line bottom rule,
     #     ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
     #   - default: 1-line composite-with-Δ as a detail line; degraded
     #     count joins as a separate detail. Box bottom stays plain.

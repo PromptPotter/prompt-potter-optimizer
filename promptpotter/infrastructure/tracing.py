@@ -1615,10 +1615,10 @@ Reads JSON from disk and emits :class:`QueryScoreStart` / :class:`QueryNodeSpan`
 / :class:`QueryScoreEnd` events into an :class:`ObservabilityBridge`. The sink
 owns every Langfuse SDK call — this file is just a disk walker.
 
-Idempotency tracking (``backfilled_run_ids`` and legacy ``dataset_items``
-seed) lives in ``obs/langfuse/backfill_state.json``; the sink's own
-persisted id maps in ``campaigns/{cycle_id}/langfuse_state.json`` are
-the source of truth after the first replay.
+Idempotency tracking (``backfilled_run_ids`` and ``dataset_items`` seed)
+lives in ``obs/langfuse/backfill_state.json``; the sink's own persisted
+id maps in ``campaigns/{cycle_id}/langfuse_state.json`` are the source
+of truth after the first replay.
 """
 
 

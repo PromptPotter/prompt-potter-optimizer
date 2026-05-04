@@ -58,11 +58,6 @@ __all__ = [
 ]
 
 
-# ---------------------------------------------------------------------------
-# JSON parsing utilities (formerly ``promptpotter.shared.llm_parsing``)
-# ---------------------------------------------------------------------------
-
-
 def try_parse_json(content: str, provider: str) -> Any | None:
     """Parse JSON from response content, return None on failure."""
     text = content.strip()

@@ -19,10 +19,8 @@ __all__ = ["HASH_TRUNCATE", "content_hash", "qg_pair"]
 
 
 def qg_pair(d: Any) -> tuple[str, str]:
-    """Extract (query, ground_truth) from a Sample or legacy dict."""
-    if hasattr(d, "query"):
-        return d.query, d.ground_truth
-    return d.get("query", ""), d.get("ground_truth", "")
+    """Extract (query, ground_truth) from a Sample."""
+    return d.query, d.ground_truth
 
 
 def content_hash(

@@ -982,4 +982,3 @@ def _finalize_run(
         write_review_md(session, cycle)
         with graceful("Tenant leaderboard refresh failed"):
             refresh_tenant_leaderboards(session)
-        emitter.finalize()

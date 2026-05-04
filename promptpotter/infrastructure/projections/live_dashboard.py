@@ -657,11 +657,6 @@ class LiveDashboardProjection:
         self._current_round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top]
         self._persist()
 
-    # -- Lifecycle -------------------------------------------------------------
-
-    def finalize(self) -> None:
-        """No-op now that ``output.log`` is gone — kept for callers that still wire it through."""
-
     # -- Internal --------------------------------------------------------------
 
     def _persist(self) -> None:

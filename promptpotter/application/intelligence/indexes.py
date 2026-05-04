@@ -111,10 +111,6 @@ class ConfigIndex:
                 out |= self._configs_to_runs[key]
         return out
 
-    def mark_seen(self, run_id: str) -> None:
-        """External cursor advance — kept for parity with :class:`SampleIndex`."""
-        self._seen_runs.add(run_id)
-
 
 def _matches_subset_local(
     stored: list[tuple[str, dict[str, Any]]],

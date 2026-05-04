@@ -15,9 +15,9 @@ Two related concerns share this module so the short codes (``acc``, ``H``,
    ``render_composite_block`` / ``render_composite_inline``) — operator-
    facing forms that surfaces share. Without seeing the inputs the operator
    can't tell *why* composite moved when accuracy didn't.
-   ``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to the
-   legacy single-line ``composite=0.4f`` bottom rule (``log.md`` always
-   carries the full block).
+   ``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to a
+   single-line ``composite=0.4f`` bottom rule (``log.md`` always carries
+   the full block).
 
 Pure functions; no I/O, no Session, no logging side-effects.
 """

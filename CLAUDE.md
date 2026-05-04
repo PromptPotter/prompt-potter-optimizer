@@ -6,6 +6,31 @@ PromptPotter is **LLM-driven program evolution** for prompts and pipeline params
 
 The user is the operator and the project file tree IS their dashboard — no webapp yet (M11/M12 plan one over FastAPI). Onboarding: install → restart VS Code → `/potter-run` (downloads TermNorm, starts its `.bat`, converts datasets, prompts for API keys).
 
+## STOP — read this before writing any code
+
+**No backward compatibility, ever.** Zero released versions, zero stale on-disk data. There is nothing to be compatible with. **This is the rule that gets ignored most often.** Skipping this section wastes the operator's time.
+
+**Delete on sight — don't ask, don't TODO, don't "remove later":**
+- `// removed`, `# old name`, `# kept for parity`, `# kept for callers that still wire it through`
+- Re-export aliases (`OldName = NewName`, `from .x import NewName as OldName`)
+- `try/except ImportError` shims for renamed modules
+- `dict.get(new, dict.get(old, default))` chains for renamed keys
+- `getattr(obj, "new", getattr(obj, "old", default))` chains for renamed fields
+- Methods/properties that exist solely to map old → new names
+- `# legacy dict`, `# legacy format`, `# legacy payload` branches and the comments justifying them
+- `(formerly ``module.x``)` reorganization breadcrumbs in code comments
+- "Phase 2 / Phase 3 cleanup will replace this" docstrings — document current state, not half-done plans
+- No-op stubs whose docstring says "kept for X"
+- `dict.get("new") or dict.get("old", default)` fallbacks for renamed config keys
+
+**Changing a contract:** rename, restructure, delete the old test, write the new one. No compat test, no deprecation warning, no shim, no fallback default.
+
+**Found a shim someone else wrote?** Delete it in the same PR you noticed it. Don't file a TODO. Don't add a "remove later" comment.
+
+The word `legacy` in a comment or docstring is a code smell — either the path is dead (delete it) or the word is wrong (delete the word). The only sanctioned uses of `deprecated` are the fatal-warning sample lifecycle (`is_deprecated`, `evicted_priors`, `retry_of_deprecated_cache`, `RoundResult.deprecated`) — these are core domain language, not back-compat.
+
+(This section is about **shim code and misleading wording**, not about docstrings explaining real invariants. See the docstring-trimming rule in Conventions: real WHY-docstrings stay.)
+
 ## Commands
 
 ```bash
@@ -62,7 +87,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 ## Conventions (non-derivable)
 
 - **PEP 604** type hints; `logging` module only (no `print()` in `promptpotter/`); ruff line-length **100**; `APP_VERSION` in `config/settings.py`.
-- **No backward compatibility** — break, rename, restructure freely. No compat shims, no `// removed` comments. Replace contract → delete old test.
+- **No backward compatibility** — see the **STOP** section above. Non-negotiable.
 - **No fallbacks in service code.** Two sanctioned exceptions: `score_population()` synthetic-0 on `validation_failures`; load-boundary deprecated-sample gate (uses `classify_result()` fatal codes). Any new fallback must be documented alongside these.
 - **`eval` banned from identifiers and prose.** Exception: the `Evaluator` class + direct registry consumers (`evaluators` field, `all_evaluators()`, `materialize_*_values`). Use loop / round / searchpoint / sample / measurement / scoring / fitness / trial / critique. Domain vocabulary: evolve, generation, population, mutation, selection, individual.
 - Pipeline components are **nodes**.

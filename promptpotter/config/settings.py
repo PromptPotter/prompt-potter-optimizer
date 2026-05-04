@@ -15,11 +15,6 @@ DEFAULT_BACKEND_URL = "http://127.0.0.1:8000"
 DEFAULT_BACKEND_ID = "local"
 DEFAULT_EXPERIMENT_ID = "1_production_historical"
 
-
-# ---------------------------------------------------------------------------
-# Service-level constants (formerly ``promptpotter.shared.constants``)
-# ---------------------------------------------------------------------------
-
 DATASET_NAME: str = "ground_truth"
 NO_RESULT: str = "NO_RESULT"
 

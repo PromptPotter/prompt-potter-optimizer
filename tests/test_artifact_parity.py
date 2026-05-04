@@ -339,7 +339,6 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     (campaign_dir / "review.md").write_text(
         render_review_md(index_data, [trial_dump], round_audits=[None]), encoding="utf-8"
     )
-    emitter.finalize()
 
     missing_campaign = [a for a in CAMPAIGN_ARTIFACTS if not (campaign_dir / a).exists()]
     assert not missing_campaign, f"Campaign-tree parity violated — missing: {missing_campaign}"
