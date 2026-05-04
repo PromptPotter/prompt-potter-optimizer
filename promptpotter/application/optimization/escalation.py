@@ -14,6 +14,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.cycle import NextAction
 from promptpotter.application.optimization.dispatch import (
     Layer,
     build_dispatch_state,
@@ -233,7 +234,10 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     if result.template_override:
         osp.l1_template_override = result.template_override
     osp.l2_output_failures = list(result.l2_output_failures)
-    cycle.escalation.l2.record_entry(cycle.tracking.best_accuracy, cycle.tracking.best_composite)
+    cycle.escalation.record_l2_fired(
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_composite=cycle.tracking.best_composite,
+    )
 
     is_probe = result.action == OptimizerAction.PROBE_ROUND
     record_decision(
@@ -264,8 +268,13 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     warned, top = warning_summary(cycle.opt_sp.warning_inventory)
+    # ``l2_*_at_entry`` fields are read by ``EscalationState.fold`` on resume —
+    # they're the canonical post-fire L2 state captured by ``record_l2_fired``.
     return {
         "l2_round": cycle.escalation.l2.round,
+        "l2_stall_count": cycle.escalation.l2.stall_count,
+        "l2_best_accuracy_at_entry": cycle.escalation.l2.best_accuracy_at_entry,
+        "l2_best_composite_at_entry": cycle.escalation.l2.best_composite_at_entry,
         "param_changes_count": len(result.opt_search_point.optimizer_params),
         "task_context_changed": result.task_context is not None,
         "scheme_overrides_count": len(result.scheme_overrides),
@@ -329,8 +338,10 @@ def _parse_l3(
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-    cycle.escalation.l3.record_entry(cycle.tracking.best_accuracy, cycle.tracking.best_composite)
-    cycle.escalation.reset_for_l3(cycle.tracking.best_accuracy, cycle.tracking.best_composite)
+    cycle.escalation.record_l3_fired(
+        best_accuracy=cycle.tracking.best_accuracy,
+        best_composite=cycle.tracking.best_composite,
+    )
 
 
 def _l3_enter(cycle: Cycle) -> dict[str, Any]:
@@ -342,8 +353,13 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+    # ``l3_*_at_entry`` are read by ``EscalationState.fold`` on resume —
+    # ``record_l3_fired`` also resets L2 state to these same baselines.
     return {
         "l3_round": cycle.escalation.l3.round,
+        "l3_stall_count": cycle.escalation.l3.stall_count,
+        "l3_best_accuracy_at_entry": cycle.escalation.l3.best_accuracy_at_entry,
+        "l3_best_composite_at_entry": cycle.escalation.l3.best_composite_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "pipeline_params_changed": result.pipeline_params is not None,
@@ -470,24 +486,39 @@ async def escalate_l2(
     obs_campaign_id: str = "",
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
-    """L1→L2 (and optional L2→L3) escalation; patience-exhausts → next layer / stop."""
+    """Drive an L2 (or cascading L3) escalation: observe state, fire layer,
+    record divergence-gated decisions, return a stop reason or None.
+
+    Called from the round-loop's ``FIRE_L2`` dispatch and from the mid-round
+    DegradationCheck path. The decision to escalate already happened
+    upstream; this driver runs the L2/L3 patience cascade (via
+    ``EscalationState.observe_l2_escalation``) and the L3 force-trigger heal
+    on L2 validator failures.
+    """
     opt = config.optimization
     esc = cycle.escalation
-    esc.l2.record_outcome(cycle.tracking.best_composite)
 
-    l2_stalled = opt.l2_patience is not None and esc.l2.stall_count >= opt.l2_patience
-    _inputs, _data = _trigger_payload(
+    event = esc.observe_l2_escalation(
+        current_composite=cycle.tracking.best_composite,
+        l2_patience=opt.l2_patience,
+        l3_patience=opt.l3_patience,
+        enable_l3=opt.enable_l3,
+    )
+
+    # L2 trigger decision is replayed for divergence — record fired-or-not.
+    l2_inputs, l2_data = _trigger_payload(
         cycle, esc.l2, round_num, opt.l2_patience, layer="l2", track_accuracy=True
     )
     record_decision(
         cycle.pending_decisions,
         DecisionKind.L2_ESCALATION_TRIGGER,
-        _inputs,
-        not l2_stalled,
-        data=_data,
+        l2_inputs,
+        event.next_action == NextAction.FIRE_L2,
+        data=l2_data,
         round=round_num,
     )
-    if not l2_stalled:
+
+    if event.next_action == NextAction.FIRE_L2:
         await _run_transition(
             L2,
             cycle,
@@ -499,9 +530,9 @@ async def escalate_l2(
             obs_campaign_id=obs_campaign_id,
             escalation_check_result=escalation_check_result,
         )
-        # Loop 4: post-L2 validator force fires L3 immediately to heal L2.
-        # Trigger is deterministic from L2's output (rides on trial JSON), so
-        # resume reproduces it without a separate decision record.
+        # Loop 4: post-L2 validator failure force-triggers L3 to heal L2's
+        # output. Trigger is deterministic from L2's output (rides on trial
+        # JSON), so resume reproduces it without a separate decision record.
         if cycle.opt_sp.l2_output_failures and opt.enable_l3:
             logger.info(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
@@ -520,21 +551,21 @@ async def escalate_l2(
             )
         return None
 
-    if not opt.enable_l3:
+    if event.next_action == NextAction.STOP_L2_PATIENCE:
         return StopReason.L2_PATIENCE
 
-    esc.l3.record_outcome(cycle.tracking.best_composite)
-    l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
-    _inputs, _data = _trigger_payload(cycle, esc.l3, round_num, opt.l3_patience, layer="l3")
+    # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
+    l3_inputs, l3_data = _trigger_payload(cycle, esc.l3, round_num, opt.l3_patience, layer="l3")
     record_decision(
         cycle.pending_decisions,
         DecisionKind.L3_ESCALATION_TRIGGER,
-        _inputs,
-        not l3_exhausted,
-        data=_data,
+        l3_inputs,
+        event.next_action == NextAction.FIRE_L3,
+        data=l3_data,
         round=round_num,
     )
-    if not l3_exhausted:
+
+    if event.next_action == NextAction.FIRE_L3:
         await _run_transition(
             L3,
             cycle,

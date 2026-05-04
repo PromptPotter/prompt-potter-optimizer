@@ -31,6 +31,22 @@ The word `legacy` in a comment or docstring is a code smell — either the path 
 
 (This section is about **shim code and misleading wording**, not about docstrings explaining real invariants. See the docstring-trimming rule in Conventions: real WHY-docstrings stay.)
 
+## Backbone
+
+These primitives are settled. Reorganizing them — adding a parallel ingress, a getattr-chain fallback, a second dispatch site — should feel like swimming upstream because the shape doesn't permit it. Extend in place; if you genuinely need to change one, change the primitive itself. The wrong shape is meant to be hard to express, not policed by a test.
+
+| Primitive | Where | Self-enforcing because |
+|---|---|---|
+| Three I/O kinds (Persistence / Display / Control) | per this file | Persistence has one ingress (`RunLedger.append`); display-side `RunListener` writes nothing; control-side `stop_check` writes no campaign artifacts |
+| `DecisionKind` + `DECISION_GATING` | `domain/run_records.py` | Import-time exhaustiveness — adding a kind without a gating mode raises before the module loads |
+| Hexagonal layer separation | per this file | `tests/test_layer_imports.py` — and modules in different layers don't expose what the other side would need |
+| `RunLedger` + `ProjectionBase` dispatch | `infrastructure/ledger.py`, `projections/base.py` | `ProjectionBase.on_record` owns the `isinstance(record, …)` dispatch; subclasses override hooks. There's no second dispatch path because the base class is the only one |
+| `score_search_point()` gateway | `application/scoring/search_point_scorer.py` | Single function callers reach for; `measure_sample` is implementation detail. The gateway is the natural call |
+| Path helpers + `CycleDir` / `RootCycleDir` newtypes | `infrastructure/store/paths.py`, `domain/cycle_paths.py` | Projections and stores accept `CycleDir`/`RootCycleDir`, not `str`/`Path`. Callers get directories from helpers |
+| `JobSearchPoint` / `PromptTemplate` / `OptSearchPoint` | `domain/search_point.py`, `domain/opt_search_point.py` | Frozen Pydantic models. Mutation isn't a thing the type permits; lineage is encoded by `derive()` |
+| `EscalationState` cause-driven dynamics | `application/optimization/cycle.py` | Counters are private. The only mutation surface is observation methods; `next_action` is computed from stall_depth + mutation_history, so "signals from measurement, not the calendar" is structural |
+| Tracing-as-shadow | `infrastructure/tracing/` | Tracing exposes no read API. State reaches the optimizer only via the ledger; tracing is fan-out only |
+
 ## Commands
 
 ```bash

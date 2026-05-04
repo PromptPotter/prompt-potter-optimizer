@@ -68,7 +68,7 @@ if result.text_overrides:
     cycle.opt_sp.l1_section_overrides_text |= result.text_overrides
 if result.template_override:
     cycle.opt_sp.l1_template_override = result.template_override
-cycle.escalation.l2.record_entry(...)
+cycle.escalation.record_l2_fired(best_accuracy=..., best_composite=...)
 
 is_probe = result.action is OptimizerAction.PROBE_ROUND
 record_decision("probe_round_commitment", ..., outcome=is_probe, ...)

@@ -22,6 +22,7 @@ from promptpotter.application.bootstrap import (
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import (
     Cycle,
+    NextAction,
     build_escalation_entry,
 )
 from promptpotter.application.optimization.escalation import (
@@ -252,16 +253,6 @@ async def _escalate_or_stop(
         raise StopLoop(stop)
 
 
-def _advance_l1_stall(cycle: Cycle, round_result: RoundResult, cb: RunListener) -> None:
-    """Bump (or reset) the L1 stall counter, clear volatile state on improvement, fan out."""
-    cycle.escalation.l1_stall_count = (
-        0 if round_result.improved else cycle.escalation.l1_stall_count + 1
-    )
-    if round_result.improved:
-        cycle.opt_sp.clear_volatile()
-    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
-
-
 def _persist_round(
     cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
 ) -> None:
@@ -406,23 +397,6 @@ def _evolve_scoring_set_if_enabled(
         )
 
 
-async def _check_stop_or_escalate(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    round_num: int,
-    cb: RunListener,
-) -> None:
-    """Raise ``StopLoop`` on perfect/patience, or trigger L2 escalation when stalled."""
-    if cycle.tracking.current_accuracy >= 1.0:
-        raise StopLoop(StopReason.PERFECT)
-    if cycle.escalation.l1_stall_count >= config.optimization.l1_patience:
-        if not config.optimization.enable_l2:
-            raise StopLoop(StopReason.PATIENCE)
-        await _escalate_or_stop(cycle, config, session, round_num, cb)
-        cycle.escalation.l1_stall_count = 0
-
-
 async def _post_round(
     cycle: Cycle,
     round_result: RoundResult,
@@ -432,8 +406,22 @@ async def _post_round(
     dataset: list[Sample],
     cb: RunListener,
 ) -> None:
-    """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition."""
-    _advance_l1_stall(cycle, round_result, cb)
+    """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition.
+
+    The state machine observes the round outcome up front (bumping L1 stall,
+    deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function persists
+    the post-observe state and dispatches the chosen action.
+    """
+    event = cycle.escalation.observe_round(
+        improved=round_result.improved,
+        current_accuracy=cycle.tracking.current_accuracy,
+        l1_patience=config.optimization.l1_patience,
+        enable_l2=config.optimization.enable_l2,
+    )
+    if round_result.improved:
+        cycle.opt_sp.clear_volatile()
+    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
+
     _persist_round(cycle, round_result, round_num, session)
 
     # Hot-swap composite formula via scoring_steer.json BEFORE round-boundary
@@ -443,7 +431,11 @@ async def _post_round(
 
     _refresh_axes_and_filter(cycle, config, session, dataset, round_num, cb)
     _evolve_scoring_set_if_enabled(cycle, round_result, round_num, dataset, config, session, cb)
-    await _check_stop_or_escalate(cycle, config, session, round_num, cb)
+
+    if event.stop_reason is not None:
+        raise StopLoop(event.stop_reason)
+    if event.next_action == NextAction.FIRE_L2:
+        await _escalate_or_stop(cycle, config, session, round_num, cb)
 
 
 async def _run_sweep_generation_only(
@@ -491,7 +483,6 @@ async def _run_sweep_generation_only(
                     "l1_n_no_op": yield_stats.n_no_op,
                     "l1_n_duplicate": yield_stats.n_duplicate,
                     "opt_search_point": cycle.opt_sp.model_dump(),
-                    **cycle.escalation.to_checkpoint_dict(),
                 },
             )
         write_log_md(session)

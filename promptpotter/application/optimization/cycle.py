@@ -7,6 +7,7 @@ archival. Action driver (escalate_l2 + L2/L3 strategies) lives in escalation.py
 
 from __future__ import annotations
 
+import enum
 import hashlib
 import json
 import logging
@@ -28,12 +29,15 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.opt_search_point import OptSearchPoint, RoundSummary
+from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import (
     DECISION_GATING,
     Decision,
     DecisionKind,
     GatingMode,
+    Phase,
+    RunRecord,
     SweepPayload,
     record_decision,
 )
@@ -68,9 +72,11 @@ __all__ = [
     "Cycle",
     "Decision",
     "Divergence",
+    "EscalationEvent",
     "EscalationState",
     "ForkResult",
-    "LayerCounter",
+    "LayerView",
+    "NextAction",
     "ReplayContext",
     "build_escalation_entry",
     "fork_for_diag_sibling",
@@ -89,7 +95,7 @@ def _build_scoreboard(
     """Trial-JSON `scoreboard`: rank by (composite, accuracy) desc; tag winner."""
     ranked = sorted(
         candidate_scores,
-        key=lambda c: (c.get("composite", c.get("accuracy", 0.0)), c.get("accuracy", 0.0)),
+        key=lambda c: (c["composite"], c["accuracy"]),
         reverse=True,
     )
     rows: list[dict[str, Any]] = []
@@ -141,6 +147,34 @@ class ForkResult(NamedTuple):
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
 
 
+# Decorator-driven registry: ``@replayer(kind)`` populates this at import.
+# ``DECISION_GATING`` is the source of truth for which kinds exist with which
+# gating mode; the decorator refuses to register an ARCHIVAL kind or a
+# duplicate, so REPLAYERS cannot drift from DECISION_GATING by construction.
+REPLAYERS: dict[DecisionKind, Replayer] = {}
+
+
+def replayer(kind: DecisionKind) -> Callable[[Replayer], Replayer]:
+    """Register a function as the replayer for ``kind``.
+
+    Fails at decoration time if the kind is ARCHIVAL in ``DECISION_GATING``
+    or already has a replayer registered.
+    """
+    if DECISION_GATING.get(kind) is not GatingMode.REPLAYED:
+        raise ValueError(
+            f"@replayer({kind!r}): not REPLAYED in DECISION_GATING. "
+            f"Add the kind to DECISION_GATING with mode=REPLAYED first."
+        )
+    if kind in REPLAYERS:
+        raise ValueError(f"@replayer({kind!r}): duplicate registration")
+
+    def deco(fn: Replayer) -> Replayer:
+        REPLAYERS[kind] = fn
+        return fn
+
+    return deco
+
+
 def replay_decisions(
     trial: dict[str, Any],
     prior_trials: list[dict[str, Any]] | None = None,
@@ -181,6 +215,7 @@ def _mean_score(results: list[dict]) -> float:
     return sum(float(r.get("score", 0.0)) for r in results) / len(results)
 
 
+@replayer(DecisionKind.ROUND_WINNER)
 def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
@@ -215,6 +250,7 @@ def _pobb_replay_snapshot(
     return candidate_id, posterior_best_probabilities({**priors, candidate_id: current}), current
 
 
+@replayer(DecisionKind.ELIMINATION_CUT)
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """PoBB gate under rescored scores."""
     snap = _pobb_replay_snapshot(ctx, inputs_ref)
@@ -224,6 +260,7 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(inputs_ref["epsilon"]))
 
 
+@replayer(DecisionKind.LEADER_LOCK_IN)
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """PoBB leader-lock under rescored scores; argmax + P(best) ≥ lock_in + n ≥ lock_in_n_min."""
     if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
@@ -255,11 +292,7 @@ def _derive_stall_count(
         if r < 0 or r > this_round:
             continue
         winner_results = t.get("results") or []
-        comp = (
-            _mean_score(winner_results)
-            if winner_results
-            else float(t.get("composite", t.get("accuracy", 0.0)))
-        )
+        comp = _mean_score(winner_results) if winner_results else float(t["composite"])
         running_max = max(running_max, comp)
         if r <= entry_round:
             if r == entry_round:
@@ -288,25 +321,12 @@ def _replay_layer_trigger(patience_key: str) -> Replayer:
     return _replay
 
 
-_replay_l2_trigger = _replay_layer_trigger("l2_patience")
-_replay_l3_trigger = _replay_layer_trigger("l3_patience")
-
-
-# Flat registry: DecisionKind → replayer. ARCHIVAL kinds (per ``DECISION_GATING``)
-# MUST NOT appear here; ``test_decision_kinds_registry.py`` enforces the pairing.
-# The check below runs once at import; if it ever trips, fix the table — don't
-# silence it.
-REPLAYERS: dict[DecisionKind, Replayer] = {
-    DecisionKind.ROUND_WINNER: _replay_round_winner,
-    DecisionKind.ELIMINATION_CUT: _replay_elimination_cut,
-    DecisionKind.LEADER_LOCK_IN: _replay_leader_lock_in,
-    DecisionKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
-    DecisionKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
-}
-for _kind in REPLAYERS:
-    if DECISION_GATING.get(_kind) is not GatingMode.REPLAYED:
-        raise ValueError(f"REPLAYERS entry {_kind!r} is not REPLAYED in DECISION_GATING")
-del _kind
+_replay_l2_trigger = replayer(DecisionKind.L2_ESCALATION_TRIGGER)(
+    _replay_layer_trigger("l2_patience")
+)
+_replay_l3_trigger = replayer(DecisionKind.L3_ESCALATION_TRIGGER)(
+    _replay_layer_trigger("l3_patience")
+)
 
 
 def _fork_sibling_setup(
@@ -558,63 +578,287 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
     )
 
 
-@dataclass
-class LayerCounter:
-    """Per-layer escalation tracking (stall count, round count, entry baseline)."""
+class NextAction(enum.StrEnum):
+    """What the round loop does after an escalation observation.
 
-    round: int = 0
-    stall_count: int = 0
-    best_accuracy_at_entry: float = 0.0
-    best_composite_at_entry: float = 0.0
+    Computed inside ``EscalationState`` from stall depth + layer history.
+    Stop variants carry the matching ``StopReason`` via
+    ``EscalationEvent.stop_reason``; ``CONTINUE`` / ``FIRE_*`` carry None.
+    """
 
-    def record_outcome(self, best_composite: float) -> bool:
-        """Update stall_count after a round. Returns True if stalled (not improved)."""
-        improved = best_composite > self.best_composite_at_entry
-        self.stall_count = 0 if improved or self.round == 0 else self.stall_count + 1
-        return not improved and self.round > 0
-
-    def record_entry(self, best_accuracy: float, best_composite: float) -> None:
-        self.round += 1
-        self.best_accuracy_at_entry = best_accuracy
-        self.best_composite_at_entry = best_composite
+    CONTINUE = "continue"
+    FIRE_L2 = "fire_l2"
+    FIRE_L3 = "fire_l3"
+    STOP_PERFECT = "stop_perfect"
+    STOP_L1_PATIENCE = "stop_l1_patience"
+    STOP_L2_PATIENCE = "stop_l2_patience"
+    STOP_L3_PATIENCE = "stop_l3_patience"
 
 
-_LAYER_COUNTER_FIELDS = (
-    "round",
-    "stall_count",
-    "best_accuracy_at_entry",
-    "best_composite_at_entry",
-)
+_NEXT_ACTION_TO_STOP: dict[NextAction, StopReason] = {
+    NextAction.STOP_PERFECT: StopReason.PERFECT,
+    NextAction.STOP_L1_PATIENCE: StopReason.PATIENCE,
+    NextAction.STOP_L2_PATIENCE: StopReason.L2_PATIENCE,
+    NextAction.STOP_L3_PATIENCE: StopReason.L3_PATIENCE,
+}
 
 
-@dataclass
+@dataclass(frozen=True)
+class EscalationEvent:
+    """Outcome of one escalation observation — what the loop does next.
+
+    ``stall_depth`` is the layer-relevant counter at decision time (L1 stall
+    for ``observe_round``; L2 or L3 stall for ``observe_l2_escalation``).
+    ``reason`` is human-readable for telemetry; consumers branch on
+    ``next_action`` and read ``stop_reason`` for the StopLoop projection.
+    """
+
+    next_action: NextAction
+    stall_depth: int
+    reason: str
+
+    @property
+    def stop_reason(self) -> StopReason | None:
+        return _NEXT_ACTION_TO_STOP.get(self.next_action)
+
+
+@dataclass(frozen=True)
+class LayerView:
+    """Read-only snapshot of an L2/L3 layer counter — exposed via
+    ``EscalationState.l2`` / ``.l3``. Constructed fresh per access so the
+    underlying counters cannot be mutated through the view.
+    """
+
+    round: int
+    stall_count: int
+    best_accuracy_at_entry: float
+    best_composite_at_entry: float
+
+
 class EscalationState:
-    """L1 stall counter + L2/L3 LayerCounter instances."""
+    """Cause-driven L1/L2/L3 escalation. Counters are private; the only
+    mutation surface is the observation methods (``observe_round``,
+    ``observe_l2_escalation``) and the post-fire bookkeepers
+    (``record_l2_fired``, ``record_l3_fired``). Read access is via
+    ``l1_stall_count`` / ``l2`` / ``l3`` properties — there is no public
+    setter for any counter, so the "signals from measurement, not the
+    calendar" rule (per ``promptpotter/CLAUDE.md``) is structural: there
+    is no field to assign a ``round_num >= N`` literal to.
+    """
 
-    l1_stall_count: int = 0
-    l2: LayerCounter = field(default_factory=LayerCounter)
-    l3: LayerCounter = field(default_factory=LayerCounter)
+    __slots__ = (
+        "_l1_stall_count",
+        "_l2_best_accuracy_at_entry",
+        "_l2_best_composite_at_entry",
+        "_l2_round",
+        "_l2_stall_count",
+        "_l3_best_accuracy_at_entry",
+        "_l3_best_composite_at_entry",
+        "_l3_round",
+        "_l3_stall_count",
+    )
 
-    def reset_for_l3(self, best_accuracy: float, best_composite: float) -> None:
-        self.l2 = LayerCounter(
-            best_accuracy_at_entry=best_accuracy,
-            best_composite_at_entry=best_composite,
+    def __init__(self) -> None:
+        self._l1_stall_count = 0
+        self._l2_round = 0
+        self._l2_stall_count = 0
+        self._l2_best_accuracy_at_entry = 0.0
+        self._l2_best_composite_at_entry = 0.0
+        self._l3_round = 0
+        self._l3_stall_count = 0
+        self._l3_best_accuracy_at_entry = 0.0
+        self._l3_best_composite_at_entry = 0.0
+
+    # ---- Read-only access (telemetry, decision payloads, prompt vars) ----
+
+    @property
+    def l1_stall_count(self) -> int:
+        return self._l1_stall_count
+
+    @property
+    def l2(self) -> LayerView:
+        return LayerView(
+            round=self._l2_round,
+            stall_count=self._l2_stall_count,
+            best_accuracy_at_entry=self._l2_best_accuracy_at_entry,
+            best_composite_at_entry=self._l2_best_composite_at_entry,
         )
 
-    def to_checkpoint_dict(self) -> dict[str, Any]:
-        out: dict[str, Any] = {"l1_stall_count": self.l1_stall_count}
-        for layer in ("l2", "l3"):
-            counter: LayerCounter = getattr(self, layer)
-            for f in _LAYER_COUNTER_FIELDS:
-                out[f"{layer}_{f}" if f != "round" else f"{layer}_round"] = getattr(counter, f)
-        return out
+    @property
+    def l3(self) -> LayerView:
+        return LayerView(
+            round=self._l3_round,
+            stall_count=self._l3_stall_count,
+            best_accuracy_at_entry=self._l3_best_accuracy_at_entry,
+            best_composite_at_entry=self._l3_best_composite_at_entry,
+        )
+
+    # ---- Observations: the only mutation surface ----
+
+    def observe_round(
+        self,
+        *,
+        improved: bool,
+        current_accuracy: float,
+        l1_patience: int,
+        enable_l2: bool,
+    ) -> EscalationEvent:
+        """L1 round outcome. Bumps the stall counter; returns CONTINUE /
+        FIRE_L2 / STOP_PERFECT / STOP_L1_PATIENCE.
+
+        L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
+        the mid-round signal path (DegradationCheck) shares the same cascade.
+        """
+        self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
+
+        if current_accuracy >= 1.0:
+            return EscalationEvent(
+                next_action=NextAction.STOP_PERFECT,
+                stall_depth=self._l1_stall_count,
+                reason="composite >= 1.0",
+            )
+        if self._l1_stall_count < l1_patience:
+            return EscalationEvent(
+                next_action=NextAction.CONTINUE,
+                stall_depth=self._l1_stall_count,
+                reason=f"L1 stall {self._l1_stall_count}/{l1_patience}",
+            )
+        if not enable_l2:
+            return EscalationEvent(
+                next_action=NextAction.STOP_L1_PATIENCE,
+                stall_depth=self._l1_stall_count,
+                reason="L1 patience exhausted; L2 disabled",
+            )
+        return EscalationEvent(
+            next_action=NextAction.FIRE_L2,
+            stall_depth=self._l1_stall_count,
+            reason="L1 patience exhausted -> L2",
+        )
+
+    def observe_l2_escalation(
+        self,
+        *,
+        current_composite: float,
+        l2_patience: int | None,
+        l3_patience: int | None,
+        enable_l3: bool,
+    ) -> EscalationEvent:
+        """L2 escalation requested (L1 patience or mid-round signal). Updates
+        the L2 stall counter (and L3's when cascading); returns FIRE_L2 /
+        FIRE_L3 / STOP_L2_PATIENCE / STOP_L3_PATIENCE.
+
+        First-invocation grace: ``stall_count`` only advances after a layer
+        has fired at least once (``round > 0``) — the prior best composite
+        captured at entry is the comparator.
+        """
+        if self._l2_round > 0:
+            l2_improved = current_composite > self._l2_best_composite_at_entry
+            self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
+
+        if l2_patience is None or self._l2_stall_count < l2_patience:
+            return EscalationEvent(
+                next_action=NextAction.FIRE_L2,
+                stall_depth=self._l2_stall_count,
+                reason=f"L2 stall {self._l2_stall_count}/{l2_patience}",
+            )
+
+        if not enable_l3:
+            return EscalationEvent(
+                next_action=NextAction.STOP_L2_PATIENCE,
+                stall_depth=self._l2_stall_count,
+                reason="L2 patience exhausted; L3 disabled",
+            )
+
+        if self._l3_round > 0:
+            l3_improved = current_composite > self._l3_best_composite_at_entry
+            self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
+
+        if l3_patience is None or self._l3_stall_count < l3_patience:
+            return EscalationEvent(
+                next_action=NextAction.FIRE_L3,
+                stall_depth=self._l3_stall_count,
+                reason=f"L2 patience -> L3 stall {self._l3_stall_count}/{l3_patience}",
+            )
+
+        return EscalationEvent(
+            next_action=NextAction.STOP_L3_PATIENCE,
+            stall_depth=self._l3_stall_count,
+            reason="L3 patience exhausted",
+        )
+
+    # ---- Post-fire bookkeepers ----
+
+    def record_l2_fired(self, *, best_accuracy: float, best_composite: float) -> None:
+        """L2 LLM completed. Bumps L2 round, captures entry baseline; resets L1 stall."""
+        self._l1_stall_count = 0
+        self._l2_round += 1
+        self._l2_best_accuracy_at_entry = best_accuracy
+        self._l2_best_composite_at_entry = best_composite
+
+    def record_l3_fired(self, *, best_accuracy: float, best_composite: float) -> None:
+        """L3 LLM completed. Bumps L3 round, captures entry; resets L1 stall and
+        the L2 counter — under a new plan, L2's prior progress is invalidated.
+        """
+        self._l1_stall_count = 0
+        self._l3_round += 1
+        self._l3_best_accuracy_at_entry = best_accuracy
+        self._l3_best_composite_at_entry = best_composite
+        self._l2_round = 0
+        self._l2_stall_count = 0
+        self._l2_best_accuracy_at_entry = best_accuracy
+        self._l2_best_composite_at_entry = best_composite
+
+    # ---- Reducer over the ledger ----
+    #
+    # State is the fold of three Phase signals: round-complete (improved →
+    # L1 stall), l2_context exit (L2 fired → l2 state), l3_plan exit (L3
+    # fired → l3 state, l2 reset). The live mutators above are the in-memory
+    # cache of this fold; ``from_ledger`` rebuilds the same value on resume.
+
+    def fold(self, record: RunRecord) -> None:
+        """Advance state from one ledger record. No-op for unrelated records."""
+        if not isinstance(record, Phase):
+            return
+        if record.phase == "round" and record.event == "complete":
+            # Two Phase("round","complete") records exist per round: the
+            # display-side RunListener emit (no ``improved`` key) and the
+            # audit-side _persist_round emit (carries improved/composite).
+            # Fold only the audit emit so state isn't double-bumped.
+            payload = record.payload
+            if "improved" not in payload:
+                return
+            self._l1_stall_count = 0 if bool(payload["improved"]) else self._l1_stall_count + 1
+        elif record.phase == "l2_context" and record.event == "exit":
+            data = record.payload.get("data") or {}
+            self._l1_stall_count = 0
+            self._l2_round = int(data["l2_round"])
+            self._l2_stall_count = int(data["l2_stall_count"])
+            self._l2_best_accuracy_at_entry = float(data["l2_best_accuracy_at_entry"])
+            self._l2_best_composite_at_entry = float(data["l2_best_composite_at_entry"])
+        elif record.phase == "l3_plan" and record.event == "exit":
+            data = record.payload.get("data") or {}
+            best_acc = float(data["l3_best_accuracy_at_entry"])
+            best_comp = float(data["l3_best_composite_at_entry"])
+            self._l1_stall_count = 0
+            self._l3_round = int(data["l3_round"])
+            self._l3_stall_count = int(data["l3_stall_count"])
+            self._l3_best_accuracy_at_entry = best_acc
+            self._l3_best_composite_at_entry = best_comp
+            # record_l3_fired wipes L2 — under a new plan, prior L2 stall is gone.
+            self._l2_round = 0
+            self._l2_stall_count = 0
+            self._l2_best_accuracy_at_entry = best_acc
+            self._l2_best_composite_at_entry = best_comp
 
     @classmethod
-    def from_checkpoint_dict(cls, d: dict) -> EscalationState:
-        def _counter(prefix: str) -> LayerCounter:
-            return LayerCounter(**{f: d[f"{prefix}_{f}"] for f in _LAYER_COUNTER_FIELDS})
-
-        return cls(l1_stall_count=d["l1_stall_count"], l2=_counter("l2"), l3=_counter("l3"))
+    def from_ledger(cls, ledger: RunLedger | None) -> EscalationState:
+        """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state."""
+        s = cls()
+        if ledger is None:
+            return s
+        for rec in ledger.iter():
+            s.fold(rec)
+        return s
 
 
 @dataclass
@@ -701,9 +945,13 @@ class Cycle:
         )
 
     def restore_from_trial(self, trial: dict[str, Any]) -> None:
-        """Restore optimizer state from a campaign checkpoint dict (in-place)."""
+        """Restore optimizer state from a campaign checkpoint dict (in-place).
+
+        ``EscalationState`` is NOT read from the trial — it's a projection of
+        the ledger and must be rebuilt by the resume path via
+        ``EscalationState.from_ledger``.
+        """
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
-        self.escalation = EscalationState.from_checkpoint_dict(trial)
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
@@ -817,7 +1065,6 @@ class Cycle:
             "candidate_scores": list(rr.candidate_scores),
             "decisions": list(rr.decisions),
             "evaluators": dict(rr.evaluators),
-            **self.escalation.to_checkpoint_dict(),
             "opt_search_point": self.opt_sp.model_dump(),
             **(
                 {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}
@@ -880,6 +1127,7 @@ def resume_with_divergence_check(
                 )
                 if survivors:
                     cycle.restore_from_trial(survivors[-1])
+                cycle.escalation = EscalationState.from_ledger(session.state.ledger)
                 logger.warning(
                     "Resume diverged at round %d (%s); forked → %s",
                     div.round_num,
@@ -906,6 +1154,7 @@ def resume_with_divergence_check(
 
     if prior:
         cycle.restore_from_trial(prior[-1])
+    cycle.escalation = EscalationState.from_ledger(session.state.ledger)
     return None
 
 

@@ -201,6 +201,92 @@ def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> 
     assert isinstance(history[2], Decision) and history[2].outcome == "c2"
 
 
+def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
+    """EscalationState is a projection of the ledger — fold == live mutation.
+
+    Named invariant from root CLAUDE.md: persistence has one ingress
+    (``RunLedger``). EscalationState used to checkpoint a parallel state dict
+    into every trial JSON; resume now rebuilds from the ledger. This test
+    drives both paths over an identical sequence and asserts they agree.
+    """
+    from promptpotter.application.optimization.cycle import EscalationState
+
+    ledger = RunLedger.open(CycleDir(tmp_path / "cyc"))
+
+    # Round 1: not improved → l1 stall = 1.
+    ledger.append(
+        Phase(
+            phase="round",
+            event="complete",
+            round=1,
+            payload={"improved": False, "composite": 0.5, "accuracy": 0.5, "label": "round_1"},
+        )
+    )
+    # Round 2: improved → l1 stall reset to 0.
+    ledger.append(
+        Phase(
+            phase="round",
+            event="complete",
+            round=2,
+            payload={"improved": True, "composite": 0.6, "accuracy": 0.6, "label": "round_2"},
+        )
+    )
+    # L2 fires on round 3.
+    ledger.append(
+        Phase(
+            phase="l2_context",
+            event="exit",
+            round=3,
+            payload={
+                "data": {
+                    "l2_round": 1,
+                    "l2_stall_count": 0,
+                    "l2_best_accuracy_at_entry": 0.6,
+                    "l2_best_composite_at_entry": 0.6,
+                }
+            },
+        )
+    )
+    # L3 fires on round 5 — must wipe L2 state to L3's entry baseline.
+    ledger.append(
+        Phase(
+            phase="l3_plan",
+            event="exit",
+            round=5,
+            payload={
+                "data": {
+                    "l3_round": 1,
+                    "l3_stall_count": 0,
+                    "l3_best_accuracy_at_entry": 0.7,
+                    "l3_best_composite_at_entry": 0.7,
+                }
+            },
+        )
+    )
+
+    rebuilt = EscalationState.from_ledger(ledger)
+    assert rebuilt.l1_stall_count == 0  # reset by L3 fire
+    assert rebuilt.l2.round == 0  # wiped by L3 fire
+    assert rebuilt.l2.stall_count == 0
+    assert rebuilt.l2.best_composite_at_entry == 0.7  # rebased to L3's entry
+    assert rebuilt.l3.round == 1
+    assert rebuilt.l3.best_composite_at_entry == 0.7
+
+    # Display-side Phase("round","complete") emit (no ``improved`` key) must
+    # not double-bump the L1 stall counter — only the audit-side emit folds.
+    ledger2 = RunLedger.open(CycleDir(tmp_path / "cyc2"))
+    ledger2.append(Phase(phase="round", event="complete", round=1, payload={"l1_stall_count": 999}))
+    ledger2.append(
+        Phase(
+            phase="round",
+            event="complete",
+            round=1,
+            payload={"improved": False, "composite": 0.5},
+        )
+    )
+    assert EscalationState.from_ledger(ledger2).l1_stall_count == 1
+
+
 def test_divergence_hint_lists_every_decision_kind() -> None:
     """The CLI hint shown on resume-divergence enumerates every kind by gating mode.
 
@@ -214,5 +300,3 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
         assert kind.value in _DIVERGENCE_HINT, (
             f"_DIVERGENCE_HINT must mention {kind.value} ({mode.value})"
         )
-
-
