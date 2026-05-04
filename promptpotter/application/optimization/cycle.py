@@ -28,12 +28,12 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, cast
+from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.optimization.pipeline import (
     L2RefineStrategy,
     L3ModifyPlan,
-    LayerTransition,
+    run_layer_transition,
 )
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -81,7 +81,6 @@ __all__ = [
     "escalate_l2",
     "record_decision",
     "replay_decisions",
-    "replayer",
     "resume_with_divergence_check",
 ]
 
@@ -132,28 +131,25 @@ def _build_scoreboard(
     return rows
 
 
-@dataclass(frozen=True)
-class Divergence:
+class Divergence(NamedTuple):
     """A recorded decision re-derived to a different outcome under the current scorer."""
 
     round_num: int
     kind: str
     recorded_outcome: Any
     current_outcome: Any
-    inputs_ref: dict[str, Any] = field(default_factory=dict)
+    inputs_ref: dict[str, Any]
 
 
-@dataclass(frozen=True)
-class ReplayContext:
+class ReplayContext(NamedTuple):
     """Context passed to replayers — trial + prior_trials + baseline_results all rescored."""
 
     trial: dict[str, Any]
-    prior_trials: list[dict[str, Any]] = field(default_factory=list)
-    baseline_results: list[dict[str, Any]] = field(default_factory=list)
+    prior_trials: list[dict[str, Any]]
+    baseline_results: list[dict[str, Any]]
 
 
-@dataclass(frozen=True)
-class ForkResult:
+class ForkResult(NamedTuple):
     """Resume detected divergence and forked into a sibling cycle."""
 
     new_cycle_id: str
@@ -161,26 +157,6 @@ class ForkResult:
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
-
-REPLAYERS: dict[DecisionKind, Replayer] = {}
-
-
-def replayer(kind: DecisionKind) -> Callable[[Replayer], Replayer]:
-    """Register a replayer function for a ``REPLAYED`` decision kind.
-
-    ``ARCHIVAL`` kinds (per ``DECISION_GATING``) MUST NOT be registered;
-    ``test_decision_kinds_registry.py`` enforces the pairing.
-    """
-    if DECISION_GATING.get(kind) is not GatingMode.REPLAYED:
-        raise ValueError(
-            f"replayer registered for {kind!r}, which is not REPLAYED in DECISION_GATING"
-        )
-
-    def deco(fn: Replayer) -> Replayer:
-        REPLAYERS[kind] = fn
-        return fn
-
-    return deco
 
 
 def record_decision(
@@ -248,7 +224,6 @@ def _mean_score(results: list[dict]) -> float:
     return sum(float(r.get("score", 0.0)) for r in results) / len(results)
 
 
-@replayer(DecisionKind.ROUND_WINNER)
 def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
     all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
@@ -265,7 +240,6 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     return winner_id
 
 
-@replayer(DecisionKind.ELIMINATION_CUT)
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-run the Bayesian PoBB gate under rescored scores.
 
@@ -303,7 +277,6 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return pobb_should_stop(snapshot.get(candidate_id, 1.0), epsilon)
 
 
-@replayer(DecisionKind.LEADER_LOCK_IN)
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-run the PoBB lock-in gate under rescored scores.
 
@@ -368,7 +341,6 @@ def _derive_stall_count(
     return rounds_after if baseline is not None else 0
 
 
-@replayer(DecisionKind.L2_ESCALATION_TRIGGER)
 def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-derive L2 fire/patience-defer."""
     patience = inputs_ref.get("l2_patience")
@@ -380,7 +352,6 @@ def _replay_l2_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     return stalls < int(patience)
 
 
-@replayer(DecisionKind.L3_ESCALATION_TRIGGER)
 def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """Re-derive whether L3 fires. Same shape as ``l2_escalation_trigger``."""
     patience = inputs_ref.get("l3_patience")
@@ -390,6 +361,105 @@ def _replay_l3_trigger(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     this_round = int(inputs_ref.get("round_num", -1))
     stalls = _derive_stall_count(ctx.prior_trials, entry_round, this_round)
     return stalls < int(patience)
+
+
+# Flat registry: DecisionKind → replayer. ARCHIVAL kinds (per ``DECISION_GATING``)
+# MUST NOT appear here; ``test_decision_kinds_registry.py`` enforces the pairing.
+# The check below runs once at import; if it ever trips, fix the table — don't
+# silence it.
+REPLAYERS: dict[DecisionKind, Replayer] = {
+    DecisionKind.ROUND_WINNER: _replay_round_winner,
+    DecisionKind.ELIMINATION_CUT: _replay_elimination_cut,
+    DecisionKind.LEADER_LOCK_IN: _replay_leader_lock_in,
+    DecisionKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
+    DecisionKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
+}
+for _kind in REPLAYERS:
+    if DECISION_GATING.get(_kind) is not GatingMode.REPLAYED:
+        raise ValueError(f"REPLAYERS entry {_kind!r} is not REPLAYED in DECISION_GATING")
+del _kind
+
+
+def _fork_sibling_setup(
+    campaign_store: CampaignStore,
+    tenant_id: str,
+    session_id: str,
+    parent_cycle_id: str,
+    new_cycle_id: str,
+    *,
+    from_round: int,
+    fork_data: dict[str, Any] | None = None,
+    log_extra: str = "",
+) -> tuple[Path, Path, str, dict[str, Any]]:
+    """Common fork plumbing: dir create, FORK_CUT append, parent index read, pointer + log.
+
+    Returns ``(parent_dir, new_dir, now_iso, parent_index)``. Caller writes
+    ``new_dir/index.json`` and any per-fork artifacts.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir
+    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.store.base import read_json_optional
+    from promptpotter.infrastructure.store.stores import save_active_pointer
+
+    parent_dir = campaign_store.campaign_dir(parent_cycle_id)
+    new_dir = campaign_store.campaign_dir(new_cycle_id)
+    if new_dir.exists():
+        raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
+    new_dir.mkdir(parents=True, exist_ok=True)
+
+    now = datetime.now(UTC).isoformat()
+    with graceful("FORK_CUT decision append failed"):
+        RunLedger.open(CycleDir(parent_dir)).append(
+            Decision(
+                kind=DecisionKind.FORK_CUT,
+                inputs_ref={"from_round": from_round},
+                outcome=new_cycle_id,
+                data={"forked_at": now, **(fork_data or {})},
+            )
+        )
+
+    parent_index = read_json_optional(parent_dir / "index.json") or {}
+    save_active_pointer(tenant_id, session_id, new_cycle_id)
+    logger.info(
+        "Forked %s → %s at round %d%s (active pointer retargeted)",
+        parent_cycle_id,
+        new_cycle_id,
+        from_round,
+        log_extra,
+    )
+    return parent_dir, new_dir, now, parent_index
+
+
+def _fresh_sibling_index(
+    parent_index: dict[str, Any],
+    new_cycle_id: str,
+    parent_cycle_id: str,
+    fork_kind: str,
+    now: str,
+    **extras: Any,
+) -> dict[str, Any]:
+    """Build a clean-slate sibling index inheriting type/config/backend from the parent."""
+    return {
+        "campaign_id": new_cycle_id,
+        "type": parent_index.get("type", "optimization_loop"),
+        "config": parent_index.get("config", {}),
+        "connector_type": parent_index.get("connector_type", ""),
+        "backend_id": parent_index.get("backend_id", ""),
+        "parent_cycle_id": parent_cycle_id,
+        "parent_session_id": parent_index.get("parent_session_id", ""),
+        "forked_from_round": 0,
+        "forked_at": now,
+        "fork_kind": fork_kind,
+        "trials": [],
+        "n_trials": 0,
+        "best_accuracy": 0.0,
+        "best_trial_id": None,
+        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
+        "status": "active",
+        "created_at": now,
+        "updated_at": now,
+        **extras,
+    }
 
 
 def _fork_at_divergence(
@@ -402,58 +472,34 @@ def _fork_at_divergence(
 ) -> str:
     """Mint an operator-divergence sibling that re-runs round ``fork_from_round``.
 
-    Resume semantics: the fork inherits the parent's prior-round
-    artifacts (``trials/trial_NNNN.json`` and the
-    ``.runtime/cache/candidates/round_NNNN.json`` checkpoints) for
-    every round below ``fork_from_round`` so the resumed loop replays
-    those rounds deterministically before re-running round
-    ``fork_from_round`` under the current scorer.
-
-    Records a ``Decision(kind=FORK_CUT, ...)`` on the parent's ledger
-    naming the new cycle id and the fork-from-round so any downstream
-    reader following the parent's ``events.jsonl`` sees the cutover
-    inline. The fork's own ledger inherits from the parent up to (but
-    not including) the FORK_CUT — wired in :mod:`runner` after the
-    fork is detected.
+    Inherits the parent's prior-round artifacts (``trials/trial_NNNN.json``
+    and the ``.runtime/cache/candidates/round_NNNN.json`` checkpoints) for
+    every round below ``fork_from_round`` so the resumed loop replays those
+    rounds deterministically before re-running round ``fork_from_round``
+    under the current scorer.
 
     Sibling forks that intentionally re-explore from round 0 (sweep,
     diag-BFS) must NOT pass through this function — they would inherit
-    the parent's stale round-0 candidate checkpoint and short-circuit
-    L1 generation. Use :func:`_fork_for_sweep_sibling` or
+    the parent's stale round-0 candidate checkpoint and short-circuit L1
+    generation. Use :func:`_fork_for_sweep_sibling` or
     :func:`_fork_for_diag_sibling` for clean-slate siblings.
     """
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import RunLedger
-    from promptpotter.infrastructure.store.base import read_json_optional, write_json
-    from promptpotter.infrastructure.store.stores import save_active_pointer
+    from promptpotter.infrastructure.store.base import write_json
 
     ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
     new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
-    old_dir = campaign_store.campaign_dir(old_cycle_id)
-    new_dir = campaign_store.campaign_dir(new_cycle_id)
-    if new_dir.exists():
-        raise FileExistsError(f"forked cycle dir already exists: {new_dir}")
-    new_dir.mkdir(parents=True, exist_ok=True)
 
-    with graceful("FORK_CUT decision append failed"):
-        parent_ledger = RunLedger.open(CycleDir(old_dir))
-        parent_ledger.append(
-            Decision(
-                kind=DecisionKind.FORK_CUT,
-                inputs_ref={"from_round": fork_from_round},
-                outcome=new_cycle_id,
-                data={"forked_at": datetime.now(UTC).isoformat()},
-            )
-        )
+    old_dir, new_dir, now, index = _fork_sibling_setup(
+        campaign_store, tenant_id, session_id, old_cycle_id, new_cycle_id,
+        from_round=fork_from_round,
+    )
 
-    index = read_json_optional(old_dir / "index.json") or {}
     best_acc = max((float(t.get("accuracy", 0.0)) for t in surviving_trials), default=0.0)
     best_trial_id = next(
         (t.get("trial_id") for t in surviving_trials if float(t.get("accuracy", 0.0)) == best_acc),
         None,
     )
-    now = datetime.now(UTC).isoformat()
     index.update(
         {
             "campaign_id": new_cycle_id,
@@ -490,13 +536,6 @@ def _fork_at_divergence(
             if n < fork_from_round:
                 shutil.copyfile(p, dst / p.name)
 
-    save_active_pointer(tenant_id, session_id, new_cycle_id)
-    logger.info(
-        "Forked cycle %s → %s at round %d (active pointer retargeted)",
-        old_cycle_id,
-        new_cycle_id,
-        fork_from_round,
-    )
     return new_cycle_id
 
 
@@ -524,59 +563,17 @@ def _fork_for_diag_sibling(
     session_id: str,
     parent_cycle_id: str,
 ) -> str:
-    """Mint a diag-BFS sibling rooted at round 0; records ``FORK_CUT`` on the parent ledger and retargets the active pointer."""
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import RunLedger
-    from promptpotter.infrastructure.store.base import read_json_optional, write_json
-    from promptpotter.infrastructure.store.stores import save_active_pointer
+    """Mint a diag-BFS sibling rooted at round 0; records ``FORK_CUT`` and retargets the active pointer."""
+    from promptpotter.infrastructure.store.base import write_json
 
     new_cycle_id = _next_diag_sibling_id(campaign_store, parent_cycle_id)
-    parent_dir = campaign_store.campaign_dir(parent_cycle_id)
-    new_dir = campaign_store.campaign_dir(new_cycle_id)
-    if new_dir.exists():
-        raise FileExistsError(f"diag sibling dir already exists: {new_dir}")
-    new_dir.mkdir(parents=True, exist_ok=True)
-
-    now = datetime.now(UTC).isoformat()
-    with graceful("FORK_CUT decision append failed"):
-        parent_ledger = RunLedger.open(CycleDir(parent_dir))
-        parent_ledger.append(
-            Decision(
-                kind=DecisionKind.FORK_CUT,
-                inputs_ref={"from_round": 0},
-                outcome=new_cycle_id,
-                data={"forked_at": now, "kind": "diag_sibling"},
-            )
-        )
-
-    parent_index = read_json_optional(parent_dir / "index.json") or {}
-    new_index: dict[str, Any] = {
-        "campaign_id": new_cycle_id,
-        "type": parent_index.get("type", "optimization_loop"),
-        "config": parent_index.get("config", {}),
-        "connector_type": parent_index.get("connector_type", ""),
-        "backend_id": parent_index.get("backend_id", ""),
-        "parent_cycle_id": parent_cycle_id,
-        "parent_session_id": parent_index.get("parent_session_id", ""),
-        "forked_from_round": 0,
-        "forked_at": now,
-        "fork_kind": "diag_sibling",
-        "trials": [],
-        "n_trials": 0,
-        "best_accuracy": 0.0,
-        "best_trial_id": None,
-        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
-        "status": "active",
-        "created_at": now,
-        "updated_at": now,
-    }
-    write_json(new_dir / "index.json", new_index)
-
-    save_active_pointer(tenant_id, session_id, new_cycle_id)
-    logger.info(
-        "Diag sibling: %s → %s (active pointer retargeted)",
-        parent_cycle_id,
-        new_cycle_id,
+    _, new_dir, now, parent_index = _fork_sibling_setup(
+        campaign_store, tenant_id, session_id, parent_cycle_id, new_cycle_id,
+        from_round=0, fork_data={"kind": "diag_sibling"},
+    )
+    write_json(
+        new_dir / "index.json",
+        _fresh_sibling_index(parent_index, new_cycle_id, parent_cycle_id, "diag_sibling", now),
     )
     return new_cycle_id
 
@@ -594,26 +591,18 @@ def _fork_for_sweep_sibling(
 
     Sweep forks explore the parent's problem under a per-payload L1
     directive that ``apply_sweep_payload_to_osp`` stamps onto the fresh
-    OSP at runtime. Round 0 must regenerate via L1 to actually
-    exercise that directive; inheriting the parent's
-    ``round_0000.json`` candidate checkpoint (as
-    :func:`_fork_at_divergence` does for resume semantics) would
-    short-circuit L1 generation and make every fork score the parent's
-    pre-existing population — defeating the sweep.
+    OSP at runtime. Round 0 must regenerate via L1 to actually exercise
+    that directive; inheriting the parent's ``round_0000.json`` candidate
+    checkpoint would short-circuit L1 generation and make every fork
+    score the parent's pre-existing population — defeating the sweep.
 
     The cycle id encodes ``_sweep_{batch_id}_`` so ``campaign_dir_for``
-    routes the fork under ``sweeps/{batch_id}/forks/``.
-    ``sweep_batch_id`` must contain no underscores (use hyphens or
-    alnum only) — the cycle-id regex extracts it by splitting on ``_``.
-
-    The FORK_CUT record archives ``sweep_payload`` + ``source_file`` +
-    ``sweep_batch_id`` so :func:`_existing_fork_source_files` can dedupe
-    re-runs of the same payload from the same parent.
+    routes the fork under ``sweeps/{batch_id}/forks/``. ``sweep_batch_id``
+    must contain no underscores — the cycle-id regex extracts it by
+    splitting on ``_``. The FORK_CUT record archives ``sweep_payload`` +
+    ``source_file`` + ``sweep_batch_id`` so dedup can match re-runs.
     """
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import RunLedger
-    from promptpotter.infrastructure.store.base import read_json_optional, write_json
-    from promptpotter.infrastructure.store.stores import save_active_pointer
+    from promptpotter.infrastructure.store.base import write_json
 
     if "_" in sweep_batch_id:
         raise ValueError(f"sweep_batch_id must not contain underscores; got {sweep_batch_id!r}")
@@ -622,61 +611,24 @@ def _fork_for_sweep_sibling(
         :8
     ]
     new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
-    parent_dir = campaign_store.campaign_dir(parent_cycle_id)
-    new_dir = campaign_store.campaign_dir(new_cycle_id)
-    if new_dir.exists():
-        raise FileExistsError(f"sweep sibling dir already exists: {new_dir}")
-    new_dir.mkdir(parents=True, exist_ok=True)
 
-    now = datetime.now(UTC).isoformat()
-    with graceful("FORK_CUT decision append failed"):
-        parent_ledger = RunLedger.open(CycleDir(parent_dir))
-        parent_ledger.append(
-            Decision(
-                kind=DecisionKind.FORK_CUT,
-                inputs_ref={"from_round": 0},
-                outcome=new_cycle_id,
-                data={
-                    "forked_at": now,
-                    "kind": "sweep_fork",
-                    "sweep_batch_id": sweep_batch_id,
-                    "source_file": payload_source_file,
-                    "sweep_payload": payload.model_dump(mode="json"),
-                },
-            )
-        )
-
-    parent_index = read_json_optional(parent_dir / "index.json") or {}
-    new_index: dict[str, Any] = {
-        "campaign_id": new_cycle_id,
-        "type": parent_index.get("type", "optimization_loop"),
-        "config": parent_index.get("config", {}),
-        "connector_type": parent_index.get("connector_type", ""),
-        "backend_id": parent_index.get("backend_id", ""),
-        "parent_cycle_id": parent_cycle_id,
-        "parent_session_id": parent_index.get("parent_session_id", ""),
-        "forked_from_round": 0,
-        "forked_at": now,
-        "fork_kind": "sweep_fork",
-        "sweep_batch_id": sweep_batch_id,
-        "trials": [],
-        "n_trials": 0,
-        "best_accuracy": 0.0,
-        "best_trial_id": None,
-        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
-        "status": "active",
-        "created_at": now,
-        "updated_at": now,
-    }
-    write_json(new_dir / "index.json", new_index)
-
-    save_active_pointer(tenant_id, session_id, new_cycle_id)
-    logger.info(
-        "Sweep sibling: %s → %s (batch=%s, payload=%s; active pointer retargeted)",
-        parent_cycle_id,
-        new_cycle_id,
-        sweep_batch_id,
-        payload_source_file,
+    _, new_dir, now, parent_index = _fork_sibling_setup(
+        campaign_store, tenant_id, session_id, parent_cycle_id, new_cycle_id,
+        from_round=0,
+        fork_data={
+            "kind": "sweep_fork",
+            "sweep_batch_id": sweep_batch_id,
+            "source_file": payload_source_file,
+            "sweep_payload": payload.model_dump(mode="json"),
+        },
+        log_extra=f" [batch={sweep_batch_id}, payload={payload_source_file}]",
+    )
+    write_json(
+        new_dir / "index.json",
+        _fresh_sibling_index(
+            parent_index, new_cycle_id, parent_cycle_id, "sweep_fork", now,
+            sweep_batch_id=sweep_batch_id,
+        ),
     )
     return new_cycle_id
 
@@ -875,39 +827,6 @@ class Cycle:
         self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
         self.escalation = EscalationState.from_checkpoint_dict(trial)
 
-    def adopt_transition(
-        self,
-        new_opt: OptSearchPoint,
-        pipeline_params: dict | None,
-        *,
-        schema: PipelineSchema | None,
-    ) -> None:
-        """Adopt a new OptSearchPoint, preserving accumulated memory."""
-        self.opt_sp.copy_memory_to(new_opt)
-        self.opt_sp = new_opt
-        assert self.current_sp is not None
-        self.current_sp = self.opt_sp.to_job_search_point(
-            base_pipeline_params=pipeline_params or self.current_sp.pipeline_params,
-            schema=schema,
-        )
-
-    def update_current(
-        self,
-        rr: RoundResult,
-        search_point: JobSearchPoint,
-        round_num: int,
-    ) -> None:
-        """Apply a round result to current/best tracking."""
-        self.current_sp = search_point
-        self.current_accuracy = rr.accuracy
-        self.current_composite = rr.composite
-        self.current_results = list(rr.results)
-        if self.current_composite > self.best_composite:
-            self.best_composite = self.current_composite
-            self.best_accuracy = self.current_accuracy
-            self.best_round = round_num
-            self.best_sp = self.current_sp
-
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
         from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -934,25 +853,21 @@ class Cycle:
             if rr.pipeline_params is not None
             else self.current_sp.pipeline_params
         )
-        self.update_current(
-            rr,
-            self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema),
-            round_num,
+        self.current_sp = self.opt_sp.to_job_search_point(
+            base_pipeline_params=_pp, schema=schema
         )
+        self.current_accuracy = rr.accuracy
+        self.current_composite = rr.composite
+        self.current_results = list(rr.results)
+        if self.current_composite > self.best_composite:
+            self.best_composite = self.current_composite
+            self.best_accuracy = self.current_accuracy
+            self.best_round = round_num
+            self.best_sp = self.current_sp
 
     def record_decision(self, d: Decision) -> None:
         """Queue a decision produced outside the normal round flow (escalation/probe)."""
         self.pending_decisions.append(d)
-
-    def flush_decisions(self) -> list[Decision]:
-        """Drain queued decisions (used before checkpointing a round)."""
-        out = list(self.pending_decisions)
-        self.pending_decisions.clear()
-        return out
-
-    def set_probe(self, flag: bool) -> None:
-        """Mark whether the next round is a probe."""
-        self.probe_next_round = flag
 
     def apply_round_outcome(self, scoring_result: L1ScoringResult, critique_text: str) -> None:
         """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.
@@ -1175,7 +1090,7 @@ _TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
 
 
 async def _run_transition(
-    transition: LayerTransition,
+    transition: L2RefineStrategy | L3ModifyPlan,
     cycle: Cycle,
     config: CampaignConfig,
     pipeline_schema: Any,
@@ -1201,7 +1116,8 @@ async def _run_transition(
         campaign_id=obs_campaign_id,
         round_num=round_num,
     ):
-        result = await transition.run(
+        result = await run_layer_transition(
+            transition,
             cycle,
             client,
             model=config.optimizer_llm.model,
@@ -1210,9 +1126,11 @@ async def _run_transition(
             round_num=round_num,
             escalation_check_result=escalation_check_result,
         )
-    cycle.adopt_transition(
-        result.opt_search_point,
-        result.pipeline_params,
+    new_opt = result.opt_search_point
+    cycle.opt_sp.copy_memory_to(new_opt)
+    cycle.opt_sp = new_opt
+    cycle.current_sp = new_opt.to_job_search_point(
+        base_pipeline_params=result.pipeline_params or current_pp,
         schema=pipeline_schema,
     )
     if obs is not None:

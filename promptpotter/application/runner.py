@@ -288,7 +288,8 @@ def _persist_round(
     ledger for their views.
     """
     if cycle.pending_decisions:
-        flushed = cycle.flush_decisions()
+        flushed = list(cycle.pending_decisions)
+        cycle.pending_decisions.clear()
         round_result.decisions.extend(d.to_dict() for d in flushed)
         if (ledger := session.state.ledger) is not None:
             for d in flushed:
@@ -642,7 +643,7 @@ async def _run_round_loop(
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
 
             if is_probe:
-                cycle.set_probe(False)
+                cycle.probe_next_round = False
                 if opt.enable_l2:
                     await _escalate_or_stop(cycle, config, session, round_num, cb)
                 round_num += 1

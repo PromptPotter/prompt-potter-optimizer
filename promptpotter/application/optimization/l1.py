@@ -105,15 +105,6 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def _classify_axis(axis_key: str) -> str:
-    """Classify a pipeline_params override key as 'prompt_field', 'task_context', or 'pipeline_param'."""
-    if axis_key in PROMPT_STRING_FIELDS:
-        return "prompt_field"
-    if axis_key in TASK_CONTEXT_OVERRIDES:
-        return "task_context"
-    return "pipeline_param"
-
-
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
     """Construct the JSON schema L1 must conform to.
 
@@ -294,32 +285,26 @@ async def l1_generate(
         tc_changes: dict = {}
         node_overrides: dict = {}
         for k, pv in pp_override.items():
-            kind = _classify_axis(k)
-            if kind == "prompt_field":
+            if k in PROMPT_STRING_FIELDS:
                 prompt_changes[k] = pv
-            elif kind == "task_context":
+            elif k in TASK_CONTEXT_OVERRIDES:
                 tc_changes[k] = pv
             else:
                 node_overrides[k] = pv
 
         # Symmetric safety net: un-nest prompt / task_context fields the LLM
         # emitted under a node name (e.g. {"llm_only": {"answer_format": ...}}).
-        # Without this, the prompt mutation never reaches the OSP and the diff
-        # table mislabels the candidate as a clone of its parent.
         for node_name in list(node_overrides.keys()):
             nested = node_overrides[node_name]
             if not isinstance(nested, dict):
                 continue
             for sub_k in list(nested.keys()):
-                sub_kind = _classify_axis(sub_k)
-                if sub_kind == "prompt_field":
+                if sub_k in PROMPT_STRING_FIELDS:
                     logger.warning(
-                        "l1_generate: un-nesting prompt field %r from node %r",
-                        sub_k,
-                        node_name,
+                        "l1_generate: un-nesting prompt field %r from node %r", sub_k, node_name
                     )
                     prompt_changes[sub_k] = nested.pop(sub_k)
-                elif sub_kind == "task_context":
+                elif sub_k in TASK_CONTEXT_OVERRIDES:
                     logger.warning(
                         "l1_generate: un-nesting task_context field %r from node %r",
                         sub_k,
@@ -553,175 +538,6 @@ _INVALID_SCORES: dict[str, Any] = {
 }
 
 
-def _handle_scored_candidate(
-    osp_c: OptSearchPoint,
-    override: dict | None,
-    results: list[QueryResult],
-    scores: dict,
-    signal: EscalationSignal | None,
-    merged_pp_i: dict | None,
-    dataset: list,
-    elim_check: Any,
-    round_num: int,
-    *,
-    l1_diversity: float = 1.0,
-) -> tuple[CandidateScore, EscalationSignal | None]:
-    """Build report for a scored candidate; attach RuntimeFailure on elimination."""
-    elimination_stopped = signal is not None and signal.is_elimination
-    leader_locked = signal is not None and signal.is_leader_lock
-    scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
-    aborted = (
-        bool(signal) and not leader_locked and (scoring_error_abort or len(results) < len(dataset))
-    )
-
-    # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
-    if len(results) == len(dataset) and not aborted:
-        elim_check.register_completed(
-            [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
-        )
-
-    new_rf: RuntimeFailure | None = None
-    rf_kind = (
-        "degradation_check"
-        if elimination_stopped and signal is not None and signal.check_name == "degradation"
-        else "scoring_error_abort"
-        if scoring_error_abort
-        else None
-    )
-    if rf_kind and signal is not None:
-        cr = signal.check_result
-        dc = int(cr.get("degraded_count", 0))
-        te = int(cr.get("total_scored", len(results)))
-        if rf_kind == "degradation_check":
-            dominant = cr.get("dominant_warning", "unknown:unknown")
-            node_cfg = (merged_pp_i or {}).get(dominant.split(":", 1)[0], {})
-            rate = float(cr.get("degraded_rate", 0.0))
-        else:
-            dominant = str(cr.get("dominant_warning") or "scoring_error")
-            node_cfg = merged_pp_i or {}
-            rate = (dc / te) if te else 0.0
-        new_rf = RuntimeFailure(
-            source=rf_kind,
-            dominant_warning=dominant,
-            warning_types=dict(cr.get("warning_types") or {}),
-            degraded_rate=rate,
-            degraded_count=dc,
-            total_scored=te,
-            observed_config=dict(node_cfg),
-            first_seen_round=round_num,
-            candidate_label=osp_c.lineage.changes_description or "",
-        )
-        osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
-
-    elim_ctx: dict | None = None
-    if (
-        (elimination_stopped or leader_locked)
-        and signal is not None
-        and signal.check_name == "elimination"
-    ):
-        cr = signal.check_result
-        elim_ctx = {
-            "p_best": float(cr.get("p_best", 0.0)),
-            "epsilon": float(cr.get("epsilon", 0.05)),
-            "leader_id": str(cr.get("leader_id", "")),
-            "queries_scored": int(cr.get("queries_scored", len(results))),
-            "total_queries": int(cr.get("total_queries", len(dataset))),
-            "n_priors": int(cr.get("n_priors", 0)),
-            "leader_locked": leader_locked,
-        }
-
-    report = _build_score_report(
-        osp_c,
-        override,
-        scores,
-        results,
-        dataset,
-        aborted=aborted,
-        elimination_stopped=elimination_stopped,
-        elimination_context=elim_ctx,
-        new_runtime_failure=new_rf,
-        l1_diversity=l1_diversity,
-    )
-    residual = None if (elimination_stopped or leader_locked or not signal) else signal
-    return report, residual
-
-
-def _record_elimination_cut(
-    signal: EscalationSignal,
-    osp_c: OptSearchPoint,
-    elim_check: Any,
-    priors_at_test: list[str],
-    candidate_scores: list[CandidateScore],
-    report: CandidateScore,
-    decisions: list[Decision] | None,
-    round_num: int,
-    n_results: int,
-) -> None:
-    """Decorate report + append elimination_cut decision for divergence replay."""
-    cr = signal.check_result
-    leader_id = str(cr.get("leader_id", ""))
-    if leader_id and leader_id in priors_at_test:
-        prior_label = next(
-            (f"C{i + 1}" for i, r in enumerate(candidate_scores) if r.candidate_id == leader_id),
-            None,
-        )
-        if prior_label and report.elimination_context:
-            report.elimination_context["leader_label"] = prior_label
-
-    if decisions is not None:
-        record_decision(
-            decisions,
-            DecisionKind.ELIMINATION_CUT,
-            {
-                "candidate_id": osp_c.lineage.id,
-                "prior_candidate_ids": priors_at_test,
-                "queries_scored": int(cr.get("queries_scored", n_results)),
-                "epsilon": float(elim_check.epsilon),
-                "n_min": int(elim_check.n_min),
-                "round_num": round_num,
-            },
-            True,
-            data={
-                "p_best": float(cr.get("p_best", 0.0)),
-                "leader_id": leader_id,
-                "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
-            },
-        )
-
-
-def _record_leader_lock_in(
-    signal: EscalationSignal,
-    osp_c: OptSearchPoint,
-    elim_check: Any,
-    priors_at_test: list[str],
-    decisions: list[Decision] | None,
-    round_num: int,
-    n_results: int,
-) -> None:
-    """Append leader_lock_in decision for divergence replay."""
-    if decisions is None:
-        return
-    cr = signal.check_result
-    record_decision(
-        decisions,
-        DecisionKind.LEADER_LOCK_IN,
-        {
-            "candidate_id": osp_c.lineage.id,
-            "prior_candidate_ids": priors_at_test,
-            "queries_scored": int(cr.get("queries_scored", n_results)),
-            "lock_in": float(elim_check.lock_in),
-            "lock_in_n_min": int(elim_check.lock_in_n_min),
-            "round_num": round_num,
-        },
-        True,
-        data={
-            "p_best": float(cr.get("p_best", 0.0)),
-            "leader_id": str(cr.get("leader_id", "")),
-            "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
-        },
-    )
-
-
 async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
@@ -735,7 +551,6 @@ async def score_population(
     pobb_epsilon: float,
     pobb_lock_in: float = 0.95,
     pobb_lock_in_n_min: int = 8,
-    pobb_mc_samples: int = 1000,
     round_num: int = 0,
     decisions: list[Decision] | None = None,
     l1_diversity: float = 1.0,
@@ -744,7 +559,6 @@ async def score_population(
     session = cycle.session
     obs = session.state.obs
     n = len(population)
-    _ = pobb_mc_samples  # reserved for future plumbing into posterior_best_probabilities
 
     all_candidate_results: dict[str, list[QueryResult]] = {}
     candidate_scores: list[CandidateScore] = []
@@ -841,45 +655,150 @@ async def score_population(
             )
             continue
 
-        # Path 3 — scored. Snapshot priors BEFORE helper registers this candidate.
+        # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
         priors_at_test = list(elim_check.prior_ids)
-        report, residual = _handle_scored_candidate(
+        elimination_stopped = signal is not None and signal.is_elimination
+        leader_locked_loose = signal is not None and signal.is_leader_lock
+        scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
+        aborted = (
+            bool(signal)
+            and not leader_locked_loose
+            and (scoring_error_abort or len(results) < len(dataset))
+        )
+        # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
+        if len(results) == len(dataset) and not aborted:
+            elim_check.register_completed(
+                [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+            )
+
+        new_rf: RuntimeFailure | None = None
+        rf_kind = (
+            "degradation_check"
+            if elimination_stopped and signal is not None and signal.check_name == "degradation"
+            else "scoring_error_abort"
+            if scoring_error_abort
+            else None
+        )
+        if rf_kind and signal is not None:
+            cr = signal.check_result
+            dc = int(cr.get("degraded_count", 0))
+            te = int(cr.get("total_scored", len(results)))
+            if rf_kind == "degradation_check":
+                dominant = cr.get("dominant_warning", "unknown:unknown")
+                node_cfg = (merged_pp[idx] or {}).get(dominant.split(":", 1)[0], {})
+                rate = float(cr.get("degraded_rate", 0.0))
+            else:
+                dominant = str(cr.get("dominant_warning") or "scoring_error")
+                node_cfg = merged_pp[idx] or {}
+                rate = (dc / te) if te else 0.0
+            new_rf = RuntimeFailure(
+                source=rf_kind,
+                dominant_warning=dominant,
+                warning_types=dict(cr.get("warning_types") or {}),
+                degraded_rate=rate,
+                degraded_count=dc,
+                total_scored=te,
+                observed_config=dict(node_cfg),
+                first_seen_round=round_num,
+                candidate_label=osp_c.lineage.changes_description or "",
+            )
+            osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
+
+        elim_ctx: dict | None = None
+        if (
+            (elimination_stopped or leader_locked_loose)
+            and signal is not None
+            and signal.check_name == "elimination"
+        ):
+            cr = signal.check_result
+            elim_ctx = {
+                "p_best": float(cr.get("p_best", 0.0)),
+                "epsilon": float(cr.get("epsilon", 0.05)),
+                "leader_id": str(cr.get("leader_id", "")),
+                "queries_scored": int(cr.get("queries_scored", len(results))),
+                "total_queries": int(cr.get("total_queries", len(dataset))),
+                "n_priors": int(cr.get("n_priors", 0)),
+                "leader_locked": leader_locked_loose,
+            }
+
+        report = _build_score_report(
             osp_c,
             override,
-            results,
             scores,
-            signal,
-            merged_pp[idx],
+            results,
             dataset,
-            elim_check,
-            round_num,
+            aborted=aborted,
+            elimination_stopped=elimination_stopped,
+            elimination_context=elim_ctx,
+            new_runtime_failure=new_rf,
             l1_diversity=l1_diversity,
         )
-        if signal is not None and signal.is_elimination and signal.check_name == elim_check.name:
-            _record_elimination_cut(
-                signal,
-                osp_c,
-                elim_check,
-                priors_at_test,
-                candidate_scores,
-                report,
-                decisions,
-                round_num,
-                len(results),
-            )
-        leader_locked = (
-            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
+        residual = (
+            None if (elimination_stopped or leader_locked_loose or not signal) else signal
         )
-        if leader_locked and signal is not None:
-            _record_leader_lock_in(
-                signal,
-                osp_c,
-                elim_check,
-                priors_at_test,
+
+        # Decision-record the PoBB-elimination cut (divergence-replayed on resume).
+        if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
+            cr = signal.check_result
+            leader_id = str(cr.get("leader_id", ""))
+            if leader_id and leader_id in priors_at_test:
+                prior_label = next(
+                    (
+                        f"C{i + 1}"
+                        for i, r in enumerate(candidate_scores)
+                        if r.candidate_id == leader_id
+                    ),
+                    None,
+                )
+                if prior_label and report.elimination_context:
+                    report.elimination_context["leader_label"] = prior_label
+            if decisions is not None:
+                record_decision(
+                    decisions,
+                    DecisionKind.ELIMINATION_CUT,
+                    {
+                        "candidate_id": osp_c.lineage.id,
+                        "prior_candidate_ids": priors_at_test,
+                        "queries_scored": int(cr.get("queries_scored", len(results))),
+                        "epsilon": float(elim_check.epsilon),
+                        "n_min": int(elim_check.n_min),
+                        "round_num": round_num,
+                    },
+                    True,
+                    data={
+                        "p_best": float(cr.get("p_best", 0.0)),
+                        "leader_id": leader_id,
+                        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+                    },
+                )
+
+        # PoBB-only leader lock-in (early-break + decision record).
+        leader_locked = (
+            signal is not None
+            and signal.is_leader_lock
+            and signal.check_name == elim_check.name
+        )
+        if leader_locked and signal is not None and decisions is not None:
+            cr = signal.check_result
+            record_decision(
                 decisions,
-                round_num,
-                len(results),
+                DecisionKind.LEADER_LOCK_IN,
+                {
+                    "candidate_id": osp_c.lineage.id,
+                    "prior_candidate_ids": priors_at_test,
+                    "queries_scored": int(cr.get("queries_scored", len(results))),
+                    "lock_in": float(elim_check.lock_in),
+                    "lock_in_n_min": int(elim_check.lock_in_n_min),
+                    "round_num": round_num,
+                },
+                True,
+                data={
+                    "p_best": float(cr.get("p_best", 0.0)),
+                    "leader_id": str(cr.get("leader_id", "")),
+                    "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+                },
             )
+
         _fire(idx, report)
 
         if leader_locked:
@@ -939,7 +858,6 @@ async def l1_score(
     pobb_epsilon: float,
     pobb_lock_in: float = 0.95,
     pobb_lock_in_n_min: int = 8,
-    pobb_mc_samples: int = 1000,
     round_num: int = 0,
     yield_stats: L1YieldStats,
 ) -> L1ScoringResult:
@@ -962,7 +880,6 @@ async def l1_score(
         pobb_epsilon=pobb_epsilon,
         pobb_lock_in=pobb_lock_in,
         pobb_lock_in_n_min=pobb_lock_in_n_min,
-        pobb_mc_samples=pobb_mc_samples,
         round_num=round_num,
         decisions=decisions,
         l1_diversity=yield_stats.yield_,
@@ -1234,7 +1151,6 @@ async def execute_round(
             pobb_epsilon=opt.pobb_epsilon,
             pobb_lock_in=opt.pobb_lock_in,
             pobb_lock_in_n_min=opt.pobb_lock_in_n_min,
-            pobb_mc_samples=opt.pobb_mc_samples,
             round_num=round_num,
             yield_stats=yield_stats,
         )

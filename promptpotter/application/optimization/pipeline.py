@@ -23,14 +23,14 @@ Five labeled sections, in dependency order:
    ``warning_summary``, ``format_escalation_report``) — pure string
    builders consumed by section renderers and the L1 round driver.
 
-5. **Layer dispatch + transitions** (``Layer``, ``LayerContext``,
+5. **Layer dispatch + transitions** (``Layer``, ``DispatchState``,
    ``L1GenerateField``, ``L1GenerateSurface``, ``L2Surface``,
    ``compile_l1_surface``, ``compile_l2_surface``,
    ``compile_l1_critique_blob``, ``run_l1_critique``,
    ``format_l1_critique_for_prompt``, ``CritiqueContext``,
    ``OptimizerAction``, ``LayerTransition``, ``L2RefineStrategy``,
    ``L3ModifyPlan``) — the flow: archive → AxisIndex (cached) →
-   LayerContext (per-call payload) → sections (pure formatters) →
+   DispatchState (per-call payload) → sections (pure formatters) →
    surface (OSP overrides applied) → LLM. L1-generate's surface is
    typed (``L1GenerateField`` registry + ``L1GenerateSurface`` payload)
    and owned by L2 via OSP override fields (section visibility, section
@@ -49,7 +49,7 @@ import logging
 import time
 from collections import Counter
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, ClassVar, Literal, cast
@@ -100,25 +100,24 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "L1_GENERATE_SECTION_FIELDS",
     "CritiqueContext",
+    "DispatchState",
     "L1GenerateField",
     "L1GenerateSurface",
     "L2RefineStrategy",
     "L2Surface",
     "L3ModifyPlan",
     "Layer",
-    "LayerContext",
-    "LayerTransition",
     "OptimizerAction",
     "TrajectoryReport",
     "TransitionResult",
     "build_cross_candidate_diff",
+    "build_dispatch_state",
     "build_trajectory_report",
     "candidate_summaries",
     "compile_critique_context",
     "compile_l1_critique_blob",
     "compile_l1_surface",
     "compile_l2_surface",
-    "compile_layer_context",
     "compute_optimizer_prompt_hashes",
     "decompose_prompt_fields",
     "decompose_prompt_fields_cached",
@@ -1260,8 +1259,14 @@ def _compute_round_evolution(cycle: Cycle) -> tuple[str, list[str]]:
 
 
 @dataclass
-class LayerContext:
-    """Per-call payload passed to every section renderer."""
+class DispatchState:
+    """Single in-memory state container for one optimizer LLM call.
+
+    Every section renderer reads from this — nothing else. Built once per
+    transition by :func:`build_dispatch_state` from the cycle, scoring
+    result, and (cached) axis digest; consumed by the layer's section
+    table to produce ``{template_var → str}`` for the prompt template.
+    """
 
     cycle: Cycle
     layer: Layer
@@ -1289,7 +1294,7 @@ def _layer_axis_digest(layer: Layer, cycle: Cycle) -> dict[str, str] | None:
     return None
 
 
-def compile_layer_context(
+def build_dispatch_state(
     layer: Layer,
     cycle: Cycle,
     *,
@@ -1300,12 +1305,12 @@ def compile_layer_context(
     candidate_scores: list[dict] | None = None,
     escalation_check_result: dict | None = None,
     scoring_result: L1ScoringResult | None = None,
-) -> LayerContext:
-    """Build the per-call :class:`LayerContext` for *layer* over *cycle*."""
+) -> DispatchState:
+    """Build the per-call :class:`DispatchState` for *layer* over *cycle*."""
     critique: CritiqueContext | None = None
     if layer is Layer.L1_CRITIQUE and scoring_result is not None:
         critique = compile_critique_context(cycle, scoring_result, pipeline_schema)
-    return LayerContext(
+    return DispatchState(
         cycle=cycle,
         layer=layer,
         round_num=round_num,
@@ -1321,15 +1326,15 @@ def compile_layer_context(
 
 
 # ---------------------------------------------------------------------------
-# Section renderers — uniform ``(ctx: LayerContext) -> str`` signature.
+# Section renderers — uniform ``(ctx: DispatchState) -> str`` signature.
 # ---------------------------------------------------------------------------
 
 
-def _section_pipeline_schema_text(ctx: LayerContext) -> str:
+def _section_pipeline_schema_text(ctx: DispatchState) -> str:
     return ctx.pipeline_schema_text or ""
 
 
-def _section_failure_analysis(ctx: LayerContext) -> str:
+def _section_failure_analysis(ctx: DispatchState) -> str:
     fa = ctx.cycle.opt_sp.failure_analysis
     if not fa or not fa.patterns:
         return ""
@@ -1347,7 +1352,7 @@ def _section_failure_analysis(ctx: LayerContext) -> str:
     return "\n".join(lines)
 
 
-def _section_axes_l1(ctx: LayerContext) -> str:
+def _section_axes_l1(ctx: DispatchState) -> str:
     return (
         format_axis_digest_block(ctx.axis_digest, _L1_AXIS_LABELS, header="HISTORICAL CONTEXT:")
         if ctx.axis_digest
@@ -1355,7 +1360,7 @@ def _section_axes_l1(ctx: LayerContext) -> str:
     )
 
 
-def _section_task_context(ctx: LayerContext) -> str:
+def _section_task_context(ctx: DispatchState) -> str:
     tc = ctx.cycle.opt_sp.task_context
     if not tc:
         return ""
@@ -1365,7 +1370,7 @@ def _section_task_context(ctx: LayerContext) -> str:
     return f"CONTEXT:\n{lines}" if lines else ""
 
 
-def _section_escalation_probe(ctx: LayerContext) -> str:
+def _section_escalation_probe(ctx: DispatchState) -> str:
     """Probe-round per-query warning block — fires only when probe AND journal present."""
     cycle = ctx.cycle
     if not cycle.probe_next_round:
@@ -1399,7 +1404,7 @@ def _section_escalation_probe(ctx: LayerContext) -> str:
     return "\n".join(lines)
 
 
-def _section_escalation_alert(ctx: LayerContext) -> str:
+def _section_escalation_alert(ctx: DispatchState) -> str:
     """Non-probe aggregated alert — suppressed by an active l2_directive."""
     cycle = ctx.cycle
     if cycle.probe_next_round:
@@ -1422,7 +1427,7 @@ def _section_escalation_alert(ctx: LayerContext) -> str:
     return "\n".join(alert)
 
 
-def _section_l2_directive(ctx: LayerContext) -> str:
+def _section_l2_directive(ctx: DispatchState) -> str:
     v = ctx.cycle.opt_sp.l2_directive
     if not v:
         return ""
@@ -1430,12 +1435,12 @@ def _section_l2_directive(ctx: LayerContext) -> str:
     return f"{label}\n{v}"
 
 
-def _section_plan(ctx: LayerContext) -> str:
+def _section_plan(ctx: DispatchState) -> str:
     v = ctx.cycle.opt_sp.plan
     return f"PLAN:\n{v}" if v else ""
 
 
-def _escalation_report_text(ctx: LayerContext) -> str:
+def _escalation_report_text(ctx: DispatchState) -> str:
     if not ctx.escalation_check_result:
         return ""
     cycle = ctx.cycle
@@ -1449,11 +1454,7 @@ def _escalation_report_text(ctx: LayerContext) -> str:
     return text or ""
 
 
-def _section_escalation_section(ctx: LayerContext) -> str:
-    return _escalation_report_text(ctx)
-
-
-def _section_warning_inventory(ctx: LayerContext) -> str:
+def _section_warning_inventory(ctx: DispatchState) -> str:
     """L2 fallback: per-query warning inventory when no escalation section."""
     if _escalation_report_text(ctx):
         return ""
@@ -1464,7 +1465,7 @@ def _section_warning_inventory(ctx: LayerContext) -> str:
     return (text + "\n") if text else ""
 
 
-def _section_validation_failures(ctx: LayerContext) -> str:
+def _section_validation_failures(ctx: DispatchState) -> str:
     vfs: list[dict] = []
     for cs in ctx.candidate_scores or []:
         vfs.extend(cs["validation_failures"])
@@ -1490,7 +1491,7 @@ def _section_validation_failures(ctx: LayerContext) -> str:
     return "\n".join(lines)
 
 
-def _section_runtime_failures(ctx: LayerContext) -> str:
+def _section_runtime_failures(ctx: DispatchState) -> str:
     rfs = [rf.to_dict() for rf in ctx.cycle.opt_sp.runtime_failures]
     if not rfs:
         return ""
@@ -1527,7 +1528,7 @@ def _section_runtime_failures(ctx: LayerContext) -> str:
     return "\n".join(lines)
 
 
-def _section_axes_l2(ctx: LayerContext) -> str:
+def _section_axes_l2(ctx: DispatchState) -> str:
     return (
         format_axis_digest_block(ctx.axis_digest, _L2_AXIS_LABELS, header="HISTORICAL CONTEXT:")
         if ctx.axis_digest
@@ -1540,181 +1541,193 @@ def _section_axes_l2(ctx: LayerContext) -> str:
 # ---------------------------------------------------------------------------
 
 
-def _section_l1c_scoring_summary(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None or ctx.critique is None:
+def _section_l1c_round_report(ctx: DispatchState) -> str:
+    """Round-level stats: scoring, anomalies, pipeline health, ranks, evolution, this-round diff."""
+    if ctx.scoring_result is None:
         return ""
     sr = ctx.scoring_result
     cr = ctx.critique
     cycle = ctx.cycle
-    n_results = len(sr.winner_results)
-    lines = [
-        "## SCORING SUMMARY",
-        f"Accuracy: {sr.winner_accuracy:.1%} | "
-        f"Composite: {sr.winner_composite:.4f} | "
-        f"Degraded: {sr.degraded_queries}/{n_results}",
-        f"Round {ctx.round_num} | L1 stall count: {cycle.escalation.l1_stall_count} | "
-        f"Best so far: {cycle.best_accuracy:.1%} (round {cycle.best_round})",
-    ]
-    if cr.prompt_chars:
-        bloat = (
-            " — prompt is bloated; favour compression in priority_fix"
-            if cr.prompt_chars > _PROMPT_BLOAT_CHARS
-            else ""
+    parts: list[str] = []
+
+    # Scoring summary.
+    if cr is not None:
+        n_results = len(sr.winner_results)
+        lines = [
+            "## SCORING SUMMARY",
+            f"Accuracy: {sr.winner_accuracy:.1%} | "
+            f"Composite: {sr.winner_composite:.4f} | "
+            f"Degraded: {sr.degraded_queries}/{n_results}",
+            f"Round {ctx.round_num} | L1 stall count: {cycle.escalation.l1_stall_count} | "
+            f"Best so far: {cycle.best_accuracy:.1%} (round {cycle.best_round})",
+        ]
+        if cr.prompt_chars:
+            bloat = (
+                " — prompt is bloated; favour compression in priority_fix"
+                if cr.prompt_chars > _PROMPT_BLOAT_CHARS
+                else ""
+            )
+            lines.append(f"Current prompt size: {cr.prompt_chars} chars{bloat}")
+        parts.append("\n".join(lines))
+
+    # Anomaly flags.
+    if cr is not None and sr.winner_results and cr.anomalies:
+        parts.append(
+            "## ANOMALY FLAGS ({})\n{}".format(
+                len(cr.anomalies), "\n".join(f"  {a}" for a in cr.anomalies)
+            )
         )
-        lines.append(f"Current prompt size: {cr.prompt_chars} chars{bloat}")
-    return "\n".join(lines)
 
-
-def _section_l1c_anomaly_flags(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None or ctx.critique is None:
-        return ""
-    if not ctx.scoring_result.winner_results or not ctx.critique.anomalies:
-        return ""
-    return "## ANOMALY FLAGS ({})\n{}".format(
-        len(ctx.critique.anomalies),
-        "\n".join(f"  {a}" for a in ctx.critique.anomalies),
-    )
-
-
-def _section_l1c_pipeline_health(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None:
-        return ""
-    results = ctx.scoring_result.winner_results
+    # Pipeline health.
+    results = sr.winner_results
     total = len(results)
-    if not total:
-        return ""
-    web_warning_count = 0
-    termination: Counter[str] = Counter()
-    error_count = 0
-    for r in results:
-        pd = r.get("pipeline_data") or {}
-        diag = pd.get("diagnostics") or {}
-        if diag.get("warnings"):
-            web_warning_count += 1
-        termination[pd.get("terminated_at", "unknown")] += 1
-        if is_error_result(r):
-            error_count += 1
-    lines = ["## PIPELINE HEALTH"]
-    if termination:
-        lines.append("Termination distribution:")
-        for step, count in termination.most_common():
-            lines.append(f"  {step}: {count}/{total}")
-    lines.append(f"Step degradation: {web_warning_count / total:.0%} of queries")
-    lines.append(f"Error rate: {error_count / total:.0%}")
-    return "\n".join(lines)
+    if total:
+        web_warning_count = 0
+        termination: Counter[str] = Counter()
+        error_count = 0
+        for r in results:
+            pd = r.get("pipeline_data") or {}
+            diag = pd.get("diagnostics") or {}
+            if diag.get("warnings"):
+                web_warning_count += 1
+            termination[pd.get("terminated_at", "unknown")] += 1
+            if is_error_result(r):
+                error_count += 1
+        lines = ["## PIPELINE HEALTH"]
+        if termination:
+            lines.append("Termination distribution:")
+            for step, count in termination.most_common():
+                lines.append(f"  {step}: {count}/{total}")
+        lines.append(f"Step degradation: {web_warning_count / total:.0%} of queries")
+        lines.append(f"Error rate: {error_count / total:.0%}")
+        parts.append("\n".join(lines))
+
+    # Rank analysis + round evolution (precomputed in CritiqueContext).
+    if cr is not None and cr.rank_text:
+        parts.append(cr.rank_text)
+    if cr is not None and cr.evolution_text:
+        parts.append(cr.evolution_text)
+
+    # This round (trajectory + cross-candidate diff).
+    diff = build_cross_candidate_diff(
+        cast(list[dict], sr.winner_results),
+        cast("dict[str, list[dict]]", sr.all_candidate_results),
+        [cs.to_dict() for cs in sr.candidate_scores],
+    )
+    trajectory = build_trajectory_report(cycle.rounds)
+    this_round_parts: list[str] = []
+    if trajectory and trajectory.classification != "healthy":
+        this_round_parts.append(
+            f"  [TRAJECTORY] {trajectory.classification}: {trajectory.description}"
+        )
+    if diff:
+        this_round_parts.append(f"  MISSED OPPORTUNITIES:\n{diff}")
+    if this_round_parts:
+        parts.append("## THIS ROUND\n" + "\n".join(this_round_parts))
+
+    return "\n\n".join(parts)
 
 
-def _section_l1c_runtime_failures(ctx: LayerContext) -> str:
+def _section_l1c_per_query_report(ctx: DispatchState) -> str:
+    """Per-query views: runtime failures, query categories, failure details, successes."""
     if ctx.scoring_result is None:
         return ""
-    failures = [
-        {
-            "candidate_desc": (cs.changes_description or cs.candidate_id)[:60],
-            **rf,
-        }
-        for cs in ctx.scoring_result.candidate_scores
+    sr = ctx.scoring_result
+    cr = ctx.critique
+    parts: list[str] = []
+
+    # Runtime failures (steer-away regions).
+    rt_failures = [
+        {"candidate_desc": (cs.changes_description or cs.candidate_id)[:60], **rf}
+        for cs in sr.candidate_scores
         for rf in cs.runtime_failures
     ]
-    if not failures:
-        return ""
-    by_warning: dict[str, list[dict]] = {}
-    for e in failures:
-        by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
-    lines = ["## RUNTIME FAILURES THIS ROUND (steer away from these regions)"]
-    for dom in sorted(by_warning):
-        lines.append(f"  {dom}:")
-        for e in by_warning[dom]:
-            rate = float(e.get("degraded_rate", 0.0)) * 100
-            dc = e.get("degraded_count", 0)
-            tot = e.get("total_scored", 0)
-            cfg = e.get("observed_config") or {}
-            cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _RF_CFG_AXES if k in cfg)
-            lines.append(
-                f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
-            )
-    lines.append("  These configurations degraded — shift away from the same or similar regions.")
-    return "\n".join(lines)
+    if rt_failures:
+        by_warning: dict[str, list[dict]] = {}
+        for e in rt_failures:
+            by_warning.setdefault(str(e.get("dominant_warning", "unknown")), []).append(e)
+        lines = ["## RUNTIME FAILURES THIS ROUND (steer away from these regions)"]
+        for dom in sorted(by_warning):
+            lines.append(f"  {dom}:")
+            for e in by_warning[dom]:
+                rate = float(e.get("degraded_rate", 0.0)) * 100
+                dc = e.get("degraded_count", 0)
+                tot = e.get("total_scored", 0)
+                cfg = e.get("observed_config") or {}
+                cfg_bits = ", ".join(f"{k}={cfg[k]}" for k in _RF_CFG_AXES if k in cfg)
+                lines.append(
+                    f"    {e.get('candidate_desc', '?')}: {rate:.0f}% ({dc}/{tot}) @ {cfg_bits}"
+                )
+        lines.append(
+            "  These configurations degraded — shift away from the same or similar regions."
+        )
+        parts.append("\n".join(lines))
 
-
-def _section_l1c_rank_analysis(ctx: LayerContext) -> str:
-    return ctx.critique.rank_text if ctx.critique else ""
-
-
-def _section_l1c_round_evolution(ctx: LayerContext) -> str:
-    return ctx.critique.evolution_text if ctx.critique else ""
-
-
-def _section_l1c_query_categories(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None:
-        return ""
+    # Query categories — failures grouped by termination step.
     step_counts: Counter[str] = Counter()
-    for r in ctx.scoring_result.winner_results:
+    for r in sr.winner_results:
         if r.get("hit") or is_error_result(r):
             continue
         pd = r.get("pipeline_data") or {}
         step_counts[pd.get("terminated_at", "unknown")] += 1
-    if not step_counts:
-        return ""
-    lines = ["## QUERY CATEGORIES", "Failures by termination step:"]
-    for step, count in step_counts.most_common():
-        lines.append(f"  {step}: {count}")
-    return "\n".join(lines)
+    if step_counts:
+        lines = ["## QUERY CATEGORIES", "Failures by termination step:"]
+        for step, count in step_counts.most_common():
+            lines.append(f"  {step}: {count}")
+        parts.append("\n".join(lines))
+
+    # Failure details — non-near-miss misses.
+    if cr is not None:
+        keys = cr.candidate_keys or None
+        failures = [
+            r
+            for r in sr.winner_results
+            if not r.get("hit")
+            and not is_error_result(r)
+            and r.get("query", "") not in cr.nm_queries
+        ]
+        if failures:
+            lines = [f"## FAILURE DETAILS ({len(failures)} non-near-miss failures)"]
+            for r in failures[:8]:
+                pd = r.get("pipeline_data") or {}
+                gt = r.get("ground_truth", "?")
+                rank = find_rank(get_candidates(r, keys), gt)
+                rank_str = f"rank {rank}" if rank else "not in candidates"
+                diag = pd.get("diagnostics") or {}
+                warn = "degraded" if diag.get("warnings") else ""
+                diag_str = ""
+                if ctx.pipeline_schema:
+                    sd = extract_sample_diagnostics(r, ctx.pipeline_schema)
+                    sig_parts = [
+                        f"{k}={sd[k]}"
+                        for k in ("gt_in_source", "gt_in_ranked", "terminated_at")
+                        if k in sd
+                    ]
+                    if sig_parts:
+                        diag_str = " | " + ", ".join(sig_parts)
+                lines.append(
+                    f"  MISS  [{pd.get('terminated_at', '?')}]  {r['query'][:70]}\n"
+                    f"        -> {r.get('predicted', '?')[:70]}\n"
+                    f"        GT: {gt[:70]}  |  {rank_str}  {warn}{diag_str}"
+                )
+            parts.append("\n".join(lines))
+
+    # Successes — top 2 hits.
+    successes = [r for r in sr.winner_results if r.get("hit")]
+    if successes:
+        lines = [f"## SUCCESSES ({len(successes)} queries)"]
+        for r in successes[:2]:
+            pd = r.get("pipeline_data") or {}
+            lines.append(
+                f"  HIT  [{pd.get('terminated_at', '?')}]  "
+                f"{r['query'][:70]} → {r.get('predicted', '?')[:70]}"
+            )
+        parts.append("\n".join(lines))
+
+    return "\n\n".join(parts)
 
 
-def _section_l1c_failure_details(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None or ctx.critique is None:
-        return ""
-    keys = ctx.critique.candidate_keys or None
-    failures = [
-        r
-        for r in ctx.scoring_result.winner_results
-        if not r.get("hit")
-        and not is_error_result(r)
-        and r.get("query", "") not in ctx.critique.nm_queries
-    ]
-    if not failures:
-        return ""
-    lines = [f"## FAILURE DETAILS ({len(failures)} non-near-miss failures)"]
-    for r in failures[:8]:
-        pd = r.get("pipeline_data") or {}
-        gt = r.get("ground_truth", "?")
-        rank = find_rank(get_candidates(r, keys), gt)
-        rank_str = f"rank {rank}" if rank else "not in candidates"
-        diag = pd.get("diagnostics") or {}
-        warn = "degraded" if diag.get("warnings") else ""
-        diag_str = ""
-        if ctx.pipeline_schema:
-            sd = extract_sample_diagnostics(r, ctx.pipeline_schema)
-            sig_parts = [
-                f"{k}={sd[k]}" for k in ("gt_in_source", "gt_in_ranked", "terminated_at") if k in sd
-            ]
-            if sig_parts:
-                diag_str = " | " + ", ".join(sig_parts)
-        lines.append(
-            f"  MISS  [{pd.get('terminated_at', '?')}]  {r['query'][:70]}\n"
-            f"        -> {r.get('predicted', '?')[:70]}\n"
-            f"        GT: {gt[:70]}  |  {rank_str}  {warn}{diag_str}"
-        )
-    return "\n".join(lines)
-
-
-def _section_l1c_successes(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None:
-        return ""
-    successes = [r for r in ctx.scoring_result.winner_results if r.get("hit")]
-    if not successes:
-        return ""
-    lines = [f"## SUCCESSES ({len(successes)} queries)"]
-    for r in successes[:2]:
-        pd = r.get("pipeline_data") or {}
-        lines.append(
-            f"  HIT  [{pd.get('terminated_at', '?')}]  "
-            f"{r['query'][:70]} → {r.get('predicted', '?')[:70]}"
-        )
-    return "\n".join(lines)
-
-
-def _section_l1c_historical_context(ctx: LayerContext) -> str:
+def _section_l1c_historical_context(ctx: DispatchState) -> str:
     return (
         format_axis_digest_block(ctx.axis_digest, _L1C_AXIS_LABELS, header="## HISTORICAL CONTEXT")
         if ctx.axis_digest
@@ -1722,25 +1735,7 @@ def _section_l1c_historical_context(ctx: LayerContext) -> str:
     )
 
 
-def _section_l1c_this_round(ctx: LayerContext) -> str:
-    if ctx.scoring_result is None:
-        return ""
-    parts: list[str] = []
-    sr = ctx.scoring_result
-    diff = build_cross_candidate_diff(
-        cast(list[dict], sr.winner_results),
-        cast("dict[str, list[dict]]", sr.all_candidate_results),
-        [cs.to_dict() for cs in sr.candidate_scores],
-    )
-    trajectory = build_trajectory_report(ctx.cycle.rounds)
-    if trajectory and trajectory.classification != "healthy":
-        parts.append(f"  [TRAJECTORY] {trajectory.classification}: {trajectory.description}")
-    if diff:
-        parts.append(f"  MISSED OPPORTUNITIES:\n{diff}")
-    return "## THIS ROUND\n" + "\n".join(parts) if parts else ""
-
-
-def _section_l1c_available_schema_mutations(ctx: LayerContext) -> str:
+def _section_l1c_available_schema_mutations(ctx: DispatchState) -> str:
     if not ctx.pipeline_schema:
         return ""
     cap_lines = [
@@ -1759,67 +1754,12 @@ def _section_l1c_available_schema_mutations(ctx: LayerContext) -> str:
     )
 
 
-def _section_l1c_round_report(ctx: LayerContext) -> str:
-    """Round-level stats: scoring, anomalies, pipeline health, ranks, evolution, this-round diff."""
-    parts = (
-        _section_l1c_scoring_summary(ctx),
-        _section_l1c_anomaly_flags(ctx),
-        _section_l1c_pipeline_health(ctx),
-        _section_l1c_rank_analysis(ctx),
-        _section_l1c_round_evolution(ctx),
-        _section_l1c_this_round(ctx),
-    )
-    return "\n\n".join(p for p in parts if p)
-
-
-def _section_l1c_per_query_report(ctx: LayerContext) -> str:
-    """Per-query views: runtime failures, query categories, failure details, successes."""
-    parts = (
-        _section_l1c_runtime_failures(ctx),
-        _section_l1c_query_categories(ctx),
-        _section_l1c_failure_details(ctx),
-        _section_l1c_successes(ctx),
-    )
-    return "\n\n".join(p for p in parts if p)
-
-
-_L1C_SECTIONS: dict[str, Callable[[LayerContext], str]] = {
-    "l1c_round_report": _section_l1c_round_report,
-    "l1c_per_query_report": _section_l1c_per_query_report,
-    "l1c_historical_context": _section_l1c_historical_context,
-    "l1c_available_schema_mutations": _section_l1c_available_schema_mutations,
-}
-
-_L1C_SECTION_ORDER: tuple[str, ...] = tuple(_L1C_SECTIONS.keys())
-
-
-# ---------------------------------------------------------------------------
-# Layer registry — section name → renderer; per-layer emit sequence.
-# ---------------------------------------------------------------------------
-
-
-_SECTIONS: dict[str, Callable[[LayerContext], str]] = {
-    "pipeline_schema_text": _section_pipeline_schema_text,
-    "failure_analysis": _section_failure_analysis,
-    "axes_l1": _section_axes_l1,
-    "task_context": _section_task_context,
-    "escalation_probe": _section_escalation_probe,
-    "escalation_alert": _section_escalation_alert,
-    "l2_directive": _section_l2_directive,
-    "plan": _section_plan,
-    "escalation_section": _section_escalation_section,
-    "warning_inventory": _section_warning_inventory,
-    "validation_failures": _section_validation_failures,
-    "runtime_failures": _section_runtime_failures,
-    "axes_l2": _section_axes_l2,
-    **_L1C_SECTIONS,
-}
-
-
-# L1-critique stays on the legacy blob path because nothing external
-# mutates it; L1-generate and L2 moved to typed ``L1GenerateSurface`` /
-# ``L2Surface`` payloads compiled below.
-_L1_CRITIQUE_ORDER: tuple[str, ...] = _L1C_SECTION_ORDER
+_L1C_SECTIONS: tuple[Callable[[DispatchState], str], ...] = (
+    _section_l1c_round_report,
+    _section_l1c_per_query_report,
+    _section_l1c_historical_context,
+    _section_l1c_available_schema_mutations,
+)
 
 
 _ENUM_RENDER_CAP = 12
@@ -1921,7 +1861,7 @@ L1_GENERATE_SECTION_FIELDS: tuple[L1GenerateField, ...] = (
     L1GenerateField.PLAN,
 )
 
-_L1_GENERATE_SECTION_RENDERERS: dict[L1GenerateField, Callable[[LayerContext], str]] = {
+_L1_GENERATE_SECTION_RENDERERS: dict[L1GenerateField, Callable[[DispatchState], str]] = {
     L1GenerateField.PIPELINE_SCHEMA_TEXT: _section_pipeline_schema_text,
     L1GenerateField.FAILURE_ANALYSIS: _section_failure_analysis,
     L1GenerateField.AXES_L1: _section_axes_l1,
@@ -1973,8 +1913,7 @@ class L1GenerateSurface:
     rendered_prompt: str = ""
 
     def to_compile_vars(self) -> dict[str, str]:
-        """Map every registry member to its prompt-hole value."""
-        return {f.value: getattr(self, f.value) for f in L1GenerateField}
+        return asdict(self)
 
 
 def compile_l1_surface(
@@ -1998,7 +1937,7 @@ def compile_l1_surface(
     """
     schema = cycle.session.pipeline_schema
     schema_text = _render_schema_text(schema) if schema else ""
-    ctx = compile_layer_context(
+    ctx = build_dispatch_state(
         Layer.L1_GENERATE,
         cycle,
         round_num=round_num,
@@ -2021,18 +1960,11 @@ def compile_l1_surface(
         rendered[name] = (text + "\n\n") if text else ""
 
     return L1GenerateSurface(
-        pipeline_schema_text=rendered[L1GenerateField.PIPELINE_SCHEMA_TEXT.value],
-        failure_analysis=rendered[L1GenerateField.FAILURE_ANALYSIS.value],
-        axes_l1=rendered[L1GenerateField.AXES_L1.value],
-        task_context=rendered[L1GenerateField.TASK_CONTEXT.value],
-        escalation_probe=rendered[L1GenerateField.ESCALATION_PROBE.value],
-        escalation_alert=rendered[L1GenerateField.ESCALATION_ALERT.value],
-        l2_directive=rendered[L1GenerateField.L2_DIRECTIVE.value],
-        plan=rendered[L1GenerateField.PLAN.value],
         n_variants=str(n_variants),
         accuracy_pct=f"{cycle.current_accuracy:.1%}",
         n_queries=str(len(cycle.current_results)),
         rendered_prompt=cycle.opt_sp.render(),
+        **rendered,
     )
 
 
@@ -2064,22 +1996,11 @@ class L2Surface:
     l1_generate_field_catalogue: str = ""
 
     def to_compile_vars(self) -> dict[str, str]:
-        """Map every L2 prompt hole to its rendered value."""
-        return {
-            "current_params": self.current_params,
-            "task_context_section": self.task_context_section,
-            "escalation_section": self.escalation_section,
-            "warning_inventory": self.warning_inventory,
-            "l2_directive": self.l2_directive,
-            "validation_failures": self.validation_failures,
-            "runtime_failures": self.runtime_failures,
-            "axes_l2": self.axes_l2,
-            "l1_generate_field_catalogue": self.l1_generate_field_catalogue,
-        }
+        return asdict(self)
 
 
-_L2_SECTION_RENDERERS: tuple[tuple[str, Callable[[LayerContext], str]], ...] = (
-    ("escalation_section", _section_escalation_section),
+_L2_SECTION_RENDERERS: tuple[tuple[str, Callable[[DispatchState], str]], ...] = (
+    ("escalation_section", _escalation_report_text),
     ("warning_inventory", _section_warning_inventory),
     ("l2_directive", _section_l2_directive),
     ("validation_failures", _section_validation_failures),
@@ -2133,7 +2054,7 @@ def compile_l2_surface(
     prompt template) so L2's view of L1's surface stays code-derived
     and cannot drift from the registry.
     """
-    ctx = compile_layer_context(
+    ctx = build_dispatch_state(
         Layer.L2,
         cycle,
         round_num=round_num,
@@ -2142,12 +2063,9 @@ def compile_l2_surface(
         candidate_scores=candidate_scores,
         escalation_check_result=escalation_check_result,
     )
-    rendered = {name: fn(ctx) for name, fn in _L2_SECTION_RENDERERS}
-    rendered = {k: (v + "\n\n") if v else "" for k, v in rendered.items()}
+    rendered = {name: ((v + "\n\n") if (v := fn(ctx)) else "") for name, fn in _L2_SECTION_RENDERERS}
 
     opt_sp = cycle.opt_sp
-    current_params = json.dumps(opt_sp.optimizer_params)
-
     task_context_section = ""
     if opt_sp.task_context:
         tc_display = {k: v for k, v in opt_sp.task_context.items() if k != "raw_description" and v}
@@ -2158,22 +2076,13 @@ def compile_l2_surface(
             )
 
     l1_surface = compile_l1_surface(cycle, round_num=round_num, n_variants=0)
-    catalogue = _format_l1_generate_field_catalogue(
-        l1_surface,
-        opt_sp.l1_section_overrides,
-        opt_sp.l1_section_overrides_text,
-    )
-
     return L2Surface(
-        current_params=current_params,
+        current_params=json.dumps(opt_sp.optimizer_params),
         task_context_section=task_context_section,
-        escalation_section=rendered["escalation_section"],
-        warning_inventory=rendered["warning_inventory"],
-        l2_directive=rendered["l2_directive"],
-        validation_failures=rendered["validation_failures"],
-        runtime_failures=rendered["runtime_failures"],
-        axes_l2=rendered["axes_l2"],
-        l1_generate_field_catalogue=catalogue,
+        l1_generate_field_catalogue=_format_l1_generate_field_catalogue(
+            l1_surface, opt_sp.l1_section_overrides, opt_sp.l1_section_overrides_text
+        ),
+        **rendered,
     )
 
 
@@ -2195,18 +2104,14 @@ def compile_l1_critique_blob(
     mutates its surface — there is no L4-style channel that could drop a
     section permanently. L1-generate and L2 graduated to typed surfaces.
     """
-    ctx = compile_layer_context(
+    ctx = build_dispatch_state(
         Layer.L1_CRITIQUE,
         cycle,
         round_num=round_num,
         pipeline_schema=schema,
         scoring_result=scoring_result,
     )
-    sections: dict[str, str] = {}
-    for name in _L1_CRITIQUE_ORDER:
-        if text := _SECTIONS[name](ctx):
-            sections[name] = text
-    return "\n\n".join(sections[name] for name in _L1_CRITIQUE_ORDER if name in sections)
+    return "\n\n".join(text for fn in _L1C_SECTIONS if (text := fn(ctx)))
 
 
 async def run_l1_critique(
@@ -2300,80 +2205,42 @@ class TransitionResult:
     debug_response: dict | None = None
 
 
-class LayerTransition:
-    """Base for an LLM-driven optimizer transition (L2 or L3).
+async def run_layer_transition(
+    transition: L2RefineStrategy | L3ModifyPlan,
+    cycle: Cycle,
+    llm_client: LLMClientBase,
+    *,
+    model: str | None = None,
+    temperature: float | None = None,
+    pipeline_params: dict | None = None,
+    round_num: int = 0,
+    escalation_check_result: dict | None = None,
+) -> TransitionResult:
+    """Shared LLM-call template for L2/L3 transitions.
 
-    Subclasses set the four ClassVars (``layer``, ``template_name``,
-    ``default_temperature``, ``phase``) and override the five hooks
-    consumed by the orchestrator: ``build_compile_vars``,
-    ``build_result``, ``apply_side_effects``, ``enter_payload``,
-    ``exit_payload``. ``run()`` is the shared LLM-call template.
+    Walks: ``build_compile_vars`` → meta-prompt LLM call →
+    ``build_result``. ``apply_side_effects`` / ``enter_payload`` /
+    ``exit_payload`` are called by ``cycle._run_transition``.
     """
-
-    layer: ClassVar[Literal["L2", "L3"]]
-    template_name: ClassVar[str]
-    default_temperature: ClassVar[float]
-    phase: ClassVar[CampaignPhase]
-
-    async def run(
-        self,
-        cycle: Cycle,
-        llm_client: LLMClientBase,
-        *,
-        model: str | None = None,
-        temperature: float | None = None,
-        pipeline_params: dict | None = None,
-        round_num: int = 0,
-        escalation_check_result: dict | None = None,
-    ) -> TransitionResult:
-        compile_vars = self.build_compile_vars(
-            cycle,
-            pipeline_params=pipeline_params,
-            round_num=round_num,
-            escalation_check_result=escalation_check_result,
-        )
-        raw, prompt = await run_optimizer_node(
-            template_name=self.template_name,
-            compile_vars=compile_vars,
-            llm_client=llm_client,
-            model=model,
-            temperature=self.default_temperature if temperature is None else temperature,
-            recorder=cycle.session.state.round_recorder,
-            cache=cycle.session.store.optimizer_calls,
-        )
-        return self.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
-
-    def build_compile_vars(
-        self,
-        cycle: Cycle,
-        *,
-        pipeline_params: dict | None,
-        round_num: int,
-        escalation_check_result: dict | None,
-    ) -> dict:
-        raise NotImplementedError
-
-    def build_result(
-        self,
-        raw: dict,
-        opt_sp: OptSearchPoint,
-        prompt: str,
-        *,
-        pipeline_params: dict | None,
-    ) -> TransitionResult:
-        raise NotImplementedError
-
-    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
-        raise NotImplementedError
-
-    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
-        raise NotImplementedError
-
-    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-        raise NotImplementedError
+    compile_vars = transition.build_compile_vars(
+        cycle,
+        pipeline_params=pipeline_params,
+        round_num=round_num,
+        escalation_check_result=escalation_check_result,
+    )
+    raw, prompt = await run_optimizer_node(
+        template_name=transition.template_name,
+        compile_vars=compile_vars,
+        llm_client=llm_client,
+        model=model,
+        temperature=transition.default_temperature if temperature is None else temperature,
+        recorder=cycle.session.state.round_recorder,
+        cache=cycle.session.store.optimizer_calls,
+    )
+    return transition.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
 
-class L2RefineStrategy(LayerTransition):
+class L2RefineStrategy:
     """L2: refine the optimizer's strategy by writing onto ``OptSearchPoint``.
 
     L2 fires on L1 stall (per ``l1_patience``). When it fires it can write
@@ -2576,7 +2443,7 @@ class L2RefineStrategy(LayerTransition):
         }
 
 
-class L3ModifyPlan(LayerTransition):
+class L3ModifyPlan:
     """L3: propose a new strategic plan + optional pipeline_params deltas."""
 
     layer: ClassVar[Literal["L2", "L3"]] = "L3"
