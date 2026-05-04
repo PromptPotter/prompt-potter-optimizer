@@ -155,7 +155,7 @@ class RunListener:
             Phase(
                 phase="round",
                 event="complete",
-                round=getattr(round_result, "round", self._current_round),
+                round=round_result.round,
                 payload={
                     "round_result": round_result,
                     "l1_stall_count": l1_stall_count,
@@ -967,7 +967,7 @@ def _finalize_run(
                     cycle_id=session.state.cycle_id,
                     top_k_candidates=exp_cfg.top_k_candidates,
                     top_k_samples=exp_cfg.top_k_samples,
-                    posterior=getattr(cycle, "last_rasch_posterior", None),
+                    posterior=cycle.last_rasch_posterior,
                 )
         write_log_md(session, hard_samples_artifact=artifact)
         write_review_md(session, cycle)

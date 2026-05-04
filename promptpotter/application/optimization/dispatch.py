@@ -156,7 +156,7 @@ def _compute_round_evolution(cycle: Cycle) -> tuple[str, list[str]]:
         delta = acc - prev_acc if prev_acc is not None else 0.0
         lines.append(
             f"  {r.round:>5}  {acc:>7.1%}  {delta:>+6.1%}  "
-            f"{getattr(r, 'degraded_queries', 0):>8}  {len(r.candidate_scores):>10}"
+            f"{r.degraded_queries:>8}  {len(r.candidate_scores):>10}"
         )
         plateau_count = plateau_count + 1 if abs(delta) < 0.01 else 0
         prev_acc = acc

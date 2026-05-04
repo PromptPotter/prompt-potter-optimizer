@@ -26,11 +26,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
 
-# TokenUsage / token-sink registry was previously in
-# ``promptpotter.infrastructure.llm.token_usage``; folded into this module
-# during the V1 leaf sweep. ``TokenSink`` consumers fan-out via
-# ``emit_token_usage``; the built-in sink warns on optimizer prompts that
-# exceed ``OPTIMIZER_PROMPT_WARN_TOKENS``.
+# ``emit_token_usage`` warns on optimizer prompts that exceed
+# ``OPTIMIZER_PROMPT_WARN_TOKENS``.
 
 if TYPE_CHECKING:
     from openai import AsyncOpenAI
@@ -47,13 +44,10 @@ __all__ = [
     "LLMClientBase",
     "LLMResponse",
     "OpenAICompatibleClient",
-    "TokenSink",
     "TokenUsage",
     "emit_token_usage",
     "extract_parsed_json",
     "get_llm_client",
-    "register_token_sink",
-    "reset_token_sinks_for_tests",
     "try_parse_json",
 ]
 
@@ -140,34 +134,7 @@ class TokenUsage:
         return self.input_tokens + self.output_tokens
 
 
-TokenSink = Callable[[TokenUsage], None]
-
-_token_sinks: list[TokenSink] = []
-
-
-def register_token_sink(sink: TokenSink) -> None:
-    """Subscribe a consumer. Idempotent — repeated registration is a no-op."""
-    if sink not in _token_sinks:
-        _token_sinks.append(sink)
-
-
 def emit_token_usage(usage: TokenUsage) -> None:
-    """Fan out a token record to every registered sink. Sink exceptions are
-    logged and swallowed so one bad sink cannot break the caller's call site."""
-    for sink in _token_sinks:
-        try:
-            sink(usage)
-        except Exception:
-            logger.exception("token sink %r failed", sink)
-
-
-def reset_token_sinks_for_tests() -> None:
-    """Clear sink registry and re-install built-ins. Tests only."""
-    _token_sinks.clear()
-    register_token_sink(_warn_if_optimizer_over_threshold)
-
-
-def _warn_if_optimizer_over_threshold(usage: TokenUsage) -> None:
     """Warn when an optimizer prompt exceeds ``OPTIMIZER_PROMPT_WARN_TOKENS``."""
     if usage.kind != "optimizer":
         return
@@ -181,9 +148,6 @@ def _warn_if_optimizer_over_threshold(usage: TokenUsage) -> None:
             usage.input_tokens,
             threshold,
         )
-
-
-register_token_sink(_warn_if_optimizer_over_threshold)
 
 
 def _parse_tpm_overflow(err_str: str) -> tuple[int, int] | None:

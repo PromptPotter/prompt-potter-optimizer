@@ -131,6 +131,9 @@ class LiveDisplay:
         # shared ctx onto ``self._phase_ctx`` after construction so the
         # display sees the same dict the phase-view builder writes to.
         self._phase_ctx: dict = {}
+        # Per-query Posterior-of-Being-Best snapshot from the prior firing —
+        # used to render arrow glyphs (▲/▼) on the next ``on_p_best_update``.
+        self._last_p_best: dict[str, float] = {}
 
     def _write(self, line: str) -> None:
         if self._bars is not None:
@@ -297,7 +300,7 @@ class LiveDisplay:
         """
         if not p_best:
             return
-        last: dict[str, float] = getattr(self, "_last_p_best", {})
+        last = self._last_p_best
         top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
         parts: list[str] = []
         for cid, prob in top:

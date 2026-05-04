@@ -327,7 +327,7 @@ def _compute_behavior_results(
 def _lookup_dataset(stores: Any, session_id: str) -> str:
     if not session_id:
         return "?"
-    record = stores.sessions.read(session_id) if hasattr(stores, "sessions") else None
+    record = stores.sessions.read(session_id)
     if not record:
         return "?"
     return str(
