@@ -31,8 +31,12 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import Decision, DecisionKind
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import RunLedger
-from promptpotter.infrastructure.store import Stores, build_stores
-from promptpotter.infrastructure.store.stores import campaign_dir_for, root_dir_for
+from promptpotter.infrastructure.store import (
+    Stores,
+    build_stores,
+    campaign_dir_for,
+    root_dir_for,
+)
 
 StoreDep = Annotated[Stores, Depends(build_stores)]
 

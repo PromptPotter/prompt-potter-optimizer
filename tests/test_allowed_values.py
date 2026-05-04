@@ -15,7 +15,7 @@ case that produced backend 502s):
 
 from __future__ import annotations
 
-from promptpotter.application.optimization.l1 import (
+from promptpotter.application.optimization.l1_validators import (
     build_l1_output_schema,
     validate_overrides,
 )

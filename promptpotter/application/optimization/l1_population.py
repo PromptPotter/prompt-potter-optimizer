@@ -1,0 +1,185 @@
+"""L1 population shaping: project proposals → OSP, build score reports, model the result.
+
+These helpers run between L1's two phases — generation (``l1_generate``)
+produces ``CandidateProposal``s, scoring (``score_population`` /
+``l1_score``) consumes ``OptSearchPoint``s and emits ``CandidateScore``s.
+This module owns:
+
+- ``parse_population`` — proposals → OSPs + merged pipeline_params,
+  attaching schema-compliance failures.
+- ``_merge_pipeline_params`` — deep-merge LLM overrides into the active
+  ``pipeline_params``, dropping overrides for excluded nodes.
+- ``_build_score_report`` — typed ``CandidateScore`` factory with stable
+  defaults across the four exit paths in ``score_population``.
+- ``_pobb_decision_data`` — shared archival blob for elimination + lock-in
+  decisions.
+- ``L1ScoringResult`` — frozen Pydantic shape for ``l1_score``'s return.
+"""
+
+from __future__ import annotations
+
+import copy
+import logging
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict, Field
+
+from promptpotter.application.optimization.l1_validators import L1_SCHEMA_COMPLIANCE
+from promptpotter.domain.analysis import EscalationSignal, RuntimeFailure, ValidationFailure
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.results import (
+    CandidateProposal,
+    CandidateScore,
+)
+from promptpotter.domain.run_records import Decision
+from promptpotter.domain.scoring import QueryResult
+
+logger = logging.getLogger(__name__)
+
+__all__ = [
+    "INVALID_SCORES",
+    "L1ScoringResult",
+    "build_score_report",
+    "merge_pipeline_params",
+    "parse_population",
+    "pobb_decision_data",
+]
+
+
+def merge_pipeline_params(
+    base: dict | None,
+    overrides: dict | None,
+    schema: PipelineSchema | None,
+) -> dict | None:
+    """Deep-merge ``overrides`` into ``base``; drop overrides for nodes outside active steps."""
+    if not overrides:
+        return base
+    merged: dict = copy.deepcopy(base or {})
+    for k, v in overrides.items():
+        if isinstance(v, dict) and isinstance(merged.get(k), dict):
+            merged[k] = {**merged[k], **v}
+        else:
+            merged[k] = v
+    if schema:
+        _active = set(schema.active_steps)
+        for k in list(merged):
+            if k != "steps" and isinstance(merged[k], dict) and k not in _active:
+                logger.warning("Dropping LLM override for excluded node %r", k)
+                del merged[k]
+    return merged
+
+
+def parse_population(
+    proposals: list[CandidateProposal],
+    pipeline_params: dict | None,
+    schema: PipelineSchema | None,
+) -> tuple[list[OptSearchPoint], list[dict | None]]:
+    """Project proposals → OptSearchPoints + merged pp; attaches validation failures."""
+    osp_list: list[OptSearchPoint] = []
+    merged: list[dict | None] = []
+    for cp in proposals:
+        override = cp.node_overrides or None
+        osp = cp.osp
+        if schema and override:
+            outcome = L1_SCHEMA_COMPLIANCE.run(override, pipeline_schema=schema)
+            if outcome is not None:
+                failures: list[ValidationFailure] = outcome.evidence["failures"]
+                osp.validation_failures = failures
+                for vf in failures:
+                    logger.warning(
+                        "candidate %s: validation failure on %s — proposed %r not in allowed %r",
+                        osp.lineage.id[:8],
+                        vf.axis,
+                        vf.value,
+                        vf.allowed,
+                    )
+        osp_list.append(osp)
+        merged.append(merge_pipeline_params(pipeline_params, override, schema))
+    return osp_list, merged
+
+
+def build_score_report(
+    osp: OptSearchPoint,
+    override: dict | None,
+    scores: dict,
+    results: list,
+    dataset: list,
+    *,
+    aborted: bool = False,
+    elimination_stopped: bool = False,
+    elimination_context: dict | None = None,
+    resumed_from_cache: bool = False,
+    invalid: bool = False,
+    new_runtime_failure: RuntimeFailure | None = None,
+    l1_diversity: float = 1.0,
+) -> CandidateScore:
+    """Build the typed candidate score report — stable shape, defaults always present."""
+    evaluators = {**(scores.get("evaluators") or {}), "l1_diversity": l1_diversity}
+    return CandidateScore(
+        candidate_id=osp.lineage.id,
+        changes_description=osp.lineage.changes_description or "",
+        pipeline_params_override=override,
+        accuracy=scores["accuracy"],
+        composite=scores.get("composite", scores["accuracy"]),
+        hits=scores["hits"],
+        total=scores["total"],
+        evaluators=evaluators,
+        escalation_aborted=aborted,
+        elimination_stopped=elimination_stopped,
+        scored_queries=len(results),
+        expected_queries=len(dataset),
+        invalid=invalid,
+        resumed_from_cache=resumed_from_cache,
+        validation_failures=[vf.to_dict() for vf in osp.validation_failures],
+        runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
+        elimination_context=dict(elimination_context) if elimination_context else {},
+    )
+
+
+def pobb_decision_data(cr: dict) -> dict[str, Any]:
+    """Shared archival data for PoBB elimination + leader-lock decisions."""
+    return {
+        "p_best": float(cr.get("p_best", 0.0)),
+        "leader_id": str(cr.get("leader_id", "")),
+        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+    }
+
+
+INVALID_SCORES: dict[str, Any] = {
+    "accuracy": 0.0,
+    "composite": 0.0,
+    "hits": 0,
+    "total": 0,
+    "errors": 0,
+    "invalid": True,
+}
+
+
+class L1ScoringResult(BaseModel):
+    """Structured return value from l1_score() — frozen."""
+
+    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
+
+    label: str
+    winner_osp: OptSearchPoint
+    winner_prompt_fields: dict[str, Any]
+    winner_pipeline_params: dict[str, Any] | None
+    winner_accuracy: float
+    winner_composite: float
+    hits: int
+    total: int
+    improved: bool
+    p_value: float | None = None
+    candidates_scored: int
+    candidate_scores: list[CandidateScore]
+    winner_results: list[QueryResult]
+    all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
+    escalation_signal: EscalationSignal | None = None
+    degraded_queries: int = 0
+    deprecated: int = 0
+    winner_evaluators: dict[str, float] = Field(default_factory=dict)
+    decisions: list[Decision] = Field(default_factory=list)
+    l1_yield: float = 1.0
+    l1_n_no_op: int = 0
+    l1_n_duplicate: int = 0

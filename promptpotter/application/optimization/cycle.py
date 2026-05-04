@@ -38,11 +38,11 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.store import root_cycle_id, save_active_pointer
 from promptpotter.infrastructure.store.base import (
     read_json_optional,
     write_json,
 )
-from promptpotter.infrastructure.store.stores import root_cycle_id, save_active_pointer
 from promptpotter.shared.errors import ResumeDivergenceError, graceful
 from promptpotter.shared.statistics import (
     pobb_should_stop,

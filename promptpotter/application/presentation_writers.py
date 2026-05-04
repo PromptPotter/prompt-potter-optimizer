@@ -12,7 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.review import render_review_md
-from promptpotter.infrastructure.store.stores import root_cycle_id
+from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.presentation.views.render_markdown import to_markdown
 from promptpotter.presentation.views.view_factories import from_disk_log
 from promptpotter.shared.errors import graceful

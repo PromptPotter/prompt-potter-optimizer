@@ -132,14 +132,8 @@ def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: l
     return pipeline_params, baseline, build_baseline_cycle_id(baseline, schema, dataset)
 
 
-def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``init`` + ``optimize``. Pure data."""
-    parser = argparse.ArgumentParser(
-        prog="python -m promptpotter",
-        description="PromptPotter optimization CLI — init creates a session+cycle, "
-        "optimize runs a campaign against it. Reads happen by opening the artifact "
-        "tree (sessions/{id}/, campaigns/{cycle_id}/) directly.",
-    )
+def _add_global_args(parser: argparse.ArgumentParser) -> None:
+    """Tenant + session + verbosity flags shared across every command."""
     parser.add_argument("--session", default=None, help="Session ID (default: active)")
     parser.add_argument(
         "--tenant",
@@ -158,9 +152,10 @@ def build_parser() -> argparse.ArgumentParser:
         dest="json_output",
         help="Emit machine-readable JSON instead of human-formatted text",
     )
-    sub = parser.add_subparsers(dest="command", required=True)
 
-    p_init = sub.add_parser("init", help="Create session+cycle for a dataset")
+
+def _add_init_args(p_init: argparse.ArgumentParser) -> None:
+    """Backend + dataset + task overrides for ``init``."""
     p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
     p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
     p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
@@ -168,17 +163,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_init.add_argument("--excel-path", default=None)
     p_init.add_argument("--config", default=None, help="Campaign config JSON file")
     p_init.add_argument(
-        "--task-file",
-        default=None,
-        help="Override datasets/<name>/task_description.md",
+        "--task-file", default=None, help="Override datasets/<name>/task_description.md"
     )
     p_init.add_argument(
-        "--task-text",
-        default=None,
-        help="Override datasets/<name>/task_description.md inline",
+        "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )
 
-    p_opt = sub.add_parser("optimize", help="Run optimization loop on the active session")
+
+def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
+    """Resume / divergence / mode flags for ``optimize``."""
     p_opt.add_argument(
         "--from",
         dest="resume_from_round",
@@ -222,13 +215,9 @@ def build_parser() -> argparse.ArgumentParser:
         "L2's evolved L1 surface for the operator to promote.",
     )
 
-    p_cmp = sub.add_parser(
-        "compare",
-        help="PoBB-compare cycle winners across the family with adaptive top-up. "
-        "Each cycle's index.json::final.winner_pipeline_params is one arm; "
-        "under-measured arms get one extra score per round until a decisive "
-        "P(best) emerges or the topup budget is exhausted.",
-    )
+
+def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
+    """Cycle list + PoBB knobs for ``compare``."""
     p_cmp.add_argument(
         "cycle_ids",
         nargs="*",
@@ -257,6 +246,32 @@ def build_parser() -> argparse.ArgumentParser:
         default=4,
         dest="n_min_per_arm",
         help="Sample floor before SE-driven selection kicks in (default 4)",
+    )
+
+
+def build_parser() -> argparse.ArgumentParser:
+    """Argparse schema for ``init`` + ``optimize`` + ``compare``."""
+    parser = argparse.ArgumentParser(
+        prog="python -m promptpotter",
+        description="PromptPotter optimization CLI — init creates a session+cycle, "
+        "optimize runs a campaign against it. Reads happen by opening the artifact "
+        "tree (sessions/{id}/, campaigns/{cycle_id}/) directly.",
+    )
+    _add_global_args(parser)
+    sub = parser.add_subparsers(dest="command", required=True)
+
+    _add_init_args(sub.add_parser("init", help="Create session+cycle for a dataset"))
+    _add_optimize_args(
+        sub.add_parser("optimize", help="Run optimization loop on the active session")
+    )
+    _add_compare_args(
+        sub.add_parser(
+            "compare",
+            help="PoBB-compare cycle winners across the family with adaptive top-up. "
+            "Each cycle's index.json::final.winner_pipeline_params is one arm; "
+            "under-measured arms get one extra score per round until a decisive "
+            "P(best) emerges or the topup budget is exhausted.",
+        )
     )
 
     return parser
@@ -673,15 +688,15 @@ async def _run_sweep_batch(
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.domain.phases import StopReason
-    from promptpotter.infrastructure.store import build_stores
-    from promptpotter.infrastructure.store.base import write_json
-    from promptpotter.infrastructure.store.stores import (
-        root_cycle_id as _root_cycle_id,
-    )
-    from promptpotter.infrastructure.store.stores import (
+    from promptpotter.infrastructure.store import (
+        build_stores,
         save_active_pointer,
         sweep_batch_dir_for,
     )
+    from promptpotter.infrastructure.store import (
+        root_cycle_id as _root_cycle_id,
+    )
+    from promptpotter.infrastructure.store.base import write_json
 
     tenant_id = getattr(args, "tenant", "default")
     store = build_stores(tenant_id=tenant_id)
@@ -1004,7 +1019,7 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     from promptpotter.application.optimization.elevation import elevate_to_decisive
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store.stores import root_cycle_id
+    from promptpotter.infrastructure.store import root_cycle_id
 
     ctx = load_session(args)
     cycle_ids = list(args.cycle_ids)

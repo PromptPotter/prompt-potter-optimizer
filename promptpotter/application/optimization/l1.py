@@ -1,13 +1,14 @@
-"""L1 phase: generate → measure → score → execute round."""
+"""L1 phase: generate → measure → score → execute round.
+
+The round-loop spine. Validators + invariant detection live in
+``l1_validators``; population-shape helpers + ``L1ScoringResult`` live in
+``l1_population``.
+"""
 
 from __future__ import annotations
 
-import copy
 import logging
-from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
-
-from pydantic import BaseModel, ConfigDict, Field
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
 from promptpotter.application.optimization.dispatch import (
@@ -21,8 +22,20 @@ from promptpotter.application.optimization.l1_critique import (
     format_l1_critique_for_prompt,
     run_l1_critique,
 )
+from promptpotter.application.optimization.l1_population import (
+    INVALID_SCORES,
+    L1ScoringResult,
+    build_score_report,
+    parse_population,
+    pobb_decision_data,
+)
+from promptpotter.application.optimization.l1_validators import (
+    L1YieldStats,
+    _normalize_pp_override,
+    build_l1_output_schema,
+    detect_invariants,
+)
 from promptpotter.application.optimization.llm_call import (
-    get_optimizer_schema,
     load_optimizer_prompt,
     run_optimizer_node,
 )
@@ -32,15 +45,10 @@ from promptpotter.application.scoring.metrics import (
     count_degraded_queries,
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
-from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
-from promptpotter.domain.analysis import (
-    EscalationSignal,
-    RuntimeFailure,
-    ValidationFailure,
-)
+from promptpotter.config.settings import PROMPT_STRING_FIELDS
+from promptpotter.domain.analysis import EscalationSignal, RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, emit_phase
-from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
     CandidateScore,
@@ -49,7 +57,7 @@ from promptpotter.domain.results import (
 )
 from promptpotter.domain.run_records import DecisionKind
 from promptpotter.domain.scoring import QueryResult
-from promptpotter.domain.validators import LLMOutputValidator, StopRule, ValidatorOutcome
+from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
 from promptpotter.infrastructure import llm as _llm_client
@@ -75,165 +83,16 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "L1_SCHEMA_COMPLIANCE",
-    "L1ScoringResult",
-    "L1YieldStats",
-    "build_l1_output_schema",
-    "detect_invariants",
     "execute_round",
     "l1_generate",
     "l1_score",
-    "parse_population",
     "score_population",
-    "validate_overrides",
 ]
 
 
 # ---------------------------------------------------------------------------
 # Section 1 — Generation
 # ---------------------------------------------------------------------------
-
-
-def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Static l1_generate envelope + per-node param_allowed_values grafted as enums."""
-    base_node = get_optimizer_schema().get_node("l1_generate")
-    if base_node is None or base_node.output_schema is None:
-        raise RuntimeError(
-            "optimizer manifest missing l1_generate output_schema envelope "
-            "(resolved_schemas['l1_generate/1'])"
-        )
-    schema = copy.deepcopy(base_node.output_schema.json_schema)
-    override_properties = schema["schema"]["properties"]["variants"]["items"]["properties"][
-        "pipeline_params_override"
-    ]["properties"]
-
-    for node in pipeline_schema.nodes:
-        if not node.param_keys:
-            continue
-        param_props: dict[str, dict] = {}
-        for param in sorted(node.param_keys):
-            allowed = node.param_allowed_values.get(param)
-            if allowed:
-                param_props[param] = {"type": "string", "enum": list(allowed)}
-            else:
-                param_props[param] = {}
-        override_properties[node.name] = {
-            "type": "object",
-            "properties": param_props,
-            "additionalProperties": False,
-        }
-
-    return schema
-
-
-def validate_overrides(
-    node_overrides: dict[str, dict],
-    pipeline_schema: PipelineSchema,
-) -> list[ValidationFailure]:
-    """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0."""
-    failures: list[ValidationFailure] = []
-    allowed_models = list(pipeline_schema.available_models)
-    for node_name, node_params in node_overrides.items():
-        if not isinstance(node_params, dict):
-            continue
-        node = pipeline_schema.get_node(node_name)
-        node_allowed = (node.param_allowed_values if node else None) or {}
-        for param, value in node_params.items():
-            if param == "model" and allowed_models:
-                if value is not None and value not in allowed_models:
-                    failures.append(
-                        ValidationFailure(
-                            axis=f"{node_name}.model",
-                            value=str(value),
-                            allowed=allowed_models,
-                            reason="not_in_available_models",
-                        )
-                    )
-            elif (allowed := node_allowed.get(param)) and value not in allowed:
-                failures.append(
-                    ValidationFailure(
-                        axis=f"{node_name}.{param}",
-                        value=str(value),
-                        allowed=list(allowed),
-                        reason="not_in_param_allowed_values",
-                    )
-                )
-    return failures
-
-
-def _check_l1_schema_compliance(
-    source_output: Any,
-    *,
-    pipeline_schema: PipelineSchema,
-    **_: Any,
-) -> ValidatorOutcome | None:
-    """Wrap validate_overrides → ValidatorOutcome (nurse_target=L2)."""
-    if not source_output or not pipeline_schema:
-        return None
-    failures = validate_overrides(source_output, pipeline_schema)
-    if not failures:
-        return None
-    return ValidatorOutcome(
-        validator_id=L1_SCHEMA_COMPLIANCE.id,
-        passed=False,
-        score=0.0,
-        evidence={"failures": failures},
-        nurse_target="l2",
-    )
-
-
-L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
-    id="l1_schema_compliance",
-    description="Verify L1's pipeline_params_override vs schema's allowed values.",
-    nurse_target="l2",
-    check=_check_l1_schema_compliance,
-)
-
-
-def _normalize_pp_override(
-    pp_override: dict, pipeline_schema: PipelineSchema | None
-) -> tuple[dict, dict, dict]:
-    """Split LLM pp_override → (prompt, task_context, node_overrides); un-nest, auto-nest, drop unknown nodes."""
-    pp_override.pop("steps", None)  # LLM must not override pipeline composition
-    prompt_changes: dict = {}
-    tc_changes: dict = {}
-    node_overrides: dict = {}
-    for k, pv in pp_override.items():
-        if k in PROMPT_STRING_FIELDS:
-            prompt_changes[k] = pv
-        elif k in TASK_CONTEXT_OVERRIDES:
-            tc_changes[k] = pv
-        else:
-            node_overrides[k] = pv
-
-    # Un-nest prompt/task_context fields LLM emitted under a node name
-    # (e.g. {"llm_only": {"answer_format": ...}}).
-    for node_name in list(node_overrides.keys()):
-        nested = node_overrides[node_name]
-        if not isinstance(nested, dict):
-            continue
-        for sub_k in list(nested.keys()):
-            if sub_k in PROMPT_STRING_FIELDS:
-                logger.warning("l1_generate: un-nesting prompt field %r from %r", sub_k, node_name)
-                prompt_changes[sub_k] = nested.pop(sub_k)
-            elif sub_k in TASK_CONTEXT_OVERRIDES:
-                logger.warning("l1_generate: un-nesting task_context %r from %r", sub_k, node_name)
-                tc_changes[sub_k] = nested.pop(sub_k)
-        if not nested:
-            del node_overrides[node_name]
-
-    if pipeline_schema:
-        # Auto-nest flat params + drop hallucinated nodes.
-        for fk in [k for k, val in node_overrides.items() if not isinstance(val, dict)]:
-            owner = pipeline_schema.node_for_param(fk)
-            if owner:
-                logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
-                node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
-        for bk in [k for k in node_overrides if not pipeline_schema.has_node(k)]:
-            logger.warning("l1_generate: dropping hallucinated node %r", bk)
-            del node_overrides[bk]
-
-    return prompt_changes, tc_changes, node_overrides
 
 
 async def l1_generate(
@@ -334,190 +193,8 @@ async def l1_generate(
 
 
 # ---------------------------------------------------------------------------
-# Section 2 — Measurement (post-process, parse, score)
+# Section 2 — Measurement (score_population — three exit paths)
 # ---------------------------------------------------------------------------
-
-
-@dataclass(frozen=True)
-class L1YieldStats:
-    """Round-level L1 generation quality, computed from per-candidate signatures."""
-
-    yield_: float  # n_valid / n_proposed (1.0 when no proposals)
-    n_no_op: int
-    n_duplicate: int
-
-
-_INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
-
-
-def detect_invariants(
-    proposals: list[CandidateProposal], parent_osp: OptSearchPoint
-) -> L1YieldStats:
-    """Attach no_op_variant / duplicate_variant failures; return yield stats.
-
-    Failures route through score_population's synthetic-0 path (Path 1) so
-    invariant variants don't burn LLM calls. Idempotent — pre-existing
-    invariant failures are dropped first so resume-from-disk doesn't dup.
-    """
-    for cp in proposals:
-        cp.osp.validation_failures = [
-            vf for vf in cp.osp.validation_failures if vf.reason not in _INVARIANT_REASONS
-        ]
-    seen: dict[tuple, int] = {}
-    n_no_op = 0
-    n_duplicate = 0
-    parent_tc = parent_osp.task_context.to_dict()
-    for i, cp in enumerate(proposals):
-        child = cp.osp
-        pf_delta = tuple(
-            (f, getattr(child, f))
-            for f in PROMPT_STRING_FIELDS
-            if getattr(child, f) != getattr(parent_osp, f)
-        )
-        child_tc = child.task_context.to_dict()
-        tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
-        no_canon = tuple(
-            sorted((n, tuple(sorted(p.items()))) for n, p in (cp.node_overrides or {}).items() if p)
-        )
-        sig = (pf_delta, tc_delta, no_canon)
-        if not any(sig):
-            cp.osp.validation_failures = [
-                *cp.osp.validation_failures,
-                ValidationFailure(
-                    axis="variant",
-                    value="(no mutation)",
-                    allowed=["non-empty mutation"],
-                    reason="no_op_variant",
-                ),
-            ]
-            n_no_op += 1
-            continue
-        if sig in seen:
-            twin = seen[sig]
-            cp.osp.validation_failures = [
-                *cp.osp.validation_failures,
-                ValidationFailure(
-                    axis="variant",
-                    value=f"duplicate of C{twin + 1}",
-                    allowed=["unique mutation"],
-                    reason="duplicate_variant",
-                ),
-            ]
-            n_duplicate += 1
-            continue
-        seen[sig] = i
-    n = len(proposals)
-    yield_ = (n - n_no_op - n_duplicate) / n if n else 1.0
-    return L1YieldStats(yield_=yield_, n_no_op=n_no_op, n_duplicate=n_duplicate)
-
-
-def _merge_pipeline_params(
-    base: dict | None,
-    overrides: dict | None,
-    schema: PipelineSchema | None,
-) -> dict | None:
-    """Deep-merge ``overrides`` into ``base``; drop overrides for nodes outside active steps."""
-    if not overrides:
-        return base
-    merged: dict = copy.deepcopy(base or {})
-    for k, v in overrides.items():
-        if isinstance(v, dict) and isinstance(merged.get(k), dict):
-            merged[k] = {**merged[k], **v}
-        else:
-            merged[k] = v
-    if schema:
-        _active = set(schema.active_steps)
-        for k in list(merged):
-            if k != "steps" and isinstance(merged[k], dict) and k not in _active:
-                logger.warning("Dropping LLM override for excluded node %r", k)
-                del merged[k]
-    return merged
-
-
-def parse_population(
-    proposals: list[CandidateProposal],
-    pipeline_params: dict | None,
-    schema: PipelineSchema | None,
-) -> tuple[list[OptSearchPoint], list[dict | None]]:
-    """Project proposals → OptSearchPoints + merged pp; attaches validation failures."""
-    osp_list: list[OptSearchPoint] = []
-    merged: list[dict | None] = []
-    for cp in proposals:
-        override = cp.node_overrides or None
-        osp = cp.osp
-        if schema and override:
-            outcome = L1_SCHEMA_COMPLIANCE.run(override, pipeline_schema=schema)
-            if outcome is not None:
-                failures: list[ValidationFailure] = outcome.evidence["failures"]
-                osp.validation_failures = failures
-                for vf in failures:
-                    logger.warning(
-                        "candidate %s: validation failure on %s — proposed %r not in allowed %r",
-                        osp.lineage.id[:8],
-                        vf.axis,
-                        vf.value,
-                        vf.allowed,
-                    )
-        osp_list.append(osp)
-        merged.append(_merge_pipeline_params(pipeline_params, override, schema))
-    return osp_list, merged
-
-
-def _build_score_report(
-    osp: OptSearchPoint,
-    override: dict | None,
-    scores: dict,
-    results: list,
-    dataset: list,
-    *,
-    aborted: bool = False,
-    elimination_stopped: bool = False,
-    elimination_context: dict | None = None,
-    resumed_from_cache: bool = False,
-    invalid: bool = False,
-    new_runtime_failure: RuntimeFailure | None = None,
-    l1_diversity: float = 1.0,
-) -> CandidateScore:
-    """Build the typed candidate score report — stable shape, defaults always present."""
-    evaluators = {**(scores.get("evaluators") or {}), "l1_diversity": l1_diversity}
-    return CandidateScore(
-        candidate_id=osp.lineage.id,
-        changes_description=osp.lineage.changes_description or "",
-        pipeline_params_override=override,
-        accuracy=scores["accuracy"],
-        composite=scores.get("composite", scores["accuracy"]),
-        hits=scores["hits"],
-        total=scores["total"],
-        evaluators=evaluators,
-        escalation_aborted=aborted,
-        elimination_stopped=elimination_stopped,
-        scored_queries=len(results),
-        expected_queries=len(dataset),
-        invalid=invalid,
-        resumed_from_cache=resumed_from_cache,
-        validation_failures=[vf.to_dict() for vf in osp.validation_failures],
-        runtime_failures=[new_runtime_failure.to_dict()] if new_runtime_failure else [],
-        elimination_context=dict(elimination_context) if elimination_context else {},
-    )
-
-
-def _pobb_decision_data(cr: dict) -> dict[str, Any]:
-    """Shared archival data for PoBB elimination + leader-lock decisions."""
-    return {
-        "p_best": float(cr.get("p_best", 0.0)),
-        "leader_id": str(cr.get("leader_id", "")),
-        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
-    }
-
-
-_INVALID_SCORES: dict[str, Any] = {
-    "accuracy": 0.0,
-    "composite": 0.0,
-    "hits": 0,
-    "total": 0,
-    "errors": 0,
-    "invalid": True,
-}
 
 
 async def score_population(
@@ -574,10 +251,10 @@ async def score_population(
             all_candidate_results[osp_c.lineage.id] = []
             _fire(
                 idx,
-                _build_score_report(
+                build_score_report(
                     osp_c,
                     override,
-                    _INVALID_SCORES,
+                    INVALID_SCORES,
                     [],
                     dataset,
                     invalid=True,
@@ -616,7 +293,7 @@ async def score_population(
             )
             _fire(
                 idx,
-                _build_score_report(
+                build_score_report(
                     osp_c,
                     override,
                     scores,
@@ -694,7 +371,7 @@ async def score_population(
                 "leader_locked": leader_locked_loose,
             }
 
-        report = _build_score_report(
+        report = build_score_report(
             osp_c,
             override,
             scores,
@@ -740,7 +417,7 @@ async def score_population(
                         "round_num": round_num,
                     },
                     True,
-                    data=_pobb_decision_data(cr),
+                    data=pobb_decision_data(cr),
                 )
         if leader_locked and signal is not None and decisions is not None:
             cr = signal.check_result
@@ -756,7 +433,7 @@ async def score_population(
                     "round_num": round_num,
                 },
                 True,
-                data=_pobb_decision_data(cr),
+                data=pobb_decision_data(cr),
             )
 
         _fire(idx, report)
@@ -773,35 +450,6 @@ async def score_population(
 # ---------------------------------------------------------------------------
 # Section 3 — Scoring orchestration (winner selection)
 # ---------------------------------------------------------------------------
-
-
-class L1ScoringResult(BaseModel):
-    """Structured return value from l1_score() — frozen."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
-    label: str
-    winner_osp: OptSearchPoint
-    winner_prompt_fields: dict[str, Any]
-    winner_pipeline_params: dict[str, Any] | None
-    winner_accuracy: float
-    winner_composite: float
-    hits: int
-    total: int
-    improved: bool
-    p_value: float | None = None
-    candidates_scored: int
-    candidate_scores: list[CandidateScore]
-    winner_results: list[QueryResult]
-    all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
-    escalation_signal: EscalationSignal | None = None
-    degraded_queries: int = 0
-    deprecated: int = 0
-    winner_evaluators: dict[str, float] = Field(default_factory=dict)
-    decisions: list[Decision] = Field(default_factory=list)
-    l1_yield: float = 1.0
-    l1_n_no_op: int = 0
-    l1_n_duplicate: int = 0
 
 
 async def l1_score(

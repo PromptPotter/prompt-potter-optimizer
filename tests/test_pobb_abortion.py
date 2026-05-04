@@ -116,7 +116,9 @@ def test_pobb_check_fires_snapshot_callback_per_query():
 
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_queries=20)
+    check = PoBBCheck(
+        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_queries=20
+    )
     # Prior: weak candidate. Current: clear leader.
     check.register_completed([0.0] * 20, candidate_id="weak_prior")
     check.set_current("strong_current")
@@ -133,7 +135,9 @@ def test_pobb_locks_in_dominant_leader():
 
 def test_pobb_no_lock_in_below_n_min():
     """Even with overwhelming signal, lock-in waits for lock_in_n_min queries."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_queries=20)
+    check = PoBBCheck(
+        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_queries=20
+    )
     check.register_completed([0.0] * 20, candidate_id="weak_prior")
     check.set_current("strong_current")
     # Only 5 queries — past elim n_min (4) but below lock_in_n_min (8).

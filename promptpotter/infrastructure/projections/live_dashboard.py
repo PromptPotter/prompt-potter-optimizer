@@ -33,7 +33,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
-from promptpotter.infrastructure.store.stores import root_dir_for, session_dir_for
+from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 

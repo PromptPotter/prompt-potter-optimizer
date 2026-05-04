@@ -63,10 +63,9 @@ def no_dataset_hint() -> str:
 
 def load_session(args: argparse.Namespace) -> SessionCtx:
     """Load active session from disk."""
-    from promptpotter.infrastructure.store import read_active_pointer
-    from promptpotter.infrastructure.store.stores import _ACTIVE_SESSION_PATH
+    from promptpotter.infrastructure.store import active_pointer_exists, read_active_pointer
 
-    if not _ACTIVE_SESSION_PATH.exists():
+    if not active_pointer_exists():
         raise SystemExit(
             "ERROR: No active session.\n\n"
             "To start a campaign, init one of the available datasets:\n\n" + no_dataset_hint()
