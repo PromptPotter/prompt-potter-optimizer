@@ -234,24 +234,10 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
 
 
 def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
-    raw_scores = list(d.get("candidate_scores", []))
-    score_entries: list[ScoreEntry] = []
-    for i, s in enumerate(raw_scores):
-        hits = int(s.get("hits", 0))
-        total = int(s.get("total", 0))
-        ci_lo, ci_hi = wilson_ci(hits, total)
-        score_entries.append(
-            ScoreEntry(
-                label=f"C{i + 1}",
-                accuracy=float(s.get("accuracy", 0.0)),
-                composite=s.get("composite"),
-                hits=hits,
-                total=total,
-                ci_lo=ci_lo,
-                ci_hi=ci_hi,
-                escalation_aborted=bool(s.get("escalation_aborted", False)),
-            )
-        )
+    score_entries = [
+        _score_entry_from_dict(s, fallback_label=f"C{i + 1}")
+        for i, s in enumerate(d.get("candidate_scores") or [])
+    ]
 
     non_aborted = [s for s in score_entries if not s.escalation_aborted]
     if non_aborted:
@@ -418,15 +404,27 @@ def _sp_diff_from_dict(d: dict | None) -> SpDiffView:
     )
 
 
-def _score_entry_from_dict(s: dict) -> ScoreEntry:
+def _score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
+    """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
+    into a ``ScoreEntry``. ``fallback_label`` covers in-memory call sites where
+    the dict carries no ``"label"`` and the index-tag (e.g. ``C3``) is supplied
+    by the caller; ``ci_lo``/``ci_hi`` are recomputed from hits/total when the
+    dict pre-dates Wilson-CI persistence.
+    """
+    hits = int(s.get("hits", 0))
+    total = int(s.get("total", 0))
+    if "ci_lo" in s and "ci_hi" in s:
+        ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
+    else:
+        ci_lo, ci_hi = wilson_ci(hits, total)
     return ScoreEntry(
-        label=s.get("label", ""),
+        label=s.get("label") or fallback_label,
         accuracy=float(s.get("accuracy", 0.0)),
         composite=s.get("composite"),
-        hits=int(s.get("hits", 0)),
-        total=int(s.get("total", 0)),
-        ci_lo=float(s.get("ci_lo", 0.0)),
-        ci_hi=float(s.get("ci_hi", 0.0)),
+        hits=hits,
+        total=total,
+        ci_lo=ci_lo,
+        ci_hi=ci_hi,
         escalation_aborted=bool(s.get("escalation_aborted", False)),
     )
 
@@ -506,26 +504,10 @@ def from_disk_round(
     baseline_composite: float | None = None,
 ) -> RoundCompleteView:
     """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
-    score_entries: list[ScoreEntry] = []
-    for i, s in enumerate(trial.get("candidate_scores") or []):
-        hits = int(s.get("hits", 0))
-        total = int(s.get("total", 0))
-        if "ci_lo" in s and "ci_hi" in s:
-            ci_lo, ci_hi = float(s["ci_lo"]), float(s["ci_hi"])
-        else:
-            ci_lo, ci_hi = wilson_ci(hits, total)
-        score_entries.append(
-            ScoreEntry(
-                label=f"C{i + 1}",
-                accuracy=float(s.get("accuracy", 0.0)),
-                composite=s.get("composite"),
-                hits=hits,
-                total=total,
-                ci_lo=ci_lo,
-                ci_hi=ci_hi,
-                escalation_aborted=bool(s.get("escalation_aborted", False)),
-            )
-        )
+    score_entries = [
+        _score_entry_from_dict(s, fallback_label=f"C{i + 1}")
+        for i, s in enumerate(trial.get("candidate_scores") or [])
+    ]
 
     winner_label = ""
     non_aborted = [s for s in score_entries if not s.escalation_aborted]

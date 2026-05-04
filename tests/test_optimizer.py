@@ -72,9 +72,9 @@ def test_no_op_clone_attaches_validation_failure():
     no_op_reasons = [vf.reason for vf in proposals[0].osp.validation_failures]
     assert "no_op_variant" in no_op_reasons
     assert proposals[1].osp.validation_failures == []
-    assert stats.n_no_op == 1
-    assert stats.n_duplicate == 0
-    assert stats.yield_ == 0.5
+    assert stats.l1_n_no_op == 1
+    assert stats.l1_n_duplicate == 0
+    assert stats.l1_yield == 0.5
 
 
 def test_duplicate_signature_attaches_validation_failure():
@@ -91,9 +91,9 @@ def test_duplicate_signature_attaches_validation_failure():
     dup_reasons = [vf.reason for vf in proposals[1].osp.validation_failures]
     assert "duplicate_variant" in dup_reasons
     assert proposals[2].osp.validation_failures == []
-    assert stats.n_duplicate == 1
-    assert stats.n_no_op == 0
-    assert stats.yield_ == 2 / 3
+    assert stats.l1_n_duplicate == 1
+    assert stats.l1_n_no_op == 0
+    assert stats.l1_yield == 2 / 3
 
 
 # ===========================================================================
@@ -313,5 +313,3 @@ def test_sweep_payload_merges_with_existing_overrides() -> None:
         "l2_directive": "original",
         "task_context": "added",
     }
-
-

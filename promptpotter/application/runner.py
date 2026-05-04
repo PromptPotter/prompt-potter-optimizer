@@ -479,9 +479,9 @@ async def _run_sweep_generation_only(
                     "candidate_scores": [],
                     "decisions": [],
                     "evaluators": {},
-                    "l1_yield": yield_stats.yield_,
-                    "l1_n_no_op": yield_stats.n_no_op,
-                    "l1_n_duplicate": yield_stats.n_duplicate,
+                    "l1_yield": yield_stats.l1_yield,
+                    "l1_n_no_op": yield_stats.l1_n_no_op,
+                    "l1_n_duplicate": yield_stats.l1_n_duplicate,
                     "opt_search_point": cycle.opt_sp.model_dump(),
                 },
             )

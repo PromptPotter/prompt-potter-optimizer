@@ -261,18 +261,10 @@ class TrialSummary(BaseModel):
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
-class CampaignDetailResponse(BaseModel):
-    campaign_id: str = Field(description="Unique campaign identifier")
-    name: str = Field(description="Human-readable campaign name")
+class CampaignDetailResponse(CampaignSummary):
     backend_id: str = Field(description="Backend this campaign optimizes against")
-    status: str = Field(description="Campaign status: active, completed, or stopped")
     config: dict[str, Any] = Field(description="Full campaign configuration used for this run")
-    n_trials: int = Field(description="Total number of completed trial rounds")
-    best_accuracy: float = Field(description="Highest accuracy achieved across all trials")
     best_trial_id: str | None = Field(description="Trial ID of the best-performing round")
-    baseline_accuracy: float = Field(description="Initial accuracy before optimization")
-    created_at: str = Field(description="ISO 8601 creation timestamp")
-    updated_at: str = Field(description="ISO 8601 last-update timestamp")
     trials: list[TrialSummary] = Field(description="Ordered list of trial summaries")
     langfuse_trace_id: str | None = Field(
         default=None,

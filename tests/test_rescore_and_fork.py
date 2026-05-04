@@ -574,4 +574,3 @@ class TestRewindToRound:
         store = CampaignStore(tmp_path)
         with _pytest.raises(LookupError, match="no trials on disk"):
             store.rewind_to_round("bid", "cycle_nonexistent", after_round=0)
-

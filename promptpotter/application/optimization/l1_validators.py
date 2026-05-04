@@ -187,11 +187,15 @@ def _normalize_pp_override(
 
 @dataclass(frozen=True)
 class L1YieldStats:
-    """Round-level L1 generation quality, computed from per-candidate signatures."""
+    """Round-level L1 generation quality.
 
-    yield_: float  # n_valid / n_proposed (1.0 when no proposals)
-    n_no_op: int
-    n_duplicate: int
+    Field names mirror ``RoundDiagnostics.l1_yield``/``l1_n_no_op``/``l1_n_duplicate``
+    so callers can spread via ``dataclasses.asdict`` rather than translate.
+    """
+
+    l1_yield: float  # n_valid / n_proposed (1.0 when no proposals)
+    l1_n_no_op: int
+    l1_n_duplicate: int
 
 
 _INVARIANT_REASONS = frozenset({"no_op_variant", "duplicate_variant"})
@@ -255,4 +259,4 @@ def detect_invariants(
         seen[sig] = i
     n = len(proposals)
     yield_ = (n - n_no_op - n_duplicate) / n if n else 1.0
-    return L1YieldStats(yield_=yield_, n_no_op=n_no_op, n_duplicate=n_duplicate)
+    return L1YieldStats(l1_yield=yield_, l1_n_no_op=n_no_op, l1_n_duplicate=n_duplicate)

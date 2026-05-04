@@ -486,7 +486,7 @@ async def l1_score(
         pobb_config=pobb_config,
         round_num=round_num,
         decisions=decisions,
-        l1_diversity=yield_stats.yield_,
+        l1_diversity=yield_stats.l1_yield,
     )
 
     aborted_ids = {
@@ -512,7 +512,7 @@ async def l1_score(
             schema,
             opt_sp=ind,
             round_scorer=session.scoring.round_scorer,
-            l1_diversity=yield_stats.yield_,
+            l1_diversity=yield_stats.l1_yield,
         )
         if s["accuracy"] > best_acc:
             best_acc = s["accuracy"]
@@ -564,9 +564,9 @@ async def l1_score(
         deprecated=base["deprecated"],
         winner_evaluators=best_scores,
         decisions=decisions,
-        l1_yield=yield_stats.yield_,
-        l1_n_no_op=yield_stats.n_no_op,
-        l1_n_duplicate=yield_stats.n_duplicate,
+        l1_yield=yield_stats.l1_yield,
+        l1_n_no_op=yield_stats.l1_n_no_op,
+        l1_n_duplicate=yield_stats.l1_n_duplicate,
     )
 
 
@@ -639,9 +639,9 @@ async def generate_or_load_candidates(
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=True,
                 candidates=candidate_summaries(persisted),
-                l1_yield=yield_stats.yield_,
-                l1_n_no_op=yield_stats.n_no_op,
-                l1_n_duplicate=yield_stats.n_duplicate,
+                l1_yield=yield_stats.l1_yield,
+                l1_n_no_op=yield_stats.l1_n_no_op,
+                l1_n_duplicate=yield_stats.l1_n_duplicate,
             )
             return persisted, yield_stats
 
@@ -684,9 +684,9 @@ async def generate_or_load_candidates(
         n_eval_queries=n_eval_queries,
         loaded_from_disk=False,
         candidates=candidate_summaries(candidates),
-        l1_yield=yield_stats.yield_,
-        l1_n_no_op=yield_stats.n_no_op,
-        l1_n_duplicate=yield_stats.n_duplicate,
+        l1_yield=yield_stats.l1_yield,
+        l1_n_no_op=yield_stats.l1_n_no_op,
+        l1_n_duplicate=yield_stats.l1_n_duplicate,
     )
 
     return candidates, yield_stats
