@@ -1,16 +1,16 @@
 # PromptPotter Documentation
 
-**New here? → [`manual/`](manual/README.md).** One folder, numbered chapters, everything a user needs to run PromptPotter.
+PromptPotter tunes prompts and pipeline configs against a labelled dataset. The whole design is **maximize fitness, minimize spend**.
 
-Everything else is reference material, organized by what you're looking for:
+**New here? → [`manual/`](manual/README.md).** Numbered chapters: install → first run → reading output → troubleshooting.
 
 | Folder | Purpose |
 |--------|---------|
-| [`manual/`](manual/README.md) | User-facing walkthrough — install, first run, reading the output, troubleshooting |
-| [`concepts/`](concepts/README.md) | How it works — campaign lifecycle, three-layer loop, self-healing, scoring, search memory. Concept-first, no code. |
-| [`developer/`](developer/README.md) | Implementation spec — package layout, data contracts, node wiring, symbol index. Python names live here. |
-| [`operations/`](operations/README.md) | Running it — CLI reference, backend integration, persistence, rewind/fork, observability, environment setup |
-| [`methods/`](methods/README.md) | Statistical foundations — candidate elimination, exploration/exploitation sample selection |
-| [`research/`](research/README.md) | Publication-facing — benchmarks, metrics, related work |
-| [`specs/`](specs/CLAUDE.md) | Roadmap + forward-looking milestone specs |
-| `assets/` | Images and diagrams used across docs |
+| [`manual/`](manual/README.md) | User walkthrough |
+| [`concepts/`](concepts/README.md) | How it works — three-layer loop with CONTEXT and PLAN, spend control, self-healing. Concept-first, no code. |
+| [`developer/`](developer/README.md) | Implementation spec — Python names, data contracts, node wiring |
+| [`operations/`](operations/README.md) | Running it — CLI, backend integration, persistence, observability |
+| [`methods/`](methods/README.md) | The two spend-control procedures: PoBB elimination + hard-sample dashboard |
+| [`research/`](research/README.md) | Benchmarks, metrics, related work |
+| [`specs/`](specs/CLAUDE.md) | Roadmap + forward-looking specs |
+| `assets/` | Images and diagrams |

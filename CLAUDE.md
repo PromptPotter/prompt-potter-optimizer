@@ -85,4 +85,4 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 
 ## Pointers
 
-`docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/code-layout.md` + `code-map.md` symbol→file index (**single point of update when code moves**) · `docs/developer/information-flow.md` what data enters which prompt · `tests/CLAUDE.md` test charter.
+`docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · `tests/CLAUDE.md` test charter.

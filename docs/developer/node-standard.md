@@ -86,7 +86,7 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 
 ### LLM nodes additionally
 
-- **Prompt exposure** — an LLM node exposes its prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimizes it. See [prompt-scheme-internals.md](prompt-scheme-internals.md).
+- **Prompt exposure** — an LLM node exposes its prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimizes it. See [`README.md § Prompt structure`](README.md).
 - **Optimizer-discoverable parameters** — the node declares which parameters it accepts and their valid values. PromptPotter picks these up automatically as optimization axes — no hardcoding.
 - **Self-healing Loop 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE` validator; L2 teaches L1 not to repeat the invalid proposal. See [self-healing-internals.md](self-healing-internals.md).
 - **Self-healing Loop 2** — `RuntimeFailure` attached to the candidate mid-evaluation; L2 adjusts its own strategy; L3 replans if the pattern persists.
@@ -105,8 +105,7 @@ Capabilities are opt-in. A deterministic node declares none of these; an LLM nod
 |----------|---------------|
 | [self-healing-internals.md](self-healing-internals.md) | Four LLM-to-LLM healing loops in full |
 | [../methods/candidate-elimination.md](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through Bayesian PoBB cutoff |
-| [prompt-scheme-internals.md](prompt-scheme-internals.md) | Prompt field decomposition, `PromptTemplate` |
+| [`README.md`](README.md) | Architecture brief — prompt structure, dispatch, scoring node, cross-run memory |
 | [../operations/observability.md](../operations/observability.md) | Node tracing and Langfuse integration |
-| [code-layout.md](code-layout.md) | Pipeline exit points, cache reuse |
 | `promptpotter/application/optimization/optimizer_pipeline.json` | Live optimizer node declarations |
 | `GET /pipeline` | Backend self-description — source of the pipeline schema at runtime |

@@ -58,4 +58,4 @@ MeasurementArchive   ← facts (append-only, persisted)
 
 The archive is the source of truth. Both derived views read it; neither replaces it. When you ask "what was actually measured?" the archive answers. When you ask "across all measurements, which axes shifted fitness?" the axis index answers.
 
-For the internal mechanics — refresh path, digest API, accessor catalog — see [../developer/axis-index-internals.md](../developer/axis-index-internals.md).
+For implementation — refresh path, accessors, in-memory cursor — see [`../developer/README.md § Cross-run memory`](../developer/README.md).

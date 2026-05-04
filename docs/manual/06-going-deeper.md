@@ -26,10 +26,9 @@ The `concepts/` folder explains the ideas behind PromptPotter in plain language.
 
 ## Developer — implementation
 
-- [Code layout](../developer/code-layout.md) — package structure, hexagonal layers
-- [Information flow](../developer/information-flow.md) — what each optimizer layer reads and writes
+- [Developer README](../developer/README.md) — architecture brief: prompt structure, dispatch, scoring node, cross-run memory
+- [Surface field reference](../developer/information-flow.md) — per-field tables for L1/L2/L3 surfaces
 - [Node standard](../developer/node-standard.md) — how to wire a new pipeline node
-- [Code map](../developer/code-map.md) — Python symbol index, where everything lives
 
 ## Methods — the statistics
 

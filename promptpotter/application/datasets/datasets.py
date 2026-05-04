@@ -439,7 +439,7 @@ def load_node_prompt(
     raise FileNotFoundError(
         f"Canonical prompt template not found for dataset={dataset!r} node={node_name!r}. "
         f"Expected either {node_path} (per-node) or {variant_path} (dataset default). "
-        f"Author one as a 6-field PromptTemplate JSON; see docs/developer/prompt-scheme-internals.md."
+        f"Author one as a PromptTemplate JSON; see docs/concepts/prompts-and-individuals.md."
     )
 
 

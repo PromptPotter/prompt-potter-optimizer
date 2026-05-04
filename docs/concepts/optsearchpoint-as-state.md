@@ -2,7 +2,7 @@
 
 Every round, the optimizer carries one record forward — the *individual* (in code: `OptSearchPoint`, often shortened to *OSP*). It holds everything the optimizer knows about the current best-so-far: the prompt, the strategic context, the operational memory, and L2's mutations to L1's surface.
 
-This page is for operators. For the implementation, see [`../developer/code-map.md`](../developer/code-map.md).
+This page is for operators. For the implementation, see `OptSearchPoint` in `promptpotter/domain/opt_search_point.py`.
 
 ---
 
@@ -63,4 +63,4 @@ Every change L2 makes is on this record. Nothing is lost between rounds because 
 - [what-is-l2.md](what-is-l2.md) — the main writer of the record's strategy fields.
 - [l1-generate-surface.md](l1-generate-surface.md) — the surface fields on the record.
 - [scoring-and-traces.md](scoring-and-traces.md) — how the record interacts with the scoring archive.
-- [`../developer/code-map.md`](../developer/code-map.md) — the `OptSearchPoint` class definition and field list.
+- `promptpotter/domain/opt_search_point.py` — the `OptSearchPoint` class definition and field list.

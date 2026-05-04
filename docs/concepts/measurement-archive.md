@@ -110,7 +110,7 @@ Same archive, same matcher primitive, two viewpoints.
 
 ## See also
 
-- [`docs/developer/measurement-archive-internals.md`](../developer/measurement-archive-internals.md) — `Measurement` dataclass, predicate semantics, file layout.
+- [`../developer/README.md § Cross-run memory`](../developer/README.md) — `Measurement` dataclass, write/read paths, extension seams.
 - [`docs/operations/persistence-and-state.md`](../operations/persistence-and-state.md) — full tenant-tree reference, including non-archive surfaces (sessions, campaigns).
 - [`docs/concepts/scoring-and-traces.md`](scoring-and-traces.md) — how measurements are written: rescore-on-load, decision-replay, fork.
 - [`docs/concepts/axis-index.md`](axis-index.md) — the digest layer that consumes the archive.

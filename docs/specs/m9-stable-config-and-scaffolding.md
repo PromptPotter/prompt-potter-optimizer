@@ -214,7 +214,7 @@ LoopEnv  (per-run infrastructure, transient)
 4. `configure_and_apply_pipeline()`, `apply_stored_overrides()`, and recon-result merging stop mutating user config.
 5. `LoopEnv.zero_signal_filter_*` fields moved to `CampaignConfig.optimization`; `LoopEnv` reads from `CampaignConfig` at `run_optimization` construction time.
 6. Existing `campaign.json` files in `datasets/*/` parse unchanged (validator handles legacy shape). Test fixture coverage extends to both shapes.
-7. `docs/developer/code-layout.md` + `CLAUDE.md` updated with the new three-object boundary: *user knobs / session identity / loop infrastructure*.
+7. `CLAUDE.md` updated with the new three-object boundary: *user knobs / session identity / loop infrastructure*.
 
 **Sequencing:** Wave 2, alongside Track 3 (multi-dataset). Track 3 adds `dataset_name` and `pipeline_name` as required session fields — the same surgery that Track 7 is doing on `session_id` / `project_root` / `recon_brief`. Landing them together keeps `SessionEnv`'s shape stable afterwards. Depends on Track 2 (hexagonal layout) being complete so the imports don't move again mid-refactor.
 

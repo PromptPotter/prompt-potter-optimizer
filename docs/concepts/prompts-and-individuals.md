@@ -2,7 +2,7 @@
 
 PromptPotter doesn't treat a prompt as one opaque string. It decomposes every prompt into independently mutable fields — six prompt-string fields rendered in order, plus two appended sections (few-shot examples, plan). L1 mutates one axis at a time, holding the rest fixed, so the fitness delta of each axis is unambiguous.
 
-The decomposition, render pipeline, and field registry live in [../developer/prompt-scheme-internals.md](../developer/prompt-scheme-internals.md). This page is the *why*.
+For the per-layer prompt structure (8 fields, layer-specific surfaces, render chain) see [`../developer/README.md § Prompt structure`](../developer/README.md). This page is the *why*.
 
 ## Why decomposition matters
 

@@ -122,7 +122,7 @@ The resume source of truth. Each completed round writes its serialized `OptSearc
 
 ## Entry-point emission boundary
 
-Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardProjection` (family-root telemetry: `dashboard.json`) and `AuditTrailProjection` (per-cycle audit: `.runtime/cache/rounds/round_NNNN.json`). Both subscribe to the per-cycle `RunLedger` in `infrastructure/ledger.py` which persists every fact (`Decision`, `Phase`, `Snapshot`) to `.runtime/ledger.jsonl`. The `ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_OPERATOR_ARTIFACTS`, `PER_CYCLE_INTERNAL_UMBRELLA`, and `SIBLING_GROUP_DIRS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract. See [../developer/code-layout.md § Three-layer I/O architecture](../developer/code-layout.md).
+Entry points (notebook, CLI, `/potter-run` skill, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardProjection` (family-root telemetry: `dashboard.json`) and `AuditTrailProjection` (per-cycle audit: `.runtime/cache/rounds/round_NNNN.json`). Both subscribe to the per-cycle `RunLedger` in `infrastructure/ledger.py` which persists every fact (`Decision`, `Phase`, `Snapshot`) to `.runtime/ledger.jsonl`. The `ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_OPERATOR_ARTIFACTS`, `PER_CYCLE_INTERNAL_UMBRELLA`, and `SIBLING_GROUP_DIRS` allowlists live in `tests/test_artifact_parity.py`; the test owns the contract.
 
 ---
 

@@ -192,9 +192,17 @@ class ExplorationConfig(BaseModel):
 
 
 class OptimizationConfig(BaseModel):
-    """Optimization-loop knobs. Required per-dataset experiment fields vs.
-    defaulted system invariants are split deliberately — see
-    ``docs/developer/optimization-config.md`` before adding or moving a field.
+    """Optimization-loop knobs.
+
+    Required per-dataset fields (no default — Pydantic raises if missing): every
+    ``datasets/*/campaign.json`` must declare ``improvement_threshold``,
+    ``max_failures``, ``degradation_threshold``.
+
+    System invariants (defaulted, MUST NOT appear in any ``campaign.json``):
+    ``enable_l2=True``, ``enable_l3=True``, ``seed=42``, and
+    ``ExplorationConfig.swap_out_delta_se=0.7``.
+
+    Guard test: ``tests/test_campaign_config_validation.py::test_required_optimization_fields_must_be_explicit``.
     """
 
     model_config = ConfigDict(extra="forbid")

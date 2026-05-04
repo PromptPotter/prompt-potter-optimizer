@@ -10,9 +10,11 @@
 
 ## Why PromptPotter?
 
-Manual prompt tuning is slow, inconsistent, and the lessons don't carry over to the next project. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Whether you're an office worker iterating on the same daily report or an AI agent learning a new tool, you get a better prompt without the trial and error.
+Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Every measurement costs money, so the design is built to **maximize fitness, minimize spend**:
 
-Under the hood, PromptPotter just collects a lot of datapoints. Every evaluation is stored, every parameter combination is tracked, and the optimizer uses this accumulated evidence to make better decisions each round.
+- **Search-only-with-evidence.** Variants default to a small budget (~3–5 samples) and only get extended when there's statistical evidence they have a chance.
+- **Hard-sample dashboard.** Score preferentially on samples that actually separate variants — samples everyone aces or fails are noise.
+- **Cross-run memory.** Every datapoint is stored; the optimizer carries what it learned into the next run.
 
 
 ## The Workflow
@@ -141,6 +143,14 @@ Developer internals (Python symbols, data contracts, wiring) live under [`docs/d
 ## Watching a run
 
 While `python -m promptpotter optimize` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `trials/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the planned webapp. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
+
+## Common questions
+
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`prompts-and-individuals.md`](docs/concepts/prompts-and-individuals.md).
+- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
+- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run) above.
+- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-traces.md`](docs/concepts/scoring-and-traces.md).
+- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/concepts/self-healing.md)); stalls escalate L1 → L2 → L3 ([three-layer-loop](docs/concepts/three-layer-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
 
 ## Citation
 

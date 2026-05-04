@@ -1,38 +1,41 @@
 # Concepts
 
-How PromptPotter works, explained without reference to Python classes, module paths, or internal schemas. Each page stands alone — read in any order.
+PromptPotter tunes prompts and pipeline configs against a labelled dataset. Every measurement costs money — the design is **maximize fitness, minimize spend**.
 
-## The full algorithm
+## The loop
 
-PromptPotter evolves prompts and pipeline configs against a labelled dataset. The seven pages below cover the full algorithm.
+Three layers, each wraps the next like a system prompt wraps a user prompt:
 
-| Page | What it covers |
-|------|----------------|
-| [Campaign lifecycle](campaign-lifecycle.md) | Outer shell: `init` → baseline → rounds → finalize |
-| [The three-layer loop](three-layer-loop.md) | L1 generate-measure-critique, L2 refine on stall, L3 replan on deeper stall |
-| [Mid-round elimination race (PoBB)](../methods/candidate-elimination.md) | Bayesian early-stop: a candidate is cut mid-round when its posterior probability of being the round's best drops below ε |
-| [Sample selection + hard-sample leaderboard](../methods/exploration-exploitation.md) | Rasch + Knowledge Gradient — between rounds, swap understood samples for high-info ones; same posterior feeds the hard-sample leaderboard |
-| [Self-healing](self-healing.md) | The four LLM-to-LLM healing loops (validation, runtime, L2-stall, L2-output validators) |
-| [Scoring and traces](scoring-and-traces.md) | Traces are facts; scores are policy. Rescore-on-load, decision replay, fork |
-| [The measurement archive](measurement-archive.md) | The cross-cycle / cross-session / cross-tenant database core: one row = (sample × config → outcome) |
+- **L1** mutates the prompt template's fields (persona, task instruction, …) and the pipeline params, then scores each variant.
+- **L2** writes a **CONTEXT** outline that wraps L1, and tweaks L1's fields when L1 stalls.
+- **L3** writes a **PLAN** outline that wraps L2, and is rewritten when L2 stalls.
 
-## Strategist details (operator track for L2)
+CONTEXT and PLAN live on disk inside each trial file — the loop's actual config, inspectable and editable. "Add this to the plan" means exactly that.
 
-| Page | What it covers |
-|------|----------------|
-| [What L2 is](what-is-l2.md) | The optimizer's strategist — what it watches, what it mutates, why |
-| [L2's decision tree](l2-decision-tree.md) | When L2 picks each of its five choices, with one scenario per variant |
-| [L1's prompt surface](l1-generate-surface.md) | The closed catalogue of variables L1 sees, and L2's three levers over it |
-| [The individual record](optsearchpoint-as-state.md) | The `OptSearchPoint` record explained — what each layer reads and writes |
+## Spend control
 
-## Supporting machinery
+- **Search-only-with-evidence.** Each variant runs against ~3–5 samples by default. Only variants with statistical evidence of being promising get extended; the rest drop out before the bill grows.
+- **Hard-sample dashboard.** Samples that everyone aces or everyone fails carry no signal. The dashboard surfaces samples that actually separate variants, and the loop preferentially scores on those.
+
+## Register
 
 | Page | What it covers |
 |------|----------------|
-| [The fork tree and sweep primitive](fork-tree-and-sweep.md) | A campaign is a tree of cycles. What rides the tree, what doesn't. How sweep mints siblings |
-| [Axis index](axis-index.md) | How knowledge accumulates across campaigns; parameter impact, query patterns, failure modes |
+| [Campaign lifecycle](campaign-lifecycle.md) | `init` → baseline → rounds → finalize |
+| [Three-layer loop](three-layer-loop.md) | L1 / L2 / L3 cadence and what each writes |
+| [What L2 is](what-is-l2.md) | L2's role and the CONTEXT outline it owns |
+| [L2's decision tree](l2-decision-tree.md) | L2's five choices, with one scenario per variant |
+| [L1's prompt surface](l1-generate-surface.md) | What L1 sees and which parts L2 can override |
+| [The individual record](optsearchpoint-as-state.md) | The record carrying CONTEXT, PLAN, and L1 overrides |
+| [Mid-round elimination](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
+| [Hard-sample dashboard](../methods/exploration-exploitation.md) | Sample selection in detail |
+| [Self-healing](self-healing.md) | Four LLM-to-LLM healing loops |
+| [Scoring and traces](scoring-and-traces.md) | Traces are facts; scores are policy |
+| [Measurement archive](measurement-archive.md) | The cross-run database core |
+| [Fork tree and sweep](fork-tree-and-sweep.md) | Campaigns as cycle trees |
+| [Axis index](axis-index.md) | Knowledge accumulation across campaigns |
 | [Prompts and individuals](prompts-and-individuals.md) | The 8-field prompt decomposition |
-| [Nodes and pipelines](nodes-and-pipelines.md) | What a pipeline node is and what it can do |
+| [Nodes and pipelines](nodes-and-pipelines.md) | Pipeline node anatomy |
 | [Glossary](glossary.md) | Terms used across the docs |
 
-Looking for implementation details? See [`../developer/`](../developer/README.md).
+Looking for implementation? See [`../developer/`](../developer/README.md).
