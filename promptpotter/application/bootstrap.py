@@ -10,7 +10,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.config import EXPERIMENT_EXTRACTORS
+from promptpotter import connectors
 from promptpotter.application.datasets.datasets import (
     DATASET_LOADERS,
     samples_from_dicts,
@@ -21,6 +21,9 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
+
+# Self-registration side effect — keep this import alive even if linters flag it.
+from promptpotter.connectors import termnorm as _termnorm  # noqa: F401
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
@@ -452,9 +455,12 @@ async def _sync_and_extract_experiment(
         return
 
     schema_key = session.pipeline_schema.name.lower() if session.pipeline_schema else ""
-    extractor = EXPERIMENT_EXTRACTORS.get(schema_key)
-    if extractor:
-        queries, index_terms = extractor(extract)
+    try:
+        connector = connectors.get(schema_key) if schema_key else None
+    except KeyError:
+        connector = None
+    if connector is not None:
+        queries, index_terms = connector.extract_experiment(extract)
     else:
         runs = extract.get("runs", [])
         queries = []
@@ -499,7 +505,14 @@ async def init_services(
     store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
     _apply_tenant_guard(tenant_id, take_over, status)
 
-    client = BackendClient(backend_url)
+    # Connector type is config-time (no auto-discovery). TermNorm is the only
+    # connector today; M12 broadens lookup via dataset's pipeline.json::backend_type.
+    connector = connectors.get("termnorm")
+    client = BackendClient(
+        backend_url,
+        wire_adapter=connector.wire_adapter,
+        session=connector.session_factory(),
+    )
     status(f"Backend: {backend_url}")
 
     pipeline_schema = await _resolve_pipeline_schema(client, project_root, dataset_name, status)

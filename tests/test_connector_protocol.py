@@ -1,11 +1,10 @@
 """ConnectorProtocol — wire payload + session lifecycle pluggability.
 
 These tests pin the M12 connector boundary: ``BackendClient`` must
-accept a custom ``WireAdapter`` (outbound payload shape) and a custom
+accept a ``WireAdapter`` (outbound payload shape) and a
 ``SessionProtocol`` (session lifecycle) so a second backend can land
-without touching ``BackendClient`` or any of its callers. The default
-behaviour preserves TermNorm shape — these tests prove the *seam*
-exists, not that we ship a second connector today.
+without touching ``BackendClient`` or any of its callers. The TermNorm
+implementation lives in ``promptpotter.connectors.termnorm``.
 """
 
 from __future__ import annotations
@@ -15,15 +14,12 @@ from typing import Any
 import httpx
 import pytest
 
-from promptpotter.infrastructure.backend import (
-    BackendClient,
-    TermNormSession,
-    termnorm_wire_adapter,
-)
+from promptpotter.connectors.termnorm import TermNormSession, termnorm_wire_adapter
+from promptpotter.infrastructure.backend import BackendClient
 
 
 def test_termnorm_wire_adapter_default_shape() -> None:
-    """Default adapter projects pipeline_params to {query, steps, node_config}."""
+    """TermNorm adapter projects pipeline_params to {query, steps, node_config}."""
     payload = termnorm_wire_adapter(
         "what is X?",
         {
@@ -69,19 +65,14 @@ def test_backend_client_uses_custom_wire_adapter() -> None:
         captured["pp"] = pipeline_params
         return {"prompt": query, "options": pipeline_params or {}}
 
-    client = BackendClient("http://example.invalid", wire_adapter=alt_wire)
-    # Call the adapter directly (no HTTP) — the contract under test is
-    # which adapter the client holds, not the network round-trip.
+    client = BackendClient(
+        "http://example.invalid",
+        wire_adapter=alt_wire,
+        session=TermNormSession(),
+    )
     payload = client._wire_adapter("hello", {"k": "v"})
     assert payload == {"prompt": "hello", "options": {"k": "v"}}
     assert captured == {"query": "hello", "pp": {"k": "v"}}
-
-
-def test_backend_client_default_session_is_termnorm() -> None:
-    """Default session is TermNormSession (preserves current behaviour)."""
-    client = BackendClient("http://example.invalid")
-    assert isinstance(client._guard, TermNormSession)
-    assert client._guard.has_terms is False
 
 
 def test_backend_client_accepts_custom_session() -> None:
@@ -106,10 +97,12 @@ def test_backend_client_accepts_custom_session() -> None:
             calls.append(("recover", None))
             return True
 
-    client = BackendClient("http://example.invalid", session=FakeSession())
+    client = BackendClient(
+        "http://example.invalid",
+        wire_adapter=termnorm_wire_adapter,
+        session=FakeSession(),
+    )
     assert client._guard.has_terms is True
-    # Sanity: the custom session is a SessionProtocol-shaped object the
-    # client holds; full network coverage lives in the runtime smoke.
     assert hasattr(client._guard, "set_terms")
     assert hasattr(client._guard, "recover")
 

@@ -25,7 +25,11 @@ from typing import Annotated, Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
+from promptpotter import connectors
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
+
+# Self-registration side effect.
+from promptpotter.connectors import termnorm as _termnorm  # noqa: F401
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import Decision, DecisionKind
@@ -140,7 +144,12 @@ async def get_backend(backend_id: str, store: StoreDep):
 async def sync_experiments(backend_id: str, store: StoreDep):
     """Sync experiments from backend API into project store (verbatim)."""
     backend = _get_backend_or_404(backend_id, store)
-    client = BackendClient(backend.base_url)
+    connector = connectors.get(backend.backend_type)
+    client = BackendClient(
+        backend.base_url,
+        wire_adapter=connector.wire_adapter,
+        session=connector.session_factory(),
+    )
 
     try:
         count = await client.sync_experiments(store, backend_id)
@@ -198,7 +207,12 @@ async def get_experiment(backend_id: str, experiment_id: str, store: StoreDep):
 async def get_pipeline(backend_id: str, store: StoreDep):
     """Dynamic pipeline view from the backend."""
     backend = _get_backend_or_404(backend_id, store)
-    client = BackendClient(backend.base_url)
+    connector = connectors.get(backend.backend_type)
+    client = BackendClient(
+        backend.base_url,
+        wire_adapter=connector.wire_adapter,
+        session=connector.session_factory(),
+    )
 
     view = await compute_pipeline_view(client)
 
