@@ -16,7 +16,7 @@ from __future__ import annotations
 
 import enum
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal
+from typing import Annotated, Any, Literal, Protocol
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -29,6 +29,7 @@ __all__ = [
     "RunRecord",
     "Snapshot",
     "SweepPayload",
+    "record_decision",
 ]
 
 
@@ -77,6 +78,14 @@ DECISION_GATING: dict[DecisionKind, GatingMode] = {
     # gating itself — replaying it can't re-derive a different fork.
     DecisionKind.FORK_CUT: GatingMode.ARCHIVAL,
 }
+
+
+# Adding a kind without choosing REPLAYED/ARCHIVAL is a programming error;
+# fail at import rather than at first replay attempt.
+_unmapped = [k for k in DecisionKind if k not in DECISION_GATING]
+if _unmapped:
+    raise RuntimeError(f"DecisionKind members missing from DECISION_GATING: {_unmapped}")
+del _unmapped
 
 
 def _utcnow_iso() -> str:
@@ -150,6 +159,34 @@ RunRecord = Annotated[
     Decision | Phase | Snapshot,
     Field(discriminator="record_type"),
 ]
+
+
+class _DecisionSink(Protocol):
+    """Anything with ``append(Decision) -> Any`` — list[Decision] or RunLedger."""
+
+    def append(self, decision: Decision, /) -> Any: ...
+
+
+def record_decision(
+    sink: _DecisionSink,
+    kind: DecisionKind,
+    inputs_ref: dict[str, Any],
+    outcome: Any,
+    *,
+    data: dict[str, Any] | None = None,
+    round: int | None = None,
+) -> Any:
+    """Build a Decision and append to *sink*; return outcome for passthrough."""
+    sink.append(
+        Decision(
+            kind=kind,
+            inputs_ref=dict(inputs_ref),
+            outcome=outcome,
+            data=dict(data or {}),
+            round=round,
+        )
+    )
+    return outcome
 
 
 class SweepPayload(BaseModel):

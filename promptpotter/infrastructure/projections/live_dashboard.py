@@ -32,7 +32,8 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
+from promptpotter.domain.run_records import Phase, Snapshot
+from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -147,7 +148,7 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
-class LiveDashboardProjection:
+class LiveDashboardProjection(ProjectionBase):
     """Per-cycle dashboard + audit log writer; ensures per-session narrative
     + control files. Not an optimizer checkpoint — resume reads
     ``trials/trial_NNNN.json``, counters here are display continuity only."""
@@ -546,24 +547,11 @@ class LiveDashboardProjection:
 
     # -- Ledger subscription (sole ingress) -----------------------------------
 
-    def on_record(self, record: RunRecord, offset: int) -> None:
-        """Subscribe-side hook: receive a typed record from the ledger.
+    # Decision records are persisted to ``ledger.jsonl`` by the runner; this
+    # projection only mirrors the live scalar/round state to ``dashboard.json``.
+    # Phases drive scalar updates, snapshots drive per-round structures.
 
-        Routes each record kind to the corresponding internal handler.
-        The runner-side ``RunListener`` is the only producer; there is
-        no parallel direct-callback path.
-        """
-        del offset
-        # Decision records are persisted to ``ledger.jsonl`` by the runner;
-        # this projection only mirrors the live scalar/round state to
-        # ``dashboard.json``. Phases drive scalar updates, snapshots drive
-        # per-round structures.
-        if isinstance(record, Phase):
-            self._dispatch_phase(record)
-        elif isinstance(record, Snapshot):
-            self._dispatch_snapshot(record)
-
-    def _dispatch_phase(self, record: Phase) -> None:
+    def _handle_phase(self, record: Phase) -> None:
         if record.phase == "round" and record.event == "complete":
             payload = record.payload or {}
             round_result = payload.get("round_result")
@@ -582,7 +570,7 @@ class LiveDashboardProjection:
         )
         self._on_phase(event, view)
 
-    def _dispatch_snapshot(self, record: Snapshot) -> None:
+    def _handle_snapshot(self, record: Snapshot) -> None:
         ev = record.event
         payload = record.payload or {}
         if ev == "sample_started":

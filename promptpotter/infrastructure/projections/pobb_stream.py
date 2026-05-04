@@ -19,7 +19,8 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import RunRecord, Snapshot
+from promptpotter.domain.run_records import Snapshot
+from promptpotter.infrastructure.projections.base import ProjectionBase
 
 logger = logging.getLogger(__name__)
 
@@ -28,7 +29,7 @@ __all__ = ["PoBBStreamProjection"]
 _STREAMS_SUBPATH = (".runtime", "streams")
 
 
-class PoBBStreamProjection:
+class PoBBStreamProjection(ProjectionBase):
     """Appends per-query P(best) snapshots to one JSONL file per round.
 
     File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
@@ -55,10 +56,7 @@ class PoBBStreamProjection:
         """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
         return cls(Path(cycle_dir).joinpath(*_STREAMS_SUBPATH))
 
-    def on_record(self, record: RunRecord, offset: int) -> None:
-        del offset
-        if not isinstance(record, Snapshot):
-            return
+    def _handle_snapshot(self, record: Snapshot) -> None:
         if record.event != "p_best_update":
             return
         if record.round is None:

@@ -14,7 +14,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization import cycle as _cycle_mod
 from promptpotter.application.optimization.dispatch import (
     Layer,
     build_dispatch_state,
@@ -32,7 +31,7 @@ from promptpotter.application.optimization.transitions import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
-from promptpotter.domain.run_records import DecisionKind, SweepPayload
+from promptpotter.domain.run_records import DecisionKind, SweepPayload, record_decision
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared.errors import graceful
@@ -237,7 +236,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     cycle.escalation.l2.record_entry(cycle.tracking.best_accuracy, cycle.tracking.best_composite)
 
     is_probe = result.action == OptimizerAction.PROBE_ROUND
-    _cycle_mod.record_decision(
+    record_decision(
         cycle.pending_decisions,
         DecisionKind.PROBE_ROUND_COMMITMENT,
         {"round_num": round_num, "l2_round": cycle.escalation.l2.round},
@@ -247,6 +246,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
             "l2_directive_preview": (result.l2_directive or "")[:200],
             "changes_description": result.opt_search_point.lineage.changes_description or "",
         },
+        round=round_num,
     )
     if is_probe:
         cycle.probe_next_round = True
@@ -479,12 +479,13 @@ async def escalate_l2(
     _inputs, _data = _trigger_payload(
         cycle, esc.l2, round_num, opt.l2_patience, layer="l2", track_accuracy=True
     )
-    _cycle_mod.record_decision(
+    record_decision(
         cycle.pending_decisions,
         DecisionKind.L2_ESCALATION_TRIGGER,
         _inputs,
         not l2_stalled,
         data=_data,
+        round=round_num,
     )
     if not l2_stalled:
         await _run_transition(
@@ -525,12 +526,13 @@ async def escalate_l2(
     esc.l3.record_outcome(cycle.tracking.best_composite)
     l3_exhausted = opt.l3_patience is not None and esc.l3.stall_count >= opt.l3_patience
     _inputs, _data = _trigger_payload(cycle, esc.l3, round_num, opt.l3_patience, layer="l3")
-    _cycle_mod.record_decision(
+    record_decision(
         cycle.pending_decisions,
         DecisionKind.L3_ESCALATION_TRIGGER,
         _inputs,
         not l3_exhausted,
         data=_data,
+        round=round_num,
     )
     if not l3_exhausted:
         await _run_transition(

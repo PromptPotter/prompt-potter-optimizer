@@ -59,11 +59,12 @@ def test_archival_kinds_have_no_replayer() -> None:
     )
 
 
-# Match calls only — ``(?<!def )`` skips the ``Cycle.record_decision`` method
-# signature. Then greedily skip the first argument (the decisions list) up to
-# the first comma not nested in brackets/parens, and require the next token to
-# start with ``DecisionKind.``. Bare-string second args ("round_winner") fail
-# the match — exactly what we want to catch.
+# Match calls only — ``(?<!def )`` skips the ``def record_decision(...)``
+# helper definition in ``domain/run_records.py``. Then greedily skip the first
+# argument (the decisions list / ledger sink) up to the first comma not nested
+# in brackets/parens, and require the next token to start with ``DecisionKind.``.
+# Bare-string second args ("round_winner") fail the match — exactly what we
+# want to catch.
 _RECORD_DECISION = re.compile(
     r"""(?<!def\ )record_decision\s*\(
         \s*[^,()\[\]]+,           # arg 1: decisions list (no nested punctuation)

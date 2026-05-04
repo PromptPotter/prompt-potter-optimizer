@@ -35,6 +35,7 @@ from promptpotter.domain.run_records import (
     DecisionKind,
     GatingMode,
     SweepPayload,
+    record_decision,
 )
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.ledger import RunLedger
@@ -74,13 +75,12 @@ __all__ = [
     "build_escalation_entry",
     "fork_for_diag_sibling",
     "fork_for_sweep_sibling",
-    "record_decision",
     "replay_decisions",
     "resume_with_divergence_check",
 ]
 
 
-# Decision / DecisionKind live in domain/run_records.py; re-exported here.
+# Decision / DecisionKind / record_decision live in domain/run_records.py.
 
 
 def _build_scoreboard(
@@ -139,26 +139,6 @@ class ForkResult(NamedTuple):
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
-
-
-def record_decision(
-    decisions: list[Decision],
-    kind: DecisionKind,
-    inputs_ref: dict[str, Any],
-    outcome: Any,
-    *,
-    data: dict[str, Any] | None = None,
-) -> Any:
-    """Append Decision to *decisions*; return outcome for passthrough."""
-    decisions.append(
-        Decision(
-            kind=kind,
-            inputs_ref=dict(inputs_ref),
-            outcome=outcome,
-            data=dict(data or {}),
-        )
-    )
-    return outcome
 
 
 def replay_decisions(
@@ -353,13 +333,12 @@ def _fork_sibling_setup(
 
     now = datetime.now(UTC).isoformat()
     with graceful("FORK_CUT decision append failed"):
-        RunLedger.open(CycleDir(parent_dir)).append(
-            Decision(
-                kind=DecisionKind.FORK_CUT,
-                inputs_ref={"from_round": from_round},
-                outcome=new_cycle_id,
-                data={"forked_at": now, **(fork_data or {})},
-            )
+        record_decision(
+            RunLedger.open(CycleDir(parent_dir)),
+            DecisionKind.FORK_CUT,
+            {"from_round": from_round},
+            new_cycle_id,
+            data={"forked_at": now, **(fork_data or {})},
         )
 
     parent_index = read_json_optional(parent_dir / "index.json") or {}
@@ -757,10 +736,6 @@ class Cycle:
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
-
-    def record_decision(self, d: Decision) -> None:
-        """Queue a decision produced outside the normal round flow (escalation/probe)."""
-        self.pending_decisions.append(d)
 
     def apply_round_outcome(self, scoring_result: L1ScoringResult, critique_text: str) -> None:
         """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.

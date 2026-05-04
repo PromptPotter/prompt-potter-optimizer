@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.cycle import Cycle, Decision, record_decision
+from promptpotter.application.optimization.cycle import Cycle, Decision
 from promptpotter.application.optimization.dispatch import (
     Layer,
     build_dispatch_state,
@@ -55,7 +55,7 @@ from promptpotter.domain.results import (
     RoundBaseline,
     RoundResult,
 )
-from promptpotter.domain.run_records import DecisionKind
+from promptpotter.domain.run_records import DecisionKind, record_decision
 from promptpotter.domain.scoring import QueryResult
 from promptpotter.domain.validators import StopRule
 
@@ -418,6 +418,7 @@ async def score_population(
                     },
                     True,
                     data=pobb_decision_data(cr),
+                    round=round_num,
                 )
         if leader_locked and signal is not None and decisions is not None:
             cr = signal.check_result
@@ -434,6 +435,7 @@ async def score_population(
                 },
                 True,
                 data=pobb_decision_data(cr),
+                round=round_num,
             )
 
         _fire(idx, report)
@@ -530,6 +532,7 @@ async def l1_score(
         },
         scored[winner_idx].lineage.id if winner_idx is not None and scored else "",
         data={"current_best_accuracy_at_record": baseline.accuracy},
+        round=round_num,
     )
 
     base = _compute_accuracy(best_results)

@@ -274,7 +274,7 @@ def _persist_round(
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
-            ledger.append(d.model_copy(update={"round": round_num}))
+            ledger.append(d)
         ledger.append(
             Phase(
                 phase="round",

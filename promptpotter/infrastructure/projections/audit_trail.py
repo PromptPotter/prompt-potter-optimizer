@@ -25,7 +25,8 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import Phase, RunRecord
+from promptpotter.domain.run_records import Phase
+from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
@@ -69,7 +70,7 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-class AuditTrailProjection:
+class AuditTrailProjection(ProjectionBase):
     """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush.
 
     Construct via :meth:`from_cycle_dir` so the ``rounds_dir`` is derived
@@ -166,21 +167,15 @@ class AuditTrailProjection:
 
     # -- Ledger subscription (Phase 3) ----------------------------------------
 
-    def on_record(self, record: RunRecord, offset: int) -> None:
-        """Subscribe-side hook: receive a typed record from the ledger.
+    # Round boundaries (``Phase("round", "enter"|"complete")``) drive
+    # ``begin_round`` and ``flush``. The baseline phase emits its own
+    # ``Phase("baseline", "enter"|"exit")`` pair before the first round; treated
+    # as a pseudo-round so its node I/O lands in ``round_baseline.json`` instead
+    # of being silently discarded when round 0 begins. Decision and Snapshot
+    # records bypass this projection — decisions are archived in trial JSON and
+    # snapshots are display-only.
 
-        Round boundaries (``Phase("round", "enter"|"complete")``) drive
-        ``begin_round`` and ``flush``. The baseline phase emits its own
-        ``Phase("baseline", "enter"|"exit")`` pair before the first round;
-        we treat it as a pseudo-round so its node I/O lands in
-        ``round_baseline.json`` instead of being silently discarded when
-        round 0 begins. Decision and Snapshot records bypass this
-        projection — decisions are archived in trial JSON and snapshots
-        are display-only.
-        """
-        del offset
-        if not isinstance(record, Phase):
-            return
+    def _handle_phase(self, record: Phase) -> None:
         if record.phase == "round":
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round)
