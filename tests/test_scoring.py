@@ -131,6 +131,35 @@ def test_compile_scorer_routes_to_named_function():
 
 
 @pytest.mark.parametrize(
+    "formula",
+    [
+        "().__class__",
+        "__import__('os').system('echo pwn')",
+        "(lambda: 1)()",
+        "[x for x in range(10)][0]",
+        "predicted.__class__",
+        "exact_match(predicted, ground_truth) := 1",
+    ],
+)
+def test_compile_scorer_rejects_attribute_and_unsafe_syntax(formula: str) -> None:
+    """Restricted-eval is bypassable; the AST allowlist is the real boundary."""
+    with pytest.raises((ValueError, SyntaxError)):
+        compile_scorer(formula)
+
+
+def test_compile_scorer_accepts_known_formulas() -> None:
+    """Production formulas across datasets must still compile after AST validation."""
+    for f in (
+        "exact_match(predicted, ground_truth)",
+        "gsm8k_match(predicted, ground_truth)",
+        "aime_match(predicted, ground_truth)",
+        "hockeystick(rr(ground_truth_rank), 0.2)",
+        "0.7 * hit + 0.3 * (1.0 - input_tokens / 1000)",
+    ):
+        assert compile_scorer(f) is not None
+
+
+@pytest.mark.parametrize(
     "predicted,formula,expected",
     [
         ("The answer is **Disproved**.", "exact_match(predicted, ground_truth)", "Disproved"),

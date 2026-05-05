@@ -22,6 +22,7 @@ contributes one named value. Undefined names raise ``NameError`` (fail loud).
 
 from __future__ import annotations
 
+import ast
 import hashlib
 import json
 import logging
@@ -254,6 +255,66 @@ _SAFE_BUILTINS = {
 }
 
 
+# AST allowlist — restricted-eval is bypassable by default
+# (``().__class__.__base__.__subclasses__()`` reaches anything). Block at the
+# AST instead: no Attribute access (kills .__class__), no comprehensions, no
+# lambdas, no walrus, no subscript. Names are unrestricted because the
+# per-query namespace is shaped by ``pipeline_data`` and varies per dataset;
+# the boundary is "no attribute access, no unknown calls" — every Call must
+# resolve to a name in ``_SAFE_BUILTINS`` ∪ ``SCORING_FUNCTIONS`` ∪ namespace.
+_ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
+    {
+        ast.Expression,
+        ast.BinOp,
+        ast.UnaryOp,
+        ast.BoolOp,
+        ast.Compare,
+        ast.Name,
+        ast.Load,
+        ast.Constant,
+        ast.Call,
+        ast.IfExp,
+        ast.keyword,
+        # Operators
+        ast.Add,
+        ast.Sub,
+        ast.Mult,
+        ast.Div,
+        ast.FloorDiv,
+        ast.Mod,
+        ast.Pow,
+        ast.UAdd,
+        ast.USub,
+        ast.Not,
+        ast.And,
+        ast.Or,
+        ast.Eq,
+        ast.NotEq,
+        ast.Lt,
+        ast.LtE,
+        ast.Gt,
+        ast.GtE,
+    }
+)
+
+
+def _validate_ast(tree: ast.AST, *, source: str) -> None:
+    """Walk *tree*; reject anything outside ``_ALLOWED_AST_NODES``.
+
+    Raises ``ValueError`` (caught by ``apply_steer_file`` and reported by
+    ``compile_scorer`` callers).
+    """
+    for node in ast.walk(tree):
+        kind = type(node)
+        if kind in _ALLOWED_AST_NODES:
+            continue
+        raise ValueError(
+            f"Scoring formula rejected — disallowed syntax {kind.__name__!r} "
+            f"in {source}. Allowed: arithmetic, comparisons, calls to the "
+            "registered scoring helpers, namespace name lookups."
+        )
+
+
 def _build_namespace(result: dict) -> dict:
     pd = result.get("pipeline_data") or {}
 
@@ -296,7 +357,9 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
             "query scores 0 because fresh traces carry no ``hit`` field."
         )
 
-    code = compile(formula, "<scoring>", "eval")
+    tree = ast.parse(formula, "<scoring>", "eval")
+    _validate_ast(tree, source="per_query scoring formula")
+    code = compile(tree, "<scoring>", "eval")
 
     def _scorer(result: dict) -> float:
         ns = _build_namespace(result)
@@ -345,7 +408,9 @@ def compile_round_scorer(formula: str | None) -> RoundScorer:
     if not formula:
         return _default_round_scorer
 
-    code = compile(formula, "<round_scoring>", "eval")
+    tree = ast.parse(formula, "<round_scoring>", "eval")
+    _validate_ast(tree, source="per_round scoring formula")
+    code = compile(tree, "<round_scoring>", "eval")
 
     def _scorer(values: dict[str, float]) -> float:
         raw = eval(code, _SAFE_BUILTINS, dict(values))
