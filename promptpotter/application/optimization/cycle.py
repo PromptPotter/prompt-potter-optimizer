@@ -52,7 +52,6 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes import AxisIndex
-    from promptpotter.application.optimization.l1 import PopulationScoreReport
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.scoring import QueryMeasurement
@@ -862,14 +861,13 @@ class Cycle:
     def absorb_round(
         self,
         rr: RoundResult,
-        scoring_result: PopulationScoreReport,
         critique_text: str,
         round_num: int,
     ) -> dict[str, Any]:
         """Sole sink for a finished L1 round: fold optimizer-memory onto opt_sp,
         append the round, propagate tracking, project the trial dict.
 
-        l1.py never mutates Cycle — it returns the scoring result + critique
+        l1.py never mutates Cycle — it returns the round result + critique
         text and the runner calls this once at the round boundary. The
         returned dict is the input to ``save_round_file`` on the normal
         path; probe and escalation paths discard it.
@@ -879,18 +877,18 @@ class Cycle:
 
         # 1. opt_sp memory — critique, failure analysis, warning inventory, runtime failures.
         self.opt_sp.l1_critique_text = critique_text
-        if scoring_result.winner_results and schema is not None:
+        if rr.results and schema is not None:
             self.opt_sp.failure_analysis = compile_failure_analysis(
-                scoring_result.winner_results, schema
+                cast("list[QueryMeasurement]", rr.results), schema
             )
         else:
             self.opt_sp.failure_analysis = None
-        all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
+        all_results: list = [r for rs in rr.all_candidate_results.values() for r in rs]
         if all_results:
             update_query_tracker(self.opt_sp.warning_inventory, all_results)
         existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
-        for cs in scoring_result.candidate_scores:
-            for rf_dict in cs.runtime_failures:
+        for cs in rr.candidate_scores:
+            for rf_dict in cs.get("runtime_failures") or []:
                 k = _rf_dedup_key(rf_dict)
                 if k in existing_keys:
                     continue

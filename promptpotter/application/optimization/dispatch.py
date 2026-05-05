@@ -10,7 +10,7 @@ existing consumers keep importing ``from .dispatch import ...``.
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, cast
 
 from promptpotter.application.optimization.dispatch_registry import LAYER_CONFIGS
 from promptpotter.application.optimization.dispatch_types import (
@@ -32,7 +32,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.l1 import PopulationScoreReport
+    from promptpotter.domain.results import RoundResult
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
@@ -51,12 +51,14 @@ __all__ = [
 
 def compile_critique_context(
     cycle: Cycle,
-    scoring_result: PopulationScoreReport,
+    round_result: RoundResult,
     schema: PipelineSchema | None,
 ) -> CritiqueContext:
     candidate_keys = candidate_keys_from_schema(schema)
     prompt_chars = len(cycle.opt_sp.render())
-    rank_text, nm_queries = _compute_rank_analysis(scoring_result.winner_results, candidate_keys)
+    rank_text, nm_queries = _compute_rank_analysis(
+        cast("list[QueryMeasurement]", round_result.results), candidate_keys
+    )
     evolution_text, anomalies = _compute_round_evolution(cycle)
     return CritiqueContext(
         prompt_chars=prompt_chars,
@@ -188,12 +190,12 @@ def build_dispatch_state(
     pipeline_params: dict | None = None,
     candidate_scores: list[dict] | None = None,
     escalation_check_result: dict | None = None,
-    scoring_result: PopulationScoreReport | None = None,
+    round_result: RoundResult | None = None,
 ) -> DispatchState:
     """Build the per-call :class:`DispatchState` for *layer* over *cycle*."""
     critique: CritiqueContext | None = None
-    if layer is Layer.L1_CRITIQUE and scoring_result is not None:
-        critique = compile_critique_context(cycle, scoring_result, pipeline_schema)
+    if layer is Layer.L1_CRITIQUE and round_result is not None:
+        critique = compile_critique_context(cycle, round_result, pipeline_schema)
     return DispatchState(
         opt_sp=cycle.opt_sp,
         layer=layer,
@@ -202,7 +204,7 @@ def build_dispatch_state(
         pipeline_params=pipeline_params,
         candidate_scores=candidate_scores,
         escalation_check_result=escalation_check_result,
-        scoring_result=scoring_result,
+        round_result=round_result,
         axis_digest=_layer_axis_digest(layer, cycle),
         critique=critique,
         l1_stall_count=cycle.escalation.l1_stall_count,

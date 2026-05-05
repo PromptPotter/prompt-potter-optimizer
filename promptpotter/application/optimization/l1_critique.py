@@ -5,7 +5,7 @@ from __future__ import annotations
 import logging
 from collections import Counter
 from collections.abc import Callable
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.dispatch import (
     DispatchState,
@@ -27,7 +27,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.l1 import PopulationScoreReport
+    from promptpotter.domain.results import RoundResult
     from promptpotter.infrastructure.projections import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
@@ -54,20 +54,20 @@ _L1C_AXIS_LABELS: dict[str, str] = {
 
 def _section_l1c_round_report(ctx: DispatchState) -> str:
     """Round-level stats: scoring, anomalies, pipeline health, ranks, evolution, this-round diff."""
-    if ctx.scoring_result is None:
+    if ctx.round_result is None:
         return ""
-    sr = ctx.scoring_result
+    rr = ctx.round_result
     cr = ctx.critique
     parts: list[str] = []
 
     # Scoring summary.
     if cr is not None:
-        n_results = len(sr.winner_results)
+        n_results = len(rr.results)
         lines = [
             "## SCORING SUMMARY",
-            f"Accuracy: {sr.winner_accuracy:.1%} | "
-            f"Composite: {sr.winner_composite_fitness:.4f} | "
-            f"Degraded: {sr.degraded_queries}/{n_results}",
+            f"Accuracy: {rr.accuracy:.1%} | "
+            f"Composite: {rr.composite_fitness:.4f} | "
+            f"Degraded: {rr.degraded_queries}/{n_results}",
             f"Round {ctx.round_num} | L1 stall count: {ctx.l1_stall_count} | "
             f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
         ]
@@ -81,7 +81,7 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
         parts.append("\n".join(lines))
 
     # Anomaly flags.
-    if cr is not None and sr.winner_results and cr.anomalies:
+    if cr is not None and rr.results and cr.anomalies:
         parts.append(
             "## ANOMALY FLAGS ({})\n{}".format(
                 len(cr.anomalies), "\n".join(f"  {a}" for a in cr.anomalies)
@@ -89,7 +89,7 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
         )
 
     # Pipeline health.
-    results = sr.winner_results
+    results = rr.results
     total = len(results)
     if total:
         web_warning_count = 0
@@ -120,9 +120,9 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
 
     # This round (trajectory + cross-candidate diff).
     diff = build_cross_candidate_diff(
-        cast(list[dict], sr.winner_results),
-        cast("dict[str, list[dict]]", sr.all_candidate_results),
-        [cs.to_dict() for cs in sr.candidate_scores],
+        rr.results,
+        rr.all_candidate_results,
+        list(rr.candidate_scores),
     )
     trajectory = build_trajectory_report(ctx.rounds)
     this_round_parts: list[str] = []
@@ -140,17 +140,20 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
 
 def _section_l1c_per_query_report(ctx: DispatchState) -> str:
     """Per-query views: runtime failures, query categories, failure details, successes."""
-    if ctx.scoring_result is None:
+    if ctx.round_result is None:
         return ""
-    sr = ctx.scoring_result
+    rr = ctx.round_result
     cr = ctx.critique
     parts: list[str] = []
 
     # Runtime failures (steer-away regions).
     rt_failures = [
-        {"candidate_desc": (cs.changes_description or cs.candidate_id)[:60], **rf}
-        for cs in sr.candidate_scores
-        for rf in cs.runtime_failures
+        {
+            "candidate_desc": (cs.get("changes_description") or cs.get("candidate_id", ""))[:60],
+            **rf,
+        }
+        for cs in rr.candidate_scores
+        for rf in cs.get("runtime_failures") or []
     ]
     if rt_failures:
         by_warning: dict[str, list[dict]] = {}
@@ -175,7 +178,7 @@ def _section_l1c_per_query_report(ctx: DispatchState) -> str:
 
     # Query categories — failures grouped by termination step.
     step_counts: Counter[str] = Counter()
-    for r in sr.winner_results:
+    for r in rr.results:
         if r.get("hit") or is_error_result(r):
             continue
         pd = r.get("pipeline_data") or {}
@@ -191,7 +194,7 @@ def _section_l1c_per_query_report(ctx: DispatchState) -> str:
         keys = cr.candidate_keys or None
         failures = [
             r
-            for r in sr.winner_results
+            for r in rr.results
             if not r.get("hit")
             and not is_error_result(r)
             and r.get("query", "") not in cr.nm_queries
@@ -223,7 +226,7 @@ def _section_l1c_per_query_report(ctx: DispatchState) -> str:
             parts.append("\n".join(lines))
 
     # Successes — top 2 hits.
-    successes = [r for r in sr.winner_results if r.get("hit")]
+    successes = [r for r in rr.results if r.get("hit")]
     if successes:
         lines = [f"## SUCCESSES ({len(successes)} queries)"]
         for r in successes[:2]:
@@ -285,7 +288,7 @@ def compile_l1_critique_blob(state: DispatchState) -> str:
 
 async def run_l1_critique(
     cycle: Cycle,
-    scoring_result: PopulationScoreReport,
+    round_result: RoundResult,
     schema: PipelineSchema | None,
     llm_client: LLMClientBase,
     *,
@@ -299,7 +302,7 @@ async def run_l1_critique(
         cycle,
         round_num=round_num,
         pipeline_schema=schema,
-        scoring_result=scoring_result,
+        round_result=round_result,
     )
     prompt_vars = compile_prompt_vars(
         Layer.L1_CRITIQUE,
@@ -319,7 +322,7 @@ async def run_l1_critique(
         "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",
         len(prompt),
         round_num + 1,
-        scoring_result.winner_accuracy,
+        round_result.accuracy,
     )
     return result
 

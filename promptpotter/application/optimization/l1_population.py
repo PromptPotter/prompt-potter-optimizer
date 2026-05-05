@@ -1,4 +1,4 @@
-"""L1 population shaping: project proposals → OSP, build score reports, model the result.
+"""L1 population shaping: project proposals → OSP, build score reports.
 
 These helpers run between L1's two phases — generation (``l1_generate``)
 produces ``CandidateProposal``s, scoring (``score_population`` /
@@ -13,7 +13,6 @@ This module owns:
   defaults across the four exit paths in ``score_population``.
 - ``_pobb_decision_data`` — shared archival blob for elimination + lock-in
   decisions.
-- ``PopulationScoreReport`` — frozen Pydantic shape for ``l1_score``'s return.
 """
 
 from __future__ import annotations
@@ -22,24 +21,19 @@ import copy
 import logging
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
-
 from promptpotter.application.optimization.l1_validators import L1_SCHEMA_COMPLIANCE
-from promptpotter.domain.analysis import EscalationSignal, RuntimeFailure, ValidationFailure
+from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
     CandidateProposal,
     CandidateScore,
 )
-from promptpotter.domain.run_records import DecisionRecord
-from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "INVALID_SCORES",
-    "PopulationScoreReport",
     "build_score_report",
     "merge_pipeline_params",
     "parse_population",
@@ -154,32 +148,3 @@ INVALID_SCORES: dict[str, Any] = {
     "errors": 0,
     "invalid": True,
 }
-
-
-class PopulationScoreReport(BaseModel):
-    """Structured return value from l1_score() — frozen."""
-
-    model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
-
-    label: str
-    winner_osp: OptSearchPoint
-    winner_prompt_fields: dict[str, Any]
-    winner_pipeline_params: dict[str, Any] | None
-    winner_accuracy: float
-    winner_composite_fitness: float
-    hits: int
-    total: int
-    improved: bool
-    p_value: float | None = None
-    candidates_scored: int
-    candidate_scores: list[CandidateScore]
-    winner_results: list[QueryMeasurement]
-    all_candidate_results: dict[str, list[QueryMeasurement]] = Field(default_factory=dict)
-    escalation_signal: EscalationSignal | None = None
-    degraded_queries: int = 0
-    deprecated: int = 0
-    winner_evaluators: dict[str, float] = Field(default_factory=dict)
-    decisions: list[DecisionRecord] = Field(default_factory=list)
-    l1_yield: float = 1.0
-    l1_n_no_op: int = 0
-    l1_n_duplicate: int = 0

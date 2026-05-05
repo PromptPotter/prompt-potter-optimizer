@@ -1,8 +1,8 @@
 """L1 phase: generate → measure → score → execute round.
 
 The round-loop spine. Validators + invariant detection live in
-``l1_validators``; population-shape helpers + ``PopulationScoreReport`` live in
-``l1_population``.
+``l1_validators``; population-shape helpers (``parse_population``,
+``build_score_report``, ``pobb_decision_data``) live in ``l1_population``.
 """
 
 from __future__ import annotations
@@ -26,7 +26,6 @@ from promptpotter.application.optimization.l1_critique import (
 )
 from promptpotter.application.optimization.l1_population import (
     INVALID_SCORES,
-    PopulationScoreReport,
     build_score_report,
     parse_population,
     pobb_decision_data,
@@ -637,8 +636,13 @@ async def l1_score(
     pobb_config: PoBBConfig,
     round_num: int = 0,
     yield_stats: L1YieldStats,
-) -> PopulationScoreReport:
-    """Score candidates and select the round winner (compares fitness, not composite_fitness)."""
+) -> tuple[RoundResult, OptSearchPoint]:
+    """Score candidates and select the round winner (compares fitness, not composite_fitness).
+
+    Returns ``(round_result, winner_osp)``. ``RoundResult`` is the
+    persistence shape (dict-typed lists for serialization); ``winner_osp``
+    rides alongside for the ``PromptVersion`` tracing emit in the caller.
+    """
     session = cycle.session
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
@@ -711,33 +715,35 @@ async def l1_score(
     if improved and base["total"] > 0:
         bl_hits = round(baseline.accuracy * base["total"])
         p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
-    return PopulationScoreReport(
+    round_result = RoundResult(
+        round=round_num,
         label=best_label,
-        winner_osp=best_osp,
-        winner_prompt_fields={
-            **best_osp.prompt_field_dict(),
-            "lineage": best_osp.lineage.model_dump(),
-        },
-        winner_pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
-        winner_accuracy=best_acc,
-        winner_composite_fitness=best_comp,
+        accuracy=best_acc,
+        composite_fitness=best_comp,
         hits=base["hits"],
         total=base["total"],
         improved=improved,
         p_value=p_value,
+        baseline_accuracy=baseline.accuracy,
+        prompt_fields={
+            **best_osp.prompt_field_dict(),
+            "lineage": best_osp.lineage.model_dump(),
+        },
+        pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
+        results=best_results,
+        all_candidate_results=dict(all_candidate_results),
         candidates_scored=len(scored),
-        candidate_scores=candidate_scores,
-        winner_results=best_results,
-        all_candidate_results=all_candidate_results,
-        escalation_signal=escalation_signal,
+        candidate_scores=[cs.to_dict() for cs in candidate_scores],
+        decisions=[d.to_dict() for d in decisions],
         degraded_queries=count_degraded_queries(best_results),
         deprecated=base["deprecated"],
-        winner_evaluators=best_scores,
-        decisions=decisions,
+        escalation_signal=escalation_signal,
+        evaluators=best_scores,
         l1_yield=yield_stats.l1_yield,
         l1_n_no_op=yield_stats.l1_n_no_op,
         l1_n_duplicate=yield_stats.l1_n_duplicate,
     )
+    return round_result, best_osp
 
 
 # ---------------------------------------------------------------------------
@@ -870,11 +876,11 @@ async def execute_round(
     degradation_checks: list[StopRule] | None = None,
     *,
     skip_critique: bool = False,
-) -> tuple[RoundResult, PopulationScoreReport, str]:
+) -> tuple[RoundResult, str]:
     """Execute one L1 round: generate → score+select → critique. Returns
-    ``(round_result, scoring_result, critique_text)``; the runner calls
-    ``cycle.absorb_round`` to fold all three into Cycle state at the
-    boundary. l1.py never mutates Cycle directly.
+    ``(round_result, critique_text)``; the runner calls
+    ``cycle.absorb_round`` to fold both into Cycle state at the boundary.
+    l1.py never mutates Cycle directly.
 
     ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
     Sweep mode passes this so the cheap-round_data fork stays one full live LLM
@@ -914,7 +920,7 @@ async def execute_round(
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
-        scoring_result = await l1_score(
+        round_result, winner_osp = await l1_score(
             cycle,
             candidates,
             scoring_set,
@@ -932,39 +938,38 @@ async def execute_round(
             round_num=round_num,
             yield_stats=yield_stats,
         )
-        if obs and scoring_result.candidate_scores:
+        if obs and round_result.candidate_scores:
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    winner_candidate_id=str(scoring_result.winner_prompt_fields.get("id") or ""),
-                    winner_accuracy=scoring_result.winner_accuracy,
-                    improved=scoring_result.improved,
+                    winner_candidate_id=str(round_result.prompt_fields.get("id") or ""),
+                    winner_accuracy=round_result.accuracy,
+                    improved=round_result.improved,
                 )
-    candidate_scores_dicts = [cs.to_dict() for cs in scoring_result.candidate_scores]
     emit_phase(
         callbacks.on_phase,
         CampaignPhase.L1_SCORE,
         "exit",
         round=round_num,
-        winner_label=scoring_result.label,
-        winner_accuracy=scoring_result.winner_accuracy,
-        winner_composite_fitness=scoring_result.winner_composite_fitness,
-        winner_evaluators=dict(scoring_result.winner_evaluators),
-        improved=scoring_result.improved,
-        candidate_scores=candidate_scores_dicts,
+        winner_label=round_result.label,
+        winner_accuracy=round_result.accuracy,
+        winner_composite_fitness=round_result.composite_fitness,
+        winner_evaluators=dict(round_result.evaluators),
+        improved=round_result.improved,
+        candidate_scores=round_result.candidate_scores,
     )
 
     critique_text = ""
-    if scoring_result.winner_results and not skip_critique:
+    if round_result.results and not skip_critique:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
         # Critique is round-over-round feedback; survive a malformed LLM
         # response rather than crash the campaign.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
             critique_result = await run_l1_critique(
                 cycle,
-                scoring_result,
+                round_result,
                 session.pipeline_schema,
                 crit_llm,
                 round_num=round_num,
@@ -981,61 +986,34 @@ async def execute_round(
                 l1_critique_text=critique_text,
             )
 
-    round_result = RoundResult(
-        round=round_num,
-        label=scoring_result.label,
-        accuracy=scoring_result.winner_accuracy,
-        composite_fitness=scoring_result.winner_composite_fitness,
-        hits=scoring_result.hits,
-        total=scoring_result.total,
-        improved=scoring_result.improved,
-        p_value=scoring_result.p_value,
-        baseline_accuracy=baseline.accuracy,
-        prompt_fields=scoring_result.winner_prompt_fields,
-        pipeline_params=scoring_result.winner_pipeline_params,
-        results=scoring_result.winner_results,
-        all_candidate_results=dict(scoring_result.all_candidate_results),
-        candidates_scored=scoring_result.candidates_scored,
-        candidate_scores=candidate_scores_dicts,
-        decisions=[d.to_dict() for d in scoring_result.decisions],
-        degraded_queries=scoring_result.degraded_queries,
-        deprecated=scoring_result.deprecated,
-        escalation_signal=scoring_result.escalation_signal,
-        evaluators=scoring_result.winner_evaluators,
-        l1_yield=scoring_result.l1_yield,
-        l1_n_no_op=scoring_result.l1_n_no_op,
-        l1_n_duplicate=scoring_result.l1_n_duplicate,
-    )
-
     if obs:
         with graceful("RoundEnd emit failed"):
             obs.emit(
                 RoundEnd(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    accuracy=scoring_result.winner_accuracy,
-                    hits=scoring_result.hits,
-                    total=scoring_result.total,
-                    improved=scoring_result.improved,
-                    winner_prompt_fields_id=scoring_result.winner_prompt_fields.get("id", ""),
-                    candidate_scores=candidate_scores_dicts,
+                    accuracy=round_result.accuracy,
+                    hits=round_result.hits,
+                    total=round_result.total,
+                    improved=round_result.improved,
+                    winner_prompt_fields_id=round_result.prompt_fields.get("id", ""),
+                    candidate_scores=round_result.candidate_scores,
                     model=config.optimizer_llm.model or "",
                     n_variants=config.optimization.n_variants,
                     optimizer_templates=["l1_generate", "l1_critique"],
-                    evaluators=dict(scoring_result.winner_evaluators),
+                    evaluators=dict(round_result.evaluators),
                 )
             )
         with graceful("PromptVersion emit failed"):
-            w_osp = scoring_result.winner_osp
             obs.emit(
                 PromptVersion(
                     campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
-                    prompt_fields_id=w_osp.lineage.id,
-                    rendered_prompt=w_osp.render(),
-                    layer1_fields={f: getattr(w_osp, f) for f in PROMPT_STRING_FIELDS},
-                    parent_id=w_osp.lineage.parent_id,
+                    prompt_fields_id=winner_osp.lineage.id,
+                    rendered_prompt=winner_osp.render(),
+                    layer1_fields={f: getattr(winner_osp, f) for f in PROMPT_STRING_FIELDS},
+                    parent_id=winner_osp.lineage.parent_id,
                 )
             )
 
-    return round_result, scoring_result, critique_text
+    return round_result, critique_text

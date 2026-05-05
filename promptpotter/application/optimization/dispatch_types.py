@@ -17,7 +17,7 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 
 if TYPE_CHECKING:
-    from promptpotter.application.optimization.l1 import PopulationScoreReport
+    from promptpotter.domain.results import RoundResult
 
 __all__ = [
     "SECTION_L2_BRIEF",
@@ -73,7 +73,7 @@ class DispatchState:
     pipeline_params: dict | None = None
     candidate_scores: list[dict] | None = None
     escalation_check_result: dict | None = None
-    scoring_result: PopulationScoreReport | None = None
+    round_result: RoundResult | None = None
     axis_digest: dict[str, str] | None = None
     critique: CritiqueContext | None = None
     # Cycle slices renderers reach into.

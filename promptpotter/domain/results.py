@@ -27,9 +27,9 @@ __all__ = [
 class CandidateScore:
     """One candidate's score report from L1 scoring.
 
-    Stable shape, defaults always present. Lives in ``PopulationScoreReport.candidate_scores``
-    (typed) and on phase events / RoundResult / library archives as a flat
-    dict via :meth:`to_dict` (wire format).
+    Stable shape, defaults always present. Built typed in ``score_population``
+    and serialized to flat dicts via :meth:`to_dict` for ``RoundResult``,
+    phase events, and archive persistence.
     """
 
     candidate_id: str
