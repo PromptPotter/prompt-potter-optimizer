@@ -45,6 +45,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "failures",
         "task_context",
         "critique",
+        "axis_memory",
     }
 )
 
