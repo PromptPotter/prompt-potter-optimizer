@@ -1,6 +1,11 @@
 # Persistence, State, and Recovery
 
-Where PromptPotter writes everything, the active-session pointer, what each state file does, and the three recovery workflows (resume, rewind, fork).
+Your work lives in `.promptpotter/`. Two trees:
+
+- `sessions/{session_id}/` — your operator workspace (journal, notes).
+- `campaigns/{root_cycle_id}/` — one cycle family per directory; siblings under `forks/`.
+
+The rest of this page covers the active-session pointer, what each file holds, and the three recovery workflows (resume, rewind, fork).
 
 ---
 

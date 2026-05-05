@@ -20,7 +20,7 @@ Every evaluation costs money. PromptPotter is built to maximize accuracy per dol
 Inside one round PromptPotter runs three layers, each wrapping the next like a system prompt:
 
 - **L1** generates and scores candidates. It mutates the prompt template's fields (persona, task instruction, …) and the pipeline parameters.
-- **L2** writes a **CONTEXT** outline that wraps L1, and tweaks L1's fields when L1 stalls.
+- **L2** writes a **CONTEXT** outline that wraps L1, and modifies L1's fields when L1 stalls.
 - **L3** writes a **PLAN** outline that wraps L2, and is rewritten when L2 itself stalls.
 
 CONTEXT and PLAN live on disk in each trial file — the loop's actual config, inspectable and editable.

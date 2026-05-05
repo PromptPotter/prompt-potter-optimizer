@@ -9,7 +9,7 @@ You've run a campaign. Pointers below for the next layer.
 | [Three-layer loop](../concepts/the-loop.md) | Why L1/L2/L3 exist and when each fires |
 | [Self-healing](../concepts/self-healing.md) | Recovery from bad proposals + degraded runs |
 | [Scoring and memory](../concepts/scoring-and-memory.md) | Traces are facts, scores are policy + the cross-campaign archive |
-| [State record](../concepts/state-record.md) | The OSP carrying CONTEXT, PLAN, prompt fields, L2 overrides |
+| [State record](../concepts/state-record.md) | The candidate's state record (`OptSearchPoint` in code) — carries task context, plan, prompt fields, L2 overrides |
 | [Campaign tree](../concepts/campaign-tree.md) | Cycles, forks, and the sweep primitive |
 | [Nodes and pipelines](../concepts/nodes-and-pipelines.md) | Pipeline node anatomy |
 | [Glossary](../concepts/glossary.md) | Terms used across the docs |
@@ -27,7 +27,7 @@ You've run a campaign. Pointers below for the next layer.
 
 | Page | Covers |
 |------|--------|
-| [Developer README](../developer/README.md) | Prompt structure, dispatch, scoring node, cross-run memory + per-field reference tables |
+| [Developer README](../developer/README.md) | Prompt structure, request routing, the scoring step, learning from prior campaigns + per-field reference tables |
 | [L2 internals](../developer/l2-internals.md) | L2 firing, surface, output, OSP mutations |
 | [L1-generate surface](../developer/l1-generate-surface.md) | Registry, override order |
 | [Self-healing internals](../developer/self-healing-internals.md) | Failure classification, escalation wiring |

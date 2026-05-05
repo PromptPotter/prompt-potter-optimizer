@@ -109,4 +109,4 @@ The last three are L2's levers over L1's surface — see [`../developer/l1-gener
 
 ---
 
-Five LLM call sites: `restructure` (one-time decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). Broader paradigm: [`../research/related-work.md`](../research/related-work.md). Fitness comparison uses PoBB — see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). Self-healing rails: [`self-healing.md`](self-healing.md).
+Five LLM call sites: `restructure` (one-time decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). Broader paradigm: [`../research/related-work.md`](../research/related-work.md). Fitness comparison uses PoBB — see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). Self-healing: [`self-healing.md`](self-healing.md).

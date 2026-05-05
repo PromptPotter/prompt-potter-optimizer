@@ -36,7 +36,7 @@ When a campaign commits a decision, it records the kind, enough to re-derive it,
 
 **Two-tier decision records:**
 
-- **Flow-determining** — what the divergence check reads. Pointers + invariants only (candidate ids, round numbers, gate parameters that don't depend on the active scorer). Anything that's a function of scored numbers is derived on replay, never stored — a persisted value computed under the old scorer would manufacture false divergences.
+- **Replayable decisions** — which candidate won each round, the parameters that gated each choice. Stored so resume can re-derive the same outcome under a changed scorer; on divergence, fork.
 - **Archival** — full LLM outputs, diagnostic context, recorded threshold under the old scorer. Replay never reads this half. A noisy rescore that doesn't change the flow passes silently.
 
 L2's surface mutations are not separate decision kinds. They live on each round's `opt_search_point` snapshot in the trial JSON. The only L2 decision recorded per fire is `probe_round_commitment` — outcome is whether the next round runs as `normal_round` or `probe_round`.

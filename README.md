@@ -95,7 +95,7 @@ Structurally, **AutoResearch is the degenerate case of PromptPotter**:
 - One sample, one scoring run = the 5-min training loss
 - Single PromptTemplate field, e.g. `program_md`
 
-It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Bayesian Posterior-of-Being-Best elimination across seeds, L2/L3 escalation, self-healing rails, and the hard-sample sorter on top.
+It is *not literally* a configuration of PromptPotter today — running AutoResearch's workload on PromptPotter would require a `CodeExecutionConnector` (M12 multi-connector work). With that connector, PromptPotter strictly subsumes AutoResearch and adds population search, Bayesian Posterior-of-Being-Best elimination across seeds, L2/L3 escalation, self-healing, and the hard-sample sorter on top.
 
 | | AutoResearch | PromptPotter |
 |---|---|---|
@@ -103,7 +103,7 @@ It is *not literally* a configuration of PromptPotter today — running AutoRese
 | Fitness signal | 5-min nanochat training loss | Dataset accuracy (per-sample, scorer formula) |
 | Search | 1 agent, try-keep-revert | Population (`n_variants`), PoBB-eliminated rounds |
 | Loop layers | Flat — one agent, one loop | L1 generate/critique + L2 refine + L3 replan |
-| Recovery | None — agent reverts on regression | Self-healing rails (`ValidationFailure` / `RuntimeFailure`) per individual |
+| Recovery | None — agent reverts on regression | Self-healing (`ValidationFailure` / `RuntimeFailure`) per candidate |
 | Sample selection | Fixed nanochat run | Rasch + KG scoring-set evolution; hard-sample sorter |
 | Statistical guarantees | None — single noisy trial | Bayesian Posterior-of-Being-Best (population-aware best-arm-ID) |
 | Domain | ML training research | Prompt/pipeline optimization for production LLM apps |
