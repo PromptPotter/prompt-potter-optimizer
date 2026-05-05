@@ -37,14 +37,14 @@ L1 is the only layer with an L2-mutable layout; the rest run on fixed templates 
 
 ### Field channels between layers
 
-| OSP field | Writer | Reader(s) | Lifetime |
-|-----------|--------|-----------|----------|
-| `l1_critique_text` | L1 critique | L1 generate, L2 (via signals on the bundle) | one round (cleared by `clear_volatile`) |
-| `l2_brief` | L2 | L1 generate (`l2_directive` signal) | one round (cleared by `clear_volatile`) |
-| `l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
-| `plan` | L3 | L1 generate, L2 (`plan` signal in both templates) | persistent — never cleared |
-| `l2_output_failures` | L2 parser + layout validator | L3 (`failures` signal) | persistent until L3 fires |
-| `l3_output_failures` | L3 parser | L3 next fire (`failures` signal) | persistent |
+| Field | Writer | Reader(s) | Lifetime |
+|-------|--------|-----------|----------|
+| `RoundResult.critique` | L1 critique | L1 generate, L2 (`critique` signal via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
+| `OSP.l2_brief` | L2 | L1 generate (`l2_directive` signal) | one round (cleared by `clear_volatile`) |
+| `OSP.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
+| `OSP.plan` | L3 | L1 generate, L2 (`plan` signal in both templates) | persistent — never cleared |
+| `OSP.l2_output_failures` | L2 parser + layout validator | L3 (`failures` signal) | persistent until L3 fires |
+| `OSP.l3_output_failures` | L3 parser | L3 next fire (`failures` signal) | persistent |
 
 **Symmetric plan injection:** L3 writes `plan`; both L1 generate and L2 read it via the same `_r_plan` renderer. L1 sees it as a strategic constraint; L2 as the operating context for its directive. (`l2_brief` flows L2→L1; `plan` flows L3→{L1, L2}.)
 

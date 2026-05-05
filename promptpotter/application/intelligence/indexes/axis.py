@@ -135,36 +135,30 @@ class AxisIndex:
                 return "peaked"
         return "flat"
 
-    # ----- digest construction (one entry-point per agent) -----
+    # ----- digest construction (single entry-point, layer-agnostic) -----
 
-    def digest_for_l1_generate(self) -> dict[str, str] | None:
-        """Digest for the L1 generate dispatch_msg: failure_clusters, dead_queries, top_axes, top_values."""
-        rankings3 = self.axis_rankings()[:3]
+    def digest(self) -> dict[str, str] | None:
+        """Layer-agnostic axis-keyed digest — union of all axis observations.
+
+        Same payload rendered into every L1/L2/L3 prompt; per-layer
+        filtering, if it ever returns, lives in renderers, not here.
+        """
+        rankings5 = self.axis_rankings()[:5]
         top_vals_str: str | None = None
-        if rankings3:
+        if rankings5:
             impact = self._compute_axis_impact(
-                rankings3[0].axis, self._axis_values.get(rankings3[0].axis, {})
+                rankings5[0].axis, self._axis_values.get(rankings5[0].axis, {})
             )
             if impact and impact.top_values:
                 top_vals_str = "; ".join(
                     f"{r.value_preview} (acc={r.mean_accuracy:.1%})" for r in impact.top_values[:2]
                 )
 
-        c2 = self.sample_index.failure_clusters(2)
+        clusters = self.sample_index.failure_clusters(2)
         dead = self.sample_index.dead(include_always_hit=False)
-        return _collect(
-            ("failure_clusters", _fmt_clusters(c2, with_counts=True) if c2 else None),
-            ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
-            ("top_axes", _fmt_axis_rankings(rankings3) if rankings3 else None),
-            ("top_values", top_vals_str),
-        )
-
-    def digest_for_l1_critique(self) -> dict[str, str] | None:
-        """Digest for the L1 critique agent: discriminating, clusters, tractability,
-        exhausted axes, value trends, improvement attribution."""
         disc = self.sample_index.discriminating()
-        c2 = self.sample_index.failure_clusters(2)
         persistent = self.sample_index.persistent_failures(min_streak=3)
+        bottleneck = self.sample_index.bottleneck_distribution()
         exhausted = self._exhausted_axes()
         exhausted_str = (
             "; ".join(
@@ -177,27 +171,9 @@ class AxisIndex:
         )
         trend_parts = [
             f"{a.axis}: {t}"
-            for a in self.axis_rankings()[:3]
+            for a in rankings5[:3]
             if (t := self._axis_value_trend(a.axis)) not in ("flat", "non_numeric")
         ]
-        return _collect(
-            (
-                "discriminating_queries",
-                f"{len(disc)} queries vary across configs" if disc else None,
-            ),
-            ("failure_clusters", _fmt_clusters(c2, with_counts=False) if c2 else None),
-            ("tractability", _fmt_persistent_failures(persistent) if persistent else None),
-            ("exhausted_axes", exhausted_str),
-            ("value_trends", "; ".join(trend_parts) if trend_parts else None),
-            ("improvement_attribution", self._format_recent_attributions(limit=3)),
-        )
-
-    def digest_for_l2(self) -> dict[str, str] | None:
-        """Digest for the L2 refine_strategy dispatch_msg: rankings, bottleneck distribution,
-        persistent failures, failure-group correlations, volatile queries."""
-        rankings5 = self.axis_rankings()[:5]
-        bottleneck = self.sample_index.bottleneck_distribution()
-        persistent = self.sample_index.persistent_failures(min_streak=3)
 
         fg_lines: list[str] = []
         for a in rankings5[:3]:
@@ -214,32 +190,26 @@ class AxisIndex:
 
         return _collect(
             ("axis_rankings", _fmt_axis_rankings(rankings5) if rankings5 else None),
+            ("top_values", top_vals_str),
+            ("failure_clusters", _fmt_clusters(clusters, with_counts=True) if clusters else None),
+            ("dead_queries", f"{len(dead)} queries never hit" if dead else None),
+            (
+                "discriminating_queries",
+                f"{len(disc)} queries vary across configs" if disc else None,
+            ),
             ("bottleneck_distribution", _fmt_bottleneck(bottleneck)),
             (
                 "persistent_failures",
-                _fmt_persistent_failures(persistent, terse=True) if persistent else None,
+                _fmt_persistent_failures(persistent) if persistent else None,
             ),
             ("failure_group_insights", "; ".join(fg_lines) if fg_lines else None),
             (
                 "volatile_queries",
                 "; ".join(f"{q[:50]} ({n} flips)" for q, n in volatile) if volatile else None,
             ),
-        )
-
-    def digest_for_l3(self) -> dict[str, str] | None:
-        """Digest for the L3 modify_plan dispatch_msg: clusters, rankings, bottleneck, persistent."""
-        c3 = self.sample_index.failure_clusters(3)
-        rankings5 = self.axis_rankings()[:5]
-        bottleneck = self.sample_index.bottleneck_distribution()
-        persistent = self.sample_index.persistent_failures(min_streak=3)
-        return _collect(
-            ("failure_clusters", _fmt_clusters(c3, with_counts=True) if c3 else None),
-            ("axis_rankings", _fmt_axis_rankings(rankings5) if rankings5 else None),
-            ("bottleneck_distribution", _fmt_bottleneck(bottleneck)),
-            (
-                "persistent_failures",
-                _fmt_persistent_failures(persistent, terse=True) if persistent else None,
-            ),
+            ("exhausted_axes", exhausted_str),
+            ("value_trends", "; ".join(trend_parts) if trend_parts else None),
+            ("improvement_attribution", self._format_recent_attributions(limit=3)),
         )
 
     def _format_recent_attributions(self, limit: int = 5) -> str | None:

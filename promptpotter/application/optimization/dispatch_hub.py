@@ -117,9 +117,9 @@ class Bundle:
     cycle_slice: CycleSlice
     latest_diagnostics: RoundDiagnostics | None
     latest_critique: dict | None
-    # Cross-cycle axis-keyed digest from ``AxisIndex.digest_for_<layer>()``.
-    # Layer-specific selection happens at build time so the renderer stays
-    # layer-agnostic. ``None`` when ``cycle.axes`` is unset.
+    # Cross-cycle axis-keyed digest from ``AxisIndex.digest()``. Same payload
+    # everywhere — layer-agnostic by design. ``None`` when ``cycle.axes`` is
+    # unset.
     axis_digest: dict[str, str] | None
 
 
@@ -445,11 +445,9 @@ def _r_cycle_position(b: Bundle) -> str:
 
 
 def _r_axis_memory(b: Bundle) -> str:
-    """Cross-cycle axis-keyed memory — one compact block, layer-tailored.
+    """Cross-cycle axis-keyed memory — one compact block, identical for every layer.
 
-    The per-layer selection (``digest_for_l1_generate`` vs ``_l2`` vs
-    ``_l3``) already happens in :func:`build_bundle`; here we just render
-    whatever digest the bundle carries. Empty/absent digest → no
+    Reads the unified digest from the bundle. Empty/absent digest → no
     section, so the slot collapses cleanly.
     """
     digest = b.axis_digest
@@ -571,27 +569,6 @@ class DispatchHub:
 # ---------------------------------------------------------------------------
 
 
-def _layer_axis_digest(layer: Layer, cycle: Cycle) -> dict[str, str] | None:
-    """Pick the per-layer digest method on ``cycle.axes``.
-
-    Renderers stay layer-agnostic; per-layer selection happens here so the
-    Bundle carries only one digest field regardless of which layer is
-    consuming it. ``None`` when no AxisIndex is wired.
-    """
-    axes = cycle.axes
-    if axes is None:
-        return None
-    if layer == Layer.L1_GENERATE:
-        return axes.digest_for_l1_generate()
-    if layer == Layer.L1_CRITIQUE:
-        return axes.digest_for_l1_critique()
-    if layer == Layer.L2:
-        return axes.digest_for_l2()
-    if layer == Layer.L3:
-        return axes.digest_for_l3()
-    return None
-
-
 def build_bundle(
     layer: Layer,
     cycle: Cycle,
@@ -645,7 +622,7 @@ def build_bundle(
         cycle_slice=cs,
         latest_diagnostics=latest_diag,
         latest_critique=latest_crit,
-        axis_digest=_layer_axis_digest(layer, cycle),
+        axis_digest=cycle.axes.digest() if cycle.axes is not None else None,
     )
 
 

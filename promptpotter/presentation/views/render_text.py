@@ -195,12 +195,8 @@ def _render_init_exit(v: InitExitView) -> str:
         f"  {GREEN}✓{RESET} Initialized  baseline={v.baseline_acc:.1%}  "
         f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
     ]
-    if v.bootstrap_critique:
-        out.append(f"    {CYAN}Bootstrap L1 critique:{RESET} {v.bootstrap_critique}")
     if v.resumed_from_round:
         parts: list[str] = []
-        if v.l1_critique_chars:
-            parts.append(f"l1_critique={v.l1_critique_chars} chars")
         if v.task_context_keys:
             parts.append(f"task_context={v.task_context_keys} keys")
         if v.l2_round:

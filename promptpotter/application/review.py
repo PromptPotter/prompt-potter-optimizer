@@ -193,7 +193,7 @@ def _render_round(
     parts += _render_l1_inputs(osp, lineage)
     parts += _render_check_checklist(checks)
     parts += _render_variants_table(audit, scored=not is_peek)
-    parts += _render_critique(osp)
+    parts += _render_critique(round_data)
     return parts
 
 
@@ -251,8 +251,12 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
     return parts
 
 
-def _render_critique(osp: dict[str, Any]) -> list[str]:
-    critique = (osp.get("l1_critique_text") or "").strip()
+def _render_critique(round_data: dict[str, Any]) -> list[str]:
+    from promptpotter.application.optimization.l1_critique import (
+        format_l1_critique_for_prompt,
+    )
+
+    critique = format_l1_critique_for_prompt(round_data.get("critique") or {}).strip()
     if not critique:
         return []
     quoted = critique.replace("\n", "\n> ")

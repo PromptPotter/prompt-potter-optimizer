@@ -876,22 +876,21 @@ class Cycle:
     def absorb_round(
         self,
         rr: RoundResult,
-        critique_text: str,
         round_num: int,
     ) -> dict[str, Any]:
         """Sole sink for a finished L1 round: fold optimizer-memory onto opt_sp,
         append the round, propagate tracking, project the trial dict.
 
-        l1.py never mutates Cycle — it returns the round result + critique
-        text and the runner calls this once at the round boundary. The
-        returned dict is the input to ``save_round_file`` on the normal
-        path; probe and escalation paths discard it.
+        l1.py never mutates Cycle — it returns the round result (which
+        already carries ``rr.critique`` from ``run_l1_critique``) and the
+        runner calls this once at the round boundary. The returned dict
+        is the input to ``save_round_file`` on the normal path; probe and
+        escalation paths discard it.
         """
         schema = self.session.pipeline_schema
         tr = self.tracking
 
-        # 1. opt_sp memory — critique, failure analysis, warning inventory, runtime failures.
-        self.opt_sp.l1_critique_text = critique_text
+        # 1. opt_sp memory — failure analysis, warning inventory, runtime failures.
         if rr.results and schema is not None:
             self.opt_sp.failure_analysis = compile_failure_analysis(
                 cast("list[QueryMeasurement]", rr.results), schema
@@ -959,6 +958,7 @@ class Cycle:
             "candidate_scores": list(rr.candidate_scores),
             "decisions": list(rr.decisions),
             "evaluators": dict(rr.evaluators),
+            "critique": rr.critique,
             "opt_search_point": self.opt_sp.model_dump(),
             **(
                 {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}

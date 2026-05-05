@@ -94,7 +94,6 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 
 | Field | Lifecycle | Loop |
 |---|---|---|
-| `l1_critique_text` | per-round, cleared on improvement | (round-over-round feedback) |
 | `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
 | `warning_inventory` | cross-round | (per-query aggregation) |
 | `l2_brief` | one-round window, cleared on improvement | Loop 1, Loop 2 — L2 writeback |
@@ -102,6 +101,8 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Loop 2 + 3 |
 | `l2_output_failures` | per-round, set by L2 post-parse | Loop 4 — L3 reads |
 | `failure_analysis` | per-round | (round-over-round feedback) |
+
+The L1 critique itself lives on `RoundResult.critique` (a dict, not in `MEMORY_FIELDS`); the dispatch hub's `critique` signal reads it from `cycle.latest_round.critique`.
 | `round_history` | per-round, append-only | (trajectory display) |
 
 ## Mid-eval termination — what is and isn't healing

@@ -27,6 +27,9 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from promptpotter.application.optimization.l1_critique import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.domain.opt_search_point import (
     build_candidate_flat,
     flatten_sp_summary,
@@ -140,15 +143,12 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
             overlays[field_name] = str(value)
             ctx["original_sp_flat"][field_name] = str(value)
 
-    crit = cycle.opt_sp.l1_critique_text or ""
     return InitExitView(
         baseline_acc=cycle.tracking.current_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_set),
         obs_on=session.state.obs is not None,
-        bootstrap_critique=_truncate(crit.replace("\n", " ").strip(), 80),
         resumed_from_round=session.state.resumed_from_round,
-        l1_critique_chars=len(cycle.opt_sp.l1_critique_text or ""),
         task_context_keys=len(cycle.opt_sp.task_context),
         l2_round=cycle.escalation.l2_round,
         prompt_field_overlays=overlays,
@@ -277,7 +277,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         delta=delta,
         p_value=p_value,
         next_action=str(d.get("next_action", "?") or "?"),
-        l1_critique_text=d.get("l1_critique_text", "") or "",
+        l1_critique_text=format_l1_critique_for_prompt(d.get("critique") or {}),
         composite_fitness_formula=ctx.get("composite_fitness_formula"),
         composite_fitness_formula_short=ctx.get("composite_fitness_formula_short"),
         baseline_composite_fitness=ctx.get("baseline_composite_fitness"),
@@ -541,9 +541,7 @@ def from_disk_round(
         delta=(winner_acc - baseline_acc) if improved else 0.0,
         p_value=round_data.get("p_value"),
         next_action=str(round_data.get("next_action", "")),
-        l1_critique_text=str(
-            (round_data.get("opt_search_point") or {}).get("l1_critique_text") or ""
-        ),
+        l1_critique_text=format_l1_critique_for_prompt(round_data.get("critique") or {}),
         composite_fitness_formula=composite_fitness_formula,
         composite_fitness_formula_short=composite_fitness_formula_short,
         baseline_composite_fitness=baseline_composite_fitness,
@@ -635,7 +633,7 @@ def from_disk_log(
                 composite_fitness=float(t.get("composite_fitness", 0.0)),
                 changes_description=(lineage.get("changes_description") or "").strip(),
                 l2_brief=(osp.get("l2_brief") or "").strip(),
-                l1_critique_text=(osp.get("l1_critique_text") or "").strip(),
+                l1_critique_text=format_l1_critique_for_prompt(t.get("critique") or {}),
                 l1_yield=float(t.get("l1_yield", 1.0)),
                 l1_n_no_op=int(t.get("l1_n_no_op", 0)),
                 l1_n_duplicate=int(t.get("l1_n_duplicate", 0)),

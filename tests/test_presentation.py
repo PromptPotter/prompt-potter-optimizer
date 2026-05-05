@@ -160,7 +160,7 @@ def test_round_complete_view_roundtrip() -> None:
             )
             for i, cs in enumerate(candidate_scores)
         ],
-        "opt_search_point": {"l1_critique_text": ""},
+        "critique": {},
     }
     disk_view = from_disk_round(
         round_data,
@@ -226,7 +226,7 @@ def test_round_complete_view_no_improvement() -> None:
                 total=20,
             )
         ],
-        "opt_search_point": {"l1_critique_text": ""},
+        "critique": {},
     }
     disk_view = from_disk_round(round_data)
 

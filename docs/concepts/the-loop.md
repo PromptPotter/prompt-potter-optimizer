@@ -54,7 +54,7 @@ After scoring, before the next round's generate, the critique runs. The only pla
 - **L1 Generate next round** — primary signal, unless L2 has just fired.
 - **L2 Refine on escalation** — L2 builds on the critique rather than re-deriving it.
 
-`l1_critique → l1_generate` is **not** self-healing — it fires every round regardless of failure. Self-healing is failure-driven; the critique is performance-driven. Different mechanism, similar plumbing: critique writes `OptSearchPoint.l1_critique_text` + `failure_analysis`; L1's prompt reads via `{{failure_analysis}}`.
+`l1_critique → l1_generate` is **not** self-healing — it fires every round regardless of failure. Self-healing is failure-driven; the critique is performance-driven. Different mechanism, similar plumbing: critique writes `RoundResult.critique` (a dict, surfaced to prompts via the `critique` signal) and `OptSearchPoint.failure_analysis`.
 
 ## Escalation is additive
 

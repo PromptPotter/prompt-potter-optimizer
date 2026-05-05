@@ -223,7 +223,6 @@ class OptSearchPoint(PromptTemplate):
         return TaskDecomposition()
 
     # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
-    l1_critique_text: str = ""
     escalation_log: list[dict[str, Any]] = Field(default_factory=list)
     warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
     l2_brief: str = ""
@@ -253,7 +252,6 @@ class OptSearchPoint(PromptTemplate):
     # in-flight L2 layout edits instead of being silently merged from a
     # stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "l1_critique_text",
         "escalation_log",
         "warning_inventory",
         "l2_brief",
@@ -270,19 +268,15 @@ class OptSearchPoint(PromptTemplate):
     # -- Memory helpers ----------------------------------------------------
 
     def clear_volatile(self) -> None:
-        """Drop one-round windows after an improving round.
+        """Drop ``l2_brief`` after an improving round.
 
-        Both fields share the same lifecycle: they are produced to steer
-        *the next round only*, and once L1 succeeded the basis for that
-        guidance is stale.
-
-        * ``l2_brief``   — L2's action guidance for L1.
-        * ``l1_critique_text`` — the prior round's L1 critique summary; mutex
-          with ``l2_brief`` on L1, so a stale critique would otherwise
-          bleed into the next L1 meta-prompt whenever L2 did not fire.
+        ``l2_brief`` is produced to steer the next round only, so once L1
+        succeeded the basis for that guidance is stale. The prior round's
+        L1 critique now lives on :attr:`RoundResult.critique` (read by the
+        dispatch hub via ``cycle.latest_round.critique``), so its
+        lifecycle is governed by round retention, not by this method.
         """
         self.l2_brief = ""
-        self.l1_critique_text = ""
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
         """Append a log entry; fill the previous entry's pending outcome."""

@@ -770,7 +770,7 @@ async def generate_or_load_candidates(
         n_variants=_n_variants,
         creativity=_creativity,
         model=model or "(default)",
-        has_l1_critique=bool(cycle.opt_sp.l1_critique_text),
+        has_l1_critique=bool(cycle.rounds[-1].critique) if cycle.rounds else False,
         pipeline_params=cycle.tracking.current_sp.pipeline_params,
         parent_prompt_fields={k: v for k, v in cycle.opt_sp.prompt_field_dict().items() if v},
     )
@@ -865,11 +865,11 @@ async def execute_round(
     degradation_checks: list[StopRule] | None = None,
     *,
     skip_critique: bool = False,
-) -> tuple[RoundResult, str]:
+) -> RoundResult:
     """Execute one L1 round: generate → score+select → critique. Returns
-    ``(round_result, critique_text)``; the runner calls
-    ``cycle.absorb_round`` to fold both into Cycle state at the boundary.
-    l1.py never mutates Cycle directly.
+    the ``RoundResult`` with ``.critique`` set when L1_CRITIQUE fired; the
+    runner calls ``cycle.absorb_round`` to fold it into Cycle state at the
+    boundary. l1.py never mutates Cycle directly.
 
     ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
     Sweep mode passes this so the cheap-round_data fork stays one full live LLM
@@ -1024,4 +1024,4 @@ async def execute_round(
                 )
             )
 
-    return round_result, critique_text
+    return round_result

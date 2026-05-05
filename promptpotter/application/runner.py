@@ -428,7 +428,7 @@ async def _run_round_loop(
             elif _rr := session.state.audit_projection:
                 _rr.begin_round(round_num)
 
-            round_result, critique_text = await execute_round(
+            round_result = await execute_round(
                 cycle,
                 round_num,
                 round_eval_data,
@@ -436,7 +436,7 @@ async def _run_round_loop(
                 degradation_checks=round_checks,
                 skip_critique=sweep,
             )
-            trial_dict = cycle.absorb_round(round_result, critique_text, round_num)
+            trial_dict = cycle.absorb_round(round_result, round_num)
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)

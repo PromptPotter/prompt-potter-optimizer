@@ -541,7 +541,7 @@ def _build_row(
 
     round_context = {
         "opt_search_point": prev_fields,
-        "l1_critique_text": prev_fields.get("l1_critique_text", ""),
+        "critique": prev_round.get("critique") or {},
         "l2_brief": prev_fields.get("l2_brief", ""),
         "optimizer_params": prev_fields.get("optimizer_params", {}),
         "prev_accuracy": float(prev_round.get("accuracy", 0.0)),

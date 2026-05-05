@@ -77,9 +77,7 @@ class InitExitView:
     cycle_id_short: str
     samples: int
     obs_on: bool
-    bootstrap_critique: str = ""
     resumed_from_round: int = 0
-    l1_critique_chars: int = 0
     task_context_keys: int = 0
     l2_round: int = 0
     prompt_field_overlays: dict[str, str] = field(default_factory=dict)
