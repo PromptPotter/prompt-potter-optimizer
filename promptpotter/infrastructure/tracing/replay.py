@@ -29,6 +29,7 @@ from promptpotter.infrastructure.tracing.events import (
     QueryScoreEnd,
     QueryScoreStart,
 )
+from promptpotter.infrastructure.tracing.langfuse_client import LangfuseLogger
 
 logger = logging.getLogger(__name__)
 
@@ -253,7 +254,9 @@ def push_all_runs(
     on_progress: Callable[[str], None] | None = None,
 ) -> dict[str, Any]:
     """Replay all historical measurement runs through a Langfuse bridge."""
-    bridge = ObservabilityBridge.from_settings(store.base_dir, backend_id)
+    bridge = ObservabilityBridge.from_settings(
+        store.base_dir, backend_id, langfuse=LangfuseLogger()
+    )
     lf_sink = bridge.langfuse_sink
     if lf_sink is None:
         return {"error": "Langfuse is disabled (missing credentials or LANGFUSE_ENABLED=false)"}

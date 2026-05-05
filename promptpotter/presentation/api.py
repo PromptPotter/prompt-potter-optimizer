@@ -27,9 +27,6 @@ from pydantic import BaseModel, Field
 
 from promptpotter import connectors
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
-
-# Self-registration side effect.
-from promptpotter.connectors import termnorm as _termnorm  # noqa: F401
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import Decision, DecisionKind

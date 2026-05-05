@@ -99,18 +99,15 @@ class ObservabilityBridge:
         store_base_dir: str | Path,
         backend_id: str,
         *,
-        langfuse: LangfuseLogger | None = None,
+        langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge:
 
         file_sink = FileSink(store_base_dir, backend_id)
-        lf_sink: LangfuseSink | None = None
-        if langfuse is None:
-            with graceful("Cloud backend init failed; file-only mode", level=logging.DEBUG):
-                lf = LangfuseLogger.get_instance()
-                if lf.enabled:
-                    lf_sink = LangfuseSink(store_base_dir, backend_id, lf)
-        elif langfuse.enabled:
-            lf_sink = LangfuseSink(store_base_dir, backend_id, langfuse)
+        lf_sink = (
+            LangfuseSink(store_base_dir, backend_id, langfuse)
+            if (langfuse and langfuse.enabled)
+            else None
+        )
         mlflow_sink = MLflowSink(store_base_dir, backend_id) if settings.MLFLOW_ENABLED else None
         return cls(file_sink=file_sink, langfuse_sink=lf_sink, mlflow_sink=mlflow_sink)
 
@@ -208,6 +205,7 @@ class ObservabilityBridge:
         dataset: list,
         obs_campaign_id: str,
         langfuse_session_id: str | None,
+        langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge | None:
         """Build a bridge, emit ``CampaignStart``, register the dataset."""
 
@@ -216,7 +214,7 @@ class ObservabilityBridge:
 
         bridge: ObservabilityBridge | None = None
         with graceful("Failed to create ObservabilityBridge"):
-            bridge = cls.from_settings(project_root, backend_id)
+            bridge = cls.from_settings(project_root, backend_id, langfuse=langfuse)
         if bridge is None:
             return None
 

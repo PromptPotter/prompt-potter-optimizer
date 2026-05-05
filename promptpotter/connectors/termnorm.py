@@ -6,9 +6,7 @@ All TermNorm-specific code lives here:
 - ``TermNormSession`` — ``POST /sessions`` handshake with ``terms`` array.
 - ``_extract_*`` helpers — TermNorm experiment-data → ``(queries, index_terms)``.
 
-The module self-registers a ``Connector`` named ``"termnorm"`` at import time.
-``bootstrap`` imports this module once on boot; other modules read via
-``connectors.get("termnorm")``.
+Exports the ``CONNECTOR`` binding consumed by :data:`promptpotter.connectors.CONNECTORS`.
 """
 
 from __future__ import annotations
@@ -18,7 +16,6 @@ from typing import Any
 
 import httpx
 
-from promptpotter.connectors import register
 from promptpotter.connectors.protocol import Connector
 
 logger = logging.getLogger(__name__)
@@ -214,11 +211,6 @@ def _resolve_ground_truth(experiment_data: dict, query: str) -> str | None:
     return _extract_ground_truth_map(experiment_data).get(_split_query(query)[0])
 
 
-# ---------------------------------------------------------------------------
-# Self-registration
-# ---------------------------------------------------------------------------
-
-
 CONNECTOR = Connector(
     name="termnorm",
     wire_adapter=termnorm_wire_adapter,
@@ -226,5 +218,3 @@ CONNECTOR = Connector(
     extract_experiment=_extract_experiment,
     resolve_ground_truth=_resolve_ground_truth,
 )
-
-register(CONNECTOR)

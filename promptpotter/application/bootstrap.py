@@ -21,9 +21,6 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-
-# Self-registration side effect — keep this import alive even if linters flag it.
-from promptpotter.connectors import termnorm as _termnorm  # noqa: F401
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.sample import Sample
@@ -51,7 +48,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.validators import StopRule
     from promptpotter.infrastructure.ledger import RunLedger
     from promptpotter.infrastructure.projections import AuditTrailProjection
-    from promptpotter.infrastructure.tracing import ObservabilityBridge
+    from promptpotter.infrastructure.tracing import LangfuseLogger, ObservabilityBridge
 
 
 logger = logging.getLogger(__name__)
@@ -202,6 +199,7 @@ class Session:
     dataset_name: str | None = None
     project_root: str = ""
     pipeline_params: dict = field(default_factory=dict)
+    langfuse: LangfuseLogger | None = None
 
     # -- Identity --------------------------------------------------------
     session_id: str = ""
@@ -394,6 +392,17 @@ async def _resolve_pipeline_schema(
         return None
 
 
+def _read_backend_type(project_root: Path, dataset_name: str | None) -> str:
+    """Resolve backend_type from datasets/{name}/pipeline.json. Required field."""
+    if not dataset_name:
+        raise ValueError("dataset_name required to resolve backend_type for connector lookup")
+    raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
+    bt = (raw or {}).get("backend_type")
+    if not isinstance(bt, str) or not bt:
+        raise ValueError(f"backend_type missing or empty in datasets/{dataset_name}/pipeline.json")
+    return bt.lower()
+
+
 def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
@@ -505,9 +514,8 @@ async def init_services(
     store = build_stores(project_root / ".promptpotter" / "projects", tenant_id=tenant_id)
     _apply_tenant_guard(tenant_id, take_over, status)
 
-    # Connector type is config-time (no auto-discovery). TermNorm is the only
-    # connector today; M12 broadens lookup via dataset's pipeline.json::backend_type.
-    connector = connectors.get("termnorm")
+    backend_type = _read_backend_type(project_root, dataset_name)
+    connector = connectors.get(backend_type)
     client = BackendClient(
         backend_url,
         wire_adapter=connector.wire_adapter,
@@ -522,10 +530,12 @@ async def init_services(
             BackendConnection(
                 id=backend_id,
                 name=pipeline_schema.name if pipeline_schema else "Unknown",
-                backend_type="backend" if pipeline_schema else "unknown",
+                backend_type=backend_type,
                 base_url=backend_url,
             )
         )
+
+    from promptpotter.infrastructure.tracing import LangfuseLogger
 
     session = Session(
         store=store,
@@ -537,6 +547,7 @@ async def init_services(
         dataset_name=dataset_name,
         tenant=TenantContext(tenant_id=tenant_id),
         project_root=str(store.base_dir),
+        langfuse=LangfuseLogger(),
     )
 
     if dataset_name:
@@ -648,6 +659,7 @@ def _start_observability_and_scoring(
         dataset=dataset,
         obs_campaign_id=obs_campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
+        langfuse=session.langfuse,
     )
     populate_session_scoring(
         session,

@@ -332,6 +332,14 @@ def _load_local(name: str) -> PromptTemplate:
     return PromptTemplate(**body)
 
 
+@functools.cache
+def _prompt_langfuse() -> Any:
+    """Process-wide LangfuseLogger for optimizer prompt fetch/push (separate from trace logger)."""
+    from promptpotter.infrastructure.tracing import LangfuseLogger
+
+    return LangfuseLogger()
+
+
 def _try_langfuse(name: str) -> PromptTemplate | None:
     """Fetch prompt from Langfuse 'production' label (None on any failure)."""
     try:
@@ -340,9 +348,7 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
         if not settings.LANGFUSE_PROMPTS_ENABLED:
             return None
 
-        from promptpotter.infrastructure.tracing import LangfuseLogger
-
-        lf = LangfuseLogger.get_instance()
+        lf = _prompt_langfuse()
         if not lf.enabled or not lf.client:
             return None
 
@@ -369,9 +375,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
 
 def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:
     """Push manifest-registry prompt defaults to Langfuse; returns {name: success}."""
-    from promptpotter.infrastructure.tracing import LangfuseLogger
-
-    lf = LangfuseLogger.get_instance()
+    lf = _prompt_langfuse()
     if not lf.enabled or not lf.client:
         logger.warning("push_all_to_langfuse: Langfuse not available")
         return {}

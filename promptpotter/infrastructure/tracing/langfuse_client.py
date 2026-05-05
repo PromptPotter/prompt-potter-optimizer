@@ -1,4 +1,4 @@
-"""Langfuse SDK wrapper — singleton client with project isolation via API keys.
+"""Langfuse SDK wrapper — explicit-args client with project isolation via API keys.
 
 One root span per trace, child spans nested via ``start_observation``.
 Per-call observability failures log at DEBUG (a lost span is expected
@@ -8,7 +8,6 @@ during network blips); setup + post-retry failures log at WARNING.
 from __future__ import annotations
 
 import logging
-import os
 import time
 import uuid
 from typing import Any
@@ -25,8 +24,6 @@ logger = logging.getLogger(__name__)
 class LangfuseLogger:
     """Langfuse SDK wrapper. Disabled if credentials are missing."""
 
-    _instance: LangfuseLogger | None = None
-
     def __init__(self) -> None:
 
         self.enabled = bool(
@@ -41,11 +38,11 @@ class LangfuseLogger:
 
         if self.enabled:
             try:
-                os.environ["LANGFUSE_PUBLIC_KEY"] = settings.LANGFUSE_PUBLIC_KEY
-                os.environ["LANGFUSE_SECRET_KEY"] = settings.LANGFUSE_SECRET_KEY
-                os.environ["LANGFUSE_HOST"] = settings.LANGFUSE_HOST
-
-                self.client = Langfuse()
+                self.client = Langfuse(
+                    public_key=settings.LANGFUSE_PUBLIC_KEY,
+                    secret_key=settings.LANGFUSE_SECRET_KEY,
+                    host=settings.LANGFUSE_HOST,
+                )
             except ImportError:
                 logger.warning(
                     "langfuse package not installed — observability disabled. "
@@ -55,16 +52,6 @@ class LangfuseLogger:
             except Exception:
                 logger.warning("Failed to initialize Langfuse", exc_info=True)
                 self.enabled = False
-
-    @classmethod
-    def get_instance(cls) -> LangfuseLogger:
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    @classmethod
-    def reset_instance(cls) -> None:
-        cls._instance = None
 
     def create_trace_id(self) -> str | None:
         """Bare trace ID without a root observation — keeps pipeline traces

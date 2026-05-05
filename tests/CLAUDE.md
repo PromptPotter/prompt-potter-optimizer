@@ -65,9 +65,7 @@ adding. Canary: `python -m pytest tests/ --collect-only -q | tail -1`.
 
 ## Fixtures (`conftest.py`)
 
-| Fixture | Description |
-|---------|-------------|
-| `_reset_langfuse` | **Autouse** — resets `LangfuseLogger` singleton after every test |
+None currently. Add via `conftest.py` if a cross-cutting setup/teardown is genuinely needed.
 
 ## Helpers (`_helpers.py`)
 
