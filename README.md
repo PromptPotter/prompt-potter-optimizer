@@ -6,7 +6,7 @@
 
 # PromptPotter: LLM-Driven Evolution of Prompts and Pipelines
 
-**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle — an **LLM-driven program evolution** engine that jointly searches prompts and pipeline parameters with population-aware Bayesian early-stopping (Posterior-of-Being-Best), cross-run memory, and self-healing rails. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
+**PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early using statistical confidence (population-aware Bayesian best-arm identification — *Posterior-of-Being-Best, PoBB*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
 
 ## Why PromptPotter?
 
@@ -32,25 +32,7 @@ Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter a
 
 ## 🔄 The 3-layer loop
 
-A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round; **L2** escalates on stall, **L3** escalates when L2 stalls. Full mechanics in [the-loop.md](docs/concepts/the-loop.md).
-
-```
-  ┌──────────────────────────────────────────────────────────┐
-  │  l1_generate ────► l1_evaluate (+ l1_critique)            │
-  │       ▲                 │                                │
-  │       │  l1_critique OR l2_directive                      │
-  │       └──────── ◄───────┘                                │
-  │                                                          │
-  │  stall?       ──► l2_refine_strategy ──► resume L1        │
-  │  degradation? ──► l2_refine_strategy ──► resume L1        │
-  │  l2 stall?    ──► l3_modify_plan    ──► resume L2+L1     │
-  │                                                          │
-  │  Bus = OptSearchPoint:                                    │
-  │    L2 writes  l2_directive  ─►  read by l1_generate       │
-  │    L3 writes  plan          ─►  read by l1_generate, l2   │
-  │    (symmetric injection: l3→{l1,l2}, l2→l1)              │
-  └──────────────────────────────────────────────────────────┘
-```
+A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round. When the inner layer stalls, an outer layer steps in to redirect — see [the-loop.md](docs/concepts/the-loop.md) for the full mechanics.
 
 ## ⭐ Features
 
@@ -58,7 +40,7 @@ A **critique-guided** feedback cycle: each round generates candidates, scores th
 - **Auto-injected scoring:** define your scoring formula once in `campaign.json`. It's wired into every evaluation path automatically. No glue code.
 - **IDE-native operation:** drive a full optimization campaign from your terminal via the `/potter-run` Claude Code skill. No notebook required.
 - **🔁 Self-healing optimization:** when a proposed setting isn't valid for your task workflow, the verification harness catches it (deterministic) and tells the strategy layer (L2 or L3) what went wrong, which in turn updates the prompt of the model that proposed the invalid setting. Full architecture: [self-healing.md](docs/concepts/self-healing.md).
-- **Statistical early-stopping:** unfit individuals are eliminated after a handful of queries via Bayesian Posterior-of-Being-Best — population-aware joint posterior, stop when `P(c is best) < ε` — instead of burning the full budget. Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
+- **Statistical early-stopping:** unfit candidates are eliminated after a handful of queries — population-aware joint posterior, stop when `P(c is best) < ε` — instead of burning the full budget (*Posterior-of-Being-Best, PoBB*). Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
 - **Cross-run learning:** every fitness measurement flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
 
 ## How It Works
@@ -92,7 +74,7 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 [![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
 [![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
 
-Head-to-head comparison on BBEH (Big-Bench Extra Hard) against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
+Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
 
 Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
 

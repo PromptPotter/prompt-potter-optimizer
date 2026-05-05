@@ -12,7 +12,7 @@ audit data — its constructor refuses the wrong newtype (mypy) and
 asserts at construction time (runtime).
 
 These types live in :mod:`promptpotter.domain` so both ``application``
-(``RunLedger``-side) and ``infrastructure`` (projection-side) can import
+(``CycleLedger``-side) and ``infrastructure`` (projection-side) can import
 them without crossing hexagonal layers.
 """
 
@@ -21,7 +21,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import NewType, Protocol
 
-from promptpotter.domain.run_records import RunRecord
+from promptpotter.domain.run_records import CycleRecord
 
 __all__ = ["CycleDir", "Projection", "RootCycleDir"]
 
@@ -39,4 +39,4 @@ class Projection(Protocol):
     ``append`` — the ledger is single-writer from the campaign loop.
     """
 
-    def on_record(self, record: RunRecord, offset: int) -> None: ...
+    def on_record(self, record: CycleRecord, offset: int) -> None: ...

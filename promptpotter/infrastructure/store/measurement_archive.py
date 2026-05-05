@@ -427,7 +427,7 @@ def _to_measurement(
         for pair in raw_configs
         if isinstance(pair, list | tuple) and len(pair) == 2 and isinstance(pair[1], dict)
     ]
-    score = item.get("score")
+    fitness = item.get("fitness")
     return Measurement(
         run_id=run_id,
         content_hash=detail.get("content_hash", ""),
@@ -436,7 +436,7 @@ def _to_measurement(
         ground_truth=item.get("ground_truth", ""),
         predicted=item.get("predicted", ""),
         hit=bool(item.get("hit", False)),
-        score=float(score) if score is not None else None,
+        fitness=float(fitness) if fitness is not None else None,
         node_configs=node_configs,
         pipeline_data=item.get("pipeline_data") or {},
         created_at=detail.get("created_at", ""),

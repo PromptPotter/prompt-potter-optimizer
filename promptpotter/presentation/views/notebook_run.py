@@ -27,7 +27,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
 )
-from promptpotter.domain.results import RunResult
+from promptpotter.domain.results import CycleResult
 from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.presentation.views.display import (
     BOLD,
@@ -56,7 +56,7 @@ __all__ = [
 ]
 
 
-def render_completion_html(result: RunResult) -> str:
+def render_completion_html(result: CycleResult) -> str:
     """HTML render of the final-winner summary, for inline notebook display.
 
     Reads the on-disk ``index.json`` for the cycle so the rendered shape
@@ -88,7 +88,7 @@ def _try_display_html(html_body: str) -> bool:
 
 
 def render_completion(
-    result: RunResult,
+    result: CycleResult,
     *,
     best_round: dict,
     pipeline_schema: PipelineSchema | None = None,
@@ -146,8 +146,8 @@ async def init_notebook_session(
         take_over=take_over,
     )
 
-    if dataset_name and session.queries:
-        print(f"Dataset    : {dataset_name} ({len(session.queries)} queries)")
+    if dataset_name and session.samples:
+        print(f"Dataset    : {dataset_name} ({len(session.samples)} queries)")
         print(f"Session terms: {len(session.index_terms)}")
         return session
 
@@ -165,7 +165,7 @@ async def init_notebook_session(
         f"Experiment : {session.experiment_extract.get('experiment', {}).get('name', experiment_id)}"
     )
     print(f"Mappings   : {len(mappings)} total, {verified} with verified ground truth")
-    print(f"Queries    : {len(session.queries)}  |  Session terms: {len(session.index_terms)}")
+    print(f"Samples    : {len(session.samples)}  |  Session terms: {len(session.index_terms)}")
     return session
 
 
@@ -215,7 +215,7 @@ async def run_optimization_notebook(
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     session_id: str = "",
-) -> tuple[list, RunResult | None]:
+) -> tuple[list, CycleResult | None]:
     """Run optimization with ``LiveDisplay``. Prints final completion box."""
     from promptpotter.application.resume import resolve_campaign_id
 

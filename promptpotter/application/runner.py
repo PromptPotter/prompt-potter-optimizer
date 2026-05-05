@@ -48,11 +48,11 @@ from promptpotter.domain.phases import (
     StopReason,
     emit_phase,
 )
-from promptpotter.domain.results import RoundResult, RunResult
+from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.run_records import Decision, Phase, Snapshot, SweepPayload
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.projections import (
     AuditTrailProjection,
     LiveDashboardProjection,
@@ -101,7 +101,7 @@ def build_baseline_cycle_id(
 
 
 class RunListener:
-    """Single ingress: callbacks → typed RunRecord → per-cycle RunLedger.
+    """Single ingress: callbacks → typed CycleRecord → per-cycle CycleLedger.
 
     Subscribers consume via ``on_record`` only. Phase-view ctx is owned
     here (``from_phase_event`` is stateful) and serialised onto
@@ -246,7 +246,7 @@ async def _escalate_or_stop(
         round_num,
         cb.on_phase,
         obs=session.state.obs,
-        obs_campaign_id=session.state.obs_campaign_id,
+        tracing_campaign_id=session.state.tracing_campaign_id,
         escalation_check_result=escalation_check_result,
     )
     if stop:
@@ -273,7 +273,7 @@ def _persist_round(
                 round=round_num,
                 payload={
                     "accuracy": round_result.accuracy,
-                    "composite": round_result.composite,
+                    "composite_fitness": round_result.composite_fitness,
                     "improved": round_result.improved,
                     "label": round_result.label,
                 },
@@ -292,7 +292,7 @@ def _persist_round(
         with graceful("Tenant leaderboard refresh failed"):
             refresh_tenant_leaderboards(session)
 
-    if _rr := session.state.round_recorder:
+    if _rr := session.state.audit_projection:
         _rr.flush()
 
 
@@ -334,8 +334,8 @@ def _refresh_axes_and_filter(
         if not excluded:
             return
         excl_q = {e["query"] for e in excluded}
-        session.scoring.scoring_dataset[:] = [
-            s for s in session.scoring.scoring_dataset if s.query not in excl_q
+        session.scoring.scoring_set[:] = [
+            s for s in session.scoring.scoring_set if s.query not in excl_q
         ]
         always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
         emit_phase(
@@ -373,7 +373,7 @@ def _evolve_scoring_set_if_enabled(
     with graceful("ScoringSet evolve failed"):
         ss_result = evolve_scoring_set(
             full_dataset=dataset,
-            current_scoring_set=session.scoring.scoring_dataset,
+            current_scoring_set=session.scoring.scoring_set,
             rounds=cycle.rounds,
             config=exp_cfg,
             elimination_n_min=config.optimization.elimination_n_min,
@@ -383,7 +383,7 @@ def _evolve_scoring_set_if_enabled(
             cycle.last_rasch_posterior = ss_result.rasch
         if not (ss_result.swapped_in or ss_result.swapped_out):
             return
-        session.scoring.scoring_dataset[:] = ss_result.new_scoring_set
+        session.scoring.scoring_set[:] = ss_result.new_scoring_set
         event = build_scoring_set_event(round_num=round_num, result=ss_result)
         round_result.scoring_set_events.append(event)
         emit_phase(
@@ -424,7 +424,7 @@ async def _post_round(
 
     _persist_round(cycle, round_result, round_num, session)
 
-    # Hot-swap composite formula via scoring_steer.json BEFORE round-boundary
+    # Hot-swap composite_fitness formula via scoring_steer.json BEFORE round-boundary
     # mutations so next round evaluates under the new formula.
     with graceful("Scoring steer apply failed"):
         apply_steer_file(session, round_num, cb.on_phase)
@@ -450,7 +450,7 @@ async def _run_sweep_generation_only(
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
         ledger.append(Phase(phase="round", event="enter", round=round_num))
-    elif _rr := session.state.round_recorder:
+    elif _rr := session.state.audit_projection:
         _rr.begin_round(round_num)
 
     candidates, yield_stats = await generate_or_load_candidates(
@@ -471,7 +471,7 @@ async def _run_sweep_generation_only(
                     "label": label,
                     "status": "generation_only",
                     "accuracy": 0.0,
-                    "composite": 0.0,
+                    "composite_fitness": 0.0,
                     "hits": 0,
                     "total": 0,
                     "improved": False,
@@ -497,7 +497,7 @@ async def _run_sweep_generation_only(
                 payload={"status": "generation_only", "n_candidates": len(candidates)},
             )
         )
-    elif _rr := session.state.round_recorder:
+    elif _rr := session.state.audit_projection:
         _rr.flush()
 
 
@@ -544,7 +544,7 @@ async def _run_round_loop(
                 round_eval_data = [s for s in dataset if s.query in warned]
                 round_checks = None
             else:
-                round_eval_data = session.scoring.scoring_dataset
+                round_eval_data = session.scoring.scoring_set
                 round_checks = session.scoring.degradation_checks
 
             logger.debug(
@@ -563,7 +563,7 @@ async def _run_round_loop(
             cb.set_round(round_num)
             if (ledger := session.state.ledger) is not None:
                 ledger.append(Phase(phase="round", event="enter", round=round_num))
-            elif _rr := session.state.round_recorder:
+            elif _rr := session.state.audit_projection:
                 _rr.begin_round(round_num)
 
             round_result = await execute_round(
@@ -673,7 +673,7 @@ async def run_optimization(
     sweep: bool = False,
     diag: bool = False,
     fork_payload: SweepPayload | None = None,
-) -> RunResult:
+) -> CycleResult:
     """Run optimization end-to-end; auto-mint session+cycle if not pre-set."""
     started_at = datetime.now(UTC).isoformat()
     cb = listener if listener is not None else RunListener()
@@ -704,11 +704,11 @@ async def run_optimization(
             )
         if session.state.cycle_id:
             cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
-            session.state.ledger = RunLedger.open(cycle_dir)
+            session.state.ledger = CycleLedger.open(cycle_dir)
             ledger = session.state.ledger
             ledger.bind(emitter)
-            if session.state.round_recorder is not None:
-                ledger.bind(session.state.round_recorder)
+            if session.state.audit_projection is not None:
+                ledger.bind(session.state.audit_projection)
             if display is not None:
                 ledger.bind(display)
             ledger.bind(PoBBStreamProjection.from_cycle_dir(cycle_dir))
@@ -786,14 +786,14 @@ async def run_optimization(
     )
     if forked and session.state.cycle_id and session.store is not None:
         cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
-        session.state.round_recorder = AuditTrailProjection.from_cycle_dir(cycle_dir)
-        session.state.round_recorder.rehydrate_sticky()
-        fork_ledger = RunLedger.open(cycle_dir)
+        session.state.audit_projection = AuditTrailProjection.from_cycle_dir(cycle_dir)
+        session.state.audit_projection.rehydrate_sticky()
+        fork_ledger = CycleLedger.open(cycle_dir)
         # Re-open parent so the offset reflects _fork_at_divergence's FORK_CUT
-        # append (which used a separate RunLedger instance).
+        # append (which used a separate CycleLedger instance).
         if pre_loop_cycle_id:
             parent_dir = CycleDir(session.store.campaigns.campaign_dir(pre_loop_cycle_id))
-            fresh_parent = RunLedger.open(parent_dir)
+            fresh_parent = CycleLedger.open(parent_dir)
             fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
         session.state.ledger = fork_ledger
 
@@ -803,10 +803,10 @@ async def run_optimization(
             campaign_config,
             baseline_accuracy=baseline.baseline_acc,
             resumed_from_round=session.state.resumed_from_round,
-            recorder=session.state.round_recorder,
+            recorder=session.state.audit_projection,
         )
     elif forked and session.state.cycle_id and pre_loop_cycle_id:
-        emitter._recorder = session.state.round_recorder
+        emitter._recorder = session.state.audit_projection
         emitter.log_fork(
             old_cycle_id=pre_loop_cycle_id,
             new_cycle_id=session.state.cycle_id,
@@ -814,14 +814,14 @@ async def run_optimization(
         )
     elif early_bind_done and emitter._recorder is None:
         # init_optimization_loop built the recorder after early-bind; patch on.
-        emitter._recorder = session.state.round_recorder
+        emitter._recorder = session.state.audit_projection
     # Late-bind subscribers: skip when early-bind already ran on the same
     # ledger (would double-subscribe), but always re-bind on fork.
     late_ledger = session.state.ledger
     if late_ledger is not None and (not early_bind_done or forked):
         late_ledger.bind(emitter)
-        if session.state.round_recorder is not None:
-            late_ledger.bind(session.state.round_recorder)
+        if session.state.audit_projection is not None:
+            late_ledger.bind(session.state.audit_projection)
         if display is not None:
             late_ledger.bind(display)
         if session.state.cycle_id and session.store is not None:
@@ -837,7 +837,7 @@ async def run_optimization(
     )
 
     finished_at = datetime.now(UTC).isoformat()
-    run_result = RunResult(
+    cycle_result = CycleResult(
         rounds=cycle.rounds,
         n_rounds=len(cycle.rounds),
         best_accuracy=cycle.tracking.best_accuracy,
@@ -854,22 +854,22 @@ async def run_optimization(
         session_id=session.session_id or None,
         resumed_from_round=session.state.resumed_from_round,
     )
-    _finalize_run(cycle, session, emitter, run_result, campaign_config, sweep=sweep, diag=diag)
-    return run_result
+    _finalize_run(cycle, session, emitter, cycle_result, campaign_config, sweep=sweep, diag=diag)
+    return cycle_result
 
 
 def _finalize_run(
     cycle: Cycle,
     session: Session,
     emitter: LiveDashboardProjection | None,
-    run_result: RunResult,
+    cycle_result: CycleResult,
     campaign_config: CampaignConfig,
     *,
     sweep: bool = False,
     diag: bool = False,
 ) -> None:
     """Mark cycle finished, fold summary into index.json::final, render log.md, finalize emitter."""
-    stop_reason = run_result.stop_reason
+    stop_reason = cycle_result.stop_reason
     if session.state.cycle_id:
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
@@ -879,26 +879,26 @@ def _finalize_run(
             session.state.cycle_id,
             status=status_map.get(stop_reason, "completed"),
             stop_reason=stop_reason,
-            best_accuracy=run_result.best_accuracy,
-            best_round=run_result.best_round,
-            n_rounds=run_result.n_rounds,
-            finished_at=run_result.finished_at,
+            best_accuracy=cycle_result.best_accuracy,
+            best_round=cycle_result.best_round,
+            n_rounds=cycle_result.n_rounds,
+            finished_at=cycle_result.finished_at,
         )
 
     obs = session.state.obs
     if obs:
         obs.end_campaign(
-            session.state.obs_campaign_id,
-            best_accuracy=run_result.best_accuracy,
-            n_rounds=run_result.n_rounds,
+            session.state.tracing_campaign_id,
+            best_accuracy=cycle_result.best_accuracy,
+            n_rounds=cycle_result.n_rounds,
             stop_reason=stop_reason,
-            best_round=run_result.best_round,
+            best_round=cycle_result.best_round,
         )
 
-    run_result.langfuse_trace_id = (
+    cycle_result.langfuse_trace_id = (
         None
         if stop_reason == StopReason.INTERRUPTED or obs is None
-        else obs.get_langfuse_trace_id(session.state.obs_campaign_id)
+        else obs.get_langfuse_trace_id(session.state.tracing_campaign_id)
     )
 
     if session.state.cycle_id:
@@ -918,11 +918,11 @@ def _finalize_run(
             else:
                 formula_full = None
                 formula_short = None
-            baseline_composite = cycle.tracking.baseline_composite
-            final_block = run_result.model_dump(exclude={"rounds"}, mode="json")
+            baseline_composite_fitness = cycle.tracking.baseline_composite_fitness
+            final_block = cycle_result.model_dump(exclude={"rounds"}, mode="json")
             final_block["scorer_round_formula"] = formula_full
             final_block["scorer_round_formula_short"] = formula_short
-            final_block["baseline_composite"] = baseline_composite
+            final_block["baseline_composite_fitness"] = baseline_composite_fitness
             from promptpotter.application.optimization.llm_call import (
                 compute_optimizer_prompt_hashes,
             )
@@ -950,7 +950,7 @@ def _finalize_run(
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
-                {"final": final_block, "baseline_accuracy": run_result.baseline_accuracy},
+                {"final": final_block, "baseline_accuracy": cycle_result.baseline_accuracy},
             )
 
     if emitter:

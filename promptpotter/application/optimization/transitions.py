@@ -92,11 +92,11 @@ async def run_layer_transition(
 ) -> TransitionResult:
     """Shared LLM-call template for L2/L3 transitions.
 
-    Walks: ``build_compile_vars`` → meta-prompt LLM call →
+    Walks: ``build_prompt_vars`` → meta-prompt LLM call →
     ``build_result``. ``apply_side_effects`` / ``enter_payload`` /
     ``exit_payload`` are called by ``escalation._run_transition``.
     """
-    compile_vars = transition.build_compile_vars(
+    prompt_vars = transition.build_prompt_vars(
         cycle,
         pipeline_params=pipeline_params,
         round_num=round_num,
@@ -104,12 +104,12 @@ async def run_layer_transition(
     )
     raw, prompt = await run_optimizer_node(
         template_name=transition.template_name,
-        compile_vars=compile_vars,
+        prompt_vars=prompt_vars,
         llm_client=llm_client,
         model=model,
         temperature=transition.default_temperature if temperature is None else temperature,
-        recorder=cycle.session.state.round_recorder,
-        cache=cycle.session.store.optimizer_calls,
+        recorder=cycle.session.state.audit_projection,
+        optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     return transition.build_result(raw, cycle.opt_sp, prompt, pipeline_params=pipeline_params)
 
@@ -132,8 +132,8 @@ def compile_l3_extras(cycle: Cycle, pipeline_params: dict | None) -> dict[str, s
         {
             "l2_round": cycle.escalation.l2.round,
             "optimizer_params": opt_sp.optimizer_params,
-            "accuracy_change": cycle.tracking.best_composite
-            - cycle.escalation.l3.best_composite_at_entry,
+            "accuracy_change": cycle.tracking.best_composite_fitness
+            - cycle.escalation.l3.best_composite_fitness_at_entry,
         }
     ]
     l2_summary = "\n".join(

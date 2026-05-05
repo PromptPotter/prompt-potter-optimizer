@@ -13,7 +13,7 @@ This module owns:
   defaults across the four exit paths in ``score_population``.
 - ``_pobb_decision_data`` — shared archival blob for elimination + lock-in
   decisions.
-- ``L1ScoringResult`` — frozen Pydantic shape for ``l1_score``'s return.
+- ``PopulationScoreReport`` — frozen Pydantic shape for ``l1_score``'s return.
 """
 
 from __future__ import annotations
@@ -33,13 +33,13 @@ from promptpotter.domain.results import (
     CandidateScore,
 )
 from promptpotter.domain.run_records import Decision
-from promptpotter.domain.scoring import QueryResult
+from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "INVALID_SCORES",
-    "L1ScoringResult",
+    "PopulationScoreReport",
     "build_score_report",
     "merge_pipeline_params",
     "parse_population",
@@ -79,10 +79,12 @@ def parse_population(
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
     for cp in proposals:
-        override = cp.node_overrides or None
+        pipeline_params_override = cp.pipeline_params_override or None
         osp = cp.osp
-        if schema and override:
-            outcome = L1_SCHEMA_COMPLIANCE.run(override, pipeline_schema=schema)
+        if schema and pipeline_params_override:
+            outcome = L1_SCHEMA_COMPLIANCE.run(
+                pipeline_params_override, pipeline_schema=schema
+            )
             if outcome is not None:
                 failures: list[ValidationFailure] = outcome.evidence["failures"]
                 osp.validation_failures = failures
@@ -95,15 +97,15 @@ def parse_population(
                         vf.allowed,
                     )
         osp_list.append(osp)
-        merged.append(merge_pipeline_params(pipeline_params, override, schema))
+        merged.append(merge_pipeline_params(pipeline_params, pipeline_params_override, schema))
     return osp_list, merged
 
 
 def build_score_report(
     osp: OptSearchPoint,
-    override: dict | None,
-    scores: dict,
-    results: list,
+    pipeline_params_override: dict | None,
+    score_summary: dict,
+    query_results: list,
     dataset: list,
     *,
     aborted: bool = False,
@@ -115,19 +117,19 @@ def build_score_report(
     l1_diversity: float = 1.0,
 ) -> CandidateScore:
     """Build the typed candidate score report — stable shape, defaults always present."""
-    evaluators = {**(scores.get("evaluators") or {}), "l1_diversity": l1_diversity}
+    evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     return CandidateScore(
         candidate_id=osp.lineage.id,
         changes_description=osp.lineage.changes_description or "",
-        pipeline_params_override=override,
-        accuracy=scores["accuracy"],
-        composite=scores.get("composite", scores["accuracy"]),
-        hits=scores["hits"],
-        total=scores["total"],
+        pipeline_params_override=pipeline_params_override,
+        accuracy=score_summary["accuracy"],
+        composite_fitness=score_summary.get("composite_fitness", score_summary["accuracy"]),
+        hits=score_summary["hits"],
+        total=score_summary["total"],
         evaluators=evaluators,
         escalation_aborted=aborted,
         elimination_stopped=elimination_stopped,
-        scored_queries=len(results),
+        scored_queries=len(query_results),
         expected_queries=len(dataset),
         invalid=invalid,
         resumed_from_cache=resumed_from_cache,
@@ -137,18 +139,18 @@ def build_score_report(
     )
 
 
-def pobb_decision_data(cr: dict) -> dict[str, Any]:
+def pobb_decision_data(candidate_score: dict) -> dict[str, Any]:
     """Shared archival data for PoBB elimination + leader-lock decisions."""
     return {
-        "p_best": float(cr.get("p_best", 0.0)),
-        "leader_id": str(cr.get("leader_id", "")),
-        "p_best_snapshot": dict(cr.get("p_best_snapshot") or {}),
+        "p_best": float(candidate_score.get("p_best", 0.0)),
+        "leader_id": str(candidate_score.get("leader_id", "")),
+        "p_best_snapshot": dict(candidate_score.get("p_best_snapshot") or {}),
     }
 
 
 INVALID_SCORES: dict[str, Any] = {
     "accuracy": 0.0,
-    "composite": 0.0,
+    "composite_fitness": 0.0,
     "hits": 0,
     "total": 0,
     "errors": 0,
@@ -156,7 +158,7 @@ INVALID_SCORES: dict[str, Any] = {
 }
 
 
-class L1ScoringResult(BaseModel):
+class PopulationScoreReport(BaseModel):
     """Structured return value from l1_score() — frozen."""
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
@@ -166,15 +168,15 @@ class L1ScoringResult(BaseModel):
     winner_prompt_fields: dict[str, Any]
     winner_pipeline_params: dict[str, Any] | None
     winner_accuracy: float
-    winner_composite: float
+    winner_composite_fitness: float
     hits: int
     total: int
     improved: bool
     p_value: float | None = None
     candidates_scored: int
     candidate_scores: list[CandidateScore]
-    winner_results: list[QueryResult]
-    all_candidate_results: dict[str, list[QueryResult]] = Field(default_factory=dict)
+    winner_results: list[QueryMeasurement]
+    all_candidate_results: dict[str, list[QueryMeasurement]] = Field(default_factory=dict)
     escalation_signal: EscalationSignal | None = None
     degraded_queries: int = 0
     deprecated: int = 0

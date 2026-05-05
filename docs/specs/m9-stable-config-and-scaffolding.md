@@ -154,7 +154,7 @@ Shipped: `LoopConfig` deleted, `CampaignConfig` is Pydantic with nested sub-mode
 
 1. **`LoopConfig`** (`application/campaign/config.py`) — Pydantic, ~25 fields. Mixes user knobs (`l1_patience`, `creativity`, `elimination_alpha`, …) with runtime context (`session_id`, `backend_id`, `project_root`, `pipeline_schema`, `recon_brief`, `dataset_name`). Two lifecycles, one object.
 2. **`SessionEnv`** (`application/campaign/campaign_setup.py`) — dataclass. Session-scoped identity, infrastructure handles, and eval data. Missing the runtime fields `LoopConfig` duplicates today (`session_id`, `project_root`, `recon_brief`, derived `pipeline_params`).
-3. **`LoopEnv`** (`application/optimization/loop_env.py`) — dataclass. Loop-specific infrastructure handles (`scoring_ctx`, `degradation_checks`, `scoring_dataset`, `cycle_id`, `zero_signal_filter_*`, `resumed_from_round`).
+3. **`LoopEnv`** (`application/optimization/loop_env.py`) — dataclass. Loop-specific infrastructure handles (`scoring_ctx`, `degradation_checks`, `scoring_set`, `cycle_id`, `zero_signal_filter_*`, `resumed_from_round`).
 
 Consequences:
 - `CampaignConfig` (TypedDict, user-authored) is silently mutated at runtime — `configure_and_apply_pipeline()` writes derived `pipeline_params` into the user dict at `config.py:450`. `apply_stored_overrides()` and `recon_report.py` do the same. User config is no longer user config.
@@ -183,13 +183,13 @@ SessionEnv  (runtime context, not persisted)
     ├── pipeline_schema                 # derived from GET /pipeline, filtered + overrides baked
     ├── pipeline_params                 # NEW — derived, lives here (was mutated on CampaignConfig)
     ├── recon_brief | None              # NEW — was on LoopConfig
-    ├── queries, index_terms, experiment_extract
-    └── synced
+    ├── samples, index_terms, experiment_extract
+    └── backend_index_synced
 
 LoopEnv  (per-run infrastructure, transient)
     Unchanged in shape; gains nothing from redesign.
-    ├── scoring_ctx, campaign_store, cycle_id, obs_campaign_id
-    ├── scoring_dataset, degradation_checks, resumed_from_round
+    ├── scoring_ctx, campaign_store, cycle_id, tracing_campaign_id
+    ├── scoring_set, degradation_checks, resumed_from_round
     └── (zero_signal_filter_* fields MOVE to CampaignConfig.optimization)
 ```
 

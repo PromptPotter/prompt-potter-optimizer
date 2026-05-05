@@ -300,8 +300,8 @@ def candidate_summaries(proposals: list[CandidateProposal]) -> list[dict]:
             "idx": i,
             "changes_description": cp.osp.lineage.changes_description or "",
         }
-        if cp.node_overrides:
-            summary["pipeline_params_override"] = cp.node_overrides
+        if cp.pipeline_params_override:
+            summary["pipeline_params_override"] = cp.pipeline_params_override
         if prompt_fields:
             summary["prompt_fields"] = prompt_fields
         summaries.append(summary)
@@ -348,7 +348,7 @@ def warning_summary(tracker: dict[str, dict]) -> tuple[int, str]:
 
 def format_escalation_report(
     escalation_check_result: dict | None,
-    escalation_journal: list[dict] | None,
+    escalation_log: list[dict] | None,
     pipeline_params: dict | None = None,
     pipeline_schema: PipelineSchema | None = None,
 ) -> str:
@@ -374,9 +374,9 @@ def format_escalation_report(
 
     lines.append("")
 
-    if escalation_journal:
+    if escalation_log:
         lines.append("  Tried configs and stability:")
-        for entry in escalation_journal:
+        for entry in escalation_log:
             step = entry.get("problem_step", "unknown")
             ec = entry.get("step_config", {})
             prev_rate = entry.get("degraded_rate", 0)

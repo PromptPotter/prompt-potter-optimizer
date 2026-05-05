@@ -24,7 +24,7 @@ from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict, runtime_ch
 
 
 class PipelineData(TypedDict, total=False):
-    """Nested pipeline execution details within a QueryResult."""
+    """Nested pipeline execution details within a QueryMeasurement."""
 
     final_ranking: list[dict[str, Any]]
     total_time: float
@@ -39,14 +39,14 @@ class PipelineData(TypedDict, total=False):
     diagnostics: dict[str, Any]
 
 
-class QueryResult(TypedDict):
+class QueryMeasurement(TypedDict):
     """Core per-query measurement result.
 
     Raw trace fields (``query``, ``ground_truth``, ``predicted``, ``error``,
-    ``pipeline_data``) are populated at measurement time. ``hit`` and ``score``
+    ``pipeline_data``) are populated at measurement time. ``hit`` and ``fitness``
     are the *active-scorer projection* — written exclusively by
     ``rescore_results`` (in ``application.scoring.formula``), which also
-    populates the authoritative ``scored`` audit map (``{scorer_id: {score,
+    populates the authoritative ``scored`` audit map (``{scorer_id: {fitness,
     hit, formula}}`` — one entry per scorer the trace has been scored
     under). They are ``NotRequired`` because a freshly measured trace has not
     yet been scored.
@@ -60,12 +60,12 @@ class QueryResult(TypedDict):
     ground_truth: str
     predicted: str
     hit: NotRequired[bool]
-    score: NotRequired[float]
+    fitness: NotRequired[float]
     error: str | None
     pipeline_data: PipelineData | None
 
 
-class QueryResultFull(QueryResult, total=False):
+class QueryMeasurementFull(QueryMeasurement, total=False):
     """Extended result with optional fields from scoring pipeline and stale-data protocol."""
 
     # Multi-scorer audit map — {scorer_id: {score, hit, formula}}.

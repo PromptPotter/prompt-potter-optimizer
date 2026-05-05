@@ -42,7 +42,7 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
         "predicted": "**42**",
         "ground_truth": "42",
         "hit": False,
-        "score": 0.0,
+        "fitness": 0.0,
         "error": None,
         "pipeline_data": None,
         "ground_truth_rank": 1,
@@ -51,16 +51,16 @@ def test_rescore_results_accumulates_and_projects_active() -> None:
     rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
     rescore_results([result], compile_scorer(formula_a), scorer_id="a", formula=formula_a)
     assert list(result["scored"]) == ["a"]  # idempotent
-    assert result["score"] == 1.0 and result["hit"] is True
+    assert result["fitness"] == 1.0 and result["hit"] is True
 
     formula_b = "1 - exact_match(predicted, ground_truth)"
     rescore_results([result], compile_scorer(formula_b), scorer_id="b", formula=formula_b)
     assert set(result["scored"]) == {"a", "b"}
-    assert result["score"] == 0.0 and result["hit"] is False
+    assert result["fitness"] == 0.0 and result["hit"] is False
 
 
 def _r(score: float) -> dict:
-    return {"query": "q", "predicted": "p", "ground_truth": "g", "score": score, "hit": False}
+    return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score, "hit": False}
 
 
 def test_round_winner_replay_uses_rescored_baseline() -> None:
@@ -183,7 +183,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import Decision, DecisionKind
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
     old_cycle = "cycle_fork_cut_test"
@@ -204,7 +204,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
         surviving_trials=trials[:1],
     )
 
-    parent_ledger = RunLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
     assert records, "parent ledger must contain the FORK_CUT record"
     cut = records[-1]
@@ -217,8 +217,8 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
     # see the FORK_CUT marker — i.e. the runner's "re-open parent before
     # inherit" pattern is what downstream readers depend on.
     fork_dir = stores.campaigns.campaign_dir(new_cycle)
-    fork_ledger = RunLedger.open(CycleDir(fork_dir))
-    fresh_parent = RunLedger.open(CycleDir(parent_dir))
+    fork_ledger = CycleLedger.open(CycleDir(fork_dir))
+    fresh_parent = CycleLedger.open(CycleDir(parent_dir))
     fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
     fork_history = list(fork_ledger.iter())
     assert any(
@@ -238,7 +238,7 @@ def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
 
 
 def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -> None:
-    """The load-bearing invariant: a partial state.results merged with prior_results
+    """The load-bearing invariant: a partial state.results merged with cached_query_results
     yields back every dataset query the archive already covered.
 
     Aborted runs must not shrink an already-fuller archive — without this the
@@ -247,15 +247,15 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     """
     queries = [f"q{i}" for i in range(20)]
     dataset_queries = set(queries)
-    prior_results = {q: _prior(q) for q in queries}
+    cached_query_results = {q: _prior(q) for q in queries}
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     state_results = [_prior(q) for q in queries[:7]]
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         state_results,
-        prior_results=prior_results,
+        cached_query_results=cached_query_results,
         dataset_queries=dataset_queries,
-        evicted_priors={},
+        deprecated_samples={},
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
@@ -268,18 +268,18 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
     """Only dataset queries get merged; evicted (deprecated) priors are excluded
     so they re-measure on the next encounter."""
     dataset_queries = {"q1", "q2"}
-    prior_results = {
+    cached_query_results = {
         "q1": _prior("q1"),
         "q2": _prior("q2"),
         "q_off": _prior("q_off"),  # not in current dataset
     }
-    evicted = {"q2": _prior("q2")}  # q2 deprecated → must remeasure
+    deprecated = {"q2": _prior("q2")}  # q2 deprecated → must remeasure
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         [],
-        prior_results=prior_results,
+        cached_query_results=cached_query_results,
         dataset_queries=dataset_queries,
-        evicted_priors=evicted,
+        deprecated_samples=deprecated,
         scorer=compile_scorer(formula),
         scorer_id="x",
         scorer_formula=formula,
@@ -338,7 +338,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     of the parent distinguishes diag-BFS branches from divergence forks."""
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import Decision, DecisionKind
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
     parent = "cycle_diagparent2"
@@ -352,7 +352,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     parent_dir = stores.campaigns.campaign_dir(parent)
     new_cycle = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
 
-    parent_ledger = RunLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
     cut = records[-1]
     assert isinstance(cut, Decision)
@@ -433,7 +433,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import Decision, DecisionKind
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
     parent = "cycle_sweepparent2"
@@ -456,7 +456,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
         payload=payload,
     )
 
-    parent_ledger = RunLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
     cut = list(parent_ledger.iter())[-1]
     assert isinstance(cut, Decision)
     assert cut.kind is DecisionKind.FORK_CUT

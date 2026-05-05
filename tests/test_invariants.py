@@ -133,7 +133,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.application.optimization.cycle import Cycle, TrackingState
     from promptpotter.domain.cycle_paths import RootCycleDir
     from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.domain.results import RoundResult, RunResult
+    from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import Phase, Snapshot
     from promptpotter.infrastructure.projections import LiveDashboardProjection
     from promptpotter.presentation.views.view_factories import (
@@ -177,7 +177,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         )
 
     # Simulate a single round lifecycle.  The emitter only reads a handful of
-    # fields off the ``env`` payload (cycle_id, scoring.scoring_dataset, obs,
+    # fields off the ``env`` payload (cycle_id, scoring.scoring_set, obs,
     # resumed_from_round, pipeline_schema) so a SimpleNamespace is enough.
     # Cycle requires session+config; the emitter doesn't read them off
     # ``init_state`` here, so SimpleNamespace stand-ins are fine.
@@ -192,7 +192,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             obs=None,
             resumed_from_round=0,
         ),
-        scoring=SimpleNamespace(scoring_dataset=[]),
+        scoring=SimpleNamespace(scoring_set=[]),
         pipeline_schema=None,
     )
     fire(
@@ -313,7 +313,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.presentation.views.render_markdown import to_markdown
     from promptpotter.presentation.views.view_factories import from_disk_log
 
-    final = RunResult(
+    final = CycleResult(
         rounds=[round_result],
         n_rounds=1,
         best_accuracy=0.6,

@@ -39,7 +39,7 @@ class L1Stats:
 def compute_l1_stats(
     rounds: list[dict[str, Any]],
     *,
-    baseline_composite: float,
+    baseline_composite_fitness: float,
     behavior_results: list[list[CheckResult]],
 ) -> L1Stats:
     """Aggregate per-round trial dicts + behaviour check results into L1Stats.
@@ -50,14 +50,14 @@ def compute_l1_stats(
     """
     rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
-    top_lifts = _top_lifts(rounds, baseline_composite)
+    top_lifts = _top_lifts(rounds, baseline_composite_fitness)
     top_lift_mean = sum(top_lifts) / len(top_lifts) if top_lifts else 0.0
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_fires = sum(1 for r in rounds if _round_source(r) == "l2_context")
     round_1_verdict = compute_round_1_verdict(
         rounds,
-        baseline_composite=baseline_composite,
+        baseline_composite_fitness=baseline_composite_fitness,
         round_1_behavior=behavior_results[0] if behavior_results else [],
         round_1_top_lift=top_lifts[0] if top_lifts else 0.0,
         round_1_yield_rate=_round_yield_rate(rounds[0]) if rounds else 0.0,
@@ -76,7 +76,7 @@ def compute_l1_stats(
 def compute_round_1_verdict(
     rounds: list[dict[str, Any]],
     *,
-    baseline_composite: float,
+    baseline_composite_fitness: float,
     round_1_behavior: list[CheckResult],
     round_1_top_lift: float,
     round_1_yield_rate: float,
@@ -92,8 +92,8 @@ def compute_round_1_verdict(
         return "unknown"
 
     failed = sum(1 for c in round_1_behavior if not c.passed)
-    round_1_composite = float(rounds[0].get("composite") or 0.0)
-    baseline_regression = round_1_composite < baseline_composite
+    round_1_composite_fitness = float(rounds[0].get("composite_fitness") or 0.0)
+    baseline_regression = round_1_composite_fitness < baseline_composite_fitness
 
     if failed >= 2 or baseline_regression:
         return "broken"
@@ -125,15 +125,15 @@ def _mean_yield_rate(rounds: list[dict[str, Any]]) -> float:
     return sum(_round_yield_rate(r) for r in rounds) / len(rounds)
 
 
-def _top_lifts(rounds: list[dict[str, Any]], baseline_composite: float) -> list[float]:
-    """Per-round (best variant composite − parent composite). Round 0's parent
-    is the baseline composite; subsequent rounds inherit the prior round's."""
+def _top_lifts(rounds: list[dict[str, Any]], baseline_composite_fitness: float) -> list[float]:
+    """Per-round (best variant composite_fitness − parent composite_fitness). Round 0's parent
+    is the baseline composite_fitness; subsequent rounds inherit the prior round's."""
     lifts: list[float] = []
-    parent = float(baseline_composite or 0.0)
+    parent = float(baseline_composite_fitness or 0.0)
     for r in rounds:
-        composite = float(r.get("composite") or 0.0)
-        lifts.append(composite - parent)
-        parent = composite
+        composite_fitness = float(r.get("composite_fitness") or 0.0)
+        lifts.append(composite_fitness - parent)
+        parent = composite_fitness
     return lifts
 
 

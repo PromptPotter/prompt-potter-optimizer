@@ -76,13 +76,13 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
 
 
 def validate_overrides(
-    node_overrides: dict[str, dict],
+    pipeline_params_override: dict[str, dict],
     pipeline_schema: PipelineSchema,
 ) -> list[ValidationFailure]:
     """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0."""
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
-    for node_name, node_params in node_overrides.items():
+    for node_name, node_params in pipeline_params_override.items():
         if not isinstance(node_params, dict):
             continue
         node = pipeline_schema.get_node(node_name)
@@ -142,23 +142,23 @@ L1_SCHEMA_COMPLIANCE: LLMOutputValidator = LLMOutputValidator(
 def _normalize_pp_override(
     pp_override: dict, pipeline_schema: PipelineSchema | None
 ) -> tuple[dict, dict, dict]:
-    """Split LLM pp_override → (prompt, task_context, node_overrides); un-nest, auto-nest, drop unknown nodes."""
+    """Split LLM pp_override → (prompt, task_context, pipeline_params_override); un-nest, auto-nest, drop unknown nodes."""
     pp_override.pop("steps", None)  # LLM must not override pipeline composition
     prompt_changes: dict = {}
     tc_changes: dict = {}
-    node_overrides: dict = {}
+    pipeline_params_override: dict = {}
     for k, pv in pp_override.items():
         if k in PROMPT_STRING_FIELDS:
             prompt_changes[k] = pv
         elif k in TASK_CONTEXT_OVERRIDES:
             tc_changes[k] = pv
         else:
-            node_overrides[k] = pv
+            pipeline_params_override[k] = pv
 
     # Un-nest prompt/task_context fields LLM emitted under a node name
     # (e.g. {"llm_only": {"answer_format": ...}}).
-    for node_name in list(node_overrides.keys()):
-        nested = node_overrides[node_name]
+    for node_name in list(pipeline_params_override.keys()):
+        nested = pipeline_params_override[node_name]
         if not isinstance(nested, dict):
             continue
         for sub_k in list(nested.keys()):
@@ -169,20 +169,22 @@ def _normalize_pp_override(
                 logger.warning("l1_generate: un-nesting task_context %r from %r", sub_k, node_name)
                 tc_changes[sub_k] = nested.pop(sub_k)
         if not nested:
-            del node_overrides[node_name]
+            del pipeline_params_override[node_name]
 
     if pipeline_schema:
         # Auto-nest flat params + drop hallucinated nodes.
-        for fk in [k for k, val in node_overrides.items() if not isinstance(val, dict)]:
+        for fk in [k for k, val in pipeline_params_override.items() if not isinstance(val, dict)]:
             owner = pipeline_schema.node_for_param(fk)
             if owner:
                 logger.warning("l1_generate: auto-nesting flat param %r → %s", fk, owner)
-                node_overrides.setdefault(owner, {})[fk] = node_overrides.pop(fk)
-        for bk in [k for k in node_overrides if not pipeline_schema.has_node(k)]:
+                pipeline_params_override.setdefault(owner, {})[fk] = pipeline_params_override.pop(
+                    fk
+                )
+        for bk in [k for k in pipeline_params_override if not pipeline_schema.has_node(k)]:
             logger.warning("l1_generate: dropping hallucinated node %r", bk)
-            del node_overrides[bk]
+            del pipeline_params_override[bk]
 
-    return prompt_changes, tc_changes, node_overrides
+    return prompt_changes, tc_changes, pipeline_params_override
 
 
 @dataclass(frozen=True)
@@ -228,7 +230,11 @@ def detect_invariants(
         child_tc = child.task_context.to_dict()
         tc_delta = tuple(sorted((k, v) for k, v in child_tc.items() if v != parent_tc.get(k)))
         no_canon = tuple(
-            sorted((n, tuple(sorted(p.items()))) for n, p in (cp.node_overrides or {}).items() if p)
+            sorted(
+                (n, tuple(sorted(p.items())))
+                for n, p in (cp.pipeline_params_override or {}).items()
+                if p
+            )
         )
         sig = (pf_delta, tc_delta, no_canon)
         if not any(sig):

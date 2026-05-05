@@ -203,7 +203,7 @@ class ObservabilityBridge:
         config_snapshot: dict[str, Any],
         baseline_accuracy: float,
         dataset: list,
-        obs_campaign_id: str,
+        tracing_campaign_id: str,
         langfuse_session_id: str | None,
         langfuse: LangfuseLogger | None,
     ) -> ObservabilityBridge | None:
@@ -221,7 +221,7 @@ class ObservabilityBridge:
         with graceful("CampaignStart emit failed"):
             bridge.emit(
                 CampaignStart(
-                    campaign_id=obs_campaign_id,
+                    campaign_id=tracing_campaign_id,
                     config=config_snapshot,
                     baseline_accuracy=baseline_accuracy,
                     session_id=langfuse_session_id,
@@ -239,7 +239,7 @@ class ObservabilityBridge:
 
     def end_campaign(
         self,
-        obs_campaign_id: str,
+        tracing_campaign_id: str,
         *,
         best_accuracy: float,
         n_rounds: int,
@@ -251,7 +251,7 @@ class ObservabilityBridge:
         with graceful("Bridge campaign end failed"):
             self.emit(
                 CampaignEnd(
-                    campaign_id=obs_campaign_id,
+                    campaign_id=tracing_campaign_id,
                     best_accuracy=best_accuracy,
                     n_rounds=n_rounds,
                     stop_reason=stop_reason,
@@ -259,7 +259,7 @@ class ObservabilityBridge:
                 )
             )
             self.flush()
-            langfuse_trace_id = self.get_langfuse_trace_id(obs_campaign_id)
+            langfuse_trace_id = self.get_langfuse_trace_id(tracing_campaign_id)
         return langfuse_trace_id
 
 

@@ -26,7 +26,7 @@ from promptpotter.shared.statistics import pobb_should_stop, posterior_best_prob
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
     "DegradationCheck",
@@ -157,7 +157,7 @@ def is_deprecated(result: Mapping[str, Any]) -> bool:
 
 def update_query_tracker(
     tracker: dict[str, dict],
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
 ) -> None:
     """Merge results into the per-query warning inventory (mutates tracker)."""
     for r in results:
@@ -229,7 +229,7 @@ class DegradationCheck:
         self.min_queries = min_queries
 
     def check(
-        self, results: list[QueryResult], candidate_idx: int, n_total_candidates: int
+        self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if results:
             classification = classify_result(results[-1])
@@ -331,7 +331,7 @@ class PoBBCheck:
         return self._last_snapshot
 
     def check(
-        self, results: list[QueryResult], candidate_idx: int, n_total_candidates: int
+        self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
     ) -> EscalationSignal | None:
         if not self.priors:
             return None
@@ -339,7 +339,7 @@ class PoBBCheck:
         if n < self.n_min:
             return None
 
-        scores = [r.get("score", 0.0) for r in results]
+        scores = [r.get("fitness", 0.0) for r in results]
         cid = self._current_id or "__current__"
         histories: dict[str, list[float]] = {**self.priors, cid: scores}
         snapshot = posterior_best_probabilities(histories)

@@ -68,10 +68,10 @@ def _load_arm_history(
             continue
         for item in detail.get("measurements", []):
             sid = item.get("sample_id")
-            score = item.get("score")
-            if sid is None or score is None or item.get("predicted") == "ERROR":
+            fitness = item.get("fitness")
+            if sid is None or fitness is None or item.get("predicted") == "ERROR":
                 continue
-            seen.setdefault(int(sid), float(score))
+            seen.setdefault(int(sid), float(fitness))
     return list(seen.values()), set(seen.keys())
 
 
@@ -221,8 +221,8 @@ async def elevate_to_decisive(
                 note=_format_note("aborted", best, p_best, histories, topups),
             )
         measured[chosen].add(sample.id)
-        if results and (new_score := results[0].get("score")) is not None:
-            histories[chosen].append(float(new_score))
+        if results and (new_fitness := results[0].get("fitness")) is not None:
+            histories[chosen].append(float(new_fitness))
             topups[chosen] += 1
             if stream:
                 # Recompute p_best for the streamed line so the operator sees
@@ -232,7 +232,7 @@ async def elevate_to_decisive(
                 cur_best = max(cur_p, key=lambda k: cur_p[k])
                 print(
                     f"[topup #{sum(topups.values())}] arm={chosen} "
-                    f"n={len(histories[chosen])} score={float(new_score):.3f} "
+                    f"n={len(histories[chosen])} fitness={float(new_fitness):.3f} "
                     f"P_best={cur_p[cur_best]:.2f} ({cur_best})",
                     flush=True,
                 )

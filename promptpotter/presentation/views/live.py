@@ -5,8 +5,8 @@ Surface differentiation via constructor flags, not subclasses:
 - ``store`` provided → enables ``note()`` / ``render_claude_notes()`` /
   ``render_journal()`` (notebook ↔ Claude exchange channel)
 
-Single ingress: the display consumes ``RunRecord``s from the per-cycle
-``RunLedger`` via ``on_record``. Per-query / per-candidate / per-round
+Single ingress: the display consumes ``CycleRecord``s from the per-cycle
+``CycleLedger`` via ``on_record``. Per-query / per-candidate / per-round
 formatters live in sibling modules; this file is the dispatch + tqdm
 bar tracker. Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
 """
@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import Phase, RunRecord, Snapshot
+from promptpotter.domain.run_records import CycleRecord, Phase, Snapshot
 from promptpotter.infrastructure.store.base import read_text_optional
 from promptpotter.presentation.views.display import (
     _box_bottom,
@@ -40,7 +40,7 @@ from promptpotter.presentation.views.round_render import (
 )
 from promptpotter.shared.composite import (
     compact_display_enabled,
-    render_composite_block,
+    render_composite_fitness_block,
 )
 
 if TYPE_CHECKING:
@@ -126,7 +126,7 @@ class LiveDisplay:
         self._bars = _BarTracker(sp_budget_ttest) if sp_budget_ttest is not None else None
         # Composite-render context — read by ``on_candidate_scored`` for the
         # per-candidate baseline anchor and by ``on_round_complete`` for the
-        # 3-line composite block. Populated from L1_SCORE:exit views and
+        # 3-line composite_fitness block. Populated from L1_SCORE:exit views and
         # mutated on ``scoring_steer:applied``. ``RunListener`` wires its
         # shared ctx onto ``self._phase_ctx`` after construction so the
         # display sees the same dict the phase-view builder writes to.
@@ -147,7 +147,7 @@ class LiveDisplay:
 
     # --- Ledger subscription ------------------------------------------
 
-    def on_record(self, record: RunRecord, offset: int) -> None:
+    def on_record(self, record: CycleRecord, offset: int) -> None:
         """Route a typed record to the corresponding internal handler."""
         del offset
         if isinstance(record, Phase):
@@ -157,7 +157,7 @@ class LiveDisplay:
                 l1_stall = int(payload.get("l1_stall_count") or 0)
                 if round_result is not None:
                     # Re-sync phase ctx from listener-side snapshot so the
-                    # composite block reads the same baseline anchors the
+                    # composite_fitness block reads the same baseline anchors the
                     # listener saw at emit time.
                     ctx = payload.get("phase_ctx")
                     if isinstance(ctx, dict):
@@ -266,7 +266,7 @@ class LiveDisplay:
         if event.phase == "scoring_steer" and event.event == "applied":
             new_formula = event.data.get("formula")
             if new_formula:
-                self._phase_ctx["composite_formula"] = new_formula
+                self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_started(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, query_text: str
@@ -335,8 +335,8 @@ class LiveDisplay:
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        baseline_comp = self._phase_ctx.get("baseline_composite")
-        summary = build_individual_summary(scores, baseline_acc, baseline_composite=baseline_comp)
+        baseline_comp = self._phase_ctx.get("baseline_composite_fitness")
+        summary = build_individual_summary(scores, baseline_acc, baseline_composite_fitness=baseline_comp)
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:
@@ -358,7 +358,7 @@ class LiveDisplay:
                 "round": len(self.campaign_rounds),
                 "label": round_result.label,
                 "accuracy": round_result.accuracy,
-                "composite": round_result.composite,
+                "composite_fitness": round_result.composite_fitness,
                 "hits": round_result.hits,
                 "total": round_result.total,
                 "improved": round_result.improved,
@@ -374,20 +374,20 @@ class LiveDisplay:
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
         for line in render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
-        # Composite block — full mode only. 3-line render: composite +
+        # Composite block — full mode only. 3-line render: composite_fitness +
         # baseline anchor (line 1), abbreviated formula (line 2), short-
         # name evaluator values (line 3). Anchored to the campaign
         # baseline so operators see how far the run came from origin.
         # Short formula is None for custom user formulas — fall back to
         # full text and accept the wrap.
-        formula_short = self._phase_ctx.get("composite_formula_short")
-        formula_full = self._phase_ctx.get("composite_formula")
+        formula_short = self._phase_ctx.get("composite_fitness_formula_short")
+        formula_full = self._phase_ctx.get("composite_fitness_formula")
         if (formula_short or formula_full) and not compact_display_enabled():
-            for line in render_composite_block(
-                round_result.composite,
+            for line in render_composite_fitness_block(
+                round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                baseline=self._phase_ctx.get("baseline_composite"),
+                baseline=self._phase_ctx.get("baseline_composite_fitness"),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

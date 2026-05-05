@@ -127,7 +127,7 @@ Self-healing fires through a different door: failures route directly to the laye
 - Runs a frozen `JobSearchPoint` (rendered prompt + `pipeline_params`) against the **backend**, not the optimizer LLM.
 - Loops over the scoring dataset, calls the backend per sample, applies the scorer formula.
 - Handles two-tier caching, deprecated-prior eviction, and PoBB elimination stops mid-loop.
-- Returns `(list[QueryResult], stats, completed, escalation_signal)`.
+- Returns `(list[QueryMeasurement], stats, completed, escalation_signal)`.
 
 It's the **bridge between optimizer and target system**. Everything above it generates prompts and pipeline params; the scoring node is the only place those land in the real backend and produce a fitness number. The measurement archive is its output stream.
 

@@ -60,7 +60,7 @@ async def decompose_prompt_fields(
 
     result, _ = await run_optimizer_node(
         template_name="restructure",
-        compile_vars={"consultation_instruction": consultation_instruction},
+        prompt_vars={"consultation_instruction": consultation_instruction},
         llm_client=llm_client,
         model=model,
         user_content=user_content,

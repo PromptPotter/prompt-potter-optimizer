@@ -11,7 +11,7 @@
         "context_sources": [
           "l1_critique",
           "task_context",
-          "escalation_journal"
+          "escalation_log"
         ],
         "response_parser": "candidate_list",
         "prompt_version": 1,
@@ -79,7 +79,7 @@
           "l1_critique",
           "task_context",
           "plan",
-          "escalation_journal"
+          "escalation_log"
         ],
         "response_parser": "transition_result",
         "prompt_version": 1

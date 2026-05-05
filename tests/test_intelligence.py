@@ -69,14 +69,14 @@ def _seed_archive_run(
     )
 
 
-def _archive_item(sample_id: int, *, hit: bool, score: float = 1.0) -> dict[str, Any]:
+def _archive_item(sample_id: int, *, hit: bool, fitness: float = 1.0) -> dict[str, Any]:
     return {
         "sample_id": sample_id,
         "query": f"q_{sample_id}",
         "ground_truth": f"gt_{sample_id}",
         "predicted": "pred",
         "hit": hit,
-        "score": score,
+        "fitness": fitness,
         "pipeline_data": {"terminated_at": "llm_only"},
     }
 
@@ -115,7 +115,7 @@ def test_measurements_for_sample_returns_only_matching_rows(
     a_row = next(r for r in rows if r.run_id == "run_a")
     assert a_row.hit is True
     assert a_row.node_configs == [("llm_only", {"model": "X", "temperature": 0.0})]
-    assert a_row.score == 1.0
+    assert a_row.fitness == 1.0
 
 
 def test_measurements_for_config_subset_predicate(archive: MeasurementArchive) -> None:
@@ -199,7 +199,7 @@ def _seed_indexed_run(
                     "ground_truth": "gt",
                     "predicted": "p",
                     "hit": accuracy >= 0.5,
-                    "score": accuracy,
+                    "fitness": accuracy,
                     "pipeline_data": {"terminated_at": "llm_only"},
                 }
             ],
@@ -319,7 +319,7 @@ def _seed_cross_cycle(
 
 
 def _cross_cycle_item(
-    sid: int, *, hit: bool, score: float = 1.0, error: bool = False
+    sid: int, *, hit: bool, fitness: float = 1.0, error: bool = False
 ) -> dict[str, Any]:
     return {
         "sample_id": sid,
@@ -327,7 +327,7 @@ def _cross_cycle_item(
         "ground_truth": f"gt_{sid}",
         "predicted": "ERROR" if error else "pred",
         "hit": hit,
-        "score": score,
+        "fitness": fitness,
         "error": error,
         "pipeline_data": {"terminated_at": "llm_only"},
     }
@@ -378,9 +378,9 @@ def test_individuals_rows_aggregate_and_filter_errors(
         run_id="run_a",
         content_hash="hash_aaaaaaaaaaaaa",
         items=[
-            _cross_cycle_item(1, hit=True, score=1.0),
-            _cross_cycle_item(2, hit=True, score=0.5),
-            _cross_cycle_item(3, hit=False, score=0.0),
+            _cross_cycle_item(1, hit=True, fitness=1.0),
+            _cross_cycle_item(2, hit=True, fitness=0.5),
+            _cross_cycle_item(3, hit=False, fitness=0.0),
             _cross_cycle_item(4, hit=False, error=True),  # dropped
         ],
     )
@@ -389,8 +389,8 @@ def test_individuals_rows_aggregate_and_filter_errors(
         run_id="run_b",
         content_hash="hash_bbbbbbbbbbbbb",
         items=[
-            _cross_cycle_item(10, hit=False, score=0.0),
-            _cross_cycle_item(11, hit=False, score=0.0),
+            _cross_cycle_item(10, hit=False, fitness=0.0),
+            _cross_cycle_item(11, hit=False, fitness=0.0),
         ],
     )
     stores = SimpleNamespace(archive=aggregator_archive)

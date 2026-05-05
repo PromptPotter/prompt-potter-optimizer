@@ -208,7 +208,7 @@ async def prepare_scoring_context(
 
     session: Session = svc
     sp_budget = campaign_config.sp_budget_ttest or 15
-    scoring_dataset = sample_dataset(dataset, sp_budget)
+    scoring_set = sample_dataset(dataset, sp_budget)
     spec = split_scoring_block(campaign_config.scoring)
 
     if session.index_terms:
@@ -221,7 +221,7 @@ async def prepare_scoring_context(
 
     if obs:
         with graceful("Dataset registration in baseline scoring failed"):
-            obs.register_dataset(DATASET_NAME, scoring_dataset)
+            obs.register_dataset(DATASET_NAME, scoring_set)
 
     sp = baseline.to_job_search_point(
         base_pipeline_params=pipeline_params,
@@ -258,11 +258,11 @@ async def prepare_scoring_context(
     try:
         baseline_results, scores, _cached, _ = await score_search_point(
             sp,
-            scoring_dataset,
+            scoring_set,
             session,
             label="Baseline",
-            on_result=on_result_cb,
-            on_start=on_start_cb,
+            on_query_scored=on_result_cb,
+            on_query_starting=on_start_cb,
         )
     finally:
         if listener is not None:

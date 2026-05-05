@@ -221,7 +221,7 @@ def _scoreboard(
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
-    ``candidate_scores`` items: {candidate_id, accuracy, composite?, hits, total}.
+    ``candidate_scores`` items: {candidate_id, accuracy, composite_fitness?, hits, total}.
     Returns multi-line string ready to print.
     """
     if not candidate_scores:
@@ -229,7 +229,7 @@ def _scoreboard(
 
     ranked = sorted(
         candidate_scores,
-        key=lambda s: (s.get("composite", s["accuracy"]), s["accuracy"]),
+        key=lambda s: (s.get("composite_fitness", s["accuracy"]), s["accuracy"]),
         reverse=True,
     )
     w = 78
@@ -252,7 +252,7 @@ def _scoreboard(
             winner_mark = f"  {GREEN}{BOLD}*{RESET}"
         else:
             winner_mark = ""
-        comp_val = s.get("composite") if s.get("composite") is not None else acc
+        comp_val = s.get("composite_fitness") if s.get("composite_fitness") is not None else acc
         comp_part = f"   {comp_val:>8.4f}"
         row = f"{i:<4d}{label:<8s}{acc:>8.1%}   {ci_str:>16s}{comp_part}   {delta_str:>7s}{winner_mark}"
         lines.append(f"  {_box_line(row, width=w)}")

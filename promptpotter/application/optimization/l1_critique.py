@@ -27,7 +27,7 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.l1 import L1ScoringResult
+    from promptpotter.application.optimization.l1 import PopulationScoreReport
     from promptpotter.infrastructure.projections import AuditTrailProjection
 
 logger = logging.getLogger(__name__)
@@ -66,7 +66,7 @@ def _section_l1c_round_report(ctx: DispatchState) -> str:
         lines = [
             "## SCORING SUMMARY",
             f"Accuracy: {sr.winner_accuracy:.1%} | "
-            f"Composite: {sr.winner_composite:.4f} | "
+            f"Composite: {sr.winner_composite_fitness:.4f} | "
             f"Degraded: {sr.degraded_queries}/{n_results}",
             f"Round {ctx.round_num} | L1 stall count: {ctx.l1_stall_count} | "
             f"Best so far: {ctx.best_accuracy:.1%} (round {ctx.best_round})",
@@ -285,7 +285,7 @@ def compile_l1_critique_blob(state: DispatchState) -> str:
 
 async def run_l1_critique(
     cycle: Cycle,
-    scoring_result: L1ScoringResult,
+    scoring_result: PopulationScoreReport,
     schema: PipelineSchema | None,
     llm_client: LLMClientBase,
     *,
@@ -301,7 +301,7 @@ async def run_l1_critique(
         pipeline_schema=schema,
         scoring_result=scoring_result,
     )
-    compile_vars = compile_prompt_vars(
+    prompt_vars = compile_prompt_vars(
         Layer.L1_CRITIQUE,
         state,
         cycle.opt_sp,
@@ -309,11 +309,11 @@ async def run_l1_critique(
     )
     result, prompt = await run_optimizer_node(
         template_name="l1_critique",
-        compile_vars=compile_vars,
+        prompt_vars=prompt_vars,
         llm_client=llm_client,
         model=model,
         recorder=recorder,
-        cache=cycle.session.store.optimizer_calls,
+        optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     logger.info(
         "Rich L1 critique: %d chars prompt, round %d, acc=%.3f",

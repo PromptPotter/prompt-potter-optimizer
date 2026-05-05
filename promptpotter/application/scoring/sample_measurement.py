@@ -13,7 +13,7 @@ import httpx
 from promptpotter.application.scoring.metrics import find_rank
 from promptpotter.config.settings import NO_RESULT
 from promptpotter.domain.sample import Sample
-from promptpotter.domain.scoring import QueryResult
+from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.shared.errors import ErrorCategory, is_degraded
 
 if TYPE_CHECKING:
@@ -168,13 +168,13 @@ def _compute_step_tokens(
 def _error_result(
     sample: Sample,
     error_msg: str,
-) -> QueryResult:
+) -> QueryMeasurement:
     """Build a standard error result dict.
 
     Error rows intentionally carry no ``hit``/``score`` — those fields are
     owned exclusively by ``rescore_results``, which skips error rows.
     """
-    return QueryResult(
+    return QueryMeasurement(
         sample_id=sample.id,
         query=sample.query,
         ground_truth=sample.ground_truth,
@@ -203,7 +203,7 @@ async def measure_sample(
     sample: Sample,
     session: Session,
     pipeline_params: dict | None = None,
-) -> QueryResult:
+) -> QueryMeasurement:
     """Measure one Sample: run query through pipeline, score against ground truth."""
     query = sample.query
     ground_truth = sample.ground_truth

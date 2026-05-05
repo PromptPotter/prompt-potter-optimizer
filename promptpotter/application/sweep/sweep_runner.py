@@ -78,13 +78,13 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
     """
     from promptpotter.domain.cycle_paths import CycleDir
     from promptpotter.domain.run_records import Decision, DecisionKind
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
 
     out: dict[str, str] = {}
     parent_dir = store.campaigns.campaign_dir(parent_cycle_id)
     if not (parent_dir / "ledger.jsonl").exists():
         return out
-    ledger = RunLedger.open(CycleDir(parent_dir))
+    ledger = CycleLedger.open(CycleDir(parent_dir))
     for record in ledger.iter():
         if isinstance(record, Decision) and record.kind == DecisionKind.FORK_CUT:
             src = record.data.get("source_file")

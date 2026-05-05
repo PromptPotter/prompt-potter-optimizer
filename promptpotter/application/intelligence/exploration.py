@@ -249,7 +249,7 @@ def build_observations(rounds: list[RoundResult]) -> list[Observation]:
     """Flatten ``cycle.rounds`` into the ``(candidate, sample, hit)`` triples Rasch needs.
 
     Skips items missing ``sample_id`` (older traces predate the field) or
-    flagged as errors via the QueryResult contract.
+    flagged as errors via the QueryMeasurement contract.
     """
     obs: list[Observation] = []
     for rr in rounds:

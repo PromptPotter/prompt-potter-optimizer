@@ -10,7 +10,7 @@ an LLM node's parsed output dict; emits a :class:`ValidatorOutcome` whose
     L2's output --[L2 validator]--> ValidatorOutcome (nurse_target="l3") --> L3 heals L2
 
 The ``score`` field mirrors ``Evaluator.compute``'s return shape (1.0 = clean,
-0.0 = full failure) so future L4 composite scoring can read validator outcomes
+0.0 = full failure) so future L4 composite_fitness scoring can read validator outcomes
 through the same channel as evaluators.
 
 **Stop rule** — :class:`StopRule`. Mid-round check on the running result stream
@@ -29,7 +29,7 @@ from typing import TYPE_CHECKING, Any, Literal, Protocol, runtime_checkable
 
 if TYPE_CHECKING:
     from promptpotter.domain.analysis import EscalationSignal
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryMeasurement
 
 NurseTarget = Literal["l2", "l3"]
 
@@ -81,7 +81,7 @@ class StopRule(Protocol):
 
     def check(
         self,
-        results: list[QueryResult],
+        results: list[QueryMeasurement],
         candidate_idx: int,
         n_total_candidates: int,
     ) -> EscalationSignal | None: ...

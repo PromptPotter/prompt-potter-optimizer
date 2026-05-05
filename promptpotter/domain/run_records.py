@@ -1,6 +1,6 @@
 """Typed records for the run ledger — facts about a campaign cycle.
 
-The ledger spine in ``application/ledger.py`` accepts a ``RunRecord`` union and
+The ledger spine in ``application/ledger.py`` accepts a ``CycleRecord`` union and
 fans out to projection writers. Each record subtype is a frozen Pydantic model
 with a ``record_type`` discriminator so JSON round-trips through the spine
 without ambiguity.
@@ -22,11 +22,11 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "DECISION_GATING",
+    "CycleRecord",
     "Decision",
     "DecisionKind",
     "GatingMode",
     "Phase",
-    "RunRecord",
     "Snapshot",
     "SweepPayload",
     "record_decision",
@@ -152,17 +152,17 @@ class Snapshot(BaseModel):
 
 
 # Discriminated union — Pydantic uses ``record_type`` to pick the right model
-# when parsing a dict back into a RunRecord (e.g. when iterating a ledger
+# when parsing a dict back into a CycleRecord (e.g. when iterating a ledger
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
-RunRecord = Annotated[
+CycleRecord = Annotated[
     Decision | Phase | Snapshot,
     Field(discriminator="record_type"),
 ]
 
 
 class _DecisionSink(Protocol):
-    """Anything with ``append(Decision) -> Any`` — list[Decision] or RunLedger."""
+    """Anything with ``append(Decision) -> Any`` — list[Decision] or CycleLedger."""
 
     def append(self, decision: Decision, /) -> Any: ...
 

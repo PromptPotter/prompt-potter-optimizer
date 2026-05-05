@@ -1,22 +1,22 @@
 """ProjectionBase — typed-record routing for ledger subscribers.
 
 Every concrete projection in this package isinstance-dispatches the same
-three ``RunRecord`` subtypes (``Phase`` / ``Snapshot`` / ``Decision``).
+three ``CycleRecord`` subtypes (``Phase`` / ``Snapshot`` / ``Decision``).
 This base owns that dispatch in one place: subclasses override only the
-hooks they care about, and adding a new ``RunRecord`` subtype touches one
+hooks they care about, and adding a new ``CycleRecord`` subtype touches one
 file instead of N. Default hooks are no-ops so writers that don't care
 about a kind stay silent without boilerplate.
 """
 
 from __future__ import annotations
 
-from promptpotter.domain.run_records import Decision, Phase, RunRecord, Snapshot
+from promptpotter.domain.run_records import CycleRecord, Decision, Phase, Snapshot
 
 __all__ = ["ProjectionBase"]
 
 
 class ProjectionBase:
-    def on_record(self, record: RunRecord, offset: int) -> None:
+    def on_record(self, record: CycleRecord, offset: int) -> None:
         del offset
         if isinstance(record, Phase):
             self._handle_phase(record)

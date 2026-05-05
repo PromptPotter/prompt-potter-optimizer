@@ -1,14 +1,14 @@
-"""Per-dataset scorer formulas, evaluator registry, composite render, scoring-set
+"""Per-dataset scorer formulas, evaluator registry, composite_fitness render, scoring-set
 evolution, and interactive steering.
 
 Five named invariants:
   1. Dataset-specific scorers (AIME / GSM8K / exact_match) recover wrong-reveal
      cases via ``compile_scorer`` + ``extract_display_answer``.
   2. ``materialize_round_values`` only emits recall/cache evaluators when the
-     pipeline schema has typed nodes; ``compute_composite_score`` matches the
+     pipeline schema has typed nodes; ``compute_composite_fitness`` matches the
      default formula and zeroes on validation failure; ``compute_prompt_compactness``
      penalises verbose prompts and stays vacuous when no opt_sp is passed.
-  3. ``render_composite_block`` / ``render_composite_oneliner`` /
+  3. ``render_composite_fitness_block`` / ``render_composite_fitness_oneliner`` /
      ``inline_short_formula_values`` produce formula text + named evaluator pairs
      within their three-line frame budget, dropping evaluators not in formula.
   4. ``fit_rasch`` recovers known θ/δ on synthetic Bernoulli data and is sparse-safe;
@@ -48,7 +48,7 @@ from promptpotter.application.scoring.formula import (
     compile_scorer,
     extract_display_answer,
 )
-from promptpotter.application.scoring.metrics import compute_composite_score
+from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.domain.pipeline_schema import (
     NodeType,
     ObservationMapping,
@@ -117,7 +117,7 @@ def _result_min(predicted: str, ground_truth: str) -> dict:
         "predicted": predicted,
         "ground_truth": ground_truth,
         "hit": False,
-        "score": 0.0,
+        "fitness": 0.0,
         "error": None,
         "pipeline_data": None,
     }
@@ -143,7 +143,7 @@ def test_extract_display_answer(predicted, formula, expected):
 
 
 # ===========================================================================
-# Evaluator registry + materialization + composite scoring
+# Evaluator registry + materialization + composite_fitness scoring
 # ===========================================================================
 
 
@@ -176,7 +176,7 @@ def _eval_result(
         "predicted": predicted,
         "ground_truth": ground_truth,
         "hit": hit,
-        "score": score,
+        "fitness": score,
         "error": error,
         "pipeline_data": pd,
     }
@@ -260,22 +260,22 @@ def test_materialize_recall_only_emits_for_typed_nodes():
     assert "cache_hit_rate" in values
 
 
-def test_composite_matches_default_formula():
+def test_composite_fitness_matches_default_formula():
     schema = _single_node_schema()
     results = [_eval_result(score=1.0, total_time=100), _eval_result(score=0.0, total_time=200)]
-    scored = compute_composite_score(results, schema)
+    scored = compute_composite_fitness(results, schema)
     # Accuracy=0.5, latency_norm=0.985, health=1.0; recall term falls back to accuracy.
     # prompt_compactness defaults to 1.0 when no opt_sp passed (vacuous).
     expected = 0.65 * 0.5 + 0.15 * 1.0 + 0.10 * 0.985 + 0.05 * 0.5 + 0.05 * 1.0
-    assert scored["composite"] == pytest.approx(expected, abs=1e-4)
+    assert scored["composite_fitness"] == pytest.approx(expected, abs=1e-4)
 
 
-def test_composite_zeroed_on_validation_failure():
+def test_composite_fitness_zeroed_on_validation_failure():
     fake_opt_sp = SimpleNamespace(validation_failures=[object()], runtime_failures=[])
-    scored = compute_composite_score(
+    scored = compute_composite_fitness(
         [_eval_result(score=1.0)], _single_node_schema(), opt_sp=fake_opt_sp
     )
-    assert scored["composite"] == 0.0
+    assert scored["composite_fitness"] == 0.0
 
 
 def test_round_scorer_fails_loud_and_clamps_unit_interval():
@@ -396,7 +396,7 @@ def _make_round(round_idx: int, candidate_results: dict[str, list[dict]]) -> Rou
         round=round_idx,
         label=f"R{round_idx}",
         accuracy=0.5,
-        composite=0.5,
+        composite_fitness=0.5,
         hits=0,
         total=0,
         improved=False,
@@ -455,7 +455,7 @@ def test_evolve_scoring_set_does_not_mutate_inputs(enabled: bool) -> None:
         config=cfg,
         elimination_n_min=4,
     )
-    # Inputs untouched — caller is responsible for mutating session.scoring.scoring_dataset.
+    # Inputs untouched — caller is responsible for mutating session.scoring.scoring_set.
     assert samples == snapshot
 
 

@@ -40,12 +40,12 @@ def _row(s: ScoreEntry, *, is_winner: bool) -> str:
         winner_mark = '<span style="color:#0a7d0a;font-weight:bold">★</span>'
     else:
         winner_mark = ""
-    composite = "—" if s.composite is None else f"{s.composite:.4f}"
+    composite_fitness = "—" if s.composite_fitness is None else f"{s.composite_fitness:.4f}"
     return (
         f"<tr><td>{_esc(s.label)}</td>"
         f"<td style='text-align:right'>{_pct(s.accuracy)}</td>"
         f"<td style='text-align:right'>[{_pct(s.ci_lo)}-{_pct(s.ci_hi)}]</td>"
-        f"<td style='text-align:right'>{composite}</td>"
+        f"<td style='text-align:right'>{composite_fitness}</td>"
         f"<td style='text-align:right'>{s.hits}/{s.total}</td>"
         f"<td>{winner_mark}</td></tr>"
     )

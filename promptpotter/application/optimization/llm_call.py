@@ -252,7 +252,7 @@ async def llm_call(
 async def run_optimizer_node(
     *,
     template_name: str,
-    compile_vars: dict,
+    prompt_vars: dict,
     llm_client: LLMClientBase,
     model: str | None,
     temperature: float = 0.0,
@@ -260,7 +260,7 @@ async def run_optimizer_node(
     user_content: str | None = None,
     recorder: AuditTrailProjection | None = None,
     template: PromptTemplate | None = None,
-    cache: OptimizerCallCache | None = None,
+    optimizer_call_cache: OptimizerCallCache | None = None,
 ) -> tuple[Any, str]:
     """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
 
@@ -269,12 +269,12 @@ async def run_optimizer_node(
     body by writing ``template_override`` on its OSP). The trace metadata
     still records ``template_name`` so observability stays continuous.
 
-    When *cache* is provided, it is forwarded to :func:`llm_call` for
-    content-addressed cross-cycle reuse of optimizer LLM responses.
+    When *optimizer_call_cache* is provided, it is forwarded to :func:`llm_call`
+    for content-addressed cross-cycle reuse of optimizer LLM responses.
     """
     if template is None:
         template = load_optimizer_prompt(template_name)
-    prompt = template.compile_prompt(**compile_vars)
+    prompt = template.compile_prompt(**prompt_vars)
     if user_content is not None:
         messages: list[dict[str, str]] = [
             {"role": "system", "content": prompt},
@@ -290,11 +290,11 @@ async def run_optimizer_node(
         temperature=temperature,
         json_schema=json_schema,
         recorder=recorder,
-        cache=cache,
+        cache=optimizer_call_cache,
         trace_meta={
             "template_name": template_name,
             "template_fields": template.prompt_field_dict(),
-            "variables": compile_vars,
+            "variables": prompt_vars,
         },
     )
     return extract_parsed_json(response), prompt

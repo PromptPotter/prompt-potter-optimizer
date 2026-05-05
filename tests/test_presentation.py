@@ -44,7 +44,7 @@ def _candidate_score_dict(
     *,
     candidate_id: str,
     accuracy: float,
-    composite: float,
+    composite_fitness: float,
     hits: int,
     total: int,
     aborted: bool = False,
@@ -56,7 +56,7 @@ def _candidate_score_dict(
         "changes_description": "",
         "pipeline_params_override": None,
         "accuracy": accuracy,
-        "composite": composite,
+        "composite_fitness": composite_fitness,
         "hits": hits,
         "total": total,
         "ci_lo": ci_lo,
@@ -81,14 +81,14 @@ def test_round_complete_view_roundtrip() -> None:
     winner_acc = 0.55
     winner_hits = 11
     winner_total = 20
-    winner_composite = 0.60
+    winner_composite_fitness = 0.60
 
-    # Three candidates; the second one wins (highest composite).
+    # Three candidates; the second one wins (highest composite_fitness).
     candidate_scores = [
         {
             "label": "C1",
             "accuracy": 0.40,
-            "composite": 0.45,
+            "composite_fitness": 0.45,
             "hits": 8,
             "total": 20,
             "escalation_aborted": False,
@@ -96,7 +96,7 @@ def test_round_complete_view_roundtrip() -> None:
         {
             "label": "C2",
             "accuracy": winner_acc,
-            "composite": winner_composite,
+            "composite_fitness": winner_composite_fitness,
             "hits": winner_hits,
             "total": winner_total,
             "escalation_aborted": False,
@@ -104,7 +104,7 @@ def test_round_complete_view_roundtrip() -> None:
         {
             "label": "C3",
             "accuracy": 0.20,
-            "composite": 0.25,
+            "composite_fitness": 0.25,
             "hits": 4,
             "total": 20,
             "escalation_aborted": False,
@@ -116,9 +116,9 @@ def test_round_complete_view_roundtrip() -> None:
     ctx = {
         "round_num": 0,
         "baseline_accuracy": baseline_acc,
-        "baseline_composite": 0.40,
-        "composite_formula": "0.7*acc + 0.3*recall",
-        "composite_formula_short": "0.7*A + 0.3*R",
+        "baseline_composite_fitness": 0.40,
+        "composite_fitness_formula": "0.7*acc + 0.3*recall",
+        "composite_fitness_formula_short": "0.7*A + 0.3*R",
     }
     event = PhaseEvent(
         phase="l1_score",
@@ -127,7 +127,7 @@ def test_round_complete_view_roundtrip() -> None:
         data={
             "winner_label": "C2",
             "winner_accuracy": winner_acc,
-            "winner_composite": winner_composite,
+            "winner_composite_fitness": winner_composite_fitness,
             "winner_evaluators": {"accuracy": winner_acc},
             "improved": True,
             "candidate_scores": candidate_scores,
@@ -143,7 +143,7 @@ def test_round_complete_view_roundtrip() -> None:
         "round": 0,
         "label": "round_0",
         "accuracy": winner_acc,
-        "composite": winner_composite,
+        "composite_fitness": winner_composite_fitness,
         "hits": winner_hits,
         "total": winner_total,
         "improved": True,
@@ -154,7 +154,7 @@ def test_round_complete_view_roundtrip() -> None:
             _candidate_score_dict(
                 candidate_id=f"cand_{i}",
                 accuracy=cs["accuracy"],
-                composite=cs["composite"],
+                composite_fitness=cs["composite_fitness"],
                 hits=cs["hits"],
                 total=cs["total"],
             )
@@ -164,9 +164,9 @@ def test_round_complete_view_roundtrip() -> None:
     }
     disk_view = from_disk_round(
         trial,
-        composite_formula=ctx["composite_formula"],
-        composite_formula_short=ctx["composite_formula_short"],
-        baseline_composite=ctx["baseline_composite"],
+        composite_fitness_formula=ctx["composite_fitness_formula"],
+        composite_fitness_formula_short=ctx["composite_fitness_formula_short"],
+        baseline_composite_fitness=ctx["baseline_composite_fitness"],
     )
 
     # The live view carries an in-memory ``next_action`` flag that the
@@ -184,7 +184,7 @@ def test_round_complete_view_no_improvement() -> None:
         {
             "label": "C1",
             "accuracy": 0.40,
-            "composite": 0.42,
+            "composite_fitness": 0.42,
             "hits": 8,
             "total": 20,
             "escalation_aborted": False,
@@ -198,7 +198,7 @@ def test_round_complete_view_no_improvement() -> None:
         data={
             "winner_label": "C1",
             "winner_accuracy": 0.40,
-            "winner_composite": 0.42,
+            "winner_composite_fitness": 0.42,
             "winner_evaluators": {},
             "improved": False,
             "candidate_scores": candidate_scores,
@@ -210,7 +210,7 @@ def test_round_complete_view_no_improvement() -> None:
     trial = {
         "round": 0,
         "accuracy": 0.40,
-        "composite": 0.42,
+        "composite_fitness": 0.42,
         "hits": 8,
         "total": 20,
         "improved": False,
@@ -221,7 +221,7 @@ def test_round_complete_view_no_improvement() -> None:
             _candidate_score_dict(
                 candidate_id="cand_0",
                 accuracy=0.40,
-                composite=0.42,
+                composite_fitness=0.42,
                 hits=8,
                 total=20,
             )

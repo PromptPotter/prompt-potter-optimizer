@@ -8,7 +8,7 @@ These tests enforce the contract documented in
 2. Every ``REPLAYED`` kind has a registered replayer; every ``ARCHIVAL``
    kind has none. The pairing is symmetric — a kind cannot be both gated
    and unreplayable, nor archival yet replayable.
-3. The runtime ledger primitive (``RunLedger``) round-trips records
+3. The runtime ledger primitive (``CycleLedger``) round-trips records
    through ``events.jsonl`` so projection writers see the same shape on
    replay as on live append.
 4. No call site passes a bare string for ``record_decision(kind=...)`` —
@@ -31,7 +31,7 @@ from promptpotter.domain.run_records import (
     Phase,
     Snapshot,
 )
-from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.ledger import CycleLedger
 
 _SRC_ROOT = Path(__file__).resolve().parent.parent / "promptpotter"
 
@@ -90,7 +90,7 @@ def test_no_bare_string_decision_kinds() -> None:
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
     """Append decision/phase/snapshot, read back via iter() — types preserved."""
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc1"))
+    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
 
     d = Decision(
         kind=DecisionKind.ROUND_WINNER,
@@ -152,15 +152,15 @@ def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
     from promptpotter.application.runner import RunListener
     from promptpotter.domain.phases import PhaseEvent
 
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc1"))
+    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
     cb = RunListener(ledger=ledger)
     cb.set_round(3)
 
     cb.on_phase(PhaseEvent(phase="l1_generate", event="enter", round=3, data={"k": "v"}))
     cb.on_sample_scored(
-        0, 1, 4, 5, {"hit": True, "score": 1.0, "pipeline_data": {"terminated_at": "llm_only"}}
+        0, 1, 4, 5, {"hit": True, "fitness": 1.0, "pipeline_data": {"terminated_at": "llm_only"}}
     )
-    cb.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 6, "total": 10, "composite": 0.55})
+    cb.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 6, "total": 10, "composite_fitness": 0.55})
 
     records = list(ledger.iter())
     assert len(records) == 3
@@ -185,12 +185,12 @@ def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> 
     happened) — but a downstream replay (e.g. a webapp opening the
     fork) walks the combined stream.
     """
-    parent = RunLedger.open(CycleDir(tmp_path / "parent"))
+    parent = CycleLedger.open(CycleDir(tmp_path / "parent"))
     parent.append(Phase(phase="round", event="complete", round=0))
     parent.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
     parent.append(Phase(phase="round", event="complete", round=1))  # past the cut
 
-    fork = RunLedger.open(CycleDir(tmp_path / "fork"))
+    fork = CycleLedger.open(CycleDir(tmp_path / "fork"))
     fork.inherit_from(parent, offset=2)  # parent's first 2 records
     fork.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c2", round=1))
 
@@ -205,13 +205,13 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     """EscalationState is a projection of the ledger — fold == live mutation.
 
     Named invariant from root CLAUDE.md: persistence has one ingress
-    (``RunLedger``). EscalationState used to checkpoint a parallel state dict
+    (``CycleLedger``). EscalationState used to checkpoint a parallel state dict
     into every trial JSON; resume now rebuilds from the ledger. This test
     drives both paths over an identical sequence and asserts they agree.
     """
     from promptpotter.application.optimization.cycle import EscalationState
 
-    ledger = RunLedger.open(CycleDir(tmp_path / "cyc"))
+    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc"))
 
     # Round 1: not improved → l1 stall = 1.
     ledger.append(
@@ -219,7 +219,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
             phase="round",
             event="complete",
             round=1,
-            payload={"improved": False, "composite": 0.5, "accuracy": 0.5, "label": "round_1"},
+            payload={"improved": False, "composite_fitness": 0.5, "accuracy": 0.5, "label": "round_1"},
         )
     )
     # Round 2: improved → l1 stall reset to 0.
@@ -228,7 +228,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
             phase="round",
             event="complete",
             round=2,
-            payload={"improved": True, "composite": 0.6, "accuracy": 0.6, "label": "round_2"},
+            payload={"improved": True, "composite_fitness": 0.6, "accuracy": 0.6, "label": "round_2"},
         )
     )
     # L2 fires on round 3.
@@ -242,7 +242,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
                     "l2_round": 1,
                     "l2_stall_count": 0,
                     "l2_best_accuracy_at_entry": 0.6,
-                    "l2_best_composite_at_entry": 0.6,
+                    "l2_best_composite_fitness_at_entry": 0.6,
                 }
             },
         )
@@ -258,7 +258,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
                     "l3_round": 1,
                     "l3_stall_count": 0,
                     "l3_best_accuracy_at_entry": 0.7,
-                    "l3_best_composite_at_entry": 0.7,
+                    "l3_best_composite_fitness_at_entry": 0.7,
                 }
             },
         )
@@ -268,20 +268,20 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     assert rebuilt.l1_stall_count == 0  # reset by L3 fire
     assert rebuilt.l2.round == 0  # wiped by L3 fire
     assert rebuilt.l2.stall_count == 0
-    assert rebuilt.l2.best_composite_at_entry == 0.7  # rebased to L3's entry
+    assert rebuilt.l2.best_composite_fitness_at_entry == 0.7  # rebased to L3's entry
     assert rebuilt.l3.round == 1
-    assert rebuilt.l3.best_composite_at_entry == 0.7
+    assert rebuilt.l3.best_composite_fitness_at_entry == 0.7
 
     # Display-side Phase("round","complete") emit (no ``improved`` key) must
     # not double-bump the L1 stall counter — only the audit-side emit folds.
-    ledger2 = RunLedger.open(CycleDir(tmp_path / "cyc2"))
+    ledger2 = CycleLedger.open(CycleDir(tmp_path / "cyc2"))
     ledger2.append(Phase(phase="round", event="complete", round=1, payload={"l1_stall_count": 999}))
     ledger2.append(
         Phase(
             phase="round",
             event="complete",
             round=1,
-            payload={"improved": False, "composite": 0.5},
+            payload={"improved": False, "composite_fitness": 0.5},
         )
     )
     assert EscalationState.from_ledger(ledger2).l1_stall_count == 1

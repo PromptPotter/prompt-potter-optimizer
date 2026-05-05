@@ -36,8 +36,8 @@ from promptpotter.presentation.views.display import (
 )
 from promptpotter.shared.composite import (
     compact_display_enabled,
-    render_composite_inline,
-    render_composite_oneliner,
+    render_composite_fitness_inline,
+    render_composite_fitness_oneliner,
 )
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import wilson_ci
@@ -137,7 +137,7 @@ class IndividualSummary:
     - ``body_line`` — the mutations + hits + delta line; the notebook
       renders it as an inner box line, the CLI as an indented second line.
     - ``detail_lines`` — ordered extras (elimination summary, the 1-line
-      composite-with-Δ render, degraded-count tag, or validation-failure
+      composite_fitness-with-Δ render, degraded-count tag, or validation-failure
       entries); rendered inline by both displays, with the last entry
       folded onto the bottom info rule by callers that support it.
     """
@@ -167,7 +167,7 @@ def build_individual_summary(
     scores: dict,
     baseline_acc: float,
     *,
-    baseline_composite: float | None = None,
+    baseline_composite_fitness: float | None = None,
 ) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
@@ -177,15 +177,15 @@ def build_individual_summary(
     eliminated are mutually exclusive by construction in
     ``_handle_scored_candidate``).
 
-    Per-candidate composite render is intentionally 1 line —
-    ``composite=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
+    Per-candidate composite_fitness render is intentionally 1 line —
+    ``composite_fitness=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
     don't dump 60 lines of identical formula text into the terminal. The
     formula + per-evaluator breakdown lands once per round in the round
     summary block. ``PROMPTPOTTER_COMPACT_DISPLAY=1`` reverts to the
-    single-line ``composite=0.4f`` bottom rule (only when composite ≠ accuracy).
+    single-line ``composite_fitness=0.4f`` bottom rule (only when composite_fitness ≠ accuracy).
 
-    *baseline_composite* anchors the Δ against the campaign's first-round
-    composite — even at deep rounds the operator sees how far the run
+    *baseline_composite_fitness* anchors the Δ against the campaign's first-round
+    composite_fitness — even at deep rounds the operator sees how far the run
     has come from origin. ``None`` collapses to the no-Δ form.
     """
     mutations = fmt_pp_override(scores.get("pipeline_params_override"))
@@ -224,22 +224,22 @@ def build_individual_summary(
     elif elim_ctx_raw.get("leader_locked"):
         detail_lines.append(format_leader_locked_summary(elim_ctx_raw))
 
-    comp = scores.get("composite")
+    comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_queries", 0)
 
     # Two render modes:
     #   - compact (env var set): single-line bottom rule,
-    #     ``composite=...  ⚠ K/N degraded``, only when comp ≠ acc.
-    #   - default: 1-line composite-with-Δ as a detail line; degraded
+    #     ``composite_fitness=...  ⚠ K/N degraded``, only when comp ≠ acc.
+    #   - default: 1-line composite_fitness-with-Δ as a detail line; degraded
     #     count joins as a separate detail. Box bottom stays plain.
     if comp is not None and not compact_display_enabled():
-        detail_lines.append(render_composite_oneliner(comp, baseline=baseline_composite))
+        detail_lines.append(render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness))
         if degraded:
             detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
     else:
         bottom_extras: list[str] = []
         if comp is not None and comp != acc:
-            bottom_extras.append(render_composite_inline(comp))
+            bottom_extras.append(render_composite_fitness_inline(comp))
         if degraded:
             bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
         if bottom_extras:
@@ -470,11 +470,11 @@ def render_progress_table(
     *,
     framed: bool = True,
 ) -> str:
-    """Round-over-round trajectory table: accuracy, composite, rolling avg, trend, plateau.
+    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau.
 
     Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
     The ``Composite`` column is always shown so the operator never has to
-    wonder whether composite was hidden because it equalled accuracy on
+    wonder whether composite_fitness was hidden because it equalled accuracy on
     every round so far.
 
     ``framed=True`` (default) wraps each line in ``_node_line()`` for
@@ -520,7 +520,7 @@ def render_progress_table(
             else:
                 trend = f"{d:.1%}"
         rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        comp = rd.get("composite") if rd.get("composite") is not None else acc
+        comp = rd.get("composite_fitness") if rd.get("composite_fitness") is not None else acc
         row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f} {rolling:>12.1%}  {trend}"
         lines.append(wrap(row))
 

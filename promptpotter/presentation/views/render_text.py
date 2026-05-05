@@ -2,7 +2,7 @@
 
 Pure dispatch function: ``to_text(view)`` returns the formatted string for
 each view type. ANSI primitives (``_node_block``, ``_scoreboard``,
-``fmt_pvalue``, …) come from ``display.py``; the per-candidate composite
+``fmt_pvalue``, …) come from ``display.py``; the per-candidate composite_fitness
 block from ``shared/composite.py``. No I/O, no global state.
 
 The ``_render_l1_generate_exit`` path uses an internal ``render_sp_diff``
@@ -47,7 +47,7 @@ from promptpotter.presentation.views.view_models import (
 )
 from promptpotter.shared.composite import (
     compact_display_enabled,
-    render_composite_block,
+    render_composite_fitness_block,
 )
 
 __all__ = ["to_text"]
@@ -254,7 +254,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         {
             "label": s.label,
             "accuracy": s.accuracy,
-            "composite": s.composite,
+            "composite_fitness": s.composite_fitness,
             "hits": s.hits,
             "total": s.total,
             "escalation_aborted": s.escalation_aborted,
@@ -269,19 +269,19 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
             for s in sorted(
                 score_dicts,
-                key=lambda s: (s.get("composite") or s["accuracy"], s["accuracy"]),
+                key=lambda s: (s.get("composite_fitness") or s["accuracy"], s["accuracy"]),
                 reverse=True,
             )
         ]
         out.append(f"  Scoreboard: {' | '.join(parts)}")
 
-    formula = v.composite_formula_short or v.composite_formula
+    formula = v.composite_fitness_formula_short or v.composite_fitness_formula
     show_inline = compact_display_enabled() or not formula
     comp_tag = (
-        f"  composite={v.winner_composite:.4f}"
+        f"  composite_fitness={v.winner_composite_fitness:.4f}"
         if show_inline
-        and v.winner_composite is not None
-        and v.winner_composite != v.winner_accuracy
+        and v.winner_composite_fitness is not None
+        and v.winner_composite_fitness != v.winner_accuracy
         else ""
     )
 
@@ -298,13 +298,13 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f"{v.winner_accuracy:.1%}{comp_tag}"
         )
 
-    if not show_inline and v.winner_composite is not None:
-        for line in render_composite_block(
-            v.winner_composite,
+    if not show_inline and v.winner_composite_fitness is not None:
+        for line in render_composite_fitness_block(
+            v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            baseline=v.baseline_composite,
-            use_short_names=bool(v.composite_formula_short),
+            baseline=v.baseline_composite_fitness,
+            use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
 

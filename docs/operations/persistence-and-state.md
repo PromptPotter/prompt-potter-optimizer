@@ -44,7 +44,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
       prompts/{family}/{version}/      # rendered optimizer prompts
       # ── Root cycle's internals ──
       .runtime/
-        ledger.jsonl                   # RunLedger spine — typed Decision/Phase/Snapshot
+        ledger.jsonl                   # CycleLedger spine — typed Decision/Phase/Snapshot
         streams/round_NNNN_p_best.jsonl  # PoBB telemetry (rendered as sparkline in log.md)
         cache/
           rounds/round_NNNN.json       # per-round node I/O
@@ -113,7 +113,7 @@ The resume source of truth. On resume, `Cycle.restore_from_trial` rehydrates the
 
 ## Entry-point emission boundary
 
-Entry points (notebook, CLI, `/potter-run`, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardProjection` (family-root telemetry) and `AuditTrailProjection` (per-cycle audit). Both subscribe to the per-cycle `RunLedger` (`infrastructure/ledger.py`) which persists every fact to `.runtime/ledger.jsonl`. Allowlists — `ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_OPERATOR_ARTIFACTS`, `PER_CYCLE_INTERNAL_UMBRELLA`, `SIBLING_GROUP_DIRS` — live in `tests/test_artifact_parity.py`.
+Entry points (notebook, CLI, `/potter-run`, API, webapp) MUST NOT write campaign artifacts directly. Writes go through two newtype-guarded projections in `promptpotter/infrastructure/projections/`: `LiveDashboardProjection` (family-root telemetry) and `AuditTrailProjection` (per-cycle audit). Both subscribe to the per-cycle `CycleLedger` (`infrastructure/ledger.py`) which persists every fact to `.runtime/ledger.jsonl`. Allowlists — `ROOT_TELEMETRY_ARTIFACTS`, `PER_CYCLE_OPERATOR_ARTIFACTS`, `PER_CYCLE_INTERNAL_UMBRELLA`, `SIBLING_GROUP_DIRS` — live in `tests/test_artifact_parity.py`.
 
 ---
 

@@ -4,8 +4,8 @@ elimination, sweep payload round-trip.
 Four named invariants:
   1. L1 ``detect_invariants``: a candidate is a non-empty unique mutation
      of the parent OSP, else a ValidationFailure attaches → synth-0
-     downstream. Idempotent under repeat calls; node_overrides count as
-     mutation.
+     downstream. Idempotent under repeat calls; pipeline_params_override
+     counts as mutation.
   2. L2 output validators (``L2_CROSS_FIELD_DUPLICATION``,
      ``L2_VERBATIM_SELF_REPEAT``, ``L2_CATALOGUE_REDUNDANCY``) flag the
      three failure shapes with ``nurse_target='l3'``;
@@ -222,7 +222,7 @@ def test_pobb_check_n_min_floor():
     check.register_completed([1.0] * 10, candidate_id="winner")
     check.set_current("loser")
     # 3 queries < n_min=4 — too early to fire even though signal is huge.
-    sig = check.check([{"score": 0.0}] * 3, candidate_idx=1, n_total_candidates=2)
+    sig = check.check([{"fitness": 0.0}] * 3, candidate_idx=1, n_total_candidates=2)
     assert sig is None
 
 
@@ -231,7 +231,7 @@ def test_pobb_check_high_signal_stops_inferior():
     check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_queries=20)
     check.register_completed([1.0] * 20, candidate_id="winner")
     check.set_current("loser")
-    sig = check.check([{"score": 0.0}] * 5, candidate_idx=1, n_total_candidates=2)
+    sig = check.check([{"fitness": 0.0}] * 5, candidate_idx=1, n_total_candidates=2)
     assert sig is not None
     assert sig.check_name == "elimination"
     cr = sig.check_result
@@ -248,7 +248,7 @@ def test_pobb_locks_in_dominant_leader():
     # Prior: weak candidate. Current: clear leader.
     check.register_completed([0.0] * 20, candidate_id="weak_prior")
     check.set_current("strong_current")
-    sig = check.check([{"score": 1.0}] * 8, candidate_idx=1, n_total_candidates=3)
+    sig = check.check([{"fitness": 1.0}] * 8, candidate_idx=1, n_total_candidates=3)
     assert sig is not None
     assert sig.target == EscalationTarget.LEADER_LOCKED
     cr = sig.check_result

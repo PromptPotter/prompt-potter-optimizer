@@ -83,9 +83,9 @@ class InitExitView:
     task_context_keys: int = 0
     l2_round: int = 0
     prompt_field_overlays: dict[str, str] = field(default_factory=dict)
-    composite_formula: str | None = None
-    composite_formula_short: str | None = None
-    baseline_composite: float = 0.0
+    composite_fitness_formula: str | None = None
+    composite_fitness_formula_short: str | None = None
+    baseline_composite_fitness: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -135,7 +135,7 @@ class ScoreEntry:
 
     label: str
     accuracy: float
-    composite: float | None
+    composite_fitness: float | None
     hits: int
     total: int
     ci_lo: float
@@ -154,7 +154,7 @@ class RoundCompleteView:
     scores: tuple[ScoreEntry, ...]
     winner_label: str
     winner_accuracy: float
-    winner_composite: float | None
+    winner_composite_fitness: float | None
     winner_evaluators: dict[str, float]
     winner_hits: int
     winner_total: int
@@ -163,9 +163,9 @@ class RoundCompleteView:
     p_value: float | None
     next_action: str
     l1_critique_text: str
-    composite_formula: str | None
-    composite_formula_short: str | None
-    baseline_composite: float | None
+    composite_fitness_formula: str | None
+    composite_fitness_formula_short: str | None
+    baseline_composite_fitness: float | None
 
 
 @dataclass(frozen=True)
@@ -262,7 +262,7 @@ class RoundDigestView:
     improved: bool
     hits: int
     total: int
-    composite: float
+    composite_fitness: float
     changes_description: str
     l2_directive: str
     l1_critique_text: str
@@ -319,7 +319,7 @@ class LogMdView:
     status: DigestStatusView
     rounds: tuple[RoundDigestView, ...]
     formula: str | None
-    baseline_composite: float | None
+    baseline_composite_fitness: float | None
     hard_samples: HardSamplesView | None
     final: FinalWinnerView | None
     forks: tuple[ForkSummaryView, ...] = ()

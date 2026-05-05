@@ -27,7 +27,7 @@ The user is the operator and the project file tree IS their dashboard — no web
 
 **Found a shim someone else wrote?** Delete it in the same PR you noticed it. Don't file a TODO. Don't add a "remove later" comment.
 
-The word `legacy` in a comment or docstring is a code smell — either the path is dead (delete it) or the word is wrong (delete the word). The only sanctioned uses of `deprecated` are the fatal-warning sample lifecycle (`is_deprecated`, `evicted_priors`, `retry_of_deprecated_cache`, `RoundResult.deprecated`) — these are core domain language, not back-compat.
+The word `legacy` in a comment or docstring is a code smell — either the path is dead (delete it) or the word is wrong (delete the word). The only sanctioned uses of `deprecated` are the fatal-warning sample lifecycle (`is_deprecated`, `deprecated_samples`, `retry_of_deprecated_cache`, `RoundResult.deprecated`) — these are core domain language, not back-compat.
 
 (This section is about **shim code and misleading wording**, not about docstrings explaining real invariants. See the docstring-trimming rule in Conventions: real WHY-docstrings stay.)
 
@@ -37,10 +37,10 @@ These primitives are settled. Reorganizing them — adding a parallel ingress, a
 
 | Primitive | Where | Self-enforcing because |
 |---|---|---|
-| Three I/O kinds (Persistence / Display / Control) | per this file | Persistence has one ingress (`RunLedger.append`); display-side `RunListener` writes nothing; control-side `stop_check` writes no campaign artifacts |
+| Three I/O kinds (Persistence / Display / Control) | per this file | Persistence has one ingress (`CycleLedger.append`); display-side `RunListener` writes nothing; control-side `stop_check` writes no campaign artifacts |
 | `DecisionKind` + `DECISION_GATING` | `domain/run_records.py` | Import-time exhaustiveness — adding a kind without a gating mode raises before the module loads |
 | Hexagonal layer separation | per this file | `tests/test_layer_imports.py` — and modules in different layers don't expose what the other side would need |
-| `RunLedger` + `ProjectionBase` dispatch | `infrastructure/ledger.py`, `projections/base.py` | `ProjectionBase.on_record` owns the `isinstance(record, …)` dispatch; subclasses override hooks. There's no second dispatch path because the base class is the only one |
+| `CycleLedger` + `ProjectionBase` dispatch | `infrastructure/ledger.py`, `projections/base.py` | `ProjectionBase.on_record` owns the `isinstance(record, …)` dispatch; subclasses override hooks. There's no second dispatch path because the base class is the only one |
 | `score_search_point()` gateway | `application/scoring/search_point_scorer.py` | Single function callers reach for; `measure_sample` is implementation detail. The gateway is the natural call |
 | Path helpers + `CycleDir` / `RootCycleDir` newtypes | `infrastructure/store/paths.py`, `domain/cycle_paths.py` | Projections and stores accept `CycleDir`/`RootCycleDir`, not `str`/`Path`. Callers get directories from helpers |
 | `JobSearchPoint` / `PromptTemplate` / `OptSearchPoint` | `domain/search_point.py`, `domain/opt_search_point.py` | Frozen Pydantic models. Mutation isn't a thing the type permits; lineage is encoded by `derive()` |
@@ -69,7 +69,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 
 **Three-layer loop + four healing loops** (gradual, one nudge per fire). L1 generates/measures/scores/critiques every round. L2 fires on L1 stall — writes to `OptSearchPoint` (directive, `l1_section_overrides`, optimizer-param tweaks); never touches pipeline_params. L3 fires on L2 stall — replans the strategy. Healing: L2 nurses L1 on `ValidationFailure` and on `RuntimeFailure` (DegradationCheck mid-eval); L3 replans on L2 patience; L3 nurses L2 on validator outcome (cross-field dup, verbatim self-repeat, catalogue redundancy). Compression chain: eval results → `dispatch_msg` (`compile_l1_critique_blob`) → L1 critique → L2 `directive` → L1 generate. **Fan-in:** L1-generate reads both `plan` (from L3, persistent on `OptSearchPoint`, never cleared) and `l2_directive` (from L2, one-round window via `clear_volatile()`). L2 also reads `plan` — symmetric to L2→L1: L3 sets the strategic framework that both L2 (when refining) and L1 (when generating) operate within. **All four optimizer LLM calls go through one path:** `DispatchState` (per-call state) → `LAYER_CONFIGS[layer]` (`{var: section_renderer}` table) → `compile_prompt_vars` (applies OSP overrides, merges per-call extras) → LLM. **No prompt site summarizes its own data** — fields enter prompts only via this path.
 
-**Three I/O kinds (invariant, not guideline).** Allowlists owned by `tests/test_artifact_parity.py`. (1) **Persistence:** sole ingress is per-cycle `RunLedger` (`infrastructure/ledger.py`, `events.jsonl`). Two newtype-guarded projections under `infrastructure/projections/`: `LiveDashboardProjection` (root-only; `dashboard.json`, `output.log`); `AuditTrailProjection` (per cycle/fork; `.cache/rounds/round_NNNN.json`). Forks via `RunLedger.inherit_from(parent, offset)`. `DecisionKind` + `DECISION_GATING` (`domain/run_records.py`) are the SoT for replayed-vs-archival gating. (2) **Display:** `RunListener` (`application/runner.py`); MUST NOT write to disk. (3) **Control:** `stop_check` on `Session`; MUST NOT write campaign artifacts. **Entry points MUST NOT write campaign artifacts directly.**
+**Three I/O kinds (invariant, not guideline).** Allowlists owned by `tests/test_artifact_parity.py`. (1) **Persistence:** sole ingress is per-cycle `CycleLedger` (`infrastructure/ledger.py`, `events.jsonl`). Two newtype-guarded projections under `infrastructure/projections/`: `LiveDashboardProjection` (root-only; `dashboard.json`, `output.log`); `AuditTrailProjection` (per cycle/fork; `.cache/rounds/round_NNNN.json`). Forks via `CycleLedger.inherit_from(parent, offset)`. `DecisionKind` + `DECISION_GATING` (`domain/run_records.py`) are the SoT for replayed-vs-archival gating. (2) **Display:** `RunListener` (`application/runner.py`); MUST NOT write to disk. (3) **Control:** `stop_check` on `Session`; MUST NOT write campaign artifacts. **Entry points MUST NOT write campaign artifacts directly.**
 
 **Pipeline params** — always nested dicts keyed by node (`{"llm_only": {"model": ...}}`). No flat format, no `override_map`, no `resolve_flat_param()`. `PROMPT_STRING_FIELDS` (`config/settings.py`) splits prompt fields from node params. `PipelineSchema` is built entirely from `GET /pipeline` — zero backend constants in PromptPotter. Canonical prompts at `datasets/{name}/prompts/{node}.json` as `PromptTemplate` JSON; monolithic `prompt` strings in `pipeline.json` are deprecated.
 
@@ -77,7 +77,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 
 **Cycle identity.** Cycle hash = baseline `JobSearchPoint.content_hash(dataset)` (folds in pipeline_params + rendered prompt + dataset; excludes loop-control knobs). `cmd_optimize` recomputes per run; mismatch with active session → fresh session+cycle auto-minted.
 
-**Round-boundary scoring-set mutations — two sanctioned writers, in order:** (1) zero-signal filter (off by default; mutates `datasets/{name}.json::excluded`); (2) scoring-set evolution (off by default; in-memory `session.scoring_dataset` only). No third writer is sanctioned.
+**Round-boundary scoring-set mutations — two sanctioned writers, in order:** (1) zero-signal filter (off by default; mutates `datasets/{name}.json::excluded`); (2) scoring-set evolution (off by default; in-memory `session.scoring.scoring_set` only). No third writer is sanctioned.
 
 ## Persistence
 

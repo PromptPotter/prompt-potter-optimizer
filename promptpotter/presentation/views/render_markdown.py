@@ -18,7 +18,7 @@ from promptpotter.presentation.views.view_models import (
     RoundDigestView,
     SweepSummaryView,
 )
-from promptpotter.shared.composite import render_composite_block
+from promptpotter.shared.composite import render_composite_fitness_block
 
 __all__ = ["render_hard_sample_heatmap", "render_sweep_summary", "to_markdown"]
 
@@ -204,14 +204,14 @@ def _render_round(
     rd: RoundDigestView,
     *,
     formula: str | None,
-    baseline_composite: float | None,
+    baseline_composite_fitness: float | None,
 ) -> list[str]:
     parts: list[str] = [
         f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
         "",
         f"- improved: **{'yes' if rd.improved else 'no'}**",
         f"- hits: {rd.hits}/{rd.total}",
-        f"- composite: `{rd.composite:.4f}`",
+        f"- composite_fitness: `{rd.composite_fitness:.4f}`",
     ]
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
@@ -226,15 +226,15 @@ def _render_round(
         if rd.l1_n_duplicate:
             bits.append(f"{rd.l1_n_duplicate} dup")
         parts.append(f"- L1 yield: {n_valid}/{n_total} ({', '.join(bits)})")
-    composite_block = render_composite_block(
-        rd.composite,
+    composite_fitness_block = render_composite_fitness_block(
+        rd.composite_fitness,
         rd.evaluators,
         formula,
-        baseline=baseline_composite,
+        baseline=baseline_composite_fitness,
         use_short_names=False,
     )
-    if composite_block:
-        parts += ["", "```", *composite_block, "```"]
+    if composite_fitness_block:
+        parts += ["", "```", *composite_fitness_block, "```"]
     if rd.l1_critique_text:
         parts += ["", "> " + rd.l1_critique_text.replace("\n", "\n> ")]
     parts += _render_p_best_trajectory(rd)
@@ -318,7 +318,7 @@ def to_markdown(view: LogMdView) -> str:
         parts += _render_round(
             rd,
             formula=view.formula,
-            baseline_composite=view.baseline_composite,
+            baseline_composite_fitness=view.baseline_composite_fitness,
         )
 
     parts += _render_hard_samples(view.hard_samples)

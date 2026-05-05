@@ -116,7 +116,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
     ctx["baseline_accuracy"] = cycle.tracking.current_accuracy
-    ctx["baseline_composite"] = cycle.tracking.current_composite
+    ctx["baseline_composite_fitness"] = cycle.tracking.current_composite_fitness
     schema = getattr(session, "pipeline_schema", None)
     explicit = getattr(session, "scorer_round_formula", None)
     if explicit:
@@ -131,8 +131,8 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
 
         full = default_per_round_formula(schema)
         short = default_per_round_formula_short(schema)
-    ctx["composite_formula"] = full
-    ctx["composite_formula_short"] = short
+    ctx["composite_fitness_formula"] = full
+    ctx["composite_fitness_formula_short"] = short
 
     overlays: dict[str, str] = {}
     for field_name, value in cycle.opt_sp.prompt_field_dict().items():
@@ -144,7 +144,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
     return InitExitView(
         baseline_acc=cycle.tracking.current_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
-        samples=len(session.scoring.scoring_dataset),
+        samples=len(session.scoring.scoring_set),
         obs_on=session.state.obs is not None,
         bootstrap_critique=_truncate(crit.replace("\n", " ").strip(), 80),
         resumed_from_round=session.state.resumed_from_round,
@@ -152,9 +152,9 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
         task_context_keys=len(cycle.opt_sp.task_context),
         l2_round=cycle.escalation.l2.round,
         prompt_field_overlays=overlays,
-        composite_formula=full,
-        composite_formula_short=short,
-        baseline_composite=ctx["baseline_composite"],
+        composite_fitness_formula=full,
+        composite_fitness_formula_short=short,
+        baseline_composite_fitness=ctx["baseline_composite_fitness"],
     )
 
 
@@ -243,7 +243,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     if non_aborted:
         best = max(
             non_aborted,
-            key=lambda s: (s.composite if s.composite is not None else s.accuracy, s.accuracy),
+            key=lambda s: (s.composite_fitness if s.composite_fitness is not None else s.accuracy, s.accuracy),
         )
         winner_label, winner_hits, winner_total = best.label, best.hits, best.total
     else:
@@ -266,7 +266,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_accuracy=w_acc,
-        winner_composite=d.get("winner_composite"),
+        winner_composite_fitness=d.get("winner_composite_fitness"),
         winner_evaluators=dict(d.get("winner_evaluators") or {}),
         winner_hits=winner_hits,
         winner_total=winner_total,
@@ -275,9 +275,9 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         p_value=p_value,
         next_action=str(d.get("next_action", "?") or "?"),
         l1_critique_text=d.get("l1_critique_text", "") or "",
-        composite_formula=ctx.get("composite_formula"),
-        composite_formula_short=ctx.get("composite_formula_short"),
-        baseline_composite=ctx.get("baseline_composite"),
+        composite_fitness_formula=ctx.get("composite_fitness_formula"),
+        composite_fitness_formula_short=ctx.get("composite_fitness_formula_short"),
+        baseline_composite_fitness=ctx.get("baseline_composite_fitness"),
     )
 
 
@@ -420,7 +420,7 @@ def _score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
     return ScoreEntry(
         label=s.get("label") or fallback_label,
         accuracy=float(s.get("accuracy", 0.0)),
-        composite=s.get("composite"),
+        composite_fitness=s.get("composite_fitness"),
         hits=hits,
         total=total,
         ci_lo=ci_lo,
@@ -499,9 +499,9 @@ def view_from_record(record: dict[str, Any]) -> AnyView | None:
 def from_disk_round(
     trial: dict[str, Any],
     *,
-    composite_formula: str | None = None,
-    composite_formula_short: str | None = None,
-    baseline_composite: float | None = None,
+    composite_fitness_formula: str | None = None,
+    composite_fitness_formula_short: str | None = None,
+    baseline_composite_fitness: float | None = None,
 ) -> RoundCompleteView:
     """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
     score_entries = [
@@ -514,7 +514,7 @@ def from_disk_round(
     if non_aborted:
         best = max(
             non_aborted,
-            key=lambda s: (s.composite if s.composite is not None else s.accuracy, s.accuracy),
+            key=lambda s: (s.composite_fitness if s.composite_fitness is not None else s.accuracy, s.accuracy),
         )
         winner_label = best.label
 
@@ -527,7 +527,7 @@ def from_disk_round(
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_accuracy=winner_acc,
-        winner_composite=trial.get("composite"),
+        winner_composite_fitness=trial.get("composite_fitness"),
         winner_evaluators=dict(trial.get("evaluators") or {}),
         winner_hits=int(trial.get("hits", 0)),
         winner_total=int(trial.get("total", 0)),
@@ -536,9 +536,9 @@ def from_disk_round(
         p_value=trial.get("p_value"),
         next_action=str(trial.get("next_action", "")),
         l1_critique_text=str((trial.get("opt_search_point") or {}).get("l1_critique_text") or ""),
-        composite_formula=composite_formula,
-        composite_formula_short=composite_formula_short,
-        baseline_composite=baseline_composite,
+        composite_fitness_formula=composite_fitness_formula,
+        composite_fitness_formula_short=composite_fitness_formula_short,
+        baseline_composite_fitness=baseline_composite_fitness,
     )
 
 
@@ -624,7 +624,7 @@ def from_disk_log(
                 improved=bool(t.get("improved", False)),
                 hits=int(t.get("hits", 0)),
                 total=int(t.get("total", 0)),
-                composite=float(t.get("composite", 0.0)),
+                composite_fitness=float(t.get("composite_fitness", 0.0)),
                 changes_description=(lineage.get("changes_description") or "").strip(),
                 l2_directive=(osp.get("l2_directive") or "").strip(),
                 l1_critique_text=(osp.get("l1_critique_text") or "").strip(),
@@ -681,7 +681,7 @@ def from_disk_log(
         status=status,
         rounds=tuple(rounds),
         formula=final.get("scorer_round_formula"),
-        baseline_composite=final.get("baseline_composite"),
+        baseline_composite_fitness=final.get("baseline_composite_fitness"),
         hard_samples=hard,
         final=final_view,
         forks=fork_views,

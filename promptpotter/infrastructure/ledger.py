@@ -1,7 +1,7 @@
-"""RunLedger — the single append-only spine for facts about a campaign cycle.
+"""CycleLedger — the single append-only spine for facts about a campaign cycle.
 
 Every fact (decision, phase boundary, live snapshot) is appended as a typed
-``RunRecord`` to one ``events.jsonl`` per cycle. Projections (live dashboard,
+``CycleRecord`` to one ``events.jsonl`` per cycle. Projections (live dashboard,
 audit trail, measurement archive, langfuse mirror) subscribe to the spine and
 rebuild their views deterministically — they never write to disk on their
 own initiative.
@@ -11,7 +11,7 @@ Path-newtype guards (``RootCycleDir`` / ``CycleDir``) live in
 projection writers in :mod:`promptpotter.infrastructure.projections` can
 import them without crossing hexagonal layers.
 
-Forks are first-class via ``RunLedger.inherit_from(parent, offset)``: a
+Forks are first-class via ``CycleLedger.inherit_from(parent, offset)``: a
 fork's ``iter()`` walks the parent's records up to ``offset``, then its
 own appends. The parent records the cut as a
 ``Decision(kind=FORK_CUT, ...)`` so the divergence walker sees the
@@ -28,17 +28,17 @@ from typing import IO
 from pydantic import TypeAdapter
 
 from promptpotter.domain.cycle_paths import CycleDir, Projection
-from promptpotter.domain.run_records import RunRecord
+from promptpotter.domain.run_records import CycleRecord
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["RunLedger"]
+__all__ = ["CycleLedger"]
 
 
-_RECORD_ADAPTER: TypeAdapter[RunRecord] = TypeAdapter(RunRecord)
+_RECORD_ADAPTER: TypeAdapter[CycleRecord] = TypeAdapter(CycleRecord)
 
 
-class RunLedger:
+class CycleLedger:
     """Append-only ``events.jsonl`` ledger plus an in-memory subscriber list.
 
     One ledger per cycle. The on-disk file is the source of truth; the
@@ -55,11 +55,11 @@ class RunLedger:
         self._path = path
         self._subscribers: list[Projection] = []
         self._next_offset = self._scan_existing_offset()
-        self._inherit_parent: RunLedger | None = None
+        self._inherit_parent: CycleLedger | None = None
         self._inherit_offset: int = 0
 
     @classmethod
-    def open(cls, cycle_dir: CycleDir) -> RunLedger:
+    def open(cls, cycle_dir: CycleDir) -> CycleLedger:
         """Open (creating if absent) the ledger at ``{cycle_dir}/.runtime/ledger.jsonl``."""
         runtime_dir = Path(cycle_dir) / ".runtime"
         runtime_dir.mkdir(parents=True, exist_ok=True)
@@ -69,7 +69,7 @@ class RunLedger:
     def path(self) -> Path:
         return self._path
 
-    def append(self, record: RunRecord) -> int:
+    def append(self, record: CycleRecord) -> int:
         """Write one record, fan out to subscribers, return its offset.
 
         ``fallback=str`` lets payload dicts carry arbitrary objects (e.g.
@@ -94,7 +94,7 @@ class RunLedger:
                 )
         return offset
 
-    def iter(self, since: int = 0) -> Iterator[RunRecord]:
+    def iter(self, since: int = 0) -> Iterator[CycleRecord]:
         """Yield records from disk starting at offset ``since``.
 
         For an inherited ledger (``inherit_from`` set), walks the parent's
@@ -124,7 +124,7 @@ class RunLedger:
                     yield _RECORD_ADAPTER.validate_json(line)
                 produced += 1
 
-    def inherit_from(self, parent: RunLedger, offset: int) -> None:
+    def inherit_from(self, parent: CycleLedger, offset: int) -> None:
         """Mark this ledger as a fork of *parent*, replaying parent records up to *offset*.
 
         Subsequent ``iter()`` calls walk the parent's first ``offset``
@@ -136,9 +136,9 @@ class RunLedger:
         if self._inherit_parent is parent and self._inherit_offset == offset:
             return
         if self._inherit_parent is not None:
-            raise ValueError("RunLedger.inherit_from: already inheriting; cannot rebind")
+            raise ValueError("CycleLedger.inherit_from: already inheriting; cannot rebind")
         if offset < 0:
-            raise ValueError(f"RunLedger.inherit_from: offset must be >= 0, got {offset}")
+            raise ValueError(f"CycleLedger.inherit_from: offset must be >= 0, got {offset}")
         self._inherit_parent = parent
         self._inherit_offset = offset
 

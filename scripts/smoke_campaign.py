@@ -175,7 +175,7 @@ async def _run(args: argparse.Namespace) -> int:
     pipeline_params = configure_and_apply_pipeline(session, campaign_config, log=print)
     set_display_tags(session.pipeline_schema)
 
-    train_slice = (session.queries or [])[: args.samples]
+    train_slice = (session.samples or [])[: args.samples]
     if not train_slice:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3

@@ -46,7 +46,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.domain.validators import StopRule
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
     from promptpotter.infrastructure.projections import AuditTrailProjection
     from promptpotter.infrastructure.tracing import LangfuseLogger, ObservabilityBridge
 
@@ -55,7 +55,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "HOT_UPDATEABLE_KEYS",
-    "CampaignState",
+    "CampaignBundle",
     "ScoringContext",
     "Session",
     "TenantContext",
@@ -164,21 +164,25 @@ class ScoringContext:
     scorer_round_formula: str | None = (
         None  # None = registry default; else what scoring_steer.json replaced.
     )
-    scoring_dataset: list[Sample] = field(default_factory=list)
+    scoring_set: list[Sample] = field(default_factory=list)
     sample_index: SampleIndex | None = None
     degradation_checks: list[StopRule] = field(default_factory=list)
 
 
 @dataclass
-class CampaignState:
-    """Per-cycle mutable state — flips on fork; ledger is the sole event ingress."""
+class CampaignBundle:
+    """Per-cycle mutable bundle — flips on fork; ledger is the sole event ingress.
+
+    Bundle of objects (ledger, projection writer, observability bridge), not a
+    state machine. ``EscalationState`` is the FSM; this is plumbing.
+    """
 
     cycle_id: str = ""
-    obs_campaign_id: str = ""
+    tracing_campaign_id: str = ""
     resumed_from_round: int = 0
     obs: ObservabilityBridge | None = None
-    round_recorder: AuditTrailProjection | None = None
-    ledger: RunLedger | None = None
+    audit_projection: AuditTrailProjection | None = None
+    ledger: CycleLedger | None = None
 
 
 @dataclass
@@ -191,8 +195,8 @@ class Session:
     experiment_id: str
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
-    synced: bool
-    queries: list[Sample] = field(default_factory=list)
+    backend_index_synced: bool
+    samples: list[Sample] = field(default_factory=list)
     experiment_extract: dict = field(default_factory=dict)
     index_terms: list[str] = field(default_factory=list)
     tenant: TenantContext | None = None
@@ -205,7 +209,7 @@ class Session:
     session_id: str = ""
 
     # -- Per-cycle bundles ----------------------------------------------
-    state: CampaignState = field(default_factory=CampaignState)
+    state: CampaignBundle = field(default_factory=CampaignBundle)
     scoring: ScoringContext = field(default_factory=ScoringContext)
 
     # -- Runtime config --------------------------------------------------
@@ -406,7 +410,7 @@ def _read_backend_type(project_root: Path, dataset_name: str | None) -> str:
 def _load_dataset_into_session(
     session: Session, dataset_name: str, status: Callable[[str], None]
 ) -> None:
-    """Populate session.queries + index_terms from DatasetStore or DATASET_LOADERS."""
+    """Populate session.samples + index_terms from DatasetStore or DATASET_LOADERS."""
     ds = session.store.backends.load_dataset(dataset_name)
     if not (ds and ds.get("items")) and dataset_name in DATASET_LOADERS:
         status(f"Loading dataset '{dataset_name}' from registry ...")
@@ -423,7 +427,7 @@ def _load_dataset_into_session(
 
     items = ds["items"]
     valid = [item for item in items if item.get("query") and item.get("ground_truth")]
-    session.queries = samples_from_dicts(valid)
+    session.samples = samples_from_dicts(valid)
     session.index_terms = sorted({r["ground_truth"] for r in items if r.get("ground_truth")})
     status(f"Dataset: {dataset_name} ({len(items)} queries)")
 
@@ -447,7 +451,7 @@ async def _sync_and_extract_experiment(
             extract = await session.backend_client.sync_experiment(
                 session.store, backend_id, experiment_id, include_traces=True
             )
-            session.synced = True
+            session.backend_index_synced = True
             status("Sync complete")
         except (KeyboardInterrupt, asyncio.CancelledError):
             raise
@@ -484,7 +488,7 @@ async def _sync_and_extract_experiment(
     exp_name = extract.get("experiment", {}).get("name", experiment_id)
     status(f"Experiment: {exp_name} ({len(queries)} queries, {len(index_terms)} session terms)")
 
-    session.queries = samples_from_dicts(queries)
+    session.samples = samples_from_dicts(queries)
     session.experiment_extract = extract
     session.index_terms = index_terms
 
@@ -543,7 +547,7 @@ async def init_services(
         experiment_id=experiment_id,
         backend_client=client,
         pipeline_schema=pipeline_schema,
-        synced=False,
+        backend_index_synced=False,
         dataset_name=dataset_name,
         tenant=TenantContext(tenant_id=tenant_id),
         project_root=str(store.base_dir),
@@ -650,14 +654,14 @@ def _start_observability_and_scoring(
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
     opt = config.optimization
-    obs_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
+    tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
         session.project_root,
         session.backend_id,
         config_snapshot=config.model_dump(mode="json"),
         baseline_accuracy=baseline.baseline_acc,
         dataset=dataset,
-        obs_campaign_id=obs_campaign_id,
+        tracing_campaign_id=tracing_campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
         langfuse=session.langfuse,
     )
@@ -672,7 +676,7 @@ def _start_observability_and_scoring(
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,
     )
-    return obs_campaign_id, obs
+    return tracing_campaign_id, obs
 
 
 def _apply_resume_fork(
@@ -710,15 +714,15 @@ def _apply_resume_fork(
     return resolved_cycle_id, resumed_from_round
 
 
-def _open_cycle_ledger(session: Session, cycle_id: str) -> RunLedger | None:
-    """Open per-cycle RunLedger; None when no store; idempotent (offsets cumulate)."""
+def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleLedger | None:
+    """Open per-cycle CycleLedger; None when no store; idempotent (offsets cumulate)."""
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import RunLedger
+    from promptpotter.infrastructure.ledger import CycleLedger
 
     if session.store is None:
         return None
     cycle_dir = CycleDir(session.store.campaigns.campaign_dir(cycle_id))
-    return RunLedger.open(cycle_dir)
+    return CycleLedger.open(cycle_dir)
 
 
 def _finalize_loop_state(
@@ -729,7 +733,7 @@ def _finalize_loop_state(
     cb: RunListener,
     *,
     resolved_cycle_id: str | None,
-    obs_campaign_id: str,
+    tracing_campaign_id: str,
     resumed_from_round: int,
 ) -> None:
     """Init AxisIndex, write final session/cycle state, emit ``INIT.exit``."""
@@ -751,8 +755,8 @@ def _finalize_loop_state(
         # Idempotent: runner.py may have pre-opened the ledger.
         if session.state.ledger is None:
             session.state.ledger = _open_cycle_ledger(session, resolved_cycle_id)
-    session.state.obs_campaign_id = obs_campaign_id
-    session.scoring.scoring_dataset = sample_dataset(dataset, config.sp_budget_ttest)
+    session.state.tracing_campaign_id = tracing_campaign_id
+    session.scoring.scoring_set = sample_dataset(dataset, config.sp_budget_ttest)
     session.scoring.degradation_checks = build_degradation_checks(config)
     session.state.resumed_from_round = resumed_from_round
 
@@ -800,7 +804,7 @@ async def init_optimization_loop(
         resume_from_round_override,
     )
 
-    obs_campaign_id, _obs = _start_observability_and_scoring(
+    tracing_campaign_id, _obs = _start_observability_and_scoring(
         session,
         config,
         baseline,
@@ -832,7 +836,7 @@ async def init_optimization_loop(
         dataset,
         cb,
         resolved_cycle_id=resolved_cycle_id,
-        obs_campaign_id=obs_campaign_id,
+        tracing_campaign_id=tracing_campaign_id,
         resumed_from_round=resumed_from_round,
     )
     return cycle

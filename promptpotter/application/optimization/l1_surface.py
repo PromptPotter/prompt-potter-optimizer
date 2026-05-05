@@ -143,11 +143,11 @@ def _section_task_context(ctx: DispatchState) -> str:
 
 
 def _section_escalation_probe(ctx: DispatchState) -> str:
-    """Probe-round per-query warning block — fires only when probe AND journal present."""
+    """Probe-round per-query warning block — fires only when probe AND log present."""
     if not ctx.probe_next_round:
         return ""
-    journal = ctx.opt_sp.escalation_journal
-    if not journal:
+    log = ctx.opt_sp.escalation_log
+    if not log:
         return ""
     lines = [
         "PROBE ROUND: queries have recurring pipeline warnings. "
@@ -165,7 +165,7 @@ def _section_escalation_probe(ctx: DispatchState) -> str:
         if step_counts:
             dom_step, dom_count = step_counts.most_common(1)[0]
             lines.append(f"\nDominant step: {dom_step} ({dom_count} warnings)")
-            tried = [ej for ej in journal if ej.get("problem_step") == dom_step][-3:]
+            tried = [ej for ej in log if ej.get("problem_step") == dom_step][-3:]
             if tried:
                 lines.append(f"Previous attempts at {dom_step}:")
                 lines.extend(
@@ -181,17 +181,17 @@ def _section_escalation_alert(ctx: DispatchState) -> str:
         return ""
     if ctx.opt_sp.l2_directive:
         return ""
-    journal = ctx.opt_sp.escalation_journal
-    if not journal:
+    log = ctx.opt_sp.escalation_log
+    if not log:
         return ""
-    latest = journal[-1]
+    latest = log[-1]
     alert = [
         f"PIPELINE ISSUE: {latest.get('degraded_rate', 0):.0%} of queries "
         f"degrade at {latest.get('problem_step', 'unknown')}. "
         "Address pipeline instability."
     ]
-    if len(journal) > 1:
-        alert.append(f"{len(journal)} prior attempts unresolved.")
+    if len(log) > 1:
+        alert.append(f"{len(log)} prior attempts unresolved.")
     if latest.get("warning_types"):
         alert.append(f"Warnings: {latest['warning_types']}")
     return "\n".join(alert)

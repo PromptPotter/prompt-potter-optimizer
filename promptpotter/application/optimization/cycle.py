@@ -21,7 +21,7 @@ from promptpotter.application.optimization.elimination import update_query_track
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import (
     compile_failure_analysis,
-    compute_composite_score,
+    compute_composite_fitness,
 )
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
@@ -31,16 +31,16 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import (
     DECISION_GATING,
+    CycleRecord,
     Decision,
     DecisionKind,
     GatingMode,
     Phase,
-    RunRecord,
     SweepPayload,
     record_decision,
 )
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import root_cycle_id, save_active_pointer
 from promptpotter.shared.errors import ResumeDivergenceError, graceful
 from promptpotter.shared.statistics import (
@@ -52,10 +52,10 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes import AxisIndex
-    from promptpotter.application.optimization.l1 import L1ScoringResult
+    from promptpotter.application.optimization.l1 import PopulationScoreReport
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryMeasurement
     from promptpotter.domain.search_point import TaskDecomposition
     from promptpotter.infrastructure.store import CampaignStore
 
@@ -86,10 +86,10 @@ __all__ = [
 def _build_scoreboard(
     candidate_scores: list[dict[str, Any]], winner_label: str
 ) -> list[dict[str, Any]]:
-    """Trial-JSON `scoreboard`: rank by (composite, accuracy) desc; tag winner."""
+    """Trial-JSON `scoreboard`: rank by (composite_fitness, accuracy) desc; tag winner."""
     ranked = sorted(
         candidate_scores,
-        key=lambda c: (c["composite"], c["accuracy"]),
+        key=lambda c: (c["composite_fitness"], c["accuracy"]),
         reverse=True,
     )
     rows: list[dict[str, Any]] = []
@@ -101,7 +101,7 @@ def _build_scoreboard(
                 "candidate_id": c.get("candidate_id"),
                 "label": c.get("changes_description", ""),
                 "accuracy": c.get("accuracy"),
-                "composite": c.get("composite"),
+                "composite_fitness": c.get("composite_fitness"),
                 "hits": c.get("hits"),
                 "total": c.get("total"),
                 "ci_lo": c.get("ci_lo"),
@@ -206,7 +206,7 @@ def _mean_score(results: list[dict]) -> float:
     """Mean of rescored ``score`` projection."""
     if not results:
         return 0.0
-    return sum(float(r.get("score", 0.0)) for r in results) / len(results)
+    return sum(float(r.get("fitness", 0.0)) for r in results) / len(results)
 
 
 @replayer(DecisionKind.ROUND_WINNER)
@@ -234,9 +234,9 @@ def _pobb_replay_snapshot(
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
     n = int(inputs_ref.get("queries_scored", 0))
-    current = [float(r.get("score", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
+    current = [float(r.get("fitness", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
     priors = {
-        pid: [float(r.get("score", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
+        pid: [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
     }
     priors = {pid: p for pid, p in priors.items() if p}
     if not priors or len(current) < 2:
@@ -286,7 +286,7 @@ def _derive_stall_count(
         if r < 0 or r > this_round:
             continue
         winner_results = t.get("results") or []
-        comp = _mean_score(winner_results) if winner_results else float(t["composite"])
+        comp = _mean_score(winner_results) if winner_results else float(t["composite_fitness"])
         running_max = max(running_max, comp)
         if r <= entry_round:
             if r == entry_round:
@@ -348,7 +348,7 @@ def _fork_sibling_setup(
     now = datetime.now(UTC).isoformat()
     with graceful("FORK_CUT decision append failed"):
         record_decision(
-            RunLedger.open(CycleDir(parent_dir)),
+            CycleLedger.open(CycleDir(parent_dir)),
             DecisionKind.FORK_CUT,
             {"from_round": from_round},
             new_cycle_id,
@@ -550,7 +550,7 @@ class LayerView:
     round: int
     stall_count: int
     best_accuracy_at_entry: float
-    best_composite_at_entry: float
+    best_composite_fitness_at_entry: float
 
 
 class EscalationState:
@@ -567,11 +567,11 @@ class EscalationState:
     __slots__ = (
         "_l1_stall_count",
         "_l2_best_accuracy_at_entry",
-        "_l2_best_composite_at_entry",
+        "_l2_best_composite_fitness_at_entry",
         "_l2_round",
         "_l2_stall_count",
         "_l3_best_accuracy_at_entry",
-        "_l3_best_composite_at_entry",
+        "_l3_best_composite_fitness_at_entry",
         "_l3_round",
         "_l3_stall_count",
     )
@@ -581,11 +581,11 @@ class EscalationState:
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_accuracy_at_entry = 0.0
-        self._l2_best_composite_at_entry = 0.0
+        self._l2_best_composite_fitness_at_entry = 0.0
         self._l3_round = 0
         self._l3_stall_count = 0
         self._l3_best_accuracy_at_entry = 0.0
-        self._l3_best_composite_at_entry = 0.0
+        self._l3_best_composite_fitness_at_entry = 0.0
 
     # ---- Read-only access (telemetry, decision payloads, prompt vars) ----
 
@@ -599,7 +599,7 @@ class EscalationState:
             round=self._l2_round,
             stall_count=self._l2_stall_count,
             best_accuracy_at_entry=self._l2_best_accuracy_at_entry,
-            best_composite_at_entry=self._l2_best_composite_at_entry,
+            best_composite_fitness_at_entry=self._l2_best_composite_fitness_at_entry,
         )
 
     @property
@@ -608,7 +608,7 @@ class EscalationState:
             round=self._l3_round,
             stall_count=self._l3_stall_count,
             best_accuracy_at_entry=self._l3_best_accuracy_at_entry,
-            best_composite_at_entry=self._l3_best_composite_at_entry,
+            best_composite_fitness_at_entry=self._l3_best_composite_fitness_at_entry,
         )
 
     # ---- Observations: the only mutation surface ----
@@ -633,7 +633,7 @@ class EscalationState:
             return EscalationEvent(
                 next_action=NextAction.STOP_PERFECT,
                 stall_depth=self._l1_stall_count,
-                reason="composite >= 1.0",
+                reason="composite_fitness >= 1.0",
             )
         if self._l1_stall_count < l1_patience:
             return EscalationEvent(
@@ -656,7 +656,7 @@ class EscalationState:
     def observe_l2_escalation(
         self,
         *,
-        current_composite: float,
+        current_composite_fitness: float,
         l2_patience: int | None,
         l3_patience: int | None,
         enable_l3: bool,
@@ -666,11 +666,11 @@ class EscalationState:
         FIRE_L3 / STOP_L2_PATIENCE / STOP_L3_PATIENCE.
 
         First-invocation grace: ``stall_count`` only advances after a layer
-        has fired at least once (``round > 0``) — the prior best composite
+        has fired at least once (``round > 0``) — the prior best composite_fitness
         captured at entry is the comparator.
         """
         if self._l2_round > 0:
-            l2_improved = current_composite > self._l2_best_composite_at_entry
+            l2_improved = current_composite_fitness > self._l2_best_composite_fitness_at_entry
             self._l2_stall_count = 0 if l2_improved else self._l2_stall_count + 1
 
         if l2_patience is None or self._l2_stall_count < l2_patience:
@@ -688,7 +688,7 @@ class EscalationState:
             )
 
         if self._l3_round > 0:
-            l3_improved = current_composite > self._l3_best_composite_at_entry
+            l3_improved = current_composite_fitness > self._l3_best_composite_fitness_at_entry
             self._l3_stall_count = 0 if l3_improved else self._l3_stall_count + 1
 
         if l3_patience is None or self._l3_stall_count < l3_patience:
@@ -706,25 +706,25 @@ class EscalationState:
 
     # ---- Post-fire bookkeepers ----
 
-    def record_l2_fired(self, *, best_accuracy: float, best_composite: float) -> None:
+    def record_l2_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
         """L2 LLM completed. Bumps L2 round, captures entry baseline; resets L1 stall."""
         self._l1_stall_count = 0
         self._l2_round += 1
         self._l2_best_accuracy_at_entry = best_accuracy
-        self._l2_best_composite_at_entry = best_composite
+        self._l2_best_composite_fitness_at_entry = best_composite_fitness
 
-    def record_l3_fired(self, *, best_accuracy: float, best_composite: float) -> None:
+    def record_l3_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
         """L3 LLM completed. Bumps L3 round, captures entry; resets L1 stall and
         the L2 counter — under a new plan, L2's prior progress is invalidated.
         """
         self._l1_stall_count = 0
         self._l3_round += 1
         self._l3_best_accuracy_at_entry = best_accuracy
-        self._l3_best_composite_at_entry = best_composite
+        self._l3_best_composite_fitness_at_entry = best_composite_fitness
         self._l2_round = 0
         self._l2_stall_count = 0
         self._l2_best_accuracy_at_entry = best_accuracy
-        self._l2_best_composite_at_entry = best_composite
+        self._l2_best_composite_fitness_at_entry = best_composite_fitness
 
     # ---- Reducer over the ledger ----
     #
@@ -733,43 +733,43 @@ class EscalationState:
     # fired → l3 state, l2 reset). The live mutators above are the in-memory
     # cache of this fold; ``from_ledger`` rebuilds the same value on resume.
 
-    def fold(self, record: RunRecord) -> None:
+    def fold(self, record: CycleRecord) -> None:
         """Advance state from one ledger record. No-op for unrelated records."""
         if not isinstance(record, Phase):
             return
         if record.phase == "round" and record.event == "complete":
             # Two Phase("round","complete") records exist per round: the
             # display-side RunListener emit (no ``improved`` key) and the
-            # audit-side _persist_round emit (carries improved/composite).
+            # audit-side _persist_round emit (carries improved/composite_fitness).
             # Fold only the audit emit so state isn't double-bumped.
             payload = record.payload
             if "improved" not in payload:
                 return
             self._l1_stall_count = 0 if bool(payload["improved"]) else self._l1_stall_count + 1
         elif record.phase == "l2_context" and record.event == "exit":
-            data = record.payload.get("data") or {}
+            escalation_state = record.payload.get("data") or {}
             self._l1_stall_count = 0
-            self._l2_round = int(data["l2_round"])
-            self._l2_stall_count = int(data["l2_stall_count"])
-            self._l2_best_accuracy_at_entry = float(data["l2_best_accuracy_at_entry"])
-            self._l2_best_composite_at_entry = float(data["l2_best_composite_at_entry"])
+            self._l2_round = int(escalation_state["l2_round"])
+            self._l2_stall_count = int(escalation_state["l2_stall_count"])
+            self._l2_best_accuracy_at_entry = float(escalation_state["l2_best_accuracy_at_entry"])
+            self._l2_best_composite_fitness_at_entry = float(escalation_state["l2_best_composite_fitness_at_entry"])
         elif record.phase == "l3_plan" and record.event == "exit":
-            data = record.payload.get("data") or {}
-            best_acc = float(data["l3_best_accuracy_at_entry"])
-            best_comp = float(data["l3_best_composite_at_entry"])
+            escalation_state = record.payload.get("data") or {}
+            best_acc = float(escalation_state["l3_best_accuracy_at_entry"])
+            best_comp = float(escalation_state["l3_best_composite_fitness_at_entry"])
             self._l1_stall_count = 0
-            self._l3_round = int(data["l3_round"])
-            self._l3_stall_count = int(data["l3_stall_count"])
+            self._l3_round = int(escalation_state["l3_round"])
+            self._l3_stall_count = int(escalation_state["l3_stall_count"])
             self._l3_best_accuracy_at_entry = best_acc
-            self._l3_best_composite_at_entry = best_comp
+            self._l3_best_composite_fitness_at_entry = best_comp
             # record_l3_fired wipes L2 — under a new plan, prior L2 stall is gone.
             self._l2_round = 0
             self._l2_stall_count = 0
             self._l2_best_accuracy_at_entry = best_acc
-            self._l2_best_composite_at_entry = best_comp
+            self._l2_best_composite_fitness_at_entry = best_comp
 
     @classmethod
-    def from_ledger(cls, ledger: RunLedger | None) -> EscalationState:
+    def from_ledger(cls, ledger: CycleLedger | None) -> EscalationState:
         """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state."""
         s = cls()
         if ledger is None:
@@ -781,17 +781,17 @@ class EscalationState:
 
 @dataclass
 class TrackingState:
-    """Current/best searchpoint trajectory + frozen baseline composite."""
+    """Current/best searchpoint trajectory + frozen baseline composite_fitness."""
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
-    current_composite: float = 0.0
+    current_composite_fitness: float = 0.0
     current_results: list[dict] = field(default_factory=list)
     best_accuracy: float = 0.0
-    best_composite: float = 0.0
+    best_composite_fitness: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
-    baseline_composite: float = 0.0
+    baseline_composite_fitness: float = 0.0
 
 
 @dataclass
@@ -827,12 +827,12 @@ class Cycle:
         config: CampaignConfig,
     ) -> Cycle:
         """Construct a fresh Cycle from a scored baseline."""
-        composite = (
-            compute_composite_score(
+        composite_fitness = (
+            compute_composite_fitness(
                 baseline_results,  # type: ignore[arg-type]
                 schema,
                 round_scorer=round_scorer,
-            )["composite"]
+            )["composite_fitness"]
             if baseline_results and schema is not None
             else baseline_accuracy
         )
@@ -852,12 +852,12 @@ class Cycle:
             tracking=TrackingState(
                 current_sp=sp,
                 current_accuracy=baseline_accuracy,
-                current_composite=composite,
+                current_composite_fitness=composite_fitness,
                 current_results=baseline_results or [],
                 best_accuracy=baseline_accuracy,
-                best_composite=composite,
+                best_composite_fitness=composite_fitness,
                 best_sp=sp,
-                baseline_composite=composite,
+                baseline_composite_fitness=composite_fitness,
             ),
             opt_sp=opt_sp,
         )
@@ -880,7 +880,7 @@ class Cycle:
             RoundSummary(
                 round=rr.round,
                 accuracy=rr.accuracy,
-                composite=rr.composite,
+                composite_fitness=rr.composite_fitness,
                 improved=rr.improved,
                 degraded_queries=rr.degraded_queries,
                 pipeline_params=rr.pipeline_params,
@@ -895,15 +895,15 @@ class Cycle:
         )
         tr.current_sp = self.opt_sp.to_job_search_point(base_pipeline_params=_pp, schema=schema)
         tr.current_accuracy = rr.accuracy
-        tr.current_composite = rr.composite
+        tr.current_composite_fitness = rr.composite_fitness
         tr.current_results = list(rr.results)
-        if tr.current_composite > tr.best_composite:
-            tr.best_composite = tr.current_composite
+        if tr.current_composite_fitness > tr.best_composite_fitness:
+            tr.best_composite_fitness = tr.current_composite_fitness
             tr.best_accuracy = tr.current_accuracy
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
 
-    def apply_round_outcome(self, scoring_result: L1ScoringResult, critique_text: str) -> None:
+    def apply_round_outcome(self, scoring_result: PopulationScoreReport, critique_text: str) -> None:
         """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.
 
         Single mutation point for: l1_critique_text, failure_analysis,
@@ -935,28 +935,28 @@ class Cycle:
                 existing_keys.add(k)
                 self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
 
-    def baseline_for_round(self, scoring_dataset: list[Sample], round_num: int) -> RoundBaseline:
+    def baseline_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundBaseline:
         """Build round baseline; on probe rounds, rescore over the probe subset."""
         schema = self.session.pipeline_schema
         tr = self.tracking
         accuracy = tr.current_accuracy
-        composite = tr.current_composite
+        composite_fitness = tr.current_composite_fitness
         results: list[dict] = list(tr.current_results)
         if self.probe_next_round and tr.current_results and schema is not None:
-            probe_queries = {s.query for s in scoring_dataset}
+            probe_queries = {s.query for s in scoring_set}
             subset = [r for r in tr.current_results if r.get("query") in probe_queries]
             if subset:
-                subset_scores = compute_composite_score(
-                    cast("list[QueryResult]", subset),
+                subset_scores = compute_composite_fitness(
+                    cast("list[QueryMeasurement]", subset),
                     schema,
                     round_scorer=self.session.scoring.round_scorer,
                 )
                 accuracy = subset_scores["accuracy"]
-                composite = subset_scores.get("composite", accuracy)
+                composite_fitness = subset_scores.get("composite_fitness", accuracy)
                 results = subset
         return RoundBaseline(
             accuracy=accuracy,
-            composite=composite,
+            composite_fitness=composite_fitness,
             osp=self.opt_sp,
             results=results,
             label=f"round_{round_num}" if round_num > 0 else "baseline",
@@ -969,7 +969,7 @@ class Cycle:
             "round": round_num,
             "label": rr.label,
             "accuracy": rr.accuracy,
-            "composite": rr.composite,
+            "composite_fitness": rr.composite_fitness,
             "hits": rr.hits,
             "total": rr.total,
             "improved": rr.improved,

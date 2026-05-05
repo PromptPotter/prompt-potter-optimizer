@@ -78,8 +78,8 @@ def build_leaderboard_rows(stores: Any) -> list[LeaderboardRow]:
         if not cycle_id:
             continue
         backend_id = summary.get("backend_id") or ""
-        index = cs.load(backend_id, cycle_id) or summary
-        row = _row_from_cycle(stores, backend_id, cycle_id, index)
+        cycle_summary = cs.load(backend_id, cycle_id) or summary
+        row = _row_from_cycle(stores, backend_id, cycle_id, cycle_summary)
         if row is not None:
             rows.append(row)
     return rows
@@ -231,16 +231,16 @@ def _md_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str
 
 
 def _row_from_cycle(
-    stores: Any, backend_id: str, cycle_id: str, index: dict[str, Any]
+    stores: Any, backend_id: str, cycle_id: str, cycle_summary: dict[str, Any]
 ) -> LeaderboardRow | None:
-    final = index.get("final") or {}
-    n_trials = int(index.get("n_trials") or 0)
+    final = cycle_summary.get("final") or {}
+    n_trials = int(cycle_summary.get("n_trials") or 0)
     cs = stores.campaigns
     trials = cs.load_trials_range(backend_id, cycle_id, 0, n_trials - 1) if n_trials else []
     cycle_dir = cs.campaign_dir(cycle_id)
     audits = _load_round_audits(cycle_dir, trials)
 
-    parent_session_id = index.get("parent_session_id") or ""
+    parent_session_id = cycle_summary.get("parent_session_id") or ""
     dataset = _lookup_dataset(stores, parent_session_id)
     pipeline = (final.get("scorer_round_formula_short") or "").strip() or "?"
 
@@ -249,16 +249,16 @@ def _row_from_cycle(
     l1_crit_hash = (hashes.get("l1_critique") or "")[:8]
     mode = (final.get("mode") or "").strip() or "?"
 
-    baseline_composite = float(final.get("baseline_composite") or 0.0)
+    baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
     behavior_results = _compute_behavior_results(trials, audits)
     stats = compute_l1_stats(
-        list(trials), baseline_composite=baseline_composite, behavior_results=behavior_results
+        list(trials), baseline_composite_fitness=baseline_composite_fitness, behavior_results=behavior_results
     )
 
-    baseline_acc = float(index.get("baseline_accuracy") or 0.0)
-    best_acc = float(index.get("best_accuracy") or 0.0)
+    baseline_acc = float(cycle_summary.get("baseline_accuracy") or 0.0)
+    best_acc = float(cycle_summary.get("best_accuracy") or 0.0)
     round_1_top_lift = (
-        (float(trials[0].get("composite") or 0.0) - baseline_composite) if trials else 0.0
+        (float(trials[0].get("composite_fitness") or 0.0) - baseline_composite_fitness) if trials else 0.0
     )
     round_1_yield = float(trials[0].get("l1_yield") or 0.0) if trials else 0.0
 
@@ -279,7 +279,7 @@ def _row_from_cycle(
         behavior_pass_rate=stats.behavior_pass_rate,
         rounds_completed=n_trials,
         l2_fires=stats.l2_fires,
-        stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or ""),
+        stop_reason=str(final.get("stop_reason") or cycle_summary.get("stop_reason") or ""),
     )
 
 
@@ -381,7 +381,7 @@ def build_individuals_rows(stores: Any, backend_id: str) -> list[JSPRow]:
             if item.get("error") or item.get("predicted") == "ERROR":
                 continue
             n_samples += 1
-            s = item.get("score")
+            s = item.get("fitness")
             if s is not None:
                 score_sum += float(s)
                 score_n += 1

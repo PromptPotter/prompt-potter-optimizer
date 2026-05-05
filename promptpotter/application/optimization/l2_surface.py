@@ -39,7 +39,7 @@ def _escalation_report_text(ctx: DispatchState) -> str:
         return ""
     text = format_escalation_report(
         ctx.escalation_check_result,
-        ctx.opt_sp.escalation_journal or None,
+        ctx.opt_sp.escalation_log or None,
         ctx.pipeline_params,
         pipeline_schema=ctx.pipeline_schema,
     )

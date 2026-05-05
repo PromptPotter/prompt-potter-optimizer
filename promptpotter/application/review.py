@@ -7,11 +7,11 @@ testable as a transformation.
 Inputs
 ------
 - ``index`` — ``campaigns/{cycle_id}/index.json`` payload (carries
-  baseline / best / final block with ``baseline_composite``,
+  baseline / best / final block with ``baseline_composite_fitness``,
   ``prompt_hashes``, ``mode``).
 - ``trials`` — per-round optimizer state from ``trials/trial_NNNN.json``,
   in round order. Carries ``opt_search_point`` (lineage, l2_directive,
-  critique), composite, accuracy, l1_yield.
+  critique), composite_fitness, accuracy, l1_yield.
 - ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
   same length and order as ``trials``. Source of L1 variants for the
   variants table + behaviour checks. ``None`` for rounds with no audit.
@@ -54,10 +54,10 @@ def render_review_md(
 
     behavior_per_round = _compute_behavior_per_round(trials, audits, ctx_items, param_unlock_round)
     final = index.get("final") or {}
-    baseline_composite = float(final.get("baseline_composite") or 0.0)
+    baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
     stats = compute_l1_stats(
         list(trials),
-        baseline_composite=baseline_composite,
+        baseline_composite_fitness=baseline_composite_fitness,
         behavior_results=behavior_per_round,
     )
 
@@ -187,7 +187,7 @@ def _render_round(
     if not is_peek:
         parts += [
             f"- accuracy: {float(trial.get('accuracy', 0.0) or 0.0):.1%}",
-            f"- composite: `{float(trial.get('composite', 0.0) or 0.0):.4f}`",
+            f"- composite_fitness: `{float(trial.get('composite_fitness', 0.0) or 0.0):.4f}`",
             f"- improved: **{'yes' if trial.get('improved') else 'no'}**",
         ]
     parts += _render_l1_inputs(osp, lineage)
@@ -228,7 +228,7 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        parts.append("| variant | composite | acc | Δ_parent | Δ_baseline | beat | changes |")
+        parts.append("| variant | composite_fitness | acc | Δ_parent | Δ_baseline | beat | changes |")
         parts.append("|---|---|---|---|---|---|---|")
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the

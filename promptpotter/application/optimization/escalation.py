@@ -96,7 +96,7 @@ class LayerStrategy:
     exit_payload_fn: ExitFn
     needs_candidate_scores: bool = False  # L2 reads cycle.rounds[-1].candidate_scores
 
-    def build_compile_vars(
+    def build_prompt_vars(
         self,
         cycle: Cycle,
         *,
@@ -236,7 +236,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     osp.l2_output_failures = list(result.l2_output_failures)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
-        best_composite=cycle.tracking.best_composite,
+        best_composite_fitness=cycle.tracking.best_composite_fitness,
     )
 
     is_probe = result.action == OptimizerAction.PROBE_ROUND
@@ -274,7 +274,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_round": cycle.escalation.l2.round,
         "l2_stall_count": cycle.escalation.l2.stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2.best_accuracy_at_entry,
-        "l2_best_composite_at_entry": cycle.escalation.l2.best_composite_at_entry,
+        "l2_best_composite_fitness_at_entry": cycle.escalation.l2.best_composite_fitness_at_entry,
         "param_changes_count": len(result.opt_search_point.optimizer_params),
         "task_context_changed": result.task_context is not None,
         "scheme_overrides_count": len(result.scheme_overrides),
@@ -340,7 +340,7 @@ def _parse_l3(
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
-        best_composite=cycle.tracking.best_composite,
+        best_composite_fitness=cycle.tracking.best_composite_fitness,
     )
 
 
@@ -359,7 +359,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_round": cycle.escalation.l3.round,
         "l3_stall_count": cycle.escalation.l3.stall_count,
         "l3_best_accuracy_at_entry": cycle.escalation.l3.best_accuracy_at_entry,
-        "l3_best_composite_at_entry": cycle.escalation.l3.best_composite_at_entry,
+        "l3_best_composite_fitness_at_entry": cycle.escalation.l3.best_composite_fitness_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "pipeline_params_changed": result.pipeline_params is not None,
@@ -396,7 +396,7 @@ async def _run_transition(
     on_phase: Callable[[PhaseEvent], None] | None,
     *,
     obs: ObservabilityBridge | None,
-    obs_campaign_id: str,
+    tracing_campaign_id: str,
     escalation_check_result: dict | None = None,
 ) -> Any:
     """enter → call → adopt → LayerApplied → side-effects → exit."""
@@ -411,7 +411,7 @@ async def _run_transition(
         f"{transition.template_name}_r{round_num}",
         "llm/meta",
         obs=obs,
-        campaign_id=obs_campaign_id,
+        campaign_id=tracing_campaign_id,
         round_num=round_num,
     ):
         result = await run_layer_transition(
@@ -435,7 +435,7 @@ async def _run_transition(
             obs.emit_write_point(
                 LayerApplied,
                 layer=transition.layer,
-                campaign_id=obs_campaign_id,
+                campaign_id=tracing_campaign_id,
                 round_num=round_num,
                 changes_description=result.opt_search_point.lineage.changes_description or "",
             )
@@ -468,8 +468,8 @@ def _trigger_payload(
     data: dict[str, Any] = {
         f"{layer}_round": counter.round,
         "stall_count": counter.stall_count,
-        "best_composite_at_entry": counter.best_composite_at_entry,
-        "best_composite_this_round": cycle.tracking.best_composite,
+        "best_composite_fitness_at_entry": counter.best_composite_fitness_at_entry,
+        "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
     }
     if track_accuracy:
         data["best_accuracy"] = cycle.tracking.best_accuracy
@@ -483,7 +483,7 @@ async def escalate_l2(
     round_num: int,
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
-    obs_campaign_id: str = "",
+    tracing_campaign_id: str = "",
     escalation_check_result: dict | None = None,
 ) -> StopReason | None:
     """Drive an L2 (or cascading L3) escalation: observe state, fire layer,
@@ -499,7 +499,7 @@ async def escalate_l2(
     esc = cycle.escalation
 
     event = esc.observe_l2_escalation(
-        current_composite=cycle.tracking.best_composite,
+        current_composite_fitness=cycle.tracking.best_composite_fitness,
         l2_patience=opt.l2_patience,
         l3_patience=opt.l3_patience,
         enable_l3=opt.enable_l3,
@@ -527,7 +527,7 @@ async def escalate_l2(
             round_num,
             on_phase,
             obs=obs,
-            obs_campaign_id=obs_campaign_id,
+            tracing_campaign_id=tracing_campaign_id,
             escalation_check_result=escalation_check_result,
         )
         # Loop 4: post-L2 validator failure force-triggers L3 to heal L2's
@@ -547,7 +547,7 @@ async def escalate_l2(
                 round_num,
                 on_phase,
                 obs=obs,
-                obs_campaign_id=obs_campaign_id,
+                tracing_campaign_id=tracing_campaign_id,
             )
         return None
 
@@ -574,7 +574,7 @@ async def escalate_l2(
             round_num,
             on_phase,
             obs=obs,
-            obs_campaign_id=obs_campaign_id,
+            tracing_campaign_id=tracing_campaign_id,
         )
         return None
 

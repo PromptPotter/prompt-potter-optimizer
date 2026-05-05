@@ -95,7 +95,7 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 | Field | Lifecycle | Loop |
 |---|---|---|
 | `l1_critique_text` | per-round, cleared on improvement | (round-over-round feedback) |
-| `escalation_journal` | cross-round, append-only | (general history) |
+| `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
 | `warning_inventory` | cross-round | (per-query aggregation) |
 | `l2_directive` | one-round window, cleared on improvement | Loop 1, Loop 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Loop 1 — L2 reads |

@@ -11,7 +11,7 @@ from typing import TYPE_CHECKING, Any, cast
 
 from promptpotter.application.datasets.datasets import build_dataset_run_data
 from promptpotter.application.scoring.formula import rescore_results
-from promptpotter.application.scoring.metrics import compute_composite_score
+from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.application.scoring.sample_measurement import (
     _error_result,
     measure_sample,
@@ -20,7 +20,7 @@ from promptpotter.application.scoring.sample_measurement import (
     execute_stale_data_protocol as _execute_stale_data_protocol,
 )
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
-from promptpotter.domain.scoring import QueryResult, Scorer
+from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import (
     ErrorCategory,
@@ -43,15 +43,15 @@ __all__ = ["QueryLoopResult", "merge_with_unprocessed_priors", "score_search_poi
 
 
 def merge_with_unprocessed_priors(
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
     *,
-    prior_results: dict[str, QueryResult],
+    cached_query_results: dict[str, QueryMeasurement],
     dataset_queries: set[str],
-    evicted_priors: dict[str, QueryResult],
+    deprecated_samples: dict[str, QueryMeasurement],
     scorer: Scorer | None,
     scorer_id: str,
     scorer_formula: str | None,
-) -> list[QueryResult]:
+) -> list[QueryMeasurement]:
     """Union results with cache priors for unprocessed dataset queries; rescore via active scorer.
 
     Without this, partial runs (cache hits + Ctrl+C) shrink the archive on
@@ -59,10 +59,10 @@ def merge_with_unprocessed_priors(
     """
     processed = {r["query"] for r in results}
     merged = list(results)
-    for q, prior in prior_results.items():
-        if q not in dataset_queries or q in processed or q in evicted_priors:
+    for q, prior in cached_query_results.items():
+        if q not in dataset_queries or q in processed or q in deprecated_samples:
             continue
-        entry = cast(QueryResult, dict(prior))
+        entry = cast(QueryMeasurement, dict(prior))
         if scorer is not None:
             rescore_results([cast(dict, entry)], scorer, scorer_id, scorer_formula)
         merged.append(entry)
@@ -73,7 +73,7 @@ def merge_with_unprocessed_priors(
 class QueryLoopResult:
     """_run_query_loop return: results + completed/stop_reason + first escalation_signal."""
 
-    results: list[QueryResult]
+    results: list[QueryMeasurement]
     completed: bool = True
     stop_reason: str | None = None  # "graceful" | "force" | "escalation" | abort reason
     escalation_signal: EscalationSignal | None = None
@@ -83,11 +83,11 @@ _BOLD_MARKER_RE = re.compile(r"\*\*[^*]+\*\*")
 
 
 def _materialize_cached(
-    item: QueryResult,
+    item: QueryMeasurement,
     scorer: Scorer,
     scorer_id: str,
     scorer_formula: str | None,
-) -> QueryResult:
+) -> QueryMeasurement:
     """Mark prior as cached + rescored; warn on hit/no-hit drift unless explained by bold-strip."""
     archived_hit = item.get("hit") if "hit" in item else None
     r: dict = {**item, "cached": True}
@@ -107,12 +107,12 @@ def _materialize_cached(
                 rescored_hit,
                 scorer_id,
             )
-    return cast(QueryResult, r)
+    return cast(QueryMeasurement, r)
 
 
 def _build_scoring_error_signal(
     *,
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
     stop_reason: str,
     candidate_idx: int,
     n_total_candidates: int,
@@ -152,15 +152,15 @@ def _build_scoring_error_signal(
     )
 
 
-def _filter_deprecated_priors(
-    prior_results: dict[str, QueryResult],
-) -> tuple[dict[str, QueryResult], dict[str, QueryResult]]:
-    """Load-side cache split: (kept, evicted=deprecated rows for fresh re-measure)."""
+def _split_off_deprecated_samples(
+    cached_query_results: dict[str, QueryMeasurement],
+) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement]]:
+    """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
     from promptpotter.application.optimization.elimination import is_deprecated
 
-    evicted = {q: r for q, r in prior_results.items() if is_deprecated(r)}
-    kept = {q: r for q, r in prior_results.items() if q not in evicted}
-    return kept, evicted
+    deprecated = {q: r for q, r in cached_query_results.items() if is_deprecated(r)}
+    kept = {q: r for q, r in cached_query_results.items() if q not in deprecated}
+    return kept, deprecated
 
 
 @dataclass
@@ -169,9 +169,9 @@ class _LoopContext:
 
     search_point: JobSearchPoint
     session: Session
-    prior_results: dict[str, QueryResult]
-    on_result: Callable[[QueryResult, int, int], None] | None
-    on_start: Callable[[str, int, int], None] | None
+    cached_query_results: dict[str, QueryMeasurement]
+    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None
+    on_query_starting: Callable[[str, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
@@ -179,17 +179,17 @@ class _LoopContext:
     # Queries whose prior-cache entry was a deprecated sample — value is the
     # cached entry itself so display can show the original DEPR row before
     # the retry row is rendered.
-    evicted_priors: dict[str, QueryResult]
+    deprecated_samples: dict[str, QueryMeasurement]
     # Persist the results-so-far after each fresh measurement. Cache hits do
     # not call this — their on-disk row is unchanged.
-    persist_fresh: Callable[[list[QueryResult]], None]
+    persist_fresh: Callable[[list[QueryMeasurement]], None]
 
 
 @dataclass
 class _LoopState:
     """Mutable state accumulated across the dataset loop."""
 
-    results: list[QueryResult]
+    results: list[QueryMeasurement]
     consecutive_errors: int = 0
 
 
@@ -202,10 +202,10 @@ class _SampleOutcome:
 
 
 async def _maybe_recover_degraded(
-    result: QueryResult,
+    result: QueryMeasurement,
     sample: Sample,
     ctx: _LoopContext,
-) -> QueryResult:
+) -> QueryMeasurement:
     """Run the stale-data protocol if the result is degraded and protocol is wired."""
     if not (_is_degraded(result) and ctx.session.stale_data_load_protocol):
         return result
@@ -217,11 +217,11 @@ async def _maybe_recover_degraded(
         pipeline_params=ctx.search_point.pipeline_params,
         axes=ctx.axes,
     )
-    return cast(QueryResult, recovered)
+    return cast(QueryMeasurement, recovered)
 
 
 def _classify_abort(
-    result: QueryResult,
+    result: QueryMeasurement,
     state: _LoopState,
     session: Session,
 ) -> str:
@@ -245,7 +245,7 @@ async def _process_cache_hit(
 ) -> _SampleOutcome:
     """Materialize a prior-cache result, append, and check escalation."""
     cached_r = _materialize_cached(
-        ctx.prior_results[sample.query],
+        ctx.cached_query_results[sample.query],
         ctx.scorer,
         ctx.scorer_id,
         ctx.scorer_formula,
@@ -254,8 +254,8 @@ async def _process_cache_hit(
     # Overlay current-run sample_id — archived traces may predate the field.
     cached_r["sample_id"] = sample.id
     state.results.append(cached_r)
-    if ctx.on_result is not None:
-        ctx.on_result(cached_r, idx, dataset_len)
+    if ctx.on_query_scored is not None:
+        ctx.on_query_scored(cached_r, idx, dataset_len)
     # Elimination must see cached rows too — otherwise a candidate
     # whose priors already dominate it runs one extra real query.
     esc = check_escalation()
@@ -271,13 +271,13 @@ async def _process_fresh_sample(
     check_escalation: Callable[[], EscalationSignal | None],
 ) -> _SampleOutcome:
     """Backend-measure one sample; render rescored DEPR row before retry; classify errors."""
-    if (cached_deprecated := ctx.evicted_priors.get(sample.query)) is not None:
+    if (cached_deprecated := ctx.deprecated_samples.get(sample.query)) is not None:
         display_cached = _materialize_cached(
             cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
         )
         display_cached["sample_id"] = sample.id
-        if ctx.on_result is not None:
-            ctx.on_result(display_cached, idx, dataset_len)
+        if ctx.on_query_scored is not None:
+            ctx.on_query_scored(display_cached, idx, dataset_len)
         from promptpotter.infrastructure.llm import (
             DEPR_RETRY_COOLDOWN_SEC,
             wait_with_countdown,
@@ -291,7 +291,7 @@ async def _process_fresh_sample(
         pipeline_params=ctx.search_point.pipeline_params,
     )
     result = await _maybe_recover_degraded(result, sample, ctx)
-    if sample.query in ctx.evicted_priors:
+    if sample.query in ctx.deprecated_samples:
         cast(dict[str, Any], result)["retry_of_deprecated_cache"] = True
     state.results.append(result)
     ctx.persist_fresh(state.results)
@@ -303,8 +303,8 @@ async def _process_fresh_sample(
     else:
         state.consecutive_errors = 0
 
-    if ctx.on_result is not None:
-        ctx.on_result(result, idx, dataset_len)
+    if ctx.on_query_scored is not None:
+        ctx.on_query_scored(result, idx, dataset_len)
 
     esc = check_escalation()
     return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
@@ -315,15 +315,15 @@ async def _run_query_loop(
     dataset: list[Sample],
     session: Session,
     *,
-    prior_results: dict[str, QueryResult],
-    evicted_priors: dict[str, QueryResult],
-    on_result: Callable[[QueryResult, int, int], None] | None,
-    on_start: Callable[[str, int, int], None] | None,
+    cached_query_results: dict[str, QueryMeasurement],
+    deprecated_samples: dict[str, QueryMeasurement],
+    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None,
+    on_query_starting: Callable[[str, int, int], None] | None,
     degradation_checks: list[StopRule] | None,
     candidate_idx: int,
     n_total_candidates: int,
     axes: AxisIndex | None,
-    persist_fresh: Callable[[list[QueryResult]], None],
+    persist_fresh: Callable[[list[QueryMeasurement]], None],
 ) -> QueryLoopResult:
     """Score dataset samples, reusing prior results where available."""
     assert session.scoring.scorer is not None, "session.scoring.scorer required for scoring"
@@ -331,14 +331,14 @@ async def _run_query_loop(
     ctx = _LoopContext(
         search_point=search_point,
         session=session,
-        prior_results=prior_results,
-        on_result=on_result,
-        on_start=on_start,
+        cached_query_results=cached_query_results,
+        on_query_scored=on_query_scored,
+        on_query_starting=on_query_starting,
         axes=axes,
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
         scorer_formula=session.scoring.scorer_formula,
-        evicted_priors=evicted_priors,
+        deprecated_samples=deprecated_samples,
         persist_fresh=persist_fresh,
     )
 
@@ -355,10 +355,10 @@ async def _run_query_loop(
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
-            if on_start is not None:
-                on_start(sample.query, i, len(dataset))
+            if on_query_starting is not None:
+                on_query_starting(sample.query, i, len(dataset))
 
-            handler = _process_cache_hit if sample.query in prior_results else _process_fresh_sample
+            handler = _process_cache_hit if sample.query in cached_query_results else _process_fresh_sample
             outcome = await handler(sample, i, len(dataset), state, ctx, _check_escalation)
 
             if outcome.escalation:
@@ -396,15 +396,15 @@ async def score_search_point(
     session: Session,
     *,
     label: str = "Score",
-    on_result: Callable[[QueryResult, int, int], None] | None = None,
-    on_start: Callable[[str, int, int], None] | None = None,
+    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None = None,
+    on_query_starting: Callable[[str, int, int], None] | None = None,
     source: str = "",
     degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,
     n_total_candidates: int = 1,
     axes: AxisIndex | None = None,
     l1_diversity: float = 1.0,
-) -> tuple[list[QueryResult], dict[str, Any], bool, EscalationSignal | None]:
+) -> tuple[list[QueryMeasurement], dict[str, Any], bool, EscalationSignal | None]:
     """Score search point with chain-addressed cache; per-sample persist (Ctrl+C-safe)."""
     store = session.store
     backend_id = session.backend_id
@@ -416,21 +416,21 @@ async def score_search_point(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    prior_results: dict[str, QueryResult] = {}
+    cached_query_results: dict[str, QueryMeasurement] = {}
     if store and backend_id:
         from promptpotter.application.optimization.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
-        prior_results = cast(
-            "dict[str, QueryResult]",
+        cached_query_results = cast(
+            "dict[str, QueryMeasurement]",
             store.archive.load_reusable_results(backend_id, node_configs, is_fatal=is_deprecated),
         )
 
-    prior_results, evicted_priors = _filter_deprecated_priors(prior_results)
-    if evicted_priors:
+    cached_query_results, deprecated_samples = _split_off_deprecated_samples(cached_query_results)
+    if deprecated_samples:
         logger.info(
             "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
-            len(evicted_priors),
+            len(deprecated_samples),
         )
 
     display_name = f"{session.experiment_id}_{safe_label}" if session.experiment_id else safe_label
@@ -441,7 +441,7 @@ async def score_search_point(
     # whether the upcoming per-query lines are cache replays vs fresh
     # measurements. Suppressed when no priors match the current dataset.
     cached_in_dataset = sum(
-        1 for q in prior_results if q in dataset_queries and q not in evicted_priors
+        1 for q in cached_query_results if q in dataset_queries and q not in deprecated_samples
     )
     if cached_in_dataset:
         total = len(dataset)
@@ -452,18 +452,18 @@ async def score_search_point(
             flush=True,
         )
 
-    def _merged_view(results: list[QueryResult]) -> list[QueryResult]:
+    def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
         return merge_with_unprocessed_priors(
             results,
-            prior_results=prior_results,
+            cached_query_results=cached_query_results,
             dataset_queries=dataset_queries,
-            evicted_priors=evicted_priors,
+            deprecated_samples=deprecated_samples,
             scorer=session.scoring.scorer,
             scorer_id=session.scoring.scorer_id,
             scorer_formula=session.scoring.scorer_formula,
         )
 
-    def _save_run(results: list[QueryResult], scores: dict[str, Any]) -> None:
+    def _save_run(results: list[QueryMeasurement], scores: dict[str, Any]) -> None:
         if not (store and backend_id):
             return
         merged = _merged_view(results)
@@ -480,11 +480,11 @@ async def score_search_point(
         )
         store.archive.save(backend_id, run_id, run_data)
 
-    def _persist_fresh(results: list[QueryResult]) -> None:
+    def _persist_fresh(results: list[QueryMeasurement]) -> None:
         if not (store and backend_id):
             return
         merged = _merged_view(results)
-        scores = compute_composite_score(
+        scores = compute_composite_fitness(
             merged,
             pipeline_schema,
             round_scorer=session.scoring.round_scorer,
@@ -502,10 +502,10 @@ async def score_search_point(
         search_point,
         dataset,
         session,
-        prior_results=prior_results,
-        evicted_priors=evicted_priors,
-        on_result=on_result,
-        on_start=on_start,
+        cached_query_results=cached_query_results,
+        deprecated_samples=deprecated_samples,
+        on_query_scored=on_query_scored,
+        on_query_starting=on_query_starting,
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,
@@ -531,7 +531,7 @@ async def score_search_point(
             n_total_candidates=n_total_candidates,
         )
 
-    scores = compute_composite_score(
+    scores = compute_composite_fitness(
         results,
         pipeline_schema,
         round_scorer=session.scoring.round_scorer,

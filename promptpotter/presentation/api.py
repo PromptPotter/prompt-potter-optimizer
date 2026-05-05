@@ -12,7 +12,7 @@ imports and the ``StoreDep`` dependency:
 
 3. **Per-cycle live reads** (also on ``campaigns_router``) — dashboard
    passthrough, log.md, ledger reads + filtered views (decisions,
-   forks). The first real consumer of the per-cycle ``RunLedger``;
+   forks). The first real consumer of the per-cycle ``CycleLedger``;
    validates the record types carry what a webapp needs.
 """
 
@@ -31,7 +31,7 @@ from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import Decision, DecisionKind
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import (
     Stores,
     build_stores,
@@ -322,7 +322,7 @@ async def get_trial(
 # Per-cycle live reads — dashboard, log, ledger
 # Webapp-facing endpoints that pass through the on-disk artifacts the
 # operator workflows already use, plus filtered ledger views (decisions,
-# forks) derived from the typed RunRecord stream.
+# forks) derived from the typed CycleRecord stream.
 # ===========================================================================
 
 
@@ -344,7 +344,7 @@ class DashboardSnapshot(BaseModel):
     data: dict[str, Any] = Field(description="Verbatim dashboard.json contents")
 
 
-class RunRecordEnvelope(BaseModel):
+class CycleRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
     ``record_type`` discriminates Decision / Phase / Snapshot;
@@ -360,7 +360,7 @@ class RunRecordEnvelope(BaseModel):
 
 class LedgerSliceResponse(BaseModel):
     cycle_id: str = Field(description="Cycle the records belong to")
-    records: list[RunRecordEnvelope] = Field(description="Records since the requested offset")
+    records: list[CycleRecordEnvelope] = Field(description="Records since the requested offset")
     next_offset: int = Field(description="Pass back as ?since= for incremental polling")
 
 
@@ -390,16 +390,16 @@ class ForksResponse(BaseModel):
     forks: list[ForkRef] = Field(description="Children minted from this parent")
 
 
-def _open_cycle_ledger_or_404(cycle_id: str, store: Stores) -> RunLedger:
+def _open_cycle_ledger_or_404(cycle_id: str, store: Stores) -> CycleLedger:
     """Open the per-cycle ledger; 404 if the cycle dir doesn't exist."""
     cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
     if not cycle_dir.exists():
         raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-    return RunLedger.open(CycleDir(cycle_dir))
+    return CycleLedger.open(CycleDir(cycle_dir))
 
 
-def _record_to_envelope(record: Any, offset: int) -> RunRecordEnvelope:
-    return RunRecordEnvelope(
+def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
+    return CycleRecordEnvelope(
         offset=offset,
         record_type=record.record_type,
         payload=record.model_dump(),
@@ -449,7 +449,7 @@ async def get_cycle_ledger(
     since: int = Query(0, ge=0, description="Skip records before this offset"),
     limit: int = Query(1000, ge=1, le=50_000, description="Max records to return"),
 ):
-    """Typed RunRecord stream from the cycle's events.jsonl, since the given offset.
+    """Typed CycleRecord stream from the cycle's events.jsonl, since the given offset.
 
     Pass back ``next_offset`` as ``?since=`` for incremental polling —
     the webapp's primary live-state read path. Up to ``limit`` records
@@ -457,7 +457,7 @@ async def get_cycle_ledger(
     huge responses.
     """
     ledger = _open_cycle_ledger_or_404(cycle_id, store)
-    records: list[RunRecordEnvelope] = []
+    records: list[CycleRecordEnvelope] = []
     offset = since
     for rec in ledger.iter(since=since):
         records.append(_record_to_envelope(rec, offset))

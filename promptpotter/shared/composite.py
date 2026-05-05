@@ -11,12 +11,12 @@ Two related concerns share this module so the short codes (``acc``, ``H``,
    ``application/scoring/evaluators.py::default_per_round_formula_short``;
    keep them in sync by hand if the registry default changes.
 
-2. **Composite-score render primitives** (``render_composite_oneliner`` /
-   ``render_composite_block`` / ``render_composite_inline``) — operator-
+2. **Composite-score render primitives** (``render_composite_fitness_oneliner`` /
+   ``render_composite_fitness_block`` / ``render_composite_fitness_inline``) — operator-
    facing forms that surfaces share. Without seeing the inputs the operator
-   can't tell *why* composite moved when accuracy didn't.
+   can't tell *why* composite_fitness moved when accuracy didn't.
    ``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to a
-   single-line ``composite=0.4f`` bottom rule (``log.md`` always carries
+   single-line ``composite_fitness=0.4f`` bottom rule (``log.md`` always carries
    the full block).
 
 Pure functions; no I/O, no Session, no logging side-effects.
@@ -32,9 +32,9 @@ __all__ = [
     "compact_display_enabled",
     "extract_evaluator_names",
     "inline_short_formula_values",
-    "render_composite_block",
-    "render_composite_inline",
-    "render_composite_oneliner",
+    "render_composite_fitness_block",
+    "render_composite_fitness_inline",
+    "render_composite_fitness_oneliner",
 ]
 
 
@@ -136,7 +136,7 @@ _FORMULA_BUILTINS = {
     "False",
 }
 
-# Short codes used by ``render_composite_block`` when ``use_short_names``
+# Short codes used by ``render_composite_fitness_block`` when ``use_short_names``
 # is enabled. Names not in this map fall back to themselves so user-
 # defined evaluators still surface — only the registry-known ones get
 # squeezed into short codes for the round-level live frame.
@@ -180,22 +180,22 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     return out
 
 
-def render_composite_inline(composite: float) -> str:
-    """One-line composite tag — for slots that can't carry a multi-line block."""
-    return f"composite={composite:.4f}"
+def render_composite_fitness_inline(composite_fitness: float) -> str:
+    """One-line composite_fitness tag — for slots that can't carry a multi-line block."""
+    return f"composite_fitness={composite_fitness:.4f}"
 
 
-def render_composite_oneliner(composite: float, baseline: float | None = None) -> str:
-    """Per-candidate / per-row 1-line composite render.
+def render_composite_fitness_oneliner(composite_fitness: float, baseline: float | None = None) -> str:
+    """Per-candidate / per-row 1-line composite_fitness render.
 
     Anchors against the campaign baseline so the operator sees how far
     the run has come from origin even at round 50. ``baseline=None``
-    (e.g. before init has fired) collapses to ``composite=0.6042``.
+    (e.g. before init has fired) collapses to ``composite_fitness=0.6042``.
     """
     if baseline is None:
-        return f"composite={composite:.4f}"
-    delta = composite - baseline
-    return f"composite={composite:.4f}  (Δ{delta:+.4f} vs baseline {baseline:.4f})"
+        return f"composite_fitness={composite_fitness:.4f}"
+    delta = composite_fitness - baseline
+    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs baseline {baseline:.4f})"
 
 
 def _pairs_line(
@@ -210,8 +210,8 @@ def _pairs_line(
     return "  ".join(f"{n}={evaluators[n]:.3f}" for n in names)
 
 
-def render_composite_block(
-    composite: float,
+def render_composite_fitness_block(
+    composite_fitness: float,
     evaluators: dict[str, float] | None,
     formula: str | None,
     *,
@@ -220,10 +220,10 @@ def render_composite_block(
     use_short_names: bool = False,
     legend: str | None = None,
 ) -> list[str]:
-    """3-line round-level composite block.
+    """3-line round-level composite_fitness block.
 
     Layout:
-        line 1: ``composite = X.XXXX   baseline=Y.YYYY  Δ+0.103``
+        line 1: ``composite_fitness = X.XXXX   baseline=Y.YYYY  Δ+0.103``
         line 2: ``formula:  <formula>``
         line 3: ``name1=val  name2=val  ...``  (named evaluators present in
                  the formula, full names by default; short codes when
@@ -232,7 +232,7 @@ def render_composite_block(
     *legend* (optional) appends a 4th line ``  legend: <text>`` so callers
     can name the abbreviations they used in *formula*. Skipped when None.
 
-    Falls back to a single line ``composite=0.6042 (formula unavailable)``
+    Falls back to a single line ``composite_fitness=0.6042 (formula unavailable)``
     when *formula* is None / empty.
 
     *width* is informational only — used by callers to decide whether to
@@ -240,10 +240,10 @@ def render_composite_block(
     exceeds *width*, it overflows and the caller must pick a wider frame
     or set ``use_short_names=True``.
     """
-    # Line 1: composite + trajectory anchor
-    line1 = f"composite = {composite:.4f}"
+    # Line 1: composite_fitness + trajectory anchor
+    line1 = f"composite_fitness = {composite_fitness:.4f}"
     if baseline is not None:
-        delta = composite - baseline
+        delta = composite_fitness - baseline
         line1 += f"   baseline={baseline:.4f}  Δ{delta:+.4f}"
 
     if not formula:

@@ -35,7 +35,7 @@ The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output 
 2. Implement a `_section_<name>(state: DispatchState) -> str` renderer.
 3. Wire `<name>` into `_L1_GENERATE_SECTION_RENDERERS` and `_L1_GENERATE_FIELD_DESCRIPTIONS`.
 4. Append `<name>: str = ""` to `L1GenerateSurface`.
-5. Add `<name>` to `L1_GENERATE_SECTION_FIELDS` and the `to_compile_vars` mapping.
+5. Add `<name>` to `L1_GENERATE_SECTION_FIELDS` and the `to_prompt_vars` mapping.
 6. Add `{{<name>}}` to `optimizer_pipeline.json::resolved_prompts['l1_generate/1'].problem_description` body.
 
 **Removing a section:** delete the enum member. The deletion is the deliberate code change — L2 cannot drop a section by emitting an override, only gate it off via `scheme_overrides[name] = False`.
@@ -50,7 +50,7 @@ The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output 
 
 After section assembly, scalars (`n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`) are populated from `cycle.current_accuracy`, `cycle.current_results`, `cycle.opt_sp.render()`, and the `n_variants` argument.
 
-`L1GenerateSurface.to_compile_vars()` returns a `dict[str, str]` mapping each `L1GenerateField.value` to its rendered string — fed directly to `run_optimizer_node(compile_vars=...)`.
+`L1GenerateSurface.to_prompt_vars()` returns a `dict[str, str]` mapping each `L1GenerateField.value` to its rendered string — fed directly to `run_optimizer_node(prompt_vars=...)`.
 
 ## Whole-body override — `OptSearchPoint.l1_template_override`
 

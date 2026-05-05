@@ -15,7 +15,7 @@
 
 ## L4 partial — what this also is
 
-The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, the unified fork primitive (Track 5) is the cheap-trial mechanism *and* the substrate that L4 auto-rebase will plug into, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~500 LOC of new code** (50 LOC bump from 0.1.0 to absorb the fork primitive generalization), all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `RunLedger.inherit_from`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
+The framework doubles as the partial implementation of L4 self-optimization (see [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md)). L4 has two blockers: (1) credit assignment / cheap proxy reward; (2) "PromptPotter-as-backend" adapter. **M10 closes most of (1)**: `proxy_lift_corr` is the credit-assignment validation, the unified fork primitive (Track 5) is the cheap-trial mechanism *and* the substrate that L4 auto-rebase will plug into, behavior checks are the programmatic conformance signal, `review.md` + `L1Stats` are the per-cycle structured features. (2) stays in M12+. Architectural consequence: **target ≤ ~500 LOC of new code** (50 LOC bump from 0.1.0 to absorb the fork primitive generalization), all reusing existing primitives (`AuditTrailProjection`, `OptSearchPoint` traces, `MeasurementArchive`, `CycleLedger.inherit_from`, `formatting.py`, scipy.stats). No new persistence, no new abstraction layer. If a proposed component doesn't forerun L4, push back.
 
 ## Why a milestone
 
@@ -145,7 +145,7 @@ class ForkPayload(BaseModel):
 
 `FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING` — its outcome (the new cycle_id) is downstream of the divergence-checked decisions, never gating itself.
 
-**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, trials/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `RunLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
+**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, trials/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
 
 **LLM-side surface.** Extend `OptimizerAction` in `application/optimization/pipeline.py`:
 
@@ -281,7 +281,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 | Cycle finalize / round emission | `application/runner.py` |
 | Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
 | Parity test | `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` |
-| **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::RunLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
+| **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
 | **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard.py` (telemetry binds to root with no `parent_cycle_id`) |
 
 ## Risks

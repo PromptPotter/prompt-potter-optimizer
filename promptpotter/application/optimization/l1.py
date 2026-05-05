@@ -1,7 +1,7 @@
 """L1 phase: generate → measure → score → execute round.
 
 The round-loop spine. Validators + invariant detection live in
-``l1_validators``; population-shape helpers + ``L1ScoringResult`` live in
+``l1_validators``; population-shape helpers + ``PopulationScoreReport`` live in
 ``l1_population``.
 """
 
@@ -24,7 +24,7 @@ from promptpotter.application.optimization.l1_critique import (
 )
 from promptpotter.application.optimization.l1_population import (
     INVALID_SCORES,
-    L1ScoringResult,
+    PopulationScoreReport,
     build_score_report,
     parse_population,
     pobb_decision_data,
@@ -41,7 +41,7 @@ from promptpotter.application.optimization.llm_call import (
 )
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
-    compute_composite_score,
+    compute_composite_fitness,
     count_degraded_queries,
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -56,7 +56,7 @@ from promptpotter.domain.results import (
     RoundResult,
 )
 from promptpotter.domain.run_records import DecisionKind, record_decision
-from promptpotter.domain.scoring import QueryResult
+from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 
 # Module-level alias for test monkeypatching.
@@ -111,7 +111,7 @@ async def l1_generate(
 
     opt_sp = cycle.opt_sp
     pipeline_schema = cycle.session.pipeline_schema
-    obs_campaign_id = cycle.session.state.obs_campaign_id
+    tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
     state = build_dispatch_state(
         Layer.L1_GENERATE,
@@ -119,7 +119,7 @@ async def l1_generate(
         round_num=round_num,
         pipeline_schema=pipeline_schema,
     )
-    compile_vars = compile_prompt_vars(
+    prompt_vars = compile_prompt_vars(
         Layer.L1_GENERATE,
         state,
         opt_sp,
@@ -138,19 +138,19 @@ async def l1_generate(
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     generated, meta_prompt = await run_optimizer_node(
         template_name="l1_generate",
-        compile_vars=compile_vars,
+        prompt_vars=prompt_vars,
         llm_client=llm_client,
         model=model,
         temperature=creativity,
         json_schema=output_schema,
-        recorder=cycle.session.state.round_recorder,
+        recorder=cycle.session.state.audit_projection,
         template=template,
-        cache=cycle.session.store.optimizer_calls,
+        optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     section_sizes = sorted(
         (
             (name, len(value.rstrip()))
-            for name, value in compile_vars.items()
+            for name, value in prompt_vars.items()
             if value and value.strip()
         ),
         key=lambda x: -x[1],
@@ -166,7 +166,7 @@ async def l1_generate(
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
-        prompt_changes, tc_changes, node_overrides = _normalize_pp_override(
+        prompt_changes, tc_changes, pipeline_params_override = _normalize_pp_override(
             v.get("pipeline_params_override") or {}, pipeline_schema
         )
         # Override validation is deferred to parse_population — one producer of truth.
@@ -177,13 +177,15 @@ async def l1_generate(
         )
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
-        population.append(CandidateProposal(osp=child, node_overrides=node_overrides))
+        population.append(
+            CandidateProposal(osp=child, pipeline_params_override=pipeline_params_override)
+        )
 
         if obs:
             with graceful("CandidateCreated emit failed"):
                 obs.emit_write_point(
                     CandidateCreated,
-                    campaign_id=obs_campaign_id,
+                    campaign_id=tracing_campaign_id,
                     round_num=round_num,
                     candidate_idx=len(population) - 1,
                     candidate_id=child.lineage.id,
@@ -210,13 +212,13 @@ async def score_population(
     round_num: int = 0,
     decisions: list[Decision] | None = None,
     l1_diversity: float = 1.0,
-) -> tuple[dict[str, list[QueryResult]], list[CandidateScore], EscalationSignal | None]:
+) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
 
-    all_candidate_results: dict[str, list[QueryResult]] = {}
+    all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
     elim_check = PoBBCheck(pobb_config, n_queries=len(dataset))
@@ -228,15 +230,17 @@ async def score_population(
             with graceful("CandidateScored emit failed"):
                 obs.emit_write_point(
                     CandidateScored,
-                    campaign_id=session.state.obs_campaign_id,
+                    campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     candidate_idx=idx,
                     report=report.to_dict(),
                 )
 
     for idx, osp_c in enumerate(population):
-        override = proposals[idx].node_overrides or None
-        callbacks.on_candidate_started(idx, n, osp_c.lineage.changes_description or "", override)
+        pipeline_params_override = proposals[idx].pipeline_params_override or None
+        callbacks.on_candidate_started(
+            idx, n, osp_c.lineage.changes_description or "", pipeline_params_override
+        )
         # Bind the PoBBCheck to this candidate so its per-query snapshot
         # lands on the live telemetry stream tagged with the right id.
         _candidate_idx = idx
@@ -253,7 +257,7 @@ async def score_population(
                 idx,
                 build_score_report(
                     osp_c,
-                    override,
+                    pipeline_params_override,
                     INVALID_SCORES,
                     [],
                     dataset,
@@ -276,8 +280,8 @@ async def score_population(
             dataset,
             session,
             label=f"candidate_{idx}",
-            on_result=_on_result,
-            on_start=_on_start,
+            on_query_scored=_on_result,
+            on_query_starting=_on_start,
             degradation_checks=[*(degradation_checks or []), elim_check],
             candidate_idx=idx,
             n_total_candidates=n,
@@ -289,13 +293,13 @@ async def score_population(
         # Path 2 — full-run cache replay.
         if was_cached:
             elim_check.register_completed(
-                [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+                [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
             )
             _fire(
                 idx,
                 build_score_report(
                     osp_c,
-                    override,
+                    pipeline_params_override,
                     scores,
                     results,
                     dataset,
@@ -318,7 +322,7 @@ async def score_population(
         # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
         if len(results) == len(dataset) and not aborted:
             elim_check.register_completed(
-                [r.get("score", 0.0) for r in results], candidate_id=osp_c.lineage.id
+                [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
             )
 
         new_rf: RuntimeFailure | None = None
@@ -373,7 +377,7 @@ async def score_population(
 
         report = build_score_report(
             osp_c,
-            override,
+            pipeline_params_override,
             scores,
             results,
             dataset,
@@ -467,8 +471,8 @@ async def l1_score(
     pobb_config: PoBBConfig,
     round_num: int = 0,
     yield_stats: L1YieldStats,
-) -> L1ScoringResult:
-    """Score candidates and select the round winner (compares fitness, not composite)."""
+) -> PopulationScoreReport:
+    """Score candidates and select the round winner (compares fitness, not composite_fitness)."""
     session = cycle.session
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
@@ -500,14 +504,14 @@ async def l1_score(
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
     best_acc = baseline.accuracy
-    best_comp = baseline.composite
+    best_comp = baseline.composite_fitness
     best_osp: OptSearchPoint = baseline.osp
     best_results: list = list(baseline.results)
     best_label = baseline.label
     best_scores: dict[str, float] = dict(baseline.evaluators)
     winner_idx: int | None = None
     for idx, ind in enumerate(scored):
-        s = compute_composite_score(
+        s = compute_composite_fitness(
             all_candidate_results[ind.lineage.id],
             schema,
             opt_sp=ind,
@@ -516,7 +520,7 @@ async def l1_score(
         )
         if s["accuracy"] > best_acc:
             best_acc = s["accuracy"]
-            best_comp = s["composite"]
+            best_comp = s["composite_fitness"]
             best_osp = ind
             best_results = list(all_candidate_results[ind.lineage.id])
             best_label = ind.lineage.changes_description or ind.lineage.id[:12]
@@ -541,7 +545,7 @@ async def l1_score(
     if improved and base["total"] > 0:
         bl_hits = round(baseline.accuracy * base["total"])
         p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
-    return L1ScoringResult(
+    return PopulationScoreReport(
         label=best_label,
         winner_osp=best_osp,
         winner_prompt_fields={
@@ -550,7 +554,7 @@ async def l1_score(
         },
         winner_pipeline_params=merged_pp[winner_idx] if winner_idx is not None else pipeline_params,
         winner_accuracy=best_acc,
-        winner_composite=best_comp,
+        winner_composite_fitness=best_comp,
         hits=base["hits"],
         total=base["total"],
         improved=improved,
@@ -622,7 +626,7 @@ async def generate_or_load_candidates(
             yield_stats = detect_invariants(persisted, cycle.opt_sp)
             # llm_call never fires on this branch — synthesize l1_generate
             # so dashboard.json + round_NNNN.json don't miss the node.
-            if _rr := session.state.round_recorder:
+            if _rr := session.state.audit_projection:
                 _rr.set_node(
                     "l1_generate",
                     {
@@ -652,7 +656,7 @@ async def generate_or_load_candidates(
         f"l1_generate_r{round_num}",
         "llm/meta",
         obs=obs,
-        campaign_id=session.state.obs_campaign_id,
+        campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
         candidates = await l1_generate(
@@ -695,7 +699,7 @@ async def generate_or_load_candidates(
 async def execute_round(
     cycle: Cycle,
     round_num: int,
-    scoring_dataset: list[Sample],
+    scoring_set: list[Sample],
     callbacks: RunListener,
     degradation_checks: list[StopRule] | None = None,
     *,
@@ -714,10 +718,10 @@ async def execute_round(
     obs = session.state.obs
     if obs:
         with graceful("RoundStart emit failed"):
-            obs.emit(RoundStart(campaign_id=session.state.obs_campaign_id, round_num=round_num))
+            obs.emit(RoundStart(campaign_id=session.state.tracing_campaign_id, round_num=round_num))
 
     candidates, yield_stats = await generate_or_load_candidates(
-        round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_dataset), obs=obs
+        round_num, cycle, callbacks.on_phase, n_eval_queries=len(scoring_set), obs=obs
     )
 
     assert cycle.tracking.current_sp is not None
@@ -727,24 +731,24 @@ async def execute_round(
         "enter",
         round=round_num,
         n_candidates=len(candidates),
-        n_queries=len(scoring_dataset),
+        n_queries=len(scoring_set),
         current_best_accuracy=cycle.tracking.current_accuracy,
         improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
     )
-    baseline = cycle.baseline_for_round(scoring_dataset, round_num)
+    baseline = cycle.baseline_for_round(scoring_set, round_num)
     async with observed_node(
         f"l1_score_r{round_num}",
         "scoring",
         obs=obs,
         obs_type="span",
-        campaign_id=session.state.obs_campaign_id,
+        campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
         scoring_result = await l1_score(
             cycle,
             candidates,
-            scoring_dataset,
+            scoring_set,
             baseline,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
@@ -763,7 +767,7 @@ async def execute_round(
             with graceful("RoundWinnerChosen emit failed"):
                 obs.emit_write_point(
                     RoundWinnerChosen,
-                    campaign_id=session.state.obs_campaign_id,
+                    campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     winner_candidate_id=str(scoring_result.winner_prompt_fields.get("id") or ""),
                     winner_accuracy=scoring_result.winner_accuracy,
@@ -777,7 +781,7 @@ async def execute_round(
         round=round_num,
         winner_label=scoring_result.label,
         winner_accuracy=scoring_result.winner_accuracy,
-        winner_composite=scoring_result.winner_composite,
+        winner_composite_fitness=scoring_result.winner_composite_fitness,
         winner_evaluators=dict(scoring_result.winner_evaluators),
         improved=scoring_result.improved,
         candidate_scores=candidate_scores_dicts,
@@ -796,14 +800,14 @@ async def execute_round(
                 crit_llm,
                 round_num=round_num,
                 model=config.optimizer_llm.model,
-                recorder=session.state.round_recorder,
+                recorder=session.state.audit_projection,
             )
             critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
             obs.emit_write_point(
                 L1CritiqueWritten,
-                campaign_id=session.state.obs_campaign_id,
+                campaign_id=session.state.tracing_campaign_id,
                 round_num=round_num,
                 l1_critique_text=critique_text,
             )
@@ -814,7 +818,7 @@ async def execute_round(
         round=round_num,
         label=scoring_result.label,
         accuracy=scoring_result.winner_accuracy,
-        composite=scoring_result.winner_composite,
+        composite_fitness=scoring_result.winner_composite_fitness,
         hits=scoring_result.hits,
         total=scoring_result.total,
         improved=scoring_result.improved,
@@ -840,7 +844,7 @@ async def execute_round(
         with graceful("RoundEnd emit failed"):
             obs.emit(
                 RoundEnd(
-                    campaign_id=session.state.obs_campaign_id,
+                    campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     accuracy=scoring_result.winner_accuracy,
                     hits=scoring_result.hits,
@@ -858,7 +862,7 @@ async def execute_round(
             w_osp = scoring_result.winner_osp
             obs.emit(
                 PromptVersion(
-                    campaign_id=session.state.obs_campaign_id,
+                    campaign_id=session.state.tracing_campaign_id,
                     round_num=round_num,
                     prompt_fields_id=w_osp.lineage.id,
                     rendered_prompt=w_osp.render(),

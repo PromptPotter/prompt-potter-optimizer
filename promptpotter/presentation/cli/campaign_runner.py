@@ -399,7 +399,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     if args.excel_path:
         train_data = prepare_datasets(session.store, args.excel_path).train_data or []
     else:
-        train_data = session.queries or []
+        train_data = session.samples or []
 
     pipeline_params, baseline, cycle_id = _prepare_cycle(session, campaign_config, train_data)
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
@@ -570,7 +570,7 @@ def _build_run_observers(
     phase and per-query output reaches the terminal. Without this, the
     CLI goes dark for the entire BASELINE phase. Recorder is built first
     so the emitter can hold a direct reference (no callback indirection).
-    Side-effect: assigns the recorder to ``session.state.round_recorder``.
+    Side-effect: assigns the recorder to ``session.state.audit_projection``.
     Display is returned as a separate handle so the entry point can pass
     it to ``run_optimization`` (which binds it to the cycle ledger).
     """
@@ -583,7 +583,7 @@ def _build_run_observers(
 
     recorder = _AuditTrailProjection.from_cycle_dir(CycleDir(campaign_dir))
     recorder.rehydrate_sticky()
-    session.state.round_recorder = recorder
+    session.state.audit_projection = recorder
 
     emitter = build_campaign_emitter(
         session,
@@ -657,7 +657,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
         )
 
-    train_data = session.queries or []
+    train_data = session.samples or []
     pipeline_params, _baseline = _prepare_cycle_for_optimize(
         args, ctx, session, campaign_config, train_data
     )
@@ -831,7 +831,7 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     result = await elevate_to_decisive(
         arms,
         session,
-        session.queries or [],
+        session.samples or [],
         epsilon=args.epsilon,
         max_topups=args.max_topups,
         n_min_per_arm=args.n_min_per_arm,

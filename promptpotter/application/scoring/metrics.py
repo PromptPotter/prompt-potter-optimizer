@@ -1,7 +1,7 @@
 """Scoring and metric computation for measurement results.
 
 Driven by the evaluator registry in ``application/scoring/evaluators.py``.
-The per-round composite is whatever the dataset's per-round scoring formula
+The per-round composite_fitness is whatever the dataset's per-round scoring formula
 resolves to; when no formula is set, the default formula reproduces the
 pre-migration 4-bundle weighted sum.
 
@@ -37,7 +37,7 @@ if TYPE_CHECKING:
         PipelineNode,
         PipelineSchema,
     )
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryMeasurement
 
 
 __all__ = [
@@ -45,7 +45,7 @@ __all__ = [
     "all_evaluators",
     "compile_failure_analysis",
     "compile_query_difficulty",
-    "compute_composite_score",
+    "compute_composite_fitness",
     "count_degraded_queries",
     "extract_sample_diagnostics",
     "find_rank",
@@ -63,7 +63,7 @@ def find_rank(candidates: list, ground_truth: str) -> int | None:
     return None
 
 
-def _compute_accuracy(results: list[QueryResult]) -> dict:
+def _compute_accuracy(results: list[QueryMeasurement]) -> dict:
     """Base scalars: hits, total, accuracy, errors, deprecated.
 
     Deprecated samples (those whose ``classify_result()`` returns any fatal
@@ -81,7 +81,7 @@ def _compute_accuracy(results: list[QueryResult]) -> dict:
     total = len(valid)
     hits = sum(1 for r in valid if r.get("hit"))
     errors = sum(1 for r in valid if is_error_result(r))
-    accuracy = sum(r.get("score", 0.0) for r in valid) / total if total else 0.0
+    accuracy = sum(r.get("fitness", 0.0) for r in valid) / total if total else 0.0
     return {
         "hits": hits,
         "total": total,
@@ -106,7 +106,7 @@ def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """Extract per-query diagnostic signals; per-query complement to ``compute_composite_score``."""
+    """Extract per-query diagnostic signals; per-query complement to ``compute_composite_fitness``."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {
@@ -209,12 +209,12 @@ _DIAG_DISPATCH: dict[str, Any] = {
 
 
 # ---------------------------------------------------------------------------
-# Round-level composite — driven by the evaluator registry + scoring formula.
+# Round-level composite_fitness — driven by the evaluator registry + scoring formula.
 # ---------------------------------------------------------------------------
 
 
-def compute_composite_score(
-    results: list[QueryResult],
+def compute_composite_fitness(
+    results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
     *,
     opt_sp: Any = None,
@@ -225,7 +225,7 @@ def compute_composite_score(
 
     Every per-round evaluator whose ``applies(schema)`` is True is
     materialized into a flat ``evaluators`` dict; names are namespaced
-    when multiple nodes of the same type exist. The composite score is
+    when multiple nodes of the same type exist. The composite_fitness score is
     the result of evaluating ``round_scorer`` against that namespace.
 
     - ``round_scorer`` can be a compiled callable (via
@@ -234,13 +234,13 @@ def compute_composite_score(
       ``default_per_round_formula(schema)`` — reproduces the pre-migration
       4-bundle weighted sum on schemas that ship with recall nodes.
     - ``opt_sp`` is an optional ``OptSearchPoint``; when provided, its
-      ``memory.validation_failures`` forces composite to 0.0 (structurally
+      ``memory.validation_failures`` forces composite_fitness to 0.0 (structurally
       invalid candidates), and ``memory.runtime_failures`` feeds the
       ``runtime_failure_rate`` evaluator.
     - ``l1_diversity`` is the round-level fraction of valid (non-no-op,
       non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
 
-    The composite is **recorded, not gating**: ``select_fittest``
+    The composite_fitness is **recorded, not gating**: ``select_fittest``
     compares candidates on ``accuracy`` (the user's per-query scoring
     function). Composite is displayed and persisted so operators can see
     whether a win came with hidden costs.
@@ -259,7 +259,7 @@ def compute_composite_score(
     else:
         scorer = compile_round_scorer(default_per_round_formula(pipeline_schema))
 
-    composite = scorer(evaluator_values)
+    composite_fitness = scorer(evaluator_values)
 
     # OptSP-layer counts for display and the validation-failure short-circuit.
     runtime_failure_count = 0
@@ -269,7 +269,7 @@ def compute_composite_score(
         validation_failure_count = len(getattr(opt_sp, "validation_failures", []) or [])
 
     if validation_failure_count > 0:
-        composite = 0.0
+        composite_fitness = 0.0
 
     degraded = count_degraded_queries(results)
 
@@ -277,7 +277,7 @@ def compute_composite_score(
         **base,
         **evaluator_values,
         "evaluators": dict(evaluator_values),
-        "composite": round(composite, 6),
+        "composite_fitness": round(composite_fitness, 6),
         "degraded_queries": degraded,
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
@@ -326,7 +326,7 @@ def _auto_name(key: tuple[str, ...]) -> str:
 
 
 def compile_failure_analysis(
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
     pipeline_schema: PipelineSchema,
     *,
     max_patterns: int = 5,
@@ -347,7 +347,7 @@ def compile_failure_analysis(
     if not failures:
         return FailureAnalysis(total_failures=0, total_results=len(results))
 
-    groups: dict[tuple[str, ...], list[QueryResult]] = defaultdict(list)
+    groups: dict[tuple[str, ...], list[QueryMeasurement]] = defaultdict(list)
     diag_cache: dict[tuple[str, ...], dict] = {}
     for r in failures:
         diag = extract_sample_diagnostics(r, pipeline_schema)

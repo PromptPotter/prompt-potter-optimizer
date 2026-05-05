@@ -3,7 +3,7 @@
 Sample is the data-side peer to SearchPoint. It owns a stable cross-campaign
 ``id``, the input strings (``query``, ``ground_truth``), and accumulating
 cross-campaign metadata (``escalation_count``, ``run_ids``). Measurement
-values (predicted/hit/score/pipeline_data) live in ``library/measurements/``
+values (predicted/hit/fitness/pipeline_data) live in ``library/measurements/``
 and the per-sample aggregate stats live in ``SampleIndex`` — accessed via
 the methods below, never duplicated as fields on the Sample itself.
 
@@ -84,7 +84,7 @@ class Measurement:
     ground_truth: str
     predicted: str
     hit: bool
-    score: float | None
+    fitness: float | None
     node_configs: list[tuple[str, dict[str, Any]]]
     pipeline_data: dict[str, Any]
     created_at: str

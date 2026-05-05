@@ -24,8 +24,8 @@ from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.l1 import L1ScoringResult
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.application.optimization.l1 import PopulationScoreReport
+    from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
     "CritiqueContext",
@@ -66,7 +66,7 @@ class CritiqueContext:
 
 def compile_critique_context(
     cycle: Cycle,
-    scoring_result: L1ScoringResult,
+    scoring_result: PopulationScoreReport,
     schema: PipelineSchema | None,
 ) -> CritiqueContext:
     candidate_keys = candidate_keys_from_schema(schema)
@@ -84,7 +84,7 @@ def compile_critique_context(
 
 
 def _compute_rank_analysis(
-    results: list[QueryResult], candidate_keys: list[str] | None
+    results: list[QueryMeasurement], candidate_keys: list[str] | None
 ) -> tuple[str, set[str]]:
     """Return (section_text, near_miss_query_set)."""
     keys = candidate_keys or None
@@ -202,7 +202,7 @@ class DispatchState:
     pipeline_params: dict | None = None
     candidate_scores: list[dict] | None = None
     escalation_check_result: dict | None = None
-    scoring_result: L1ScoringResult | None = None
+    scoring_result: PopulationScoreReport | None = None
     axis_digest: dict[str, str] | None = None
     critique: CritiqueContext | None = None
     # Cycle slices renderers reach into.
@@ -237,7 +237,7 @@ def build_dispatch_state(
     pipeline_params: dict | None = None,
     candidate_scores: list[dict] | None = None,
     escalation_check_result: dict | None = None,
-    scoring_result: L1ScoringResult | None = None,
+    scoring_result: PopulationScoreReport | None = None,
 ) -> DispatchState:
     """Build the per-call :class:`DispatchState` for *layer* over *cycle*."""
     critique: CritiqueContext | None = None

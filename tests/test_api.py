@@ -17,7 +17,7 @@ from fastapi.testclient import TestClient
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import Decision, DecisionKind, Phase
-from promptpotter.infrastructure.ledger import RunLedger
+from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import build_stores, campaign_dir_for, root_dir_for
 from promptpotter.main import app
 
@@ -45,7 +45,7 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
         encoding="utf-8",
     )
 
-    ledger = RunLedger.open(CycleDir(cycle_dir))
+    ledger = CycleLedger.open(CycleDir(cycle_dir))
     ledger.append(Phase(phase="round", event="enter", round=0))
     ledger.append(
         Decision(

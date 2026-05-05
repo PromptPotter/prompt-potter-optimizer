@@ -1,7 +1,7 @@
 """PoBBStreamProjection — appends per-query Posterior-of-Being-Best snapshots
 to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 
-Subscribed to the same ``RunLedger`` as the other projections. Filters on
+Subscribed to the same ``CycleLedger`` as the other projections. Filters on
 ``Snapshot.event == "p_best_update"`` and writes one JSONL record per
 PoBBCheck snapshot — operator-tailable in real time, replayable after the
 fact for trajectory plots and post-hoc analysis.

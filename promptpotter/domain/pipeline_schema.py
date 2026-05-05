@@ -148,7 +148,7 @@ class PipelineSchema(BaseModel):
 
         Derived once in ``model_post_init`` — schemas are frozen.  Consumed
         by ``sample_measurement`` when projecting wire-response fields into
-        a ``QueryResult``'s ``pipeline_data`` dict.
+        a ``QueryMeasurement``'s ``pipeline_data`` dict.
         """
         return self._observation_keys  # type: ignore[attr-defined]
 

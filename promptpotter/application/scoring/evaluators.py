@@ -20,7 +20,7 @@ from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
-    from promptpotter.domain.scoring import QueryResult
+    from promptpotter.domain.scoring import QueryMeasurement
 
 
 Scope = Literal["per_query", "per_round"]
@@ -54,26 +54,26 @@ __all__ = [
 # ---------------------------------------------------------------------------
 
 
-def compute_accuracy(*, results: list[QueryResult], **_: Any) -> float:
+def compute_accuracy(*, results: list[QueryMeasurement], **_: Any) -> float:
     if not results:
         return 0.0
-    return sum(r.get("score", 0.0) for r in results) / len(results)
+    return sum(r.get("fitness", 0.0) for r in results) / len(results)
 
 
-def compute_error_rate(*, results: list[QueryResult], **_: Any) -> float:
+def compute_error_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
     if not results:
         return 0.0
     return sum(1 for r in results if is_error_result(r)) / len(results)
 
 
-def compute_degraded_rate(*, results: list[QueryResult], **_: Any) -> float:
+def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float:
     if not results:
         return 0.0
     return sum(1 for r in results if is_degraded(r)) / len(results)
 
 
 def compute_runtime_failure_rate(
-    *, results: list[QueryResult], opt_sp: Any = None, **_: Any
+    *, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any
 ) -> float:
     if not results or opt_sp is None:
         return 0.0
@@ -81,7 +81,7 @@ def compute_runtime_failure_rate(
     return min(count / len(results), 1.0)
 
 
-def compute_latency_norm(*, results: list[QueryResult], **_: Any) -> float:
+def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float:
     latencies: list[float] = []
     for r in results:
         pd = r.get("pipeline_data") or {}
@@ -100,7 +100,7 @@ def compute_latency_norm(*, results: list[QueryResult], **_: Any) -> float:
 
 def _compute_recall(
     *,
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
     node: PipelineNode,
     candidate_key: str,
     **_: Any,
@@ -109,7 +109,7 @@ def _compute_recall(
     node's output candidate list. Shared between source_recall and
     candidate_recall."""
 
-    def _step_ran(r: QueryResult) -> bool:
+    def _step_ran(r: QueryMeasurement) -> bool:
         pd = r.get("pipeline_data") or {}
         if pd.get("terminated_at") == node.name:
             return True
@@ -129,7 +129,7 @@ def _compute_recall(
     return found / len(scoped)
 
 
-def compute_cache_hit_rate(*, results: list[QueryResult], node: PipelineNode, **_: Any) -> float:
+def compute_cache_hit_rate(*, results: list[QueryMeasurement], node: PipelineNode, **_: Any) -> float:
     if not results:
         return 0.0
     cache_hits = non_error = 0
@@ -168,7 +168,7 @@ def has_limit_node(schema: PipelineSchema) -> bool:
     return bool(_limit_nodes(schema))
 
 
-def _retrieval_shortfall_for_result(result: QueryResult, schema: PipelineSchema) -> float | None:
+def _retrieval_shortfall_for_result(result: QueryMeasurement, schema: PipelineSchema) -> float | None:
     """Per-query min(observed / target, 1.0) across all limit-bearing nodes.
 
     Returns None when no limit-bearing node has a list-valued output on this
@@ -188,7 +188,7 @@ def _retrieval_shortfall_for_result(result: QueryResult, schema: PipelineSchema)
 
 
 def compute_retrieval_shortfall_per_query(
-    *, result: QueryResult, schema: PipelineSchema | None = None, **_: Any
+    *, result: QueryMeasurement, schema: PipelineSchema | None = None, **_: Any
 ) -> float:
     if schema is None:
         return 1.0
@@ -197,7 +197,7 @@ def compute_retrieval_shortfall_per_query(
 
 
 def compute_mean_retrieval_shortfall(
-    *, results: list[QueryResult], schema: PipelineSchema, **_: Any
+    *, results: list[QueryMeasurement], schema: PipelineSchema, **_: Any
 ) -> float:
     values: list[float] = []
     for r in results:
@@ -228,7 +228,7 @@ def compute_prompt_compactness(*, opt_sp: Any = None, **_: Any) -> float:
     spurious penalty.
 
     The 4 000-char budget is a soft ceiling; the curve is linear so the
-    composite term degrades gracefully rather than cliff-edging at the
+    composite_fitness term degrades gracefully rather than cliff-edging at the
     threshold. To mark prompts above a hard threshold, build a per-round
     formula like ``... + 0.10 * (1 if prompt_compactness > 0.5 else 0)``.
     """
@@ -343,7 +343,7 @@ _REGISTRY: list[Evaluator] = [
         description=(
             "1 - len(rendered_prompt) / PROMPT_BUDGET_CHARS — shorter prompts score "
             "higher (≤ budget → 1.0, ≥ budget → 0.0). Penalizes overly verbose "
-            "prompt templates in the composite score."
+            "prompt templates in the composite_fitness score."
         ),
         scope="per_round",
         compute=compute_prompt_compactness,
@@ -379,7 +379,7 @@ def _concrete_round_entries(
 
 def materialize_round_values(
     schema: PipelineSchema,
-    results: list[QueryResult],
+    results: list[QueryMeasurement],
     *,
     opt_sp: Any = None,
 ) -> dict[str, float]:
@@ -395,7 +395,7 @@ def materialize_round_values(
 
 def materialize_query_values(
     schema: PipelineSchema,
-    result: QueryResult,
+    result: QueryMeasurement,
 ) -> dict[str, float]:
     """Run every per-query evaluator that applies on a single result."""
     values: dict[str, float] = {}

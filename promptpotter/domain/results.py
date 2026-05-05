@@ -13,12 +13,12 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 __all__ = [
     "CandidateProposal",
     "CandidateScore",
+    "CycleResult",
     "PayloadOutcome",
     "RoundBaseline",
     "RoundDiagnostics",
     "RoundMetadata",
     "RoundResult",
-    "RunResult",
     "SweepBatchResult",
 ]
 
@@ -27,7 +27,7 @@ __all__ = [
 class CandidateScore:
     """One candidate's score report from L1 scoring.
 
-    Stable shape, defaults always present. Lives in ``L1ScoringResult.candidate_scores``
+    Stable shape, defaults always present. Lives in ``PopulationScoreReport.candidate_scores``
     (typed) and on phase events / RoundResult / library archives as a flat
     dict via :meth:`to_dict` (wire format).
     """
@@ -35,7 +35,7 @@ class CandidateScore:
     candidate_id: str
     changes_description: str
     accuracy: float
-    composite: float
+    composite_fitness: float
     hits: int
     total: int
     evaluators: dict[str, float]
@@ -60,7 +60,7 @@ class CandidateScore:
             "changes_description": self.changes_description,
             "pipeline_params_override": self.pipeline_params_override,
             "accuracy": self.accuracy,
-            "composite": self.composite,
+            "composite_fitness": self.composite_fitness,
             "hits": self.hits,
             "total": self.total,
             "ci_lo": ci_lo,
@@ -79,32 +79,32 @@ class CandidateScore:
 
 
 class CandidateProposal(BaseModel):
-    """One LLM-proposed individual: an OptSearchPoint plus its node-param overrides.
+    """One LLM-proposed candidate: an OptSearchPoint plus its pipeline-params override.
 
     Persisted between generate and score so resume can replay a round without
     re-querying the LLM. The ``osp`` carries the prompt-field mutations and
-    lineage; ``node_overrides`` carries the LLM-proposed changes to non-prompt
-    pipeline params (deep-merged into the base ``pipeline_params`` at score time).
+    lineage; ``pipeline_params_override`` is the nested LLM-proposed override
+    (deep-merged into the base ``pipeline_params`` at score time).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     osp: OptSearchPoint
-    node_overrides: dict[str, dict] = Field(default_factory=dict)
+    pipeline_params_override: dict[str, dict] = Field(default_factory=dict)
 
 
 class RoundBaseline(BaseModel):
     """The challenger candidates compete against — built once per round.
 
     Carries the OSP directly (no dict→OSP roundtrip). On probe rounds the
-    accuracy/composite/results reflect the baseline's score *over the probe
+    accuracy/composite_fitness/results reflect the baseline's score *over the probe
     subset*, not the full prior dataset.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True, frozen=True)
 
     accuracy: float
-    composite: float
+    composite_fitness: float
     osp: OptSearchPoint
     results: list[dict] = Field(default_factory=list)
     label: str
@@ -125,7 +125,7 @@ class RoundMetadata(BaseModel):
     round: int
     label: str
     accuracy: float
-    composite: float = 0.0
+    composite_fitness: float = 0.0
     hits: int
     total: int
     improved: bool
@@ -195,7 +195,7 @@ class RoundResult(RoundMetadata, RoundDiagnostics):
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
 
-class RunResult(BaseModel):
+class CycleResult(BaseModel):
     """Final result of the feedback cycling process."""
 
     rounds: list[RoundResult]

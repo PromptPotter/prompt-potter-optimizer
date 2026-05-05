@@ -54,7 +54,7 @@ class RoundSummary(BaseModel):
 
     round: int
     accuracy: float
-    composite: float = 0.0
+    composite_fitness: float = 0.0
     improved: bool = False
     degraded_queries: int = 0
     pipeline_params: dict | None = None
@@ -223,7 +223,7 @@ class OptSearchPoint(PromptTemplate):
 
     # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
     l1_critique_text: str = ""
-    escalation_journal: list[dict[str, Any]] = Field(default_factory=list)
+    escalation_log: list[dict[str, Any]] = Field(default_factory=list)
     warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
     l2_directive: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
@@ -242,7 +242,7 @@ class OptSearchPoint(PromptTemplate):
     # in-flight L2 toggles instead of being silently merged from a stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "l1_critique_text",
-        "escalation_journal",
+        "escalation_log",
         "warning_inventory",
         "l2_directive",
         "validation_failures",
@@ -273,11 +273,11 @@ class OptSearchPoint(PromptTemplate):
         self.l1_critique_text = ""
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
-        """Append a journal entry; fill the previous entry's pending outcome."""
-        journal = self.escalation_journal
-        if journal and journal[-1]["outcome_degraded_rate"] is None:
-            journal[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
-        journal.append(entry)
+        """Append a log entry; fill the previous entry's pending outcome."""
+        log = self.escalation_log
+        if log and log[-1]["outcome_degraded_rate"] is None:
+            log[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
+        log.append(entry)
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
         """Deep-copy MEMORY_FIELDS onto *target* (in place) for L2/L3 adopt."""

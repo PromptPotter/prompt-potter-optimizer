@@ -1,4 +1,4 @@
-"""Projections — subscribers to the ``RunLedger`` spine.
+"""Projections — subscribers to the ``CycleLedger`` spine.
 
 Each module here owns one view over the ledger's record stream:
 

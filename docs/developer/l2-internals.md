@@ -27,7 +27,7 @@ Trigger gate logic + `record_decision("l2_escalation_trigger", ...)` in `cycle.e
 | `axes_l2` | `_section_axes_l2(ctx)` | AxisIndex digest |
 | `l1_generate_field_catalogue` | `_format_l1_generate_field_catalogue(...)` | L1 surface menu — capabilities can't disappear silently |
 
-`to_compile_vars()` maps the dataclass into `{hole_name: text}` for `run_optimizer_node`.
+`to_prompt_vars()` maps the dataclass into `{hole_name: text}` for `run_optimizer_node`.
 
 ## Output — flat dict
 

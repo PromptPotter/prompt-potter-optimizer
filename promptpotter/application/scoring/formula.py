@@ -1,7 +1,7 @@
 """Scoring formula compiler + match/display primitives.
 
 The compiler turns a ``campaign.json::scoring`` formula string into a
-callable that scores one ``QueryResult`` dict; ``rescore_results`` is the
+callable that scores one ``QueryMeasurement`` dict; ``rescore_results`` is the
 sole writer of top-level ``hit``/``score`` and the ``scored`` audit map.
 
 Per-query formula namespace:
@@ -318,7 +318,7 @@ def rescore_results(
 ) -> list[dict]:
     """Apply *scorer* to each result, accumulating a multi-scorer audit map.
 
-    Sole writer of top-level ``hit``/``score`` on result dicts. Skips error
+    Sole writer of top-level ``hit``/``fitness`` on result dicts. Skips error
     results. Idempotent under the same ``scorer_id``.
     """
     from promptpotter.shared.errors import is_error_result
@@ -326,11 +326,11 @@ def rescore_results(
     for r in results:
         if is_error_result(r):
             continue
-        score = scorer(r)
-        hit = score >= 1.0
+        fitness = scorer(r)
+        hit = fitness >= 1.0
         scored = r.setdefault("scored", {})
-        scored[scorer_id] = {"score": score, "hit": hit, "formula": formula}
-        r["score"] = score
+        scored[scorer_id] = {"fitness": fitness, "hit": hit, "formula": formula}
+        r["fitness"] = fitness
         r["hit"] = hit
     return results
 
