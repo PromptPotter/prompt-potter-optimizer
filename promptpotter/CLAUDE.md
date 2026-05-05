@@ -22,14 +22,14 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
-Channel: `l2_brief` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Wired declaratively in `LAYER_CONFIGS[Layer.L1_GENERATE]` (`pipeline.py`).
+Channel: `l2_brief` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.l1_layout` over the `SIGNALS` registry (`dispatch_hub.py`).
 
 ## L2-layer — l2_context
 
 Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
 
-- a 2–3 sentence **brief** injected into `l1_generate`'s meta-prompt as primary signal, and
-- optional `l1_section_overrides` + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
+- a 2–3 sentence **brief** (a.k.a. `l2_directive`) injected into `l1_generate`'s meta-prompt as primary signal, and
+- optional `l1_layout` edits + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
 
 The brief is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative briefs ("maybe try X") are out of contract. Sliding window of 1: a new brief supersedes the prior; cleared on improvement (when the L2-layer doesn't fire). The next brief evolves from the prior, not from scratch.
 

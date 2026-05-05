@@ -28,8 +28,8 @@ You've run a campaign. Pointers below for the next layer.
 | Page | Covers |
 |------|--------|
 | [Developer README](../developer/README.md) | Prompt structure, request routing, the scoring step, learning from prior campaigns + per-field reference tables |
-| [L2 internals](../developer/l2-internals.md) | L2 firing, surface, output, OSP mutations |
-| [L1-generate surface](../developer/l1-generate-surface.md) | Registry, override order |
+| [L2 internals](../developer/l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
+| [L1 layout + dispatch hub](../developer/l1-generate-surface.md) | `SIGNALS` registry, `L1Layout`, `DispatchHub` |
 | [Self-healing internals](../developer/self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](../developer/node-standard.md) | Wiring a new pipeline node |
 

@@ -1,77 +1,80 @@
-# L1-Generate Surface
+# L1 Layout + Dispatch Hub
 
-The closed catalogue of every text block injectable into L1's meta-prompt. L2 controls which sections are visible and what their text says, never the catalogue itself. Concept role: [`the-loop.md § L2 in detail`](../concepts/the-loop.md).
+L1's prompt is composed by walking a per-slot list of **signal names** and resolving each name through a single registry. L2 owns the layout; the registry is closed and code-derived. Concept role: [`the-loop.md § L2 in detail`](../concepts/the-loop.md).
 
-## What "surface" means
+## What "layout" means
 
 ```
-┌─ L1's prompt surface ──────────────────────────────────────┐
-│  CATALOGUE (closed, in code)         8 sections + 4 scalars│
+┌─ L1's prompt composition ──────────────────────────────────┐
+│  PromptTemplate (l1_generate)        per-slot static text  │
+│      +                                                     │
+│  L1Layout (on OptSearchPoint)        per-slot signal lists │
 │      ↓                                                     │
-│  PER-ROUND OVERRIDES (set by L2, on the OSP)               │
-│   • visibility toggles  — "hide section X this round"      │
-│   • text overrides      — "replace section X's text"       │
-│   • whole-body override — "use this template body"         │
+│  DispatchHub.fill_l1                 resolves names via    │
+│                                      SIGNALS registry      │
 │      ↓                                                     │
 │  RENDERED L1 PROMPT (what the LLM sees)                    │
 └────────────────────────────────────────────────────────────┘
 ```
 
-L2 sees a **catalogue block** in its own prompt — one line per registry entry with current state — so L2 always knows what L1 is receiving. No hidden state.
+Every signal name in the layout maps to a renderer `(Bundle) → str` in `SIGNALS` (`dispatch_hub.py`). Renderers are layer-agnostic — the same `plan` renderer feeds L1, L2, and L3.
 
-## Registry — `L1GenerateField`
+## Layout — `L1Layout`
 
-Closed `enum.StrEnum` in `promptpotter/application/optimization/pipeline.py`. Two subsets:
+`L1Layout` (`promptpotter/domain/l1_layout.py`) is a Pydantic model with one list per addressable slot:
 
-| Kind | Members | L2-mutable | Source |
-|------|---------|------------|--------|
-| Section | `pipeline_schema_text`, `failure_analysis`, `axes_l1`, `task_context`, `escalation_probe`, `escalation_alert`, `l2_brief`, `plan` | yes | each has a `_section_*` renderer |
-| Scalar | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt` | no — factual | computed in `compile_l1_surface` |
+| Slot | Mutable by L2 |
+|------|---------------|
+| `persona` | yes |
+| `task_intent` | yes |
+| `problem_description` | yes |
+| `thinking_style` | yes |
 
-The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output parser drops override keys not in this subset (with a warning log) — typos don't propagate.
+`answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's signal renderings are appended.
 
-**Adding a section:**
-1. Add an enum member to `L1GenerateField`.
-2. Implement a `_section_<name>(state: DispatchState) -> str` renderer.
-3. Wire `<name>` into `_L1_GENERATE_SECTION_RENDERERS` and `_L1_GENERATE_FIELD_DESCRIPTIONS`.
-4. Append `<name>: str = ""` to `L1GenerateSurface`.
-5. Add `<name>` to `L1_GENERATE_SECTION_FIELDS` and the `to_prompt_vars` mapping.
-6. Add `{{<name>}}` to `optimizer_pipeline.json::resolved_prompts['l1_generate/1'].problem_description` body.
+`L1_POSSIBLE` (subset of `SIGNALS`) is the menu L2 picks from. L2-internal signals (`current_params`, `l1_signal_catalogue`, `l1_rendered_prompt`, `l2_history`) are deliberately excluded so L1 can't see L2's own state. `L1_MANDATORY` (`plan`, `l2_directive`, `rendered_prompt`, `pipeline_axes`) must appear somewhere across the slots — without these L1 has no parent prompt, no plan, no brief, and no mutation surface.
 
-**Removing a section:** delete the enum member. The deletion is the deliberate code change — L2 cannot drop a section by emitting an override, only gate it off via `scheme_overrides[name] = False`.
+Default layout (`default_l1_layout`): `l2_directive` in `task_intent`; `rendered_prompt`, `pipeline_axes`, `plan`, `diagnostics`, `failures` in `problem_description`. Most L2 fires don't touch the layout.
 
-## Compile path
+## Dispatch hub — `DispatchHub`
 
-`compile_l1_surface(cycle, *, round_num, n_variants)` walks `L1_GENERATE_SECTION_FIELDS` and applies overrides in this order:
+Single ingress for every optimizer prompt. Three entry points, all stateless:
 
-1. `cycle.opt_sp.l1_section_overrides.get(name) is False` → empty string.
-2. `name in cycle.opt_sp.l1_section_overrides_text` → use that text verbatim.
-3. Otherwise → call the registered `_section_*` renderer.
+| Entry | Used by | Returns |
+|-------|---------|---------|
+| `render(name, bundle)` | internal | one signal's text |
+| `fill_l1(template, layout, bundle)` | L1 generate | `PromptTemplate` with layout-driven content appended to slots |
+| `fill_fixed(template, bundle)` | L1 critique, L2, L3 | `{var: text}` kwargs for `compile_prompt` |
 
-After section assembly, scalars (`n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt`) are populated from `cycle.current_accuracy`, `cycle.current_results`, `cycle.opt_sp.render()`, and the `n_variants` argument.
+`Bundle` is the per-call frozen state: `(layer, opt_sp, pipeline_schema, cycle_slice, latest_diagnostics, latest_critique)`. Built once via `build_bundle(layer, cycle)`; consumed by the fill methods.
 
-`L1GenerateSurface.to_prompt_vars()` returns a `dict[str, str]` mapping each `L1GenerateField.value` to its rendered string — fed directly to `run_optimizer_node(prompt_vars=...)`.
+L1 generate uses `fill_l1`: walks `L1_LAYOUT_SLOTS`, calls `DispatchHub.render(name, bundle)` per signal, appends results to the slot's static text. L1 critique / L2 / L3 use `fill_fixed`: scans `{{name}}` placeholders in the template body and resolves each through the registry.
 
-## Whole-body override — `OptSearchPoint.l1_template_override`
+Both modes feed `compile_prompt(**hub_dict, **extras)`. Template-author scalars (`n_variants`, `accuracy_pct`, `n_queries` for L1) are the *extras*; everything that depends on optimizer state is the hub's output.
 
-When L2 sets `template_override`, the new body lands on `cycle.opt_sp.l1_template_override`. `l1.l1_generate()` handles it:
+## Validation — split HARD / SOFT
 
-```python
-template = load_optimizer_prompt("l1_generate")
-if cycle.opt_sp.l1_template_override:
-    template = template.model_copy(
-        update={"problem_description": cycle.opt_sp.l1_template_override}
-    )
-```
+`validate_l1_layout(layout, prior_layout)` enforces:
 
-Authors of `template_override` must include `{{l2_brief}}` in the body so future briefs flow through. No parser-level enforcement — contract documented for L2's prompt and operator review.
+* HARD — missing mandatory placeholder, name outside `L1_POSSIBLE`, duplicate within a slot. Caller rolls back to the prior layout; outcomes append to `opt_sp.l2_output_failures` for self-healing on the next L2 fire.
+* SOFT — layout unchanged from prior. Apply with warning logged; flagged as `score=0.5` so L3 sees the churn signal next replan.
+
+L2's parser (`escalation._parse_l2`) coerces `{slot: [name, ...]}` into `L1Layout`, validates, and only writes the new layout to OSP when HARD checks pass.
+
+## Adding a signal
+
+1. Implement `_r_<name>(b: Bundle) -> str` in `dispatch_hub.py`. Return `""` when the bundle's source field is empty — empty signals are skipped by `fill_l1` so they don't waste tokens.
+2. Register in `SIGNALS`.
+3. If L2 may pick it for L1's layout, add to `L1_POSSIBLE`. If it's part of L1's contract, add to `L1_MANDATORY` — the validator will then refuse layouts that drop it.
+4. Reference `{{<name>}}` in any fixed template body that should resolve through `fill_fixed`.
+
+Renderers stay layer-agnostic. Per-layer specialisation is the kind of complexity the hub exists to remove — if a signal needs to differ for L2 vs L3, that's two signals.
 
 ## File-line anchors
 
-- `L1GenerateField` + descriptions + section renderer map: `promptpotter/application/optimization/pipeline.py`
-- `L1GenerateSurface` dataclass + `compile_l1_surface`: same file
-- `L2RefineStrategy.build_result` (validates override keys): same file
-- L1 entry point: `promptpotter/application/optimization/l1.py::l1_generate`
-- OSP override fields: `promptpotter/domain/opt_search_point.py` — `l1_section_overrides`, `l1_section_overrides_text`, `l1_template_override`
+- `SIGNALS`, `Bundle`, `DispatchHub`, `build_bundle`: `promptpotter/application/optimization/dispatch_hub.py`
+- `L1Layout`, `L1_POSSIBLE`, `L1_MANDATORY`, `L1_LAYOUT_SLOTS`, `default_l1_layout`, `validate_l1_layout`: `promptpotter/domain/l1_layout.py`
+- L1 generate compose path: `promptpotter/application/optimization/l1.py::l1_generate`
+- OSP layout field: `promptpotter/domain/opt_search_point.py` — `l1_layout` (in `MEMORY_FIELDS`)
 
 L2-side orchestration: [`l2-internals.md`](l2-internals.md).

@@ -4,7 +4,7 @@ Implementation notes for architectural seams not obvious from a single file. AI 
 
 Four things every contributor needs to understand:
 
-1. **Prompt structure** — the 8-field scheme + per-layer surface registries.
+1. **Prompt structure** — the 8-field scheme + the dispatch hub that fills it.
 2. **Dispatch** — which layer fires next, and where the decision lives.
 3. **Scoring node** — the one node that's deterministic, not LLM-driven.
 4. **Cross-run memory** — what persists between runs.
@@ -13,90 +13,62 @@ Four things every contributor needs to understand:
 
 ## 1. Prompt structure
 
-Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders a `PromptTemplate` (`domain/opt_search_point.py:64`). Eight fields:
+Every optimizer LLM node — `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — renders a `PromptTemplate` (`promptpotter/domain/opt_search_point.py`). Eight fields, in render order:
 
 ```
 persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `archive → AxisIndex → DispatchState → sections → surface → LLM`. Sections are pure formatters `(state) → str`; the surface is the typed payload that lands in `{{variable}}` holes.
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. The hub has no state.
 
-**Invariant:** no prompt site summarizes its own data. If a field isn't in the surface registry, it doesn't enter a prompt. L2 owns L1's surface; L3 owns L2's. The catalogue is code-derived, so capabilities can't silently disappear.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `SIGNALS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear.
 
-### Per-layer surfaces
+### Per-layer composition
 
-| Layer | Surface | Mutator |
-|-------|---------|---------|
-| L1 generate | `L1GenerateSurface` (8 sections + 4 scalars) | L2 (via OSP overrides) |
-| L1 critique | `{{dispatch_msg}}` blob built by `compile_l1_critique_blob` | (none — internal) |
-| L2 context | `L2Surface` (incl. L1's field catalogue) | L3 |
-| L3 plan | multi-hole template (6 holes) | (top of stack) |
+| Layer | Composition path | What L2 controls |
+|-------|------------------|------------------|
+| L1 generate | `fill_l1(template, opt_sp.l1_layout, bundle)` — appends signals to slots | the layout (per-slot signal lists) |
+| L1 critique | `fill_fixed(template, bundle)` — resolves `{{name}}` placeholders | (none — internal) |
+| L2 context | `fill_fixed(template, bundle)` | (none) |
+| L3 plan | `fill_fixed(template, bundle)` | (none) |
 
-Every optimizer LLM call follows the same path: `DispatchState (per-call) → LAYER_CONFIGS[layer] ({var: section_renderer}) → compile_prompt_vars (applies OSP overrides, merges per-call extras) → run_optimizer_node (renders, calls LLM)`.
+L1 is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `SIGNALS`. Same hub, same registry, same `Bundle` for every call.
 
 ### Field channels between layers
 
-| Field | Writer | Reader(s) | Lifetime |
-|-------|--------|-----------|----------|
-| `dispatch_msg` | `compile_l1_critique_blob` | L1-critique | per-call, not persisted |
-| `l1_critique_text` (+ critique fields) | L1-critique | L1-generate, L2 | one round (cleared by `clear_volatile`) |
-| `l2_brief` | L2 | L1-generate | one round (cleared by `clear_volatile`) |
-| `l1_section_overrides` / `_text` | L2 | L1-generate `read_overrides` | persistent (memory) |
-| `plan` | L3 | L1-generate, L2 | persistent until next L3 (never cleared) |
+| OSP field | Writer | Reader(s) | Lifetime |
+|-----------|--------|-----------|----------|
+| `l1_critique_text` | L1 critique | L1 generate, L2 (via signals on the bundle) | one round (cleared by `clear_volatile`) |
+| `l2_brief` | L2 | L1 generate (`l2_directive` signal) | one round (cleared by `clear_volatile`) |
+| `l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
+| `plan` | L3 | L1 generate, L2 (`plan` signal in both templates) | persistent — never cleared |
+| `l2_output_failures` | L2 parser + layout validator | L3 (`failures` signal) | persistent until L3 fires |
+| `l3_output_failures` | L3 parser | L3 next fire (`failures` signal) | persistent |
 
-**Symmetric plan injection:** L3 writes `plan` to `OptSearchPoint`; both L1-generate **and** L2 read it. L1 receives it as a strategic constraint; L2 as the operating context for its brief. (`l2_brief` flows L2→L1; `plan` flows L3→{L1, L2}.)
+**Symmetric plan injection:** L3 writes `plan`; both L1 generate and L2 read it via the same `_r_plan` renderer. L1 sees it as a strategic constraint; L2 as the operating context for its directive. (`l2_brief` flows L2→L1; `plan` flows L3→{L1, L2}.)
 
-### L1 / L2 surface field reference
+### Signal registry — what's in `SIGNALS`
 
-Retention legend: `memory` (checkpointed with the candidate), `opt_sp` (on the optimizer state, checkpointed), `transient` (computed per-round), `config` (immutable within a cycle), `axes` (cross-campaign).
+Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` (empty when the source field is empty — empty signals are skipped by the fillers).
 
-| Field | L1 | L2 | Retention | Description |
-|-------|----|----|-----------|-------------|
-| `pipeline_schema_text` | ✓ | — | config | Pipeline node/param catalogue. |
-| `failure_analysis` | ✓ | — | transient | Top-3 clustered failure patterns. |
-| `axes_l1` | ✓ | — | axes | Cross-campaign digest: clusters, dead queries, top axes / values. |
-| `task_context` | ✓ | — | opt_sp | Structured domain context (read-only from L1; L2 edits). |
-| `escalation_probe` | ✓ | — | memory | Probe-round per-query warning dump. |
-| `escalation_alert` | ✓ | — | memory | Aggregated escalation alert; suppressed by an active `l2_brief`. |
-| `l2_brief` | BRIEF: | PREVIOUS BRIEF: | memory | One-round window; cleared on improvement. The only guidance channel into L1 generate. |
-| `plan` | ✓ | ✓ | opt_sp | L3's strategic plan; symmetric read. |
-| `escalation_section` | — | ✓ | transient | Aggregated pipeline stability report. |
-| `warning_inventory` | — | ✓ | memory | Per-query warning breakdown; L2 fallback. |
-| `validation_failures` | — | ✓ | transient | L1 parse-time invariant violations — Loop 1 input. |
-| `runtime_failures` | — | ✓ | memory | Mid-eval degradation records — Loop 2 input. |
-| `l2_output_failures` | — | (L3) | memory | Validator outcomes on L2's output — Loop 4 input. |
-| `axes_l2` | — | ✓ | axes | Cross-campaign strategic digest. |
+| Signal | Reads from `Bundle` | Used by |
+|--------|---------------------|---------|
+| `plan` | `opt_sp.plan` | L1, L2, L3 |
+| `l2_directive` | `opt_sp.l2_brief` | L1, L3 (preview), L2 (own prior brief) |
+| `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt), L3 (preview) |
+| `pipeline_axes` | `pipeline_schema` | L1 (mutation surface) |
+| `diagnostics` | `latest_diagnostics` (`RoundDiagnostics`) | L1, L2, L3 |
+| `failures` | `opt_sp.{validation,runtime,escalation_log,warning_inventory,l2_output,l3_output}_failures` | L1, L2, L3 |
+| `task_context` | `opt_sp.task_context` | L1, L2 |
+| `critique` | `latest_critique` | L1, L2, L3 |
+| `current_params` | `opt_sp.optimizer_params` | L2 |
+| `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
+| `l1_rendered_prompt` | filled L1 template (recursive into `fill_l1`) | L2, L3 |
+| `cycle_position` | `cycle_slice` (round / stall / best counters) | L2, L3 |
+| `l2_history` | `cycle_slice` + `opt_sp.optimizer_params` | L3 only |
 
-L2 also receives an `l1_generate_field_catalogue` hole — a code-derived menu of every L1-generate registry entry with current visibility / override state. See [`l1-generate-surface.md`](l1-generate-surface.md).
-
-L2 writes back a flat dict — any subset of `brief`, `optimizer_params`, `task_context`, `scheme_overrides`, `text_overrides`, `template_override`, `action`. Each field lands directly on the corresponding `OptSearchPoint` field. See [`l2-internals.md`](l2-internals.md).
-
-### L1 critique blob composites
-
-The critique phase runs inside L1 after scoring. Four composite sections in order, joined with `\n\n`:
-
-| Section | Inner blocks |
-|---------|--------------|
-| `ROUND_REPORT` | scoring summary, anomaly flags, pipeline health, candidate rank analysis, round evolution, this-round trajectory + diff |
-| `PER_QUERY_REPORT` | runtime failures, query categories, failure details, successes |
-| `HISTORICAL_CONTEXT` | `AxisIndex`: discriminating queries, failure clusters, tractability, exhausted axes, value trends |
-| `AVAILABLE_SCHEMA_MUTATIONS` | Pipeline nodes with mutable output schemas |
-
-Assembled by `compile_l1_critique_blob(state)` and passed as the `dispatch_msg` extra. Output flows into L2 refine, which compresses it into a brief that L1 generate reads.
-
-### L3 multi-hole template
-
-L3 fires when L2 stalls. Six explicit holes:
-
-| Hole | Source |
-|------|--------|
-| `{{current_plan}}` | Current strategic plan |
-| `{{l2_summary}}` | Last 3 L2 rounds — what changed, whether accuracy moved |
-| `{{rendered_prompt}}` | Current prompt rendered as a single string |
-| `{{pipeline_section}}` | Current pipeline parameters |
-| `{{runtime_failures_section}}` | Runtime failures across rounds |
-| `{{axes_digest}}` | `AxisIndex.digest_for_l3()`: rankings, bottlenecks, clusters, persistent failures |
+L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L1-internal signals (`current_params`, `l1_signal_catalogue`, `l1_rendered_prompt`, `l2_history`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1.
 
 ---
 
@@ -174,8 +146,8 @@ archive/                            MeasurementArchive
 
 | Page | Covers |
 |------|--------|
-| [L2 internals](l2-internals.md) | L2 firing, surface, output, OSP mutations |
-| [L1-generate surface](l1-generate-surface.md) | `L1GenerateField` registry, override order |
+| [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
+| [L1 layout + dispatch hub](l1-generate-surface.md) | `SIGNALS` registry, `L1Layout`, `DispatchHub` |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |
 
