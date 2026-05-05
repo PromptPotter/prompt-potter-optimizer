@@ -32,8 +32,9 @@ methodology. Registered in
 ## Pipeline Notes
 
 - Single `llm_only` node — prompt flows through `pipeline_params.llm_only.prompt`
-- `max_tokens: 32000`, `reasoning_effort: "high"` — competition math needs
-  long reasoning chains; lower settings risk empty outputs on harder problems
+- Default target: `openrouter:mistralai/mistral-small-3.2-24b-instruct`
+  (fast, no reasoning_effort knob). Switch to `groq:openai/gpt-oss-120b`
+  with `reasoning_effort: "high"` when chasing accuracy on harder problems
 - Optimization target: prompt template (reasoning strategy, verification
-  steps, answer formatting), `reasoning_effort`, `temperature`
+  steps, answer formatting), `temperature`
 - Prompts should instruct the model to put the final answer in `\boxed{N}` format

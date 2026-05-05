@@ -19,8 +19,8 @@
       "l3_temperature": 0.5
     },
     "optimizer_llm": {
-      "model": "openai/gpt-oss-120b",
-      "provider": "groq",
+      "model": "mistralai/mistral-small-3.2-24b-instruct",
+      "provider": "openrouter",
       "temperature": 0.4,
       "max_tokens": 2000
     }

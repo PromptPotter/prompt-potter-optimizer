@@ -4,7 +4,7 @@
   "description": "Competition math reasoning — prompt optimization via TermNorm /matches with the llm_only pipeline.",
   "backend_name": "TermNorm",
   "backend_type": "termnorm",
-  "available_models": ["openai/gpt-oss-120b"],
+  "available_models": ["mistralai/mistral-small-3.2-24b-instruct", "openai/gpt-oss-120b"],
   "nodes": {
     "llm_only": {
       "type": "generation",
@@ -12,9 +12,9 @@
       "node_role": "ranker",
       "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies; self-healing spots real truncations.",
       "config": {
-        "model": "openai/gpt-oss-120b",
-        "temperature": 0.0,
-        "reasoning_effort": "high"
+        "provider": "openrouter",
+        "model": "mistralai/mistral-small-3.2-24b-instruct",
+        "temperature": 0.0
       },
       "prompt_meta": {
         "family": "llm_only",
@@ -42,7 +42,7 @@
     "default": ["llm_only"]
   },
   "llm_defaults": {
-    "provider": "groq",
-    "model": "openai/gpt-oss-120b"
+    "provider": "openrouter",
+    "model": "mistralai/mistral-small-3.2-24b-instruct"
   }
 }
