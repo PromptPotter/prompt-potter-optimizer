@@ -953,12 +953,19 @@ async def execute_round(
     # Compute deterministic post-scoring stats once and attach to the round
     # result. The dispatch hub's ``diagnostics`` signal reads this; rendering
     # is layer-agnostic so the same payload feeds L1_CRITIQUE / L2 / L3.
+    # ``cycle.probe_next_round`` is still True at this point — runner only
+    # resets it after ``absorb_round`` lands. Reading ``best_accuracy`` here
+    # is the pre-probe full-set best (probe didn't fold yet).
     rounds_history = [*cycle.rounds, round_result]
+    prior_full_accuracy = cycle.tracking.best_accuracy if cycle.probe_next_round else 0.0
     round_result.diagnostics = compute_round_diagnostics(
         round_result,
         rounds_history,
         session.pipeline_schema,
         prompt_chars=len(cycle.opt_sp.render()),
+        probe_just_completed=cycle.probe_next_round,
+        axis_tested=cycle.last_l2_axis,
+        prior_full_accuracy=prior_full_accuracy,
     )
 
     critique_text = ""

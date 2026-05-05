@@ -791,7 +791,17 @@ class Cycle:
     rounds: list[RoundResult] = field(default_factory=list)
     tracking: TrackingState = field(default_factory=TrackingState)
     opt_sp: OptSearchPoint = field(default_factory=OptSearchPoint)
+    # Inter-round bridge state: ``probe_next_round`` set by L2 when it picks
+    # ``action="probe_round"``; consumed and reset on the very next round.
+    # ``last_l2_axis`` is the most recent ``axis_targeted`` from L2, read by
+    # ``compute_round_diagnostics`` to label probe outcomes. Neither is folded
+    # from the ledger today: a resume that lands inside the one-round gap
+    # between an L2 fire and the probe round drops the probe (the next round
+    # runs full-set) and renders ``axis_tested=""``. Acceptable trade —
+    # ``PROBE_ROUND_COMMITMENT`` is ARCHIVAL so divergence isn't detected,
+    # and probe outcomes are L2/L3 telemetry rather than control-flow signals.
     probe_next_round: bool = False
+    last_l2_axis: str = ""
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
     # Flushed into the next round_data's `decisions` before campaign_store.save_round_file.

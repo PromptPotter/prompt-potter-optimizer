@@ -1,7 +1,7 @@
 """Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB
 elimination, layout validators, sweep payload round-trip.
 
-Six named invariants:
+Seven named invariants:
   1. L1 ``detect_invariants``: a candidate is a non-empty unique mutation
      of the parent OSP, else a ValidationFailure attaches → synth-0
      downstream. Idempotent under repeat calls; pipeline_params_override
@@ -22,14 +22,24 @@ Six named invariants:
   6. ``SweepPayload`` round-trips through ``OptSearchPoint``: brief +
      l1_layout dict survive ``model_dump`` → reload; mandatory layout
      placeholders enforced; extra keys rejected at parse.
+  7. L2 ``action`` channel: ``probe_round`` round-trips through
+     ``_parse_l2``; garbage values default to ``normal_round``;
+     ``_apply_l2`` sets ``cycle.probe_next_round`` + records a
+     ``PROBE_ROUND_COMMITMENT`` decision keyed on the action.
 """
 
 from __future__ import annotations
 
+import types
+
 import numpy as np
 import pytest
 
-from promptpotter.application.optimization.escalation import apply_sweep_payload_to_osp
+from promptpotter.application.optimization.escalation import (
+    _apply_l2,
+    _parse_l2,
+    apply_sweep_payload_to_osp,
+)
 from promptpotter.application.optimization.l1_validators import detect_invariants
 from promptpotter.application.optimization.l2_validators import (
     L2_DIRECTIVE_LENGTH_FLOOR,
@@ -42,7 +52,7 @@ from promptpotter.application.optimization.l2_validators import (
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
-from promptpotter.domain.run_records import SweepPayload
+from promptpotter.domain.run_records import DecisionKind, SweepPayload
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
@@ -329,3 +339,73 @@ def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
     with pytest.raises(ValueError, match="hard validators"):
         apply_sweep_payload_to_osp(osp, payload)
+
+
+# ===========================================================================
+# L2 action channel — probe-round wire field + commitment decision
+# ===========================================================================
+
+
+def _l2_cycle_stub() -> types.SimpleNamespace:
+    """Minimal Cycle attributes _apply_l2 reads."""
+    from promptpotter.application.optimization.cycle import EscalationState
+
+    return types.SimpleNamespace(
+        opt_sp=_osp(),
+        escalation=EscalationState(),
+        pending_decisions=[],
+        probe_next_round=False,
+        last_l2_axis="",
+        tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
+    )
+
+
+def test_parse_l2_round_trips_probe_action_and_axis():
+    raw = {
+        "directive": "Probe persona axis using the warned subset.",
+        "action": "probe_round",
+        "axis_targeted": "persona",
+        "rationale": "test",
+    }
+    result = _parse_l2(raw, _osp(), prompt="<prompt>")
+    assert result.action == "probe_round"
+    assert result.axis_targeted == "persona"
+
+
+def test_parse_l2_invalid_action_defaults_to_normal_round():
+    raw = {"directive": "x" * 200, "action": "garbage", "rationale": "test"}
+    result = _parse_l2(raw, _osp(), prompt="<prompt>")
+    assert result.action == "normal_round"
+
+
+def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
+    cycle = _l2_cycle_stub()
+    raw = {
+        "directive": "Probe persona axis using the warned subset.",
+        "action": "probe_round",
+        "axis_targeted": "persona",
+        "rationale": "test",
+    }
+    result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
+    _apply_l2(cycle, result, round_num=3)
+
+    assert cycle.probe_next_round is True
+    assert cycle.last_l2_axis == "persona"
+    last = cycle.pending_decisions[-1]
+    assert last.kind == DecisionKind.PROBE_ROUND_COMMITMENT
+    assert last.outcome is True
+    assert last.data["action"] == "probe_round"
+    assert last.data["axis_targeted"] == "persona"
+
+
+def test_apply_l2_normal_action_records_commitment_without_probe_state():
+    cycle = _l2_cycle_stub()
+    raw = {"directive": "x" * 200, "action": "normal_round", "rationale": "test"}
+    result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
+    _apply_l2(cycle, result, round_num=3)
+
+    assert cycle.probe_next_round is False
+    last = cycle.pending_decisions[-1]
+    assert last.kind == DecisionKind.PROBE_ROUND_COMMITMENT
+    assert last.outcome is False
+    assert last.data["action"] == "normal_round"

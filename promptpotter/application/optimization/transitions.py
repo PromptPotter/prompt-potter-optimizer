@@ -2,16 +2,16 @@
 
 The actual ``L2`` / ``L3`` ``LayerStrategy`` instances live in
 ``escalation.py``; this module is what they share — ``TransitionResult``
-and ``run_layer_transition``. V1 strips the L2 ``action`` channel, the
-L1 surface override fan-out, and the L3 ``pipeline_params`` channel —
-those are all deferred (see the plan at the top of this directory).
+and ``run_layer_transition``. V1 keeps the L2 ``action`` channel
+(``normal_round`` vs ``probe_round``) but strips the L1 surface override
+fan-out and the L3 ``pipeline_params`` channel.
 """
 
 from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.optimization.llm_call import run_optimizer_node
 from promptpotter.domain.l1_layout import L1Layout
@@ -25,9 +25,13 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.escalation import LayerStrategy
 
 __all__ = [
+    "OptimizerAction",
     "TransitionResult",
     "run_layer_transition",
 ]
+
+
+OptimizerAction = Literal["normal_round", "probe_round"]
 
 
 @dataclass
@@ -35,14 +39,20 @@ class TransitionResult:
     """L2/L3 transition result.
 
     L2 may write any combination of ``l2_brief``, ``l1_layout``,
-    ``optimizer_params`` and ``task_context``. L3 only writes ``plan``.
-    The validator outcomes ride alongside so the caller can persist them
-    to the OSP for cross-fire self-healing.
+    ``optimizer_params`` and ``task_context``, plus an ``action``
+    selecting ``normal_round`` (default) or ``probe_round`` (re-run only
+    the warned-query subset under the same OSP). L3 only writes
+    ``plan``. The validator outcomes ride alongside so the caller can
+    persist them to the OSP for cross-fire self-healing.
+    ``axis_targeted`` names the axis the directive tests; required prose
+    when ``action="probe_round"``, optional otherwise.
     """
 
     opt_search_point: OptSearchPoint
     task_context: TaskDecomposition | None = None
     l2_brief: str = ""
+    action: OptimizerAction = "normal_round"
+    axis_targeted: str = ""
     l1_layout: L1Layout | None = None
     l2_output_failures: list[ValidatorOutcome] = field(default_factory=list)
     l3_output_failures: list[ValidatorOutcome] = field(default_factory=list)

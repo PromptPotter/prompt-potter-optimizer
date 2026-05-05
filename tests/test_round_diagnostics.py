@@ -1,15 +1,19 @@
 """``compute_round_diagnostics`` — pure function over scoring data.
 
-Three named invariants:
+Four named invariants:
   1. With no pipeline_schema, candidate-key resolution returns no candidates,
      so all valid samples land in ``not_found`` and ``n_valid`` counts every
      non-error result.
   2. Multi-round trajectories classify against the documented
      ``healthy / oscillating / plateau / regressing / ceiling`` axis.
   3. The function is deterministic — same input → same output.
+  4. ``probe_outcome`` is populated only when ``probe_just_completed=True`` —
+     the contract that lets L2/L3 read post-probe footprints from diagnostics.
 """
 
 from __future__ import annotations
+
+import pytest
 
 from promptpotter.application.optimization.round_diagnostics import (
     compute_round_diagnostics,
@@ -74,3 +78,26 @@ def test_pure_function_deterministic_output():
     assert a.rank_buckets == b.rank_buckets
     assert a.top_k_accuracy == b.top_k_accuracy
     assert a.trajectory == b.trajectory
+
+
+def test_probe_outcome_gated_by_probe_just_completed_flag():
+    """probe_outcome is populated only when probe_just_completed=True."""
+    results = [_hit("q1", "a"), _hit("q2", "b"), _miss("q3", "c"), _miss("q4", "d")]
+    rr = _round(0, 0.5, results)
+
+    diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
+    assert diag.probe_outcome is None
+
+    diag_probe = compute_round_diagnostics(
+        rr,
+        [rr],
+        pipeline_schema=None,
+        probe_just_completed=True,
+        axis_tested="persona",
+        prior_full_accuracy=0.7,
+    )
+    assert diag_probe.probe_outcome is not None
+    assert diag_probe.probe_outcome.axis_tested == "persona"
+    assert diag_probe.probe_outcome.target_subset_size == 4
+    assert diag_probe.probe_outcome.hit_rate == 0.5
+    assert diag_probe.probe_outcome.delta_vs_full == pytest.approx(-0.2)

@@ -7,9 +7,10 @@ forbidden by ``tests/test_layer_imports.py``. Both layers share the same
 into the ``L2`` and ``L3`` instances.
 
 V1 contract:
-* L2 writes ``directive`` (required) + optional ``l1_layout`` /
-  ``optimizer_params`` / ``task_context``. No ``action`` (no probe rounds),
-  no L1-surface scheme/text/template overrides.
+* L2 writes ``directive`` (required) + ``action`` (``normal_round`` or
+  ``probe_round``) + optional ``axis_targeted`` / ``l1_layout`` /
+  ``optimizer_params`` / ``task_context``. No L1-surface
+  scheme/text/template overrides.
 * L3 writes ``plan`` (required). No ``pipeline_params`` deltas.
 """
 
@@ -33,6 +34,7 @@ from promptpotter.application.optimization.l2_validators import (
 )
 from promptpotter.application.optimization.llm_call import load_optimizer_prompt
 from promptpotter.application.optimization.transitions import (
+    OptimizerAction,
     TransitionResult,
     run_layer_transition,
 )
@@ -166,6 +168,13 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
 
     directive = raw.get("directive", "") if isinstance(raw.get("directive"), str) else ""
 
+    raw_action = raw.get("action")
+    action: OptimizerAction = (
+        raw_action if raw_action in ("normal_round", "probe_round") else "normal_round"
+    )
+    raw_axis = raw.get("axis_targeted")
+    axis_targeted = raw_axis if isinstance(raw_axis, str) else ""
+
     proposed_layout = _coerce_l1_layout(raw.get("l1_layout"))
     layout_outcomes: list = []
     accepted_layout: L1Layout | None = None
@@ -188,6 +197,8 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
         task_context=new_task_context,
         l2_brief=directive,
+        action=action,
+        axis_targeted=axis_targeted,
         l1_layout=accepted_layout,
         l2_output_failures=failures,
         debug_prompt=prompt,
@@ -207,6 +218,27 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
     )
+    # Don't clobber prior axis when the LLM omits it — a stale axis is more
+    # informative than an empty one for the next probe-outcome render.
+    if result.axis_targeted:
+        cycle.last_l2_axis = result.axis_targeted
+
+    is_probe = result.action == "probe_round"
+    record_decision(
+        cycle.pending_decisions,
+        DecisionKind.PROBE_ROUND_COMMITMENT,
+        {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
+        is_probe,
+        data={
+            "action": result.action,
+            "l2_directive_preview": (result.l2_brief or "")[:200],
+            "changes_description": result.opt_search_point.lineage.changes_description or "",
+            "axis_targeted": result.axis_targeted,
+        },
+        round=round_num,
+    )
+    if is_probe:
+        cycle.probe_next_round = True
 
 
 def _l2_enter(cycle: Cycle) -> dict[str, Any]:
@@ -232,6 +264,8 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_search_point.lineage.changes_description or "",
+        "action": result.action,
+        "axis_targeted": result.axis_targeted,
         "warned_queries": warned,
         "top_warning": top,
         "l2_prompt": result.debug_prompt,

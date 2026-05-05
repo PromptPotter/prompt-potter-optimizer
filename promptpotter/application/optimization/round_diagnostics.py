@@ -22,6 +22,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import (
     EvolutionRow,
     NearMiss,
+    ProbeOutcome,
     RoundDiagnostics,
     SampleDiag,
     TrajectoryClass,
@@ -44,12 +45,17 @@ def compute_round_diagnostics(
     pipeline_schema: PipelineSchema | None,
     *,
     prompt_chars: int = 0,
+    probe_just_completed: bool = False,
+    axis_tested: str = "",
+    prior_full_accuracy: float = 0.0,
 ) -> RoundDiagnostics:
     """Compute typed deterministics over a completed round.
 
     *rounds_history* MUST contain *round_result* as its last element —
     callers fold the round into ``cycle.rounds`` before computing
-    diagnostics.
+    diagnostics. ``probe_just_completed`` opts the round into a
+    ``ProbeOutcome`` summary computed from the warned-query subset
+    accuracy vs. the pre-probe full-set best.
     """
     candidate_keys = candidate_keys_from_schema(pipeline_schema)
     results = round_result.results or []
@@ -61,6 +67,15 @@ def compute_round_diagnostics(
     trajectory, trajectory_desc = _trajectory(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
     samples = _sample_diagnostics(results, candidate_keys, pipeline_schema)
+    probe_outcome: ProbeOutcome | None = None
+    if probe_just_completed:
+        subset_size = len(results)
+        probe_outcome = ProbeOutcome(
+            axis_tested=axis_tested or "unspecified",
+            target_subset_size=subset_size,
+            hit_rate=round_result.accuracy,
+            delta_vs_full=round_result.accuracy - prior_full_accuracy,
+        )
 
     return RoundDiagnostics(
         rank_buckets=rank_buckets,
@@ -83,6 +98,7 @@ def compute_round_diagnostics(
         cache_share=0.0,
         prompt_chars=prompt_chars,
         samples=samples,
+        probe_outcome=probe_outcome,
     )
 
 
