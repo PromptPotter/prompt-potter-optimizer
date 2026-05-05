@@ -63,7 +63,7 @@ def _sweep_batch_id(cycle_id: str) -> str:
 def root_dir_for(tenant_root: Path, cycle_id: str) -> Path:
     """Family-root campaign dir — where telemetry binds (one continuous stream
     across all forks of the family)."""
-    return tenant_root / "campaigns" / root_cycle_id(cycle_id)
+    return tenant_root / "campaigns" / validate_path_component(root_cycle_id(cycle_id))
 
 
 def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
@@ -90,6 +90,8 @@ def campaign_dir_for(tenant_root: Path, cycle_id: str) -> Path:
 
 def sweep_batch_dir_for(tenant_root: Path, root_cid: str, batch_id: str) -> Path:
     """Sweep batch dir — holds the batch's ``index.json`` + ``forks/`` subtree."""
+    validate_path_component(root_cid)
+    validate_path_component(batch_id)
     return tenant_root / "campaigns" / root_cid / "sweeps" / batch_id
 
 
