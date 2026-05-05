@@ -4,6 +4,8 @@ import logging
 import sys
 from typing import Literal
 
+from promptpotter.config.log_redaction import SecretRedactionFilter
+
 LOG_FORMAT = "%(asctime)s %(levelname)-8s [%(name)s] %(message)s"
 LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 
@@ -56,6 +58,7 @@ def setup_logging(
         handler.setFormatter(_CliFormatter())
     else:
         handler.setFormatter(logging.Formatter(LOG_FORMAT, datefmt=LOG_DATE_FORMAT))
+    handler.addFilter(SecretRedactionFilter())
     root.setLevel(level)
     root.addHandler(handler)
     # Suppress noisy httpx request logging
