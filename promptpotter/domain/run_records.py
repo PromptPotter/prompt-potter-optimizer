@@ -23,11 +23,11 @@ from pydantic import BaseModel, ConfigDict, Field
 __all__ = [
     "DECISION_GATING",
     "CycleRecord",
-    "Decision",
     "DecisionKind",
+    "DecisionRecord",
     "GatingMode",
-    "Phase",
-    "Snapshot",
+    "PhaseRecord",
+    "SnapshotRecord",
     "SweepPayload",
     "record_decision",
 ]
@@ -92,7 +92,7 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class Decision(BaseModel):
+class DecisionRecord(BaseModel):
     """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
     model_config = ConfigDict(frozen=True)
@@ -115,7 +115,7 @@ class Decision(BaseModel):
         }
 
 
-class Phase(BaseModel):
+class PhaseRecord(BaseModel):
     """A campaign-phase boundary event (round-start, l2-fired, baseline-complete, …)."""
 
     model_config = ConfigDict(frozen=True)
@@ -128,7 +128,7 @@ class Phase(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
-class Snapshot(BaseModel):
+class SnapshotRecord(BaseModel):
     """An in-flight live-state snapshot — per-query / per-candidate / per-round.
 
     Snapshots are display state for the live dashboard and per-query log.
@@ -156,15 +156,15 @@ class Snapshot(BaseModel):
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 CycleRecord = Annotated[
-    Decision | Phase | Snapshot,
+    DecisionRecord | PhaseRecord | SnapshotRecord,
     Field(discriminator="record_type"),
 ]
 
 
 class _DecisionSink(Protocol):
-    """Anything with ``append(Decision) -> Any`` — list[Decision] or CycleLedger."""
+    """Anything with ``append(DecisionRecord) -> Any`` — list[DecisionRecord] or CycleLedger."""
 
-    def append(self, decision: Decision, /) -> Any: ...
+    def append(self, decision: DecisionRecord, /) -> Any: ...
 
 
 def record_decision(
@@ -176,9 +176,9 @@ def record_decision(
     data: dict[str, Any] | None = None,
     round: int | None = None,
 ) -> Any:
-    """Build a Decision and append to *sink*; return outcome for passthrough."""
+    """Build a DecisionRecord and append to *sink*; return outcome for passthrough."""
     sink.append(
-        Decision(
+        DecisionRecord(
             kind=kind,
             inputs_ref=dict(inputs_ref),
             outcome=outcome,

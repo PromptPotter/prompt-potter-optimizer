@@ -1,4 +1,4 @@
-"""Decision-kind registry — single seam for divergence gating.
+"""DecisionRecord-kind registry — single seam for divergence gating.
 
 These tests enforce the contract documented in
 ``promptpotter/domain/run_records.py``:
@@ -25,11 +25,11 @@ from promptpotter.application.optimization.cycle import REPLAYERS
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import (
     DECISION_GATING,
-    Decision,
     DecisionKind,
+    DecisionRecord,
     GatingMode,
-    Phase,
-    Snapshot,
+    PhaseRecord,
+    SnapshotRecord,
 )
 from promptpotter.infrastructure.ledger import CycleLedger
 
@@ -92,13 +92,13 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
     """Append decision/phase/snapshot, read back via iter() — types preserved."""
     ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
 
-    d = Decision(
+    d = DecisionRecord(
         kind=DecisionKind.ROUND_WINNER,
         inputs_ref={"candidate_ids": ["c1"], "round_num": 0},
         outcome="c1",
     )
-    p = Phase(phase="l1_generate", event="enter", round=1, payload={"n_variants": 3})
-    s = Snapshot(
+    p = PhaseRecord(phase="l1_generate", event="enter", round=1, payload={"n_variants": 3})
+    s = SnapshotRecord(
         event="sample_scored",
         round=1,
         candidate_idx=0,
@@ -112,15 +112,15 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
 
     records = list(ledger.iter())
     assert len(records) == 3
-    assert isinstance(records[0], Decision) and records[0].outcome == "c1"
-    assert isinstance(records[1], Phase) and records[1].phase == "l1_generate"
-    assert isinstance(records[2], Snapshot) and records[2].sample_idx == 4
+    assert isinstance(records[0], DecisionRecord) and records[0].outcome == "c1"
+    assert isinstance(records[1], PhaseRecord) and records[1].phase == "l1_generate"
+    assert isinstance(records[2], SnapshotRecord) and records[2].sample_idx == 4
 
 
 def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     """``_open_cycle_ledger`` opens the ledger under the per-cycle audit dir.
 
-    Phase 3 plumbing: the ledger MUST live at
+    PhaseRecord 3 plumbing: the ledger MUST live at
     ``campaigns/{cycle_id}/.runtime/ledger.jsonl`` (per-cycle scope) so a
     fork's facts never bleed into the family-root telemetry stream.
     Returns ``None`` when no store is wired (test-bypass paths).
@@ -166,13 +166,13 @@ def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
 
     records = list(ledger.iter())
     assert len(records) == 3
-    assert isinstance(records[0], Phase)
+    assert isinstance(records[0], PhaseRecord)
     assert records[0].phase == "l1_generate"
     assert records[0].payload["data"] == {"k": "v"}
-    assert isinstance(records[1], Snapshot)
+    assert isinstance(records[1], SnapshotRecord)
     assert records[1].event == "sample_scored"
     assert records[1].sample_idx == 4 and records[1].payload["result"]["hit"] is True
-    assert isinstance(records[2], Snapshot)
+    assert isinstance(records[2], SnapshotRecord)
     assert records[2].event == "candidate_scored"
     assert records[2].candidate_idx == 0
     assert records[2].payload["scores"]["accuracy"] == 0.6
@@ -181,26 +181,26 @@ def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
 def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> None:
     """A fork's iter() walks parent's records up to the cut offset, then its own.
 
-    Phase 4 contract: the fork's view of its history is parent[0:cut] +
+    PhaseRecord 4 contract: the fork's view of its history is parent[0:cut] +
     fork's own appends. Subscribers of the fork ledger only see new
     appends (the parent already broadcast its records when they
     happened) — but a downstream replay (e.g. a webapp opening the
     fork) walks the combined stream.
     """
     parent = CycleLedger.open(CycleDir(tmp_path / "parent"))
-    parent.append(Phase(phase="round", event="complete", round=0))
-    parent.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
-    parent.append(Phase(phase="round", event="complete", round=1))  # past the cut
+    parent.append(PhaseRecord(phase="round", event="complete", round=0))
+    parent.append(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
+    parent.append(PhaseRecord(phase="round", event="complete", round=1))  # past the cut
 
     fork = CycleLedger.open(CycleDir(tmp_path / "fork"))
     fork.inherit_from(parent, offset=2)  # parent's first 2 records
-    fork.append(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c2", round=1))
+    fork.append(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c2", round=1))
 
     history = list(fork.iter())
     assert len(history) == 3
-    assert isinstance(history[0], Phase) and history[0].round == 0
-    assert isinstance(history[1], Decision) and history[1].outcome == "c1"
-    assert isinstance(history[2], Decision) and history[2].outcome == "c2"
+    assert isinstance(history[0], PhaseRecord) and history[0].round == 0
+    assert isinstance(history[1], DecisionRecord) and history[1].outcome == "c1"
+    assert isinstance(history[2], DecisionRecord) and history[2].outcome == "c2"
 
 
 def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
@@ -217,7 +217,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
 
     # Round 1: not improved → l1 stall = 1.
     ledger.append(
-        Phase(
+        PhaseRecord(
             phase="round",
             event="complete",
             round=1,
@@ -231,7 +231,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     )
     # Round 2: improved → l1 stall reset to 0.
     ledger.append(
-        Phase(
+        PhaseRecord(
             phase="round",
             event="complete",
             round=2,
@@ -245,7 +245,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     )
     # L2 fires on round 3.
     ledger.append(
-        Phase(
+        PhaseRecord(
             phase="l2_context",
             event="exit",
             round=3,
@@ -261,7 +261,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     )
     # L3 fires on round 5 — must wipe L2 state to L3's entry baseline.
     ledger.append(
-        Phase(
+        PhaseRecord(
             phase="l3_plan",
             event="exit",
             round=5,
@@ -284,12 +284,12 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     assert rebuilt.l3.round == 1
     assert rebuilt.l3.best_composite_fitness_at_entry == 0.7
 
-    # Display-side Phase("round","complete") emit (no ``improved`` key) must
+    # Display-side PhaseRecord("round","complete") emit (no ``improved`` key) must
     # not double-bump the L1 stall counter — only the audit-side emit folds.
     ledger2 = CycleLedger.open(CycleDir(tmp_path / "cyc2"))
-    ledger2.append(Phase(phase="round", event="complete", round=1, payload={"l1_stall_count": 999}))
+    ledger2.append(PhaseRecord(phase="round", event="complete", round=1, payload={"l1_stall_count": 999}))
     ledger2.append(
-        Phase(
+        PhaseRecord(
             phase="round",
             event="complete",
             round=1,

@@ -77,7 +77,7 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
     would otherwise be permanently blocked from re-running that payload.
     """
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
     from promptpotter.infrastructure.ledger import CycleLedger
 
     out: dict[str, str] = {}
@@ -86,7 +86,7 @@ def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, st
         return out
     ledger = CycleLedger.open(CycleDir(parent_dir))
     for record in ledger.iter():
-        if isinstance(record, Decision) and record.kind == DecisionKind.FORK_CUT:
+        if isinstance(record, DecisionRecord) and record.kind == DecisionKind.FORK_CUT:
             src = record.data.get("source_file")
             outcome = record.outcome
             if src and outcome and store.campaigns.campaign_dir(str(outcome)).exists():

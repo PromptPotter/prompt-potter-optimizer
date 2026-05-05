@@ -29,7 +29,7 @@ from promptpotter import connectors
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import Decision, DecisionKind
+from promptpotter.domain.run_records import DecisionKind, DecisionRecord
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import (
@@ -347,10 +347,10 @@ class DashboardSnapshot(BaseModel):
 class CycleRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
-    ``record_type`` discriminates Decision / Phase / Snapshot;
+    ``record_type`` discriminates DecisionRecord / PhaseRecord / SnapshotRecord;
     ``payload`` carries the model's fields verbatim (Pydantic
     model_dump). Consumers either route by record_type or filter on
-    Decision.kind for gating events.
+    DecisionRecord.kind for gating events.
     """
 
     offset: int = Field(description="Position in events.jsonl, monotonic per cycle")
@@ -376,7 +376,7 @@ class DecisionEnvelope(BaseModel):
 
 class DecisionsResponse(BaseModel):
     cycle_id: str = Field(description="Cycle the decisions belong to")
-    decisions: list[DecisionEnvelope] = Field(description="All Decision records in append order")
+    decisions: list[DecisionEnvelope] = Field(description="All DecisionRecord records in append order")
 
 
 class ForkRef(BaseModel):
@@ -476,7 +476,7 @@ async def get_cycle_ledger(
     response_model=DecisionsResponse,
 )
 async def get_cycle_decisions(store: StoreDep, cycle_id: str):
-    """All Decision records from the cycle's ledger, in append order.
+    """All DecisionRecord records from the cycle's ledger, in append order.
 
     Filtered view over ``GET /ledger`` for the common gating-event use
     case. Includes archival kinds (probe, fork_cut) — consumers filter
@@ -485,7 +485,7 @@ async def get_cycle_decisions(store: StoreDep, cycle_id: str):
     ledger = _open_cycle_ledger_or_404(cycle_id, store)
     out: list[DecisionEnvelope] = []
     for offset, rec in enumerate(ledger.iter()):
-        if isinstance(rec, Decision):
+        if isinstance(rec, DecisionRecord):
             out.append(
                 DecisionEnvelope(
                     offset=offset,
@@ -507,7 +507,7 @@ async def get_cycle_decisions(store: StoreDep, cycle_id: str):
 async def get_cycle_forks(store: StoreDep, cycle_id: str):
     """Sibling forks minted from this cycle, derived from FORK_CUT records.
 
-    Each fork's metadata comes from a single ``Decision(kind=FORK_CUT)``
+    Each fork's metadata comes from a single ``DecisionRecord(kind=FORK_CUT)``
     in the parent's ledger — ``outcome`` is the child cycle_id,
     ``inputs_ref.from_round`` is the cut point, ``data.forked_at`` is
     the wall-clock fork time.
@@ -515,7 +515,7 @@ async def get_cycle_forks(store: StoreDep, cycle_id: str):
     ledger = _open_cycle_ledger_or_404(cycle_id, store)
     forks: list[ForkRef] = []
     for rec in ledger.iter():
-        if isinstance(rec, Decision) and rec.kind is DecisionKind.FORK_CUT:
+        if isinstance(rec, DecisionRecord) and rec.kind is DecisionKind.FORK_CUT:
             forks.append(
                 ForkRef(
                     fork_cycle_id=str(rec.outcome),

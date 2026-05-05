@@ -14,7 +14,7 @@ import them without crossing hexagonal layers.
 Forks are first-class via ``CycleLedger.inherit_from(parent, offset)``: a
 fork's ``iter()`` walks the parent's records up to ``offset``, then its
 own appends. The parent records the cut as a
-``Decision(kind=FORK_CUT, ...)`` so the divergence walker sees the
+``DecisionRecord(kind=FORK_CUT, ...)`` so the divergence walker sees the
 boundary.
 """
 
@@ -46,7 +46,7 @@ class CycleLedger:
     Replay (``replay_into``) is independent of subscribers — it walks the
     file from offset 0.
 
-    Forks: Phase 4 will add ``inherit_from(parent, offset)`` so a fork's
+    Forks: PhaseRecord 4 will add ``inherit_from(parent, offset)`` so a fork's
     ``iter()`` walks the parent's records up to the cut point before its own.
     The current implementation is the per-cycle base case.
     """

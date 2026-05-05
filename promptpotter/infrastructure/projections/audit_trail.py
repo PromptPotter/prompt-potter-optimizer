@@ -7,8 +7,8 @@ construction site, and ``from_cycle_dir`` derives the standard subpath.
 A runtime assertion in ``__init__`` rejects any path that doesn't end in
 ``/.runtime/cache/rounds`` to catch ad-hoc constructions.
 
-Round boundaries arrive via ``on_record``: ``Phase("round","enter")``
-triggers ``begin_round`` and ``Phase("round","complete")`` triggers
+Round boundaries arrive via ``on_record``: ``PhaseRecord("round","enter")``
+triggers ``begin_round`` and ``PhaseRecord("round","complete")`` triggers
 ``flush``. Per-node action data still arrives via direct calls
 (``add_action`` / ``set_node`` / ``set_l1_score``) from the LLM call
 sites and the live dashboard projection — that data isn't replayable
@@ -25,7 +25,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import Phase
+from promptpotter.domain.run_records import PhaseRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store.base import write_json
 
@@ -162,20 +162,20 @@ class AuditTrailProjection(ProjectionBase):
         self._l1_score = block
 
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
-        """Phase-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the live dashboard)."""
+        """PhaseRecord-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the live dashboard)."""
         return dict(self._sticky_nodes)
 
-    # -- Ledger subscription (Phase 3) ----------------------------------------
+    # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
-    # Round boundaries (``Phase("round", "enter"|"complete")``) drive
+    # Round boundaries (``PhaseRecord("round", "enter"|"complete")``) drive
     # ``begin_round`` and ``flush``. The baseline phase emits its own
-    # ``Phase("baseline", "enter"|"exit")`` pair before the first round; treated
+    # ``PhaseRecord("baseline", "enter"|"exit")`` pair before the first round; treated
     # as a pseudo-round so its node I/O lands in ``round_baseline.json`` instead
-    # of being silently discarded when round 0 begins. Decision and Snapshot
+    # of being silently discarded when round 0 begins. DecisionRecord and SnapshotRecord
     # records bypass this projection — decisions are archived in trial JSON and
     # snapshots are display-only.
 
-    def _handle_phase(self, record: Phase) -> None:
+    def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "round":
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round)

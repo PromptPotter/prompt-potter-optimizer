@@ -16,7 +16,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import Decision, DecisionKind, Phase
+from promptpotter.domain.run_records import DecisionKind, DecisionRecord, PhaseRecord
 from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import build_stores, campaign_dir_for, root_dir_for
 from promptpotter.main import app
@@ -46,18 +46,18 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
     )
 
     ledger = CycleLedger.open(CycleDir(cycle_dir))
-    ledger.append(Phase(phase="round", event="enter", round=0))
+    ledger.append(PhaseRecord(phase="round", event="enter", round=0))
     ledger.append(
-        Decision(
+        DecisionRecord(
             kind=DecisionKind.ROUND_WINNER,
             inputs_ref={"candidate_ids": ["c1"], "round_num": 0},
             outcome="c1",
             round=0,
         )
     )
-    ledger.append(Phase(phase="round", event="complete", round=0, payload={"acc": 0.6}))
+    ledger.append(PhaseRecord(phase="round", event="complete", round=0, payload={"acc": 0.6}))
     ledger.append(
-        Decision(
+        DecisionRecord(
             kind=DecisionKind.FORK_CUT,
             inputs_ref={"from_round": 1},
             outcome="cycle_apitest_001_fork_abc",

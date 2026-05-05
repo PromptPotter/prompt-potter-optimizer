@@ -1,4 +1,4 @@
-"""Phase enums, stop reasons, phase events — pure control-flow types."""
+"""PhaseRecord enums, stop reasons, phase events — pure control-flow types."""
 
 from __future__ import annotations
 

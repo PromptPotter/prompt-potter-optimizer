@@ -32,7 +32,7 @@ from promptpotter.domain.results import (
     CandidateProposal,
     CandidateScore,
 )
-from promptpotter.domain.run_records import Decision
+from promptpotter.domain.run_records import DecisionRecord
 from promptpotter.domain.scoring import QueryMeasurement
 
 logger = logging.getLogger(__name__)
@@ -179,7 +179,7 @@ class PopulationScoreReport(BaseModel):
     degraded_queries: int = 0
     deprecated: int = 0
     winner_evaluators: dict[str, float] = Field(default_factory=dict)
-    decisions: list[Decision] = Field(default_factory=list)
+    decisions: list[DecisionRecord] = Field(default_factory=list)
     l1_yield: float = 1.0
     l1_n_no_op: int = 0
     l1_n_duplicate: int = 0

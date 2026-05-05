@@ -18,7 +18,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import CycleRecord, Phase, Snapshot
+from promptpotter.domain.run_records import CycleRecord, PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.store.base import read_text_optional
 from promptpotter.presentation.views.display import (
     _box_bottom,
@@ -150,7 +150,7 @@ class LiveDisplay:
     def on_record(self, record: CycleRecord, offset: int) -> None:
         """Route a typed record to the corresponding internal handler."""
         del offset
-        if isinstance(record, Phase):
+        if isinstance(record, PhaseRecord):
             if record.phase == "round" and record.event == "complete":
                 payload = record.payload or {}
                 round_result = payload.get("round_result")
@@ -174,7 +174,7 @@ class LiveDisplay:
                 data=data,
             )
             self.on_phase(event, view)
-        elif isinstance(record, Snapshot):
+        elif isinstance(record, SnapshotRecord):
             ev = record.event
             payload = record.payload or {}
             if ev == "sample_started":

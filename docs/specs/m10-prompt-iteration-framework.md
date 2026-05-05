@@ -110,7 +110,7 @@ Computes `proxy_lift_corr` across all branches where the same `l1_generate_hash`
 
 ### 5. Unified fork primitive (`--sweep` is the first caller)
 
-Today `Decision(kind=FORK_CUT)` is scoring-divergence-only and its payload is `{from_round, forked_at}`. Generalize it to a typed action that **any trigger** can emit. Operator sweep is one caller; future L2/L3 rebase, L4 auto-rebase, M11 manual rewind, M12 pipeline-switch, and M11/M12 webapp-replay are additional callers built on the same code path. **One mechanism, multiple drivers.**
+Today `DecisionRecord(kind=FORK_CUT)` is scoring-divergence-only and its payload is `{from_round, forked_at}`. Generalize it to a typed action that **any trigger** can emit. Operator sweep is one caller; future L2/L3 rebase, L4 auto-rebase, M11 manual rewind, M12 pipeline-switch, and M11/M12 webapp-replay are additional callers built on the same code path. **One mechanism, multiple drivers.**
 
 **Why this shape (vs the 0.1.0 `--sweep` halt-flag).** Sweep, L2-rebase-to-historical-parent, L3-meta-replan, and scoring-divergence all answer the same shape of question: *"abandon this lineage from round N, start over from round M < N with a different payload."* They differ only in (a) who issues the cut, (b) what payload differs at the cut. Building one primitive per driver compounds tech debt. Building the typed primitive once means new drivers (L4, webapp, multi-pipeline) ship as small callers rather than re-architecture.
 
@@ -141,7 +141,7 @@ class ForkPayload(BaseModel):
     scoring_swap: dict | None = None     # forward-compat: explicit scorer change at fork
 ```
 
-`Decision(kind=FORK_CUT)` continues to carry `inputs_ref={"from_round": N}` and `outcome=new_cycle_id` (existing wire shape preserved); the new payload moves into `data.fork: ForkPayload`. Existing scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`.
+`DecisionRecord(kind=FORK_CUT)` continues to carry `inputs_ref={"from_round": N}` and `outcome=new_cycle_id` (existing wire shape preserved); the new payload moves into `data.fork: ForkPayload`. Existing scoring-divergence forks keep working — runner backfills `trigger=SCORING_DIVERGENCE`, `issued_by="system"`, `reason="scorer_mismatch:<decision_kind>"`.
 
 `FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING` — its outcome (the new cycle_id) is downstream of the divergence-checked decisions, never gating itself.
 

@@ -510,7 +510,7 @@ def test_valid_steer_swaps_round_scorer_and_archives_file(tmp_path: Path) -> Non
     assert not (session._cycle_dir / "scoring_steer.json").exists()
     assert any(p.name.startswith("scoring_steer.applied.") for p in session._cycle_dir.iterdir())
 
-    # Phase event surfaced for the operator-facing log.
+    # PhaseRecord event surfaced for the operator-facing log.
     assert len(events) == 1
     assert events[0]["phase"] == "scoring_steer"
     assert events[0]["event"] == "applied"

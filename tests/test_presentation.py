@@ -11,8 +11,8 @@ Two named invariants:
      accepts only a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or
      a CycleDir via ``from_cycle_dir`` that derives the subpath); the
      ``on_record`` ledger hook drives ``begin_round`` / ``flush`` on
-     Phase('round', enter|complete), persists the baseline phase to
-     ``round_baseline.json``, and ignores Decision records.
+     PhaseRecord('round', enter|complete), persists the baseline phase to
+     ``round_baseline.json``, and ignores DecisionRecord records.
 """
 
 from __future__ import annotations
@@ -305,51 +305,51 @@ def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
 
 
 def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
-    """Phase('round', 'enter')/'complete' from a ledger drives the recorder lifecycle.
+    """PhaseRecord('round', 'enter')/'complete' from a ledger drives the recorder lifecycle.
 
-    Phase 3 contract: an AuditTrailProjection bound to the ledger MUST
+    PhaseRecord 3 contract: an AuditTrailProjection bound to the ledger MUST
     react to round-boundary phase records — ``enter`` opens a fresh
     round, ``complete`` flushes ``round_NNNN.json`` to disk. Other
     record types are ignored at this projection's scope.
     """
-    from promptpotter.domain.run_records import Decision, DecisionKind, Phase
+    from promptpotter.domain.run_records import DecisionKind, DecisionRecord, PhaseRecord
 
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
 
     # Record an action so flush has state to write.
-    proj.on_record(Phase(phase="round", event="enter", round=4), 0)
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=4), 0)
     proj.add_action({"type": "l1_generate", "response": "ok"})
-    # An unrelated Decision must not crash or trigger a flush.
-    proj.on_record(Decision(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 1)
+    # An unrelated DecisionRecord must not crash or trigger a flush.
+    proj.on_record(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 1)
     # Round-complete triggers the disk write.
-    proj.on_record(Phase(phase="round", event="complete", round=4), 2)
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=4), 2)
 
     written = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0004.json"
-    assert written.exists(), "Phase('round', 'complete') must flush round_NNNN.json"
+    assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
 
 
 def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
     """Baseline LLM-call metadata must persist to ``round_baseline.json`` instead of being discarded.
 
-    The baseline phase emits ``Phase('baseline', 'enter'|'exit')`` before
+    The baseline phase emits ``PhaseRecord('baseline', 'enter'|'exit')`` before
     the first round's enter/complete. Pre-fix, baseline node accumulation
     leaked into round 0's ``begin_round`` slot and was warn-and-discarded.
     """
-    from promptpotter.domain.run_records import Phase
+    from promptpotter.domain.run_records import PhaseRecord
 
     cycle_dir = tmp_path / "campaigns" / "cyc_baseline"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
 
-    proj.on_record(Phase(phase="baseline", event="enter", round=0), 0)
+    proj.on_record(PhaseRecord(phase="baseline", event="enter", round=0), 0)
     proj.add_action({"type": "llm_only", "response": "answer"})
-    proj.on_record(Phase(phase="baseline", event="exit", round=0), 1)
+    proj.on_record(PhaseRecord(phase="baseline", event="exit", round=0), 1)
     # Round 0 begins fresh — no warn-and-discard, no leakage of baseline.
-    proj.on_record(Phase(phase="round", event="enter", round=0), 2)
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=0), 2)
     proj.add_action({"type": "l1_generate", "response": "ok"})
-    proj.on_record(Phase(phase="round", event="complete", round=0), 3)
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=0), 3)
 
     baseline_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_baseline.json"
     round_0_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"

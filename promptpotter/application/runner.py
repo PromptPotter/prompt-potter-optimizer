@@ -49,7 +49,12 @@ from promptpotter.domain.phases import (
     emit_phase,
 )
 from promptpotter.domain.results import CycleResult, RoundResult
-from promptpotter.domain.run_records import Decision, Phase, Snapshot, SweepPayload
+from promptpotter.domain.run_records import (
+    DecisionRecord,
+    PhaseRecord,
+    SnapshotRecord,
+    SweepPayload,
+)
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.ledger import CycleLedger
@@ -103,9 +108,9 @@ def build_baseline_cycle_id(
 class RunListener:
     """Single ingress: callbacks → typed CycleRecord → per-cycle CycleLedger.
 
-    Subscribers consume via ``on_record`` only. Phase-view ctx is owned
+    Subscribers consume via ``on_record`` only. PhaseRecord-view ctx is owned
     here (``from_phase_event`` is stateful) and serialised onto
-    ``Phase.payload['view']``. Events emitted before ``ledger`` is set
+    ``PhaseRecord.payload['view']``. Events emitted before ``ledger`` is set
     are buffered and drained on the first post-binding append.
     """
 
@@ -141,7 +146,7 @@ class RunListener:
     def on_phase(self, event: Any) -> None:
         view = view_to_wire_dict(from_phase_event(event, self._phase_ctx))
         self._emit(
-            Phase(
+            PhaseRecord(
                 phase=str(event.phase),
                 event=str(event.event),
                 round=event.round,
@@ -152,7 +157,7 @@ class RunListener:
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
         self._phase_ctx["l1_stall_count"] = l1_stall_count
         self._emit(
-            Phase(
+            PhaseRecord(
                 phase="round",
                 event="complete",
                 round=round_result.round,
@@ -176,7 +181,7 @@ class RunListener:
         sample_total: int | None = None,
     ) -> None:
         self._emit(
-            Snapshot(
+            SnapshotRecord(
                 event=event,
                 round=self._current_round if round_num is None else round_num,
                 candidate_idx=ci,
@@ -257,7 +262,7 @@ def _persist_round(
     cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
 ) -> None:
     """Flush decisions, mirror to ledger, write trial + log.md/review.md, flush recorder."""
-    flushed: list[Decision] = []
+    flushed: list[DecisionRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
@@ -267,7 +272,7 @@ def _persist_round(
         for d in flushed:
             ledger.append(d)
         ledger.append(
-            Phase(
+            PhaseRecord(
                 phase="round",
                 event="complete",
                 round=round_num,
@@ -449,7 +454,7 @@ async def _run_sweep_generation_only(
     """L1 variants without scoring; trial JSON is minimal status='generation_only'."""
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
-        ledger.append(Phase(phase="round", event="enter", round=round_num))
+        ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
     elif _rr := session.state.audit_projection:
         _rr.begin_round(round_num)
 
@@ -490,7 +495,7 @@ async def _run_sweep_generation_only(
 
     if (ledger := session.state.ledger) is not None:
         ledger.append(
-            Phase(
+            PhaseRecord(
                 phase="round",
                 event="complete",
                 round=round_num,
@@ -562,7 +567,7 @@ async def _run_round_loop(
             # kept as no-ledger fallback (test fixtures, headless tools).
             cb.set_round(round_num)
             if (ledger := session.state.ledger) is not None:
-                ledger.append(Phase(phase="round", event="enter", round=round_num))
+                ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
             elif _rr := session.state.audit_projection:
                 _rr.begin_round(round_num)
 

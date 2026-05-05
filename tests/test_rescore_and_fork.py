@@ -182,7 +182,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
     cross-file polling needed to discover that a fork was minted.
     """
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
     from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
@@ -208,7 +208,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
     records = list(parent_ledger.iter())
     assert records, "parent ledger must contain the FORK_CUT record"
     cut = records[-1]
-    assert isinstance(cut, Decision)
+    assert isinstance(cut, DecisionRecord)
     assert cut.kind is DecisionKind.FORK_CUT
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 1}
@@ -222,7 +222,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
     fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
     fork_history = list(fork_ledger.iter())
     assert any(
-        isinstance(r, Decision) and r.kind is DecisionKind.FORK_CUT and r.outcome == new_cycle
+        isinstance(r, DecisionRecord) and r.kind is DecisionKind.FORK_CUT and r.outcome == new_cycle
         for r in fork_history
     ), "fork inheriting from re-opened parent must see the FORK_CUT marker"
 
@@ -337,7 +337,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     sibling and ``from_round=0``, with ``data.kind="diag_sibling"`` so a tail
     of the parent distinguishes diag-BFS branches from divergence forks."""
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
     from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
@@ -355,7 +355,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     parent_ledger = CycleLedger.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
     cut = records[-1]
-    assert isinstance(cut, Decision)
+    assert isinstance(cut, DecisionRecord)
     assert cut.kind is DecisionKind.FORK_CUT
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 0}
@@ -432,7 +432,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     downstream review can attribute the fork to the operator's hypothesis.
     """
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import Decision, DecisionKind
+    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
     from promptpotter.infrastructure.ledger import CycleLedger
 
     tenant = "default"
@@ -458,7 +458,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
 
     parent_ledger = CycleLedger.open(CycleDir(parent_dir))
     cut = list(parent_ledger.iter())[-1]
-    assert isinstance(cut, Decision)
+    assert isinstance(cut, DecisionRecord)
     assert cut.kind is DecisionKind.FORK_CUT
     assert cut.outcome == new_cycle
     data = cut.data or {}

@@ -10,8 +10,8 @@ assertion in ``__init__`` rejects any path that contains a ``forks/``
 segment.
 
 Single ingress: the projection consumes only via ``on_record`` from the
-per-cycle ``CycleLedger``. The runner emits typed ``Phase`` / ``Snapshot`` /
-``Decision`` records; this class routes each record kind to the
+per-cycle ``CycleLedger``. The runner emits typed ``PhaseRecord`` / ``SnapshotRecord`` /
+``DecisionRecord`` records; this class routes each record kind to the
 corresponding internal handler.
 
 (Historical: this writer also produced ``output.log`` — a parallel
@@ -32,7 +32,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import Phase, Snapshot
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
@@ -547,11 +547,11 @@ class LiveDashboardProjection(ProjectionBase):
 
     # -- Ledger subscription (sole ingress) -----------------------------------
 
-    # Decision records are persisted to ``ledger.jsonl`` by the runner; this
+    # DecisionRecord records are persisted to ``ledger.jsonl`` by the runner; this
     # projection only mirrors the live scalar/round state to ``dashboard.json``.
     # Phases drive scalar updates, snapshots drive per-round structures.
 
-    def _handle_phase(self, record: Phase) -> None:
+    def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "round" and record.event == "complete":
             payload = record.payload or {}
             round_result = payload.get("round_result")
@@ -570,7 +570,7 @@ class LiveDashboardProjection(ProjectionBase):
         )
         self._on_phase(event, view)
 
-    def _handle_snapshot(self, record: Snapshot) -> None:
+    def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event
         payload = record.payload or {}
         if ev == "sample_started":

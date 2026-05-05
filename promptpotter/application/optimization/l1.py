@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.cycle import Cycle, Decision
+from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
 from promptpotter.application.optimization.dispatch import (
     Layer,
     build_dispatch_state,
@@ -210,7 +210,7 @@ async def score_population(
     callbacks: RunListener,
     pobb_config: PoBBConfig,
     round_num: int = 0,
-    decisions: list[Decision] | None = None,
+    decisions: list[DecisionRecord] | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
@@ -309,7 +309,7 @@ async def score_population(
             )
             continue
 
-        # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
+        # Path 3 — scored. SnapshotRecord priors BEFORE eval registers this candidate.
         priors_at_test = list(elim_check.prior_ids)
         elimination_stopped = signal is not None and signal.is_elimination
         leader_locked_loose = signal is not None and signal.is_leader_lock
@@ -478,7 +478,7 @@ async def l1_score(
     assert schema is not None, "l1_score requires pipeline_schema"
 
     osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
-    decisions: list[Decision] = []
+    decisions: list[DecisionRecord] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,

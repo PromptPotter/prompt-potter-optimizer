@@ -134,7 +134,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.domain.cycle_paths import RootCycleDir
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import CycleResult, RoundResult
-    from promptpotter.domain.run_records import Phase, Snapshot
+    from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
     from promptpotter.infrastructure.projections import LiveDashboardProjection
     from promptpotter.presentation.views.view_factories import (
         from_phase_event,
@@ -160,14 +160,14 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
 
     # ``RunListener`` would call ``from_phase_event`` once per event on a
-    # shared ctx, serialise via ``view_to_wire_dict``, and feed Phase records
+    # shared ctx, serialise via ``view_to_wire_dict``, and feed PhaseRecord records
     # to the ledger; subscribers route them via ``on_record``. Mirror that here.
     phase_ctx: dict = {}
 
     def fire(event: PhaseEvent) -> None:
         view = view_to_wire_dict(from_phase_event(event, phase_ctx))
         emitter.on_record(
-            Phase(
+            PhaseRecord(
                 phase=str(event.phase),
                 event=str(event.event),
                 round=event.round,
@@ -230,7 +230,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
 
     def fire_snapshot(event: str, payload: dict, **idx: int) -> None:
         emitter.on_record(
-            Snapshot(
+            SnapshotRecord(
                 event=event,
                 round=0,
                 candidate_idx=idx.get("ci"),
@@ -298,7 +298,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         candidates_scored=1,
     )
     emitter.on_record(
-        Phase(
+        PhaseRecord(
             phase="round",
             event="complete",
             round=0,

@@ -32,10 +32,10 @@ from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import (
     DECISION_GATING,
     CycleRecord,
-    Decision,
     DecisionKind,
+    DecisionRecord,
     GatingMode,
-    Phase,
+    PhaseRecord,
     SweepPayload,
     record_decision,
 )
@@ -64,7 +64,7 @@ logger = logging.getLogger(__name__)
 __all__ = [
     "REPLAYERS",
     "Cycle",
-    "Decision",
+    "DecisionRecord",
     "Divergence",
     "EscalationEvent",
     "EscalationState",
@@ -80,7 +80,7 @@ __all__ = [
 ]
 
 
-# Decision / DecisionKind / record_decision live in domain/run_records.py.
+# DecisionRecord / DecisionKind / record_decision live in domain/run_records.py.
 
 
 def _build_scoreboard(
@@ -729,17 +729,17 @@ class EscalationState:
 
     # ---- Reducer over the ledger ----
     #
-    # State is the fold of three Phase signals: round-complete (improved →
+    # State is the fold of three PhaseRecord signals: round-complete (improved →
     # L1 stall), l2_context exit (L2 fired → l2 state), l3_plan exit (L3
     # fired → l3 state, l2 reset). The live mutators above are the in-memory
     # cache of this fold; ``from_ledger`` rebuilds the same value on resume.
 
     def fold(self, record: CycleRecord) -> None:
         """Advance state from one ledger record. No-op for unrelated records."""
-        if not isinstance(record, Phase):
+        if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
-            # Two Phase("round","complete") records exist per round: the
+            # Two PhaseRecord("round","complete") records exist per round: the
             # display-side RunListener emit (no ``improved`` key) and the
             # audit-side _persist_round emit (carries improved/composite_fitness).
             # Fold only the audit emit so state isn't double-bumped.
@@ -811,7 +811,7 @@ class Cycle:
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
     # Flushed into the next trial's `decisions` before campaign_store.add_trial.
-    pending_decisions: list[Decision] = field(default_factory=list)
+    pending_decisions: list[DecisionRecord] = field(default_factory=list)
     state_version: int = 1
     # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None

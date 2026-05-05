@@ -2,7 +2,7 @@
 to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 
 Subscribed to the same ``CycleLedger`` as the other projections. Filters on
-``Snapshot.event == "p_best_update"`` and writes one JSONL record per
+``SnapshotRecord.event == "p_best_update"`` and writes one JSONL record per
 PoBBCheck snapshot — operator-tailable in real time, replayable after the
 fact for trajectory plots and post-hoc analysis.
 
@@ -19,7 +19,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import Snapshot
+from promptpotter.domain.run_records import SnapshotRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class PoBBStreamProjection(ProjectionBase):
         """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
         return cls(Path(cycle_dir).joinpath(*_STREAMS_SUBPATH))
 
-    def _handle_snapshot(self, record: Snapshot) -> None:
+    def _handle_snapshot(self, record: SnapshotRecord) -> None:
         if record.event != "p_best_update":
             return
         if record.round is None:
