@@ -33,7 +33,7 @@ from promptpotter.application.l1_behavior_checks import (
     CheckResult,
     run_all_checks,
 )
-from promptpotter.application.optimization.l1_stats import L1Stats, compute_l1_stats
+from promptpotter.application.l1_stats import L1Stats, compute_l1_stats
 
 __all__ = ["render_review_md"]
 

@@ -141,34 +141,6 @@ class ForkResult(NamedTuple):
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
 
 
-# Decorator-driven registry: ``@replayer(kind)`` populates this at import.
-# ``DECISION_GATING`` is the source of truth for which kinds exist with which
-# gating mode; the decorator refuses to register an ARCHIVAL kind or a
-# duplicate, so REPLAYERS cannot drift from DECISION_GATING by construction.
-REPLAYERS: dict[DecisionKind, Replayer] = {}
-
-
-def replayer(kind: DecisionKind) -> Callable[[Replayer], Replayer]:
-    """Register a function as the replayer for ``kind``.
-
-    Fails at decoration time if the kind is ARCHIVAL in ``DECISION_GATING``
-    or already has a replayer registered.
-    """
-    if DECISION_GATING.get(kind) is not GatingMode.REPLAYED:
-        raise ValueError(
-            f"@replayer({kind!r}): not REPLAYED in DECISION_GATING. "
-            f"Add the kind to DECISION_GATING with mode=REPLAYED first."
-        )
-    if kind in REPLAYERS:
-        raise ValueError(f"@replayer({kind!r}): duplicate registration")
-
-    def deco(fn: Replayer) -> Replayer:
-        REPLAYERS[kind] = fn
-        return fn
-
-    return deco
-
-
 def replay_decisions(
     round_data: dict[str, Any],
     prior_rounds: list[dict[str, Any]] | None = None,
@@ -209,7 +181,6 @@ def _mean_score(results: list[dict]) -> float:
     return sum(float(r.get("fitness", 0.0)) for r in results) / len(results)
 
 
-@replayer(DecisionKind.ROUND_WINNER)
 def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
     all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
@@ -245,7 +216,6 @@ def _pobb_replay_snapshot(
     return candidate_id, posterior_best_probabilities({**priors, candidate_id: current}), current
 
 
-@replayer(DecisionKind.ELIMINATION_CUT)
 def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """PoBB gate under rescored scores."""
     snap = _pobb_replay_snapshot(ctx, inputs_ref)
@@ -255,7 +225,6 @@ def _replay_elimination_cut(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> b
     return pobb_should_stop(snapshot.get(candidate_id, 1.0), float(inputs_ref["epsilon"]))
 
 
-@replayer(DecisionKind.LEADER_LOCK_IN)
 def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
     """PoBB leader-lock under rescored scores; argmax + P(best) ≥ lock_in + n ≥ lock_in_n_min."""
     if int(inputs_ref.get("queries_scored", 0)) < int(inputs_ref.get("lock_in_n_min", 8)):
@@ -316,12 +285,31 @@ def _replay_layer_trigger(patience_key: str) -> Replayer:
     return _replay
 
 
-_replay_l2_trigger = replayer(DecisionKind.L2_ESCALATION_TRIGGER)(
-    _replay_layer_trigger("l2_patience")
-)
-_replay_l3_trigger = replayer(DecisionKind.L3_ESCALATION_TRIGGER)(
-    _replay_layer_trigger("l3_patience")
-)
+_replay_l2_trigger = _replay_layer_trigger("l2_patience")
+_replay_l3_trigger = _replay_layer_trigger("l3_patience")
+
+
+# Explicit decision-replayer registry. ``DECISION_GATING`` is the source of
+# truth for which kinds exist; the assertion below enforces that every
+# REPLAYED kind has a replayer here, so resume can never silently treat an
+# unhandled kind as non-divergence.
+REPLAYERS: dict[DecisionKind, Replayer] = {
+    DecisionKind.ROUND_WINNER: _replay_round_winner,
+    DecisionKind.ELIMINATION_CUT: _replay_elimination_cut,
+    DecisionKind.LEADER_LOCK_IN: _replay_leader_lock_in,
+    DecisionKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
+    DecisionKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
+}
+
+_missing_replayers = {
+    k for k, mode in DECISION_GATING.items() if mode is GatingMode.REPLAYED and k not in REPLAYERS
+}
+if _missing_replayers:
+    raise RuntimeError(
+        f"DECISION_GATING declares {sorted(_missing_replayers)} as REPLAYED, "
+        "but no replayer is registered in cycle.py::REPLAYERS."
+    )
+del _missing_replayers
 
 
 def _fork_sibling_setup(

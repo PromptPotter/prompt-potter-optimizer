@@ -617,91 +617,67 @@ async def _run_sweep_batch(
     )
 
 
-async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
-    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
-    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
-    """
+def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
+    """Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
+    off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
+    parent's archive. Each probe is its own cycle with ``parent_cycle_id`` set;
+    baseline measurements stay shared via the JSP-keyed archive."""
+    if not (
+        getattr(args, "diag", False)
+        and ctx.cycle_id
+        and getattr(args, "resume_from_round", None) is None
+    ):
+        return
+    existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
+    if (existing_index.get("final") or {}).get("mode") != "diag":
+        return
+    from promptpotter.application.optimization.cycle import fork_for_diag_sibling
+
+    new_cycle_id = fork_for_diag_sibling(
+        session.store.campaigns,
+        session.tenant.tenant_id if session.tenant else "default",
+        ctx.session_id,
+        ctx.cycle_id,
+    )
+    ctx.cycle_id = new_cycle_id
+    session.state.cycle_id = new_cycle_id
+
+
+async def _maybe_dispatch_sweep_batch(
+    args: argparse.Namespace, ctx, campaign_config, train_data
+) -> CommandResult | None:
+    """Multi-fork sweep dispatch: with --sweep AND a non-empty
+    ``datasets/{name}/sweep/*.json`` directory, mint one fork per candidate
+    ``SweepPayload`` and run sweep mode on each. Returns None to fall through
+    to the normal path (no --sweep flag, no sweep dir, or empty payloads)."""
+    if not getattr(args, "sweep", False):
+        return None
+    from promptpotter.application.sweep import (
+        load_sweep_payloads,
+        resolve_sweep_dir,
+    )
+
+    sweep_dir = resolve_sweep_dir(ctx.init_params.get("dataset_name"))
+    if sweep_dir is None:
+        return None
+    sweep_payloads = load_sweep_payloads(sweep_dir)
+    if not sweep_payloads:
+        return None
+    ctx.save_phase("optimizing")
+    return await _run_sweep_batch(args, ctx, campaign_config, train_data, sweep_payloads)
+
+
+async def _run_normal_optimize(
+    args: argparse.Namespace, ctx, campaign_config, session, train_data
+) -> CommandResult:
+    """Build observers, drive the optimization loop, handle divergence."""
     from promptpotter.application.runner import (
         run_optimization as _orch_run_optimization,
     )
     from promptpotter.shared.errors import ResumeDivergenceError
 
-    ctx = load_session(args)
-    campaign_config = ctx.campaign_config
-    session = await init_services_cli(**ctx.init_params)
-
-    status = await session.backend_client.check_status()
-    if status.get("status") == "unreachable":
-        return CommandResult(
-            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
-            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
-        )
-
-    train_data = session.samples or []
-    pipeline_params, _baseline = _prepare_cycle_for_optimize(
-        args, ctx, session, campaign_config, train_data
-    )
-    # ctx may have been re-minted; bind the now-resolved ids onto session.
-    session.session_id = ctx.session_id
-    session.state.cycle_id = ctx.cycle_id
-
-    # Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
-    # off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
-    # parent's archive. Each probe is its own cycle with ``parent_cycle_id``
-    # set; baseline measurements stay shared via the JSP-keyed archive.
-    if (
-        getattr(args, "diag", False)
-        and ctx.cycle_id
-        and getattr(args, "resume_from_round", None) is None
-    ):
-        existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
-        if (existing_index.get("final") or {}).get("mode") == "diag":
-            from promptpotter.application.optimization.cycle import fork_for_diag_sibling
-
-            new_cycle_id = fork_for_diag_sibling(
-                session.store.campaigns,
-                session.tenant.tenant_id if session.tenant else "default",
-                ctx.session_id,
-                ctx.cycle_id,
-            )
-            ctx.cycle_id = new_cycle_id
-            session.state.cycle_id = new_cycle_id
-
-    log_startup_summary(
-        session,
-        pipeline_params,
-        len(train_data),
-        ctx.backend_url,
-        ctx.init_params["dataset_name"],
-    )
-    session_dir = session.store.sessions.session_dir(ctx.session_id)
-    campaign_dir = session.store.campaigns.campaign_dir(ctx.cycle_id)
-    logger.info("Session: %s", session_dir)
-    logger.info("Campaign: %s", campaign_dir)
-
-    # Multi-fork sweep dispatch: with --sweep AND a non-empty
-    # ``datasets/{name}/sweep/*.json`` directory, mint one fork per
-    # candidate ``SweepPayload`` and run sweep mode on each. Without the
-    # sweep dir, --sweep falls through to the existing single-cycle path
-    # (today's behavior, backwards compatible).
-    if getattr(args, "sweep", False):
-        from promptpotter.application.sweep import (
-            load_sweep_payloads,
-            resolve_sweep_dir,
-        )
-
-        sweep_dir = resolve_sweep_dir(ctx.init_params.get("dataset_name"))
-        if sweep_dir is not None:
-            sweep_payloads = load_sweep_payloads(sweep_dir)
-            if sweep_payloads:
-                ctx.save_phase("optimizing")
-                return await _run_sweep_batch(
-                    args, ctx, campaign_config, train_data, sweep_payloads
-                )
-
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
     observers = _build_observers(args, session, campaign_config, train_data, pre_baseline_acc)
-
     ctx.save_phase("optimizing")
 
     try:
@@ -732,6 +708,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     ctx.state["best_accuracy"] = cycle_result.best_accuracy
     ctx.save_phase("optimize")
+    campaign_dir = session.store.campaigns.campaign_dir(ctx.cycle_id)
     return CommandResult(
         data=cycle_result.model_dump(),
         human=(
@@ -740,6 +717,49 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             f"Digest: {campaign_dir / 'log.md'}"
         ),
     )
+
+
+async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
+    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
+    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
+    """
+    ctx = load_session(args)
+    campaign_config = ctx.campaign_config
+    session = await init_services_cli(**ctx.init_params)
+
+    status = await session.backend_client.check_status()
+    if status.get("status") == "unreachable":
+        return CommandResult(
+            data={"error": "backend_unreachable", "backend_url": ctx.backend_url},
+            human=f"Backend unreachable at {ctx.backend_url}. Start the backend and retry.",
+        )
+
+    train_data = session.samples or []
+    pipeline_params, _baseline = _prepare_cycle_for_optimize(
+        args, ctx, session, campaign_config, train_data
+    )
+    # ctx may have been re-minted; bind the now-resolved ids onto session.
+    session.session_id = ctx.session_id
+    session.state.cycle_id = ctx.cycle_id
+
+    _maybe_fork_diag_sibling(args, ctx, session)
+
+    log_startup_summary(
+        session,
+        pipeline_params,
+        len(train_data),
+        ctx.backend_url,
+        ctx.init_params["dataset_name"],
+    )
+    logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
+    logger.info("Campaign: %s", session.store.campaigns.campaign_dir(ctx.cycle_id))
+
+    if (sweep_result := await _maybe_dispatch_sweep_batch(
+        args, ctx, campaign_config, train_data
+    )) is not None:
+        return sweep_result
+
+    return await _run_normal_optimize(args, ctx, campaign_config, session, train_data)
 
 
 async def cmd_compare(args: argparse.Namespace) -> CommandResult:

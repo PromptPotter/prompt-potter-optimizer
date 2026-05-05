@@ -243,6 +243,29 @@ def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
     return fg_text, parsed
 
 
+def _try_groq_json_validate_repair(
+    exc: Exception, request_params: dict[str, Any], provider_name: str
+) -> LLMResponse | None:
+    """Groq-specific: turn a 400 ``json_validate_failed`` into a salvaged response.
+
+    Returns ``None`` for any error that isn't this exact quirk so the caller
+    re-raises. No-op for non-Groq providers — they don't surface this status.
+    """
+    if getattr(exc, "status_code", None) != 400 or "json_validate_failed" not in str(exc):
+        return None
+    repaired = _repair_json_validate_failure(str(exc))
+    if repaired is None:
+        return None
+    fg_text, parsed = repaired
+    logger.info("%s: salvaged failed_generation via JSON repair", provider_name)
+    return LLMResponse(
+        content=fg_text,
+        model=request_params.get("model", ""),
+        usage={"prompt_tokens": 0, "completion_tokens": 0},
+        parsed=parsed,
+    )
+
+
 class LLMResponse(BaseModel):
     """Standardized response from LLM providers."""
 
@@ -424,36 +447,18 @@ class OpenAICompatibleClient(LLMClientBase):
     def _try_recover_from_chat_error(
         self, exc: Exception, request_params: dict[str, Any]
     ) -> LLMResponse | None:
-        """Translate known provider quirks into a salvaged response or a clearer raise.
-
-        Returns a salvaged ``LLMResponse`` only for Groq's 400 json_validate_failed
-        when the body carries a recoverable ``failed_generation``. Returns ``None``
-        when the caller should re-raise the original exception.
-        """
+        """Translate known errors: too-large raises, 404 raises a clearer
+        ValueError, Groq json_validate_failed salvages. Returns ``None`` to
+        re-raise the original exception."""
         _raise_if_request_too_large(exc, self._provider_name)
-        status = getattr(exc, "status_code", None)
-        if status == 404:
+        if getattr(exc, "status_code", None) == 404:
             model_name = request_params.get("model", "unknown")
             raise ValueError(
                 f"Model '{model_name}' not found on {self._provider_name}. "
                 f"Update campaign_config['optimizer_llm']['model'] or "
                 f"set EXPERIMENT_ID = None to use current config."
             ) from exc
-        if status == 400 and "json_validate_failed" in str(exc):
-            repaired = _repair_json_validate_failure(str(exc))
-            if repaired is not None:
-                fg_text, parsed = repaired
-                logger.info(
-                    "%s: salvaged failed_generation via JSON repair",
-                    self._provider_name,
-                )
-                return LLMResponse(
-                    content=fg_text,
-                    model=request_params.get("model", ""),
-                    usage={"prompt_tokens": 0, "completion_tokens": 0},
-                    parsed=parsed,
-                )
-        return None
+        return _try_groq_json_validate_repair(exc, request_params, self._provider_name)
 
 
 class AnthropicClient(LLMClientBase):
@@ -826,21 +831,29 @@ class RateLimiter:
         while self._tokens and self._tokens[0][0] < cutoff:
             self._tokens.popleft()
 
+    def _rpm_wait(self, now: float) -> float:
+        """Seconds until the oldest request ages out, if the RPM cap is full."""
+        if self.rpm is None or len(self._requests) < self.rpm:
+            return 0.0
+        return self._requests[0] + self.window_s - now
+
+    def _tpm_wait(self, now: float, estimated_tokens: int) -> float:
+        """Seconds until enough token budget has aged out to fit the request."""
+        if self.tpm is None:
+            return 0.0
+        current = sum(t for _, t in self._tokens)
+        if current + estimated_tokens <= self.tpm:
+            return 0.0
+        needed = current + estimated_tokens - self.tpm
+        shed = 0
+        for ts, toks in self._tokens:
+            shed += toks
+            if shed >= needed:
+                return ts + self.window_s - now
+        return 0.0
+
     def _wait_needed(self, now: float, estimated_tokens: int) -> float:
-        delays: list[float] = [0.0]
-        if self.rpm is not None and len(self._requests) >= self.rpm:
-            delays.append(self._requests[0] + self.window_s - now)
-        if self.tpm is not None:
-            current = sum(t for _, t in self._tokens)
-            if current + estimated_tokens > self.tpm:
-                needed = current + estimated_tokens - self.tpm
-                shed = 0
-                for ts, toks in self._tokens:
-                    shed += toks
-                    if shed >= needed:
-                        delays.append(ts + self.window_s - now)
-                        break
-        return max(delays)
+        return max(self._rpm_wait(now), self._tpm_wait(now, estimated_tokens))
 
 
 @dataclass(frozen=True)

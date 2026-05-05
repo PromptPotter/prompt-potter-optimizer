@@ -22,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.application.l1_behavior_checks import CheckContext, run_all_checks
-from promptpotter.application.optimization.l1_stats import (
+from promptpotter.application.l1_stats import (
     compute_l1_stats,
 )
 

@@ -8,6 +8,8 @@ The round-loop spine. Validators + invariant detection live in
 from __future__ import annotations
 
 import logging
+from dataclasses import dataclass, field
+from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
@@ -199,6 +201,263 @@ async def l1_generate(
 # ---------------------------------------------------------------------------
 
 
+class CandidateOutcome(StrEnum):
+    """How ``score_one_candidate`` exited. Caller fires the report unconditionally
+    and uses the tag to decide whether to break the loop or continue.
+
+    SCORED is the default exit. SKIPPED_VALIDATION / REPLAYED_FROM_CACHE are
+    early returns from paths 1 and 2; both still produce a report. LEADER_LOCKED
+    and ESCALATED are scored-path tags that signal the caller to break."""
+
+    SKIPPED_VALIDATION = "skipped_validation"
+    REPLAYED_FROM_CACHE = "replayed_from_cache"
+    SCORED = "scored"
+    LEADER_LOCKED = "leader_locked"
+    ESCALATED = "escalated"
+
+
+@dataclass(frozen=True)
+class CandidateRunResult:
+    """One candidate's full lifecycle output. ``runtime_failure`` is the
+    caller's signal to append to ``osp_c.runtime_failures``; the function
+    cannot mutate it directly because the OSP is shared with other paths."""
+
+    outcome: CandidateOutcome
+    results: list[QueryMeasurement] = field(default_factory=list)
+    report: CandidateScore = None  # type: ignore[assignment]
+    runtime_failure: RuntimeFailure | None = None
+    escalation_signal: EscalationSignal | None = None
+
+
+async def score_one_candidate(
+    *,
+    idx: int,
+    osp_c: OptSearchPoint,
+    pipeline_params_override: dict | None,
+    cycle: Cycle,
+    dataset: list,
+    n_total: int,
+    merged_pp: dict | None,
+    elim_check: PoBBCheck,
+    callbacks: RunCallbacks,
+    degradation_checks: list[StopRule] | None,
+    decisions: list[DecisionRecord] | None,
+    candidate_scores: list[CandidateScore],
+    round_num: int,
+    l1_diversity: float,
+) -> CandidateRunResult:
+    """Run one candidate through the three-exit-path lifecycle.
+
+    Path 1 — validation-skip: synthetic-0 score (no eval).
+    Path 2 — cache-replay: full-run cache hit (no backend calls).
+    Path 3 — scored: full eval; classifies signal into SCORED / LEADER_LOCKED /
+    ESCALATED, builds RuntimeFailure on degradation, records ELIMINATION_CUT
+    / LEADER_LOCK_IN decisions on ``decisions``.
+
+    ``candidate_scores`` is read for prior_label resolution (already-scored
+    candidates only — caller appends the current report after this returns)."""
+    # Path 1 — validation-skip synthetic-0.
+    if osp_c.validation_failures:
+        return CandidateRunResult(
+            outcome=CandidateOutcome.SKIPPED_VALIDATION,
+            results=[],
+            report=build_score_report(
+                osp_c,
+                pipeline_params_override,
+                INVALID_SCORES,
+                [],
+                dataset,
+                invalid=True,
+                l1_diversity=l1_diversity,
+            ),
+        )
+
+    def _on_query_scored(r, qi, qt, _ci=idx):
+        callbacks.on_sample_scored(_ci, n_total, qi, qt, r)
+
+    def _on_query_starting(qtxt, qi, qt, _ci=idx):
+        callbacks.on_sample_started(_ci, n_total, qi, qt, qtxt)
+
+    results, scores, was_cached, signal = await score_search_point(
+        osp_c.to_job_search_point(
+            base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
+        ),
+        dataset,
+        cycle.session,
+        label=f"candidate_{idx}",
+        on_query_scored=_on_query_scored,
+        on_query_starting=_on_query_starting,
+        degradation_checks=[*(degradation_checks or []), elim_check],
+        candidate_idx=idx,
+        n_total_candidates=n_total,
+        axes=cycle.axes,
+        l1_diversity=l1_diversity,
+    )
+
+    # Path 2 — full-run cache replay.
+    if was_cached:
+        elim_check.register_completed(
+            [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
+        )
+        return CandidateRunResult(
+            outcome=CandidateOutcome.REPLAYED_FROM_CACHE,
+            results=results,
+            report=build_score_report(
+                osp_c,
+                pipeline_params_override,
+                scores,
+                results,
+                dataset,
+                resumed_from_cache=True,
+                l1_diversity=l1_diversity,
+            ),
+        )
+
+    # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
+    priors_at_test = list(elim_check.prior_ids)
+    elimination_stopped = signal is not None and signal.is_elimination
+    leader_locked_loose = signal is not None and signal.is_leader_lock
+    scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
+    aborted = (
+        bool(signal)
+        and not leader_locked_loose
+        and (scoring_error_abort or len(results) < len(dataset))
+    )
+    # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
+    if len(results) == len(dataset) and not aborted:
+        elim_check.register_completed(
+            [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
+        )
+
+    new_rf: RuntimeFailure | None = None
+    if signal is not None:
+        cr = signal.check_result
+        dc = int(cr.get("degraded_count", 0))
+        te = int(cr.get("total_scored", len(results)))
+        if elimination_stopped and signal.check_name == "degradation":
+            rf_kind: str | None = "degradation_check"
+            dominant = cr.get("dominant_warning", "unknown:unknown")
+            node_cfg = (merged_pp or {}).get(dominant.split(":", 1)[0], {})
+            rate = float(cr.get("degraded_rate", 0.0))
+        elif scoring_error_abort:
+            rf_kind = "scoring_error_abort"
+            dominant = str(cr.get("dominant_warning") or "scoring_error")
+            node_cfg = merged_pp or {}
+            rate = (dc / te) if te else 0.0
+        else:
+            rf_kind = None
+        if rf_kind is not None:
+            new_rf = RuntimeFailure(
+                source=rf_kind,
+                dominant_warning=dominant,
+                warning_types=dict(cr.get("warning_types") or {}),
+                degraded_rate=rate,
+                degraded_count=dc,
+                total_scored=te,
+                observed_config=dict(node_cfg),
+                first_seen_round=round_num,
+                candidate_label=osp_c.lineage.changes_description or "",
+            )
+
+    elim_ctx: dict | None = None
+    if (
+        (elimination_stopped or leader_locked_loose)
+        and signal is not None
+        and signal.check_name == "elimination"
+    ):
+        cr = signal.check_result
+        elim_ctx = {
+            "p_best": float(cr.get("p_best", 0.0)),
+            "epsilon": float(cr.get("epsilon", 0.05)),
+            "leader_id": str(cr.get("leader_id", "")),
+            "queries_scored": int(cr.get("queries_scored", len(results))),
+            "total_queries": int(cr.get("total_queries", len(dataset))),
+            "n_priors": int(cr.get("n_priors", 0)),
+            "leader_locked": leader_locked_loose,
+        }
+
+    report = build_score_report(
+        osp_c,
+        pipeline_params_override,
+        scores,
+        results,
+        dataset,
+        aborted=aborted,
+        elimination_stopped=elimination_stopped,
+        elimination_context=elim_ctx,
+        new_runtime_failure=new_rf,
+        l1_diversity=l1_diversity,
+    )
+    residual = None if (elimination_stopped or leader_locked_loose or not signal) else signal
+
+    # PoBB-elimination cut + leader lock-in: decision-record both
+    # (divergence-replayed on resume); leader_locked also breaks the loop.
+    leader_locked = (
+        signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
+    )
+    if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
+        cr = signal.check_result
+        leader_id = str(cr.get("leader_id", ""))
+        if leader_id and leader_id in priors_at_test:
+            prior_label = next(
+                (
+                    f"C{i + 1}"
+                    for i, r in enumerate(candidate_scores)
+                    if r.candidate_id == leader_id
+                ),
+                None,
+            )
+            if prior_label and report.elimination_context:
+                report.elimination_context["leader_label"] = prior_label
+        if decisions is not None:
+            record_decision(
+                decisions,
+                DecisionKind.ELIMINATION_CUT,
+                {
+                    "candidate_id": osp_c.lineage.id,
+                    "prior_candidate_ids": priors_at_test,
+                    "queries_scored": int(cr.get("queries_scored", len(results))),
+                    "epsilon": float(elim_check.epsilon),
+                    "n_min": int(elim_check.n_min),
+                    "round_num": round_num,
+                },
+                True,
+                data=pobb_decision_data(cr),
+                round=round_num,
+            )
+    if leader_locked and signal is not None and decisions is not None:
+        cr = signal.check_result
+        record_decision(
+            decisions,
+            DecisionKind.LEADER_LOCK_IN,
+            {
+                "candidate_id": osp_c.lineage.id,
+                "prior_candidate_ids": priors_at_test,
+                "queries_scored": int(cr.get("queries_scored", len(results))),
+                "lock_in": float(elim_check.lock_in),
+                "lock_in_n_min": int(elim_check.lock_in_n_min),
+                "round_num": round_num,
+            },
+            True,
+            data=pobb_decision_data(cr),
+            round=round_num,
+        )
+
+    if leader_locked:
+        outcome = CandidateOutcome.LEADER_LOCKED
+    elif residual is not None:
+        outcome = CandidateOutcome.ESCALATED
+    else:
+        outcome = CandidateOutcome.SCORED
+    return CandidateRunResult(
+        outcome=outcome,
+        results=results,
+        report=report,
+        runtime_failure=new_rf,
+        escalation_signal=residual if outcome == CandidateOutcome.ESCALATED else None,
+    )
+
+
 async def score_population(
     cycle: Cycle,
     population: list[OptSearchPoint],
@@ -213,7 +472,12 @@ async def score_population(
     decisions: list[DecisionRecord] | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
-    """Score each individual; dispatch over three exit paths (validation/cache/scored)."""
+    """Score each individual; dispatch over three exit paths (validation/cache/scored).
+
+    Per-candidate body lives in ``score_one_candidate``; this function owns
+    the loop, the shared accumulators (``candidate_scores``, ``decisions``,
+    ``all_candidate_results``), and the break conditions on
+    LEADER_LOCKED / ESCALATED outcomes."""
     session = cycle.session
     obs = session.state.obs
     n = len(population)
@@ -250,204 +514,31 @@ async def score_population(
 
         elim_check.set_current(osp_c.lineage.id, on_snapshot=_emit_p_best)
 
-        # Path 1 — validation-skip synthetic-0.
-        if osp_c.validation_failures:
-            all_candidate_results[osp_c.lineage.id] = []
-            _fire(
-                idx,
-                build_score_report(
-                    osp_c,
-                    pipeline_params_override,
-                    INVALID_SCORES,
-                    [],
-                    dataset,
-                    invalid=True,
-                    l1_diversity=l1_diversity,
-                ),
-            )
-            continue
-
-        def _on_result(r, qi, qt, _ci=idx):
-            callbacks.on_sample_scored(_ci, n, qi, qt, r)
-
-        def _on_start(qtxt, qi, qt, _ci=idx):
-            callbacks.on_sample_started(_ci, n, qi, qt, qtxt)
-
-        results, scores, was_cached, signal = await score_search_point(
-            osp_c.to_job_search_point(
-                base_pipeline_params=merged_pp[idx], schema=session.pipeline_schema
-            ),
-            dataset,
-            session,
-            label=f"candidate_{idx}",
-            on_query_scored=_on_result,
-            on_query_starting=_on_start,
-            degradation_checks=[*(degradation_checks or []), elim_check],
-            candidate_idx=idx,
-            n_total_candidates=n,
-            axes=cycle.axes,
+        cr_result = await score_one_candidate(
+            idx=idx,
+            osp_c=osp_c,
+            pipeline_params_override=pipeline_params_override,
+            cycle=cycle,
+            dataset=dataset,
+            n_total=n,
+            merged_pp=merged_pp[idx],
+            elim_check=elim_check,
+            callbacks=callbacks,
+            degradation_checks=degradation_checks,
+            decisions=decisions,
+            candidate_scores=candidate_scores,
+            round_num=round_num,
             l1_diversity=l1_diversity,
         )
-        all_candidate_results[osp_c.lineage.id] = results
+        all_candidate_results[osp_c.lineage.id] = cr_result.results
+        if cr_result.runtime_failure is not None:
+            osp_c.runtime_failures = [*osp_c.runtime_failures, cr_result.runtime_failure]
+        _fire(idx, cr_result.report)
 
-        # Path 2 — full-run cache replay.
-        if was_cached:
-            elim_check.register_completed(
-                [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
-            )
-            _fire(
-                idx,
-                build_score_report(
-                    osp_c,
-                    pipeline_params_override,
-                    scores,
-                    results,
-                    dataset,
-                    resumed_from_cache=True,
-                    l1_diversity=l1_diversity,
-                ),
-            )
-            continue
-
-        # Path 3 — scored. SnapshotRecord priors BEFORE eval registers this candidate.
-        priors_at_test = list(elim_check.prior_ids)
-        elimination_stopped = signal is not None and signal.is_elimination
-        leader_locked_loose = signal is not None and signal.is_leader_lock
-        scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
-        aborted = (
-            bool(signal)
-            and not leader_locked_loose
-            and (scoring_error_abort or len(results) < len(dataset))
-        )
-        # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
-        if len(results) == len(dataset) and not aborted:
-            elim_check.register_completed(
-                [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
-            )
-
-        new_rf: RuntimeFailure | None = None
-        rf_kind = (
-            "degradation_check"
-            if elimination_stopped and signal is not None and signal.check_name == "degradation"
-            else "scoring_error_abort"
-            if scoring_error_abort
-            else None
-        )
-        if rf_kind and signal is not None:
-            cr = signal.check_result
-            dc = int(cr.get("degraded_count", 0))
-            te = int(cr.get("total_scored", len(results)))
-            if rf_kind == "degradation_check":
-                dominant = cr.get("dominant_warning", "unknown:unknown")
-                node_cfg = (merged_pp[idx] or {}).get(dominant.split(":", 1)[0], {})
-                rate = float(cr.get("degraded_rate", 0.0))
-            else:
-                dominant = str(cr.get("dominant_warning") or "scoring_error")
-                node_cfg = merged_pp[idx] or {}
-                rate = (dc / te) if te else 0.0
-            new_rf = RuntimeFailure(
-                source=rf_kind,
-                dominant_warning=dominant,
-                warning_types=dict(cr.get("warning_types") or {}),
-                degraded_rate=rate,
-                degraded_count=dc,
-                total_scored=te,
-                observed_config=dict(node_cfg),
-                first_seen_round=round_num,
-                candidate_label=osp_c.lineage.changes_description or "",
-            )
-            osp_c.runtime_failures = [*osp_c.runtime_failures, new_rf]
-
-        elim_ctx: dict | None = None
-        if (
-            (elimination_stopped or leader_locked_loose)
-            and signal is not None
-            and signal.check_name == "elimination"
-        ):
-            cr = signal.check_result
-            elim_ctx = {
-                "p_best": float(cr.get("p_best", 0.0)),
-                "epsilon": float(cr.get("epsilon", 0.05)),
-                "leader_id": str(cr.get("leader_id", "")),
-                "queries_scored": int(cr.get("queries_scored", len(results))),
-                "total_queries": int(cr.get("total_queries", len(dataset))),
-                "n_priors": int(cr.get("n_priors", 0)),
-                "leader_locked": leader_locked_loose,
-            }
-
-        report = build_score_report(
-            osp_c,
-            pipeline_params_override,
-            scores,
-            results,
-            dataset,
-            aborted=aborted,
-            elimination_stopped=elimination_stopped,
-            elimination_context=elim_ctx,
-            new_runtime_failure=new_rf,
-            l1_diversity=l1_diversity,
-        )
-        residual = None if (elimination_stopped or leader_locked_loose or not signal) else signal
-
-        # PoBB-elimination cut + leader lock-in: decision-record both
-        # (divergence-replayed on resume); leader_locked also breaks the loop.
-        leader_locked = (
-            signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
-        )
-        if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
-            cr = signal.check_result
-            leader_id = str(cr.get("leader_id", ""))
-            if leader_id and leader_id in priors_at_test:
-                prior_label = next(
-                    (
-                        f"C{i + 1}"
-                        for i, r in enumerate(candidate_scores)
-                        if r.candidate_id == leader_id
-                    ),
-                    None,
-                )
-                if prior_label and report.elimination_context:
-                    report.elimination_context["leader_label"] = prior_label
-            if decisions is not None:
-                record_decision(
-                    decisions,
-                    DecisionKind.ELIMINATION_CUT,
-                    {
-                        "candidate_id": osp_c.lineage.id,
-                        "prior_candidate_ids": priors_at_test,
-                        "queries_scored": int(cr.get("queries_scored", len(results))),
-                        "epsilon": float(elim_check.epsilon),
-                        "n_min": int(elim_check.n_min),
-                        "round_num": round_num,
-                    },
-                    True,
-                    data=pobb_decision_data(cr),
-                    round=round_num,
-                )
-        if leader_locked and signal is not None and decisions is not None:
-            cr = signal.check_result
-            record_decision(
-                decisions,
-                DecisionKind.LEADER_LOCK_IN,
-                {
-                    "candidate_id": osp_c.lineage.id,
-                    "prior_candidate_ids": priors_at_test,
-                    "queries_scored": int(cr.get("queries_scored", len(results))),
-                    "lock_in": float(elim_check.lock_in),
-                    "lock_in_n_min": int(elim_check.lock_in_n_min),
-                    "round_num": round_num,
-                },
-                True,
-                data=pobb_decision_data(cr),
-                round=round_num,
-            )
-
-        _fire(idx, report)
-
-        if leader_locked:
+        if cr_result.outcome == CandidateOutcome.LEADER_LOCKED:
             break  # round leader confirmed — skip remaining candidates
-        if residual is not None:
-            escalation_signal = residual
+        if cr_result.outcome == CandidateOutcome.ESCALATED:
+            escalation_signal = cr_result.escalation_signal
             break  # true degradation — abort remaining candidates
 
     return all_candidate_results, candidate_scores, escalation_signal
