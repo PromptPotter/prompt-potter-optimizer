@@ -10,9 +10,12 @@ assertion in ``__init__`` rejects any path that contains a ``forks/``
 segment.
 
 Single ingress: the projection consumes only via ``on_record`` from the
-per-cycle ``CycleLedger``. The runner emits typed ``PhaseRecord`` / ``SnapshotRecord`` /
-``DecisionRecord`` records; this class routes each record kind to the
-corresponding internal handler.
+per-cycle ``CycleLedger``. The runner emits typed ``PhaseRecord`` /
+``SnapshotRecord`` / ``DecisionRecord`` records; ``LiveDashboardProjection``
+is a thin router that fans each record kind to a ``_ScalarBlock``
+(top-level scalars + counters) and a ``_RoundBlock`` (per-round nodes /
+candidates / p_best leaderboard), then merges both into one
+``dashboard.json`` write through ``_persist``.
 
 (Historical: this writer also produced ``output.log`` — a parallel
 narrative stream. Dropped because the per-line format was strictly
@@ -25,7 +28,6 @@ from __future__ import annotations
 
 import json
 import logging
-import time
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -148,10 +150,303 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
+class _ScalarBlock:
+    """Top-level dashboard.json scalars: phase markers, sample markers,
+    cumulative counters, current accuracy, composite-fitness formula. The
+    short-form formula template is held here too — it's set on INIT/exit
+    and consumed by both per-candidate live updates and the per-round
+    l1_score block render."""
+
+    def __init__(
+        self,
+        resume_from: dict[str, Any] | None,
+        cycle_id: str | None,
+        *,
+        l1_patience: int,
+        n_variants: int,
+        sp_budget_ttest: int,
+    ) -> None:
+        self.patience_max = l1_patience
+        self.state: dict[str, Any] = _make_initial_state(
+            resume_from,
+            cycle_id,
+            patience_max=l1_patience,
+            n_variants=n_variants,
+            sp_budget_ttest=sp_budget_ttest,
+        )
+        # Bare short-form formula template (set on INIT:exit). On every
+        # candidate score we re-inline the candidate's resolved
+        # evaluator values into this template and write the result onto
+        # ``state["composite_fitness_formula_short"]``.
+        self.short_formula_template: str | None = None
+
+    def apply_phase(self, event: PhaseEvent, view: dict | None) -> None:
+        s = self.state
+        s["phase"] = event.phase
+        if event.round is not None:
+            s["round"] = event.round
+
+        phase, data = event.phase, event.data
+        if phase == CampaignPhase.INIT and event.event == "exit":
+            cycle = data["state"]
+            loop_env = data["env"]
+            config = data["config"]
+            s["cycle_id"] = loop_env.state.cycle_id
+            s["baseline"] = cycle.tracking.current_accuracy
+            self.patience_max = config.optimization.l1_patience
+            s["patience"] = f"0/{self.patience_max}"
+            if view is not None:
+                s["composite_fitness_formula"] = view.get("composite_fitness_formula")
+                self.short_formula_template = view.get("composite_fitness_formula_short")
+                s["composite_fitness_formula_short"] = self.short_formula_template
+        elif phase == "scoring_steer" and event.event == "applied":
+            # Operator-driven hot-swap: mirror the new formula onto the
+            # top-level scalar so the next dashboard tail shows it.
+            new_formula = data.get("formula")
+            if new_formula:
+                s["composite_fitness_formula"] = new_formula
+                # Custom formulas render verbatim — no short form, no
+                # value inlining (operator authored it, they read it).
+                self.short_formula_template = None
+                s["composite_fitness_formula_short"] = None
+        elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+            s["round"] = data.get("round", s["round"])
+            s["degraded_count"] = 0
+        elif phase in _PHASE_TO_LAYER:
+            s["layer"] = _PHASE_TO_LAYER[phase]
+
+    def update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
+        s = self.state
+        s["candidate"] = f"C{ci + 1}/{ct}"
+        s["query"] = f"{qi + 1}/{qt}"
+
+    def mark_sample_started(self, query_text: str) -> None:
+        s = self.state
+        s["query_in_flight"] = True
+        s["query_started_at"] = datetime.now(UTC).isoformat()
+        s["current_query_payload"] = (query_text or "")[:120]
+
+    def absorb_sample_scored(self, result: dict) -> None:
+        s = self.state
+        pd = result.get("pipeline_data") or {}
+        query_time = float(pd.get("total_time", 0.0) or 0.0)
+        is_cached = bool(result.get("cached", False))
+
+        if result.get("error") or pd.get("error"):
+            s["error_count"] += 1
+        if is_degraded(result):
+            s["degraded_count"] += 1
+
+        s["total_queries_scored"] += 1
+        if not is_cached:
+            s["total_backend_calls"] += 1
+
+        s["query_in_flight"] = False
+        s["query_started_at"] = None
+        s["current_query_payload"] = None
+        s["last_query_elapsed_s"] = round(query_time, 2)
+
+    def update_current_acc(self, scores: dict) -> None:
+        s = self.state
+        s["current_acc"] = round(scores.get("accuracy", 0.0), 4)
+        # Inline this candidate's resolved evaluator values into the
+        # short-form formula so the top of dashboard.json reads
+        # ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` instead of needing a
+        # legend lookup. Skipped when the operator authored a custom
+        # formula (no template) — it renders verbatim in
+        # ``composite_fitness_formula``.
+        if self.short_formula_template:
+            s["composite_fitness_formula_short"] = inline_short_formula_values(
+                self.short_formula_template, scores.get("evaluators")
+            )
+
+    def absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:
+        s = self.state
+        if accuracy > s["best"]:
+            s["best"] = round(accuracy, 4)
+        s["patience"] = f"{l1_stall_count}/{self.patience_max}"
+        s["layer"] = "L1"
+
+    def update_cycle_id(self, new_cycle_id: str) -> None:
+        self.state["cycle_id"] = new_cycle_id
+
+
+class _RoundBlock:
+    """Per-round structure under ``dashboard.json::current_round.nodes
+    .l1_score`` — candidates, samples, and the round-wide P(best)
+    leaderboard. Reset at L1_GENERATE/enter and at round-complete."""
+
+    def __init__(self) -> None:
+        self.current: dict[str, Any] = {"round": 0, "candidates": {}}
+
+    def begin_round(self, round_idx: int) -> None:
+        self.current = {"round": round_idx, "candidates": {}}
+
+    def seed_candidate(
+        self,
+        idx: int,
+        total: int,
+        changes_description: str,
+        pp_override: dict | None,
+    ) -> None:
+        # Seed the entry so CURRENT shows labelled pending slots; sample/score
+        # callbacks lazy-init the same key for paths that skip this callback.
+        entry = self.current.setdefault("candidates", {}).setdefault(idx, {})
+        entry["idx"] = idx
+        entry["total"] = total
+        entry["label"] = changes_description or ""
+        entry["pp_override"] = pp_override
+        entry.setdefault("samples", [])
+        entry.setdefault("scores", None)
+
+    def append_sample(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+        pd = result.get("pipeline_data") or {}
+        query_time = float(pd.get("total_time", 0.0) or 0.0)
+        hit = bool(result.get("hit"))
+        is_cached = bool(result.get("cached", False))
+        terminated = pd.get("terminated_at") or ""
+        # Lazy-init candidate entry — older paths may skip on_candidate_started.
+        cand = self.current.setdefault("candidates", {}).setdefault(
+            ci, {"idx": ci, "total": ct, "label": "", "samples": [], "scores": None}
+        )
+        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
+        in_tok = result.get("input_tokens")
+        out_tok = result.get("output_tokens")
+        cand["samples"].append(
+            {
+                "qi": qi,
+                "qt": qt,
+                "sample_id": result.get("sample_id"),
+                "hit": hit,
+                "cached": is_cached,
+                "query": result.get("query") or "",
+                "prediction": result.get("prediction") or "",
+                "ground_truth": result.get("ground_truth") or "",
+                "time_s": round(query_time, 2),
+                "terminated_at": terminated,
+                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
+                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
+            }
+        )
+
+    def set_candidate_scores(self, idx: int, total: int, scores: dict) -> None:
+        # Store the report verbatim — single source of truth shared with
+        # ``round_result.candidate_scores`` (same dict instance).
+        # ``build_l1_score_block`` projects to the dashboard/round_NNNN
+        # shape without a second copy of the keys.
+        cand = self.current.setdefault("candidates", {}).setdefault(
+            idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
+        )
+        cand["scores"] = scores
+
+    def update_p_best(
+        self,
+        idx: int,
+        total: int,
+        current_id: str,
+        n_queries: int,
+        p_best: dict[str, float],
+    ) -> None:
+        """Merge per-query P(best) into the candidate slot + top-5 leaderboard.
+
+        Stores each candidate's ``p_best``, signed delta vs prior query, and
+        a capped trajectory list. Also publishes the round-wide top-5 sorted
+        view at ``current.p_best_top``.
+        """
+        cand = self.current.setdefault("candidates", {}).setdefault(
+            idx, {"idx": idx, "total": total}
+        )
+        current = float(p_best.get(current_id, 0.0))
+        prev = float(cand.get("p_best", current))
+        history: list[float] = list(cand.get("p_best_history") or [])
+        history.append(current)
+        # Cap history at 64 entries — round size rarely exceeds 40.
+        if len(history) > 64:
+            history = history[-64:]
+        cand["p_best"] = current
+        cand["p_best_delta"] = current - prev
+        cand["p_best_history"] = history
+        cand["p_best_n_queries"] = n_queries
+
+        # Round-wide leaderboard (top-5 by P(best)).
+        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
+        self.current["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top]
+
+    def build_l1_score_block(
+        self,
+        *,
+        short_formula_template: str | None,
+        active_formula: str | None,
+        live: bool,
+    ) -> dict[str, Any]:
+        """Project current candidates to dashboard's l1_score shape.
+
+        ``live=True`` renders samples as compact one-liners (keeps
+        dashboard.json from carrying 2 kB query strings per sample);
+        ``live=False`` emits the full sample dicts (round-complete flush).
+        ``active_formula`` pairs each candidate's composite_fitness number
+        with the formula that produced it; ``short_formula_template`` is
+        the bare template re-inlined per-candidate with that candidate's
+        resolved evaluator values.
+        """
+        candidates = self.current.get("candidates") or {}
+        input_candidates: list[dict[str, Any]] = []
+        output_candidates: list[dict[str, Any]] = []
+        for idx in sorted(candidates.keys()):
+            cand = candidates[idx]
+            scores = cand.get("scores") or {}
+            label = cand.get("label") or scores.get("changes_description") or ""
+            input_candidates.append(
+                {
+                    "idx": idx,
+                    "label": label,
+                    "changes_description": scores.get("changes_description") or label,
+                    "pp_override": cand.get("pp_override"),
+                }
+            )
+            cand_evaluators = dict(scores.get("evaluators") or {})
+            stats: dict[str, Any] = {
+                "accuracy": scores.get("accuracy"),
+                "composite_fitness": scores.get("composite_fitness"),
+                "composite_fitness_formula": active_formula,
+                # Per-candidate value-inlined short formula — the
+                # top-level scalar carries the latest candidate's
+                # version; this field carries the per-candidate
+                # snapshot so a finished round records every
+                # candidate's resolved formula.
+                "composite_fitness_formula_short": inline_short_formula_values(
+                    short_formula_template, cand_evaluators
+                ),
+                # Resolved evaluator values that fed the formula —
+                # ``accuracy``, ``latency_norm``, ``error_rate``, etc.
+                # Use these to read what each short code (``acc``,
+                # ``H``, ``lat``, ``R``, ``pc``) resolved to. Legend
+                # lives in ``docs/operations/improvement-tracking.md``.
+                "evaluators": cand_evaluators,
+                "hits": scores.get("hits"),
+                "total": scores.get("total"),
+                "invalid": scores.get("invalid", False),
+                "validation_failures": scores.get("validation_failures") or [],
+            }
+            samples = cand.get("samples") or []
+            output_candidates.append(
+                {
+                    "idx": idx,
+                    "stats": stats,
+                    "samples": [fmt_sample_line(s) for s in samples] if live else list(samples),
+                }
+            )
+        return {
+            "input": {"candidates": input_candidates},
+            "output": {"candidates": output_candidates},
+        }
+
+
 class LiveDashboardProjection(ProjectionBase):
-    """Per-cycle dashboard + audit log writer; ensures per-session narrative
-    + control files. Not an optimizer checkpoint — resume reads
-    ``rounds/trial_NNNN.json``, counters here are display continuity only."""
+    """Per-cycle dashboard writer; routes ledger records to the scalar +
+    round blocks and persists the merged view to ``dashboard.json``. Not
+    an optimizer checkpoint — resume reads ``rounds/trial_NNNN.json``,
+    counters here are display continuity only."""
 
     def __init__(
         self,
@@ -181,25 +476,14 @@ class LiveDashboardProjection(ProjectionBase):
         self.session_dir = session_dir
         self._recorder = recorder
 
-        self._patience_max: int = l1_patience
-        self._state: dict[str, Any] = _make_initial_state(
+        self.scalar = _ScalarBlock(
             resume_from,
             cycle_id,
-            patience_max=self._patience_max,
+            l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
         )
-        self._workflow_start = time.monotonic()
-        self._round_start = time.monotonic()
-        self._query_start: float | None = None
-
-        # Bare short-form formula template (set on INIT:exit). On every
-        # candidate score we re-inline the candidate's resolved
-        # evaluator values into this template and write the result onto
-        # ``self._state["composite_fitness_formula_short"]``.
-        self._short_formula_template: str | None = None
-
-        self._current_round: dict[str, Any] = {"round": 0, "candidates": {}}
+        self.round = _RoundBlock()
 
         self._persist()
 
@@ -261,51 +545,6 @@ class LiveDashboardProjection(ProjectionBase):
             recorder=recorder,
         )
 
-    # -- Internal handlers (called from on_record router) ---------------------
-
-    def _on_phase(self, event: PhaseEvent, view: dict | None) -> None:
-        s = self._state
-        s["phase"] = event.phase
-        if event.round is not None:
-            s["round"] = event.round
-
-        phase, data = event.phase, event.data
-        if phase == CampaignPhase.INIT and event.event == "exit":
-            cycle = data["state"]
-            loop_env = data["env"]
-            config = data["config"]
-            s["cycle_id"] = loop_env.state.cycle_id
-            s["baseline"] = cycle.tracking.current_accuracy
-            self._patience_max = config.optimization.l1_patience
-            s["patience"] = f"0/{self._patience_max}"
-            if view is not None:
-                s["composite_fitness_formula"] = view.get("composite_fitness_formula")
-                # Stash the bare short-form template so subsequent
-                # candidate scores can re-inline fresh values without
-                # losing the structure.
-                self._short_formula_template = view.get("composite_fitness_formula_short")
-                s["composite_fitness_formula_short"] = self._short_formula_template
-        elif phase == "scoring_steer" and event.event == "applied":
-            # Operator-driven hot-swap: mirror the new formula onto the
-            # top-level scalar so the next dashboard tail shows it.
-            new_formula = data.get("formula")
-            if new_formula:
-                s["composite_fitness_formula"] = new_formula
-                # Custom formulas render verbatim — no short form, no
-                # value inlining (operator authored it, they read it).
-                self._short_formula_template = None
-                s["composite_fitness_formula_short"] = None
-        elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
-            s["round"] = data.get("round", s["round"])
-            self._round_start = time.monotonic()
-            s["degraded_count"] = 0
-            # Fresh round — clear in-flight accumulator (history already populated).
-            self._current_round = {"round": s["round"], "candidates": {}}
-        elif phase in _PHASE_TO_LAYER:
-            s["layer"] = _PHASE_TO_LAYER[phase]
-
-        self._persist()
-
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
         """Mark a fork-on-divergence cutover on the live dashboard.
 
@@ -315,241 +554,16 @@ class LiveDashboardProjection(ProjectionBase):
         keeps the dashboard's identity field current.
         """
         del old_cycle_id, from_round
-        self._state["cycle_id"] = new_cycle_id
+        self.scalar.update_cycle_id(new_cycle_id)
         self._persist()
-
-    def _on_candidate_started(
-        self,
-        idx: int,
-        total: int,
-        changes_description: str,
-        pp_override: dict | None,
-    ) -> None:
-        # Seed the entry so CURRENT shows labelled pending slots; sample/score
-        # callbacks lazy-init the same key for paths that skip this callback.
-        entry = self._current_round.setdefault("candidates", {}).setdefault(idx, {})
-        entry["idx"] = idx
-        entry["total"] = total
-        entry["label"] = changes_description or ""
-        entry["pp_override"] = pp_override
-        entry.setdefault("samples", [])
-        entry.setdefault("scores", None)
-        # No _persist() here — placeholder seed; the next on_sample_scored
-        # write picks it up live, and on_round_complete is the final flush.
-
-    def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
-        s = self._state
-        s["candidate"] = f"C{ci + 1}/{ct}"
-        s["query"] = f"{qi + 1}/{qt}"
-
-    def _on_sample_started(
-        self,
-        ci: int,
-        ct: int,
-        qi: int,
-        qt: int,
-        query_text: str,
-    ) -> None:
-        s = self._state
-        self._update_sample_markers(ci, ct, qi, qt)
-
-        self._query_start = time.monotonic()
-        s["query_in_flight"] = True
-        s["query_started_at"] = datetime.now(UTC).isoformat()
-        s["current_query_payload"] = (query_text or "")[:120]
-        # Flush so an operator tailing dashboard.json sees query_in_flight + payload
-        # during the in-flight call, not only after sample_scored persists.
-        self._persist()
-
-    def _on_sample_scored(
-        self,
-        ci: int,
-        ct: int,
-        qi: int,
-        qt: int,
-        result: dict,
-    ) -> None:
-        s = self._state
-        self._update_sample_markers(ci, ct, qi, qt)
-
-        pd = result.get("pipeline_data") or {}
-        query_time = float(pd.get("total_time", 0.0) or 0.0)
-        hit = bool(result.get("hit"))
-        is_cached = bool(result.get("cached", False))
-        terminated = pd.get("terminated_at") or ""
-
-        if result.get("error") or pd.get("error"):
-            s["error_count"] += 1
-        if is_degraded(result):
-            s["degraded_count"] += 1
-
-        s["total_queries_scored"] += 1
-        if not is_cached:
-            s["total_backend_calls"] += 1
-
-        s["query_in_flight"] = False
-        s["query_started_at"] = None
-        s["current_query_payload"] = None
-        s["last_query_elapsed_s"] = round(query_time, 2)
-        self._query_start = None
-
-        # Lazy-init candidate entry — older paths may skip on_candidate_started.
-        cand = self._current_round.setdefault("candidates", {}).setdefault(
-            ci, {"idx": ci, "total": ct, "label": "", "samples": [], "scores": None}
-        )
-        # Tokens may live on result or pd; prefer result, preserve 0 vs None.
-        in_tok = result.get("input_tokens")
-        out_tok = result.get("output_tokens")
-        cand["samples"].append(
-            {
-                "qi": qi,
-                "qt": qt,
-                "sample_id": result.get("sample_id"),
-                "hit": hit,
-                "cached": is_cached,
-                "query": result.get("query") or "",
-                "prediction": result.get("prediction") or "",
-                "ground_truth": result.get("ground_truth") or "",
-                "time_s": round(query_time, 2),
-                "terminated_at": terminated,
-                "input_tokens": pd.get("input_tokens") if in_tok is None else in_tok,
-                "output_tokens": pd.get("output_tokens") if out_tok is None else out_tok,
-            }
-        )
-        self._persist()
-
-    def _on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        s = self._state
-        acc = scores.get("accuracy", 0.0)
-
-        s["current_acc"] = round(acc, 4)
-        # Inline this candidate's resolved evaluator values into the
-        # short-form formula so the top of dashboard.json reads
-        # ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` instead of needing a
-        # legend lookup. Skipped when the operator authored a custom
-        # formula (no template) — it renders verbatim in
-        # ``composite_fitness_formula``.
-        if self._short_formula_template:
-            s["composite_fitness_formula_short"] = inline_short_formula_values(
-                self._short_formula_template, scores.get("evaluators")
-            )
-
-        # Store the report verbatim — single source of truth shared with
-        # ``round_result.candidate_scores`` (same dict instance from
-        # ``_fire``). ``_build_l1_score_block`` projects to the
-        # dashboard/round_NNNN shape without a second copy of the keys.
-        cand = self._current_round.setdefault("candidates", {}).setdefault(
-            idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
-        )
-        cand["scores"] = scores
-        # No _persist() here — on_round_complete (or the next candidate's
-        # on_sample_scored) flushes the scored candidate to dashboard.json.
-
-    def _on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
-        s = self._state
-        acc = round_result.accuracy
-        improved = round_result.improved
-
-        if acc > s["best"]:
-            s["best"] = round(acc, 4)
-
-        s["patience"] = f"{l1_stall_count}/{self._patience_max}"
-        s["layer"] = "L1"
-
-        del (
-            improved
-        )  # round-complete narrative removed with output.log; ledger carries the decision
-        # Deposit l1_score block + HITL onto the active recorder before
-        # runner.py flush() — produces one consolidated .runtime/cache/rounds/round_NNNN.json.
-        self._deposit_audit_projection_state(round_result)
-
-        self._current_round = {"round": round_result.round + 1, "candidates": {}}
-        self._persist()
-
-    def _deposit_audit_projection_state(self, round_result: RoundResult) -> None:
-        """Hand l1_score block to the active recorder."""
-        if self._recorder is None:
-            return
-        self._recorder.set_l1_score(self._build_l1_score_block(round_result))
-
-    def _build_l1_score_block(
-        self,
-        round_result: RoundResult | None = None,
-    ) -> dict[str, Any]:
-        """l1_score block for dashboard/round_NNNN.json.
-
-        Reads the full score report stored in ``cand['scores']`` by
-        ``on_candidate_scored`` and projects to dashboard shape. ``round_result``
-        is currently only used to switch sample rendering between live (compact
-        one-liners to keep dashboard.json from carrying 2 kB query strings)
-        and round-complete (full structured samples).
-        """
-        candidates = self._current_round.get("candidates") or {}
-        is_live = round_result is None
-
-        input_candidates: list[dict[str, Any]] = []
-        output_candidates: list[dict[str, Any]] = []
-        for idx in sorted(candidates.keys()):
-            cand = candidates[idx]
-            scores = cand.get("scores") or {}
-            label = cand.get("label") or scores.get("changes_description") or ""
-            input_candidates.append(
-                {
-                    "idx": idx,
-                    "label": label,
-                    "changes_description": scores.get("changes_description") or label,
-                    "pp_override": cand.get("pp_override"),
-                }
-            )
-            cand_evaluators = dict(scores.get("evaluators") or {})
-            stats: dict[str, Any] = {
-                "accuracy": scores.get("accuracy"),
-                "composite_fitness": scores.get("composite_fitness"),
-                # Active formula at the moment this candidate was scored
-                # — pairs the composite_fitness number with what produced it so
-                # an operator reading the searchpoint's score never has
-                # to scroll up to the top of dashboard.json to find it.
-                "composite_fitness_formula": self._state.get("composite_fitness_formula"),
-                # Per-candidate value-inlined short formula —
-                # ``0.65*acc|0.667 + 0.15*H|0.972 + ...`` for THIS
-                # candidate's evaluator values. The top-level scalar
-                # carries the latest candidate's version; this field
-                # carries the per-candidate snapshot, so a finished
-                # round records every candidate's resolved formula.
-                "composite_fitness_formula_short": inline_short_formula_values(
-                    self._short_formula_template, cand_evaluators
-                ),
-                # Resolved evaluator values that fed the formula —
-                # ``accuracy``, ``latency_norm``, ``error_rate``,
-                # ``prompt_compactness``, etc. Use these to read what
-                # each short code (``acc``, ``H``, ``lat``, ``R``,
-                # ``pc``) resolved to for this candidate. Legend lives
-                # in ``docs/operations/improvement-tracking.md``.
-                "evaluators": cand_evaluators,
-                "hits": scores.get("hits"),
-                "total": scores.get("total"),
-                "invalid": scores.get("invalid", False),
-                "validation_failures": scores.get("validation_failures") or [],
-            }
-            samples = cand.get("samples") or []
-            output_candidates.append(
-                {
-                    "idx": idx,
-                    "stats": stats,
-                    "samples": [fmt_sample_line(s) for s in samples] if is_live else list(samples),
-                }
-            )
-
-        return {
-            "input": {"candidates": input_candidates},
-            "output": {"candidates": output_candidates},
-        }
 
     # -- Ledger subscription (sole ingress) -----------------------------------
-
-    # DecisionRecord records are persisted to ``ledger.jsonl`` by the runner; this
-    # projection only mirrors the live scalar/round state to ``dashboard.json``.
-    # Phases drive scalar updates, snapshots drive per-round structures.
+    #
+    # DecisionRecord records are persisted to ``ledger.jsonl`` by the
+    # runner; this projection only mirrors the live scalar / round state
+    # to ``dashboard.json``. Phases drive scalar updates; snapshots drive
+    # per-round structures. Both fan-outs are explicit here — no second
+    # dispatch path elsewhere.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "round" and record.event == "display":
@@ -557,8 +571,16 @@ class LiveDashboardProjection(ProjectionBase):
             round_result = payload.get("round_result")
             l1_stall = int(payload.get("l1_stall_count") or 0)
             if round_result is not None:
-                self._on_round_complete(round_result, l1_stall)
+                self.scalar.absorb_round_complete(round_result.accuracy, l1_stall)
+                # Deposit l1_score block onto the active recorder before
+                # runner._finalize_run flush — produces one consolidated
+                # .runtime/cache/rounds/round_NNNN.json.
+                if self._recorder is not None:
+                    self._recorder.set_l1_score(self._build_l1_score_block(round_result))
+                self.round.begin_round(round_result.round + 1)
+                self._persist()
             return
+
         payload = record.payload or {}
         view = payload.get("view")
         data = payload.get("data") or {}
@@ -568,82 +590,67 @@ class LiveDashboardProjection(ProjectionBase):
             round=record.round,
             data=data,
         )
-        self._on_phase(event, view)
+        self.scalar.apply_phase(event, view)
+        # L1_GENERATE/enter resets the in-flight round block in lockstep
+        # with the scalar's degraded_count clear.
+        if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+            self.round.begin_round(self.scalar.state["round"])
+        self._persist()
 
     def _handle_snapshot(self, record: SnapshotRecord) -> None:
         ev = record.event
         payload = record.payload or {}
+        ci = int(record.candidate_idx or 0)
+        ct = int(record.candidate_total or 0)
+        qi = int(record.sample_idx or 0)
+        qt = int(record.sample_total or 0)
         if ev == "sample_started":
-            self._on_sample_started(
-                int(record.candidate_idx or 0),
-                int(record.candidate_total or 0),
-                int(record.sample_idx or 0),
-                int(record.sample_total or 0),
-                payload.get("query_text") or "",
-            )
+            self.scalar.update_sample_markers(ci, ct, qi, qt)
+            self.scalar.mark_sample_started(payload.get("query_text") or "")
+            # Flush so an operator tailing dashboard.json sees
+            # query_in_flight + payload during the in-flight call, not
+            # only after sample_scored persists.
+            self._persist()
         elif ev == "sample_scored":
-            self._on_sample_scored(
-                int(record.candidate_idx or 0),
-                int(record.candidate_total or 0),
-                int(record.sample_idx or 0),
-                int(record.sample_total or 0),
-                payload.get("result") or {},
-            )
+            result = payload.get("result") or {}
+            self.scalar.update_sample_markers(ci, ct, qi, qt)
+            self.scalar.absorb_sample_scored(result)
+            self.round.append_sample(ci, ct, qi, qt, result)
+            self._persist()
         elif ev == "candidate_started":
-            self._on_candidate_started(
-                int(record.candidate_idx or 0),
-                int(record.candidate_total or 0),
+            self.round.seed_candidate(
+                ci,
+                ct,
                 payload.get("changes_description") or "",
                 payload.get("pp_override"),
             )
+            # No _persist() here — placeholder seed; the next sample_scored
+            # write picks it up live, and on_round_complete is the final flush.
         elif ev == "candidate_scored":
-            self._on_candidate_scored(
-                int(record.candidate_idx or 0),
-                int(record.candidate_total or 0),
-                payload.get("scores") or {},
-            )
+            scores = payload.get("scores") or {}
+            self.scalar.update_current_acc(scores)
+            self.round.set_candidate_scores(ci, ct, scores)
+            # No _persist() here — flushed by next sample_scored
+            # (next candidate) or by round_complete.
         elif ev == "p_best_update":
-            self._on_p_best_update(
-                int(record.candidate_idx or 0),
-                int(record.candidate_total or 0),
+            self.round.update_p_best(
+                ci,
+                ct,
                 payload.get("current_id") or "",
                 int(payload.get("n_queries") or 0),
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
+            self._persist()
 
-    def _on_p_best_update(
+    def _build_l1_score_block(
         self,
-        idx: int,
-        total: int,
-        current_id: str,
-        n_queries: int,
-        p_best: dict[str, float],
-    ) -> None:
-        """Merge per-query P(best) into the candidate slot + top-5 leaderboard.
-
-        Stores each candidate's ``p_best``, signed delta vs prior query, and
-        a capped trajectory list. Also publishes the round-wide top-5 sorted
-        view at ``current_round.p_best_top``.
-        """
-        cand = self._current_round.setdefault("candidates", {}).setdefault(
-            idx, {"idx": idx, "total": total}
+        round_result: RoundResult | None = None,
+    ) -> dict[str, Any]:
+        return self.round.build_l1_score_block(
+            short_formula_template=self.scalar.short_formula_template,
+            active_formula=self.scalar.state.get("composite_fitness_formula"),
+            live=round_result is None,
         )
-        current = float(p_best.get(current_id, 0.0))
-        prev = float(cand.get("p_best", current))
-        history: list[float] = list(cand.get("p_best_history") or [])
-        history.append(current)
-        # Cap history at 64 entries — round size rarely exceeds 40.
-        if len(history) > 64:
-            history = history[-64:]
-        cand["p_best"] = current
-        cand["p_best_delta"] = current - prev
-        cand["p_best_history"] = history
-        cand["p_best_n_queries"] = n_queries
-
-        # Round-wide leaderboard (top-5 by P(best)).
-        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
-        self._current_round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top]
-        self._persist()
 
     # -- Internal --------------------------------------------------------------
 
@@ -652,11 +659,11 @@ class LiveDashboardProjection(ProjectionBase):
         # partial reads and the file is rewritten on the next callback.
 
         # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
-        round_idx = self._current_round.get("round", 0)
+        round_idx = self.round.current.get("round", 0)
         nodes: dict[str, Any] = {}
         if self._recorder is not None:
             nodes.update(self._recorder.snapshot_nodes())
-        if self._current_round.get("candidates"):
+        if self.round.current.get("candidates"):
             nodes["l1_score"] = self._build_l1_score_block()
         ordered: dict[str, Any] = {}
         for preferred in ("l1_generate", "l1_critique"):
@@ -665,10 +672,11 @@ class LiveDashboardProjection(ProjectionBase):
         if "l1_score" in nodes:
             ordered["l1_score"] = nodes.pop("l1_score")
         ordered.update(nodes)
-        self._state["current_round"] = {"round": round_idx, "nodes": ordered}
+        s = self.scalar.state
+        s["current_round"] = {"round": round_idx, "nodes": ordered}
 
-        self._state["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
+        s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
         self.state_path.write_text(
-            json.dumps(self._state, indent=2, ensure_ascii=False, default=str),
+            json.dumps(s, indent=2, ensure_ascii=False, default=str),
             encoding="utf-8",
         )
