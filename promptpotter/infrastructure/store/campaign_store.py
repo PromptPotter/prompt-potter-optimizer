@@ -357,6 +357,164 @@ class CampaignStore(EntityStore):
             )
         return results
 
+    # -- Fork helpers ---------------------------------------------------------
+
+    @staticmethod
+    def _fresh_sibling_index_blob(
+        parent_index: dict[str, Any],
+        new_cycle_id: str,
+        parent_cycle_id: str,
+        fork_kind: str,
+        forked_at: str,
+        **extras: Any,
+    ) -> dict[str, Any]:
+        """Clean-slate sibling index inheriting type/config/backend from the parent."""
+        return {
+            "campaign_id": new_cycle_id,
+            "type": parent_index.get("type", "optimization_loop"),
+            "config": parent_index.get("config", {}),
+            "connector_type": parent_index.get("connector_type", ""),
+            "backend_id": parent_index.get("backend_id", ""),
+            "parent_cycle_id": parent_cycle_id,
+            "parent_session_id": parent_index.get("parent_session_id", ""),
+            "forked_from_round": 0,
+            "forked_at": forked_at,
+            "fork_kind": fork_kind,
+            "trials": [],
+            "n_trials": 0,
+            "best_accuracy": 0.0,
+            "best_trial_id": None,
+            "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
+            "status": "active",
+            "created_at": forked_at,
+            "updated_at": forked_at,
+            **extras,
+        }
+
+    def save_divergence_fork(
+        self,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
+        surviving_trials: list[dict[str, Any]],
+        forked_at: str,
+        forked_from_round: int,
+    ) -> Path:
+        """Divergence-fork ``index.json`` inheriting parent state.
+
+        Recomputes ``best_*`` from ``surviving_trials`` so the fork's index
+        reflects only the rounds < ``forked_from_round`` it inherited.
+        """
+        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
+        parent_index = read_json_optional(parent_path) or {}
+        best_acc = max(
+            (float(t.get("accuracy", 0.0)) for t in surviving_trials),
+            default=0.0,
+        )
+        best_trial_id = next(
+            (
+                t.get("trial_id")
+                for t in surviving_trials
+                if float(t.get("accuracy", 0.0)) == best_acc
+            ),
+            None,
+        )
+        index = {
+            **parent_index,
+            "campaign_id": new_cycle_id,
+            "parent_cycle_id": parent_cycle_id,
+            "forked_from_round": forked_from_round,
+            "forked_at": forked_at,
+            "trials": list(surviving_trials),
+            "n_trials": len(surviving_trials),
+            "best_accuracy": best_acc,
+            "best_trial_id": best_trial_id,
+            "status": "resumed",
+            "updated_at": forked_at,
+        }
+        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        write_json(path, index)
+        return path
+
+    def save_diag_fork(
+        self,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
+        forked_at: str,
+    ) -> Path:
+        """Clean-slate diag-sibling ``index.json``."""
+        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
+        parent_index = read_json_optional(parent_path) or {}
+        blob = self._fresh_sibling_index_blob(
+            parent_index, new_cycle_id, parent_cycle_id, "diag_sibling", forked_at
+        )
+        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        write_json(path, blob)
+        return path
+
+    def save_sweep_fork(
+        self,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
+        sweep_batch_id: str,
+        forked_at: str,
+    ) -> Path:
+        """Clean-slate sweep-fork ``index.json`` carrying ``sweep_batch_id``."""
+        parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
+        parent_index = read_json_optional(parent_path) or {}
+        blob = self._fresh_sibling_index_blob(
+            parent_index,
+            new_cycle_id,
+            parent_cycle_id,
+            "sweep_fork",
+            forked_at,
+            sweep_batch_id=sweep_batch_id,
+        )
+        path = self._campaign_dir("", new_cycle_id) / "index.json"
+        write_json(path, blob)
+        return path
+
+    def copy_parent_trials_and_candidates(
+        self,
+        parent_cycle_id: str,
+        new_cycle_id: str,
+        *,
+        before_round: int,
+    ) -> int:
+        """Copy parent's ``trials/`` + ``candidates/`` files for rounds < ``before_round``.
+
+        Returns total files copied. Caller owns deciding when to invoke;
+        used by divergence forks for deterministic-replay inheritance.
+        """
+        copy_specs: tuple[tuple[Path, Path, str], ...] = (
+            (
+                self._trials_dir("", parent_cycle_id),
+                self._trials_dir("", new_cycle_id),
+                "trial_",
+            ),
+            (
+                self._candidates_dir("", parent_cycle_id),
+                self._candidates_dir("", new_cycle_id),
+                "round_",
+            ),
+        )
+        n_copied = 0
+        for src, dst, prefix in copy_specs:
+            if not src.exists():
+                continue
+            dst.mkdir(parents=True, exist_ok=True)
+            for p in sorted(src.glob(f"{prefix}*.json")):
+                try:
+                    n = int(p.stem.removeprefix(prefix))
+                except ValueError:
+                    continue
+                if n < before_round:
+                    shutil.copyfile(p, dst / p.name)
+                    n_copied += 1
+        return n_copied
+
     # -- Trial CRUD -----------------------------------------------------------
 
     def add_trial(

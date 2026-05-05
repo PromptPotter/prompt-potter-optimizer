@@ -41,6 +41,8 @@ __all__ = [
     "RoundStartView",
     "ScoreEntry",
     "SpDiffView",
+    "SweepPayloadRow",
+    "SweepSummaryView",
     "WarningEntry",
 ]
 
@@ -324,6 +326,29 @@ class LogMdView:
     family_best: tuple[float, str] | None = None
 
 
+@dataclass(frozen=True)
+class SweepPayloadRow:
+    """One row in a sweep batch's ``summary.md`` payload table."""
+
+    source_file: str
+    status: str
+    cycle_id: str
+
+
+@dataclass(frozen=True)
+class SweepSummaryView:
+    """``summary.md`` for a sweep batch dir — header + one row per payload."""
+
+    batch_id: str
+    parent_cycle_id: str
+    family_root: str
+    started_at: str
+    completed_at: str
+    n_minted: int
+    n_payloads: int
+    payloads: tuple[SweepPayloadRow, ...]
+
+
 AnyView = (
     InitEnterView
     | InitExitView
@@ -341,4 +366,5 @@ AnyView = (
     | LogMdView
     | FinalWinnerView
     | ForkSummaryView
+    | SweepSummaryView
 )

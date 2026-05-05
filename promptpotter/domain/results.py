@@ -13,11 +13,13 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 __all__ = [
     "CandidateProposal",
     "CandidateScore",
+    "PayloadOutcome",
     "RoundBaseline",
     "RoundDiagnostics",
     "RoundMetadata",
     "RoundResult",
     "RunResult",
+    "SweepBatchResult",
 ]
 
 
@@ -210,3 +212,24 @@ class RunResult(BaseModel):
     cycle_id: str | None = None
     session_id: str | None = None
     resumed_from_round: int = 0
+
+
+class PayloadOutcome(BaseModel):
+    """Per-payload row inside a ``SweepBatchResult``."""
+
+    source_file: str
+    status: str  # completed | interrupted | skipped | skipped_already_forked
+    cycle_id: str
+
+
+class SweepBatchResult(BaseModel):
+    """Final outcome of a sweep batch — all forks attempted, persistence finalized."""
+
+    batch_id: str
+    parent_cycle_id: str
+    family_root: str
+    started_at: str
+    completed_at: str
+    fork_cycle_ids: list[str]
+    payload_outcomes: list[PayloadOutcome]
+    interrupted: bool

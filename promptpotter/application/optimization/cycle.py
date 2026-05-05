@@ -12,11 +12,9 @@ import hashlib
 import json
 import logging
 import re
-import shutil
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
-from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
 from promptpotter.application.optimization.elimination import update_query_tracker
@@ -44,10 +42,6 @@ from promptpotter.domain.run_records import (
 from promptpotter.domain.search_point import JobSearchPoint
 from promptpotter.infrastructure.ledger import RunLedger
 from promptpotter.infrastructure.store import root_cycle_id, save_active_pointer
-from promptpotter.infrastructure.store.base import (
-    read_json_optional,
-    write_json,
-)
 from promptpotter.shared.errors import ResumeDivergenceError, graceful
 from promptpotter.shared.statistics import (
     pobb_should_stop,
@@ -339,11 +333,11 @@ def _fork_sibling_setup(
     from_round: int,
     fork_data: dict[str, Any] | None = None,
     log_extra: str = "",
-) -> tuple[Path, Path, str, dict[str, Any]]:
-    """Common fork plumbing: dir create, FORK_CUT append, parent index read, pointer + log.
+) -> str:
+    """Common fork plumbing: dir create, FORK_CUT append, pointer + log.
 
-    Returns ``(parent_dir, new_dir, now_iso, parent_index)``. Caller writes
-    ``new_dir/index.json`` and any per-fork artifacts.
+    Returns ``now_iso`` — pass to the matching ``CampaignStore.save_*_fork``
+    so its ``forked_at`` matches the FORK_CUT decision record.
     """
     parent_dir = campaign_store.campaign_dir(parent_cycle_id)
     new_dir = campaign_store.campaign_dir(new_cycle_id)
@@ -361,7 +355,6 @@ def _fork_sibling_setup(
             data={"forked_at": now, **(fork_data or {})},
         )
 
-    parent_index = read_json_optional(parent_dir / "index.json") or {}
     save_active_pointer(tenant_id, session_id, new_cycle_id)
     logger.info(
         "Forked %s → %s at round %d%s (active pointer retargeted)",
@@ -370,39 +363,7 @@ def _fork_sibling_setup(
         from_round,
         log_extra,
     )
-    return parent_dir, new_dir, now, parent_index
-
-
-def _fresh_sibling_index(
-    parent_index: dict[str, Any],
-    new_cycle_id: str,
-    parent_cycle_id: str,
-    fork_kind: str,
-    now: str,
-    **extras: Any,
-) -> dict[str, Any]:
-    """Build a clean-slate sibling index inheriting type/config/backend from the parent."""
-    return {
-        "campaign_id": new_cycle_id,
-        "type": parent_index.get("type", "optimization_loop"),
-        "config": parent_index.get("config", {}),
-        "connector_type": parent_index.get("connector_type", ""),
-        "backend_id": parent_index.get("backend_id", ""),
-        "parent_cycle_id": parent_cycle_id,
-        "parent_session_id": parent_index.get("parent_session_id", ""),
-        "forked_from_round": 0,
-        "forked_at": now,
-        "fork_kind": fork_kind,
-        "trials": [],
-        "n_trials": 0,
-        "best_accuracy": 0.0,
-        "best_trial_id": None,
-        "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
-        "status": "active",
-        "created_at": now,
-        "updated_at": now,
-        **extras,
-    }
+    return now
 
 
 def _fork_at_divergence(
@@ -422,7 +383,7 @@ def _fork_at_divergence(
     suffix = hashlib.sha256(f"{old_cycle_id}|{ts}".encode()).hexdigest()[:8]
     new_cycle_id = f"{old_cycle_id}_fork_{suffix}"
 
-    old_dir, new_dir, now, index = _fork_sibling_setup(
+    now = _fork_sibling_setup(
         campaign_store,
         tenant_id,
         session_id,
@@ -430,48 +391,16 @@ def _fork_at_divergence(
         new_cycle_id,
         from_round=fork_from_round,
     )
-
-    best_acc = max((float(t.get("accuracy", 0.0)) for t in surviving_trials), default=0.0)
-    best_trial_id = next(
-        (t.get("trial_id") for t in surviving_trials if float(t.get("accuracy", 0.0)) == best_acc),
-        None,
+    campaign_store.save_divergence_fork(
+        old_cycle_id,
+        new_cycle_id,
+        surviving_trials=surviving_trials,
+        forked_at=now,
+        forked_from_round=fork_from_round,
     )
-    index.update(
-        {
-            "campaign_id": new_cycle_id,
-            "parent_cycle_id": old_cycle_id,
-            "forked_from_round": fork_from_round,
-            "forked_at": now,
-            "trials": list(surviving_trials),
-            "n_trials": len(surviving_trials),
-            "best_accuracy": best_acc,
-            "best_trial_id": best_trial_id,
-            "status": "resumed",
-            "updated_at": now,
-        }
+    campaign_store.copy_parent_trials_and_candidates(
+        old_cycle_id, new_cycle_id, before_round=fork_from_round
     )
-    write_json(new_dir / "index.json", index)
-
-    copy_specs: tuple[tuple[Path, Path, str], ...] = (
-        (old_dir / "trials", new_dir / "trials", "trial_"),
-        (
-            old_dir / ".runtime" / "cache" / "candidates",
-            new_dir / ".runtime" / "cache" / "candidates",
-            "round_",
-        ),
-    )
-    for src, dst, prefix in copy_specs:
-        if not src.exists():
-            continue
-        dst.mkdir(parents=True, exist_ok=True)
-        for p in sorted(src.glob(f"{prefix}*.json")):
-            try:
-                n = int(p.stem.removeprefix(prefix))
-            except ValueError:
-                continue
-            if n < fork_from_round:
-                shutil.copyfile(p, dst / p.name)
-
     return new_cycle_id
 
 
@@ -499,7 +428,7 @@ def fork_for_diag_sibling(
 ) -> str:
     """Mint a diag-BFS sibling rooted at round 0; records ``FORK_CUT`` and retargets the active pointer."""
     new_cycle_id = _next_diag_sibling_id(campaign_store, parent_cycle_id)
-    _, new_dir, now, parent_index = _fork_sibling_setup(
+    now = _fork_sibling_setup(
         campaign_store,
         tenant_id,
         session_id,
@@ -508,10 +437,7 @@ def fork_for_diag_sibling(
         from_round=0,
         fork_data={"kind": "diag_sibling"},
     )
-    write_json(
-        new_dir / "index.json",
-        _fresh_sibling_index(parent_index, new_cycle_id, parent_cycle_id, "diag_sibling", now),
-    )
+    campaign_store.save_diag_fork(parent_cycle_id, new_cycle_id, forked_at=now)
     return new_cycle_id
 
 
@@ -535,7 +461,7 @@ def fork_for_sweep_sibling(
     ]
     new_cycle_id = f"{parent_cycle_id}_sweep_{sweep_batch_id}_{suffix}"
 
-    _, new_dir, now, parent_index = _fork_sibling_setup(
+    now = _fork_sibling_setup(
         campaign_store,
         tenant_id,
         session_id,
@@ -550,16 +476,8 @@ def fork_for_sweep_sibling(
         },
         log_extra=f" [batch={sweep_batch_id}, payload={payload_source_file}]",
     )
-    write_json(
-        new_dir / "index.json",
-        _fresh_sibling_index(
-            parent_index,
-            new_cycle_id,
-            parent_cycle_id,
-            "sweep_fork",
-            now,
-            sweep_batch_id=sweep_batch_id,
-        ),
+    campaign_store.save_sweep_fork(
+        parent_cycle_id, new_cycle_id, sweep_batch_id=sweep_batch_id, forked_at=now
     )
     return new_cycle_id
 

@@ -21,6 +21,7 @@ from promptpotter.infrastructure.store.paths import (
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.stores import Stores, build_stores
+from promptpotter.infrastructure.store.sweep_store import SweepStore
 
 __all__ = [
     "BackendStore",
@@ -29,6 +30,7 @@ __all__ = [
     "OptimizerCallCache",
     "SessionStore",
     "Stores",
+    "SweepStore",
     "active_pointer_exists",
     "build_stores",
     "campaign_dir_for",

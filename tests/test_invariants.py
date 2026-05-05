@@ -357,6 +357,46 @@ def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, 
     assert data["parent_session_id"], "index.json must carry parent_session_id"
 
 
+def test_no_direct_artifact_writes_outside_stores() -> None:
+    """Entry points and orchestrators MUST NOT write campaign artifacts directly.
+
+    The persistence invariant says only Stores own atomic file ops on the
+    campaign tree. cycle.py and the sweep paths used to bypass this with
+    direct write_json/shutil.copyfile/Path.write_text calls into campaign
+    dirs — silently passing the existence check above. AST-walk those
+    modules and forbid the bypass; introducing a new direct write here
+    fails the test with a file:line:func pointer.
+    """
+    BANNED_FUNCS = {"write_json", "write_text", "write_bytes", "copyfile", "copy", "copy2"}
+    repo_root = Path(__file__).resolve().parents[1]
+    guarded_paths = [
+        repo_root / "promptpotter" / "application" / "optimization" / "cycle.py",
+        repo_root / "promptpotter" / "presentation" / "cli" / "campaign_runner.py",
+        repo_root / "promptpotter" / "application" / "sweep" / "sweep_runner.py",
+    ]
+    offenders: list[str] = []
+    for src_path in guarded_paths:
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name: str | None
+            if isinstance(fn, ast.Attribute):
+                name = fn.attr
+            elif isinstance(fn, ast.Name):
+                name = fn.id
+            else:
+                name = None
+            if name in BANNED_FUNCS:
+                rel = src_path.relative_to(repo_root)
+                offenders.append(f"{rel}:{node.lineno}:{name}")
+    assert not offenders, (
+        "Direct artifact writes detected — route through CampaignStore/SweepStore:\n"
+        + "\n".join(offenders)
+    )
+
+
 def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
     """FileSink's Langfuse shadow must be wire-format compatible: camelCase
     fields on observations/scores, and nested spans carry parentObservationId.

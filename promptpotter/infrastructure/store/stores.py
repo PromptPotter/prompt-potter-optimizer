@@ -16,6 +16,7 @@ from promptpotter.infrastructure.store.paths import (
     DEFAULT_TENANT_ID,
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
+from promptpotter.infrastructure.store.sweep_store import SweepStore
 
 
 @dataclass(frozen=True)
@@ -33,6 +34,7 @@ class Stores:
     backends: BackendStore
     sessions: SessionStore
     campaigns: CampaignStore
+    sweeps: SweepStore
     archive: MeasurementArchive
     optimizer_calls: OptimizerCallCache
 
@@ -60,6 +62,7 @@ def build_stores(
         backends=BackendStore(tenant_dir, ds_root),
         sessions=SessionStore(tenant_dir),
         campaigns=CampaignStore(tenant_dir),
+        sweeps=SweepStore(tenant_dir),
         archive=MeasurementArchive(tenant_dir),
         optimizer_calls=OptimizerCallCache(tenant_dir),
     )
