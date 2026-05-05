@@ -182,10 +182,12 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
 
 def render_composite_fitness_inline(composite_fitness: float) -> str:
     """One-line composite_fitness tag — for slots that can't carry a multi-line block."""
-    return f"composite_fitness={composite_fitness:.4f}"
+    return f"comp_fit={composite_fitness:.4f}"
 
 
-def render_composite_fitness_oneliner(composite_fitness: float, baseline: float | None = None) -> str:
+def render_composite_fitness_oneliner(
+    composite_fitness: float, baseline: float | None = None
+) -> str:
     """Per-candidate / per-row 1-line composite_fitness render.
 
     Anchors against the campaign baseline so the operator sees how far

@@ -8,9 +8,9 @@ L3 is L2's nurse-LLM, analogue of how L2 nurses L1 via validation_failures.
 Three starter validators (extensible registry — add more here):
 
 * :data:`L2_CROSS_FIELD_DUPLICATION` — same N+ line block in ≥2 of
-  ``{directive, template_override, *text_overrides.values()}``.
-* :data:`L2_VERBATIM_SELF_REPEAT` — L2's ``directive`` this round equals the
-  previous round's directive on the OSP (L2 wrote the same thing again).
+  ``{brief, template_override, *text_overrides.values()}``.
+* :data:`L2_VERBATIM_SELF_REPEAT` — L2's ``brief`` this round equals the
+  previous round's brief on the OSP (L2 wrote the same thing again).
 * :data:`L2_CATALOGUE_REDUNDANCY` — a ``text_overrides[section]`` value
   equals the section's existing override on the OSP (no-op write).
 """
@@ -48,9 +48,9 @@ def _line_blocks(text: str, min_lines: int) -> list[str]:
 def _gather_l2_text_fields(source_output: Mapping[str, Any]) -> dict[str, str]:
     """Map of {field_label: text} across L2's text-bearing output fields."""
     out: dict[str, str] = {}
-    directive = source_output.get("directive")
-    if isinstance(directive, str) and directive:
-        out["directive"] = directive
+    brief = source_output.get("brief")
+    if isinstance(brief, str) and brief:
+        out["brief"] = brief
     tmpl = source_output.get("template_override")
     if isinstance(tmpl, str) and tmpl:
         out["template_override"] = tmpl
@@ -108,19 +108,19 @@ def _check_verbatim_self_repeat(
 ) -> ValidatorOutcome | None:
     if opt_sp is None:
         return None
-    new_directive = source_output.get("directive")
-    if not isinstance(new_directive, str) or not new_directive.strip():
+    new_brief = source_output.get("brief")
+    if not isinstance(new_brief, str) or not new_brief.strip():
         return None
-    prev_directive = opt_sp.l2_directive or ""
-    if not prev_directive.strip():
+    prev_brief = opt_sp.l2_brief or ""
+    if not prev_brief.strip():
         return None
-    if new_directive.strip() != prev_directive.strip():
+    if new_brief.strip() != prev_brief.strip():
         return None
     return ValidatorOutcome(
         validator_id=L2_VERBATIM_SELF_REPEAT.id,
         passed=False,
         score=0.0,
-        evidence={"directive": new_directive},
+        evidence={"brief": new_brief},
         nurse_target="l3",
     )
 
@@ -159,9 +159,9 @@ L2_CROSS_FIELD_DUPLICATION: LLMOutputValidator = LLMOutputValidator(
     id="l2_cross_field_duplication",
     description=(
         "L2 wrote the same N+ line block into two different output fields "
-        "(directive / template_override / text_overrides[*]). Indicates a "
+        "(brief / template_override / text_overrides[*]). Indicates a "
         "broken strategy mode — L3 must rewrite the plan to refine L2's "
-        "directive shape so it stops duplicating itself."
+        "brief shape so it stops duplicating itself."
     ),
     nurse_target="l3",
     check=_check_cross_field_duplication,
@@ -171,7 +171,7 @@ L2_CROSS_FIELD_DUPLICATION: LLMOutputValidator = LLMOutputValidator(
 L2_VERBATIM_SELF_REPEAT: LLMOutputValidator = LLMOutputValidator(
     id="l2_verbatim_self_repeat",
     description=(
-        "L2's directive this round equals the previous round's directive "
+        "L2's brief this round equals the previous round's brief "
         "on the OSP. L2 stalled and repeated itself — no learning. L3 must "
         "replan to break the loop."
     ),

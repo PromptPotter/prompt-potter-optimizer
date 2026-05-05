@@ -159,7 +159,7 @@ def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
             f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
         )
         out.append(f"{YELLOW}⚠{RESET} {axis} = {value!r}  ∉ [{allowed_str}]")
-        out.append("  ↳ scored 0 (no backend call); L2 directive will name this value")
+        out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
     return tuple(out)
 
 
@@ -233,7 +233,9 @@ def build_individual_summary(
     #   - default: 1-line composite_fitness-with-Δ as a detail line; degraded
     #     count joins as a separate detail. Box bottom stays plain.
     if comp is not None and not compact_display_enabled():
-        detail_lines.append(render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness))
+        detail_lines.append(
+            render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness)
+        )
         if degraded:
             detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
     else:

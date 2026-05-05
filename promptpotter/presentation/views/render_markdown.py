@@ -215,8 +215,8 @@ def _render_round(
     ]
     if rd.changes_description:
         parts.append(f"- changes: {rd.changes_description}")
-    if rd.l2_directive:
-        parts.append(f"- L2 directive: {rd.l2_directive}")
+    if rd.l2_brief:
+        parts.append(f"- L2 brief: {rd.l2_brief}")
     if rd.l1_yield < 1.0:
         n_total = rd.candidates_scored
         n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate)

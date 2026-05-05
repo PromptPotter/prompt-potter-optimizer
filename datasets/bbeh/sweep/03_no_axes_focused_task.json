@@ -1,6 +1,6 @@
 {
   "reason": "Hypothesis: the per-axis guidance section dilutes BBEH-specific framing. Hide axes_l1, replace task_context with concrete BBEH framing.",
-  "directive": "Variants should focus exclusively on the BBEH-specific challenge — heterogeneous reasoning over 23 subtask shapes with one short final answer — rather than abstract optimization axes.",
+  "brief": "Variants should focus exclusively on the BBEH-specific challenge — heterogeneous reasoning over 23 subtask shapes with one short final answer — rather than abstract optimization axes.",
   "l1_section_overrides": {"axes_l1": false},
   "l1_section_overrides_text": {
     "task_context": "BBEH spans 23 reasoning subtasks (logical deduction, temporal/spatial/causal reasoning, boardgame QA, word problems). Answer shape varies per task: integers, single words, short phrases, fixed vocabularies. The grader reads only the last bolded span, case-insensitive. Variants must accommodate this heterogeneity without inventing new answer tokens when a task lists allowed values."

@@ -1,4 +1,4 @@
 {
-  "reason": "Decompose-then-verify directive — push L1 toward variants that explicitly add a verification pass before committing.",
-  "directive": "BBEH puzzles fail when the model rushes a single inference. Variants must emphasize step-by-step decomposition and a final verification pass that re-checks every inference against the puzzle's stated constraints before emitting the bolded answer."
+  "reason": "Decompose-then-verify brief — push L1 toward variants that explicitly add a verification pass before committing.",
+  "brief": "BBEH puzzles fail when the model rushes a single inference. Variants must emphasize step-by-step decomposition and a final verification pass that re-checks every inference against the puzzle's stated constraints before emitting the bolded answer."
 }

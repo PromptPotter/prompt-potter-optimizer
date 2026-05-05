@@ -24,7 +24,7 @@ A loop firing once produces *one* nudge — not a guaranteed fix. The producer's
 - Loop 2's failure trail accumulates across rounds; L2 sees NEW vs ACCUMULATED and must change angle if the latter survives.
 - Loop 3 fires only on stall, but each L3 plan shapes both subsequent L1 and L2.
 
-The system depends on this gradualness. Hard one-shot directives ("do NOT propose X") aren't required — softer pointers toward the right region are enough, because the loop is built to retry.
+The system depends on this gradualness. Hard one-shot briefs ("do NOT propose X") aren't required — softer pointers toward the right region are enough, because the loop is built to retry.
 
 ## Validators are Evaluator-shaped
 

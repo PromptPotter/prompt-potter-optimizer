@@ -25,7 +25,7 @@ Closed `enum.StrEnum` in `promptpotter/application/optimization/pipeline.py`. Tw
 
 | Kind | Members | L2-mutable | Source |
 |------|---------|------------|--------|
-| Section | `pipeline_schema_text`, `failure_analysis`, `axes_l1`, `task_context`, `escalation_probe`, `escalation_alert`, `l2_directive`, `plan` | yes | each has a `_section_*` renderer |
+| Section | `pipeline_schema_text`, `failure_analysis`, `axes_l1`, `task_context`, `escalation_probe`, `escalation_alert`, `l2_brief`, `plan` | yes | each has a `_section_*` renderer |
 | Scalar | `n_variants`, `accuracy_pct`, `n_queries`, `rendered_prompt` | no — factual | computed in `compile_l1_surface` |
 
 The section-only subset is exposed as `L1_GENERATE_SECTION_FIELDS`. L2's output parser drops override keys not in this subset (with a warning log) — typos don't propagate.
@@ -64,7 +64,7 @@ if cycle.opt_sp.l1_template_override:
     )
 ```
 
-Authors of `template_override` must include `{{l2_directive}}` in the body so future directives flow through. No parser-level enforcement — contract documented for L2's prompt and operator review.
+Authors of `template_override` must include `{{l2_brief}}` in the body so future briefs flow through. No parser-level enforcement — contract documented for L2's prompt and operator review.
 
 ## File-line anchors
 

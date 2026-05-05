@@ -10,7 +10,7 @@ Inputs
   baseline / best / final block with ``baseline_composite_fitness``,
   ``prompt_hashes``, ``mode``).
 - ``trials`` — per-round optimizer state from ``trials/trial_NNNN.json``,
-  in round order. Carries ``opt_search_point`` (lineage, l2_directive,
+  in round order. Carries ``opt_search_point`` (lineage, l2_brief,
   critique), composite_fitness, accuracy, l1_yield.
 - ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
   same length and order as ``trials``. Source of L1 variants for the
@@ -199,8 +199,8 @@ def _render_round(
 
 def _render_l1_inputs(osp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
     parts: list[str] = ["", "**L1 inputs**", ""]
-    directive = (osp.get("l2_directive") or "").strip()
-    parts.append(f"- L2 directive: {directive or '_(none)_'}")
+    brief = (osp.get("l2_brief") or "").strip()
+    parts.append(f"- L2 brief: {brief or '_(none)_'}")
     src = (lineage.get("source") or "").strip()
     if src:
         parts.append(f"- lineage source: `{src}`")
@@ -228,7 +228,9 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        parts.append("| variant | composite_fitness | acc | Δ_parent | Δ_baseline | beat | changes |")
+        parts.append(
+            "| variant | composite_fitness | acc | Δ_parent | Δ_baseline | beat | changes |"
+        )
         parts.append("|---|---|---|---|---|---|---|")
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the

@@ -358,7 +358,11 @@ async def _run_query_loop(
             if on_query_starting is not None:
                 on_query_starting(sample.query, i, len(dataset))
 
-            handler = _process_cache_hit if sample.query in cached_query_results else _process_fresh_sample
+            handler = (
+                _process_cache_hit
+                if sample.query in cached_query_results
+                else _process_fresh_sample
+            )
             outcome = await handler(sample, i, len(dataset), state, ctx, _check_escalation)
 
             if outcome.escalation:

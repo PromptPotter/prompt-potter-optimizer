@@ -179,8 +179,8 @@ Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial c
 
 ```json
 {
-  "reason": "step-by-step directive",
-  "directive": "Reason step-by-step in <thinking> tags before producing the final answer.",
+  "reason": "step-by-step brief",
+  "brief": "Reason step-by-step in <thinking> tags before producing the final answer.",
   "l1_section_overrides": {"axes_l1": false},
   "l1_section_overrides_text": {"task_context": "BBEH targets multi-step deliberation; variants should explore decomposition + verification."},
   "l1_template_override": null
@@ -191,10 +191,10 @@ Every field optional; `reason` defaults to empty string. The Pydantic model is `
 
 | Field | Effect on L1 |
 |-------|--------------|
-| `directive` | Stamped onto `OptSearchPoint.l2_directive`. |
+| `brief` | Stamped onto `OptSearchPoint.l2_brief`. |
 | `l1_section_overrides` | Per-section visibility toggles. |
 | `l1_section_overrides_text` | Per-section text replacements. |
-| `l1_template_override` | Whole-body replacement of L1-generate's `problem_description`. Should contain `{{l2_directive}}`. |
+| `l1_template_override` | Whole-body replacement of L1-generate's `problem_description`. Should contain `{{l2_brief}}`. |
 
 These are the same fields L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
 

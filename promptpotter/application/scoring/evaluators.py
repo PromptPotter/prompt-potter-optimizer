@@ -129,7 +129,9 @@ def _compute_recall(
     return found / len(scoped)
 
 
-def compute_cache_hit_rate(*, results: list[QueryMeasurement], node: PipelineNode, **_: Any) -> float:
+def compute_cache_hit_rate(
+    *, results: list[QueryMeasurement], node: PipelineNode, **_: Any
+) -> float:
     if not results:
         return 0.0
     cache_hits = non_error = 0
@@ -168,7 +170,9 @@ def has_limit_node(schema: PipelineSchema) -> bool:
     return bool(_limit_nodes(schema))
 
 
-def _retrieval_shortfall_for_result(result: QueryMeasurement, schema: PipelineSchema) -> float | None:
+def _retrieval_shortfall_for_result(
+    result: QueryMeasurement, schema: PipelineSchema
+) -> float | None:
     """Per-query min(observed / target, 1.0) across all limit-bearing nodes.
 
     Returns None when no limit-bearing node has a list-valued output on this

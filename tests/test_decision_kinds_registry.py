@@ -160,7 +160,9 @@ def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
     cb.on_sample_scored(
         0, 1, 4, 5, {"hit": True, "fitness": 1.0, "pipeline_data": {"terminated_at": "llm_only"}}
     )
-    cb.on_candidate_scored(0, 1, {"accuracy": 0.6, "hits": 6, "total": 10, "composite_fitness": 0.55})
+    cb.on_candidate_scored(
+        0, 1, {"accuracy": 0.6, "hits": 6, "total": 10, "composite_fitness": 0.55}
+    )
 
     records = list(ledger.iter())
     assert len(records) == 3
@@ -219,7 +221,12 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
             phase="round",
             event="complete",
             round=1,
-            payload={"improved": False, "composite_fitness": 0.5, "accuracy": 0.5, "label": "round_1"},
+            payload={
+                "improved": False,
+                "composite_fitness": 0.5,
+                "accuracy": 0.5,
+                "label": "round_1",
+            },
         )
     )
     # Round 2: improved → l1 stall reset to 0.
@@ -228,7 +235,12 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
             phase="round",
             event="complete",
             round=2,
-            payload={"improved": True, "composite_fitness": 0.6, "accuracy": 0.6, "label": "round_2"},
+            payload={
+                "improved": True,
+                "composite_fitness": 0.6,
+                "accuracy": 0.6,
+                "label": "round_2",
+            },
         )
     )
     # L2 fires on round 3.

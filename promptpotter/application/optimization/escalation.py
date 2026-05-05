@@ -67,8 +67,8 @@ def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) ->
         }
     if payload.l1_template_override:
         opt_sp.l1_template_override = payload.l1_template_override
-    if payload.directive:
-        opt_sp.l2_directive = payload.directive
+    if payload.brief:
+        opt_sp.l2_brief = payload.brief
 
 
 # ---------------------------------------------------------------------------
@@ -169,7 +169,7 @@ def _parse_l2(
     except ValueError:
         action = OptimizerAction.NORMAL_ROUND
 
-    directive = raw.get("directive", "") if isinstance(raw.get("directive"), str) else ""
+    brief = raw.get("brief", "") if isinstance(raw.get("brief"), str) else ""
 
     def _filter_known(d: Any, kind: str) -> dict:
         if not isinstance(d, dict):
@@ -195,7 +195,7 @@ def _parse_l2(
 
     failures = run_l2_output_validators(
         {
-            "directive": directive,
+            "brief": brief,
             "template_override": template_override,
             "text_overrides": dict(text_overrides),
         },
@@ -211,7 +211,7 @@ def _parse_l2(
     return TransitionResult(
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
         task_context=new_task_context,
-        l2_directive=directive,
+        l2_brief=brief,
         action=action,
         scheme_overrides=scheme_overrides,
         text_overrides=text_overrides,
@@ -226,7 +226,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     osp = cycle.opt_sp
     if result.task_context:
         osp.task_context = result.task_context
-    osp.l2_directive = result.l2_directive
+    osp.l2_brief = result.l2_brief
     if result.scheme_overrides:
         osp.l1_section_overrides = {**osp.l1_section_overrides, **result.scheme_overrides}
     if result.text_overrides:
@@ -247,7 +247,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         is_probe,
         data={
             "action": str(result.action),
-            "l2_directive_preview": (result.l2_directive or "")[:200],
+            "l2_brief_preview": (result.l2_brief or "")[:200],
             "changes_description": result.opt_search_point.lineage.changes_description or "",
         },
         round=round_num,

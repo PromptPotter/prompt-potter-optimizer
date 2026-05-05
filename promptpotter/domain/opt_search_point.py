@@ -225,7 +225,7 @@ class OptSearchPoint(PromptTemplate):
     l1_critique_text: str = ""
     escalation_log: list[dict[str, Any]] = Field(default_factory=list)
     warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    l2_directive: str = ""
+    l2_brief: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     l2_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
@@ -244,7 +244,7 @@ class OptSearchPoint(PromptTemplate):
         "l1_critique_text",
         "escalation_log",
         "warning_inventory",
-        "l2_directive",
+        "l2_brief",
         "validation_failures",
         "runtime_failures",
         "l2_output_failures",
@@ -264,12 +264,12 @@ class OptSearchPoint(PromptTemplate):
         *the next round only*, and once L1 succeeded the basis for that
         guidance is stale.
 
-        * ``l2_directive``   — L2's action guidance for L1.
+        * ``l2_brief``   — L2's action guidance for L1.
         * ``l1_critique_text`` — the prior round's L1 critique summary; mutex
-          with ``l2_directive`` on L1, so a stale critique would otherwise
+          with ``l2_brief`` on L1, so a stale critique would otherwise
           bleed into the next L1 meta-prompt whenever L2 did not fire.
         """
-        self.l2_directive = ""
+        self.l2_brief = ""
         self.l1_critique_text = ""
 
     def append_escalation(self, entry: dict[str, Any]) -> None:

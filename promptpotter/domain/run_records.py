@@ -204,7 +204,7 @@ class SweepPayload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     reason: str = ""
-    directive: str | None = None
+    brief: str | None = None
     l1_section_overrides: dict[str, bool] | None = None
     l1_section_overrides_text: dict[str, str] | None = None
     l1_template_override: str | None = None

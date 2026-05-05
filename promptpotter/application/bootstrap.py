@@ -192,7 +192,7 @@ class Session:
     # -- Wiring ----------------------------------------------------------
     store: Stores
     backend_id: str
-    experiment_id: str
+    experiment_id: str  # Backend-side experiment id (TermNorm vocabulary). Distinct from cycle_id.
     backend_client: BackendClient
     pipeline_schema: PipelineSchema | None
     backend_index_synced: bool

@@ -82,7 +82,7 @@ Line 1 names the observation. Line 2 names the repair or consequence. A finding 
 
 ```
 ⚠ llm_only.model = 'gpt-4o' ∉ [openai/gpt-oss-120b]
-  ↳ scored 0; L2 directive will name this value
+  ↳ scored 0; L2 brief will name this value
 ```
 
 `dashboard.json::last_scoring_metadata` holds the structured finding. Each entry point reads from there and formats using this convention — data lives in one place, only rendering is per-surface.
@@ -107,7 +107,7 @@ The stale-data ladder's rescue step is **samplescan rescue** — "probe" is rese
 
 `campaigns/{cycle_id}/trials/trial_NNNN.json`:
 
-- `opt_search_point.l2_directive` — directive (if any).
+- `opt_search_point.l2_brief` — brief (if any).
 - `opt_search_point.l1_section_overrides` / `l1_section_overrides_text` / `l1_template_override` — surface mutations.
 - `opt_search_point.optimizer_params` / `task_context` — strategy fields.
 - `decisions[]` with `kind: "probe_round_commitment"` — outcome `True` when L2 set `action = "probe_round"`.

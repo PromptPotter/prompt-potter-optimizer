@@ -62,14 +62,14 @@ class TransitionResult:
     L2 may write any combination of these fields on the next OSP — they
     are independent. Surface mutations (`scheme_overrides`,
     `text_overrides`, `template_override`) target L1's prompt surface;
-    `directive`, `optimizer_params`, and `task_context` are L2's strategic
+    `brief`, `optimizer_params`, and `task_context` are L2's strategic
     levers; `action` controls whether the next round is normal or a probe.
     """
 
     opt_search_point: OptSearchPoint
     pipeline_params: dict | None = None
     task_context: TaskDecomposition | None = None
-    l2_directive: str = ""
+    l2_brief: str = ""
     action: OptimizerAction = OptimizerAction.NORMAL_ROUND
     scheme_overrides: dict[str, bool] = field(default_factory=dict)
     text_overrides: dict[str, str] = field(default_factory=dict)

@@ -156,7 +156,7 @@ class RuntimeFailure:
 
     Stored on ``OptSearchPoint.runtime_failures``, surfaced in the
     candidate's score report, and ingested by L2 next round as a
-    self-healing directive signal — mirroring the ValidationFailure
+    self-healing brief signal — mirroring the ValidationFailure
     pipeline. Does **not** drive synthetic-0: the candidate's real
     score stands (usually low anyway), the failure is a forensic
     attachment explaining *why*.

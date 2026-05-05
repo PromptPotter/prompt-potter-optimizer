@@ -43,7 +43,7 @@ Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. T
 |---|---|
 | `context_object_honored` | Each variant references at least one of the three `context_object` items in `changes_description` or new prompt-field text. |
 | `param_scope_discipline` | No variant touches `temperature`/`max_tokens`/`reasoning_effort` while ≥1 prompt field has been unchanged for the past 2 rounds, or before round `param_unlock_round` (default 3). |
-| `l2_directive_followed` | If `opt_search_point.l2_directive` non-empty, ≥1 variant's `changes_description` references a key noun phrase from it. |
+| `l2_brief_followed` | If `opt_search_point.l2_brief` non-empty, ≥1 variant's `changes_description` references a key noun phrase from it. |
 | `not_only_param_variants` | ≥1 variant per round mutates a `PROMPT_STRING_FIELDS` field. |
 | `optimizer_rewind_guard` *(5b — wired only when L2/L3 rebase emission lands)* | If the round emitted a `RebaseAction`, target round must exist + be ≤ current round; `reason` non-empty; payload non-empty (no-op rebase = bug). |
 
@@ -65,7 +65,7 @@ def render_review_md(
 ```
 
 **Per-round section:**
-- L1 inputs: `l2_directive`, critique fed in, three `context_object` items.
+- L1 inputs: `l2_brief`, critique fed in, three `context_object` items.
 - Behavior-check checklist (✓/✗ + evidence string).
 - Variants table: `variant | composite | accuracy | Δ_parent | Δ_baseline | beat_parent | changes`.
 - This round's critique (output of `l1_critique`).
@@ -133,7 +133,7 @@ class ForkPayload(BaseModel):
     reason: str                          # mandatory; LLM-issued reason or operator label
     issued_by: str                       # operator id, "L2", "L3", "L4", or "system"
     # Optional deltas; any subset may be set:
-    directive: str | None = None
+    brief: str | None = None
     l1_section_overrides: dict[str, bool] | None = None
     l1_section_overrides_text: dict[str, str] | None = None
     l1_template_override: str | None = None
@@ -170,7 +170,7 @@ All sweep branches share their parent's baseline measurements via the `library/`
 **LLM-rebase callers (M11 deliverable, scoped here for forward compat).** Out of M10 implementation, but the primitive must support:
 
 - L2 rebase fires when accumulated `RuntimeFailure` trail contaminates the current branch beyond what L2's L1-surface writes can fix. Gated behind: (a) `--allow-llm-rebase` opt-in (default off until calibrated), (b) `l2_rebase_patience` counter (default `l2_patience × 2`), (c) hard cap of one L2 rebase per branch.
-- L3 rebase fires when the whole L2 alley has stalled and L3's directive-rewrite is insufficient. Same gating shape with `l3_rebase_patience`, hard cap of one L3 rebase per branch.
+- L3 rebase fires when the whole L2 alley has stalled and L3's brief-rewrite is insufficient. Same gating shape with `l3_rebase_patience`, hard cap of one L3 rebase per branch.
 - `OPTIMIZER_REWIND_GUARD` behavior check (Track 1): rebase target round must exist + be ≤ current round; reason field non-empty; payload non-empty (no-op rebase = bug).
 
 **Telemetry.** Stays at family root. The active fork's `cycle_id` already lives at `dashboard.json::cycle_id`; extend with `cycle_id_path: list[str]` (root → ... → current) so the live view + webapp can render the branch tree without walking ledgers.

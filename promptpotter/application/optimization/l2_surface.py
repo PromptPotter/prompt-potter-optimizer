@@ -6,7 +6,7 @@ import json
 from collections.abc import Callable
 
 from promptpotter.application.optimization.dispatch import (
-    SECTION_L2_DIRECTIVE,
+    SECTION_L2_BRIEF,
     SECTION_PLAN,
     DispatchState,
 )
@@ -74,7 +74,7 @@ def _section_validation_failures(ctx: DispatchState) -> str:
         )
         lines.append(f"    allowed: [{allowed_str}]")
     lines.append(
-        "  ↳ Healing is gradual. Write a directive that shifts L1 toward the "
+        "  ↳ Healing is gradual. Write a brief that shifts L1 toward the "
         "allowed region — pointing at the allowed set is usually enough; "
         "spelling out every forbidden value is not required. If L1 still "
         "proposes invalid values next round, the loop retriggers with the "
@@ -92,7 +92,7 @@ def _section_runtime_failures(ctx: DispatchState) -> str:
     lines = [
         "RUNTIME FAILURES — L2 SELF-HEALING EVIDENCE",
         "  (candidates ran but produced high warning rates; L2 must adjust "
-        "its own strategy — directive, task_context, optimizer_params — to "
+        "its own strategy — brief, task_context, optimizer_params — to "
         "steer L1 away from the failing config region)",
     ]
     if rfs_new:
@@ -111,7 +111,7 @@ def _section_runtime_failures(ctx: DispatchState) -> str:
     lines.append("")
     lines.append(
         "  ↳ Healing is gradual and self-directed. Update your OWN outputs — "
-        "shift the directive, refine task_context, or adjust optimizer_params "
+        "shift the brief, refine task_context, or adjust optimizer_params "
         "to steer L1's search toward a safer region. ACCUMULATED items are "
         "the signal that your last angle didn't take; try a different one. "
         "Don't expect a one-shot fix — if the pattern persists across L2 "
@@ -137,7 +137,7 @@ L2_SECTION_RENDERERS: dict[str, Callable[[DispatchState], str]] = {
     "plan": SECTION_PLAN,
     "escalation_section": _escalation_report_text,
     "warning_inventory": _section_warning_inventory,
-    "l2_directive": SECTION_L2_DIRECTIVE,
+    "l2_brief": SECTION_L2_BRIEF,
     "validation_failures": _section_validation_failures,
     "runtime_failures": _section_runtime_failures,
     "axes_l2": _section_axes_l2,

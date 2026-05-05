@@ -348,17 +348,17 @@ def compile_prompt_vars(
 
 
 # ---------------------------------------------------------------------------
-# Shared section renderers — `_section_l2_directive` and `_section_plan` are
+# Shared section renderers — `_section_l2_brief` and `_section_plan` are
 # rendered by BOTH L1_GENERATE and L2, so they live with the dispatch types
 # instead of in either surface module.
 # ---------------------------------------------------------------------------
 
 
-def _section_l2_directive(ctx: DispatchState) -> str:
-    v = ctx.opt_sp.l2_directive
+def _section_l2_brief(ctx: DispatchState) -> str:
+    v = ctx.opt_sp.l2_brief
     if not v:
         return ""
-    label = "DIRECTIVE:" if ctx.layer is Layer.L1_GENERATE else "PREVIOUS DIRECTIVE:"
+    label = "BRIEF:" if ctx.layer is Layer.L1_GENERATE else "PREVIOUS BRIEF:"
     return f"{label}\n{v}"
 
 
@@ -369,5 +369,5 @@ def _section_plan(ctx: DispatchState) -> str:
 
 # Re-exports so the surface modules can import shared section renderers
 # from a single canonical home.
-SECTION_L2_DIRECTIVE = _section_l2_directive
+SECTION_L2_BRIEF = _section_l2_brief
 SECTION_PLAN = _section_plan

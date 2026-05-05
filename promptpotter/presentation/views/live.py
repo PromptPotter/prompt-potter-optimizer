@@ -336,7 +336,9 @@ class LiveDisplay:
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
         baseline_comp = self._phase_ctx.get("baseline_composite_fitness")
-        summary = build_individual_summary(scores, baseline_acc, baseline_composite_fitness=baseline_comp)
+        summary = build_individual_summary(
+            scores, baseline_acc, baseline_composite_fitness=baseline_comp
+        )
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
         if summary.body_line:

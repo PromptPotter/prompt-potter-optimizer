@@ -24,7 +24,7 @@ Trigger: after each full `optimize` run. **Mandatory after round 1** (the round-
    - `degraded` → halt, fix one knob, restart. Identify the issue.
    - `broken` → halt, full prompt revisit. Identify the failure mode.
 3. Issue ranking — pick the **single** highest priority:
-   1. Failed seeded check (`context_object_honored`, `param_scope_discipline`, `l2_directive_followed`, `not_only_param_variants`)
+   1. Failed seeded check (`context_object_honored`, `param_scope_discipline`, `l2_brief_followed`, `not_only_param_variants`)
    2. Failed scaffolding check (added later by the operator)
    3. `yield_rate < 0.20`
    4. `top_lift ≤ 0` (flat lift)
@@ -66,7 +66,7 @@ Once the verdict is known, locate the issue:
 
 - **Behaviour ✗ — `context_object_honored`** → L1 isn't reading the task context. Edit `l1_generate.json` to make the `task_context` block more prominent (move earlier, add explicit "you must reference these"). General fix, not the specific item that was missed.
 - **Behaviour ✗ — `param_scope_discipline`** → L1 mutated `temperature`/`max_tokens`/`reasoning_effort` too early. Edit `l1_generate.json` to push the param-vs-prompt boundary later (or tighten the "do not change LLM-call params" guard). Mention `param_unlock_round` (default 3) explicitly.
-- **Behaviour ✗ — `l2_directive_followed`** → L1 ignored the L2 directive. Edit `l1_generate.json` to elevate the `l2_directive` field and add an explicit "follow this above all else" instruction.
+- **Behaviour ✗ — `l2_brief_followed`** → L1 ignored the L2 brief. Edit `l1_generate.json` to elevate the `l2_brief` field and add an explicit "follow this above all else" instruction.
 - **Behaviour ✗ — `not_only_param_variants`** → L1 only mutated node params, never prompt fields. Edit `l1_generate.json` to require ≥ 1 prompt-field mutation per round.
 - **All ✓ + low yield** → L1 is too conservative. Bump `creativity` or relax the no-op detector; or rewrite `l1_critique.json` to give richer signal so L1 has more axes to explore.
 - **All ✓ + flat lift** → scoring or sample-set issue, not a prompt issue. Surface to operator: check the scoring formula (`campaign.json::scoring`), check `dashboard.json::scoring_set` for sample bias.

@@ -82,9 +82,7 @@ def parse_population(
         pipeline_params_override = cp.pipeline_params_override or None
         osp = cp.osp
         if schema and pipeline_params_override:
-            outcome = L1_SCHEMA_COMPLIANCE.run(
-                pipeline_params_override, pipeline_schema=schema
-            )
+            outcome = L1_SCHEMA_COMPLIANCE.run(pipeline_params_override, pipeline_schema=schema)
             if outcome is not None:
                 failures: list[ValidationFailure] = outcome.evidence["failures"]
                 osp.validation_failures = failures

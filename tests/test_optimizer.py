@@ -15,7 +15,7 @@ Four named invariants:
      leaders collapse to ~1.0; uniform regimes diffuse to ~1/K. ``PoBBCheck``
      respects ``n_min`` floor and ``lock_in_n_min`` lock-in gate;
      ``lock_in=1.0`` disables the lock-in branch.
-  4. ``SweepPayload`` round-trips through ``OptSearchPoint``: directive +
+  4. ``SweepPayload`` round-trips through ``OptSearchPoint``: brief +
      section overrides + template override survive ``model_dump`` → reload;
      dict deltas merge (don't replace); extra keys rejected at parse.
 """
@@ -109,7 +109,7 @@ def test_cross_field_duplication_fires_on_repeated_block():
     block = "step one\nstep two\nstep three"
     out = L2_CROSS_FIELD_DUPLICATION.run(
         {
-            "directive": f"intro\n{block}\nclose",
+            "brief": f"intro\n{block}\nclose",
             "template_override": f"prelude\n{block}\nepilogue",
             "text_overrides": {},
         },
@@ -123,22 +123,22 @@ def test_cross_field_duplication_fires_on_repeated_block():
     assert any(block == d["block"] for d in duplicates)
 
 
-def test_verbatim_self_repeat_fires_when_directive_matches_prev():
-    osp = _osp(l2_directive="Use ONLY model X for now.")
+def test_verbatim_self_repeat_fires_when_brief_matches_prev():
+    osp = _osp(l2_brief="Use ONLY model X for now.")
     out = L2_VERBATIM_SELF_REPEAT.run(
-        {"directive": "Use ONLY model X for now.", "text_overrides": {}},
+        {"brief": "Use ONLY model X for now.", "text_overrides": {}},
         opt_sp=osp,
     )
     assert out is not None
     assert out.nurse_target == "l3"
-    assert "Use ONLY model X" in out.evidence["directive"]
+    assert "Use ONLY model X" in out.evidence["brief"]
 
 
 def test_catalogue_redundancy_fires_on_no_op_text_override():
     osp = _osp(l1_section_overrides_text={"axes_l1": "do not propose model X"})
     out = L2_CATALOGUE_REDUNDANCY.run(
         {
-            "directive": "irrelevant",
+            "brief": "irrelevant",
             "text_overrides": {"axes_l1": "do not propose model X"},
         },
         opt_sp=osp,
@@ -150,12 +150,12 @@ def test_catalogue_redundancy_fires_on_no_op_text_override():
 def test_run_l2_output_validators_aggregates():
     block = "alpha\nbeta\ngamma"
     osp = _osp(
-        l2_directive="repeat me",
+        l2_brief="repeat me",
         l1_section_overrides_text={"axes_l1": "no-op"},
     )
     outcomes = run_l2_output_validators(
         {
-            "directive": "repeat me",
+            "brief": "repeat me",
             "template_override": f"hi\n{block}\nbye",
             "text_overrides": {
                 "axes_l1": "no-op",
@@ -171,10 +171,8 @@ def test_run_l2_output_validators_aggregates():
 
 
 def test_format_for_l3_renders_validator_ids_and_action():
-    osp = _osp(l2_directive="repeat me")
-    outcomes = run_l2_output_validators(
-        {"directive": "repeat me", "text_overrides": {}}, opt_sp=osp
-    )
+    osp = _osp(l2_brief="repeat me")
+    outcomes = run_l2_output_validators({"brief": "repeat me", "text_overrides": {}}, opt_sp=osp)
     rendered = format_l2_output_failures_for_l3(outcomes)
     assert "L2 OUTPUT FAILURES" in rendered
     assert "l2_verbatim_self_repeat" in rendered
@@ -267,17 +265,17 @@ def test_pobb_locks_in_dominant_leader():
 def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     payload = SweepPayload(
         reason="canonical case",
-        directive="reason step-by-step before answering",
+        brief="reason step-by-step before answering",
         l1_section_overrides={"axes_l1": False},
         l1_section_overrides_text={"task_context": "hard reasoning framing"},
-        l1_template_override="{{l2_directive}}\n\nCustom body.",
+        l1_template_override="{{l2_brief}}\n\nCustom body.",
     )
 
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
     apply_sweep_payload_to_osp(osp, payload)
 
     # The fields land where compile_prompt_vars reads them (L1-generate overrides).
-    assert osp.l2_directive == payload.directive
+    assert osp.l2_brief == payload.brief
     assert osp.l1_section_overrides == {"axes_l1": False}
     assert osp.l1_section_overrides_text == {"task_context": "hard reasoning framing"}
     assert osp.l1_template_override == payload.l1_template_override
@@ -288,7 +286,7 @@ def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     dump = osp.model_dump()
     reloaded = OptSearchPoint(**dump)
 
-    assert reloaded.l2_directive == payload.directive
+    assert reloaded.l2_brief == payload.brief
     assert reloaded.l1_section_overrides == {"axes_l1": False}
     assert reloaded.l1_section_overrides_text == {"task_context": "hard reasoning framing"}
     assert reloaded.l1_template_override == payload.l1_template_override
@@ -300,7 +298,7 @@ def test_sweep_payload_merges_with_existing_overrides() -> None:
     (not replace) so a sweep over a non-fresh OSP doesn't drop prior keys."""
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
     osp.l1_section_overrides = {"plan": True}
-    osp.l1_section_overrides_text = {"l2_directive": "original"}
+    osp.l1_section_overrides_text = {"l2_brief": "original"}
 
     payload = SweepPayload(
         l1_section_overrides={"axes_l1": False},
@@ -310,6 +308,6 @@ def test_sweep_payload_merges_with_existing_overrides() -> None:
 
     assert osp.l1_section_overrides == {"plan": True, "axes_l1": False}
     assert osp.l1_section_overrides_text == {
-        "l2_directive": "original",
+        "l2_brief": "original",
         "task_context": "added",
     }

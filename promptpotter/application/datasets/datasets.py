@@ -483,16 +483,16 @@ def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
     Deterministic, inside-this-file rule (no import from optimization/):
       - ``plan`` changed              → L3
       - ``optimizer_params`` changed
-        or ``l2_directive`` set fresh → L2
+        or ``l2_brief`` set fresh → L2
       - otherwise                     → L1
     """
     if prev_fields.get("plan", "") != next_fields.get("plan", ""):
         return "L3"
     if prev_fields.get("optimizer_params", {}) != next_fields.get("optimizer_params", {}):
         return "L2"
-    prev_directive = prev_fields.get("l2_directive", "")
-    next_directive = next_fields.get("l2_directive", "")
-    if next_directive and next_directive != prev_directive:
+    prev_brief = prev_fields.get("l2_brief", "")
+    next_brief = next_fields.get("l2_brief", "")
+    if next_brief and next_brief != prev_brief:
         return "L2"
     return "L1"
 
@@ -520,7 +520,7 @@ def _build_row(
     round_context = {
         "opt_search_point": prev_fields,
         "l1_critique_text": prev_fields.get("l1_critique_text", ""),
-        "l2_directive": prev_fields.get("l2_directive", ""),
+        "l2_brief": prev_fields.get("l2_brief", ""),
         "optimizer_params": prev_fields.get("optimizer_params", {}),
         "prev_accuracy": float(prev_trial.get("accuracy", 0.0)),
     }

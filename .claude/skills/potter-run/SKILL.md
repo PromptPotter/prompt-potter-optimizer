@@ -123,7 +123,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md
 
 ## Phase 5: Results
 
-Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
+Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
 
 ---
 

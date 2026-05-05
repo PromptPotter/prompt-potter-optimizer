@@ -12,7 +12,7 @@ from collections import Counter
 from collections.abc import Callable
 
 from promptpotter.application.optimization.dispatch import (
-    SECTION_L2_DIRECTIVE,
+    SECTION_L2_BRIEF,
     SECTION_PLAN,
     DispatchState,
     Layer,
@@ -176,10 +176,10 @@ def _section_escalation_probe(ctx: DispatchState) -> str:
 
 
 def _section_escalation_alert(ctx: DispatchState) -> str:
-    """Non-probe aggregated alert — suppressed by an active l2_directive."""
+    """Non-probe aggregated alert — suppressed by an active l2_brief."""
     if ctx.probe_next_round:
         return ""
-    if ctx.opt_sp.l2_directive:
+    if ctx.opt_sp.l2_brief:
         return ""
     log = ctx.opt_sp.escalation_log
     if not log:
@@ -209,7 +209,7 @@ L1_SECTION_RENDERERS: dict[str, Callable[[DispatchState], str]] = {
     "task_context": _section_task_context,
     "escalation_probe": _section_escalation_probe,
     "escalation_alert": _section_escalation_alert,
-    "l2_directive": SECTION_L2_DIRECTIVE,
+    "l2_brief": SECTION_L2_BRIEF,
     "plan": SECTION_PLAN,
 }
 
@@ -221,7 +221,7 @@ L1_SECTION_DESCRIPTIONS: dict[str, str] = {
     "task_context": "Structured domain context — domain, goals, challenges.",
     "escalation_probe": "Probe-round per-query warning block (probe rounds only).",
     "escalation_alert": "Aggregated pipeline-issue alert (non-probe).",
-    "l2_directive": "L2's strategic directive for this round.",
+    "l2_brief": "L2's strategic brief for this round.",
     "plan": "L3's strategic framework.",
 }
 

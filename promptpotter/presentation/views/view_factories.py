@@ -243,7 +243,10 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     if non_aborted:
         best = max(
             non_aborted,
-            key=lambda s: (s.composite_fitness if s.composite_fitness is not None else s.accuracy, s.accuracy),
+            key=lambda s: (
+                s.composite_fitness if s.composite_fitness is not None else s.accuracy,
+                s.accuracy,
+            ),
         )
         winner_label, winner_hits, winner_total = best.label, best.hits, best.total
     else:
@@ -514,7 +517,10 @@ def from_disk_round(
     if non_aborted:
         best = max(
             non_aborted,
-            key=lambda s: (s.composite_fitness if s.composite_fitness is not None else s.accuracy, s.accuracy),
+            key=lambda s: (
+                s.composite_fitness if s.composite_fitness is not None else s.accuracy,
+                s.accuracy,
+            ),
         )
         winner_label = best.label
 
@@ -626,7 +632,7 @@ def from_disk_log(
                 total=int(t.get("total", 0)),
                 composite_fitness=float(t.get("composite_fitness", 0.0)),
                 changes_description=(lineage.get("changes_description") or "").strip(),
-                l2_directive=(osp.get("l2_directive") or "").strip(),
+                l2_brief=(osp.get("l2_brief") or "").strip(),
                 l1_critique_text=(osp.get("l1_critique_text") or "").strip(),
                 l1_yield=float(t.get("l1_yield", 1.0)),
                 l1_n_no_op=int(t.get("l1_n_no_op", 0)),

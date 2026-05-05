@@ -15,7 +15,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.runtime_failures` | none | per-round on the OSP itself |
 | **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_output_failures_section}}` |
 | **Renderer** | `_section_validation_failures` | `_section_runtime_failures` | `format_runtime_failures_for_l3` | `format_l2_output_failures_for_l3` |
-| **Healer's writeback** | `cycle.opt_sp.l2_directive` | `l2_directive` / `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
+| **Healer's writeback** | `cycle.opt_sp.l2_brief` | `l2_brief` / `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Loop 1 — L2 nurses L1 on `ValidationFailure`
@@ -24,7 +24,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 
 Failures land on `OptSearchPoint.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 
-L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_section_validation_failures()`. L2 writes a directive pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
+L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_section_validation_failures()`. L2 writes a brief pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
 
 ## Loop 2 — L2 nurses L1 on `RuntimeFailure`
 
@@ -58,8 +58,8 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 | Validator id | Detects |
 |---|---|
-| `l2_cross_field_duplication` | Same N+ line block in ≥2 of `{directive, template_override, text_overrides[*]}` |
-| `l2_verbatim_self_repeat` | L2's `directive` this round equals previous round's directive on OSP |
+| `l2_cross_field_duplication` | Same N+ line block in ≥2 of `{brief, template_override, text_overrides[*]}` |
+| `l2_verbatim_self_repeat` | L2's `brief` this round equals previous round's brief on OSP |
 | `l2_catalogue_redundancy` | `text_overrides[section]` equals existing override on OSP for that section |
 
 Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_output_failures` and are written by `apply_side_effects` to `cycle.opt_sp.l2_output_failures`.
@@ -97,7 +97,7 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 | `l1_critique_text` | per-round, cleared on improvement | (round-over-round feedback) |
 | `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
 | `warning_inventory` | cross-round | (per-query aggregation) |
-| `l2_directive` | one-round window, cleared on improvement | Loop 1, Loop 2 — L2 writeback |
+| `l2_brief` | one-round window, cleared on improvement | Loop 1, Loop 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Loop 1 — L2 reads |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Loop 2 + 3 |
 | `l2_output_failures` | per-round, set by L2 post-parse | Loop 4 — L3 reads |

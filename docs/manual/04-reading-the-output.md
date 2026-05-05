@@ -77,7 +77,7 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
 
 ```
 ⚠ llm_only.model = 'gpt-4o' not in allowed set
-  ↳ scored 0; L2 directive will name this value
+  ↳ scored 0; L2 brief will name this value
 
 ⚠ candidate degraded on 3/4 queries; eliminated early
   ↳ L2 will steer next round away from this region
@@ -87,7 +87,7 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 
 ## Where results land
 
-- `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 directive / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
+- `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
 - `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`.
 
 ## Live state (forks and the family root)

@@ -58,7 +58,7 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > ├─ c2  +thinking_style:socratic          acc=0.71
 > ├─ c3  +persona:domain expert           acc=0.68  ✗ eliminated @ q18 (t-test)
 > └─ c4  model:gpt-oss-120b→… ⚠ invalid   acc=0.00  ↳ validation_failure
->                                                      → L2 directive next round
+>                                                      → L2 brief next round
 > 
 > winner: c1  (+12pp over baseline, p=0.003)
 > L1 critique: "Step-by-step improves multi-hop reasoning. Socratic overlaps

@@ -41,11 +41,11 @@ Every optimizer LLM call follows the same path: `DispatchState (per-call) → LA
 |-------|--------|-----------|----------|
 | `dispatch_msg` | `compile_l1_critique_blob` | L1-critique | per-call, not persisted |
 | `l1_critique_text` (+ critique fields) | L1-critique | L1-generate, L2 | one round (cleared by `clear_volatile`) |
-| `l2_directive` | L2 | L1-generate | one round (cleared by `clear_volatile`) |
+| `l2_brief` | L2 | L1-generate | one round (cleared by `clear_volatile`) |
 | `l1_section_overrides` / `_text` | L2 | L1-generate `read_overrides` | persistent (memory) |
 | `plan` | L3 | L1-generate, L2 | persistent until next L3 (never cleared) |
 
-**Symmetric plan injection:** L3 writes `plan` to `OptSearchPoint`; both L1-generate **and** L2 read it. L1 receives it as a strategic constraint; L2 as the operating context for its directive. (`l2_directive` flows L2→L1; `plan` flows L3→{L1, L2}.)
+**Symmetric plan injection:** L3 writes `plan` to `OptSearchPoint`; both L1-generate **and** L2 read it. L1 receives it as a strategic constraint; L2 as the operating context for its brief. (`l2_brief` flows L2→L1; `plan` flows L3→{L1, L2}.)
 
 ### L1 / L2 surface field reference
 
@@ -58,8 +58,8 @@ Retention legend: `memory` (checkpointed with the candidate), `opt_sp` (on the o
 | `axes_l1` | ✓ | — | axes | Cross-campaign digest: clusters, dead queries, top axes / values. |
 | `task_context` | ✓ | — | opt_sp | Structured domain context (read-only from L1; L2 edits). |
 | `escalation_probe` | ✓ | — | memory | Probe-round per-query warning dump. |
-| `escalation_alert` | ✓ | — | memory | Aggregated escalation alert; suppressed by an active `l2_directive`. |
-| `l2_directive` | DIRECTIVE: | PREVIOUS DIRECTIVE: | memory | One-round window; cleared on improvement. The only guidance channel into L1 generate. |
+| `escalation_alert` | ✓ | — | memory | Aggregated escalation alert; suppressed by an active `l2_brief`. |
+| `l2_brief` | BRIEF: | PREVIOUS BRIEF: | memory | One-round window; cleared on improvement. The only guidance channel into L1 generate. |
 | `plan` | ✓ | ✓ | opt_sp | L3's strategic plan; symmetric read. |
 | `escalation_section` | — | ✓ | transient | Aggregated pipeline stability report. |
 | `warning_inventory` | — | ✓ | memory | Per-query warning breakdown; L2 fallback. |
@@ -70,7 +70,7 @@ Retention legend: `memory` (checkpointed with the candidate), `opt_sp` (on the o
 
 L2 also receives an `l1_generate_field_catalogue` hole — a code-derived menu of every L1-generate registry entry with current visibility / override state. See [`l1-generate-surface.md`](l1-generate-surface.md).
 
-L2 writes back a flat dict — any subset of `directive`, `optimizer_params`, `task_context`, `scheme_overrides`, `text_overrides`, `template_override`, `action`. Each field lands directly on the corresponding `OptSearchPoint` field. See [`l2-internals.md`](l2-internals.md).
+L2 writes back a flat dict — any subset of `brief`, `optimizer_params`, `task_context`, `scheme_overrides`, `text_overrides`, `template_override`, `action`. Each field lands directly on the corresponding `OptSearchPoint` field. See [`l2-internals.md`](l2-internals.md).
 
 ### L1 critique blob composites
 
@@ -83,7 +83,7 @@ The critique phase runs inside L1 after scoring. Four composite sections in orde
 | `HISTORICAL_CONTEXT` | `AxisIndex`: discriminating queries, failure clusters, tractability, exhausted axes, value trends |
 | `AVAILABLE_SCHEMA_MUTATIONS` | Pipeline nodes with mutable output schemas |
 
-Assembled by `compile_l1_critique_blob(state)` and passed as the `dispatch_msg` extra. Output flows into L2 refine, which compresses it into a directive that L1 generate reads.
+Assembled by `compile_l1_critique_blob(state)` and passed as the `dispatch_msg` extra. Output flows into L2 refine, which compresses it into a brief that L1 generate reads.
 
 ### L3 multi-hole template
 

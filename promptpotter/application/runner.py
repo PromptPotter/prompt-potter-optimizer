@@ -939,7 +939,7 @@ def _finalize_run(
                 # plain optimize on the diag fork.
                 osp = cycle.opt_sp
                 final_block["diag"] = {
-                    "l2_directive": (osp.l2_directive or "").strip(),
+                    "l2_brief": (osp.l2_brief or "").strip(),
                     "l1_section_overrides": dict(osp.l1_section_overrides or {}),
                     "l1_section_overrides_text_keys": sorted(
                         (osp.l1_section_overrides_text or {}).keys()

@@ -236,7 +236,8 @@ def _pobb_replay_snapshot(
     n = int(inputs_ref.get("queries_scored", 0))
     current = [float(r.get("fitness", 0.0)) for r in (all_results.get(candidate_id) or [])[:n]]
     priors = {
-        pid: [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])] for pid in prior_ids
+        pid: [float(r.get("fitness", 0.0)) for r in (all_results.get(pid) or [])]
+        for pid in prior_ids
     }
     priors = {pid: p for pid, p in priors.items() if p}
     if not priors or len(current) < 2:
@@ -752,7 +753,9 @@ class EscalationState:
             self._l2_round = int(escalation_state["l2_round"])
             self._l2_stall_count = int(escalation_state["l2_stall_count"])
             self._l2_best_accuracy_at_entry = float(escalation_state["l2_best_accuracy_at_entry"])
-            self._l2_best_composite_fitness_at_entry = float(escalation_state["l2_best_composite_fitness_at_entry"])
+            self._l2_best_composite_fitness_at_entry = float(
+                escalation_state["l2_best_composite_fitness_at_entry"]
+            )
         elif record.phase == "l3_plan" and record.event == "exit":
             escalation_state = record.payload.get("data") or {}
             best_acc = float(escalation_state["l3_best_accuracy_at_entry"])
@@ -903,7 +906,9 @@ class Cycle:
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
 
-    def apply_round_outcome(self, scoring_result: PopulationScoreReport, critique_text: str) -> None:
+    def apply_round_outcome(
+        self, scoring_result: PopulationScoreReport, critique_text: str
+    ) -> None:
         """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.
 
         Single mutation point for: l1_critique_text, failure_analysis,

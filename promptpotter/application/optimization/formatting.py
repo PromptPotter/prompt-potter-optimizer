@@ -125,8 +125,8 @@ def format_l2_output_failures_for_l3(outcomes: list[ValidatorOutcome] | None) ->
                 first_line = (d.get("block", "") or "").splitlines()[0][:80]
                 lines.append(f"      duplicated across [{fields}]: {first_line!r}")
         elif outcome.validator_id == "l2_verbatim_self_repeat":
-            preview = (evidence.get("directive", "") or "")[:120]
-            lines.append(f"      directive == previous round's directive: {preview!r}")
+            preview = (evidence.get("brief", "") or "")[:120]
+            lines.append(f"      brief == previous round's brief: {preview!r}")
         elif outcome.validator_id == "l2_catalogue_redundancy":
             for r in evidence.get("redundant_overrides", [])[:3]:
                 section = r.get("section", "")

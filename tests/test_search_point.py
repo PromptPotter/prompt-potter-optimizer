@@ -63,16 +63,16 @@ def test_copy_memory_carries_l1_surface_overrides_into_adoption_target():
     the OSP that was about to be defeated. Pinning here.
     """
     parent = OptSearchPoint(
-        l1_section_overrides={"directive_block": False, "warning_inventory": True},
-        l1_section_overrides_text={"directive_block": "use pattern X"},
-        l1_template_override="reframed body with {{l2_directive}}",
+        l1_section_overrides={"brief_block": False, "warning_inventory": True},
+        l1_section_overrides_text={"brief_block": "use pattern X"},
+        l1_template_override="reframed body with {{l2_brief}}",
     )
     child = OptSearchPoint()
     parent.copy_memory_to(child)
 
-    assert child.l1_section_overrides == {"directive_block": False, "warning_inventory": True}
-    assert child.l1_section_overrides_text == {"directive_block": "use pattern X"}
-    assert child.l1_template_override == "reframed body with {{l2_directive}}"
+    assert child.l1_section_overrides == {"brief_block": False, "warning_inventory": True}
+    assert child.l1_section_overrides_text == {"brief_block": "use pattern X"}
+    assert child.l1_template_override == "reframed body with {{l2_brief}}"
 
     # Deep-copy contract — mutating the child's dicts must NOT affect the parent.
     child.l1_section_overrides["new_key"] = True

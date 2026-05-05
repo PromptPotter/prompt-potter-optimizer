@@ -10,7 +10,7 @@ The parent searchpoint was selected for measured reasons. `l1_generate` mutates 
 
 - stall-driven escalation,
 - sibling-yield evidence on the chosen axis, or
-- an explicit `l2_directive`.
+- an explicit `l2_brief`.
 
 No data justifying a choice ⇒ do not gamble. Random exploration is reserved for explicit stall.
 
@@ -22,46 +22,46 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
-Channel: `l2_directive` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Wired declaratively in `LAYER_CONFIGS[Layer.L1_GENERATE]` (`pipeline.py`).
+Channel: `l2_brief` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Wired declaratively in `LAYER_CONFIGS[Layer.L1_GENERATE]` (`pipeline.py`).
 
 ## L2-layer — l2_context
 
 Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
 
-- a 2–3 sentence **directive** injected into `l1_generate`'s meta-prompt as primary signal, and
+- a 2–3 sentence **brief** injected into `l1_generate`'s meta-prompt as primary signal, and
 - optional `l1_section_overrides` + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
 
-The directive is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative directives ("maybe try X") are out of contract. Sliding window of 1: a new directive supersedes the prior; cleared on improvement (when the L2-layer doesn't fire). The next directive evolves from the prior, not from scratch.
+The brief is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative briefs ("maybe try X") are out of contract. Sliding window of 1: a new brief supersedes the prior; cleared on improvement (when the L2-layer doesn't fire). The next brief evolves from the prior, not from scratch.
 
-Channel: written to `OptSearchPoint.l2_directive`; read only by `l1_generate`. Cleared by `clear_volatile()` on improvement.
+Channel: written to `OptSearchPoint.l2_brief`; read only by `l1_generate`. Cleared by `clear_volatile()` on improvement.
 
 The L2-layer also **heals `l1_generate`** on:
 
 - `ValidationFailure` (`l1_generate` produced a malformed variant), and
 - `RuntimeFailure` from mid-eval `DegradationCheck`.
 
-Healing uses the same surface as a normal directive — framed as a remedial nudge rather than a strategic shift.
+Healing uses the same surface as a normal brief — framed as a remedial nudge rather than a strategic shift.
 
 The L2-layer may **terminate the loop** on:
 
 - goal reached (composite ≥ goal, sustained one round), or
-- infinite stall (no improvement reachable through directive nudges).
+- infinite stall (no improvement reachable through brief nudges).
 
-The L2-layer escalating to L3 is **rare** — only when the failure mode is outside the directive surface: context-shape mismatch, scoring-set drift, repeated cross-field duplication that a directive cannot resolve. Default: the L2-layer keeps nudging the L1-layer.
+The L2-layer escalating to L3 is **rare** — only when the failure mode is outside the brief surface: context-shape mismatch, scoring-set drift, repeated cross-field duplication that a brief cannot resolve. Default: the L2-layer keeps nudging the L1-layer.
 
 ## L3-layer — l3_plan
 
-Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panels plus `l2_summary` (the prior directives + their measured lift) and the runtime-failure trail. `l3_plan` produces:
+Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panels plus `l2_summary` (the prior briefs + their measured lift) and the runtime-failure trail. `l3_plan` produces:
 
-- a **strategic replan** — rewrites the directive surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant. Channel: written to `OptSearchPoint.plan` (persistent — survives `clear_volatile`) and read by **both** `l1_generate` (constraint on candidates) and `l2_context` (operating context for directives) — the symmetric injection of L2's directive into L1.
+- a **strategic replan** — rewrites the brief surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant. Channel: written to `OptSearchPoint.plan` (persistent — survives `clear_volatile`) and read by **both** `l1_generate` (constraint on candidates) and `l2_context` (operating context for briefs) — the symmetric injection of L2's brief into L1.
 
 The L3-layer also **heals the L2-layer** on validator outcomes:
 
 - cross-field duplication,
-- verbatim self-repeat across directives, or
+- verbatim self-repeat across briefs, or
 - catalogue redundancy.
 
-These are signs that `l2_context` directives are thrashing within an axis rather than across the plan-space — the L3-layer rewrites the policy, not just the next directive.
+These are signs that `l2_context` briefs are thrashing within an axis rather than across the plan-space — the L3-layer rewrites the policy, not just the next brief.
 
 The L3-layer may **terminate the loop** on the same two cases as the L2-layer (goal reached / infinite stall). If the L3-layer fires repeatedly inside one cycle, that is the loop's signal that the plan-space itself is exhausted — `l3_plan` should terminate rather than replan again.
 

@@ -252,13 +252,17 @@ def _row_from_cycle(
     baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
     behavior_results = _compute_behavior_results(trials, audits)
     stats = compute_l1_stats(
-        list(trials), baseline_composite_fitness=baseline_composite_fitness, behavior_results=behavior_results
+        list(trials),
+        baseline_composite_fitness=baseline_composite_fitness,
+        behavior_results=behavior_results,
     )
 
     baseline_acc = float(cycle_summary.get("baseline_accuracy") or 0.0)
     best_acc = float(cycle_summary.get("best_accuracy") or 0.0)
     round_1_top_lift = (
-        (float(trials[0].get("composite_fitness") or 0.0) - baseline_composite_fitness) if trials else 0.0
+        (float(trials[0].get("composite_fitness") or 0.0) - baseline_composite_fitness)
+        if trials
+        else 0.0
     )
     round_1_yield = float(trials[0].get("l1_yield") or 0.0) if trials else 0.0
 

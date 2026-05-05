@@ -16,7 +16,7 @@ Loosely grouped:
 | **Lineage** | id, parent id, change description, timestamp. | Set on creation; never mutated. |
 | **Optimizer params** | creativity, candidate budget, variant strategy. | L2 when it fires. |
 | **Task context** | structured domain understanding (domain, pipeline purpose, data characteristics, optimization goals, key challenges). | One-time decomposition at init; refined by L2. |
-| **Operational memory** | latest critique, escalation journal, warning inventory, L2 directive, validation failures, runtime failures, failure analysis, round history. | L1 (each round); preserved across L2/L3 transitions. |
+| **Operational memory** | latest critique, escalation journal, warning inventory, L2 brief, validation failures, runtime failures, failure analysis, round history. | L1 (each round); preserved across L2/L3 transitions. |
 | **L1-generate surface overrides** | section visibility toggles, section text overrides, whole-body override. | L2 (via `mutate_scheme` and `rewrite_full`). |
 
 ## Two parameter namespaces
@@ -40,7 +40,7 @@ For the per-layer prompt structure (8 fields, layer-specific surfaces, render ch
 Two independent reasons the record matters:
 
 - **Persistence.** Every round's record is serialized to `trials/trial_NNNN.json` in the campaign directory. Resume reads from the latest trial. State that's not on the record does not survive interruption.
-- **Steering.** Every layer reads from the record to know what to do. L1 reads the prompt fields and the directive. L2 reads the operational memory and the surface overrides. L3 reads the plan and the runtime failures.
+- **Steering.** Every layer reads from the record to know what to do. L1 reads the prompt fields and the brief. L2 reads the operational memory and the surface overrides. L3 reads the plan and the runtime failures.
 
 When L2 mutates the surface (toggles a section off, replaces section text, rewrites the body), it is writing onto this record. The next round's L1 reads from the same record — that's the bridge.
 
@@ -48,7 +48,7 @@ When L2 mutates the surface (toggles a section off, replaces section text, rewri
 
 ```
 Round N starts:
-  L1 reads the record's prompt fields + directive + surface overrides
+  L1 reads the record's prompt fields + brief + surface overrides
        ↓
   L1 produces candidates → measures fitness → selects winner
        ↓
@@ -58,7 +58,7 @@ Round N starts:
   L2 reads the operational memory + surface state
        ↓
   L2 (when it fires) writes any subset of fields onto the record
-       (directive, optimizer params, task context, surface overrides, action)
+       (brief, optimizer params, task context, surface overrides, action)
        ↓
   Round N's record is checkpointed to trials/trial_NNNN.json
        ↓
