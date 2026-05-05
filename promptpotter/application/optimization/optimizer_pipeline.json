@@ -119,6 +119,32 @@
       "l1_critique"
     ]
   },
+  "view": {
+    "nodes": [
+      {"id": "input",       "label": "Dataset",     "kind": "io"},
+      {"id": "baseline",    "label": "baseline",    "kind": "phase"},
+      {"id": "l3_plan",     "label": "l3_plan",     "kind": "llm"},
+      {"id": "restructure", "label": "restructure", "kind": "llm"},
+      {"id": "l2_context",  "label": "l2_context",  "kind": "llm"},
+      {"id": "l1_generate", "label": "l1_generate", "kind": "llm"},
+      {"id": "l1_score",    "label": "l1_score",    "kind": "measurement"},
+      {"id": "l1_critique", "label": "l1_critique", "kind": "llm"},
+      {"id": "output",      "label": "Best SP",     "kind": "io"}
+    ],
+    "edges": [
+      {"from": "input",       "to": "baseline",    "kind": "forward"},
+      {"from": "baseline",    "to": "l1_generate", "kind": "forward"},
+      {"from": "l1_generate", "to": "l1_score",    "kind": "forward"},
+      {"from": "l1_score",    "to": "l1_critique", "kind": "forward"},
+      {"from": "l1_critique", "to": "output",      "kind": "forward",   "label": "converged"},
+      {"from": "l1_critique", "to": "l1_generate", "kind": "loop",      "label": "next round"},
+      {"from": "l1_critique", "to": "l2_context",  "kind": "escalate",  "label": "L1 stall"},
+      {"from": "l2_context",  "to": "l1_generate", "kind": "directive", "label": "brief"},
+      {"from": "l1_critique", "to": "l3_plan",     "kind": "escalate",  "label": "L2 stall"},
+      {"from": "l3_plan",     "to": "l1_generate", "kind": "directive", "label": "plan"},
+      {"from": "l3_plan",     "to": "restructure", "kind": "sub"}
+    ]
+  },
   "resolved_schemas": {
     "l1_critique/1": {
       "fields": [

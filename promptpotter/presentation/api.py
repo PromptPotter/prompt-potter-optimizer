@@ -18,9 +18,10 @@ imports and the ``StoreDep`` dependency:
 
 import logging
 import re
+from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
@@ -36,6 +37,7 @@ from promptpotter.infrastructure.store import (
     Stores,
     build_stores,
     campaign_dir_for,
+    read_active_pointer,
     root_dir_for,
 )
 
@@ -526,3 +528,256 @@ async def get_cycle_forks(store: StoreDep, cycle_id: str):
                 )
             )
     return ForksResponse(parent_cycle_id=cycle_id, forks=forks)
+
+
+# ===========================================================================
+# Active-session pointer + file-tree (M11 webapp preview)
+# Read-only surface that lets the static webapp pin to the currently active
+# cycle and walk every artifact under the cycle dir + family-root telemetry.
+# ===========================================================================
+
+_active_router = APIRouter(tags=["Active"])
+
+
+class ActiveSessionResponse(BaseModel):
+    tenant_id: str = Field(description="Tenant the active session belongs to")
+    session_id: str = Field(description="Active session id")
+    cycle_id: str = Field(description="Active cycle id (pinned by the webapp)")
+
+
+@_active_router.get("/active", response_model=ActiveSessionResponse)
+async def get_active_session() -> ActiveSessionResponse:
+    """Return the active-session pointer; 404 when no session is active."""
+    tenant_id, session_id, cycle_id = read_active_pointer()
+    if not tenant_id:
+        raise HTTPException(404, "No active session")
+    return ActiveSessionResponse(
+        tenant_id=tenant_id,
+        session_id=session_id,
+        cycle_id=cycle_id,
+    )
+
+
+_OPTIMIZER_PIPELINE_PATH = (
+    Path(__file__).resolve().parents[1] / "application" / "optimization" / "optimizer_pipeline.json"
+)
+
+
+@_active_router.get("/optimizer/pipeline")
+async def get_optimizer_pipeline() -> dict[str, Any]:
+    """Bundled ``optimizer_pipeline.json`` — nodes, pipelines, and ``view`` topology
+    (containers + node positions + edges) the webapp renders the workflow from."""
+    import json
+
+    return json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
+
+
+class FileEntry(BaseModel):
+    path: str = Field(description="Path relative to the scope root, forward slashes")
+    scope: Literal["cycle", "family"] = Field(description="Which root the path is under")
+    size: int = Field(description="File size in bytes")
+    mtime: str = Field(description="ISO 8601 UTC modification time")
+
+
+class FilesResponse(BaseModel):
+    cycle_id: str
+    is_fork: bool = Field(description="True when cycle dir != family-root dir")
+    entries: list[FileEntry]
+
+
+class FileContentResponse(BaseModel):
+    cycle_id: str
+    scope: Literal["cycle", "family"]
+    path: str
+    size: int
+    mtime: str
+    content_type: Literal["json", "markdown", "log", "text", "binary"]
+    content: str | None = Field(
+        default=None,
+        description="UTF-8 text content; None when binary or oversized",
+    )
+
+
+# Family-root file-level artifacts (mirror of tests/test_invariants.py::ROOT_TELEMETRY_ARTIFACTS
+# plus output.log which is written next to dashboard.json by LiveDashboardProjection).
+_FAMILY_FILE_LEVEL_ARTIFACTS = ("dashboard.json", "output.log")
+_MAX_PREVIEW_BYTES = 2 * 1024 * 1024  # 2 MiB
+_MAX_FILE_ENTRIES = 5000
+
+
+def _walk_files(root: Path) -> Iterator[Path]:
+    """Walk *root* recursively, yielding files. Skip dotfiles except ``.cache/``."""
+    if not root.exists():
+        return
+    for entry in sorted(root.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower())):
+        if entry.name.startswith(".") and entry.name != ".cache":
+            continue
+        if entry.is_dir():
+            yield from _walk_files(entry)
+        elif entry.is_file():
+            yield entry
+
+
+def _iso_mtime(p: Path) -> str:
+    return datetime.fromtimestamp(p.stat().st_mtime, UTC).isoformat()
+
+
+@campaigns_router.get(
+    "/campaigns/{cycle_id}/files",
+    response_model=FilesResponse,
+)
+async def list_cycle_files(store: StoreDep, cycle_id: str) -> FilesResponse:
+    """Recursive file tree for the cycle dir + family-root telemetry artifacts."""
+    cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
+    root_dir = root_dir_for(store.base_dir, cycle_id)
+    if not cycle_dir.exists():
+        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+
+    is_fork = cycle_dir.resolve() != root_dir.resolve()
+    entries: list[FileEntry] = []
+
+    for f in _walk_files(cycle_dir):
+        entries.append(
+            FileEntry(
+                path=f.relative_to(cycle_dir).as_posix(),
+                scope="cycle",
+                size=f.stat().st_size,
+                mtime=_iso_mtime(f),
+            )
+        )
+        if len(entries) > _MAX_FILE_ENTRIES:
+            raise HTTPException(413, f"Too many entries in cycle dir (>{_MAX_FILE_ENTRIES})")
+
+    if is_fork:
+        for name in _FAMILY_FILE_LEVEL_ARTIFACTS:
+            f = root_dir / name
+            if f.is_file():
+                entries.append(
+                    FileEntry(
+                        path=name,
+                        scope="family",
+                        size=f.stat().st_size,
+                        mtime=_iso_mtime(f),
+                    )
+                )
+
+    return FilesResponse(cycle_id=cycle_id, is_fork=is_fork, entries=entries)
+
+
+def _resolve_safe_file(scope_root: Path, raw_path: str) -> Path:
+    """Validate *raw_path* against escape attempts and confine it under *scope_root*."""
+    if not raw_path or ".." in raw_path or "\\" in raw_path or raw_path.startswith("/"):
+        raise HTTPException(400, "Invalid path")
+    scope_root_resolved = scope_root.resolve()
+    resolved = (scope_root / raw_path).resolve()
+    if not resolved.is_relative_to(scope_root_resolved):
+        raise HTTPException(400, "Path escapes scope root")
+    if not resolved.is_file():
+        raise HTTPException(404, f"File not found: {raw_path}")
+    return resolved
+
+
+_TEXT_SUFFIXES = {".txt", ".jsonl", ""}
+
+
+def _classify_suffix(suffix: str) -> Literal["json", "markdown", "log", "text"] | None:
+    if suffix == ".json":
+        return "json"
+    if suffix == ".md":
+        return "markdown"
+    if suffix == ".log":
+        return "log"
+    if suffix in _TEXT_SUFFIXES:
+        return "text"
+    return None
+
+
+@campaigns_router.get(
+    "/campaigns/{cycle_id}/file",
+    response_model=FileContentResponse,
+)
+async def get_cycle_file(
+    store: StoreDep,
+    cycle_id: str,
+    scope: Literal["cycle", "family"] = Query(..., description="cycle | family"),
+    path: str = Query(..., description="Relative path under the chosen scope root"),
+) -> FileContentResponse:
+    """Read the contents of one file under the cycle or family-root scope."""
+    if scope == "cycle":
+        scope_root = campaign_dir_for(store.base_dir, cycle_id)
+    else:
+        scope_root = root_dir_for(store.base_dir, cycle_id)
+    if not scope_root.exists():
+        raise HTTPException(404, f"Cycle '{cycle_id}' not found")
+
+    resolved = _resolve_safe_file(scope_root, path)
+    size = resolved.stat().st_size
+    mtime = _iso_mtime(resolved)
+    classification = _classify_suffix(resolved.suffix.lower())
+
+    if size > _MAX_PREVIEW_BYTES:
+        return FileContentResponse(
+            cycle_id=cycle_id,
+            scope=scope,
+            path=path,
+            size=size,
+            mtime=mtime,
+            content_type="text",
+            content=None,
+        )
+
+    if classification is None:
+        try:
+            text = resolved.read_text(encoding="utf-8")
+            return FileContentResponse(
+                cycle_id=cycle_id,
+                scope=scope,
+                path=path,
+                size=size,
+                mtime=mtime,
+                content_type="text",
+                content=text,
+            )
+        except UnicodeDecodeError:
+            return FileContentResponse(
+                cycle_id=cycle_id,
+                scope=scope,
+                path=path,
+                size=size,
+                mtime=mtime,
+                content_type="binary",
+                content=None,
+            )
+
+    if classification == "text":
+        try:
+            text = resolved.read_text(encoding="utf-8")
+        except UnicodeDecodeError:
+            return FileContentResponse(
+                cycle_id=cycle_id,
+                scope=scope,
+                path=path,
+                size=size,
+                mtime=mtime,
+                content_type="binary",
+                content=None,
+            )
+        return FileContentResponse(
+            cycle_id=cycle_id,
+            scope=scope,
+            path=path,
+            size=size,
+            mtime=mtime,
+            content_type="text",
+            content=text,
+        )
+
+    return FileContentResponse(
+        cycle_id=cycle_id,
+        scope=scope,
+        path=path,
+        size=size,
+        mtime=mtime,
+        content_type=classification,
+        content=resolved.read_text(encoding="utf-8"),
+    )

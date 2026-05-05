@@ -4,6 +4,11 @@ Pins the contract for the 7 per-cycle live-read endpoints introduced in
 the Tier 3.2 cleanup. Each endpoint round-trips a typed envelope from a
 seeded fixture cycle so the ledger structure has at least one external
 consumer that fails loudly when the record schema drifts.
+
+Also covers the M11 webapp-preview surface: ``/active`` pointer, the
+``/campaigns/{cycle_id}/files`` recursive listing, the
+``/campaigns/{cycle_id}/file`` content read, and the static ``/ui``
+mount.
 """
 
 from __future__ import annotations
@@ -19,7 +24,7 @@ from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import DecisionKind, DecisionRecord, PhaseRecord
 from promptpotter.infrastructure.ledger import CycleLedger
 from promptpotter.infrastructure.store import build_stores, campaign_dir_for, root_dir_for
-from promptpotter.main import app
+from promptpotter.main import WEBAPP_DIR, app
 
 
 @pytest.fixture
@@ -42,6 +47,12 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
     )
     (cycle_dir / "log.md").write_text(
         "# Campaign log\n\n## Round 0\nbaseline=0.5\n",
+        encoding="utf-8",
+    )
+    rounds_dir = cycle_dir / "rounds"
+    rounds_dir.mkdir()
+    (rounds_dir / "round_0000.json").write_text(
+        json.dumps({"round": 0, "accuracy": 0.5}),
         encoding="utf-8",
     )
 
@@ -139,3 +150,129 @@ def test_forks_derives_from_fork_cut_records(seeded_tenant: tuple[TestClient, st
     assert fork["fork_cycle_id"] == "cycle_apitest_001_fork_abc"
     assert fork["from_round"] == 1
     assert fork["forked_at"] == "2026-04-30T12:00:00+00:00"
+
+
+# ===========================================================================
+# M11 webapp preview — /active, /files, /file, /ui mount
+# ===========================================================================
+
+
+def test_active_returns_404_when_pointer_missing(
+    seeded_tenant: tuple[TestClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, _ = seeded_tenant
+    monkeypatch.setattr(
+        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH",
+        tmp_path / "missing_active.json",
+    )
+    resp = client.get("/api/v1/active")
+    assert resp.status_code == 404
+
+
+def test_active_returns_pointer_when_present(
+    seeded_tenant: tuple[TestClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    client, cycle_id = seeded_tenant
+    pointer_path = tmp_path / "active.json"
+    pointer_path.write_text(
+        json.dumps({"tenant_id": "default", "session_id": "s_abc", "cycle_id": cycle_id}),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH",
+        pointer_path,
+    )
+    resp = client.get("/api/v1/active")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body == {"tenant_id": "default", "session_id": "s_abc", "cycle_id": cycle_id}
+
+
+def test_files_lists_cycle_artifacts(seeded_tenant: tuple[TestClient, str]) -> None:
+    client, cycle_id = seeded_tenant
+    resp = client.get(f"/api/v1/campaigns/{cycle_id}/files")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["cycle_id"] == cycle_id
+    assert body["is_fork"] is False  # root cycle, not a fork
+    paths = {e["path"] for e in body["entries"]}
+    assert {"dashboard.json", "log.md", "rounds/round_0000.json"} <= paths
+    # All entries on a non-fork cycle must be scope=cycle.
+    assert all(e["scope"] == "cycle" for e in body["entries"])
+
+
+def test_file_returns_json_content(seeded_tenant: tuple[TestClient, str]) -> None:
+    client, cycle_id = seeded_tenant
+    resp = client.get(
+        f"/api/v1/campaigns/{cycle_id}/file",
+        params={"scope": "cycle", "path": "dashboard.json"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content_type"] == "json"
+    assert json.loads(body["content"])["round"] == 3
+
+
+def test_file_rejects_path_traversal(seeded_tenant: tuple[TestClient, str]) -> None:
+    client, cycle_id = seeded_tenant
+    for bad in ("../etc/passwd", "/abs/path", "rounds\\..\\x"):
+        resp = client.get(
+            f"/api/v1/campaigns/{cycle_id}/file",
+            params={"scope": "cycle", "path": bad},
+        )
+        assert resp.status_code == 400, f"expected 400 for {bad!r}, got {resp.status_code}"
+
+
+def test_file_404_on_missing(seeded_tenant: tuple[TestClient, str]) -> None:
+    client, cycle_id = seeded_tenant
+    resp = client.get(
+        f"/api/v1/campaigns/{cycle_id}/file",
+        params={"scope": "cycle", "path": "no_such.json"},
+    )
+    assert resp.status_code == 404
+
+
+def test_file_oversize_returns_null_content(
+    seeded_tenant: tuple[TestClient, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    client, cycle_id = seeded_tenant
+    # Force the size threshold below dashboard.json's actual size.
+    monkeypatch.setattr("promptpotter.presentation.api._MAX_PREVIEW_BYTES", 1)
+    resp = client.get(
+        f"/api/v1/campaigns/{cycle_id}/file",
+        params={"scope": "cycle", "path": "dashboard.json"},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["content"] is None
+    assert body["content_type"] == "text"
+
+
+def test_optimizer_pipeline_returns_view_topology() -> None:
+    """``/optimizer/pipeline`` must expose the bundled ``view`` block (nodes +
+    edges) — what the webapp renders the workflow from."""
+    client = TestClient(app)
+    resp = client.get("/api/v1/optimizer/pipeline")
+    assert resp.status_code == 200
+    body = resp.json()
+    assert "view" in body
+    view = body["view"]
+    assert {"nodes", "edges"} <= view.keys()
+    node_ids = {n["id"] for n in view["nodes"]}
+    # Must include the L1 inner-loop trio + scoring + IO endpoints.
+    assert {"input", "l1_generate", "l1_score", "l1_critique", "output"} <= node_ids
+
+
+def test_ui_mount_serves_index_when_present() -> None:
+    client = TestClient(app)
+    resp = client.get("/ui/")
+    if WEBAPP_DIR.exists() and (WEBAPP_DIR / "index.html").exists():
+        assert resp.status_code == 200
+        assert "<html" in resp.text.lower()
+    else:
+        assert resp.status_code == 404

@@ -4,7 +4,7 @@
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. The backend declares tunable params via `GET /pipeline`; the optimizer runs critique-guided generate→score→critique with PoBB elimination (ε=0.05, n_min=4), cross-run memory, and self-healing rails. Python 3.13+, hexagonal. **Orchestration is the product — backends are pluggable.** TermNorm is the only registered connector today (`promptpotter/connectors/termnorm.py` — bundles wire adapter, session lifecycle, and experiment-data extraction under one `Connector` shape); BBEH is the headline benchmark.
 
-The user is the operator and the project file tree IS their dashboard — no webapp yet (M11/M12 plan one over FastAPI). Onboarding: install → restart VS Code → `/potter-run` (downloads TermNorm, starts its `.bat`, converts datasets, prompts for API keys).
+The user is the operator. The project file tree IS the dashboard, plus an **ugly read-only webapp preview** at `webapp/index.html` mounted on `/ui` (M11 Track 3 Slice 1) that polls the active cycle's `dashboard.json` every 2 s — used in concert with the file tree, not in place of it. Full M12 webapp (control plane, monitoring, multi-cycle) is the headline milestone. Onboarding: install → restart VS Code → `/potter-run` (downloads TermNorm, starts its `.bat`, converts datasets, prompts for API keys).
 
 ## STOP — read this before writing any code
 
@@ -56,8 +56,10 @@ python -m promptpotter init --backend-url http://127.0.0.1:8000 --config dataset
 python -m promptpotter optimize                              # resume default; Ctrl+C: 1st saves, 2nd force-quits
 python -m promptpotter optimize --from N                     # rewind in place
 python -m promptpotter optimize --fork-on-divergence         # sibling cycle at divergence point
-uvicorn promptpotter.main:app --port 8001                    # read-only API
+python -m uvicorn promptpotter.main:app --port 8001          # read-only API + /ui webapp preview
 ```
+
+Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **When the operator mentions the dashboard / webapp / UI**: probe `GET /api/v1/health` on :8001 — if it answers, share the URL; if not, suggest the uvicorn line above and remind them to keep `python -m promptpotter optimize` running in another terminal so `dashboard.json` refreshes live. Page reads `active_session.json` on load — `init` a new cycle ⇒ reload the page.
 
 `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required. Provider is per-campaign in `campaign.json::optimizer_llm.provider`.
 
@@ -123,7 +125,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 
 ## Roadmap
 
-**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; ≥95% in ≤5 rounds. **M11** — BBEH benchmarks, ablation, webapp read-only. M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; ≥95% in ≤5 rounds. **M11** — BBEH benchmarks, ablation, webapp read-only (Track 3 Slice 1 shipped — see `docs/specs/m11-webapp-minimal-preview.md`). M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Pointers
 

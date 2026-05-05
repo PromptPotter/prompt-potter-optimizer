@@ -5,11 +5,13 @@ PromptPotter Optimizer API — main FastAPI application entry point.
 import logging
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime
+from pathlib import Path
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
+from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
 from promptpotter.config.logging import setup_logging
@@ -86,3 +88,9 @@ async def health_check():
 app.include_router(_health, prefix="/api/v1", tags=["Health"])
 app.include_router(api.backends_router, prefix="/api/v1", tags=["Backends"])
 app.include_router(api.campaigns_router, prefix="/api/v1", tags=["Campaigns"])
+app.include_router(api._active_router, prefix="/api/v1")
+
+# Static webapp mount — single-page read-only preview of the active cycle.
+WEBAPP_DIR = Path(__file__).resolve().parents[1] / "webapp"
+if WEBAPP_DIR.exists():
+    app.mount("/ui", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
