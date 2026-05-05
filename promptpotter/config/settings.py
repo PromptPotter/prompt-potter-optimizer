@@ -74,6 +74,12 @@ class Settings(BaseSettings):
     OPENROUTER_RPM: int | None = None
     OPENROUTER_TPM: int | None = None
 
+    # Wire-level auth for backend connectors. Sent as
+    # ``Authorization: Bearer <TERMNORM_TOKEN>`` on every BackendClient
+    # request when non-empty. TermNorm side gates this behind its own
+    # ``TERMNORM_REQUIRE_AUTH`` flag (see backend-api/config/middleware.py).
+    TERMNORM_TOKEN: str = ""
+
     # Warn when an optimizer meta-prompt (L1/L2/L3/critique/restructure) exceeds
     # this input-token count. Our in-house threshold — signals "tune the node
     # template"; not tied to any provider cap.

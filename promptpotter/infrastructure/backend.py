@@ -81,17 +81,20 @@ class BackendClient:
         wire_adapter: WireAdapter,
         session: SessionProtocol,
         timeout: float = 30.0,
+        auth_token: str | None = None,
     ):
         self.base_url = base_url.rstrip("/")
         self.timeout = timeout
         self._wire_adapter: WireAdapter = wire_adapter
         self._guard: SessionProtocol = session
+        self._auth_token = auth_token or ""
         self._http: httpx.AsyncClient | None = None
 
     def _get_http(self) -> httpx.AsyncClient:
         """Return a shared async httpx client, creating lazily on first use."""
         if self._http is None or self._http.is_closed:
-            self._http = httpx.AsyncClient(timeout=self.timeout)
+            headers = {"Authorization": f"Bearer {self._auth_token}"} if self._auth_token else None
+            self._http = httpx.AsyncClient(timeout=self.timeout, headers=headers)
         return self._http
 
     async def _get_json(self, path: str, **params: Any) -> dict[str, Any]:

@@ -21,6 +21,7 @@ from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
     DEFAULT_EXPERIMENT_ID,
+    settings,
 )
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -566,6 +567,7 @@ async def init_services(
         backend_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
+        auth_token=settings.TERMNORM_TOKEN or None,
     )
     status(f"Backend: {backend_url}")
 

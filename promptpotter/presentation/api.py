@@ -28,6 +28,7 @@ from pydantic import BaseModel, Field
 
 from promptpotter import connectors
 from promptpotter.application.pipeline_discovery import compute_pipeline_view
+from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import DecisionKind, DecisionRecord
@@ -148,6 +149,7 @@ async def sync_experiments(backend_id: str, store: StoreDep):
         backend.base_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
+        auth_token=settings.TERMNORM_TOKEN or None,
     )
 
     try:
@@ -211,6 +213,7 @@ async def get_pipeline(backend_id: str, store: StoreDep):
         backend.base_url,
         wire_adapter=connector.wire_adapter,
         session=connector.session_factory(),
+        auth_token=settings.TERMNORM_TOKEN or None,
     )
 
     view = await compute_pipeline_view(client)
