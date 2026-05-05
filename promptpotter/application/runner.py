@@ -261,7 +261,7 @@ async def _escalate_or_stop(
 def _persist_round(
     cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
 ) -> None:
-    """Flush decisions, mirror to ledger, write trial + log.md/review.md, flush recorder."""
+    """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder."""
     flushed: list[DecisionRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
@@ -287,7 +287,7 @@ def _persist_round(
 
     if session.state.cycle_id:
         with graceful("Round checkpoint failed"):
-            session.store.campaigns.add_trial(
+            session.store.campaigns.save_round_file(
                 session.backend_id,
                 session.state.cycle_id,
                 cycle.checkpoint(round_result, round_num),
@@ -451,7 +451,7 @@ async def _run_sweep_generation_only(
     *,
     label: str = "sweep_gen_only",
 ) -> None:
-    """L1 variants without scoring; trial JSON is minimal status='generation_only'."""
+    """L1 variants without scoring; round_data JSON is minimal status='generation_only'."""
     cb.set_round(round_num)
     if (ledger := session.state.ledger) is not None:
         ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
@@ -466,12 +466,12 @@ async def _run_sweep_generation_only(
     )
 
     if session.state.cycle_id:
-        with graceful("Sweep generation-only trial write failed"):
-            session.store.campaigns.add_trial(
+        with graceful("Sweep generation-only round_data write failed"):
+            session.store.campaigns.save_round_file(
                 session.backend_id,
                 session.state.cycle_id,
                 {
-                    "trial_id": f"round_{round_num}",
+                    "round_id": f"round_{round_num}",
                     "round": round_num,
                     "label": label,
                     "status": "generation_only",

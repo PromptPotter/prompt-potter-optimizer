@@ -112,7 +112,7 @@ round runs L1 → improved?
                        (same ladder L2 → L3 with l2_patience)
 ```
 
-State lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …). In-memory during a cycle, persisted to `trials/trial_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Dispatch state is part of the in-memory state subset, but never *only* in memory — every transition is checkpointed.
+State lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …). In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Dispatch state is part of the in-memory state subset, but never *only* in memory — every transition is checkpointed.
 
 Decision logic: `_check_stop_or_escalate()` (`application/runner.py:439`). Stop conditions live here too (`accuracy ≥ 1.0 → PERFECT`, exhausted patience → `PATIENCE_EXHAUSTED`).
 
@@ -135,12 +135,12 @@ It's the **bridge between optimizer and target system**. Everything above it gen
 
 ## 4. Cross-run memory
 
-`library/.archive/` is the database. `MeasurementArchive` is the only gateway. Three in-memory views (`SampleIndex`, `ConfigIndex`, `AxisIndex`) are rebuilt from disk on every `refresh()` and never persisted.
+`archive/` is the database. `MeasurementArchive` is the only gateway. Three in-memory views (`SampleIndex`, `ConfigIndex`, `AxisIndex`) are rebuilt from disk on every `refresh()` and never persisted.
 
 ```
 ON DISK (the database)                IN MEMORY (rebuilt from disk)
 ──────────────────────────            ─────────────────────────────
-library/.archive/                            MeasurementArchive
+archive/                            MeasurementArchive
   measurements/                                      │
     {run_id}.json     ← one batch          ┌────────┼────────┐
   measurements_index.json                  ▼        ▼        ▼

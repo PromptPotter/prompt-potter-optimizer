@@ -172,7 +172,7 @@ class AuditTrailProjection(ProjectionBase):
     # ``PhaseRecord("baseline", "enter"|"exit")`` pair before the first round; treated
     # as a pseudo-round so its node I/O lands in ``round_baseline.json`` instead
     # of being silently discarded when round 0 begins. DecisionRecord and SnapshotRecord
-    # records bypass this projection — decisions are archived in trial JSON and
+    # records bypass this projection — decisions are archived in round_data JSON and
     # snapshots are display-only.
 
     def _handle_phase(self, record: PhaseRecord) -> None:

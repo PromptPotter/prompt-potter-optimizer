@@ -2,7 +2,7 @@
 
 Append-only mirror: ``events.jsonl`` is a pure observability log, never
 read back for state reconstruction. Resume + fork are driven by
-``trials/trial_NNNN.json`` via ``CampaignStore``.
+``rounds/trial_NNNN.json`` via ``CampaignStore``.
 """
 
 from __future__ import annotations
@@ -59,8 +59,8 @@ class FileSink:
             # nested fork dir, not at flat-layout campaigns/{cycle_id}/.
             return campaign_dir_for(self._tenant_root, self._cycle_id)
         # Orphan fallback for out-of-campaign file_only() emits — tucked
-        # under .archive/ so library/ top stays operator-facing.
-        return self._tenant_root / "library" / ".archive" / "obs"
+        # under archive/obs/ so it doesn't compete with operator views.
+        return self._tenant_root / "archive" / "obs"
 
     def _log_event(self, event: dict) -> None:
         event["timestamp"] = utcnow_iso()

@@ -27,8 +27,8 @@ Resume = `python -m promptpotter optimize`. No re-`init` needed.
 Sessions and campaigns are separate. Today the relation is 1:1; the layout supports 1:N later without reorg.
 
 - `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`, `journal.md` / `notes.md`.
-- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle artifacts. Three bands: **root telemetry** (live observability — `dashboard.json`) at the family root cycle; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `trials/`, `langfuse/`, `prompts/`) at each cycle's top level; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Sibling cycles split by kind into `forks/`, `diag/`, `sweeps/`.
-- `{tenant_id}/library/` — the **measurement archive**, cross-cycle/session/tenant. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
+- `{tenant_id}/campaigns/{cycle_id}/` — per-cycle artifacts. Three bands: **root telemetry** (live observability — `dashboard.json`) at the family root cycle; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `rounds/`, `langfuse/`, `prompts/`) at each cycle's top level; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Sibling cycles split by kind into `forks/`, `diag/`, `sweeps/`.
+- `{tenant_id}/archive/` — the **measurement archive**, cross-cycle/session/tenant. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
 ```
 .promptpotter/
@@ -44,7 +44,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
       index.json                       # config, phase, trial index, final block
       log.md                           # rendered narrative digest
       review.md                        # per-cycle review (M10)
-      trials/trial_NNNN.json           # resume source of truth
+      rounds/round_NNNN.json           # resume source of truth
       langfuse/                        # trace persistence
       prompts/{family}/{version}/      # rendered optimizer prompts
       # ── Root cycle's internals ──
@@ -64,7 +64,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
         index.json                     # batch metadata
         summary.md
         forks/{root}_sweep_{batch_id}_xxx/
-    library/                           # the measurement archive
+    archive/                            # the measurement archive
       measurements/{run_id}.json
       measurements.json                # archive index
       backends/{backend_id}/
@@ -74,7 +74,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
 
 **Why split this way?** Telemetry is *temporal* — a stream that flows through whichever fork is active. Anchoring it at the family root means a single `tail dashboard.json` covers every fork. Audit is *structural* — frozen records keyed by the cycle that produced them. Sibling kinds (`forks/`, `diag/`, `sweeps/`) live in different parents because they answer different questions.
 
-Prior evaluation results replay without backend calls when a new config shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume / rewind are driven entirely by `trials/trial_NNNN.json`.
+Prior evaluation results replay without backend calls when a new config shares a matching prefix with a stored run. `langfuse/events.jsonl` is a pure observability mirror — nothing reads it for state reconstruction. Resume / rewind are driven entirely by `rounds/round_NNNN.json`.
 
 **Deprecated-sample eviction.** Entries whose `classify_result()` returns a fatal code are written normally for forensic analysis but evicted at load — never served as cache. Next encounter gets a fresh backend call, tagged `retry_of_deprecated_cache`. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md#deprecated-samples).
 
@@ -88,7 +88,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `index.json` | per cycle | phase / finalize | Config, `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks), `best_accuracy`, `trials[]`, `final` block (winner + stop_reason on completion). |
 | `log.md` | per cycle | round-complete + finalize | Narrative digest. Pure derived view — safe to delete and recompute. |
 | `review.md` | per cycle | round-complete + finalize | Per-cycle review (M10). |
-| `trials/trial_NNNN.json` | per cycle | each completed round | Serialized `OptSearchPoint` for resume. |
+| `rounds/round_NNNN.json` | per cycle | each completed round | Serialized `OptSearchPoint` for resume. |
 | `langfuse/` | per cycle | during optimization | Trace shadow + `events.jsonl` mirror. Not read for state reconstruction. |
 | `prompts/` | per cycle | when prompts render | Rendered optimizer prompts. |
 | `.runtime/ledger.jsonl` | per cycle | every fact | Append-only `Decision` / `Phase` / `Snapshot` stream. |
@@ -110,7 +110,7 @@ One JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`,
 - `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — LLM meta-prompt calls. Each has `input.template_fields`, `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
 - `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid; `output.candidates[*].samples` lists per-query outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
 
-### `trials/trial_NNNN.json`
+### `rounds/round_NNNN.json`
 
 The resume source of truth. On resume, `Cycle.restore_from_trial` rehydrates the exact optimizer state — no separate write-ahead log. You can edit a trial by hand between runs to modify optimizer state; keep the `opt_search_point` block round-trippable through `OptSearchPoint.model_validate`.
 
@@ -143,12 +143,12 @@ Use when the active campaign went down a path you don't want — e.g. a bad L3 r
 python -m promptpotter optimize --from 2
 ```
 
-Archives `trials/trial_0003.json` onward into `campaigns/{cycle_id}/.runtime/archived/resumed_at_<ts>/`, rebuilds the trial index for rounds 0–2, restores optimizer state from round 2's trial, resumes at round 3.
+Archives `rounds/round_0003.json` onward into `campaigns/{cycle_id}/.runtime/archived/resumed_at_<ts>/`, rebuilds the round file index for rounds 0–2, restores optimizer state from round 2's trial, resumes at round 3.
 
-- **Preserved:** the content-addressed measurement archive. Per-query results unchanged under the new search replay from `library/measurements/` without backend calls.
+- **Preserved:** the content-addressed measurement archive. Per-query results unchanged under the new search replay from `archive/measurements/` without backend calls.
 - **Discarded:** rounds after N are moved aside, not deleted. Inspectable in the archive directory.
 
-**Editing optimizer state by hand.** Open `campaigns/{cycle_id}/trials/trial_{N:04d}.json` and edit before `optimize --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
+**Editing optimizer state by hand.** Open `campaigns/{cycle_id}/rounds/round_{N:04d}.json` and edit before `optimize --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
 ### Fork — `optimize --fork-on-divergence`
 
@@ -158,14 +158,14 @@ Use when the scoring formula changed and resume detects that decisions recorded 
 python -m promptpotter optimize --fork-on-divergence
 ```
 
-Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, retargets the active session pointer, re-runs the divergent round under the current scorer. The shared `library/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
+Mints a new `cycle_id` rooted at the divergence point, copies pre-divergence trials into the new cycle, records `parent_cycle_id`, retargets the active session pointer, re-runs the divergent round under the current scorer. The shared `archive/measurements/` archive is **not duplicated** — both cycles read the same measurements, each through their own scoring ledger.
 
 **Layout after a fork:**
 
 - **Live telemetry** (`dashboard.json`, `output.log`) **stays at the family root** (`campaigns/{root_cycle_id}/` — the cycle with no `parent_cycle_id`). One stream covers the whole family. `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner; `dashboard.json::cycle_id` always names the active fork.
-- **Per-cycle audit** (`index.json`, `log.md`, `trials/`, `langfuse/`, `prompts/`, `.runtime/`) **lives in the fork's own dir** under `campaigns/{root_cycle_id}/forks/{cycle_id}/`. The parent's audit stays frozen as the historical record.
+- **Per-cycle audit** (`index.json`, `log.md`, `rounds/`, `langfuse/`, `prompts/`, `.runtime/`) **lives in the fork's own dir** under `campaigns/{root_cycle_id}/forks/{cycle_id}/`. The parent's audit stays frozen as the historical record.
 
-To monitor a forked run: tail the **root**, not the fork. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `trials/`.
+To monitor a forked run: tail the **root**, not the fork. To inspect a specific fork's history: open the fork's `index.json` / `log.md` / `rounds/`.
 
 **Why rewind is not enough:** rewind restarts under the same policy; fork restarts under a different policy. If scoring changed, rewind would re-run decisions the recorded history expects to match, and halt again on the same divergence. Fork cuts the cord. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
@@ -209,8 +209,8 @@ The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by file
 
 **Reading results.** Each fork produces:
 
-- `campaigns/{root}/forks/{fork_id}/trials/trial_0001.json` — round 1 scored.
-- `campaigns/{root}/forks/{fork_id}/trials/trial_0002.json` — `status: "generation_only"`, no `composite`/`accuracy`.
+- `campaigns/{root}/forks/{fork_id}/rounds/round_0001.json` — round 1 scored.
+- `campaigns/{root}/forks/{fork_id}/rounds/round_0002.json` — `status: "generation_only"`, no `composite`/`accuracy`.
 - `campaigns/{root}/forks/{fork_id}/review.md` — per-fork review.
 - `campaigns/{root}/forks/{fork_id}/index.json::final.mode == "sweep"`.
 
@@ -226,7 +226,7 @@ The cycle's per-round formula can be hot-swapped between rounds by dropping a JS
 
 ### File-drop mechanism
 
-1. Author a new `per_round` formula. The namespace is the active per-round evaluator registry — check `evaluators` in any `trials/trial_NNNN.json` for valid names.
+1. Author a new `per_round` formula. The namespace is the active per-round evaluator registry — check `evaluators` in any `rounds/round_NNNN.json` for valid names.
 2. Write `campaigns/{cycle_id}/scoring_steer.json`:
 
    ```json

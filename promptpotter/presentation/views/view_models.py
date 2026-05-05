@@ -1,14 +1,14 @@
 """Frozen view-model dataclasses — the unified type set for all render targets.
 
 Two factories build these (``view_factories.py``): ``from_phase_event`` for
-live ``PhaseEvent`` payloads and ``from_disk`` for post-hoc trial / index
+live ``PhaseEvent`` payloads and ``from_disk`` for post-hoc round_data / index
 artifacts. Three render targets consume them (``render_text.py``,
 ``render_markdown.py``, ``render_html.py``). Views are pure data: no methods
 that emit text, no I/O.
 
 The named correctness invariant — exercised in ``tests/test_view_factories``
 — is ``from_phase_event(e) == from_disk(write_then_load(e))`` on
-``RoundCompleteView``, the one phase event that survives to disk in trial
+``RoundCompleteView``, the one phase event that survives to disk in round_data
 JSON. Live-only events (refine, probe, plan, escalation) have only the
 phase-event factory and no disk counterpart.
 """
@@ -248,13 +248,13 @@ class DigestStatusView:
     # Trials marked ``status: "generation_only"`` (diag mode's preview
     # round, sweep mode's no-score follow-up). Counted into
     # ``rounds_completed`` on disk but rendered separately so the operator
-    # sees how many of the trials were actually scored.
+    # sees how many of the rounds were actually scored.
     gen_only_rounds: int = 0
 
 
 @dataclass(frozen=True)
 class RoundDigestView:
-    """Per-round entry in log.md (derived from trial JSON)."""
+    """Per-round entry in log.md (derived from round_data JSON)."""
 
     round: int
     label: str

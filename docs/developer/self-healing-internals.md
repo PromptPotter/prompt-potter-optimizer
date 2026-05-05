@@ -64,7 +64,7 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 
 Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_output_failures` and are written by `apply_side_effects` to `cycle.opt_sp.l2_output_failures`.
 
-When `cycle.opt_sp.l2_output_failures` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the trial JSON), so resume reproduces it without a separate decision record.
+When `cycle.opt_sp.l2_output_failures` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
 ## Validators are Evaluator-shaped
 

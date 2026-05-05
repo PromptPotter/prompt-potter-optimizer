@@ -69,8 +69,8 @@ class QueryMeasurementFull(QueryMeasurement, total=False):
     """Extended result with optional fields from scoring pipeline and stale-data protocol."""
 
     # Multi-scorer audit map — {scorer_id: {score, hit, formula}}.
-    # Accumulated by ``rescore_results``; persisted to both trial JSON
-    # and ``library/measurements/`` items so parent + forked cycles can
+    # Accumulated by ``rescore_results``; persisted to both round_data JSON
+    # and ``archive/measurements/`` items so parent + forked cycles can
     # share the same traces with their own scorer-specific views.
     scored: dict[str, dict]
 

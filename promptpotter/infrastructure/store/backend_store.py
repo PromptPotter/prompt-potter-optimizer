@@ -18,7 +18,7 @@ from promptpotter.infrastructure.store.base import (
 class BackendStore:
     """File I/O for backend registration and synced API responses.
 
-    Backends live under ``library/.archive/backends/{backend_id}/`` —
+    Backends live under ``archive/backends/{backend_id}/`` —
     machine state the runtime needs (registration record, sync responses,
     connector profile). Named datasets live outside the tenant tree at
     ``{datasets_root}/{name}/cache.json`` so they survive
@@ -30,7 +30,7 @@ class BackendStore:
         self._datasets_root = datasets_root
 
     def _backends_root(self) -> Path:
-        return self._base_dir / "library" / ".archive" / "backends"
+        return self._base_dir / "archive" / "backends"
 
     def _backend_dir(self, backend_id: str) -> Path:
         validate_path_component(backend_id)

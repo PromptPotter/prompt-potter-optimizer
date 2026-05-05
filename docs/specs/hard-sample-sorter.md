@@ -8,7 +8,7 @@
 
 The exploration/exploitation sample-selection policy in [`../methods/exploration-exploitation.md`](../methods/exploration-exploitation.md) already fits a Rasch IRT posterior on every campaign, producing two first-class per-item quantities:
 
-- **`δ_s`** — per-sample difficulty. Surfaces today only as a top-5 compact `hardness_top` list inside each round's `scoring_set_events` entry, persisted as a field in `campaigns/{cycle_id}/trials/trial_NNNN.json`.
+- **`δ_s`** — per-sample difficulty. Surfaces today only as a top-5 compact `hardness_top` list inside each round's `scoring_set_events` entry, persisted as a field in `campaigns/{cycle_id}/rounds/round_NNNN.json`.
 - **`θ_c`** — per-candidate ability. Surfaces today only inside the same Rasch fit, not exposed anywhere.
 
 These two arrays, plus the raw `(candidate_id, sample_id) → hit` matrix they are fit on, are the core outputs of a **standalone capability that stands on its own outside the optimizer**: feed it a dataset and a handful of candidate prompts, get back a difficulty-ranked sample list and a candidate×sample performance matrix. That is useful even to users who never want the full L1/L2/L3 loop. It is also a natural product surface — "point PromptPotter's sorter at your dataset and tell me which samples are genuinely hard and which prompts handle them" — sellable independently from the optimization engine.
@@ -108,7 +108,7 @@ Licensing / packaging / pricing are out of scope for this spec; record here only
 
 ## Open questions
 
-- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `trials/trial_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md`; no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
+- **δ_s persistence.** Today the full `rasch.delta` map is discarded after each round — only the top-5 survives as the `hardness_top` field on each round's `scoring_set_events` entry inside `rounds/round_NNNN.json`. The end-of-cycle artifact is computed in `runner._finalize_run` via `build_hard_samples_artifact()` and rendered inline into `log.md`; no standalone JSON is written. Phase 2 decides whether to also serialize a JSON for the M10 webapp to consume, or to keep the on-demand compute path. Either is cheap.
 - **Cold cells.** Unmeasured cells have no Rasch estimate. Phase 2/3 may add a uniform-exploration tier that forces coverage of a small fraction of unmeasured cells before declaring the matrix stable. Out of scope in phase 1.
 
 ---

@@ -280,7 +280,7 @@ def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     assert osp.l1_section_overrides_text == {"task_context": "hard reasoning framing"}
     assert osp.l1_template_override == payload.l1_template_override
 
-    # The same model_dump path the trial writer uses → OptSearchPoint(**dump).
+    # The same model_dump path the round_data writer uses → OptSearchPoint(**dump).
     # If any of these four fields stops being a persisted Pydantic field,
     # this reconstruction loses state and the assertions below fail.
     dump = osp.model_dump()

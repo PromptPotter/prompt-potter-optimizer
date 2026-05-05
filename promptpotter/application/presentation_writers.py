@@ -1,4 +1,4 @@
-"""Operator-facing markdown writers — log.md / review.md / library/*.md.
+"""Operator-facing markdown writers — log.md / review.md / archive/*.md.
 
 Called from runner orchestration milestones, NOT from RunListener (which
 must stay display-only per CLAUDE.md).
@@ -52,15 +52,15 @@ def _render_log_md_for(
     index = store.load(backend_id, cycle_id)
     if not index:
         return
-    n_trials = int(index.get("n_trials", 0) or 0)
-    trials = store.load_trials_range(backend_id, cycle_id, 0, n_trials - 1) if n_trials else []
+    n_rounds = int(index.get("n_rounds", 0) or 0)
+    rounds = store.load_rounds_range(backend_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
     cycle_dir = store.campaign_dir(cycle_id)
     streams_dir = cycle_dir / ".runtime" / "streams"
     fork_indices = _load_fork_indices(cycle_dir)
     content = to_markdown(
         from_disk_log(
             index,
-            trials,
+            rounds,
             hard_samples_artifact=hard_samples_artifact,
             streams_dir=streams_dir,
             fork_indices=fork_indices,
@@ -99,7 +99,7 @@ def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
 
 
 def refresh_tenant_leaderboards(session: Session) -> None:
-    """Refresh tenant library/ dashboards: runs.md, individuals.md, hard_samples.md, README.md."""
+    """Refresh tenant archive/ dashboards: runs.md, individuals.md, hard_samples.md, README.md."""
     from promptpotter.application.intelligence.hard_sample_archive import (
         build_archive_hard_samples_artifact,
     )
@@ -113,13 +113,13 @@ def refresh_tenant_leaderboards(session: Session) -> None:
 
     if session.store is None:
         return
-    out_dir = session.store.base_dir / "library"
+    out_dir = session.store.base_dir / "archive"
     out_dir.mkdir(parents=True, exist_ok=True)
 
     backend_id = session.backend_id
     generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
 
-    with graceful("library/ refresh failed"):
+    with graceful("archive/ refresh failed"):
         rows = build_leaderboard_rows(session.store)
         dataset_label = _pick_dataset_label(rows)
         runs_body = f"# Runs\n\n_Generated {generated_at}._\n\n" + format_runs_md(rows)
@@ -144,7 +144,7 @@ def refresh_tenant_leaderboards(session: Session) -> None:
             )
         (out_dir / "hard_samples.md").write_text(hs_body, encoding="utf-8")
 
-        (out_dir / "README.md").write_text(_render_library_readme(), encoding="utf-8")
+        (out_dir / "README.md").write_text(_render_archive_readme(), encoding="utf-8")
 
 
 def _pick_dataset_label(rows: list[Any]) -> str:
@@ -184,9 +184,9 @@ def _build_sample_query_lookup(archive: Any, backend_id: str) -> dict[int, str]:
     return out
 
 
-def _render_library_readme() -> str:
+def _render_archive_readme() -> str:
     return (
-        "# library — cross-cycle dashboards for this tenant\n"
+        "# archive — cross-cycle dashboards for this tenant\n"
         "\n"
         "Open the .md files at the top of this folder to see what's been measured.\n"
         "\n"
@@ -196,14 +196,14 @@ def _render_library_readme() -> str:
         "| `individuals.md`  | Which target configs have been measured, ranked by mean score? |\n"
         "| `hard_samples.md` | Which dataset samples are hardest? Heatmap + Rasch leaderboard.|\n"
         "\n"
-        "`.archive/` holds machine state the optimizer needs at runtime — measurement\n"
+        "Subdirs hold machine state the optimizer needs at runtime — measurement\n"
         "facts, prompt-alias dedup, backend registrations. Don't read these by hand;\n"
         "each .md above derives its view from this archive on every round-end.\n"
     )
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
-    """Render review.md from index + trials + per-round audit JSONs (M10 surface)."""
+    """Render review.md from index + rounds + per-round audit JSONs (M10 surface)."""
     if not session.state.cycle_id or session.store is None:
         return
     with graceful("review.md render failed"):
@@ -211,17 +211,17 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         index = store.load(session.backend_id, session.state.cycle_id)
         if not index:
             return
-        n_trials = int(index.get("n_trials", 0) or 0)
-        trials = (
-            store.load_trials_range(session.backend_id, session.state.cycle_id, 0, n_trials - 1)
-            if n_trials
+        n_rounds = int(index.get("n_rounds", 0) or 0)
+        rounds = (
+            store.load_rounds_range(session.backend_id, session.state.cycle_id, 0, n_rounds - 1)
+            if n_rounds
             else []
         )
         cycle_dir = store.campaign_dir(session.state.cycle_id)
         rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
         round_audits: list[dict | None] = []
-        for trial in trials:
-            round_num = int(trial.get("round") or 0)
+        for round_data in rounds:
+            round_num = int(round_data.get("round") or 0)
             audit_path = rounds_dir / f"round_{round_num:04d}.json"
             audit: dict | None = None
             if audit_path.is_file():
@@ -238,7 +238,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
         ]
         content = render_review_md(
             index,
-            trials,
+            rounds,
             round_audits=round_audits,
             context_object=context_object,
         )

@@ -151,7 +151,7 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
 class LiveDashboardProjection(ProjectionBase):
     """Per-cycle dashboard + audit log writer; ensures per-session narrative
     + control files. Not an optimizer checkpoint — resume reads
-    ``trials/trial_NNNN.json``, counters here are display continuity only."""
+    ``rounds/trial_NNNN.json``, counters here are display continuity only."""
 
     def __init__(
         self,
@@ -167,7 +167,7 @@ class LiveDashboardProjection(ProjectionBase):
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
         # Forks share one continuous dashboard.json; per-fork audit
-        # (index.json, log.md, trials/, .runtime/) stays in each cycle's
+        # (index.json, log.md, rounds/, .runtime/) stays in each cycle's
         # own dir, written through dynamic ``session.state.cycle_id`` paths.
         root_path = Path(root_dir)
         sibling_kinds = {"forks", "diag", "sweeps"}
@@ -223,7 +223,7 @@ class LiveDashboardProjection(ProjectionBase):
     ) -> LiveDashboardProjection | None:
         """Build projection, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
-        On ``--from N`` rewind, the ``best`` counter past the surviving trials
+        On ``--from N`` rewind, the ``best`` counter past the surviving rounds
         is clamped to avoid a phantom value.
 
         Telemetry binds to the family root (derived from ``cycle_id`` —

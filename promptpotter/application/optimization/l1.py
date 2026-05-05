@@ -708,7 +708,7 @@ async def execute_round(
     """Execute one L1 round: generate → score+select → critique → persist to memory.
 
     ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
-    Sweep mode passes this so the cheap-trial fork stays one full live LLM
+    Sweep mode passes this so the cheap-round_data fork stays one full live LLM
     call (round 2 generate-only); the round-1 critique would otherwise dwarf
     that call and is the same across all forks since round 1 is identical.
     """

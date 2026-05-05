@@ -9,11 +9,11 @@ Inputs
 - ``index`` — ``campaigns/{cycle_id}/index.json`` payload (carries
   baseline / best / final block with ``baseline_composite_fitness``,
   ``prompt_hashes``, ``mode``).
-- ``trials`` — per-round optimizer state from ``trials/trial_NNNN.json``,
+- ``rounds`` — per-round optimizer state from ``rounds/trial_NNNN.json``,
   in round order. Carries ``opt_search_point`` (lineage, l2_brief,
   critique), composite_fitness, accuracy, l1_yield.
 - ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
-  same length and order as ``trials``. Source of L1 variants for the
+  same length and order as ``rounds``. Source of L1 variants for the
   variants table + behaviour checks. ``None`` for rounds with no audit.
 - ``context_object`` — three task-context strings the wiring layer pulls
   off ``cycle.task_context`` (pipeline_purpose / optimization_goals /
@@ -40,23 +40,23 @@ __all__ = ["render_review_md"]
 
 def render_review_md(
     index: dict[str, Any],
-    trials: list[dict[str, Any]],
+    rounds: list[dict[str, Any]],
     *,
     round_audits: list[dict[str, Any] | None] | None = None,
     context_object: list[str] | None = None,
     param_unlock_round: int = 3,
 ) -> str:
-    """Render ``review.md`` from index + trials + per-round audit dicts."""
-    audits = list(round_audits or [None] * len(trials))
-    if len(audits) < len(trials):
-        audits.extend([None] * (len(trials) - len(audits)))
+    """Render ``review.md`` from index + rounds + per-round audit dicts."""
+    audits = list(round_audits or [None] * len(rounds))
+    if len(audits) < len(rounds):
+        audits.extend([None] * (len(rounds) - len(audits)))
     ctx_items = [c for c in (context_object or []) if isinstance(c, str) and c.strip()]
 
-    behavior_per_round = _compute_behavior_per_round(trials, audits, ctx_items, param_unlock_round)
+    behavior_per_round = _compute_behavior_per_round(rounds, audits, ctx_items, param_unlock_round)
     final = index.get("final") or {}
     baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
     stats = compute_l1_stats(
-        list(trials),
+        list(rounds),
         baseline_composite_fitness=baseline_composite_fitness,
         behavior_results=behavior_per_round,
     )
@@ -68,11 +68,11 @@ def render_review_md(
     parts += ["## Rounds", ""]
 
     sweep_mode = (final.get("mode") or "").strip() == "sweep"
-    last_idx = len(trials) - 1
-    for i, trial in enumerate(trials):
-        is_peek = sweep_mode and i == last_idx and _is_generation_only(trial)
+    last_idx = len(rounds) - 1
+    for i, round_data in enumerate(rounds):
+        is_peek = sweep_mode and i == last_idx and _is_generation_only(round_data)
         parts += _render_round(
-            trial,
+            round_data,
             audits[i],
             behavior_per_round[i] if i < len(behavior_per_round) else [],
             is_peek=is_peek,
@@ -85,23 +85,23 @@ def render_review_md(
 
 
 def _compute_behavior_per_round(
-    trials: list[dict[str, Any]],
+    rounds: list[dict[str, Any]],
     audits: list[dict[str, Any] | None],
     context_object: list[str],
     param_unlock_round: int,
 ) -> list[list[CheckResult]]:
     out: list[list[CheckResult]] = []
     prior_audits: list[dict[str, Any]] = []
-    for i, trial in enumerate(trials):
+    for i, round_data in enumerate(rounds):
         audit = audits[i] if i < len(audits) else None
         if audit is None:
             out.append([])
             continue
-        round_num = int(trial.get("round") or i)
+        round_num = int(round_data.get("round") or i)
         ctx = CheckContext(
             round_num=round_num,
             prior_rounds=list(prior_audits),
-            opt_search_point=dict(trial.get("opt_search_point") or {}),
+            opt_search_point=dict(round_data.get("opt_search_point") or {}),
             context_object=context_object,
             param_unlock_round=param_unlock_round,
         )
@@ -170,14 +170,14 @@ def _render_behavior_summary(behavior_per_round: list[list[CheckResult]]) -> lis
 
 
 def _render_round(
-    trial: dict[str, Any],
+    round_data: dict[str, Any],
     audit: dict[str, Any] | None,
     checks: list[CheckResult],
     *,
     is_peek: bool,
 ) -> list[str]:
-    round_num = trial.get("round", "?")
-    osp = trial.get("opt_search_point") or {}
+    round_num = round_data.get("round", "?")
+    osp = round_data.get("opt_search_point") or {}
     lineage = osp.get("lineage") or {}
     suffix = " (next-gen peek)" if is_peek else ""
     parts: list[str] = [
@@ -186,9 +186,9 @@ def _render_round(
     ]
     if not is_peek:
         parts += [
-            f"- accuracy: {float(trial.get('accuracy', 0.0) or 0.0):.1%}",
-            f"- composite_fitness: `{float(trial.get('composite_fitness', 0.0) or 0.0):.4f}`",
-            f"- improved: **{'yes' if trial.get('improved') else 'no'}**",
+            f"- accuracy: {float(round_data.get('accuracy', 0.0) or 0.0):.1%}",
+            f"- composite_fitness: `{float(round_data.get('composite_fitness', 0.0) or 0.0):.4f}`",
+            f"- improved: **{'yes' if round_data.get('improved') else 'no'}**",
         ]
     parts += _render_l1_inputs(osp, lineage)
     parts += _render_check_checklist(checks)
@@ -234,7 +234,7 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         parts.append("|---|---|---|---|---|---|---|")
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the
-        # trial dict's candidate_scores array, surfaced when available.
+        # round_data dict's candidate_scores array, surfaced when available.
         for v in variants:
             name = str(v.get("variant_name") or "?")
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
@@ -270,5 +270,5 @@ def _extract_variants(audit: dict[str, Any] | None) -> list[dict[str, Any]]:
     return []
 
 
-def _is_generation_only(trial: dict[str, Any]) -> bool:
-    return str(trial.get("status") or "").strip() == "generation_only"
+def _is_generation_only(round_data: dict[str, Any]) -> bool:
+    return str(round_data.get("status") or "").strip() == "generation_only"

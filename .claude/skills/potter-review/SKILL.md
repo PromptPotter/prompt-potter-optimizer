@@ -17,7 +17,7 @@ Trigger: after each full `optimize` run. **Mandatory after round 1** (the round-
 1. Resolve `cycle_id` from `.promptpotter/active_session.json`. Read in this order:
    - `campaigns/<cycle_id>/review.md` — start here. Header has the round-1 verdict; per-round sections have the behaviour-check ✓/✗ lines.
    - `campaigns/<cycle_id>/dashboard.json` — live phase + best vs baseline.
-   - `campaigns/<cycle_id>/trials/trial_0000.json` — round 1 detail.
+   - `campaigns/<cycle_id>/rounds/round_0000.json` — round 1 detail.
    - `campaigns/<cycle_id>/.cache/rounds/round_0000.json` — L1 variant payload (only if `review.md` flags a behaviour ✗ that needs the raw evidence).
 2. Apply the round-1 rule table:
    - `healthy` → operator may continue rounds 2-5. Print a one-sentence go-ahead.

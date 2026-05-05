@@ -39,7 +39,7 @@ For the per-layer prompt structure (8 fields, layer-specific surfaces, render ch
 
 Two independent reasons the record matters:
 
-- **Persistence.** Every round's record is serialized to `trials/trial_NNNN.json` in the campaign directory. Resume reads from the latest trial. State that's not on the record does not survive interruption.
+- **Persistence.** Every round's record is serialized to `rounds/round_NNNN.json` in the campaign directory. Resume reads from the latest trial. State that's not on the record does not survive interruption.
 - **Steering.** Every layer reads from the record to know what to do. L1 reads the prompt fields and the brief. L2 reads the operational memory and the surface overrides. L3 reads the plan and the runtime failures.
 
 When L2 mutates the surface (toggles a section off, replaces section text, rewrites the body), it is writing onto this record. The next round's L1 reads from the same record — that's the bridge.
@@ -60,7 +60,7 @@ Round N starts:
   L2 (when it fires) writes any subset of fields onto the record
        (brief, optimizer params, task context, surface overrides, action)
        ↓
-  Round N's record is checkpointed to trials/trial_NNNN.json
+  Round N's record is checkpointed to rounds/round_NNNN.json
        ↓
 Round N+1 starts: L1 reads the same record again
 ```
@@ -69,7 +69,7 @@ Every change L2 makes is on this record. Nothing is lost between rounds because 
 
 ## What the record is NOT
 
-- It is not the trace archive. Per-query results live in `library/measurements/` and are referenced by ID.
+- It is not the trace archive. Per-query results live in `archive/measurements/` and are referenced by ID.
 - It is not the pipeline configuration. The frozen target pipeline shape lives in `JobSearchPoint`, projected from this record on demand.
 - It is not the campaign config. Operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
 

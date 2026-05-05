@@ -65,7 +65,7 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
 
 **Hexagonal.** `domain/` (pure) → `application/` (use cases) → `infrastructure/` (I/O) → `presentation/` (entry adapters), plus leaf `shared/`, `config/`. **Strict:** `application/intelligence/` MUST NOT import from `application/optimization/` (`tests/test_layer_imports.py`).
 
-**SearchPoint hierarchy.** `JobSearchPoint` (frozen target spec, content-hashed) + `PromptTemplate` (8-field scheme) → `OptSearchPoint` (optimizer state: lineage, L2/L3 overrides, per-individual memory). Twin tracing: target → `library/measurements/{run_id}.json` (content-addressed, the DB core); optimizer → `campaigns/{cycle_id}/trials/trial_NNNN.json`. **New optimizer state MUST flow through `OptSearchPoint`** — no sidecar state.
+**SearchPoint hierarchy.** `JobSearchPoint` (frozen target spec, content-hashed) + `PromptTemplate` (8-field scheme) → `OptSearchPoint` (optimizer state: lineage, L2/L3 overrides, per-individual memory). Twin tracing: target → `archive/measurements/{run_id}.json` (content-addressed, the DB core); optimizer → `campaigns/{cycle_id}/rounds/round_NNNN.json`. **New optimizer state MUST flow through `OptSearchPoint`** — no sidecar state.
 
 **Three-layer loop + four healing loops** (gradual, one nudge per fire). L1 generates/measures/scores/critiques every round. L2 fires on L1 stall — writes to `OptSearchPoint` (brief, `l1_section_overrides`, optimizer-param tweaks); never touches pipeline_params. L3 fires on L2 stall — replans the strategy. Healing: L2 nurses L1 on `ValidationFailure` and on `RuntimeFailure` (DegradationCheck mid-eval); L3 replans on L2 patience; L3 nurses L2 on validator outcome (cross-field dup, verbatim self-repeat, catalogue redundancy). Compression chain: eval results → `dispatch_msg` (`compile_l1_critique_blob`) → L1 critique → L2 `brief` → L1 generate. **Fan-in:** L1-generate reads both `plan` (from L3, persistent on `OptSearchPoint`, never cleared) and `l2_brief` (from L2, one-round window via `clear_volatile()`). L2 also reads `plan` — symmetric to L2→L1: L3 sets the strategic framework that both L2 (when refining) and L1 (when generating) operate within. **All four optimizer LLM calls go through one path:** `DispatchState` (per-call state) → `LAYER_CONFIGS[layer]` (`{var: section_renderer}` table) → `compile_prompt_vars` (applies OSP overrides, merges per-call extras) → LLM. **No prompt site summarizes its own data** — fields enter prompts only via this path.
 
@@ -88,13 +88,13 @@ uvicorn promptpotter.main:app --port 8001                    # read-only API
     sessions/{session_id}/                         # session.json, journal.md, notes.md
     campaigns/{root_cycle_id}/                     # FAMILY ROOT
       dashboard.json output.log                    # telemetry, root only (shared across forks)
-      index.json log.md trials/ prompts/ langfuse/
+      index.json log.md rounds/ prompts/ langfuse/
       .cache/rounds/{NNNN}.json                    # per-round LLM audit
       forks/{cycle_id}/ diag/ sweeps/              # per-fork audit; telemetry stays at root
-    library/measurements/{run_id}.json             # MeasurementArchive — DB core
+    archive/measurements/{run_id}.json             # MeasurementArchive — DB core
 ```
 
-`library/` is cross-cycle/session/tenant. One row = `(sample × config → outcome)`. Retrieval views: `measurements_for_sample()`, `measurements_for_config(predicate)`. Cache reuse + LLM digests are derived views over this archive. **Reads happen by opening files** — no read CLI.
+`archive/` is cross-cycle/session/tenant. One row = `(sample × config → outcome)`. Retrieval views: `measurements_for_sample()`, `measurements_for_config(predicate)`. Cache reuse + LLM digests are derived views over this archive. **Reads happen by opening files** — no read CLI.
 
 ## Per-dataset configuration
 

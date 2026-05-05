@@ -100,8 +100,8 @@ def session_and_campaign_dirs(tmp_path: Path) -> tuple[Path, Path]:
                 "campaign_id": cycle_id,
                 "backend_id": "test_backend",
                 "parent_session_id": session_id,
-                "trials": [],
-                "n_trials": 0,
+                "rounds": [],
+                "n_rounds": 0,
             }
         )
     )
@@ -308,7 +308,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     )
 
     # Mirror runner._finalize_run: fold the run summary into index.json::final
-    # and render log.md + review.md from the index + trial dump.
+    # and render log.md + review.md from the index + round_data dump.
     from promptpotter.application.review import render_review_md
     from promptpotter.presentation.views.render_markdown import to_markdown
     from promptpotter.presentation.views.view_factories import from_disk_log

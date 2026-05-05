@@ -10,7 +10,7 @@ Three layers, each wraps the next like a system prompt wraps a user prompt:
 - **L2** writes a **CONTEXT** outline that wraps L1, and modifies L1's fields when L1 stalls.
 - **L3** writes a **PLAN** outline that wraps L2, and is rewritten when L2 stalls.
 
-CONTEXT and PLAN live on disk inside each trial file — the loop's actual config, inspectable and editable. "Add this to the plan" means exactly that.
+CONTEXT and PLAN live on disk inside each round file — the loop's actual config, inspectable and editable. "Add this to the plan" means exactly that.
 
 ## Spend control
 

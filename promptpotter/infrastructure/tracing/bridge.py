@@ -150,7 +150,7 @@ class ObservabilityBridge:
         round_num: int,
         **extra: Any,
     ) -> None:
-        # events.jsonl is a pure mirror; resume uses trials/trial_NNNN.json.
+        # events.jsonl is a pure mirror; resume uses rounds/trial_NNNN.json.
         if not self._enabled:
             return
         with graceful(f"{event_cls.__name__} emit failed"):

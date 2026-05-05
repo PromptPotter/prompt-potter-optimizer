@@ -1,6 +1,6 @@
 """Cross-cycle review CLI — read-only pivot over a tenant's campaigns.
 
-Renders the same body as ``library/runs.md`` to stdout: every cycle
+Renders the same body as ``archive/runs.md`` to stdout: every cycle
 grouped by ``l1_generate_hash``, with a ``## Sweep view`` section when
 sweep-mode cycles exist. ``proxy_lift_corr`` (Spearman) reported in the
 footer when ≥4 paired ``l1_generate_hash``es exist across both modes —

@@ -49,7 +49,7 @@ def _candidate_score_dict(
     total: int,
     aborted: bool = False,
 ) -> dict:
-    """Mirror what ``CandidateScore.to_dict`` writes into ``trial.candidate_scores``."""
+    """Mirror what ``CandidateScore.to_dict`` writes into ``round_data.candidate_scores``."""
     ci_lo, ci_hi = wilson_ci(hits, total)
     return {
         "candidate_id": candidate_id,
@@ -136,10 +136,10 @@ def test_round_complete_view_roundtrip() -> None:
     live_view = from_phase_event(event, ctx)
     assert isinstance(live_view, RoundCompleteView)
 
-    # Disk path: build a trial dict shaped like ``RoundResult.model_dump()``
+    # Disk path: build a round_data dict shaped like ``RoundResult.model_dump()``
     # for the same round, then run from_disk_round.
-    trial = {
-        "trial_id": "round_0",
+    round_data = {
+        "round_id": "round_0",
         "round": 0,
         "label": "round_0",
         "accuracy": winner_acc,
@@ -163,7 +163,7 @@ def test_round_complete_view_roundtrip() -> None:
         "opt_search_point": {"l1_critique_text": ""},
     }
     disk_view = from_disk_round(
-        trial,
+        round_data,
         composite_fitness_formula=ctx["composite_fitness_formula"],
         composite_fitness_formula_short=ctx["composite_fitness_formula_short"],
         baseline_composite_fitness=ctx["baseline_composite_fitness"],
@@ -207,7 +207,7 @@ def test_round_complete_view_no_improvement() -> None:
     live_view = from_phase_event(event, ctx)
     assert isinstance(live_view, RoundCompleteView)
 
-    trial = {
+    round_data = {
         "round": 0,
         "accuracy": 0.40,
         "composite_fitness": 0.42,
@@ -228,7 +228,7 @@ def test_round_complete_view_no_improvement() -> None:
         ],
         "opt_search_point": {"l1_critique_text": ""},
     }
-    disk_view = from_disk_round(trial)
+    disk_view = from_disk_round(round_data)
 
     live_view = replace(live_view, next_action="")
 

@@ -35,15 +35,15 @@ The primitive does not know which caller fired. The caller passes a small `extra
 
 | Data | Lives in | Per-tree | Per-branch | Shared |
 |------|----------|----------|------------|--------|
-| Library measurements (`library/measurements/{run_id}.json`) | flat archive | — | — | ✓ content-addressed |
-| OSP state (`trials/trial_NNNN.json`) | branch dir | — | ✓ | — |
+| Library measurements (`archive/measurements/{run_id}.json`) | flat archive | — | — | ✓ content-addressed |
+| OSP state (`rounds/round_NNNN.json`) | branch dir | — | ✓ | — |
 | Ledger records (Decision / Phase / Snapshot) | branch dir | — | ✓ | — |
 | Sweep payload (operator input) | `datasets/{name}/sweep/*.json` | — | — | git-tracked |
 | Sweep payload (recorded fact) | parent's ledger, `DecisionRecord.data.fork.sweep_payload` | — | ✓ on parent | — |
 
 A branch's ledger inherits from its parent up to the cut, so reading a fork's history walks parent's records, then fork's own.
 
-**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `library/` row — that's why the second fork's "baseline" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
+**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `archive/` row — that's why the second fork's "baseline" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
 
 OSP is the optimizer's working memory for one branch — not part of the tree structure. When sweep mints a fork with overrides, the override fields ride into the fork as payload (written into FORK_CUT's `data.fork.sweep_payload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). For what OSP carries: [`state-record.md`](state-record.md).
 
@@ -53,7 +53,7 @@ When a new fork driver lands, run it through three checks. If any fail, the prim
 
 1. **Trigger-agnostic.** New caller adds an entry under `data.fork.*` and a few lines in one orchestrator. No edits to `_fork_at_divergence`'s body, no new ledger record kind.
 2. **Override is OSP-carriable.** Branch-differing fields are already (or trivially extensible to) `OptSearchPoint` fields. A different pipeline shape or scoring formula is a layer above.
-3. **No data fracture.** No parallel persistence directory; no duplicate of something already in `library/`, `trials/`, or the ledger.
+3. **No data fracture.** No parallel persistence directory; no duplicate of something already in `archive/`, `rounds/`, or the ledger.
 
 The primitive passes all three for sweep, scoring-divergence, and the planned operator-rewind / LLM-rebase callers.
 

@@ -531,7 +531,7 @@ async def escalate_l2(
             escalation_check_result=escalation_check_result,
         )
         # Loop 4: post-L2 validator failure force-triggers L3 to heal L2's
-        # output. Trigger is deterministic from L2's output (rides on trial
+        # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
         if cycle.opt_sp.l2_output_failures and opt.enable_l3:
             logger.info(

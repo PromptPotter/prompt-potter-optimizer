@@ -1,7 +1,7 @@
 """Content-addressed cache for optimizer LLM calls.
 
 Mirrors :class:`MeasurementArchive`'s file-per-record pattern. Storage is
-tenant-global at ``<base_dir>/library/.archive/optimizer_calls/{hash}.json``.
+tenant-global at ``<base_dir>/archive/optimizer_calls/{hash}.json``.
 Lookups are point-keyed; no index file.
 
 The cache is consumed by :func:`promptpotter.application.optimization.llm_call.llm_call`
@@ -52,7 +52,7 @@ class OptimizerCallCache:
         self._base_dir = base_dir
 
     def _dir(self) -> Path:
-        return self._base_dir / "library" / ".archive" / "optimizer_calls"
+        return self._base_dir / "archive" / "optimizer_calls"
 
     def _path(self, key: str) -> Path:
         return self._dir() / f"{key}.json"

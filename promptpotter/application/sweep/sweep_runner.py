@@ -108,7 +108,7 @@ async def run_sweep_batch(
 
     Forks branch off ``root_ctx.cycle_id`` — whatever the active
     pointer names. The first fork's baseline run populates the
-    ``library/`` cache; subsequent forks cache-hit on identical
+    ``archive/`` cache; subsequent forks cache-hit on identical
     baseline ``JobSearchPoint`` measurements. Active pointer is
     restored to the branch point at the end. Re-invocation from the
     same branch point dedupes via ``data.source_file`` in the parent's

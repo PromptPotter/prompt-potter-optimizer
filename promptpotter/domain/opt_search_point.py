@@ -6,8 +6,8 @@ and optimization memory. ``to_job_search_point()`` projects into a frozen
 ``pipeline_params``.
 
 Two-layer tracing:
-  Target layer:    JobSearchPoint  → content_hash → library/measurements/
-  Optimizer layer: OptSearchPoint  → model_dump() → campaigns/{id}/trial.json
+  Target layer:    JobSearchPoint  → content_hash → archive/measurements/
+  Optimizer layer: OptSearchPoint  → model_dump() → campaigns/{id}/round_data.json
 
 ADR-8: Mutable (not frozen). Updated in-place during the feedback cycle,
 serialized via ``model_dump()`` at checkpoint time.
@@ -199,7 +199,7 @@ class OptSearchPoint(PromptTemplate):
     - memory fields     — see :data:`MEMORY_FIELDS` (preserved across L2/L3
       transitions via :meth:`copy_memory_to`).
 
-    Persisted in trial checkpoints. Enables L4 to correlate optimizer
+    Persisted in round_data checkpoints. Enables L4 to correlate optimizer
     configuration with target-pipeline scoring outcomes.
     """
 

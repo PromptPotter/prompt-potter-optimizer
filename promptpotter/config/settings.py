@@ -90,7 +90,7 @@ class Settings(BaseSettings):
     OBS_ENABLED: bool = True
 
     # MLflow experiment tracking (opt-in; off by default). When enabled,
-    # FileSink writes per-round MLflow runs to ``library/mlruns/`` via the
+    # FileSink writes per-round MLflow runs to ``archive/mlruns/`` via the
     # MLflow Python SDK.
     MLFLOW_ENABLED: bool = False
 

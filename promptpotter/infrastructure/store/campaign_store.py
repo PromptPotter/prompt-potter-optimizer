@@ -35,7 +35,7 @@ class CampaignStore(EntityStore):
         return self._base_dir / "campaigns"
 
     def _campaign_dir(self, _backend_id: str, cycle_id: str) -> Path:
-        """Per-cycle dir holding trials + audit. Resolves root vs fork layout."""
+        """Per-cycle dir holding rounds + audit. Resolves root vs fork layout."""
         return campaign_dir_for(self._base_dir, cycle_id)
 
     def campaign_dir(self, cycle_id: str) -> Path:
@@ -43,8 +43,8 @@ class CampaignStore(EntityStore):
         forks at ``campaigns/{root}/forks/{cycle_id}``."""
         return campaign_dir_for(self._base_dir, cycle_id)
 
-    def _trials_dir(self, backend_id: str, cycle_id: str) -> Path:
-        return self._campaign_dir(backend_id, cycle_id) / "trials"
+    def _rounds_dir(self, backend_id: str, cycle_id: str) -> Path:
+        return self._campaign_dir(backend_id, cycle_id) / "rounds"
 
     def _candidates_dir(self, backend_id: str, cycle_id: str) -> Path:
         # Internal resume checkpoint — hidden under ``.runtime/cache/`` so the
@@ -67,7 +67,7 @@ class CampaignStore(EntityStore):
 
         When the file doesn't exist yet, writes a fresh blob with defaults.
         When it does, merges the new keys over existing values without
-        clobbering trial/best/baseline accumulators — defaults only fill
+        clobbering round_data/best/baseline accumulators — defaults only fill
         gaps. ``parent_session_id`` flows through ``metadata``.
         """
         path = self._entity_path(backend_id, cycle_id)
@@ -81,14 +81,14 @@ class CampaignStore(EntityStore):
             "connector_type": metadata.get("connector_type", DEFAULT_CONNECTOR_TYPE),
             "backend_id": backend_id,
             "parent_session_id": existing.get("parent_session_id", ""),
-            "n_trials": 0,
+            "n_rounds": 0,
             "best_accuracy": 0.0,
-            "best_trial_id": None,
+            "best_round_id": None,
             "baseline_accuracy": 0.0,
-            "trials": [],
+            "rounds": [],
         }
         # Merge order: defaults for missing keys → existing accumulators →
-        # explicit metadata overrides. Accumulators ("trials" / "n_trials"
+        # explicit metadata overrides. Accumulators ("rounds" / "n_rounds"
         # / "best_*") are preserved on replay via ``existing``.
         data = {**defaults, **existing, **metadata}
         data["updated_at"] = now
@@ -115,36 +115,36 @@ class CampaignStore(EntityStore):
         cycle_id: str,
         after_round: int,
     ) -> None:
-        """Archive trial/candidate files for rounds > ``after_round``.
+        """Archive round_data/candidate files for rounds > ``after_round``.
 
-        Moves ``trials/trial_{M:04d}.json`` and
+        Moves ``rounds/trial_{M:04d}.json`` and
         ``.runtime/cache/candidates/round_{M:04d}.json`` for M > after_round
-        into ``.runtime/archived/resumed_at_<ts>/{trials,candidates}/``,
-        then rebuilds the cycle's trial index to reflect only surviving
-        trials (rounds 0..after_round). No-op on a cycle with no such trial.
+        into ``.runtime/archived/resumed_at_<ts>/{rounds,candidates}/``,
+        then rebuilds the cycle's round_data index to reflect only surviving
+        rounds (rounds 0..after_round). No-op on a cycle with no such round_data.
         """
         cycle_dir = self._campaign_dir(backend_id, cycle_id)
-        trials_dir = self._trials_dir(backend_id, cycle_id)
+        rounds_dir = self._rounds_dir(backend_id, cycle_id)
         candidates_dir = self._candidates_dir(backend_id, cycle_id)
 
-        if not trials_dir.exists():
-            raise LookupError(f"cycle {cycle_id!r} has no trials on disk")
+        if not rounds_dir.exists():
+            raise LookupError(f"cycle {cycle_id!r} has no rounds on disk")
 
-        target = trials_dir / f"trial_{after_round:04d}.json"
+        target = rounds_dir / f"round_{after_round:04d}.json"
         if not target.exists():
             raise LookupError(
-                f"--from {after_round}: trial_{after_round:04d}.json not found in {trials_dir}"
+                f"--from {after_round}: round_{after_round:04d}.json not found in {rounds_dir}"
             )
 
         survivors: list[Path] = []
-        to_archive_trials: list[Path] = []
+        to_archive_rounds: list[Path] = []
         to_archive_candidates: list[Path] = []
-        for p in sorted(trials_dir.glob("trial_*.json")):
+        for p in sorted(rounds_dir.glob("round_*.json")):
             try:
-                n = int(p.stem.removeprefix("trial_"))
+                n = int(p.stem.removeprefix("round_"))
             except ValueError:
                 continue
-            (to_archive_trials if n > after_round else survivors).append(p)
+            (to_archive_rounds if n > after_round else survivors).append(p)
         if candidates_dir.exists():
             for p in sorted(candidates_dir.glob("round_*.json")):
                 try:
@@ -154,14 +154,14 @@ class CampaignStore(EntityStore):
                 if n > after_round:
                     to_archive_candidates.append(p)
 
-        archived_count = len(to_archive_trials) + len(to_archive_candidates)
+        archived_count = len(to_archive_rounds) + len(to_archive_candidates)
         if archived_count:
             ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%SZ")
             archive_root = cycle_dir / ".runtime" / "archived" / f"resumed_at_{ts}"
-            if to_archive_trials:
-                (archive_root / "trials").mkdir(parents=True, exist_ok=True)
-                for p in to_archive_trials:
-                    p.rename(archive_root / "trials" / p.name)
+            if to_archive_rounds:
+                (archive_root / "rounds").mkdir(parents=True, exist_ok=True)
+                for p in to_archive_rounds:
+                    p.rename(archive_root / "rounds" / p.name)
             if to_archive_candidates:
                 (archive_root / "candidates").mkdir(parents=True, exist_ok=True)
                 for p in to_archive_candidates:
@@ -174,42 +174,42 @@ class CampaignStore(EntityStore):
                 archive_root,
             )
 
-        self._rebuild_trial_index(backend_id, cycle_id, survivors)
+        self._rebuild_round_index(backend_id, cycle_id, survivors)
 
     @staticmethod
-    def _trial_summary(trial: dict[str, Any]) -> dict[str, Any]:
-        """Projection of a trial detail into the index.json::trials shape."""
-        round_num = trial.get("round", 0)
+    def _round_summary(round_data: dict[str, Any]) -> dict[str, Any]:
+        """Projection of a round_data detail into the index.json::rounds shape."""
+        round_num = round_data.get("round", 0)
         return {
-            "trial_id": trial.get("trial_id", f"round_{round_num}"),
+            "round_id": round_data.get("round_id", f"round_{round_num}"),
             "round": round_num,
-            "label": trial.get("label", ""),
-            "prompt_fields_id": trial.get("prompt_fields_id", ""),
-            "accuracy": trial.get("accuracy", 0.0),
-            "hits": trial.get("hits", 0),
-            "total": trial.get("total", 0),
-            "improved": trial.get("improved", False),
-            "created_at": trial.get("created_at", ""),
+            "label": round_data.get("label", ""),
+            "prompt_fields_id": round_data.get("prompt_fields_id", ""),
+            "accuracy": round_data.get("accuracy", 0.0),
+            "hits": round_data.get("hits", 0),
+            "total": round_data.get("total", 0),
+            "improved": round_data.get("improved", False),
+            "created_at": round_data.get("created_at", ""),
         }
 
-    def _rebuild_trial_index(
+    def _rebuild_round_index(
         self,
         backend_id: str,
         cycle_id: str,
         survivors: list[Path],
     ) -> None:
-        """Recompute ``trials`` / ``n_trials`` / ``best_accuracy`` / ``best_trial_id``
-        from the trial detail files that remain after a rewind."""
+        """Recompute ``rounds`` / ``n_rounds`` / ``best_accuracy`` / ``best_round_id``
+        from the round_data detail files that remain after a rewind."""
         campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
-        rebuilt = [self._trial_summary(read_json(p)) for p in sorted(survivors)]
+        rebuilt = [self._round_summary(read_json(p)) for p in sorted(survivors)]
         best = max(rebuilt, key=lambda s: s["accuracy"], default=None)
 
-        data["trials"] = rebuilt
-        data["n_trials"] = len(rebuilt)
+        data["rounds"] = rebuilt
+        data["n_rounds"] = len(rebuilt)
         data["best_accuracy"] = best["accuracy"] if best else 0.0
-        data["best_trial_id"] = best["trial_id"] if best else None
+        data["best_round_id"] = best["round_id"] if best else None
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(campaign_path, data)
 
@@ -250,12 +250,12 @@ class CampaignStore(EntityStore):
         min_age_seconds: float = 3600.0,
     ) -> list[str]:
         """Delete sibling cycle dirs (``forks/``, ``diag/``, ``sweeps/*/forks/``)
-        that ran zero trials and were created at least ``min_age_seconds`` ago
+        that ran zero rounds and were created at least ``min_age_seconds`` ago
         (default 1 hour). Returns the cycle_ids that were removed.
         Operator-callable; never auto-fired.
 
         ``min_age_seconds`` guards against racing with an in-progress fork
-        whose ``add_trial`` hasn't fired yet."""
+        whose ``save_round_file`` hasn't fired yet."""
         family_dir = self._campaign_dir(backend_id, family_root_cycle_id)
         sibling_dirs: list[Path] = []
         if (forks_dir := family_dir / "forks").is_dir():
@@ -275,7 +275,7 @@ class CampaignStore(EntityStore):
                 continue
             idx = fork_dir / "index.json"
             data = read_json_optional(idx) or {}
-            if int(data.get("n_trials") or 0) > 0:
+            if int(data.get("n_rounds") or 0) > 0:
                 continue
             if data.get("final"):
                 continue
@@ -347,7 +347,7 @@ class CampaignStore(EntityStore):
                     "campaign_id": data["campaign_id"],
                     "name": data.get("name", ""),
                     "status": data["status"],
-                    "n_trials": data["n_trials"],
+                    "n_rounds": data["n_rounds"],
                     "best_accuracy": data["best_accuracy"],
                     "baseline_accuracy": data["baseline_accuracy"],
                     "created_at": data["created_at"],
@@ -380,10 +380,10 @@ class CampaignStore(EntityStore):
             "forked_from_round": 0,
             "forked_at": forked_at,
             "fork_kind": fork_kind,
-            "trials": [],
-            "n_trials": 0,
+            "rounds": [],
+            "n_rounds": 0,
             "best_accuracy": 0.0,
-            "best_trial_id": None,
+            "best_round_id": None,
             "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
             "status": "active",
             "created_at": forked_at,
@@ -396,25 +396,25 @@ class CampaignStore(EntityStore):
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
-        surviving_trials: list[dict[str, Any]],
+        surviving_rounds: list[dict[str, Any]],
         forked_at: str,
         forked_from_round: int,
     ) -> Path:
         """Divergence-fork ``index.json`` inheriting parent state.
 
-        Recomputes ``best_*`` from ``surviving_trials`` so the fork's index
+        Recomputes ``best_*`` from ``surviving_rounds`` so the fork's index
         reflects only the rounds < ``forked_from_round`` it inherited.
         """
         parent_path = self._campaign_dir("", parent_cycle_id) / "index.json"
         parent_index = read_json_optional(parent_path) or {}
         best_acc = max(
-            (float(t.get("accuracy", 0.0)) for t in surviving_trials),
+            (float(t.get("accuracy", 0.0)) for t in surviving_rounds),
             default=0.0,
         )
-        best_trial_id = next(
+        best_round_id = next(
             (
-                t.get("trial_id")
-                for t in surviving_trials
+                t.get("round_id")
+                for t in surviving_rounds
                 if float(t.get("accuracy", 0.0)) == best_acc
             ),
             None,
@@ -425,10 +425,10 @@ class CampaignStore(EntityStore):
             "parent_cycle_id": parent_cycle_id,
             "forked_from_round": forked_from_round,
             "forked_at": forked_at,
-            "trials": list(surviving_trials),
-            "n_trials": len(surviving_trials),
+            "rounds": list(surviving_rounds),
+            "n_rounds": len(surviving_rounds),
             "best_accuracy": best_acc,
-            "best_trial_id": best_trial_id,
+            "best_round_id": best_round_id,
             "status": "resumed",
             "updated_at": forked_at,
         }
@@ -476,23 +476,23 @@ class CampaignStore(EntityStore):
         write_json(path, blob)
         return path
 
-    def copy_parent_trials_and_candidates(
+    def copy_parent_rounds_and_candidates(
         self,
         parent_cycle_id: str,
         new_cycle_id: str,
         *,
         before_round: int,
     ) -> int:
-        """Copy parent's ``trials/`` + ``candidates/`` files for rounds < ``before_round``.
+        """Copy parent's ``rounds/`` + ``candidates/`` files for rounds < ``before_round``.
 
         Returns total files copied. Caller owns deciding when to invoke;
         used by divergence forks for deterministic-replay inheritance.
         """
         copy_specs: tuple[tuple[Path, Path, str], ...] = (
             (
-                self._trials_dir("", parent_cycle_id),
-                self._trials_dir("", new_cycle_id),
-                "trial_",
+                self._rounds_dir("", parent_cycle_id),
+                self._rounds_dir("", new_cycle_id),
+                "round_",
             ),
             (
                 self._candidates_dir("", parent_cycle_id),
@@ -517,66 +517,66 @@ class CampaignStore(EntityStore):
 
     # -- Trial CRUD -----------------------------------------------------------
 
-    def add_trial(
+    def save_round_file(
         self,
         backend_id: str,
         cycle_id: str,
-        trial: dict[str, Any],
+        round_data: dict[str, Any],
     ) -> Path:
-        """Persist a trial detail file and update the campaign index."""
-        trial_id = trial["trial_id"]
-        validate_path_component(trial_id)
-        round_num = trial.get("round", 0)
+        """Persist a round_data detail file and update the campaign index."""
+        round_id = round_data["round_id"]
+        validate_path_component(round_id)
+        round_num = round_data.get("round", 0)
 
-        detail_path = self._trials_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json"
-        write_json(detail_path, trial)
+        detail_path = self._rounds_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json"
+        write_json(detail_path, round_data)
 
         campaign_path = self._entity_path(backend_id, cycle_id)
         data = read_json(campaign_path)
 
-        data["trials"] = [t for t in data["trials"] if t.get("round") != round_num]
-        data["trials"].append(self._trial_summary(trial))
-        data["n_trials"] = len(data["trials"])
+        data["rounds"] = [t for t in data["rounds"] if t.get("round") != round_num]
+        data["rounds"].append(self._round_summary(round_data))
+        data["n_rounds"] = len(data["rounds"])
 
-        if trial["accuracy"] > data.get("best_accuracy", 0.0):
-            data["best_accuracy"] = trial["accuracy"]
-            data["best_trial_id"] = trial_id
+        if round_data["accuracy"] > data.get("best_accuracy", 0.0):
+            data["best_accuracy"] = round_data["accuracy"]
+            data["best_round_id"] = round_id
 
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(campaign_path, data)
 
         return detail_path
 
-    def load_trial(
+    def load_round_file(
         self,
         backend_id: str,
         cycle_id: str,
         round_num: int,
     ) -> dict[str, Any] | None:
-        """Load a trial detail by round number.  Returns None if not found."""
+        """Load a round_data detail by round number.  Returns None if not found."""
         return read_json_optional(
-            self._trials_dir(backend_id, cycle_id) / f"trial_{round_num:04d}.json",
+            self._rounds_dir(backend_id, cycle_id) / f"round_{round_num:04d}.json",
         )
 
-    def load_trials_range(
+    def load_rounds_range(
         self,
         backend_id: str,
         cycle_id: str,
         start: int,
         end: int,
     ) -> list[dict[str, Any]]:
-        """Load trials for rounds ``start..end`` inclusive, in round order.
+        """Load rounds for rounds ``start..end`` inclusive, in round order.
 
-        Missing trials are skipped silently (``None`` from
-        :meth:`load_trial`). Used by the resume-divergence walker in
+        Missing rounds are skipped silently (``None`` from
+        :meth:`load_round_file`). Used by the resume-divergence walker in
         :mod:`promptpotter.application.optimization.cycle` to re-derive
         each recorded decision under the current scorer.
         """
         out: list[dict[str, Any]] = []
         for r in range(start, end + 1):
-            trial = self.load_trial(backend_id, cycle_id, r)
-            if trial is not None:
-                out.append(trial)
+            round_data = self.load_round_file(backend_id, cycle_id, r)
+            if round_data is not None:
+                out.append(round_data)
         return out
 
     def complete(self, backend_id: str, cycle_id: str) -> None:

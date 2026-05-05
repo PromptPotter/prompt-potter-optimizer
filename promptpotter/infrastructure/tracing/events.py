@@ -14,7 +14,7 @@ Two families:
   inline from the optimization loop.
 - :class:`MeasurementEvent` — Topology B (per-query dataset trace). One
   Langfuse trace per query, linked to dataset items. Emitted by the
-  backfill replayer reading ``library/measurements/`` from disk.
+  backfill replayer reading ``archive/measurements/`` from disk.
 """
 
 from __future__ import annotations
@@ -100,7 +100,7 @@ class NodeEnd:
 # Observability markers for durable mid-round transitions. events.jsonl is
 # a pure observability mirror: nothing reads these events back for state
 # reconstruction. Resume and fork are driven by
-# ``campaigns/{cycle_id}/trials/trial_NNNN.json`` via ``CampaignStore``.
+# ``campaigns/{cycle_id}/rounds/trial_NNNN.json`` via ``CampaignStore``.
 
 
 @dataclass(frozen=True, slots=True)
@@ -229,7 +229,7 @@ OptimizationEvent = Union[
 ]
 
 
-# --- Measurement (Topology B, replayed from library/measurements/) ---
+# --- Measurement (Topology B, replayed from archive/measurements/) ---
 
 
 @dataclass(frozen=True, slots=True)

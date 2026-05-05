@@ -89,7 +89,7 @@ class RequestTooLargeError(RuntimeError):
 class ResumeDivergenceError(RuntimeError):
     """Raised when a resumed campaign diverges from the recorded trajectory.
 
-    A decision recorded in a prior trial (round winner, elimination cut,
+    A decision recorded in a prior round_data (round winner, elimination cut,
     escalation trigger, …) re-derives to a different outcome under the
     currently active scorer. The only mechanism: every recorded decision is
     a pure function of scored results, and rescoring changes the inputs.

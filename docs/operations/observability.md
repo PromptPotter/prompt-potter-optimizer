@@ -67,7 +67,7 @@ Next `optimize` starts sending traces. To push historical traces uploaded later,
 
 ## MLflow sink
 
-Each round can be logged as an MLflow run when `settings.MLFLOW_ENABLED` is true (default false). Tracking URI: `library/mlruns/`. Experiment name: `{tenant_id}/{cycle_id}`. Implementation: `infrastructure/tracing.py`. Installs alongside file + Langfuse sinks. Toggle via `MLFLOW_ENABLED=true` in `.env`.
+Each round can be logged as an MLflow run when `settings.MLFLOW_ENABLED` is true (default false). Tracking URI: `archive/mlruns/`. Experiment name: `{tenant_id}/{cycle_id}`. Implementation: `infrastructure/tracing.py`. Installs alongside file + Langfuse sinks. Toggle via `MLFLOW_ENABLED=true` in `.env`.
 
 ## Display convention — `⚠ … ↳`
 
@@ -105,7 +105,7 @@ The stale-data ladder's rescue step is **samplescan rescue** — "probe" is rese
 
 ## Reading what L2 wrote from a trial
 
-`campaigns/{cycle_id}/trials/trial_NNNN.json`:
+`campaigns/{cycle_id}/rounds/round_NNNN.json`:
 
 - `opt_search_point.l2_brief` — brief (if any).
 - `opt_search_point.l1_section_overrides` / `l1_section_overrides_text` / `l1_template_override` — surface mutations.

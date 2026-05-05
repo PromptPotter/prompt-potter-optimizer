@@ -500,7 +500,7 @@ def view_from_record(record: dict[str, Any]) -> AnyView | None:
 
 
 def from_disk_round(
-    trial: dict[str, Any],
+    round_data: dict[str, Any],
     *,
     composite_fitness_formula: str | None = None,
     composite_fitness_formula_short: str | None = None,
@@ -509,7 +509,7 @@ def from_disk_round(
     """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
     score_entries = [
         _score_entry_from_dict(s, fallback_label=f"C{i + 1}")
-        for i, s in enumerate(trial.get("candidate_scores") or [])
+        for i, s in enumerate(round_data.get("candidate_scores") or [])
     ]
 
     winner_label = ""
@@ -524,24 +524,26 @@ def from_disk_round(
         )
         winner_label = best.label
 
-    winner_acc = float(trial.get("accuracy", 0.0))
-    baseline_acc = float(trial.get("baseline_accuracy", 0.0))
-    improved = bool(trial.get("improved", False))
+    winner_acc = float(round_data.get("accuracy", 0.0))
+    baseline_acc = float(round_data.get("baseline_accuracy", 0.0))
+    improved = bool(round_data.get("improved", False))
     return RoundCompleteView(
-        round=int(trial.get("round", 0)),
+        round=int(round_data.get("round", 0)),
         baseline_acc=baseline_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_accuracy=winner_acc,
-        winner_composite_fitness=trial.get("composite_fitness"),
-        winner_evaluators=dict(trial.get("evaluators") or {}),
-        winner_hits=int(trial.get("hits", 0)),
-        winner_total=int(trial.get("total", 0)),
+        winner_composite_fitness=round_data.get("composite_fitness"),
+        winner_evaluators=dict(round_data.get("evaluators") or {}),
+        winner_hits=int(round_data.get("hits", 0)),
+        winner_total=int(round_data.get("total", 0)),
         improved=improved,
         delta=(winner_acc - baseline_acc) if improved else 0.0,
-        p_value=trial.get("p_value"),
-        next_action=str(trial.get("next_action", "")),
-        l1_critique_text=str((trial.get("opt_search_point") or {}).get("l1_critique_text") or ""),
+        p_value=round_data.get("p_value"),
+        next_action=str(round_data.get("next_action", "")),
+        l1_critique_text=str(
+            (round_data.get("opt_search_point") or {}).get("l1_critique_text") or ""
+        ),
         composite_fitness_formula=composite_fitness_formula,
         composite_fitness_formula_short=composite_fitness_formula_short,
         baseline_composite_fitness=baseline_composite_fitness,
@@ -586,21 +588,21 @@ def _load_p_best_trajectory(
 
 def from_disk_log(
     index: dict[str, Any],
-    trials: list[dict[str, Any]],
+    rounds: list[dict[str, Any]],
     *,
     hard_samples_artifact: dict[str, Any] | None = None,
     sample_query_lookup: dict[int, str] | None = None,
     streams_dir: Path | None = None,
     fork_indices: list[dict[str, Any]] | None = None,
 ) -> LogMdView:
-    """Build the ``log.md`` view from ``index.json`` + a list of trial dicts.
+    """Build the ``log.md`` view from ``index.json`` + a list of round_data dicts.
 
     ``fork_indices`` is the list of fork ``index.json`` blobs (one per fork
     of the family); rendered as the ``## Forks`` section on the family-root
     log.md. Forks themselves pass ``None`` and get an empty tuple.
     """
     final = index.get("final") or {}
-    gen_only = sum(1 for t in trials if str(t.get("status") or "") == "generation_only")
+    gen_only = sum(1 for t in rounds if str(t.get("status") or "") == "generation_only")
     status = DigestStatusView(
         campaign_id=str(index.get("campaign_id") or ""),
         parent_session_id=index.get("parent_session_id"),
@@ -609,20 +611,20 @@ def from_disk_log(
         baseline_accuracy=float(index.get("baseline_accuracy", 0.0)),
         best_accuracy=float(index.get("best_accuracy", 0.0)),
         best_round=index.get("best_round"),
-        rounds_completed=int(index.get("n_trials", 0)),
+        rounds_completed=int(index.get("n_rounds", 0)),
         started_at=final.get("started_at"),
         finished_at=final.get("finished_at"),
         gen_only_rounds=gen_only,
     )
 
-    rounds: list[RoundDigestView] = []
-    for t in trials:
+    round_views: list[RoundDigestView] = []
+    for t in rounds:
         osp = t.get("opt_search_point") or {}
         lineage = osp.get("lineage") or {}
         rnd_raw = t.get("round")
         rnd = rnd_raw if isinstance(rnd_raw, int) else 0
         traj, stopped = _load_p_best_trajectory(streams_dir, rnd)
-        rounds.append(
+        round_views.append(
             RoundDigestView(
                 round=rnd,
                 label=str(t.get("label") or "").strip() or f"round_{rnd}",
@@ -666,7 +668,7 @@ def from_disk_log(
         # Drop uninitialized forks (created but never ran a round) — their
         # all-zeros row is noise. Sort survivors by best desc so the top
         # contender surfaces first.
-        live = [fi for fi in fork_indices if int(fi.get("n_trials") or 0) > 0]
+        live = [fi for fi in fork_indices if int(fi.get("n_rounds") or 0) > 0]
         fork_views = tuple(
             sorted(
                 (_fork_summary_from_index(fi) for fi in live),
@@ -685,7 +687,7 @@ def from_disk_log(
 
     return LogMdView(
         status=status,
-        rounds=tuple(rounds),
+        rounds=tuple(round_views),
         formula=final.get("scorer_round_formula"),
         baseline_composite_fitness=final.get("baseline_composite_fitness"),
         hard_samples=hard,
@@ -703,7 +705,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
         baseline_accuracy=float(fork_index.get("baseline_accuracy", 0.0)),
-        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_trials", 0) or 0),
+        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_rounds", 0) or 0),
         stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
         finished_at=final.get("finished_at") or fork_index.get("finished_at"),
     )

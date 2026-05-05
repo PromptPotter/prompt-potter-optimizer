@@ -145,7 +145,7 @@ class ForkPayload(BaseModel):
 
 `FORK_CUT` stays `ARCHIVAL` in `DECISION_GATING` — its outcome (the new cycle_id) is downstream of the divergence-checked decisions, never gating itself.
 
-**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, trials/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
+**Mechanism.** Rename `_fork_at_divergence()` → `_mint_fork(parent, fork_from_round, payload: ForkPayload)` in `application/optimization/cycle.py`. Body unchanged: parent ledger gets `FORK_CUT` (now carrying `data.fork`), fork dir minted under `campaigns/{root}/forks/{cycle_id}/`, rounds/candidates copied for rounds `< fork_from_round`, active pointer retargeted, `CycleLedger.inherit_from(parent, parent.next_offset)`. The scoring-divergence branch in `cycle.py:790` becomes one caller; sweep + future LLM-rebase are new callers.
 
 **LLM-side surface.** Extend `OptimizerAction` in `application/optimization/pipeline.py`:
 
@@ -162,10 +162,10 @@ L2 and L3 emit `rebase` through their existing JSON-output channel — no new op
 
 1. Read N L1-candidate payloads from `datasets/{name}/sweep/*.json` (one `ForkPayload` per candidate, `trigger=OPERATOR_SWEEP`, `issued_by=<operator>`).
 2. For each candidate: `_mint_fork(root_cycle, fork_from_round=1, payload=candidate_i)`, run round 1 (full: generate + score) → round 2 generation only (no scoring) → halt.
-3. Round-2 trial JSON written with `status: "generation_only"`, no `composite`/`accuracy`.
+3. Round-2 round file written with `status: "generation_only"`, no `composite`/`accuracy`.
 4. `index.json::final.mode = "sweep"` and `index.json::fork.trigger = "operator_sweep"` distinguish the branch.
 
-All sweep branches share their parent's baseline measurements via the `library/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
+All sweep branches share their parent's baseline measurements via the `archive/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
 
 **LLM-rebase callers (M11 deliverable, scoped here for forward compat).** Out of M10 implementation, but the primitive must support:
 
@@ -273,7 +273,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 | Optimizer output schemas | `optimizer_pipeline.json::resolved_schemas['{l1_generate,l1_critique}/1']` (`l1_generate` is the static envelope; `build_l1_output_schema` grafts per-target node properties on top) |
 | Prompt loading | `pipeline.py::load_optimizer_prompt` (manifest registry → Langfuse override) |
 | Per-round trace | `campaigns/{cycle_id}/.cache/rounds/round_NNNN.json` (`nodes.l1_generate`, `nodes.l1_score`, `nodes.l1_critique`) |
-| Per-round optimizer state | `campaigns/{cycle_id}/trials/trial_NNNN.json` |
+| Per-round optimizer state | `campaigns/{cycle_id}/rounds/round_NNNN.json` |
 | Prompt snapshots | `campaigns/{cycle_id}/prompts/optimizer_prompt/{hash}/` |
 | Existing log renderer | `presentation/views/log_md.py::render_log_md` (purity pattern) |
 | Reusable formatters | `presentation/views/display.py` |

@@ -155,7 +155,7 @@ class RoundDiagnostics(BaseModel):
     pipeline_params: dict | None = None
     # Comparison anchor for this round: prior round's accuracy (or campaign
     # baseline for round 0). Persisted so the scoreboard can render
-    # delta-vs-baseline without resolving the prior trial.
+    # delta-vs-baseline without resolving the prior round_data.
     baseline_accuracy: float = 0.0
     results: list[dict] = Field(default_factory=list)
     # Per-candidate scored results — persisted so resume can rescore
@@ -171,7 +171,7 @@ class RoundDiagnostics(BaseModel):
     evaluators: dict[str, float] = Field(default_factory=dict)
     # Scoring-set evolution events emitted during this round (only populated
     # when ``scoring_set.enabled``; empty otherwise). Persisted to the
-    # trial JSON so post-hoc renderers can walk the trial list and
+    # round_data JSON so post-hoc renderers can walk the round_data list and
     # reconstruct the full event log.
     scoring_set_events: list[dict] = Field(default_factory=list)
     # L1 generation quality — fraction of variants that proposed a non-empty

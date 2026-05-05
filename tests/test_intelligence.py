@@ -8,7 +8,7 @@ Four named invariants:
      ``find_by_node_configs`` is positional prefix-exact (cache reuse).
   2. ``AxisIndex.refresh`` rebuilds ``_axis_values`` from the archive (pure
      derivation, idempotent under no-change refresh, no persistence under
-     ``library/``); ``ConfigIndex.run_ids_matching`` parity with
+     ``archive/``); ``ConfigIndex.run_ids_matching`` parity with
      ``measurements_for_config`` full scan.
   3. Cross-cycle aggregators — ``StopReason.DIAG_COMPLETE`` is a named
      wire-shape member; ``build_archive_observations`` keys candidates by
@@ -248,10 +248,10 @@ def test_axis_index_refresh_rebuilds_axis_values(indexed_stores: Any) -> None:
 
 
 def test_axis_index_no_persistence(indexed_stores: Any, tmp_path: Path) -> None:
-    """Neither digest side writes anything to ``library/``."""
+    """Neither digest side writes anything to ``archive/``."""
     idx = AxisIndex()
     idx.refresh(indexed_stores, "any-backend")
-    library = indexed_stores.base_dir / "library"
+    library = indexed_stores.base_dir / "archive"
     assert not (library / "axes.json").exists()
     assert not (library / "search_memory.json").exists()
     assert not (library / "samples.json").exists()

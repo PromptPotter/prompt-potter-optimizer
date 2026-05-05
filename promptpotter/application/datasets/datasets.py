@@ -13,7 +13,7 @@ Sections:
    dataset-wide ``{variant}.json`` fallback.
 
 3. **Potter-trace dataset loader** — emits one row per
-   ``(trial_N → trial_N+1)`` transition from archived ``trials/trial_NNNN.json``
+   ``(trial_N → trial_N+1)`` transition from archived ``rounds/trial_NNNN.json``
    files. Rows conform to the dataset-row contract so they flow through
    the existing ``load_dataset()`` / ``build_dataset_run_data()`` pipeline
    unchanged. Raw material for self-optimization.
@@ -469,7 +469,7 @@ def list_dataset_prompts(dataset: str) -> list[str]:
 
 # ===========================================================================
 # Potter-trace dataset loader
-# Reads campaigns/{cycle_id}/trials/trial_NNNN.json and emits one row per
+# Reads campaigns/{cycle_id}/rounds/trial_NNNN.json and emits one row per
 # (trial_N → trial_N+1) transition: the potter-state context at round N,
 # the prompt change the potter actually made, and the accuracy delta that
 # resulted. Rows conform to the dataset-row contract so they flow through
@@ -503,31 +503,31 @@ def _rehydrate(fields: dict) -> OptSearchPoint:
 
 def _build_row(
     cycle_id: str,
-    prev_trial: dict[str, Any],
-    next_trial: dict[str, Any],
+    prev_round: dict[str, Any],
+    next_round: dict[str, Any],
 ) -> dict[str, Any] | None:
-    prev_fields = prev_trial.get("prompt_fields") or {}
-    next_fields = next_trial.get("prompt_fields") or {}
+    prev_fields = prev_round.get("prompt_fields") or {}
+    next_fields = next_round.get("prompt_fields") or {}
     if not prev_fields or not next_fields:
         return None
 
     prev_osp = _rehydrate(prev_fields)
     next_osp = _rehydrate(next_fields)
 
-    prev_round = int(prev_trial.get("round", 0))
-    score_delta = float(next_trial.get("accuracy", 0.0)) - float(prev_trial.get("accuracy", 0.0))
+    prev_round_num = int(prev_round.get("round", 0))
+    score_delta = float(next_round.get("accuracy", 0.0)) - float(prev_round.get("accuracy", 0.0))
 
     round_context = {
         "opt_search_point": prev_fields,
         "l1_critique_text": prev_fields.get("l1_critique_text", ""),
         "l2_brief": prev_fields.get("l2_brief", ""),
         "optimizer_params": prev_fields.get("optimizer_params", {}),
-        "prev_accuracy": float(prev_trial.get("accuracy", 0.0)),
+        "prev_accuracy": float(prev_round.get("accuracy", 0.0)),
     }
 
     return {
-        "query": f"{cycle_id}:round_{prev_round}",
-        "ground_truth": next_fields.get("changes_description") or next_trial.get("label", ""),
+        "query": f"{cycle_id}:round_{prev_round_num}",
+        "ground_truth": next_fields.get("changes_description") or next_round.get("label", ""),
         "round_context": round_context,
         "score_delta": score_delta,
         "prev_prompt": prev_osp.render(),
@@ -557,25 +557,25 @@ def load_potter_traces(
     rows: list[dict] = []
     for campaign in campaigns:
         cycle_id = campaign["campaign_id"]
-        trial_summaries = sorted(
-            campaign.get("trials", []),
+        round_summaries = sorted(
+            campaign.get("rounds", []),
             key=lambda t: int(t.get("round", 0)),
         )
-        if len(trial_summaries) < 2:
+        if len(round_summaries) < 2:
             continue
 
-        trials: list[dict[str, Any]] = []
-        for summary in trial_summaries:
-            detail = store.campaigns.load_trial(
+        rounds: list[dict[str, Any]] = []
+        for summary in round_summaries:
+            detail = store.campaigns.load_round_file(
                 backend_id,
                 cycle_id,
                 int(summary.get("round", 0)),
             )
             if detail is not None:
-                trials.append(detail)
+                rounds.append(detail)
 
-        for prev_trial, next_trial in pairwise(trials):
-            row = _build_row(cycle_id, prev_trial, next_trial)
+        for prev_round, next_round in pairwise(rounds):
+            row = _build_row(cycle_id, prev_round, next_round)
             if row is not None:
                 rows.append(row)
 

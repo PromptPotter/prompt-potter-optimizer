@@ -66,7 +66,7 @@ After launch, find the cycle dir. Active pointer:
 .promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/
 ```
 
-For forks (likely on a fresh notebook run that re-mints from an existing root): the actual cycle audit dir is at `forks/{cycle_id}/`. The root carries `dashboard.json` + `output.log` (telemetry stream); the leaf carries `index.json` + `log.md` + `trials/` + `.cache/`.
+For forks (likely on a fresh notebook run that re-mints from an existing root): the actual cycle audit dir is at `forks/{cycle_id}/`. The root carries `dashboard.json` + `output.log` (telemetry stream); the leaf carries `index.json` + `log.md` + `rounds/` + `.cache/`.
 
 **Files that matter for this validation:**
 
@@ -74,7 +74,7 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 |------|-----------|
 | `dashboard.json` (at root) | Live state — phase, round, current accuracy, current candidate's per-sample HIT/MISS lines |
 | `output.log` (at root) | Append-only HIT/MISS history, per query |
-| `trials/trial_0001.json` (round 2) | Smoking-gun source — `scoring_set_events`, `candidate_scores[].samples` |
+| `rounds/round_0001.json` (round 2) | Smoking-gun source — `scoring_set_events`, `candidate_scores[].samples` |
 | `log.md` (at leaf, regenerated each round) | Final digest with **Hard Samples** heatmap section |
 | `index.json` (at leaf) | `final.prompt_hashes` (Step 1c) + `final.stop_reason` |
 
@@ -82,7 +82,7 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 
 ## Step 6 — Smoking gun: are sample IDs in 0-19 order?
 
-Open `trials/trial_0001.json` (= round 2; `trial_0000.json` is round 1).
+Open `rounds/round_0001.json` (= round 2; `trial_0000.json` is round 1).
 
 **Check 1 — `scoring_set_events`:** look for the field at the top level. Should be a non-empty list. Each entry:
 ```json
@@ -123,7 +123,7 @@ This heatmap fires at finalize regardless of swap evolution — it's the indepen
 
 ## Step 8 — Verify trace correctness (Step 1 fixes)
 
-Same trial JSON:
+Same round file:
 
 - `opt_search_point.lineage.source` populated with one of `l1_generate` / `l2_context` / `l3_plan` / `baseline` — Step 1a/1b ✓.
 - All 9 `MEMORY_FIELDS` round-trip — reload produces no warning logs.
@@ -137,7 +137,7 @@ Same trial JSON:
 - Smoking gun: ≥ 1 sample_id ≥ 20 in round-2 scoring set.
 - `scoring_set_events` non-empty by round 3 (round 2 = stretch).
 - Hard Samples heatmap renders with ≥ 4 distinct δ_s values.
-- All Step 1 fixes verified by reading post-run trial JSONs and one legacy-cycle reload.
+- All Step 1 fixes verified by reading post-run round files and one legacy-cycle reload.
 
 If any fail → file the failure mode as the M10 Track-1 input. Don't start M10 until this passes.
 
@@ -148,7 +148,7 @@ If any fail → file the failure mode as the M10 Track-1 input. Don't start M10 
 Hand this file to Claude. State which step you're on:
 - `Step 1`: doing pre-flight fixes — point Claude at the row.
 - `Step 2-4`: prepping config / starting backend / launching — Claude verifies the config block and TermNorm `/status`.
-- `Step 5-6`: post-run validation — Claude reads the trial JSON and checks the smoking gun.
+- `Step 5-6`: post-run validation — Claude reads the round file and checks the smoking gun.
 - `Step 7-8`: heatmap + trace correctness — Claude reads `log.md` + `index.json`.
 
 Acceptance criteria are stable; threshold knobs and run length may evolve as you iterate. Update this file as steps complete.

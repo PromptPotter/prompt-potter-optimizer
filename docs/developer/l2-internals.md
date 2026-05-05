@@ -78,7 +78,7 @@ if is_probe:
 
 The OSP is mutable Pydantic; writes happen in place. Next round's L1 reads from the same OSP.
 
-The single decision recorded per L2 fire is `probe_round_commitment` — outcome `True` if `probe_round`, else `False`. Surface mutations and briefs are not recorded as separate decision kinds — `opt_search_point` in the trial JSON archives them.
+The single decision recorded per L2 fire is `probe_round_commitment` — outcome `True` if `probe_round`, else `False`. Surface mutations and briefs are not recorded as separate decision kinds — `opt_search_point` in the round file archives them.
 
 ## File-line anchors
 

@@ -234,8 +234,8 @@ class CampaignSummary(BaseModel):
     campaign_id: str = Field(description="Unique campaign identifier")
     name: str = Field(description="Human-readable campaign name")
     status: str = Field(description="Campaign status: active, completed, or stopped")
-    n_trials: int = Field(description="Total number of completed trial rounds")
-    best_accuracy: float = Field(description="Highest accuracy achieved across all trials")
+    n_rounds: int = Field(description="Total number of completed round_data rounds")
+    best_accuracy: float = Field(description="Highest accuracy achieved across all rounds")
     baseline_accuracy: float = Field(description="Initial accuracy before optimization")
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
@@ -246,23 +246,23 @@ class CampaignListResponse(BaseModel):
     total: int = Field(description="Total number of campaigns")
 
 
-class TrialSummary(BaseModel):
-    trial_id: str = Field(description="Unique trial identifier")
+class RoundSummary(BaseModel):
+    round_id: str = Field(description="Unique round_data identifier")
     round: int = Field(description="Round number within the campaign")
     label: str = Field(description="Human-readable label (e.g. 'round_3')")
-    prompt_fields_id: str = Field(description="OptSearchPoint ID for this trial's prompt")
-    accuracy: float = Field(description="Accuracy achieved in this trial")
+    prompt_fields_id: str = Field(description="OptSearchPoint ID for this round_data's prompt")
+    accuracy: float = Field(description="Accuracy achieved in this round_data")
     hits: int = Field(description="Number of correct matches")
     total: int = Field(description="Total number of evaluated queries")
-    improved: bool = Field(description="Whether this trial improved over the previous best")
+    improved: bool = Field(description="Whether this round_data improved over the previous best")
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
 
 class CampaignDetailResponse(CampaignSummary):
     backend_id: str = Field(description="Backend this campaign optimizes against")
     config: dict[str, Any] = Field(description="Full campaign configuration used for this run")
-    best_trial_id: str | None = Field(description="Trial ID of the best-performing round")
-    trials: list[TrialSummary] = Field(description="Ordered list of trial summaries")
+    best_round_id: str | None = Field(description="Trial ID of the best-performing round")
+    rounds: list[RoundSummary] = Field(description="Ordered list of round_data summaries")
     langfuse_trace_id: str | None = Field(
         default=None,
         description="Langfuse trace ID if observability is enabled",
@@ -294,7 +294,7 @@ async def get_campaign(
     backend_id: str,
     campaign_id: str,
 ):
-    """Get campaign detail with trial summaries."""
+    """Get campaign detail with round_data summaries."""
     data = store.campaigns.load(backend_id, campaign_id)
     if data is None:
         raise HTTPException(404, f"Campaign not found: {campaign_id}")
@@ -302,7 +302,7 @@ async def get_campaign(
 
 
 @campaigns_router.get(
-    "/backends/{backend_id}/campaigns/{campaign_id}/trials/{round_num}",
+    "/backends/{backend_id}/campaigns/{campaign_id}/rounds/{round_num}",
     response_model=dict[str, Any],
 )
 async def get_trial(
@@ -311,11 +311,11 @@ async def get_trial(
     campaign_id: str,
     round_num: int,
 ):
-    """Get full trial detail for a specific round."""
-    trial = store.campaigns.load_trial(backend_id, campaign_id, round_num)
-    if trial is None:
+    """Get full round_data detail for a specific round."""
+    round_data = store.campaigns.load_round_file(backend_id, campaign_id, round_num)
+    if round_data is None:
         raise HTTPException(404, f"Trial round {round_num} not found")
-    return trial
+    return round_data
 
 
 # ===========================================================================
@@ -376,7 +376,9 @@ class DecisionEnvelope(BaseModel):
 
 class DecisionsResponse(BaseModel):
     cycle_id: str = Field(description="Cycle the decisions belong to")
-    decisions: list[DecisionEnvelope] = Field(description="All DecisionRecord records in append order")
+    decisions: list[DecisionEnvelope] = Field(
+        description="All DecisionRecord records in append order"
+    )
 
 
 class ForkRef(BaseModel):

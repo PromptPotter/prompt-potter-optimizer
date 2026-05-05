@@ -77,7 +77,7 @@ No read CLI. Two bands — telemetry at the family root, audit per cycle:
 | `campaigns/<root_cycle_id>/output.log` | Append-only HIT/MISS history. `=== FORK ... ===` banner inline at each cutover. |
 | `<cycle_dir>/log.md` | Per-round digest, regenerated on every round-complete and at finalize |
 | `<cycle_dir>/index.json` | Campaign metadata + `final` block. Forks have a `parent_cycle_id` field. |
-| `<cycle_dir>/trials/trial_NNNN.json` | Per-round optimizer checkpoint |
+| `<cycle_dir>/rounds/round_NNNN.json` | Per-round optimizer checkpoint |
 | `<cycle_dir>/.cache/rounds/round_NNNN.json` | Per-round node I/O (internal) |
 
 `<cycle_dir>` resolves to `campaigns/{cycle_id}/` for root cycles and `campaigns/{root_cycle_id}/forks/{cycle_id}/` for forks. Telemetry stays at the family root regardless.

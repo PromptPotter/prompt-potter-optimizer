@@ -23,7 +23,7 @@ Inside one round PromptPotter runs three layers, each wrapping the next like a s
 - **L2** writes a **CONTEXT** outline that wraps L1, and modifies L1's fields when L1 stalls.
 - **L3** writes a **PLAN** outline that wraps L2, and is rewritten when L2 itself stalls.
 
-CONTEXT and PLAN live on disk in each trial file — the loop's actual config, inspectable and editable.
+CONTEXT and PLAN live on disk in each round file — the loop's actual config, inspectable and editable.
 
 **How the layers talk.** The layers don't call each other directly — they write to a shared record (one per candidate). When **L2** fires, it leaves a short **brief** that L1 reads in the next round (and overwrites once L1 improves). When **L3** fires, it leaves a **plan** that sticks around until L3 next replaces it. L1 reads both each round.
 

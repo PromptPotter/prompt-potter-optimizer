@@ -18,7 +18,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **Hit** | Boolean: rank-1 exact match against ground truth. Independent of fitness. | `QueryMeasurement.hit` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **L1 / L2 / L3** | The three layers of the loop: generate / refine / plan. | `Layer.L1_GENERATE`, `Layer.L2_CONTEXT`, `Layer.L3_PLAN` | [`the-loop.md`](the-loop.md) |
 | **L1-generate surface** | Closed catalogue of every variable injected into L1's meta-prompt. | `LAYER_CONFIGS[Layer.L1_GENERATE]` | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |
-| **Measurement archive** | Append-only `library/` of every `(sample × config → outcome)`. The cross-cycle DB. | `MeasurementArchive` | [`scoring-and-memory.md`](scoring-and-memory.md) |
+| **Measurement archive** | Append-only `archive/` of every `(sample × config → outcome)`. The cross-cycle DB. | `MeasurementArchive` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **Mutation** | A change L1 (or L2-via-overrides) makes to the candidate from one round to the next. | `mutate`, `mutation` | [`the-loop.md`](the-loop.md) |
 | **Node** | One step of a pipeline. Discovered from `GET /pipeline`. | `PipelineNode` | [`nodes-and-pipelines.md`](nodes-and-pipelines.md) |
 | **OSP mutation** | L2's canonical write onto the candidate. State that's not on the OSP doesn't survive between rounds. | — | [`state-record.md`](state-record.md) |
@@ -30,7 +30,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **Prompt fields** | Six prompt-string fields plus two appended sections (few-shot, plan). | `PromptTemplate` | [`state-record.md`](state-record.md) |
 | **Rewind** | Restart an active campaign from an earlier round in place. `optimize --from N`. | — | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
 | **Round** | One iteration of the loop. Generates, scores, picks a winner. | `RoundResult` | [`the-loop.md`](the-loop.md) |
-| **Round record** | The per-round file dump under `trials/`. Captures the candidate's full state at end-of-round so resume + replay work. | filename `trial_NNNN.json` | [`state-record.md`](state-record.md) |
+| **Round record** | The per-round file dump under `rounds/`. Captures the candidate's full state at end-of-round so resume + replay work. | filename `round_NNNN.json` | [`state-record.md`](state-record.md) |
 | **Scorer** | Per-dataset function turning pipeline output into a numeric fitness. | `Scorer`, `compile_scorer` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **Scoring set** | The active subset of the dataset used for the current round. | `ScoringContext.scoring_set` | [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) |
 | **Search memory** | Cross-campaign axis-keyed digest. Feeds L1, L2, L3. | `variant_axis_index` | [`scoring-and-memory.md`](scoring-and-memory.md) |
@@ -44,7 +44,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 
 - **`score`** — always qualified: per-query *fitness*, round-level *composite fitness*, *accuracy* (% correct), *validator health*. Bare "score" is forbidden in prose.
 - **`config`** / **`params`** — always qualified: `pipeline_params`, `pipeline_params_override`, `optimizer_params`, `node_config` (wire-only).
-- **`run`** — operator-facing: prefer **campaign**. The word `run_id` survives only as the content-hash key in `library/measurements/{run_id}.json`.
+- **`run`** — operator-facing: prefer **campaign**. The word `run_id` survives only as the content-hash key in `archive/measurements/{run_id}.json`.
 - **`state`** — qualified: *escalation state* (the FSM), *campaign bundle* (the per-cycle wiring), or named explicitly.
 - **`validation`** — qualified: *schema-compliance check* (L1 output gate), *validator outcome* (mid-round escalation), *schema-violation audit* (persisted record).
 - **`evaluator`** vs **`scorer`** — *scorer* is the per-dataset compiled formula. *Evaluator* is the registry abstraction (scorer + critique).

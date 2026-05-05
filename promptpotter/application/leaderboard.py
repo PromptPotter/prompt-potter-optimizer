@@ -2,7 +2,7 @@
 
 Walks every cycle under a ``Stores.campaigns`` tree, computes per-cycle
 ``L1Stats`` + behaviour pass rates, and renders the operator-facing
-``library/runs.md`` and ``library/individuals.md``. Cycles group by
+``archive/runs.md`` and ``archive/individuals.md``. Cycles group by
 ``l1_generate_hash`` (one heading per canonical L1-generate template).
 Sweep-mode cycles get their own ``## Sweep view`` section in the same
 file; absent when no sweep cycles exist.
@@ -132,7 +132,7 @@ def compute_proxy_lift_corr(rows: list[LeaderboardRow]) -> tuple[float | None, i
 
 
 def format_runs_md(rows: list[LeaderboardRow]) -> str:
-    """Markdown body for ``library/runs.md`` — every cycle, grouped by template.
+    """Markdown body for ``archive/runs.md`` — every cycle, grouped by template.
 
     One H2 per ``l1_generate_hash`` carries the constants (template hash +
     dataset + pipeline) so the table inside each group can stay narrow
@@ -234,11 +234,11 @@ def _row_from_cycle(
     stores: Any, backend_id: str, cycle_id: str, cycle_summary: dict[str, Any]
 ) -> LeaderboardRow | None:
     final = cycle_summary.get("final") or {}
-    n_trials = int(cycle_summary.get("n_trials") or 0)
+    n_rounds = int(cycle_summary.get("n_rounds") or 0)
     cs = stores.campaigns
-    trials = cs.load_trials_range(backend_id, cycle_id, 0, n_trials - 1) if n_trials else []
+    rounds = cs.load_rounds_range(backend_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
     cycle_dir = cs.campaign_dir(cycle_id)
-    audits = _load_round_audits(cycle_dir, trials)
+    audits = _load_round_audits(cycle_dir, rounds)
 
     parent_session_id = cycle_summary.get("parent_session_id") or ""
     dataset = _lookup_dataset(stores, parent_session_id)
@@ -250,9 +250,9 @@ def _row_from_cycle(
     mode = (final.get("mode") or "").strip() or "?"
 
     baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
-    behavior_results = _compute_behavior_results(trials, audits)
+    behavior_results = _compute_behavior_results(rounds, audits)
     stats = compute_l1_stats(
-        list(trials),
+        list(rounds),
         baseline_composite_fitness=baseline_composite_fitness,
         behavior_results=behavior_results,
     )
@@ -260,11 +260,11 @@ def _row_from_cycle(
     baseline_acc = float(cycle_summary.get("baseline_accuracy") or 0.0)
     best_acc = float(cycle_summary.get("best_accuracy") or 0.0)
     round_1_top_lift = (
-        (float(trials[0].get("composite_fitness") or 0.0) - baseline_composite_fitness)
-        if trials
+        (float(rounds[0].get("composite_fitness") or 0.0) - baseline_composite_fitness)
+        if rounds
         else 0.0
     )
-    round_1_yield = float(trials[0].get("l1_yield") or 0.0) if trials else 0.0
+    round_1_yield = float(rounds[0].get("l1_yield") or 0.0) if rounds else 0.0
 
     return LeaderboardRow(
         cycle_id=cycle_id,
@@ -281,21 +281,21 @@ def _row_from_cycle(
         baseline_acc=baseline_acc,
         delta_acc=best_acc - baseline_acc,
         behavior_pass_rate=stats.behavior_pass_rate,
-        rounds_completed=n_trials,
+        rounds_completed=n_rounds,
         l2_fires=stats.l2_fires,
         stop_reason=str(final.get("stop_reason") or cycle_summary.get("stop_reason") or ""),
     )
 
 
 def _load_round_audits(
-    cycle_dir: Path, trials: list[dict[str, Any]]
+    cycle_dir: Path, rounds: list[dict[str, Any]]
 ) -> list[dict[str, Any] | None]:
     import json
 
     rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
     out: list[dict[str, Any] | None] = []
-    for trial in trials:
-        round_num = int(trial.get("round") or 0)
+    for round_data in rounds:
+        round_num = int(round_data.get("round") or 0)
         path = rounds_dir / f"round_{round_num:04d}.json"
         if path.is_file():
             try:
@@ -308,19 +308,19 @@ def _load_round_audits(
 
 
 def _compute_behavior_results(
-    trials: list[dict[str, Any]], audits: list[dict[str, Any] | None]
+    rounds: list[dict[str, Any]], audits: list[dict[str, Any] | None]
 ) -> list[list]:
     out: list[list] = []
     prior: list[dict[str, Any]] = []
-    for i, trial in enumerate(trials):
+    for i, round_data in enumerate(rounds):
         audit = audits[i] if i < len(audits) else None
         if audit is None:
             out.append([])
             continue
         ctx = CheckContext(
-            round_num=int(trial.get("round") or i),
+            round_num=int(round_data.get("round") or i),
             prior_rounds=list(prior),
-            opt_search_point=dict(trial.get("opt_search_point") or {}),
+            opt_search_point=dict(round_data.get("opt_search_point") or {}),
             context_object=[],  # leaderboard skips context_object — caller-private
         )
         out.append(run_all_checks(audit, ctx))
@@ -405,7 +405,7 @@ def build_individuals_rows(stores: Any, backend_id: str) -> list[JSPRow]:
 
 
 def format_individuals_md(rows: list[JSPRow]) -> str:
-    """Markdown body for ``library/individuals.md`` — every measured individual."""
+    """Markdown body for ``archive/individuals.md`` — every measured individual."""
     if not rows:
         return "_No measurements yet — run a cycle first._\n"
 

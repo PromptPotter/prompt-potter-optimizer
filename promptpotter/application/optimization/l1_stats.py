@@ -1,7 +1,7 @@
 """L1Stats — per-cycle L1 fitness statistics for the M10 review surface.
 
-Pure aggregation over a list of trial dicts (loaded from
-``campaigns/{cycle_id}/trials/trial_NNNN.json``) plus the per-round
+Pure aggregation over a list of round_data dicts (loaded from
+``campaigns/{cycle_id}/rounds/trial_NNNN.json``) plus the per-round
 behaviour-check results from ``l1_behavior_checks.run_all_checks``.
 
 Headline metric is ``rounds_to_95`` — first round where best accuracy
@@ -42,9 +42,9 @@ def compute_l1_stats(
     baseline_composite_fitness: float,
     behavior_results: list[list[CheckResult]],
 ) -> L1Stats:
-    """Aggregate per-round trial dicts + behaviour check results into L1Stats.
+    """Aggregate per-round round_data dicts + behaviour check results into L1Stats.
 
-    ``rounds`` is the list of trial dicts in round order (round 0 first).
+    ``rounds`` is the list of round_data dicts in round order (round 0 first).
     ``behavior_results[i]`` is the list of CheckResults for ``rounds[i]``;
     empty when no checks ran for that round.
     """
@@ -115,7 +115,7 @@ def _first_round_at_threshold(rounds: list[dict[str, Any]], threshold: float) ->
 
 
 def _round_yield_rate(round_dict: dict[str, Any]) -> float:
-    """Variants beating parent / variants generated — pulled off the trial."""
+    """Variants beating parent / variants generated — pulled off the round_data."""
     return float(round_dict.get("l1_yield") or 0.0)
 
 
@@ -157,7 +157,7 @@ def _behavior_pass_rate(behavior_results: list[list[CheckResult]]) -> float:
 
 
 def _round_source(round_dict: dict[str, Any]) -> str:
-    """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a trial."""
+    """Pull the lineage source ('l1_generate' / 'l2_context' / ...) off a round_data."""
     osp = round_dict.get("opt_search_point") or {}
     lineage = osp.get("lineage") or {}
     return str(lineage.get("source") or "")

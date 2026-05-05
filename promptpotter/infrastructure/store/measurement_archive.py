@@ -72,7 +72,7 @@ class MeasurementArchive:
     """File I/O for the measurement archive — the database core.
 
     Tenant-global: every measurement batch lives under
-    ``library/.archive/measurements/`` regardless of ``backend_id``.
+    ``archive/measurements/`` regardless of ``backend_id``.
     Content-addressed identity comes from ``PipelineSchema.node_configs()`` —
     no cross-backend collision risk since each config blob carries the
     backend's pipeline shape.
@@ -87,10 +87,10 @@ class MeasurementArchive:
     # -- path helpers ---------------------------------------------------------
 
     def _runs_dir(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / ".archive" / "measurements"
+        return self._base_dir / "archive" / "measurements"
 
     def _index_path(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / ".archive" / "measurements_index.json"
+        return self._base_dir / "archive" / "measurements_index.json"
 
     # -- complete runs --------------------------------------------------------
 
@@ -354,7 +354,7 @@ class MeasurementArchive:
     # -- prompt alias groups ---------------------------------------------------
 
     def _alias_path(self, _backend_id: str) -> Path:
-        return self._base_dir / "library" / ".archive" / "prompt_aliases.json"
+        return self._base_dir / "archive" / "prompt_aliases.json"
 
     def register_alias(self, backend_id: str, *hashes: str) -> None:
         """Link rendered_prompt_hashes as semantically equivalent.

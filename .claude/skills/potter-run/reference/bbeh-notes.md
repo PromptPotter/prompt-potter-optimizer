@@ -61,7 +61,7 @@ Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` vi
 
 ## "Empty predictions" bug (deferred)
 
-Project memory flags TermNorm `llm_only` returning empty → 0% campaigns. Notebook iteration suggests it's intermittent or narrowed. If many `0.0` accuracies appear, check `library/dataset_runs/*.json` for empty `predicted` strings before re-running.
+Project memory flags TermNorm `llm_only` returning empty → 0% campaigns. Notebook iteration suggests it's intermittent or narrowed. If many `0.0` accuracies appear, check `archive/dataset_runs/*.json` for empty `predicted` strings before re-running.
 
 ## Related tools
 

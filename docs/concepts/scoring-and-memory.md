@@ -26,7 +26,7 @@ Three effects at the load boundary:
 - **Evicted from cache.** Loaded prior measurements filter out deprecated entries before any cache-hit logic. The query falls through to a fresh backend call. Re-measurements tagged `retry_of_deprecated_cache`, prefixed 🔄.
 - **Tagged `DEPR` in the per-query view.** Not HIT, not MISS — third class. Round summaries print `hits/total (N deprecated)`.
 
-The trace itself stays in `library/measurements/` — the archive is the forensic record. Eviction lives one layer up. Rescoring re-applies the active scorer's *judgment*; deprecation re-applies the runtime's *validity check*.
+The trace itself stays in `archive/measurements/` — the archive is the forensic record. Eviction lives one layer up. Rescoring re-applies the active scorer's *judgment*; deprecation re-applies the runtime's *validity check*.
 
 ## Decision replay
 
@@ -39,7 +39,7 @@ When a campaign commits a decision, it records the kind, enough to re-derive it,
 - **Replayable decisions** — which candidate won each round, the parameters that gated each choice. Stored so resume can re-derive the same outcome under a changed scorer; on divergence, fork.
 - **Archival** — full LLM outputs, diagnostic context, recorded threshold under the old scorer. Replay never reads this half. A noisy rescore that doesn't change the flow passes silently.
 
-L2's surface mutations are not separate decision kinds. They live on each round's `opt_search_point` snapshot in the trial JSON. The only L2 decision recorded per fire is `probe_round_commitment` — outcome is whether the next round runs as `normal_round` or `probe_round`.
+L2's surface mutations are not separate decision kinds. They live on each round's `opt_search_point` snapshot in the round file. The only L2 decision recorded per fire is `probe_round_commitment` — outcome is whether the next round runs as `normal_round` or `probe_round`.
 
 ## Fork commits to the new policy
 
@@ -57,7 +57,7 @@ Composite is **recorded, not gating**. Round-winner selection compares candidate
 
 ## The measurement archive
 
-PromptPotter's persistent memory of every measurement ever taken. Lives at `library/` under each tenant root. Append-only, content-addressed, cross-cycle, cross-session, cross-tenant. **The central data interface** — if you want to know what PromptPotter has learned, you read the archive.
+PromptPotter's persistent memory of every measurement ever taken. Lives at `archive/` under each tenant root. Append-only, content-addressed, cross-cycle, cross-session, cross-tenant. **The central data interface** — if you want to know what PromptPotter has learned, you read the archive.
 
 One row = one **measurement** = `(sample × config → outcome)`.
 
@@ -76,7 +76,7 @@ Both return `list[Measurement]`. They compose:
 ### On-disk layout
 
 ```
-{tenant_id}/library/
+{tenant_id}/archive/
 ├── measurements/{run_id}.json    ← facts, append-only
 └── measurements.json             ← index over the batches
 ```
@@ -116,7 +116,7 @@ Each digest method (`digest_for_l1_generate`, `digest_for_l1_critique`, `digest_
 ### What the archive is *not*
 
 - **Not a cache.** The cache is the archive viewed in `prefix_exact` mode. No separate runtime cache.
-- **Not the optimizer's working state.** That's `OptSearchPoint` + per-cycle `campaigns/{cycle_id}/trials/`. See [`state-record.md`](state-record.md).
+- **Not the optimizer's working state.** That's `OptSearchPoint` + per-cycle `campaigns/{cycle_id}/rounds/`. See [`state-record.md`](state-record.md).
 - **Not session metadata.** Sessions / journals / dashboards live under `sessions/{session_id}/` and `campaigns/{cycle_id}/`.
 - **Not the LLM-digest layer.** `AxisIndex` sits *on top of* the archive — a pure derived view.
 

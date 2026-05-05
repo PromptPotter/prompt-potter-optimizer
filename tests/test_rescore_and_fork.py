@@ -7,12 +7,12 @@ Three named invariants:
      replay flags divergence when scores flip; unknown decision kinds skip.
   2. ``_fork_at_divergence`` / ``fork_for_diag_sibling`` /
      ``fork_for_sweep_sibling`` mint counted ids, retarget the active pointer,
-     drop trials beyond the fork point (or all trials for diag/sweep),
+     drop rounds beyond the fork point (or all rounds for diag/sweep),
      and append a FORK_CUT decision to the parent ledger that downstream
      readers can consume via the freshly re-opened parent.
-  3. ``CampaignStore.rewind_to_round`` archives later trial + candidate files
+  3. ``CampaignStore.rewind_to_round`` archives later round_data + candidate files
      under ``.runtime/archived/resumed_at_<ts>/``, rebuilds the in-memory
-     trial index from survivors, and raises ``LookupError`` for missing
+     round_data index from survivors, and raises ``LookupError`` for missing
      rounds / missing cycles.
 """
 
@@ -66,7 +66,7 @@ def _r(score: float) -> dict:
 def test_round_winner_replay_uses_rescored_baseline() -> None:
     """Uniform rescaling preserves the recorded winner — the replayer must
     derive its threshold from the rescored baseline, not the stale one."""
-    trial = {
+    round_data = {
         "round": 0,
         "all_candidate_results": {
             "c1": [_r(0.5), _r(0.5)],
@@ -81,13 +81,13 @@ def test_round_winner_replay_uses_rescored_baseline() -> None:
             }
         ],
     }
-    assert replay_decisions(trial, baseline_results=[_r(0.4), _r(0.4)]) is None
+    assert replay_decisions(round_data, baseline_results=[_r(0.4), _r(0.4)]) is None
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
     priors = [_r(1.0)] * 10
     current = [_r(1.0)] * 6  # rescored: now ties with priors
-    trial = {
+    round_data = {
         "round": 2,
         "all_candidate_results": {"c0": priors, "c1": priors, "c2": current},
         "decisions": [
@@ -106,45 +106,45 @@ def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
             }
         ],
     }
-    div = replay_decisions(trial)
+    div = replay_decisions(round_data)
     assert div is not None
     assert div.kind == "elimination_cut"
     assert div.recorded_outcome is True and div.current_outcome is False
 
 
 def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) -> list[dict]:
-    """Lay down a minimal cycle dir on disk; return the trial-index list."""
+    """Lay down a minimal cycle dir on disk; return the round_data-index list."""
     base = projects_root / tenant / "campaigns" / cycle_id
-    (base / "trials").mkdir(parents=True)
+    (base / "rounds").mkdir(parents=True)
     (base / "candidates").mkdir(parents=True)
-    trials_index = []
+    rounds_index = []
     for r in range(n_rounds):
-        t = {"trial_id": f"round_{r}", "round": r, "accuracy": 0.5 + 0.1 * r, "label": f"r{r}"}
-        (base / "trials" / f"trial_{r:04d}.json").write_text(json.dumps(t), encoding="utf-8")
+        t = {"round_id": f"round_{r}", "round": r, "accuracy": 0.5 + 0.1 * r, "label": f"r{r}"}
+        (base / "rounds" / f"round_{r:04d}.json").write_text(json.dumps(t), encoding="utf-8")
         (base / "candidates" / f"round_{r:04d}.json").write_text("[]", encoding="utf-8")
-        trials_index.append(t)
+        rounds_index.append(t)
     (base / "index.json").write_text(
         json.dumps(
             {
                 "campaign_id": cycle_id,
-                "trials": trials_index,
-                "n_trials": n_rounds,
-                "best_trial_id": f"round_{n_rounds - 1}",
+                "rounds": rounds_index,
+                "n_rounds": n_rounds,
+                "best_round_id": f"round_{n_rounds - 1}",
                 "status": "in_progress",
             }
         ),
         encoding="utf-8",
     )
-    return trials_index
+    return rounds_index
 
 
 def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
     tmp_path: Path, monkeypatch
 ) -> None:
-    """Forking inside resume must inherit trials < R, drop R, and retarget the pointer."""
+    """Forking inside resume must inherit rounds < R, drop R, and retarget the pointer."""
     tenant = "default"
     old_cycle = "cycle_abc123"
-    trials = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=4)
+    rounds = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=4)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
     monkeypatch.setattr(
         "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
@@ -157,19 +157,19 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
         session_id="s_test",
         old_cycle_id=old_cycle,
         fork_from_round=2,
-        surviving_trials=trials[:2],
+        surviving_rounds=rounds[:2],
     )
 
     new_dir = stores.campaigns.campaign_dir(new_cycle)
     assert new_dir.parent.name == "forks", "fork dirs nest under their family root's forks/"
-    assert (new_dir / "trials" / "trial_0001.json").exists()
-    assert not (new_dir / "trials" / "trial_0002.json").exists()  # R is dropped
-    assert not (new_dir / "trials" / "trial_0003.json").exists()  # > R also dropped
+    assert (new_dir / "rounds" / "round_0001.json").exists()
+    assert not (new_dir / "rounds" / "round_0002.json").exists()  # R is dropped
+    assert not (new_dir / "rounds" / "round_0003.json").exists()  # > R also dropped
 
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
     assert index["parent_cycle_id"] == old_cycle
     assert index["forked_from_round"] == 2
-    assert index["n_trials"] == 2
+    assert index["n_rounds"] == 2
 
     pointer = json.loads(ptr.read_text(encoding="utf-8"))
     assert pointer == {"tenant_id": tenant, "session_id": "s_test", "cycle_id": new_cycle}
@@ -187,7 +187,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
 
     tenant = "default"
     old_cycle = "cycle_fork_cut_test"
-    trials = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=3)
+    rounds = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=3)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
     monkeypatch.setattr(
         "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
@@ -201,7 +201,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
         session_id="s_test",
         old_cycle_id=old_cycle,
         fork_from_round=1,
-        surviving_trials=trials[:1],
+        surviving_rounds=rounds[:1],
     )
 
     parent_ledger = CycleLedger.open(CycleDir(parent_dir))
@@ -287,11 +287,11 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
     assert {r["query"] for r in merged} == {"q1"}
 
 
-def test_fork_for_diag_sibling_mints_counted_id_and_clears_trials(
+def test_fork_for_diag_sibling_mints_counted_id_and_clears_rounds(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Diag-BFS siblings get human-counted ids (``_diag_001``, ``_002``…),
-    inherit ``parent_cycle_id`` + baseline_accuracy, and start with empty trials
+    inherit ``parent_cycle_id`` + baseline_accuracy, and start with empty rounds
     so each probe is a fresh diagnostic from the parent's baseline."""
     tenant = "default"
     parent = "cycle_diagparent"
@@ -323,7 +323,7 @@ def test_fork_for_diag_sibling_mints_counted_id_and_clears_trials(
     assert sib1_index["parent_cycle_id"] == parent
     assert sib1_index["forked_from_round"] == 0
     assert sib1_index["fork_kind"] == "diag_sibling"
-    assert sib1_index["trials"] == []
+    assert sib1_index["rounds"] == []
     assert sib1_index["baseline_accuracy"] == 0.42  # inherited
 
     pointer = json.loads(ptr.read_text(encoding="utf-8"))
@@ -414,8 +414,8 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
         "sweep fork must NOT inherit the parent's round-0 candidate cache; "
         "L1 generation would short-circuit and ignore the sweep payload's brief"
     )
-    assert not (new_dir / "trials" / "trial_0000.json").exists(), (
-        "sweep fork must NOT inherit any parent trials; sweep starts fresh from baseline"
+    assert not (new_dir / "rounds" / "round_0000.json").exists(), (
+        "sweep fork must NOT inherit any parent rounds; sweep starts fresh from baseline"
     )
 
     index = json.loads((new_dir / "index.json").read_text(encoding="utf-8"))
@@ -423,7 +423,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
     assert index["fork_kind"] == "sweep_fork"
     assert index["sweep_batch_id"] == "b1abc"
     assert index["forked_from_round"] == 0
-    assert index["trials"] == []
+    assert index["rounds"] == []
 
 
 def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, monkeypatch) -> None:
@@ -473,9 +473,9 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
 # ===========================================================================
 
 
-def _make_trial(round_num: int, accuracy: float) -> dict:
+def _make_round_data(round_num: int, accuracy: float) -> dict:
     return {
-        "trial_id": f"round_{round_num}",
+        "round_id": f"round_{round_num}",
         "round": round_num,
         "label": f"r{round_num}",
         "accuracy": accuracy,
@@ -493,7 +493,7 @@ def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> No
         {"type": "optimization_loop", "config": {}, "baseline_accuracy": 0.0},
     )
     for r in range(rounds):
-        store.add_trial(backend_id, cycle_id, _make_trial(r, 0.1 * (r + 1)))
+        store.save_round_file(backend_id, cycle_id, _make_round_data(r, 0.1 * (r + 1)))
         # Simulate round-level candidate checkpoints for the same round.
         store.save_round_candidates(
             backend_id,
@@ -504,7 +504,7 @@ def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> No
 
 
 class TestRewindToRound:
-    def test_archives_later_trial_and_candidate_files(self, tmp_path):
+    def test_archives_later_round_and_candidate_files(self, tmp_path):
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
@@ -513,25 +513,25 @@ class TestRewindToRound:
         store.rewind_to_round("bid", "cycle_a", after_round=2)
 
         cycle_dir = store.campaign_dir("cycle_a")
-        trials_dir = cycle_dir / "trials"
+        rounds_dir = cycle_dir / "rounds"
         candidates_dir = cycle_dir / ".runtime" / "cache" / "candidates"
-        assert (trials_dir / "trial_0000.json").exists()
-        assert (trials_dir / "trial_0001.json").exists()
-        assert (trials_dir / "trial_0002.json").exists()
-        assert not (trials_dir / "trial_0003.json").exists()
-        assert not (trials_dir / "trial_0004.json").exists()
+        assert (rounds_dir / "round_0000.json").exists()
+        assert (rounds_dir / "round_0001.json").exists()
+        assert (rounds_dir / "round_0002.json").exists()
+        assert not (rounds_dir / "round_0003.json").exists()
+        assert not (rounds_dir / "round_0004.json").exists()
         assert not (candidates_dir / "round_0003.json").exists()
         assert not (candidates_dir / "round_0004.json").exists()
 
         archived_roots = list((cycle_dir / ".runtime" / "archived").iterdir())
         assert len(archived_roots) == 1
         archived = archived_roots[0]
-        assert (archived / "trials" / "trial_0003.json").exists()
-        assert (archived / "trials" / "trial_0004.json").exists()
+        assert (archived / "rounds" / "round_0003.json").exists()
+        assert (archived / "rounds" / "round_0004.json").exists()
         assert (archived / "candidates" / "round_0003.json").exists()
         assert (archived / "candidates" / "round_0004.json").exists()
 
-    def test_rebuilds_trial_index_from_survivors(self, tmp_path):
+    def test_rebuilds_round_index_from_survivors(self, tmp_path):
         import pytest as _pytest
 
         from promptpotter.infrastructure.store import CampaignStore
@@ -539,20 +539,20 @@ class TestRewindToRound:
         store = CampaignStore(tmp_path)
         _seed_rewind_cycle(store, "bid", "cycle_a", rounds=5)
 
-        # Seed a best-accuracy that lives in an archived trial so the
+        # Seed a best-accuracy that lives in an archived round_data so the
         # rebuild has to recompute it.
-        store.add_trial("bid", "cycle_a", _make_trial(4, 0.99))
+        store.save_round_file("bid", "cycle_a", _make_round_data(4, 0.99))
         before = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
         assert before["best_accuracy"] == _pytest.approx(0.99)
 
         store.rewind_to_round("bid", "cycle_a", after_round=2)
 
         after = json.loads((store._entity_path("bid", "cycle_a")).read_text(encoding="utf-8"))
-        assert after["n_trials"] == 3
-        rounds_in_index = sorted(t["round"] for t in after["trials"])
+        assert after["n_rounds"] == 3
+        rounds_in_index = sorted(t["round"] for t in after["rounds"])
         assert rounds_in_index == [0, 1, 2]
-        # Best trial is round 2 (accuracy 0.3 per seed formula).
-        assert after["best_trial_id"] == "round_2"
+        # Best round_data is round 2 (accuracy 0.3 per seed formula).
+        assert after["best_round_id"] == "round_2"
         assert after["best_accuracy"] == _pytest.approx(0.3)
 
     def test_resume_from_missing_round_raises(self, tmp_path):
@@ -563,7 +563,7 @@ class TestRewindToRound:
         store = CampaignStore(tmp_path)
         _seed_rewind_cycle(store, "bid", "cycle_a", rounds=3)
 
-        with _pytest.raises(LookupError, match=r"trial_0099\.json not found"):
+        with _pytest.raises(LookupError, match=r"round_0099\.json not found"):
             store.rewind_to_round("bid", "cycle_a", after_round=99)
 
     def test_resume_from_missing_cycle_raises(self, tmp_path):
@@ -572,5 +572,5 @@ class TestRewindToRound:
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
-        with _pytest.raises(LookupError, match="no trials on disk"):
+        with _pytest.raises(LookupError, match="no rounds on disk"):
             store.rewind_to_round("bid", "cycle_nonexistent", after_round=0)

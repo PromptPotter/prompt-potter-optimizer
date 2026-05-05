@@ -206,6 +206,6 @@ GSM8K and AIME 2025 are effectively saturated at `gpt-oss-120b`. Literature numb
 
 ## Infrastructure Notes
 
-Wall-clock numbers in this document rely on prior-result reuse from `library/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
+Wall-clock numbers in this document rely on prior-result reuse from `archive/measurements/` (addressed by `PipelineSchema.node_configs`). No per-node cache.
 
 See [pevol-bench.md](pevol-bench.md) for the bench definition (what an AC-grade benchmark must satisfy) and the recommended dataset set going forward. See [metrics.md](metrics.md) for the four-metric reporting convention (Acc, HC, SE, R₉₀) that complements absolute accuracy. See [related-work.md](related-work.md) for the algorithm-configuration umbrella, the feature matrices, and the head-to-head numbers; [algorithm-configuration-lineage.md](algorithm-configuration-lineage.md) for the classical AutoML racing ancestry.

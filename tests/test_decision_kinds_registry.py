@@ -208,7 +208,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
 
     Named invariant from root CLAUDE.md: persistence has one ingress
     (``CycleLedger``). EscalationState used to checkpoint a parallel state dict
-    into every trial JSON; resume now rebuilds from the ledger. This test
+    into every round_data JSON; resume now rebuilds from the ledger. This test
     drives both paths over an identical sequence and asserts they agree.
     """
     from promptpotter.application.optimization.cycle import EscalationState
@@ -287,7 +287,9 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     # Display-side PhaseRecord("round","complete") emit (no ``improved`` key) must
     # not double-bump the L1 stall counter — only the audit-side emit folds.
     ledger2 = CycleLedger.open(CycleDir(tmp_path / "cyc2"))
-    ledger2.append(PhaseRecord(phase="round", event="complete", round=1, payload={"l1_stall_count": 999}))
+    ledger2.append(
+        PhaseRecord(phase="round", event="complete", round=1, payload={"l1_stall_count": 999})
+    )
     ledger2.append(
         PhaseRecord(
             phase="round",

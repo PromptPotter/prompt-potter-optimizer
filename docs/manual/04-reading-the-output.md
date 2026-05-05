@@ -100,7 +100,7 @@ Both live at the **root cycle's** dir (the cycle with no `parent_cycle_id`). Whe
 - `dashboard.json::cycle_id` always names the active fork.
 - `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner inline at each cutover.
 
-The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `trials/`, `.runtime/`). Open those when you want to inspect what specifically happened in one fork; tail the root for live progress.
+The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`, `.runtime/`). Open those when you want to inspect what specifically happened in one fork; tail the root for live progress.
 
 ## Stopping
 

@@ -129,7 +129,7 @@ def bootstrap_cycle(
             # against their own JSP — refresh top-level field if drift.
             if existing.get("baseline_accuracy") != baseline_accuracy:
                 store.update(session.backend_id, resolved, {"baseline_accuracy": baseline_accuracy})
-            return resolved, len(existing.get("trials", []))
+            return resolved, len(existing.get("rounds", []))
         store.create(
             session.backend_id,
             resolved,

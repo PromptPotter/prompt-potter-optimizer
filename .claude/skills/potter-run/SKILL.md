@@ -103,7 +103,7 @@ Foreground, 30s timeout. `init` auto-decomposes `datasets/{name}/task_descriptio
 
 ## Phase 4: Optimize
 
-**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phase 0 + 1, then let them launch. On their return, read `dashboard.json` (live state) + the latest `trials/trial_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
+**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phase 0 + 1, then let them launch. On their return, read `dashboard.json` (live state) + the latest `rounds/round_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
 
 ```
 ROUND {N} COMPLETE
@@ -115,9 +115,9 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `dashboard.json`. Diagnose via `trials/trial_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
+**Monitor** by tailing `dashboard.json`. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
 
-**Incremental persistence.** Every query lands in `library/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
+**Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 
 Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md`, `docs/concepts/self-healing.md`.
 
@@ -133,7 +133,7 @@ Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round criti
 - **Defer to configs.** Report what's on disk; don't second-guess the configured hyperparameters, data volume, or pipeline choice unless the user asks.
 - Interpret results, don't dump CLI output.
 - **Kill command is situational** — surface `tasklist | findstr python → taskkill //F //PID <pid>` only when recommending a long-running launch in *this* turn.
-- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → check `output.log` and the latest `trials/trial_NNNN.json` in the campaign dir.
+- Error prefixes (`[CLIENT]` / `[SERVER]` / `[CONNECTION]` / `[PIPELINE]`) → check `output.log` and the latest `rounds/round_NNNN.json` in the campaign dir.
 - Respect user-specified timeouts/stop methods exactly; ask before assuming.
 
 ---

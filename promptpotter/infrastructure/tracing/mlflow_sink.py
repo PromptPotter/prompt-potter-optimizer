@@ -1,6 +1,6 @@
 """Per-cycle MLflow sink — user-requested integration, opt-in.
 
-Logs each round as an MLflow run under ``library/mlruns/``. Disabled by
+Logs each round as an MLflow run under ``archive/mlruns/``. Disabled by
 default; flip ``settings.MLFLOW_ENABLED`` to turn on. Kept on purpose
 even when off — operators have requested MLflow as a first-class
 observability target.
@@ -22,7 +22,7 @@ class MLflowSink:
     def __init__(self, store_base_dir: str | Path, backend_id: str) -> None:
         self._tenant_root = Path(store_base_dir)
         self._tenant_id = self._tenant_root.name
-        self._library_dir = self._tenant_root / "library"
+        self._archive_dir = self._tenant_root / "archive"
         self._backend_id = backend_id
         self._cycle_id: str | None = None
         self._initialized = False
@@ -37,7 +37,7 @@ class MLflowSink:
             return
 
         if not self._initialized:
-            tracking_uri = (self._library_dir / "mlruns").resolve().as_uri()
+            tracking_uri = (self._archive_dir / "mlruns").resolve().as_uri()
             mlflow.set_tracking_uri(tracking_uri)
             mlflow.set_experiment(name=f"{self._tenant_id}/{self._cycle_id}")
             self._initialized = True

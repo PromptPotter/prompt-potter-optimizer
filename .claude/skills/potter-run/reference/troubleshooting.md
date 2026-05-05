@@ -9,7 +9,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `[CLIENT]` | Bad request (invalid params, missing fields) | Check command flags and config |
 | `[SERVER]` | Backend error (500, timeout) | Check backend status: `curl -s {url}/status` |
 | `[CONNECTION]` | Can't reach backend | Is the backend running? Check URL and port |
-| `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `trials/trial_NNNN.json` and `.cache/rounds/round_NNNN.json` for node-level details |
+| `[PIPELINE]` | Pipeline execution error (node failure) | Check the latest `rounds/round_NNNN.json` and `.cache/rounds/round_NNNN.json` for node-level details |
 | `[UNKNOWN]` | Unclassified | Read full error + `output.log` |
 
 ## Stop Reason → Recovery
@@ -20,7 +20,7 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 | `perfect_score` | 100% accuracy achieved | Done. Winner is in `index.json::final::winner_prompt_fields`. |
 | `max_rounds` | Hit maximum round limit | May need more rounds (`max_rounds` in config) or L2/L3 intervention. |
 | `interrupted` | Ctrl+C during optimization | Resume with `optimize`. State was checkpointed. |
-| `escalation_abort` | Backend degradation too severe for L2 to fix | Read `output.log` and the latest `trials/trial_NNNN.json` for degradation details. May need backend fix. |
+| `escalation_abort` | Backend degradation too severe for L2 to fix | Read `output.log` and the latest `rounds/round_NNNN.json` for degradation details. May need backend fix. |
 | `l2_patience_exhausted` | L2 tried `l2_patience` times, no improvement | Consider manual task_context changes or different scan axes. |
 | `l3_patience_exhausted` | All three layers exhausted | Optimization has converged. Review results for best achieved. |
 | `hard_cap_reached` | Hit absolute round limit (100) | Very rare. Review if L2/L3 is cycling without progress. |
@@ -32,7 +32,7 @@ The primary diagnostic surfaces (all under `campaigns/{cycle_id}/`):
 - **`dashboard.json`** — live scalar state (phase, round, candidate, baseline / best / current accuracy, in-flight query, current_round node I/O).
 - **`log.md`** — rendered narrative digest, regenerated at each round-complete and at finalize. Contains status, per-round critique / L2 brief / changes, hard-samples heatmap, and final winner.
 - **`index.json`** — campaign metadata + trial index + `final` block (winner, baseline, stop_reason).
-- **`trials/trial_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, l2_brief, escalation state.
+- **`rounds/round_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, l2_brief, escalation state.
 - **`output.log`** — append-only HIT/MISS history (raw, ungrouped, fast to tail).
 - **`.cache/rounds/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O (internal — developer artifact).
 

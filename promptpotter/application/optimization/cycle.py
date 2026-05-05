@@ -124,10 +124,10 @@ class Divergence(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """Context passed to replayers — trial + prior_trials + baseline_results all rescored."""
+    """Context passed to replayers — round_data + prior_rounds + baseline_results all rescored."""
 
-    trial: dict[str, Any]
-    prior_trials: list[dict[str, Any]]
+    round_data: dict[str, Any]
+    prior_rounds: list[dict[str, Any]]
     baseline_results: list[dict[str, Any]]
 
 
@@ -170,17 +170,17 @@ def replayer(kind: DecisionKind) -> Callable[[Replayer], Replayer]:
 
 
 def replay_decisions(
-    trial: dict[str, Any],
-    prior_trials: list[dict[str, Any]] | None = None,
+    round_data: dict[str, Any],
+    prior_rounds: list[dict[str, Any]] | None = None,
     baseline_results: list[dict[str, Any]] | None = None,
 ) -> Divergence | None:
-    """Walk ``trial['decisions']`` in order; return the first mismatch."""
+    """Walk ``round_data['decisions']`` in order; return the first mismatch."""
     ctx = ReplayContext(
-        trial=trial,
-        prior_trials=list(prior_trials or []),
+        round_data=round_data,
+        prior_rounds=list(prior_rounds or []),
         baseline_results=list(baseline_results or []),
     )
-    for rec in trial.get("decisions") or []:
+    for rec in round_data.get("decisions") or []:
         kind = rec.get("kind", "")
         fn = REPLAYERS.get(kind)
         if fn is None:
@@ -193,7 +193,7 @@ def replay_decisions(
         recorded = rec.get("outcome")
         if current != recorded:
             return Divergence(
-                round_num=int(trial.get("round", -1)),
+                round_num=int(round_data.get("round", -1)),
                 kind=kind,
                 recorded_outcome=recorded,
                 current_outcome=current,
@@ -212,9 +212,9 @@ def _mean_score(results: list[dict]) -> float:
 @replayer(DecisionKind.ROUND_WINNER)
 def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     """Re-derive round winner from rescored per-candidate results; beat-threshold derived, not read."""
-    all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
-    if ctx.prior_trials:
-        best_acc = _mean_score(list(ctx.prior_trials[-1].get("results") or []))
+    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
+    if ctx.prior_rounds:
+        best_acc = _mean_score(list(ctx.prior_rounds[-1].get("results") or []))
     else:
         best_acc = _mean_score(list(ctx.baseline_results))
     winner_id = ""
@@ -230,7 +230,7 @@ def _pobb_replay_snapshot(
     ctx: ReplayContext, inputs_ref: dict[str, Any]
 ) -> tuple[str, dict[str, float], list[float]] | None:
     """Build (candidate_id, posterior snapshot, current scores) for PoBB replay; None when underspecified."""
-    all_results: dict[str, list[dict]] = ctx.trial.get("all_candidate_results") or {}
+    all_results: dict[str, list[dict]] = ctx.round_data.get("all_candidate_results") or {}
     candidate_id = str(inputs_ref.get("candidate_id", ""))
     prior_ids = list(inputs_ref.get("prior_candidate_ids") or [])
     n = int(inputs_ref.get("queries_scored", 0))
@@ -271,14 +271,14 @@ def _replay_leader_lock_in(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bo
 
 
 def _derive_stall_count(
-    prior_trials: list[dict[str, Any]],
+    prior_rounds: list[dict[str, Any]],
     entry_round: int,
     this_round: int,
 ) -> int:
     """Reconstruct stall_count at end of this_round."""
     if entry_round < 0:
         return 0
-    sorted_trials = sorted(prior_trials, key=lambda t: int(t.get("round", -1)))
+    sorted_trials = sorted(prior_rounds, key=lambda t: int(t.get("round", -1)))
     running_max = 0.0
     baseline: float | None = None
     rounds_after = 0
@@ -300,14 +300,14 @@ def _derive_stall_count(
 
 
 def _replay_layer_trigger(patience_key: str) -> Replayer:
-    """Build a replayer that re-derives `triggered = stalls < patience` from prior trials."""
+    """Build a replayer that re-derives `triggered = stalls < patience` from prior rounds."""
 
     def _replay(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> bool:
         patience = inputs_ref.get(patience_key)
         if patience is None:
             return True
         stalls = _derive_stall_count(
-            ctx.prior_trials,
+            ctx.prior_rounds,
             int(inputs_ref.get("entry_round", -1)),
             int(inputs_ref.get("round_num", -1)),
         )
@@ -373,7 +373,7 @@ def _fork_at_divergence(
     session_id: str,
     old_cycle_id: str,
     fork_from_round: int,
-    surviving_trials: list[dict[str, Any]],
+    surviving_rounds: list[dict[str, Any]],
 ) -> str:
     """Divergence-fork that inherits parent's < fork_from_round artifacts (deterministic replay).
 
@@ -395,11 +395,11 @@ def _fork_at_divergence(
     campaign_store.save_divergence_fork(
         old_cycle_id,
         new_cycle_id,
-        surviving_trials=surviving_trials,
+        surviving_rounds=surviving_rounds,
         forked_at=now,
         forked_from_round=fork_from_round,
     )
-    campaign_store.copy_parent_trials_and_candidates(
+    campaign_store.copy_parent_rounds_and_candidates(
         old_cycle_id, new_cycle_id, before_round=fork_from_round
     )
     return new_cycle_id
@@ -810,7 +810,7 @@ class Cycle:
     probe_next_round: bool = False
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
-    # Flushed into the next trial's `decisions` before campaign_store.add_trial.
+    # Flushed into the next round_data's `decisions` before campaign_store.save_round_file.
     pending_decisions: list[DecisionRecord] = field(default_factory=list)
     state_version: int = 1
     # Round-end Rasch posterior; one fit per round, reused by finalize.
@@ -865,14 +865,14 @@ class Cycle:
             opt_sp=opt_sp,
         )
 
-    def restore_from_trial(self, trial: dict[str, Any]) -> None:
+    def restore_from_trial(self, round_data: dict[str, Any]) -> None:
         """Restore optimizer state from a campaign checkpoint dict (in-place).
 
-        ``EscalationState`` is NOT read from the trial — it's a projection of
+        ``EscalationState`` is NOT read from the round_data — it's a projection of
         the ledger and must be rebuilt by the resume path via
         ``EscalationState.from_ledger``.
         """
-        self.opt_sp = OptSearchPoint(**trial["opt_search_point"])
+        self.opt_sp = OptSearchPoint(**round_data["opt_search_point"])
 
     def record_round(self, rr: RoundResult, round_num: int) -> None:
         """Append a RoundResult and propagate to memory + current/best tracking."""
@@ -968,9 +968,9 @@ class Cycle:
         )
 
     def checkpoint(self, rr: RoundResult, round_num: int) -> dict[str, Any]:
-        """Trial dict for campaign_store.add_trial — self-contained replay."""
+        """Trial dict for campaign_store.save_round_file — self-contained replay."""
         return {
-            "trial_id": f"round_{round_num}",
+            "round_id": f"round_{round_num}",
             "round": round_num,
             "label": rr.label,
             "accuracy": rr.accuracy,
@@ -1011,11 +1011,11 @@ def resume_with_divergence_check(
     skip_divergence_check: bool,
     fork_on_divergence: bool = False,
 ) -> ForkResult | None:
-    """Rescore prior trials under the active scorer; halt or fork on divergence."""
+    """Rescore prior rounds under the active scorer; halt or fork on divergence."""
     sc = session.scoring
     scorer = sc.scorer
     assert scorer is not None, "session.scoring.scorer required for divergence replay"
-    prior = campaign_store.load_trials_range(backend_id, cycle_id, 0, resumed_from_round - 1)
+    prior = campaign_store.load_rounds_range(backend_id, cycle_id, 0, resumed_from_round - 1)
 
     def _rescore(items: Any) -> list:
         out = list(items or [])
@@ -1033,7 +1033,7 @@ def resume_with_divergence_check(
         for i, t in enumerate(prior):
             div = replay_decisions(
                 t,
-                prior_trials=prior[:i],
+                prior_rounds=prior[:i],
                 baseline_results=baseline_results_rescored,
             )
             if div is None:

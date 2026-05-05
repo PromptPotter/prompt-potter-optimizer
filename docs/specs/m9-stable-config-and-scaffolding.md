@@ -45,11 +45,11 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 ### Track 4: File-Directory UI v0 (Webapp Preparation) — **DONE (renderer unified; the literal `views/` subtree was abandoned)**
 
-**Outcome:** Renderer unification happened. There is no `sessions/{session_id}/views/` subtree — instead, the existing `campaigns/{cycle_id}/` artifact tree (`dashboard.json` + `log.md` + `trials/`) became the shared view model, and `LiveDisplay` (`promptpotter/presentation/views/live.py`) became the shared renderer that both CLI and notebook call. Same outcome as the spec's intent (one render path, one view model, future webapp can read both), different layout.
+**Outcome:** Renderer unification happened. There is no `sessions/{session_id}/views/` subtree — instead, the existing `campaigns/{cycle_id}/` artifact tree (`dashboard.json` + `log.md` + `rounds/`) became the shared view model, and `LiveDisplay` (`promptpotter/presentation/views/live.py`) became the shared renderer that both CLI and notebook call. Same outcome as the spec's intent (one render path, one view model, future webapp can read both), different layout.
 
 **What shipped:**
 
-1. Shared view model lives at `campaigns/{cycle_id}/` rather than under sessions: `dashboard.json` (live counters, in-flight payload, per-round node I/O snapshot), `log.md` (derived markdown digest, regenerated on every round-complete + finalize), `index.json` (campaign metadata + final block), `trials/trial_NNNN.json` (per-round optimizer checkpoint). For forked cycles, `dashboard.json` + `output.log` bind to the family root cycle so a single tail covers the whole family.
+1. Shared view model lives at `campaigns/{cycle_id}/` rather than under sessions: `dashboard.json` (live counters, in-flight payload, per-round node I/O snapshot), `log.md` (derived markdown digest, regenerated on every round-complete + finalize), `index.json` (campaign metadata + final block), `rounds/round_NNNN.json` (per-round optimizer checkpoint). For forked cycles, `dashboard.json` + `output.log` bind to the family root cycle so a single tail covers the whole family.
 2. Mix of small JSON + Markdown matches the spec's format intent. Append-only `output.log` for raw HIT/MISS history; pure-render `log.md` (safe to delete and recompute).
 3. `LiveDisplay` is the single renderer. CLI uses it (`presentation/cli/campaign_runner.py`); notebook uses it (`presentation/views/notebook_run.py`). No parallel render pipelines.
 4. Notebook orchestration (`init_notebook_session`, `prepare_scoring_context_notebook`, `run_optimization_notebook`) is a thin wrapper around the shared `_run_optimization` + `LiveDisplay`. Renderer divergence closed.
@@ -85,7 +85,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 │   ├── journal.md                       # user narrative (notebook ↔ Claude exchange)
 │   └── notes.md                         # Claude notes
 ├── campaigns/{cycle_id}/
-│   ├── trials/trial_{round:04d}.json    # resume WAL (state)
+│   ├── rounds/round_{round:04d}.json    # resume WAL (state)
 │   ├── .cache/candidates/round_{round:04d}.json  # pre-scoring checkpoint (internal)
 │   ├── .cache/rounds/round_{round:03d}.json      # per-round LLM action audit (internal)
 │   ├── dashboard.json                   # live counters
@@ -101,7 +101,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 │   │   ├── datasets/{name}/{item_id}.json
 │   │   └── state.json                   # cloud id mappings
 │   └── archived/resumed_at_{ts}/        # rewind history
-└── library/
+└── archive/
     ├── datasets/{name}/                 # canonical prompts, pipeline, items, config
     ├── backends/{backend_id}/           # backend.json, connector_profile.json, executions/, datasets/, sync/
     ├── dataset_runs/{run_id}.json       # content-addressed query cache
@@ -115,8 +115,8 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **Three convention fixes:**
 
-1. **MLflow via the SDK at `library/mlruns/`.** Delete the hand-rolled `FileSink._write_mlflow_run()` / `_ensure_experiment()`. Call `mlflow.set_tracking_uri(f"file://{library}/mlruns")` + `mlflow.set_experiment(name=f"{tenant_id}/{campaign_id}")`, then `mlflow.start_run()` / `log_params` / `log_metrics` / `set_tags` per round. MLflow assigns numeric experiment IDs itself; campaign identity lives in the experiment *name*. Gated on `settings.MLFLOW_ENABLED` (default `False`) with `mlflow` as an optional `pip extra`. `mlflow ui --backend-store-uri file://…/library/mlruns` works out of the box.
-2. **Tenant partition as outer axis.** `{backend_id}` drops out of the outer path entirely — backends become peers under `library/backends/{backend_id}/`. The outer axis becomes `{tenant_id}`, mandatory, defaulting to `"default"` for the single-user CLI. Multi-tenant webapp picks tenant at auth time. `.promptpotter/projects/{tenant_id}/active_session.json` is the per-tenant pointer.
+1. **MLflow via the SDK at `archive/mlruns/`.** Delete the hand-rolled `FileSink._write_mlflow_run()` / `_ensure_experiment()`. Call `mlflow.set_tracking_uri(f"file://{archive}/mlruns")` + `mlflow.set_experiment(name=f"{tenant_id}/{campaign_id}")`, then `mlflow.start_run()` / `log_params` / `log_metrics` / `set_tags` per round. MLflow assigns numeric experiment IDs itself; campaign identity lives in the experiment *name*. Gated on `settings.MLFLOW_ENABLED` (default `False`) with `mlflow` as an optional `pip extra`. `mlflow ui --backend-store-uri file://…/archive/mlruns` works out of the box.
+2. **Tenant partition as outer axis.** `{backend_id}` drops out of the outer path entirely — backends become peers under `archive/backends/{backend_id}/`. The outer axis becomes `{tenant_id}`, mandatory, defaulting to `"default"` for the single-user CLI. Multi-tenant webapp picks tenant at auth time. `.promptpotter/projects/{tenant_id}/active_session.json` is the per-tenant pointer.
 3. **Per-cycle artifacts in `CAMPAIGN_ARTIFACTS` land in `campaigns/{cycle_id}/`; per-session artifacts in `SESSION_ARTIFACTS` land in `sessions/{session_id}/`.** The two sets are disjoint and parity is enforced by `tests/test_artifact_parity.py`.
 
 **Semantic invariant: sessions and campaigns are separate.** Two mint points per `init` (one for each tree); the parent pointer in `index.json::parent_session_id` keeps the link addressable. Code shape:
@@ -138,7 +138,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 **Non-goals:**
 - The webapp itself — that's M11/M12. This plan builds the filesystem the webapp will read.
-- Cross-tenant sharing of datasets or backends. Datasets stay per-tenant. If multi-tenant sharing is needed later, add a `library/` sibling to `projects/` at `.promptpotter/` root.
+- Cross-tenant sharing of datasets or backends. Datasets stay per-tenant. If multi-tenant sharing is needed later, add a `archive/` sibling to `projects/` at `.promptpotter/` root.
 - Touching what the optimization loop does — purely a persistence / layout refactor.
 
 ---
@@ -265,9 +265,9 @@ Wave 4: Track 5 (CLI unification — collapse init+optimize, unify seed sources)
 - [x] Hexagonal layout in place; all tests green; no `from promptpotter.services` imports remain
 - [x] `TenantContext` importable from `promptpotter.domain.tenant`; `Session.tenant` exists (`SessionEnv` was renamed to `Session` in Track 7)
 - [x] Multi-dataset coexistence demonstrated across five datasets (`lca-termnorm`, `bbeh`, `gsm8k`, `hotpotqa`, `aime_2025`); pipeline identity carried by `pipeline_schema.name` + `JobSearchPoint.content_hash`, not as a path component
-- [x] Renderer unification: `LiveDisplay` (`promptpotter/presentation/views/live.py`) is the shared renderer; CLI live output and notebook both call it; the artifact tree (`campaigns/{cycle_id}/dashboard.json` + `log.md` + `trials/`) is the shared view model. Frozen webapp-reads schema doc deferred to M11
+- [x] Renderer unification: `LiveDisplay` (`promptpotter/presentation/views/live.py`) is the shared renderer; CLI live output and notebook both call it; the artifact tree (`campaigns/{cycle_id}/dashboard.json` + `log.md` + `rounds/`) is the shared view model. Frozen webapp-reads schema doc deferred to M11
 - [x] Seed sources collapsed to two after recon archival: fresh-default and `--from <int>` resume. Typed three-value `--from` vocabulary not built — moot. `--fork-on-divergence` covers cross-cycle lineage
-- [x] Three-tree layout: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`; family-root cycles also carry `dashboard.json` + `output.log` shared with their forks), and `library/` (all cross-run reference). Tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `library/mlruns/`. `CAMPAIGN_ARTIFACTS` further split into `ROOT_TELEMETRY_ARTIFACTS` + `PER_CYCLE_AUDIT_ARTIFACTS`; parity enforced by `tests/test_artifact_parity.py`
+- [x] Three-tree layout: `sessions/{session_id}/` (per-session metadata + journal/notes), `campaigns/{cycle_id}/` (per-cycle artifacts with `parent_session_id`; family-root cycles also carry `dashboard.json` + `output.log` shared with their forks), and `archive/` (all cross-run reference). Tenant partition at `.promptpotter/projects/{tenant_id}/`; MLflow via SDK at `archive/mlruns/`. `CAMPAIGN_ARTIFACTS` further split into `ROOT_TELEMETRY_ARTIFACTS` + `PER_CYCLE_AUDIT_ARTIFACTS`; parity enforced by `tests/test_artifact_parity.py`
 - [x] `LoopConfig` deleted; `CampaignConfig` is Pydantic with nested sub-models (`OptimizationConfig`, `OptimizerLLMConfig`, `ScoringSetConfig`, `HardSampleSorterConfig`) + `extra='forbid'`; runtime fields live on `Session`; `configure_and_apply_pipeline` writes to `session.pipeline_params` not `campaign_config`; all on-disk `campaign.json` files use the nested shape (legacy flat-form `model_validator` not built — no flat-form configs exist in practice)
 - [x] `CLAUDE.md` Architecture section updated to reflect new hierarchy
 

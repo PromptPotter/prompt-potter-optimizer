@@ -178,7 +178,7 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         type=int,
         default=None,
         metavar="ROUND",
-        help="Resume after round N (archives trials > N, reloads trial_N). "
+        help="Resume after round N (archives rounds > N, reloads trial_N). "
         "Omit to resume from the latest completed round.",
     )
     p_opt.add_argument(
@@ -199,7 +199,7 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         "--sweep",
         dest="sweep",
         action="store_true",
-        help="M10 cheap-trial mode: baseline → 1 full scored round → "
+        help="M10 cheap-round_data mode: baseline → 1 full scored round → "
         "1 generation-only round (variants emitted, no scoring) → halt. "
         "index.json::final.mode lands as 'sweep' so the leaderboard can "
         "pair sweep cycles with their full counterparts.",
