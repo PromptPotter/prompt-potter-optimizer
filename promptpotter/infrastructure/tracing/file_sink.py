@@ -1,8 +1,8 @@
-"""Per-cycle file sink — Langfuse-shape JSON layout under ``campaigns/{cycle_id}/langfuse/``.
+"""Per-cycle file sink — Langfuse-shape trace + observation JSON under ``campaigns/{cycle_id}/langfuse/``.
 
-Append-only mirror: ``events.jsonl`` is a pure observability log, never
-read back for state reconstruction. Resume + fork are driven by
-``rounds/trial_NNNN.json`` via ``CampaignStore``.
+Append-only observation mirror: ``events.jsonl`` is never read back for
+state reconstruction. Resume + fork are driven by ``rounds/round_NNNN.json``
+via ``CampaignStore``.
 """
 
 from __future__ import annotations
@@ -35,7 +35,7 @@ from promptpotter.infrastructure.tracing.events import (
     RoundEnd,
     RoundStart,
     RoundWinnerChosen,
-    generate_obs_id,
+    generate_observation_id,
     utcnow_iso,
 )
 
@@ -50,8 +50,8 @@ class FileSink:
         self._backend_id = backend_id
         self._cycle_id: str | None = None
         self._campaign_traces: dict[str, str] = {}
-        self._round_obs_ids: dict[tuple[str, int], tuple[str, str]] = {}
-        self._node_obs: dict[tuple[str, int, str], tuple[str, str]] = {}
+        self._round_observation_ids: dict[tuple[str, int], tuple[str, str]] = {}
+        self._node_observations: dict[tuple[str, int, str], tuple[str, str]] = {}
 
     def _scope_dir(self) -> Path:
         if self._cycle_id:
@@ -74,7 +74,7 @@ class FileSink:
         metadata: dict | None = None,
         tags: list[str] | None = None,
     ) -> str:
-        trace_id = generate_obs_id()
+        trace_id = generate_observation_id()
         trace = {
             "id": trace_id,
             "name": name,
@@ -90,19 +90,19 @@ class FileSink:
     def _write_observation(
         self,
         trace_id: str,
-        obs_type: str,
+        as_type: str,
         name: str,
         input_data: dict | None = None,
         output_data: dict | None = None,
         metadata: dict | None = None,
         parent_observation_id: str | None = None,
     ) -> str:
-        obs_id = f"obs-{uuid.uuid4().hex[:12]}"
+        observation_id = f"obs-{uuid.uuid4().hex[:12]}"
         now = utcnow_iso()
         observation: dict[str, Any] = {
-            "id": obs_id,
+            "id": observation_id,
             "traceId": trace_id,
-            "type": obs_type,
+            "type": as_type,
             "name": name,
             "startTime": now,
             "endTime": now,
@@ -113,8 +113,8 @@ class FileSink:
         if parent_observation_id is not None:
             observation["parentObservationId"] = parent_observation_id
         obs_dir = self._scope_dir() / "langfuse" / "observations" / trace_id
-        write_json(obs_dir / f"{obs_id}.json", observation)
-        return obs_id
+        write_json(obs_dir / f"{observation_id}.json", observation)
+        return observation_id
 
     def _write_score(
         self, trace_id: str, name: str, value: float, data_type: str = "NUMERIC"
@@ -132,11 +132,13 @@ class FileSink:
     def _finalize_observation(
         self,
         trace_id: str,
-        obs_id: str,
+        observation_id: str,
         output: Any,
         metadata_extra: dict[str, Any] | None = None,
     ) -> None:
-        obs_path = self._scope_dir() / "langfuse" / "observations" / trace_id / f"{obs_id}.json"
+        obs_path = (
+            self._scope_dir() / "langfuse" / "observations" / trace_id / f"{observation_id}.json"
+        )
         obs_data = read_json_optional(obs_path)
         if obs_data is None:
             return
@@ -283,35 +285,41 @@ class FileSink:
     def on_round_start(self, event: RoundStart) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
-            obs_id = self._write_observation(
+            observation_id = self._write_observation(
                 trace_id=trace_id,
-                obs_type="span",
+                as_type="span",
                 name=f"round_{event.round_num}",
                 input_data={"round": event.round_num},
                 metadata={"round": event.round_num},
             )
-            self._round_obs_ids[(event.campaign_id, event.round_num)] = (trace_id, obs_id)
+            self._round_observation_ids[(event.campaign_id, event.round_num)] = (
+                trace_id,
+                observation_id,
+            )
 
     def on_node_start(self, event: NodeStart) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if not trace_id:
             return
-        round_ids = self._round_obs_ids.get((event.campaign_id, event.round_num))
-        parent_obs_id = round_ids[1] if round_ids else None
-        obs_id = self._write_observation(
+        round_ids = self._round_observation_ids.get((event.campaign_id, event.round_num))
+        parent_observation_id = round_ids[1] if round_ids else None
+        observation_id = self._write_observation(
             trace_id=trace_id,
-            obs_type=event.obs_type,
+            as_type=event.as_type,
             name=event.node_id,
             input_data=event.input_data,
             metadata={"node_type": event.node_type, **(event.metadata or {})},
-            parent_observation_id=parent_obs_id,
+            parent_observation_id=parent_observation_id,
         )
-        self._node_obs[(event.campaign_id, event.round_num, event.node_id)] = (trace_id, obs_id)
+        self._node_observations[(event.campaign_id, event.round_num, event.node_id)] = (
+            trace_id,
+            observation_id,
+        )
         self._log_event(
             {
                 "event": "node_start",
                 "trace_id": trace_id,
-                "obs_id": obs_id,
+                "observation_id": observation_id,
                 "node_id": event.node_id,
                 "node_type": event.node_type,
             }
@@ -319,21 +327,21 @@ class FileSink:
 
     def on_node_end(self, event: NodeEnd) -> None:
         key = (event.campaign_id, event.round_num, event.node_id)
-        ids = self._node_obs.pop(key, None)
+        ids = self._node_observations.pop(key, None)
         if ids is None:
             return
-        trace_id, obs_id = ids
+        trace_id, observation_id = ids
         meta_extra: dict[str, Any] = {}
         if event.metrics:
             meta_extra["metrics"] = event.metrics
         if event.error:
             meta_extra["error"] = event.error
-        self._finalize_observation(trace_id, obs_id, event.output_data, meta_extra or None)
+        self._finalize_observation(trace_id, observation_id, event.output_data, meta_extra or None)
         self._log_event(
             {
                 "event": "node_end",
                 "trace_id": trace_id,
-                "obs_id": obs_id,
+                "observation_id": observation_id,
                 "node_id": event.node_id,
                 "error": event.error,
             }
@@ -342,15 +350,15 @@ class FileSink:
     def on_round_end(self, event: RoundEnd) -> None:
         trace_id = self._campaign_traces.get(event.campaign_id, "")
         if trace_id:
-            round_ids = self._round_obs_ids.pop((event.campaign_id, event.round_num), None)
+            round_ids = self._round_observation_ids.pop((event.campaign_id, event.round_num), None)
             if round_ids is not None:
-                _, obs_id = round_ids
+                _, observation_id = round_ids
                 meta_extra: dict[str, Any] = {"candidate_scores": event.candidate_scores}
                 if event.optimizer_templates:
                     meta_extra["optimizer_templates"] = event.optimizer_templates
                 self._finalize_observation(
                     trace_id,
-                    obs_id,
+                    observation_id,
                     {
                         "accuracy": event.accuracy,
                         "hits": event.hits,

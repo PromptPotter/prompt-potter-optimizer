@@ -25,7 +25,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal, Union
 
 
-def generate_obs_id(length: int = 32) -> str:
+def generate_observation_id(length: int = 32) -> str:
     prefix = datetime.now(UTC).strftime("%y%m%d%H%M%S")
     suffix = uuid.uuid4().hex[: length - len(prefix)]
     return f"{prefix}{suffix}"
@@ -80,7 +80,7 @@ class NodeStart:
     round_num: int
     node_id: str
     node_type: str
-    obs_type: str
+    as_type: str
     input_data: dict[str, Any]
     metadata: dict[str, Any] | None = None
 
@@ -100,7 +100,7 @@ class NodeEnd:
 # Observability markers for durable mid-round transitions. events.jsonl is
 # a pure observability mirror: nothing reads these events back for state
 # reconstruction. Resume and fork are driven by
-# ``campaigns/{cycle_id}/rounds/trial_NNNN.json`` via ``CampaignStore``.
+# ``campaigns/{cycle_id}/rounds/round_NNNN.json`` via ``CampaignStore``.
 
 
 @dataclass(frozen=True, slots=True)

@@ -44,8 +44,8 @@ class LangfuseSink:
         self._lf = langfuse
 
         self._trace_ids: dict[str, str] = {}
-        self._round_obs_ids: dict[tuple[str, int], str] = {}
-        self._node_obs_ids: dict[tuple[str, int, str], str] = {}
+        self._round_observation_ids: dict[tuple[str, int], str] = {}
+        self._node_observation_ids: dict[tuple[str, int, str], str] = {}
         self._dataset_item_ids: dict[tuple[str, str], str] = {}
         self._session_ids: dict[str, str] = {}
         # (run_id, query) → (trace_id, dataset_name, origin) — Topology B in-flight.
@@ -68,12 +68,12 @@ class LangfuseSink:
         if existing:
             self._trace_ids.update(existing.get("trace_ids", {}))
             self._session_ids.update(existing.get("session_ids", {}))
-            for key, value in (existing.get("round_obs_ids") or {}).items():
+            for key, value in (existing.get("round_observation_ids") or {}).items():
                 cid, rn = key.rsplit("|", 1)
-                self._round_obs_ids[(cid, int(rn))] = value
-            for key, value in (existing.get("node_obs_ids") or {}).items():
+                self._round_observation_ids[(cid, int(rn))] = value
+            for key, value in (existing.get("node_observation_ids") or {}).items():
                 cid, rn, nid = key.split("|", 2)
-                self._node_obs_ids[(cid, int(rn), nid)] = value
+                self._node_observation_ids[(cid, int(rn), nid)] = value
             for key, value in (existing.get("dataset_item_ids") or {}).items():
                 dsname, query = key.split("|", 1)
                 self._dataset_item_ids[(dsname, query)] = value
@@ -84,9 +84,11 @@ class LangfuseSink:
         state: dict[str, Any] = {
             "trace_ids": dict(self._trace_ids),
             "session_ids": dict(self._session_ids),
-            "round_obs_ids": {f"{cid}|{rn}": v for (cid, rn), v in self._round_obs_ids.items()},
-            "node_obs_ids": {
-                f"{cid}|{rn}|{nid}": v for (cid, rn, nid), v in self._node_obs_ids.items()
+            "round_observation_ids": {
+                f"{cid}|{rn}": v for (cid, rn), v in self._round_observation_ids.items()
+            },
+            "node_observation_ids": {
+                f"{cid}|{rn}|{nid}": v for (cid, rn, nid), v in self._node_observation_ids.items()
             },
             "dataset_item_ids": {
                 f"{dsname}|{query}": v for (dsname, query), v in self._dataset_item_ids.items()
@@ -151,7 +153,7 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        round_obs_id = self._round_obs_ids.get((event.campaign_id, event.round_num))
+        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
         self._lf.create_span(
             trace_id=trace_id,
             name=f"run_{event.run_id[:8]}",
@@ -165,45 +167,47 @@ class LangfuseSink:
                 "hits": event.hits,
                 "total": event.total,
             },
-            parent_observation_id=round_obs_id,
-            as_type="tool",
+            parent_observation_id=round_observation_id,
+            as_type="span",
         )
 
     def on_round_start(self, event: RoundStart) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        obs_id = self._lf.start_span(
+        observation_id = self._lf.start_span(
             trace_id=trace_id,
             name=f"round_{event.round_num}",
             input={"round": event.round_num},
             metadata={"round": event.round_num},
             as_type="span",
         )
-        if obs_id:
-            self._round_obs_ids[(event.campaign_id, event.round_num)] = obs_id
+        if observation_id:
+            self._round_observation_ids[(event.campaign_id, event.round_num)] = observation_id
 
     def on_node_start(self, event: NodeStart) -> None:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        round_obs_id = self._round_obs_ids.get((event.campaign_id, event.round_num))
-        as_type = event.obs_type if event.obs_type in ("generation", "span") else "span"
-        obs_id = self._lf.start_span(
+        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
+        as_type = event.as_type if event.as_type in ("generation", "span") else "span"
+        observation_id = self._lf.start_span(
             trace_id=trace_id,
             name=event.node_id,
             input=event.input_data,
             metadata={"node_type": event.node_type, **(event.metadata or {})},
-            parent_observation_id=round_obs_id,
+            parent_observation_id=round_observation_id,
             as_type=as_type,
         )
-        if obs_id:
-            self._node_obs_ids[(event.campaign_id, event.round_num, event.node_id)] = obs_id
+        if observation_id:
+            self._node_observation_ids[(event.campaign_id, event.round_num, event.node_id)] = (
+                observation_id
+            )
 
     def on_node_end(self, event: NodeEnd) -> None:
         key = (event.campaign_id, event.round_num, event.node_id)
-        obs_id = self._node_obs_ids.pop(key, None)
-        if not obs_id:
+        observation_id = self._node_observation_ids.pop(key, None)
+        if not observation_id:
             return
         meta: dict[str, Any] = {}
         if event.metrics:
@@ -211,7 +215,7 @@ class LangfuseSink:
         if event.error:
             meta["error"] = event.error
         self._lf.end_observation(
-            obs_id,
+            observation_id,
             output=event.output_data,
             metadata=meta or None,
         )
@@ -220,8 +224,10 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        round_obs_id = self._round_obs_ids.pop((event.campaign_id, event.round_num), None)
-        if round_obs_id:
+        round_observation_id = self._round_observation_ids.pop(
+            (event.campaign_id, event.round_num), None
+        )
+        if round_observation_id:
             round_meta: dict[str, Any] = {
                 "round": event.round_num,
                 "candidates_scored": len(event.candidate_scores),
@@ -229,7 +235,7 @@ class LangfuseSink:
             if event.optimizer_templates:
                 round_meta["optimizer_templates"] = event.optimizer_templates
             self._lf.end_observation(
-                round_obs_id,
+                round_observation_id,
                 output={
                     "winner_accuracy": event.accuracy,
                     "improved": event.improved,
@@ -262,7 +268,7 @@ class LangfuseSink:
         trace_id = self._trace_ids.get(event.campaign_id)
         if not trace_id:
             return
-        round_obs_id = self._round_obs_ids.get((event.campaign_id, event.round_num))
+        round_observation_id = self._round_observation_ids.get((event.campaign_id, event.round_num))
         self._lf.create_span(
             trace_id=trace_id,
             name="prompt_version",
@@ -275,8 +281,8 @@ class LangfuseSink:
                 "version": event.prompt_fields_id[:8] if event.prompt_fields_id else "unknown",
             },
             metadata={"layer1_fields": event.layer1_fields},
-            parent_observation_id=round_obs_id,
-            as_type="tool",
+            parent_observation_id=round_observation_id,
+            as_type="span",
         )
 
     def on_campaign_end(self, event: CampaignEnd) -> None:
@@ -314,9 +320,9 @@ class LangfuseSink:
         trace_name = f"{event.schema_name}_pipeline" if event.schema_name else "pipeline"
         trace_id = self._lf.create_trace(
             name=trace_name,
-            input={"query": event.query, "ground_truth": event.ground_truth},
+            input={"query": event.query, "expected_output": event.ground_truth},
             session_id=event.session_id,
-            tags=["score", event.origin, "pipeline"],
+            tags=["query", event.origin, "pipeline"],
             metadata=metadata,
         )
         if trace_id:
@@ -350,7 +356,7 @@ class LangfuseSink:
         self._lf.create_score(trace_id, "hit", 1.0 if event.hit else 0.0)
         trace_output: dict[str, Any] = {
             "predicted": event.predicted,
-            "ground_truth": event.ground_truth,
+            "expected_output": event.ground_truth,
             "hit": event.hit,
             "total_time": event.total_time,
         }

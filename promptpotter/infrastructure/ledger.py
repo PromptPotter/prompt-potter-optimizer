@@ -46,7 +46,7 @@ class CycleLedger:
     Replay (``replay_into``) is independent of subscribers — it walks the
     file from offset 0.
 
-    Forks: PhaseRecord 4 will add ``inherit_from(parent, offset)`` so a fork's
+    Forks: Phase 4 will add ``inherit_from(parent, offset)`` so a fork's
     ``iter()`` walks the parent's records up to the cut point before its own.
     The current implementation is the per-cycle base case.
     """

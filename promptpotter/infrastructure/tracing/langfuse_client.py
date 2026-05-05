@@ -33,7 +33,7 @@ class LangfuseLogger:
         )
         self.client = None
         self._trace_metadata: dict[str, Any] = {}  # trace_id → root SDK observation
-        self._open_observations: dict[str, Any] = {}  # obs_id → open SDK observation
+        self._open_observations: dict[str, Any] = {}  # observation_id → open SDK observation
         self._rate_limit_until: float = 0.0  # unix ts when quota resets
 
         if self.enabled:
@@ -133,24 +133,24 @@ class LangfuseLogger:
                 input=input,
                 metadata=metadata or {},
             )
-            obs_id = getattr(child, "id", uuid.uuid4().hex[:12])
-            self._open_observations[obs_id] = child
-            return obs_id
+            observation_id = getattr(child, "id", uuid.uuid4().hex[:12])
+            self._open_observations[observation_id] = child
+            return observation_id
         except Exception:
             logger.debug("Failed to start Langfuse span", exc_info=True)
             return None
 
     def end_observation(
         self,
-        obs_id: str,
+        observation_id: str,
         output: Any = None,
         metadata: dict[str, Any] | None = None,
     ) -> None:
-        if not self.enabled or not obs_id:
+        if not self.enabled or not observation_id:
             return
 
         with graceful("Failed to end Langfuse observation"):
-            child = self._open_observations.pop(obs_id, None)
+            child = self._open_observations.pop(observation_id, None)
             if child is None:
                 return
             kwargs: dict[str, Any] = {}

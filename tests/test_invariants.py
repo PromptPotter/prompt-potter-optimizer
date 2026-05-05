@@ -436,7 +436,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
             round_num=0,
             node_id="l1_generate",
             node_type="llm",
-            obs_type="generation",
+            as_type="generation",
             input_data={"prompt": "hello"},
         )
     )

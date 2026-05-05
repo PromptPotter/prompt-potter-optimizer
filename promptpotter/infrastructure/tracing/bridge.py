@@ -150,7 +150,7 @@ class ObservabilityBridge:
         round_num: int,
         **extra: Any,
     ) -> None:
-        # events.jsonl is a pure mirror; resume uses rounds/trial_NNNN.json.
+        # events.jsonl is a pure mirror; resume uses rounds/round_NNNN.json.
         if not self._enabled:
             return
         with graceful(f"{event_cls.__name__} emit failed"):
@@ -271,9 +271,9 @@ async def observed_node(
     obs: ObservabilityBridge | None,
     campaign_id: str,
     round_num: int,
-    obs_type: str = "generation",
+    as_type: str = "generation",
 ):
-    """Time a node and emit ``NodeStart`` / ``NodeEnd`` around the body."""
+    """Time a node and emit ``NodeStart`` / ``NodeEnd`` (Langfuse generation or span observation) around the body."""
     trace = NodeTrace()
     opened = False
 
@@ -285,7 +285,7 @@ async def observed_node(
                     round_num=round_num,
                     node_id=node_id,
                     node_type=node_type,
-                    obs_type=obs_type,
+                    as_type=as_type,
                     input_data={},
                 )
             )

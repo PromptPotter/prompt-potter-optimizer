@@ -741,7 +741,7 @@ async def execute_round(
         f"l1_score_r{round_num}",
         "scoring",
         obs=obs,
-        obs_type="span",
+        as_type="span",
         campaign_id=session.state.tracing_campaign_id,
         round_num=round_num,
     ):
