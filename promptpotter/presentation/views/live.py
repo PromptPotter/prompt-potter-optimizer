@@ -150,7 +150,7 @@ class LiveDisplay:
         """Route a typed record to the corresponding internal handler."""
         del offset
         if isinstance(record, PhaseRecord):
-            if record.phase == "round" and record.event == "complete":
+            if record.phase == "round" and record.event == "display":
                 payload = record.payload or {}
                 round_result = payload.get("round_result")
                 l1_stall = int(payload.get("l1_stall_count") or 0)

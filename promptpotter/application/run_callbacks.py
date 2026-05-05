@@ -46,11 +46,14 @@ class RunCallbacks:
         )
 
     def on_round_complete(self, round_result: Any, l1_stall_count: int) -> None:
+        # Display-only emit: distinct ``event="display"`` so the audit emit
+        # (``event="complete"``, lean scalars) is the sole input to
+        # ``EscalationState.fold``. No payload-shape demultiplex.
         self._phase_ctx["l1_stall_count"] = l1_stall_count
         self._emit(
             PhaseRecord(
                 phase="round",
-                event="complete",
+                event="display",
                 round=round_result.round,
                 payload={
                     "round_result": round_result,

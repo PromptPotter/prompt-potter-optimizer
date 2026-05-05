@@ -69,7 +69,6 @@ __all__ = [
     "EscalationEvent",
     "EscalationState",
     "ForkResult",
-    "LayerView",
     "NextAction",
     "ReplayContext",
     "build_escalation_entry",
@@ -529,28 +528,15 @@ class EscalationEvent:
         return _NEXT_ACTION_TO_STOP.get(self.next_action)
 
 
-@dataclass(frozen=True)
-class LayerView:
-    """Read-only snapshot of an L2/L3 layer counter — exposed via
-    ``EscalationState.l2`` / ``.l3``. Constructed fresh per access so the
-    underlying counters cannot be mutated through the view.
-    """
-
-    round: int
-    stall_count: int
-    best_accuracy_at_entry: float
-    best_composite_fitness_at_entry: float
-
-
 class EscalationState:
     """Cause-driven L1/L2/L3 escalation. Counters are private; the only
     mutation surface is the observation methods (``observe_round``,
     ``observe_l2_escalation``) and the post-fire bookkeepers
-    (``record_l2_fired``, ``record_l3_fired``). Read access is via
-    ``l1_stall_count`` / ``l2`` / ``l3`` properties — there is no public
-    setter for any counter, so the "signals from measurement, not the
-    calendar" rule (per ``promptpotter/CLAUDE.md``) is structural: there
-    is no field to assign a ``round_num >= N`` literal to.
+    (``record_l2_fired``, ``record_l3_fired``). Read access is via flat
+    ``l{1,2,3}_*`` properties — there is no public setter for any counter,
+    so the "signals from measurement, not the calendar" rule (per
+    ``promptpotter/CLAUDE.md``) is structural: there is no field to assign
+    a ``round_num >= N`` literal to.
     """
 
     __slots__ = (
@@ -583,22 +569,36 @@ class EscalationState:
         return self._l1_stall_count
 
     @property
-    def l2(self) -> LayerView:
-        return LayerView(
-            round=self._l2_round,
-            stall_count=self._l2_stall_count,
-            best_accuracy_at_entry=self._l2_best_accuracy_at_entry,
-            best_composite_fitness_at_entry=self._l2_best_composite_fitness_at_entry,
-        )
+    def l2_round(self) -> int:
+        return self._l2_round
 
     @property
-    def l3(self) -> LayerView:
-        return LayerView(
-            round=self._l3_round,
-            stall_count=self._l3_stall_count,
-            best_accuracy_at_entry=self._l3_best_accuracy_at_entry,
-            best_composite_fitness_at_entry=self._l3_best_composite_fitness_at_entry,
-        )
+    def l2_stall_count(self) -> int:
+        return self._l2_stall_count
+
+    @property
+    def l2_best_accuracy_at_entry(self) -> float:
+        return self._l2_best_accuracy_at_entry
+
+    @property
+    def l2_best_composite_fitness_at_entry(self) -> float:
+        return self._l2_best_composite_fitness_at_entry
+
+    @property
+    def l3_round(self) -> int:
+        return self._l3_round
+
+    @property
+    def l3_stall_count(self) -> int:
+        return self._l3_stall_count
+
+    @property
+    def l3_best_accuracy_at_entry(self) -> float:
+        return self._l3_best_accuracy_at_entry
+
+    @property
+    def l3_best_composite_fitness_at_entry(self) -> float:
+        return self._l3_best_composite_fitness_at_entry
 
     # ---- Observations: the only mutation surface ----
 
@@ -727,14 +727,11 @@ class EscalationState:
         if not isinstance(record, PhaseRecord):
             return
         if record.phase == "round" and record.event == "complete":
-            # Two PhaseRecord("round","complete") records exist per round: the
-            # display-side RunCallbacks emit (no ``improved`` key) and the
-            # audit-side _persist_round emit (carries improved/composite_fitness).
-            # Fold only the audit emit so state isn't double-bumped.
-            payload = record.payload
-            if "improved" not in payload:
-                return
-            self._l1_stall_count = 0 if bool(payload["improved"]) else self._l1_stall_count + 1
+            # Audit emit only: display fires under event="display" and is
+            # never folded. The lean scalar payload is the SoT for resume.
+            self._l1_stall_count = (
+                0 if bool(record.payload["improved"]) else self._l1_stall_count + 1
+            )
         elif record.phase == "l2_context" and record.event == "exit":
             escalation_state = record.payload.get("data") or {}
             self._l1_stall_count = 0
@@ -862,10 +859,45 @@ class Cycle:
         """
         self.opt_sp = OptSearchPoint(**round_data["opt_search_point"])
 
-    def record_round(self, rr: RoundResult, round_num: int) -> None:
-        """Append a RoundResult and propagate to memory + current/best tracking."""
+    def absorb_round(
+        self,
+        rr: RoundResult,
+        scoring_result: PopulationScoreReport,
+        critique_text: str,
+        round_num: int,
+    ) -> dict[str, Any]:
+        """Sole sink for a finished L1 round: fold optimizer-memory onto opt_sp,
+        append the round, propagate tracking, project the trial dict.
+
+        l1.py never mutates Cycle — it returns the scoring result + critique
+        text and the runner calls this once at the round boundary. The
+        returned dict is the input to ``save_round_file`` on the normal
+        path; probe and escalation paths discard it.
+        """
         schema = self.session.pipeline_schema
         tr = self.tracking
+
+        # 1. opt_sp memory — critique, failure analysis, warning inventory, runtime failures.
+        self.opt_sp.l1_critique_text = critique_text
+        if scoring_result.winner_results and schema is not None:
+            self.opt_sp.failure_analysis = compile_failure_analysis(
+                scoring_result.winner_results, schema
+            )
+        else:
+            self.opt_sp.failure_analysis = None
+        all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
+        if all_results:
+            update_query_tracker(self.opt_sp.warning_inventory, all_results)
+        existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
+        for cs in scoring_result.candidate_scores:
+            for rf_dict in cs.runtime_failures:
+                k = _rf_dedup_key(rf_dict)
+                if k in existing_keys:
+                    continue
+                existing_keys.add(k)
+                self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
+
+        # 2. round + history + tracking.
         self.rounds.append(rr)
         self.opt_sp.round_history.append(
             RoundSummary(
@@ -894,39 +926,31 @@ class Cycle:
             tr.best_round = round_num
             tr.best_sp = tr.current_sp
 
-    def apply_round_outcome(
-        self, scoring_result: PopulationScoreReport, critique_text: str
-    ) -> None:
-        """Fold per-round optimizer-memory updates onto ``opt_sp`` atomically.
-
-        Single mutation point for: l1_critique_text, failure_analysis,
-        warning_inventory (from all candidate results), runtime_failures
-        (deduped by source/warning/observed-config).
-        """
-        schema = self.session.pipeline_schema
-
-        self.opt_sp.l1_critique_text = critique_text
-
-        if scoring_result.winner_results and schema is not None:
-            self.opt_sp.failure_analysis = compile_failure_analysis(
-                scoring_result.winner_results, schema
-            )
-        else:
-            self.opt_sp.failure_analysis = None
-
-        # Aborted candidates also carry warnings — span all candidate results.
-        all_results: list = [r for rs in scoring_result.all_candidate_results.values() for r in rs]
-        if all_results:
-            update_query_tracker(self.opt_sp.warning_inventory, all_results)
-
-        existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
-        for cs in scoring_result.candidate_scores:
-            for rf_dict in cs.runtime_failures:
-                k = _rf_dedup_key(rf_dict)
-                if k in existing_keys:
-                    continue
-                existing_keys.add(k)
-                self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
+        # 3. trial dict — pure projection of post-mutation state.
+        return {
+            "round_id": f"round_{round_num}",
+            "round": round_num,
+            "label": rr.label,
+            "accuracy": rr.accuracy,
+            "composite_fitness": rr.composite_fitness,
+            "hits": rr.hits,
+            "total": rr.total,
+            "improved": rr.improved,
+            "p_value": rr.p_value,
+            "baseline_accuracy": rr.baseline_accuracy,
+            "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
+            "prompt_fields": rr.prompt_fields,
+            "results": rr.results,
+            "all_candidate_results": dict(rr.all_candidate_results),
+            "candidates_scored": rr.candidates_scored,
+            "candidate_scores": list(rr.candidate_scores),
+            "decisions": list(rr.decisions),
+            "evaluators": dict(rr.evaluators),
+            "opt_search_point": self.opt_sp.model_dump(),
+            **(
+                {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}
+            ),
+        }
 
     def baseline_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundBaseline:
         """Build round baseline; on probe rounds, rescore over the probe subset."""
@@ -954,33 +978,6 @@ class Cycle:
             results=results,
             label=f"round_{round_num}" if round_num > 0 else "baseline",
         )
-
-    def checkpoint(self, rr: RoundResult, round_num: int) -> dict[str, Any]:
-        """Trial dict for campaign_store.save_round_file — self-contained replay."""
-        return {
-            "round_id": f"round_{round_num}",
-            "round": round_num,
-            "label": rr.label,
-            "accuracy": rr.accuracy,
-            "composite_fitness": rr.composite_fitness,
-            "hits": rr.hits,
-            "total": rr.total,
-            "improved": rr.improved,
-            "p_value": rr.p_value,
-            "baseline_accuracy": rr.baseline_accuracy,
-            "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
-            "prompt_fields": rr.prompt_fields,
-            "results": rr.results,
-            "all_candidate_results": dict(rr.all_candidate_results),
-            "candidates_scored": rr.candidates_scored,
-            "candidate_scores": list(rr.candidate_scores),
-            "decisions": list(rr.decisions),
-            "evaluators": dict(rr.evaluators),
-            "opt_search_point": self.opt_sp.model_dump(),
-            **(
-                {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}
-            ),
-        }
 
 
 # ---------------------------------------------------------------------------

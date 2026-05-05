@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 from collections.abc import Callable
 
-from promptpotter.application.optimization.dispatch import (
+from promptpotter.application.optimization.dispatch_types import (
     SECTION_L2_BRIEF,
     SECTION_PLAN,
     DispatchState,

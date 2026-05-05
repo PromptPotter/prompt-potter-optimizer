@@ -278,17 +278,18 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
 
     rebuilt = EscalationState.from_ledger(ledger)
     assert rebuilt.l1_stall_count == 0  # reset by L3 fire
-    assert rebuilt.l2.round == 0  # wiped by L3 fire
-    assert rebuilt.l2.stall_count == 0
-    assert rebuilt.l2.best_composite_fitness_at_entry == 0.7  # rebased to L3's entry
-    assert rebuilt.l3.round == 1
-    assert rebuilt.l3.best_composite_fitness_at_entry == 0.7
+    assert rebuilt.l2_round == 0  # wiped by L3 fire
+    assert rebuilt.l2_stall_count == 0
+    assert rebuilt.l2_best_composite_fitness_at_entry == 0.7  # rebased to L3's entry
+    assert rebuilt.l3_round == 1
+    assert rebuilt.l3_best_composite_fitness_at_entry == 0.7
 
-    # Display-side PhaseRecord("round","complete") emit (no ``improved`` key) must
-    # not double-bump the L1 stall counter — only the audit-side emit folds.
+    # Display-side PhaseRecord("round","display") is no-op for fold — only the
+    # audit-side ``event="complete"`` emit drives EscalationState. Distinct
+    # event tags eliminate the previous payload-shape demultiplex.
     ledger2 = CycleLedger.open(CycleDir(tmp_path / "cyc2"))
     ledger2.append(
-        PhaseRecord(phase="round", event="complete", round=1, payload={"l1_stall_count": 999})
+        PhaseRecord(phase="round", event="display", round=1, payload={"l1_stall_count": 999})
     )
     ledger2.append(
         PhaseRecord(

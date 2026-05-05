@@ -229,6 +229,138 @@ class CandidateRunResult:
     escalation_signal: EscalationSignal | None = None
 
 
+@dataclass(frozen=True)
+class SignalEffect:
+    """One pure decode of an ``EscalationSignal`` over a candidate's eval state.
+
+    Folds four overlapping reads of ``signal.check_result`` (RuntimeFailure
+    construction, elimination context, ELIMINATION_CUT decision payload,
+    LEADER_LOCK_IN decision payload) into a single pass. The caller still
+    owns leader-label decoration (needs prior-rank lookup over already-scored
+    candidates) and decision emission gating. Decision payloads are kept as
+    ``(inputs_ref, data)`` tuples — the ``DecisionKind`` literal stays at
+    the ``record_decision`` callsite (static check in
+    ``test_no_bare_string_decision_kinds``).
+    """
+
+    aborted: bool
+    elimination_stopped: bool
+    leader_locked: bool
+    leader_locked_loose: bool
+    leader_id: str
+    runtime_failure: RuntimeFailure | None
+    elim_context: dict | None
+    elimination_decision: tuple[dict, dict] | None
+    leader_lock_decision: tuple[dict, dict] | None
+
+
+def decode_signal_effect(
+    signal: EscalationSignal | None,
+    *,
+    results: list,
+    dataset: list,
+    merged_pp: dict | None,
+    round_num: int,
+    elim_check: PoBBCheck,
+    candidate_id: str,
+    candidate_label: str,
+    priors_at_test: list[str],
+) -> SignalEffect:
+    """Decode all per-candidate signal effects in one pass over ``check_result``."""
+    if signal is None:
+        return SignalEffect(False, False, False, False, "", None, None, None, None)
+
+    elimination_stopped = signal.is_elimination
+    leader_locked_loose = signal.is_leader_lock
+    scoring_error_abort = signal.check_name == "scoring_error_abort"
+    leader_locked = signal.is_leader_lock and signal.check_name == elim_check.name
+    aborted = not leader_locked_loose and (scoring_error_abort or len(results) < len(dataset))
+
+    cr = signal.check_result
+
+    new_rf: RuntimeFailure | None = None
+    if elimination_stopped and signal.check_name == "degradation":
+        rf_kind: str | None = "degradation_check"
+        dominant = cr.get("dominant_warning", "unknown:unknown")
+        node_cfg = (merged_pp or {}).get(dominant.split(":", 1)[0], {})
+        rate = float(cr.get("degraded_rate", 0.0))
+    elif scoring_error_abort:
+        rf_kind = "scoring_error_abort"
+        dominant = str(cr.get("dominant_warning") or "scoring_error")
+        node_cfg = merged_pp or {}
+        dc_tmp = int(cr.get("degraded_count", 0))
+        te_tmp = int(cr.get("total_scored", len(results)))
+        rate = (dc_tmp / te_tmp) if te_tmp else 0.0
+    else:
+        rf_kind = None
+    if rf_kind is not None:
+        new_rf = RuntimeFailure(
+            source=rf_kind,
+            dominant_warning=dominant,
+            warning_types=dict(cr.get("warning_types") or {}),
+            degraded_rate=rate,
+            degraded_count=int(cr.get("degraded_count", 0)),
+            total_scored=int(cr.get("total_scored", len(results))),
+            observed_config=dict(node_cfg),
+            first_seen_round=round_num,
+            candidate_label=candidate_label,
+        )
+
+    elim_ctx: dict | None = None
+    leader_id = ""
+    if (elimination_stopped or leader_locked_loose) and signal.check_name == "elimination":
+        leader_id = str(cr.get("leader_id", ""))
+        elim_ctx = {
+            "p_best": float(cr.get("p_best", 0.0)),
+            "epsilon": float(cr.get("epsilon", 0.05)),
+            "leader_id": leader_id,
+            "queries_scored": int(cr.get("queries_scored", len(results))),
+            "total_queries": int(cr.get("total_queries", len(dataset))),
+            "n_priors": int(cr.get("n_priors", 0)),
+            "leader_locked": leader_locked_loose,
+        }
+
+    queries_scored = int(cr.get("queries_scored", len(results)))
+    elimination_decision: tuple[dict, dict] | None = None
+    if elimination_stopped and signal.check_name == elim_check.name:
+        elimination_decision = (
+            {
+                "candidate_id": candidate_id,
+                "prior_candidate_ids": priors_at_test,
+                "queries_scored": queries_scored,
+                "epsilon": float(elim_check.epsilon),
+                "n_min": int(elim_check.n_min),
+                "round_num": round_num,
+            },
+            pobb_decision_data(cr),
+        )
+    leader_lock_decision: tuple[dict, dict] | None = None
+    if leader_locked:
+        leader_lock_decision = (
+            {
+                "candidate_id": candidate_id,
+                "prior_candidate_ids": priors_at_test,
+                "queries_scored": queries_scored,
+                "lock_in": float(elim_check.lock_in),
+                "lock_in_n_min": int(elim_check.lock_in_n_min),
+                "round_num": round_num,
+            },
+            pobb_decision_data(cr),
+        )
+
+    return SignalEffect(
+        aborted=aborted,
+        elimination_stopped=elimination_stopped,
+        leader_locked=leader_locked,
+        leader_locked_loose=leader_locked_loose,
+        leader_id=leader_id,
+        runtime_failure=new_rf,
+        elim_context=elim_ctx,
+        elimination_decision=elimination_decision,
+        leader_lock_decision=leader_lock_decision,
+    )
+
+
 async def score_one_candidate(
     *,
     idx: int,
@@ -315,66 +447,22 @@ async def score_one_candidate(
 
     # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
     priors_at_test = list(elim_check.prior_ids)
-    elimination_stopped = signal is not None and signal.is_elimination
-    leader_locked_loose = signal is not None and signal.is_leader_lock
-    scoring_error_abort = signal is not None and signal.check_name == "scoring_error_abort"
-    aborted = (
-        bool(signal)
-        and not leader_locked_loose
-        and (scoring_error_abort or len(results) < len(dataset))
+    effect = decode_signal_effect(
+        signal,
+        results=results,
+        dataset=dataset,
+        merged_pp=merged_pp,
+        round_num=round_num,
+        elim_check=elim_check,
+        candidate_id=osp_c.lineage.id,
+        candidate_label=osp_c.lineage.changes_description or "",
+        priors_at_test=priors_at_test,
     )
     # Aborted candidates must NOT seed priors — their scores are synthetic 0s.
-    if len(results) == len(dataset) and not aborted:
+    if len(results) == len(dataset) and not effect.aborted:
         elim_check.register_completed(
             [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
         )
-
-    new_rf: RuntimeFailure | None = None
-    if signal is not None:
-        cr = signal.check_result
-        dc = int(cr.get("degraded_count", 0))
-        te = int(cr.get("total_scored", len(results)))
-        if elimination_stopped and signal.check_name == "degradation":
-            rf_kind: str | None = "degradation_check"
-            dominant = cr.get("dominant_warning", "unknown:unknown")
-            node_cfg = (merged_pp or {}).get(dominant.split(":", 1)[0], {})
-            rate = float(cr.get("degraded_rate", 0.0))
-        elif scoring_error_abort:
-            rf_kind = "scoring_error_abort"
-            dominant = str(cr.get("dominant_warning") or "scoring_error")
-            node_cfg = merged_pp or {}
-            rate = (dc / te) if te else 0.0
-        else:
-            rf_kind = None
-        if rf_kind is not None:
-            new_rf = RuntimeFailure(
-                source=rf_kind,
-                dominant_warning=dominant,
-                warning_types=dict(cr.get("warning_types") or {}),
-                degraded_rate=rate,
-                degraded_count=dc,
-                total_scored=te,
-                observed_config=dict(node_cfg),
-                first_seen_round=round_num,
-                candidate_label=osp_c.lineage.changes_description or "",
-            )
-
-    elim_ctx: dict | None = None
-    if (
-        (elimination_stopped or leader_locked_loose)
-        and signal is not None
-        and signal.check_name == "elimination"
-    ):
-        cr = signal.check_result
-        elim_ctx = {
-            "p_best": float(cr.get("p_best", 0.0)),
-            "epsilon": float(cr.get("epsilon", 0.05)),
-            "leader_id": str(cr.get("leader_id", "")),
-            "queries_scored": int(cr.get("queries_scored", len(results))),
-            "total_queries": int(cr.get("total_queries", len(dataset))),
-            "n_priors": int(cr.get("n_priors", 0)),
-            "leader_locked": leader_locked_loose,
-        }
 
     report = build_score_report(
         osp_c,
@@ -382,68 +470,55 @@ async def score_one_candidate(
         scores,
         results,
         dataset,
-        aborted=aborted,
-        elimination_stopped=elimination_stopped,
-        elimination_context=elim_ctx,
-        new_runtime_failure=new_rf,
+        aborted=effect.aborted,
+        elimination_stopped=effect.elimination_stopped,
+        elimination_context=dict(effect.elim_context) if effect.elim_context else None,
+        new_runtime_failure=effect.runtime_failure,
         l1_diversity=l1_diversity,
     )
-    residual = None if (elimination_stopped or leader_locked_loose or not signal) else signal
 
-    # PoBB-elimination cut + leader lock-in: decision-record both
-    # (divergence-replayed on resume); leader_locked also breaks the loop.
-    leader_locked = (
-        signal is not None and signal.is_leader_lock and signal.check_name == elim_check.name
-    )
-    if elimination_stopped and signal is not None and signal.check_name == elim_check.name:
-        cr = signal.check_result
-        leader_id = str(cr.get("leader_id", ""))
-        if leader_id and leader_id in priors_at_test:
-            prior_label = next(
-                (
-                    f"C{i + 1}"
-                    for i, r in enumerate(candidate_scores)
-                    if r.candidate_id == leader_id
-                ),
-                None,
-            )
-            if prior_label and report.elimination_context:
-                report.elimination_context["leader_label"] = prior_label
-        if decisions is not None:
-            record_decision(
-                decisions,
-                DecisionKind.ELIMINATION_CUT,
-                {
-                    "candidate_id": osp_c.lineage.id,
-                    "prior_candidate_ids": priors_at_test,
-                    "queries_scored": int(cr.get("queries_scored", len(results))),
-                    "epsilon": float(elim_check.epsilon),
-                    "n_min": int(elim_check.n_min),
-                    "round_num": round_num,
-                },
-                True,
-                data=pobb_decision_data(cr),
-                round=round_num,
-            )
-    if leader_locked and signal is not None and decisions is not None:
-        cr = signal.check_result
+    # Decorate elim_ctx with prior label when the leader was a prior candidate.
+    if (
+        effect.leader_id
+        and effect.leader_id in priors_at_test
+        and report.elimination_context is not None
+    ):
+        prior_label = next(
+            (
+                f"C{i + 1}"
+                for i, r in enumerate(candidate_scores)
+                if r.candidate_id == effect.leader_id
+            ),
+            None,
+        )
+        if prior_label:
+            report.elimination_context["leader_label"] = prior_label
+
+    if decisions is not None and effect.elimination_decision is not None:
+        inputs_ref, data = effect.elimination_decision
+        record_decision(
+            decisions,
+            DecisionKind.ELIMINATION_CUT,
+            inputs_ref,
+            True,
+            data=data,
+            round=round_num,
+        )
+    if decisions is not None and effect.leader_lock_decision is not None:
+        inputs_ref, data = effect.leader_lock_decision
         record_decision(
             decisions,
             DecisionKind.LEADER_LOCK_IN,
-            {
-                "candidate_id": osp_c.lineage.id,
-                "prior_candidate_ids": priors_at_test,
-                "queries_scored": int(cr.get("queries_scored", len(results))),
-                "lock_in": float(elim_check.lock_in),
-                "lock_in_n_min": int(elim_check.lock_in_n_min),
-                "round_num": round_num,
-            },
+            inputs_ref,
             True,
-            data=pobb_decision_data(cr),
+            data=data,
             round=round_num,
         )
 
-    if leader_locked:
+    residual = (
+        None if (effect.elimination_stopped or effect.leader_locked_loose or not signal) else signal
+    )
+    if effect.leader_locked:
         outcome = CandidateOutcome.LEADER_LOCKED
     elif residual is not None:
         outcome = CandidateOutcome.ESCALATED
@@ -453,7 +528,7 @@ async def score_one_candidate(
         outcome=outcome,
         results=results,
         report=report,
-        runtime_failure=new_rf,
+        runtime_failure=effect.runtime_failure,
         escalation_signal=residual if outcome == CandidateOutcome.ESCALATED else None,
     )
 
@@ -795,8 +870,11 @@ async def execute_round(
     degradation_checks: list[StopRule] | None = None,
     *,
     skip_critique: bool = False,
-) -> RoundResult:
-    """Execute one L1 round: generate → score+select → critique → persist to memory.
+) -> tuple[RoundResult, PopulationScoreReport, str]:
+    """Execute one L1 round: generate → score+select → critique. Returns
+    ``(round_result, scoring_result, critique_text)``; the runner calls
+    ``cycle.absorb_round`` to fold all three into Cycle state at the
+    boundary. l1.py never mutates Cycle directly.
 
     ``skip_critique=True`` skips the round-end ``run_l1_critique`` LLM call.
     Sweep mode passes this so the cheap-round_data fork stays one full live LLM
@@ -903,8 +981,6 @@ async def execute_round(
                 l1_critique_text=critique_text,
             )
 
-    cycle.apply_round_outcome(scoring_result, critique_text)
-
     round_result = RoundResult(
         round=round_num,
         label=scoring_result.label,
@@ -962,4 +1038,4 @@ async def execute_round(
                 )
             )
 
-    return round_result
+    return round_result, scoring_result, critique_text

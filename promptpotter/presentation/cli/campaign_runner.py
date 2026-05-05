@@ -754,9 +754,9 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     logger.info("Session: %s", session.store.sessions.session_dir(ctx.session_id))
     logger.info("Campaign: %s", session.store.campaigns.campaign_dir(ctx.cycle_id))
 
-    if (sweep_result := await _maybe_dispatch_sweep_batch(
-        args, ctx, campaign_config, train_data
-    )) is not None:
+    if (
+        sweep_result := await _maybe_dispatch_sweep_batch(args, ctx, campaign_config, train_data)
+    ) is not None:
         return sweep_result
 
     return await _run_normal_optimize(args, ctx, campaign_config, session, train_data)

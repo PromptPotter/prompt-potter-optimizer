@@ -130,10 +130,10 @@ def compile_l3_extras(cycle: Cycle, pipeline_params: dict | None) -> dict[str, s
 
     l2_history: list[dict[str, Any]] = [
         {
-            "l2_round": cycle.escalation.l2.round,
+            "l2_round": cycle.escalation.l2_round,
             "optimizer_params": opt_sp.optimizer_params,
             "accuracy_change": cycle.tracking.best_composite_fitness
-            - cycle.escalation.l3.best_composite_fitness_at_entry,
+            - cycle.escalation.l3_best_composite_fitness_at_entry,
         }
     ]
     l2_summary = "\n".join(

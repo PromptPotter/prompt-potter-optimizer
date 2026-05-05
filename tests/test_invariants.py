@@ -300,7 +300,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     emitter.on_record(
         PhaseRecord(
             phase="round",
-            event="complete",
+            event="display",
             round=0,
             payload={"round_result": round_result, "l1_stall_count": 0},
         ),

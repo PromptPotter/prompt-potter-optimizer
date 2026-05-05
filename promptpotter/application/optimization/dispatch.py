@@ -1,18 +1,26 @@
-"""Layer dispatch — per-call DispatchState + LAYER_CONFIGS fan-in.
+"""Layer dispatch — DispatchState builder + prompt-var compilation.
 
 Flow: archive → AxisIndex → DispatchState → LAYER_CONFIGS[layer]
 ({var: renderer} table) → compile_prompt_vars (applies OSP overrides +
-extras) → LLM. ``get_layer_configs()`` is lazy to break the
-dispatch ↔ surface-modules import cycle.
+extras) → LLM. Type primitives live in :mod:`dispatch_types`; the
+``LAYER_CONFIGS`` registry is assembled at import time in
+:mod:`dispatch_registry`. This module re-exports the type primitives so
+existing consumers keep importing ``from .dispatch import ...``.
 """
 
 from __future__ import annotations
 
-import enum
-from collections.abc import Callable
-from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
+from promptpotter.application.optimization.dispatch_registry import LAYER_CONFIGS
+from promptpotter.application.optimization.dispatch_types import (
+    SECTION_L2_BRIEF,
+    SECTION_PLAN,
+    CritiqueContext,
+    DispatchState,
+    Layer,
+    LayerConfig,
+)
 from promptpotter.application.optimization.elimination import (
     candidate_keys_from_schema,
     get_candidates,
@@ -28,6 +36,9 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
 
 __all__ = [
+    "LAYER_CONFIGS",
+    "SECTION_L2_BRIEF",
+    "SECTION_PLAN",
     "CritiqueContext",
     "DispatchState",
     "Layer",
@@ -35,33 +46,7 @@ __all__ = [
     "build_dispatch_state",
     "compile_critique_context",
     "compile_prompt_vars",
-    "get_layer_configs",
 ]
-
-
-class Layer(enum.StrEnum):
-    """Optimizer layer that consumes a dispatch_msg."""
-
-    L1_GENERATE = "L1_GENERATE"
-    L1_CRITIQUE = "L1_CRITIQUE"
-    L2 = "L2"
-    L3 = "L3"
-
-
-# Module-level constants shared across dispatch + section renderers.
-_PROMPT_BLOAT_CHARS = 3000
-
-
-@dataclass
-class CritiqueContext:
-    """L1_CRITIQUE pre-pass — cross-cutting facts computed once per call."""
-
-    prompt_chars: int = 0
-    candidate_keys: list[str] | None = None
-    nm_queries: set[str] = field(default_factory=set)
-    anomalies: list[str] = field(default_factory=list)
-    rank_text: str = ""
-    evolution_text: str = ""
 
 
 def compile_critique_context(
@@ -179,40 +164,6 @@ def _compute_round_evolution(cycle: Cycle) -> tuple[str, list[str]]:
     return "\n".join(lines), anomalies
 
 
-@dataclass
-class DispatchState:
-    """Single in-memory state container for one optimizer LLM call.
-
-    Every section renderer reads from this — nothing else. Built once per
-    transition by :func:`build_dispatch_state` from the cycle, scoring
-    result, and (cached) axis digest; consumed by the layer's section
-    table to produce ``{template_var → str}`` for the prompt template.
-
-    Carries explicit slices of cycle state (``opt_sp``, ``l1_stall_count``,
-    ``best_accuracy`` / ``best_round``, ``rounds``, ``probe_next_round``)
-    rather than a ``Cycle`` reference — renderers no longer transitively
-    depend on the orchestration state, so they can be unit-tested with a
-    plain dataclass and moved between modules without dragging Cycle.
-    """
-
-    opt_sp: OptSearchPoint
-    layer: Layer
-    round_num: int = 0
-    pipeline_schema: PipelineSchema | None = None
-    pipeline_params: dict | None = None
-    candidate_scores: list[dict] | None = None
-    escalation_check_result: dict | None = None
-    scoring_result: PopulationScoreReport | None = None
-    axis_digest: dict[str, str] | None = None
-    critique: CritiqueContext | None = None
-    # Cycle slices renderers reach into.
-    l1_stall_count: int = 0
-    best_accuracy: float = 0.0
-    best_round: int = -1
-    rounds: list[Any] = field(default_factory=list)
-    probe_next_round: bool = False
-
-
 def _layer_axis_digest(layer: Layer, cycle: Cycle) -> dict[str, str] | None:
     """Pre-fetch the layer-appropriate axis digest from ``cycle.axes``."""
     if cycle.axes is None:
@@ -262,51 +213,6 @@ def build_dispatch_state(
     )
 
 
-@dataclass(frozen=True)
-class LayerConfig:
-    """How a layer fills its prompt template.
-
-    ``sections`` maps each ``{{template_var}}`` to a renderer reading a
-    :class:`DispatchState`. ``read_overrides``, when set, extracts
-    ``(visibility, text)`` from the OSP so L2 can gate or replace
-    individual sections (currently only L1-generate uses this).
-    """
-
-    sections: dict[str, Callable[[DispatchState], str]]
-    read_overrides: Callable[[OptSearchPoint], tuple[dict[str, bool], dict[str, str]]] | None = None
-
-
-_LAYER_CONFIGS_CACHE: dict[Layer, LayerConfig] | None = None
-
-
-def get_layer_configs() -> dict[Layer, LayerConfig]:
-    """Return the layer-fan-in registry; built lazily on first call.
-
-    Built lazily so ``l1_surface`` / ``l2_surface`` (which contain the
-    section renderers) can ``from .dispatch import Layer, LayerConfig,
-    DispatchState`` without a circular dep. The first caller pays the
-    one-time cost; subsequent calls return the cached dict.
-    """
-    global _LAYER_CONFIGS_CACHE
-    if _LAYER_CONFIGS_CACHE is None:
-        from promptpotter.application.optimization.l1_surface import L1_SECTION_RENDERERS
-        from promptpotter.application.optimization.l2_surface import L2_SECTION_RENDERERS
-
-        _LAYER_CONFIGS_CACHE = {
-            Layer.L1_GENERATE: LayerConfig(
-                sections=L1_SECTION_RENDERERS,
-                read_overrides=lambda osp: (
-                    osp.l1_section_overrides,
-                    osp.l1_section_overrides_text,
-                ),
-            ),
-            Layer.L2: LayerConfig(sections=L2_SECTION_RENDERERS),
-            Layer.L3: LayerConfig(sections={}),  # L3 vars ride as extras.
-            Layer.L1_CRITIQUE: LayerConfig(sections={}),  # single dispatch_msg via extras.
-        }
-    return _LAYER_CONFIGS_CACHE
-
-
 def compile_prompt_vars(
     layer: Layer,
     state: DispatchState,
@@ -326,7 +232,7 @@ def compile_prompt_vars(
     like ``n_variants``) are merged in as-is — no override processing,
     no separator.
     """
-    cfg = get_layer_configs()[layer]
+    cfg = LAYER_CONFIGS[layer]
     visible: dict[str, bool] = {}
     text: dict[str, str] = {}
     if cfg.read_overrides is not None:
@@ -345,29 +251,3 @@ def compile_prompt_vars(
     if extras:
         out.update(extras)
     return out
-
-
-# ---------------------------------------------------------------------------
-# Shared section renderers — `_section_l2_brief` and `_section_plan` are
-# rendered by BOTH L1_GENERATE and L2, so they live with the dispatch types
-# instead of in either surface module.
-# ---------------------------------------------------------------------------
-
-
-def _section_l2_brief(ctx: DispatchState) -> str:
-    v = ctx.opt_sp.l2_brief
-    if not v:
-        return ""
-    label = "BRIEF:" if ctx.layer is Layer.L1_GENERATE else "PREVIOUS BRIEF:"
-    return f"{label}\n{v}"
-
-
-def _section_plan(ctx: DispatchState) -> str:
-    v = ctx.opt_sp.plan
-    return f"PLAN:\n{v}" if v else ""
-
-
-# Re-exports so the surface modules can import shared section renderers
-# from a single canonical home.
-SECTION_L2_BRIEF = _section_l2_brief
-SECTION_PLAN = _section_plan

@@ -16,10 +16,10 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.cycle import NextAction
 from promptpotter.application.optimization.dispatch import (
+    LAYER_CONFIGS,
     Layer,
     build_dispatch_state,
     compile_prompt_vars,
-    get_layer_configs,
 )
 from promptpotter.application.optimization.formatting import warning_summary
 from promptpotter.application.optimization.l2_surface import compile_l2_extras
@@ -150,7 +150,7 @@ class LayerStrategy:
 def _parse_l2(
     raw: dict, opt_sp: OptSearchPoint, prompt: str, pipeline_params: dict | None
 ) -> TransitionResult:
-    section_names = set(get_layer_configs()[Layer.L1_GENERATE].sections.keys())
+    section_names = set(LAYER_CONFIGS[Layer.L1_GENERATE].sections.keys())
 
     changes: dict[str, Any] = {
         "changes_description": f"L2: {raw.get('rationale', 'L2 refine_strategy transition')[:80]}"
@@ -243,7 +243,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     record_decision(
         cycle.pending_decisions,
         DecisionKind.PROBE_ROUND_COMMITMENT,
-        {"round_num": round_num, "l2_round": cycle.escalation.l2.round},
+        {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
         is_probe,
         data={
             "action": str(result.action),
@@ -258,7 +258,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
 
 def _l2_enter(cycle: Cycle) -> dict[str, Any]:
     return {
-        "l2_round": cycle.escalation.l2.round,
+        "l2_round": cycle.escalation.l2_round,
         "l1_stall_count": cycle.escalation.l1_stall_count,
         "current_params": cycle.opt_sp.optimizer_params,
         "current_accuracy": cycle.tracking.current_accuracy,
@@ -271,10 +271,10 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     # ``l2_*_at_entry`` fields are read by ``EscalationState.fold`` on resume —
     # they're the canonical post-fire L2 state captured by ``record_l2_fired``.
     return {
-        "l2_round": cycle.escalation.l2.round,
-        "l2_stall_count": cycle.escalation.l2.stall_count,
-        "l2_best_accuracy_at_entry": cycle.escalation.l2.best_accuracy_at_entry,
-        "l2_best_composite_fitness_at_entry": cycle.escalation.l2.best_composite_fitness_at_entry,
+        "l2_round": cycle.escalation.l2_round,
+        "l2_stall_count": cycle.escalation.l2_stall_count,
+        "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
+        "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "param_changes_count": len(result.opt_search_point.optimizer_params),
         "task_context_changed": result.task_context is not None,
         "scheme_overrides_count": len(result.scheme_overrides),
@@ -346,8 +346,8 @@ def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
 
 def _l3_enter(cycle: Cycle) -> dict[str, Any]:
     return {
-        "l3_round": cycle.escalation.l3.round,
-        "l2_stall_count": cycle.escalation.l2.stall_count,
+        "l3_round": cycle.escalation.l3_round,
+        "l2_stall_count": cycle.escalation.l2_stall_count,
         "current_plan_preview": str(cycle.opt_sp.plan)[:120],
     }
 
@@ -356,10 +356,10 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     # ``l3_*_at_entry`` are read by ``EscalationState.fold`` on resume —
     # ``record_l3_fired`` also resets L2 state to these same baselines.
     return {
-        "l3_round": cycle.escalation.l3.round,
-        "l3_stall_count": cycle.escalation.l3.stall_count,
-        "l3_best_accuracy_at_entry": cycle.escalation.l3.best_accuracy_at_entry,
-        "l3_best_composite_fitness_at_entry": cycle.escalation.l3.best_composite_fitness_at_entry,
+        "l3_round": cycle.escalation.l3_round,
+        "l3_stall_count": cycle.escalation.l3_stall_count,
+        "l3_best_accuracy_at_entry": cycle.escalation.l3_best_accuracy_at_entry,
+        "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "pipeline_params_changed": result.pipeline_params is not None,
@@ -452,7 +452,6 @@ async def _run_transition(
 
 def _trigger_payload(
     cycle: Cycle,
-    counter: Any,
     round_num: int,
     patience: int | None,
     *,
@@ -460,15 +459,17 @@ def _trigger_payload(
     track_accuracy: bool = False,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     """(inputs_ref, data) for an L2/L3 escalation-trigger decision."""
+    esc = cycle.escalation
+    counter_round = getattr(esc, f"{layer}_round")
     inputs_ref = {
         "round_num": round_num,
         f"{layer}_patience": patience,
-        "entry_round": counter.round if counter.round > 0 else -1,
+        "entry_round": counter_round if counter_round > 0 else -1,
     }
     data: dict[str, Any] = {
-        f"{layer}_round": counter.round,
-        "stall_count": counter.stall_count,
-        "best_composite_fitness_at_entry": counter.best_composite_fitness_at_entry,
+        f"{layer}_round": counter_round,
+        "stall_count": getattr(esc, f"{layer}_stall_count"),
+        "best_composite_fitness_at_entry": getattr(esc, f"{layer}_best_composite_fitness_at_entry"),
         "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
     }
     if track_accuracy:
@@ -507,7 +508,7 @@ async def escalate_l2(
 
     # L2 trigger decision is replayed for divergence — record fired-or-not.
     l2_inputs, l2_data = _trigger_payload(
-        cycle, esc.l2, round_num, opt.l2_patience, layer="l2", track_accuracy=True
+        cycle, round_num, opt.l2_patience, layer="l2", track_accuracy=True
     )
     record_decision(
         cycle.pending_decisions,
@@ -555,7 +556,7 @@ async def escalate_l2(
         return StopReason.L2_PATIENCE
 
     # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
-    l3_inputs, l3_data = _trigger_payload(cycle, esc.l3, round_num, opt.l3_patience, layer="l3")
+    l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")
     record_decision(
         cycle.pending_decisions,
         DecisionKind.L3_ESCALATION_TRIGGER,

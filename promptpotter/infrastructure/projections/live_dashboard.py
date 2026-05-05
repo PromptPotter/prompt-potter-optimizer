@@ -552,7 +552,7 @@ class LiveDashboardProjection(ProjectionBase):
     # Phases drive scalar updates, snapshots drive per-round structures.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase == "round" and record.event == "complete":
+        if record.phase == "round" and record.event == "display":
             payload = record.payload or {}
             round_result = payload.get("round_result")
             l1_stall = int(payload.get("l1_stall_count") or 0)

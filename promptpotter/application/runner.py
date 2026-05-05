@@ -120,7 +120,11 @@ async def _escalate_or_stop(
 
 
 def _persist_round(
-    cycle: Cycle, round_result: RoundResult, round_num: int, session: Session
+    cycle: Cycle,
+    round_result: RoundResult,
+    trial_dict: dict,
+    round_num: int,
+    session: Session,
 ) -> None:
     """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder."""
     flushed: list[DecisionRecord] = []
@@ -128,6 +132,7 @@ def _persist_round(
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
         round_result.decisions.extend(d.to_dict() for d in flushed)
+        trial_dict["decisions"] = list(round_result.decisions)
 
     if (ledger := session.state.ledger) is not None:
         for d in flushed:
@@ -151,7 +156,7 @@ def _persist_round(
             session.store.campaigns.save_round_file(
                 session.backend_id,
                 session.state.cycle_id,
-                cycle.checkpoint(round_result, round_num),
+                trial_dict,
             )
         write_log_md(session)
         write_review_md(session, cycle)
@@ -266,6 +271,7 @@ def _evolve_scoring_set_if_enabled(
 async def _post_round(
     cycle: Cycle,
     round_result: RoundResult,
+    trial_dict: dict,
     round_num: int,
     config: CampaignConfig,
     session: Session,
@@ -288,7 +294,7 @@ async def _post_round(
         cycle.opt_sp.clear_volatile()
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
-    _persist_round(cycle, round_result, round_num, session)
+    _persist_round(cycle, round_result, trial_dict, round_num, session)
 
     # Hot-swap composite_fitness formula via scoring_steer.json BEFORE round-boundary
     # mutations so next round evaluates under the new formula.
@@ -432,7 +438,7 @@ async def _run_round_loop(
             elif _rr := session.state.audit_projection:
                 _rr.begin_round(round_num)
 
-            round_result = await execute_round(
+            round_result, scoring_result, critique_text = await execute_round(
                 cycle,
                 round_num,
                 round_eval_data,
@@ -440,7 +446,7 @@ async def _run_round_loop(
                 degradation_checks=round_checks,
                 skip_critique=sweep,
             )
-            cycle.record_round(round_result, round_num)
+            trial_dict = cycle.absorb_round(round_result, scoring_result, critique_text, round_num)
 
             if cycle.axes and len(cycle.rounds) >= 2:
                 cycle.axes.record_flips_from_rounds(cycle.rounds, round_num)
@@ -495,7 +501,9 @@ async def _run_round_loop(
                 round_num += 1
                 continue
 
-            await _post_round(cycle, round_result, round_num, config, session, dataset, cb)
+            await _post_round(
+                cycle, round_result, trial_dict, round_num, config, session, dataset, cb
+            )
             round_num += 1
             clean_rounds += 1
 

@@ -11,12 +11,10 @@ from __future__ import annotations
 from collections import Counter
 from collections.abc import Callable
 
-from promptpotter.application.optimization.dispatch import (
+from promptpotter.application.optimization.dispatch_types import (
     SECTION_L2_BRIEF,
     SECTION_PLAN,
     DispatchState,
-    Layer,
-    get_layer_configs,
 )
 from promptpotter.application.optimization.formatting import (
     format_axis_digest_block,
@@ -245,10 +243,10 @@ def format_l1_generate_field_catalogue(
     ``L1_SCALAR_DESCRIPTIONS``. L2 always sees every variable that exists
     in code — including sections currently toggled off.
     """
-    # Touch the configs registry so any new L1 section added in code (but
-    # not yet entered in L1_SECTION_DESCRIPTIONS) trips a clear lookup
-    # error rather than silently disappearing.
-    _ = get_layer_configs()[Layer.L1_GENERATE].sections.keys()
+    # Touch L1_SECTION_RENDERERS so any new section added in code (but not
+    # yet entered in L1_SECTION_DESCRIPTIONS) trips a clear lookup error
+    # rather than silently disappearing. LAYER_CONFIGS wraps this same dict.
+    _ = L1_SECTION_RENDERERS.keys()
     lines: list[str] = []
     for name, desc in L1_SECTION_DESCRIPTIONS.items():
         state = "[OFF]" if overrides_visible.get(name) is False else "[ON]"

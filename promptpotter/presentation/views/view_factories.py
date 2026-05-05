@@ -150,7 +150,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
         resumed_from_round=session.state.resumed_from_round,
         l1_critique_chars=len(cycle.opt_sp.l1_critique_text or ""),
         task_context_keys=len(cycle.opt_sp.task_context),
-        l2_round=cycle.escalation.l2.round,
+        l2_round=cycle.escalation.l2_round,
         prompt_field_overlays=overlays,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
