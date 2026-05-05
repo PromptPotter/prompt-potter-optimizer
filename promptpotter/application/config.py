@@ -275,6 +275,7 @@ def configure_and_apply_pipeline(
     """Build pipeline identity, apply filtered schema + overrides onto *session*."""
     from promptpotter.application.datasets.datasets import (
         has_dataset_prompts,
+        load_dataset_node_overlay,
         load_node_prompt,
     )
     from promptpotter.infrastructure.backend import extract_pipeline_config
@@ -299,10 +300,20 @@ def configure_and_apply_pipeline(
         filtered = pipeline_schema.filter_to_steps(active)
 
     valid_overrides: dict[str, dict] = {}
+    dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
+
+    # Per-dataset operator overlay from ``datasets/{name}/pipeline.json::
+    # nodes.{name}.config`` — sparse overrides on top of backend defaults
+    # (e.g. AIME runs through OpenRouter on Mistral instead of Groq+gpt-oss).
+    if dataset_name:
+        for node, cfg in load_dataset_node_overlay(dataset_name).items():
+            if node in active:
+                valid_overrides.setdefault(node, {}).update(cfg)
+
     if overrides:
         for key, value in overrides.items():
             if isinstance(value, dict) and key in active:
-                valid_overrides[key] = value
+                valid_overrides.setdefault(key, {}).update(value)
             elif isinstance(value, dict):
                 logger.debug("configure_pipeline: skipping override for inactive node %r", key)
             else:
@@ -315,7 +326,6 @@ def configure_and_apply_pipeline(
 
     # Starting-point prompts from ``datasets/{name}/prompts/`` injected
     # per prompt-bearing node.
-    dataset_name = campaign_config.dataset_name or (session.dataset_name or "")
     starting_name = campaign_config.starting_prompt or "default"
     if dataset_name and filtered and has_dataset_prompts(dataset_name):
         prompt_nodes = [n for n in filtered.prompt_node_names() if n in active]
@@ -324,10 +334,12 @@ def configure_and_apply_pipeline(
             valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
             log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|{starting_name}].json → {pnode}")
 
-    if filtered and valid_overrides:
-        filtered = filtered.with_overrides(valid_overrides)
-
     pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
+    # Operator's ``pipeline_overrides`` + the resolved starting prompt land
+    # directly on the sparse wire payload — never into ``current_config``,
+    # which stays the backend's source of truth.
+    for node, cfg in valid_overrides.items():
+        pipeline_params.setdefault(node, {}).update(cfg)
 
     if filtered is not None:
         session.pipeline_schema = filtered

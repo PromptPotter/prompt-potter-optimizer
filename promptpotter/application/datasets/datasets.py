@@ -393,12 +393,34 @@ __all__ = [
     "dataset_prompt_dir",
     "has_dataset_prompts",
     "list_dataset_prompts",
+    "load_dataset_node_overlay",
     "load_dataset_prompt",
     "load_node_prompt",
 ]
 
 # promptpotter/application/datasets/prompt_store.py → repo root
 _REPO_ROOT = Path(__file__).resolve().parents[3]
+
+
+def load_dataset_node_overlay(dataset: str) -> dict[str, dict]:
+    """Read per-node config overrides from ``datasets/{name}/pipeline.json``.
+
+    Returns ``{node_name: {key: value}}`` — a sparse overlay layered onto
+    the wire payload at init. Backend's ``GET /pipeline`` is the source of
+    truth for runtime defaults; this overlay encodes per-dataset operator
+    preferences (e.g. AIME runs through OpenRouter on Mistral instead of
+    the backend's Groq default). Empty ``{}`` when the file is absent or
+    has no per-node config.
+    """
+    raw = read_json_optional(_REPO_ROOT / "datasets" / dataset / "pipeline.json")
+    if not raw:
+        return {}
+    out: dict[str, dict] = {}
+    for node_name, node_def in (raw.get("nodes") or {}).items():
+        cfg = node_def.get("config") if isinstance(node_def, dict) else None
+        if isinstance(cfg, dict) and cfg:
+            out[node_name] = dict(cfg)
+    return out
 
 
 def dataset_prompt_dir(dataset: str) -> Path:

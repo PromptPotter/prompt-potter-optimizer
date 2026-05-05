@@ -153,31 +153,19 @@ class PipelineSchema(BaseModel):
         return self._observation_keys  # type: ignore[attr-defined]
 
     def to_pipeline_params(self) -> dict:
-        """Build initial pipeline_params dict from this schema.
+        """Build the empty wire-format scaffold from this schema.
 
-        Produces the wire-format dict with ``steps`` + per-node config,
-        suitable for ``JobSearchPoint`` construction.
+        Returns ``{"steps": [...]}`` only — no per-node config seeded.
+        ``pipeline_params`` is a *sparse override map*: the optimizer adds
+        only the fields it wants to mutate (prompt, plus any L1/L2/L3
+        candidate-driven overrides). The backend merges these on top of its
+        own ``pipeline.json::nodes.{name}.config`` defaults.
+
+        Backend-owned introspection (current model, default temperature) is
+        still available via ``PipelineNode.current_config`` for L1's
+        evidence panels — it just doesn't flow onto the wire.
         """
-        pp: dict = {"steps": list(self.active_steps)}
-        for node in self.nodes:
-            if node.current_config:
-                pp[node.name] = dict(node.current_config)
-        return pp
-
-    def with_overrides(self, overrides: dict[str, dict]) -> "PipelineSchema":
-        """Return a new schema with overrides applied to node ``current_config``.
-
-        Since PipelineSchema is frozen, reconstructs with updated nodes.
-        Only applies overrides for nodes present in the schema.
-        """
-        updated_nodes: list[PipelineNode] = []
-        for node in self.nodes:
-            if node.name in overrides:
-                merged = {**node.current_config, **overrides[node.name]}
-                updated_nodes.append(node.model_copy(update={"current_config": merged}))
-            else:
-                updated_nodes.append(node)
-        return self.model_copy(update={"nodes": updated_nodes})
+        return {"steps": list(self.active_steps)}
 
     # -------------------------------------------------------------------
     # Lookup helpers

@@ -154,6 +154,18 @@ def _pipeline_health(results: list[dict]) -> tuple[dict[str, int], float, float]
     return dict(termination), error_count / total, warning_count / total
 
 
+def _warning_str(w: object) -> str:
+    """Normalize a pipeline warning entry to ``step:code``.
+
+    Pipelines emit warnings as either dicts (``{"step", "code", ...}``) or
+    bare strings; keep both shapes flowing to the same downstream surface.
+    Mirrors ``elimination._collect_advisories``.
+    """
+    if isinstance(w, dict):
+        return f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"
+    return str(w)
+
+
 def _failure_categories(
     results: list[dict], nm_queries: set[str]
 ) -> tuple[dict[str, int], dict[str, list[str]]]:
@@ -173,7 +185,8 @@ def _failure_categories(
         by_step[pd.get("terminated_at", "unknown")] += 1
         diag = pd.get("diagnostics") or {}
         for warning in diag.get("warnings") or ():
-            wclass = warning.split(":", 1)[0] if ":" in warning else warning
+            ws = _warning_str(warning)
+            wclass = ws.split(":", 1)[0]
             by_warning.setdefault(wclass, []).append(r.get("query", "")[:80])
     return dict(by_step), {k: v[:5] for k, v in by_warning.items()}
 
@@ -343,7 +356,7 @@ def _sample_diagnostics(
                 terminated_at=pd.get("terminated_at", "unknown"),
                 gt_in_source=(sd or {}).get("gt_in_source"),
                 gt_in_ranked=(sd or {}).get("gt_in_ranked"),
-                warnings=list(diag.get("warnings") or ()),
+                warnings=[_warning_str(w) for w in (diag.get("warnings") or ())],
                 hit=bool(r.get("hit")),
             )
         )

@@ -52,6 +52,54 @@ def test_termnorm_wire_adapter_empty_params() -> None:
     assert payload == {"query": "q"}
 
 
+def test_pipeline_schema_to_params_is_sparse() -> None:
+    """``to_pipeline_params`` emits ``{steps}`` only — no per-node defaults seeded.
+
+    Pipeline_params is a sparse override map: PromptPotter sends only the
+    fields it wants the backend to override. The backend (``GET /pipeline``)
+    is the source of truth for runtime defaults like ``provider`` — they
+    must NOT travel on the wire and risk drifting from the backend's reality.
+    Backend-side per-key merge fills the rest (see
+    research_pipeline.py::_resolve_pipeline_params).
+    """
+    from promptpotter.domain.pipeline_schema import (
+        NodeOutputSchema,
+        PipelineNode,
+        PipelineSchema,
+    )
+
+    schema = PipelineSchema(
+        name="t",
+        version="v",
+        nodes=[
+            PipelineNode(
+                name="llm_only",
+                runtime="backend",
+                node_role="ranker",
+                param_keys=("provider", "model", "temperature"),
+                output_schema=NodeOutputSchema(),
+                # Backend told us these defaults — they're for introspection,
+                # not for the wire.
+                current_config={"provider": "groq", "model": "x", "temperature": 0.0},
+            )
+        ],
+    )
+    pp = schema.to_pipeline_params()
+    assert pp == {"steps": ["llm_only"]}, (
+        "to_pipeline_params must be sparse; per-node defaults are backend-owned. "
+        f"Got {pp!r}"
+    )
+
+    # Round-trip through the wire adapter: with a {} override per node, the
+    # adapter must NOT inject provider/model/temperature from anywhere.
+    pp_with_override = {**pp, "llm_only": {"temperature": 0.7}}
+    payload = termnorm_wire_adapter("q", pp_with_override)
+    assert payload["node_config"] == {"llm_only": {"temperature": 0.7}}, (
+        "Wire payload must carry only operator/optimizer overrides — not the "
+        f"backend's defaults. Got {payload['node_config']!r}"
+    )
+
+
 def test_backend_client_uses_custom_wire_adapter() -> None:
     """BackendClient accepts a custom WireAdapter and uses it on run_query.
 

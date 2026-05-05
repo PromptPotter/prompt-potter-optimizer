@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 from collections.abc import Callable
@@ -366,33 +367,75 @@ def _apply_tenant_guard(tenant_id: str, take_over: bool, status: Callable[[str],
     status(f"Took over active session: cleared pointer (was tenant {active_tid!r})")
 
 
+def _apply_dataset_overlay(backend_resp: dict, local_raw: dict) -> dict:
+    """Merge dataset pipeline.json overlay onto the backend response.
+
+    Dataset overlay can carry: ``pipelines.default`` (which subset of nodes
+    is active for this dataset), per-node config deltas, and metadata like
+    ``available_models`` / ``prompt_meta`` / ``optimizer.param_keys``. The
+    backend stays SoT for runtime defaults; the overlay layers operator
+    intent on top.
+    """
+    out = copy.deepcopy(backend_resp.get("data") or backend_resp)
+    if "pipelines" in local_raw:
+        out["pipelines"] = local_raw["pipelines"]
+    for node_name, node_def in (local_raw.get("nodes") or {}).items():
+        if not isinstance(node_def, dict):
+            continue
+        out.setdefault("nodes", {}).setdefault(node_name, {})
+        for k, v in node_def.items():
+            if k == "config" and isinstance(v, dict):
+                out["nodes"][node_name].setdefault("config", {}).update(v)
+            else:
+                out["nodes"][node_name][k] = v
+    return out
+
+
 async def _resolve_pipeline_schema(
     client: BackendClient,
     project_root: Path,
     dataset_name: str | None,
     status: Callable[[str], None],
 ) -> PipelineSchema | None:
-    """Static datasets/{name}/pipeline.json → backend GET /pipeline fallback. None on both fail."""
-    if dataset_name:
-        raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
-        if raw is not None:
-            try:
-                schema = parse_pipeline_response(raw)
-                status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
-                return schema
-            except Exception as exc:
-                logger.warning("Failed to parse static pipeline.json: %s", exc)
+    """Backend ``GET /pipeline`` is authoritative for runtime defaults.
 
+    Local ``datasets/{name}/pipeline.json`` is the operator overlay:
+    ``pipelines.default`` selects the active node subset, ``nodes.X.config``
+    carries per-key deltas, plus per-dataset metadata. The two are merged
+    here before parsing — backend underneath, dataset on top. Backend
+    unreachable → fall back to the local file alone (offline mode).
+    """
+    backend_resp: dict | None = None
     try:
-        schema = parse_pipeline_response(await client.fetch_pipeline())
-        status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
-        return schema
+        backend_resp = await client.fetch_pipeline()
     except (KeyboardInterrupt, asyncio.CancelledError):
         raise
     except Exception as exc:
-        logger.info("Could not fetch pipeline schema: %s", exc)
-        status("Pipeline: unavailable")
-        return None
+        logger.info("Could not fetch pipeline schema from backend: %s", exc)
+
+    local_raw: dict | None = None
+    if dataset_name:
+        local_raw = read_json_optional(project_root / "datasets" / dataset_name / "pipeline.json")
+
+    if backend_resp:
+        merged = _apply_dataset_overlay(backend_resp, local_raw or {})
+        try:
+            schema = parse_pipeline_response(merged)
+            status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes)")
+            return schema
+        except Exception as exc:
+            logger.warning("Failed to parse merged pipeline schema: %s", exc)
+
+    if local_raw is not None:
+        try:
+            schema = parse_pipeline_response(local_raw)
+            status(f"Pipeline: {schema.name} ({len(schema.nodes)} nodes, offline)")
+            return schema
+        except Exception as exc:
+            logger.warning("Failed to parse offline pipeline.json: %s", exc)
+
+    status("Pipeline: unavailable")
+    return None
 
 
 def _read_backend_type(project_root: Path, dataset_name: str | None) -> str:
