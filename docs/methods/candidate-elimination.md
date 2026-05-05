@@ -31,7 +31,6 @@ PoBB beats LUCB-style pairwise tests by sampling the joint posterior over **all*
 ## Tunable knobs
 
 - `OptimizationConfig.pobb_epsilon` (default `0.05`) — smaller = more conservative.
-- `OptimizationConfig.pobb_mc_samples` (default `1000`) — joint-draw count. Sub-ms per check; raise to 5000 only if stop decisions are noisy.
 - `OptimizationConfig.elimination_n_min` (default `4`) — floor on query count before PoBB fires. Below this, Normal-CLT posterior isn't meaningful.
 
 ## Open questions

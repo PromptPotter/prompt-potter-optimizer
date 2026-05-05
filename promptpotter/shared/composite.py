@@ -12,28 +12,22 @@ Two related concerns share this module so the short codes (``acc``, ``H``,
    keep them in sync by hand if the registry default changes.
 
 2. **Composite-score render primitives** (``render_composite_fitness_oneliner`` /
-   ``render_composite_fitness_block`` / ``render_composite_fitness_inline``) — operator-
-   facing forms that surfaces share. Without seeing the inputs the operator
-   can't tell *why* composite_fitness moved when accuracy didn't.
-   ``PROMPTPOTTER_COMPACT_DISPLAY=1`` collapses the live surfaces to a
-   single-line ``composite_fitness=0.4f`` bottom rule (``log.md`` always carries
-   the full block).
+   ``render_composite_fitness_block``) — operator-facing forms that surfaces
+   share. Without seeing the inputs the operator can't tell *why*
+   composite_fitness moved when accuracy didn't.
 
 Pure functions; no I/O, no Session, no logging side-effects.
 """
 
 from __future__ import annotations
 
-import os
 import re
 
 __all__ = [
     "SHORT_NAMES",
-    "compact_display_enabled",
     "extract_evaluator_names",
     "inline_short_formula_values",
     "render_composite_fitness_block",
-    "render_composite_fitness_inline",
     "render_composite_fitness_oneliner",
 ]
 
@@ -157,12 +151,6 @@ SHORT_NAMES: dict[str, str] = {
 _NAME_RE = re.compile(r"[A-Za-z_][A-Za-z_0-9]*")
 
 
-def compact_display_enabled() -> bool:
-    """Return True when ``PROMPTPOTTER_COMPACT_DISPLAY`` is set to a truthy value."""
-    val = os.environ.get("PROMPTPOTTER_COMPACT_DISPLAY", "").strip().lower()
-    return val in {"1", "true", "yes", "on"}
-
-
 def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     """Return evaluator names present in *formula*, in first-appearance order.
 
@@ -178,11 +166,6 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
         seen.add(name)
         out.append(name)
     return out
-
-
-def render_composite_fitness_inline(composite_fitness: float) -> str:
-    """One-line composite_fitness tag — for slots that can't carry a multi-line block."""
-    return f"comp_fit={composite_fitness:.4f}"
 
 
 def render_composite_fitness_oneliner(

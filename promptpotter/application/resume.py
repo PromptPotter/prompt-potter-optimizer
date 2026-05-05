@@ -73,7 +73,6 @@ def apply_stored_overrides(
         "n_variants",
         "creativity",
         "improvement_threshold",
-        "seed",
     ):
         if (val := stored_cfg.get(key)) is not None:
             opt[key] = val
@@ -100,7 +99,6 @@ def diff_campaign_config(
         "n_variants": opt.n_variants,
         "creativity": opt.creativity,
         "improvement_threshold": opt.improvement_threshold,
-        "seed": opt.seed,
         "model": campaign_config.optimizer_llm.model,
         "sp_budget_ttest": campaign_config.sp_budget_ttest,
     }

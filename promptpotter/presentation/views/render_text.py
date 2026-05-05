@@ -46,7 +46,6 @@ from promptpotter.presentation.views.view_models import (
     SpDiffView,
 )
 from promptpotter.shared.composite import (
-    compact_display_enabled,
     render_composite_fitness_block,
 )
 
@@ -276,7 +275,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         out.append(f"  Scoreboard: {' | '.join(parts)}")
 
     formula = v.composite_fitness_formula_short or v.composite_fitness_formula
-    show_inline = compact_display_enabled() or not formula
+    show_inline = not formula
     comp_tag = (
         f"  composite_fitness={v.winner_composite_fitness:.4f}"
         if show_inline

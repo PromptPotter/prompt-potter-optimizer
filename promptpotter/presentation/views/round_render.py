@@ -35,8 +35,6 @@ from promptpotter.presentation.views.display import (
     fmt_pvalue,
 )
 from promptpotter.shared.composite import (
-    compact_display_enabled,
-    render_composite_fitness_inline,
     render_composite_fitness_oneliner,
 )
 from promptpotter.shared.errors import is_error_result
@@ -181,8 +179,7 @@ def build_individual_summary(
     ``composite_fitness=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
     don't dump 60 lines of identical formula text into the terminal. The
     formula + per-evaluator breakdown lands once per round in the round
-    summary block. ``PROMPTPOTTER_COMPACT_DISPLAY=1`` reverts to the
-    single-line ``composite_fitness=0.4f`` bottom rule (only when composite_fitness ≠ accuracy).
+    summary block.
 
     *baseline_composite_fitness* anchors the Δ against the campaign's first-round
     composite_fitness — even at deep rounds the operator sees how far the run
@@ -227,25 +224,12 @@ def build_individual_summary(
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_queries", 0)
 
-    # Two render modes:
-    #   - compact (env var set): single-line bottom rule,
-    #     ``composite_fitness=...  ⚠ K/N degraded``, only when comp ≠ acc.
-    #   - default: 1-line composite_fitness-with-Δ as a detail line; degraded
-    #     count joins as a separate detail. Box bottom stays plain.
-    if comp is not None and not compact_display_enabled():
+    if comp is not None:
         detail_lines.append(
             render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness)
         )
-        if degraded:
-            detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
-    else:
-        bottom_extras: list[str] = []
-        if comp is not None and comp != acc:
-            bottom_extras.append(render_composite_fitness_inline(comp))
-        if degraded:
-            bottom_extras.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
-        if bottom_extras:
-            detail_lines.append("  ".join(bottom_extras))
+    if degraded:
+        detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
 
     status: Literal["ok", "aborted", "eliminated"]
     if aborted:

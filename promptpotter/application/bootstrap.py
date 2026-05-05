@@ -81,7 +81,6 @@ HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
         "creativity",
         "improvement_threshold",
         "sp_budget_ttest",
-        "seed",
     }
 )
 

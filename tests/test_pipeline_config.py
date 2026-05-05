@@ -235,7 +235,7 @@ def test_required_optimization_fields_must_be_explicit() -> None:
     """Per-dataset knobs (``improvement_threshold``, ``max_failures``,
     ``degradation_threshold``) have no default — a campaign that omits them
     is rejected at load time so dataset configs are self-describing.
-    System invariants (``enable_l2``, ``enable_l3``, ``seed``) DO have
+    System invariants (``enable_l2``, ``enable_l3``) DO have
     defaults — they are not per-dataset knobs."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})

@@ -275,8 +275,6 @@ formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
 
 `H` is health `((1-error_rate) + (1-degraded_rate) + (1-runtime_failure_rate)) / 3`; `R` is the average of applicable recall evaluators. Custom formulas (`campaign.json::scoring`) render verbatim. `log.md` always carries the full formula text — source of truth when reviewing finished cycles.
 
-`PROMPTPOTTER_COMPACT_DISPLAY=1` reverts live surfaces to the legacy `composite=0.4f` bottom rule (only when composite ≠ accuracy). `log.md` is unaffected.
-
 ### Code references
 
 - Evaluator registry + default formula: `promptpotter/application/scoring/evaluators.py`

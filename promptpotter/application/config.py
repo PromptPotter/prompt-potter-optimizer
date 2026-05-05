@@ -63,10 +63,6 @@ class ExplorationConfig(BaseModel):
         description="Swap-in threshold: minimum sample KG to be eligible.",
     )
     max_swaps_per_round: int = Field(3, description="Cap on scoring-set churn per round.")
-    min_scoring_set_size: int | None = Field(
-        None,
-        description="Floor on scoring-set size (None → derive from elimination_n_min).",
-    )
     cold_start_prior_sigma: float = Field(
         1.5,
         description="Sigma on the N(0, sigma²) theta prior when no observations yet.",
@@ -94,7 +90,7 @@ class OptimizationConfig(BaseModel):
     ``max_failures``, ``degradation_threshold``.
 
     System invariants (defaulted, MUST NOT appear in any ``campaign.json``):
-    ``enable_l2=True``, ``enable_l3=True``, ``seed=42``, and
+    ``enable_l2=True``, ``enable_l3=True``, and
     ``ExplorationConfig.swap_out_delta_se=0.7``.
 
     Guard test: ``tests/test_campaign_config_validation.py::test_required_optimization_fields_must_be_explicit``.
@@ -107,7 +103,6 @@ class OptimizationConfig(BaseModel):
     n_variants: int = Field(5, description="Candidates per round")
     creativity: float = Field(0.7, description="Temperature for candidate generation")
     improvement_threshold: float = Field(..., description="Min accuracy delta")
-    seed: int = Field(42, description="Random seed — system invariant, not a per-dataset knob")
     max_failures: int = Field(..., description="Max failure examples fed to L1")
 
     enable_l2: bool = Field(True, description="System invariant — L2 is part of the architecture")
@@ -140,11 +135,6 @@ class OptimizationConfig(BaseModel):
         description="Minimum queries before PoBB lock-in can fire. Higher than "
         "elimination_n_min because locker-in commits the round-winner — needs more "
         "samples for posterior stability than the loser-elimination floor.",
-    )
-    pobb_mc_samples: int = Field(
-        1000,
-        description="Monte Carlo joint-draw count for posterior_best_probabilities. "
-        "Default 1000; MC error √(p(1-p)/N) ≈ 0.7% at p=0.05.",
     )
 
     max_consecutive_errors: int = Field(3)

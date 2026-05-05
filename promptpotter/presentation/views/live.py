@@ -39,7 +39,6 @@ from promptpotter.presentation.views.round_render import (
     render_round_stats,
 )
 from promptpotter.shared.composite import (
-    compact_display_enabled,
     render_composite_fitness_block,
 )
 
@@ -384,7 +383,7 @@ class LiveDisplay:
         # full text and accept the wrap.
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
         formula_full = self._phase_ctx.get("composite_fitness_formula")
-        if (formula_short or formula_full) and not compact_display_enabled():
+        if formula_short or formula_full:
             for line in render_composite_fitness_block(
                 round_result.composite_fitness,
                 dict(round_result.evaluators),

@@ -12,7 +12,7 @@ Five named invariants:
      ``inline_short_formula_values`` produce formula text + named evaluator pairs
      within their three-line frame budget, dropping evaluators not in formula.
   4. ``fit_rasch`` recovers known θ/δ on synthetic Bernoulli data and is sparse-safe;
-     ``evolve_scoring_set`` preserves ``min_scoring_set_size``, mutates only the
+     ``evolve_scoring_set`` preserves the ``elimination_n_min`` floor, mutates only the
      scoring slice, and is a no-op when disabled.
   5. ``apply_steer_file`` hot-swaps ``session.scoring.round_scorer`` on a valid
      ``scoring_steer.json`` (archives the file) and leaves state untouched on
@@ -413,7 +413,7 @@ def test_evolve_scoring_set_respects_min_size() -> None:
     full = scoring_set + extra
 
     # Many candidates measuring all scoring-set samples consistently → narrow δ SE
-    # → swap-out would be eligible, but min_scoring_set_size==4 must block it.
+    # → swap-out would be eligible, but the elimination_n_min==4 floor must block it.
     candidate_results = {
         f"c{ci}": [{"sample_id": s.id, "hit": True} for s in scoring_set] for ci in range(8)
     }

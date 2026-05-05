@@ -396,11 +396,7 @@ def evolve_scoring_set(
     if surviving_candidates is None:
         surviving_candidates = list(posterior.theta.keys())
 
-    min_size = (
-        config.min_scoring_set_size
-        if config.min_scoring_set_size is not None
-        else elimination_n_min
-    )
+    min_size = elimination_n_min
     scoring_set_ids = {s.id for s in current_scoring_set}
 
     swap_out_ids = _select_swap_outs(
