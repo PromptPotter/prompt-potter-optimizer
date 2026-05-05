@@ -10,6 +10,7 @@ from __future__ import annotations
 import logging
 from dataclasses import dataclass, field
 from enum import StrEnum
+from functools import partial
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
@@ -187,6 +188,38 @@ async def l1_generate(
 # ---------------------------------------------------------------------------
 # Section 2 — Measurement (score_population — three exit paths)
 # ---------------------------------------------------------------------------
+
+
+def _on_query_scored(
+    callbacks: RunCallbacks,
+    idx: int,
+    n_total: int,
+    result,
+    query_idx: int,
+    query_total: int,
+) -> None:
+    callbacks.on_sample_scored(idx, n_total, query_idx, query_total, result)
+
+
+def _on_query_starting(
+    callbacks: RunCallbacks,
+    idx: int,
+    n_total: int,
+    query_text,
+    query_idx: int,
+    query_total: int,
+) -> None:
+    callbacks.on_sample_started(idx, n_total, query_idx, query_total, query_text)
+
+
+def _emit_p_best(
+    callbacks: RunCallbacks,
+    round_num: int,
+    idx: int,
+    n: int,
+    snap,
+) -> None:
+    callbacks.on_p_best_update(round_num, idx, n, snap)
 
 
 class CandidateOutcome(StrEnum):
@@ -392,12 +425,6 @@ async def score_one_candidate(
             ),
         )
 
-    def _on_query_scored(r, qi, qt, _ci=idx):
-        callbacks.on_sample_scored(_ci, n_total, qi, qt, r)
-
-    def _on_query_starting(qtxt, qi, qt, _ci=idx):
-        callbacks.on_sample_started(_ci, n_total, qi, qt, qtxt)
-
     results, scores, was_cached, signal = await score_search_point(
         osp_c.to_job_search_point(
             base_pipeline_params=merged_pp, schema=cycle.session.pipeline_schema
@@ -405,8 +432,8 @@ async def score_one_candidate(
         dataset,
         cycle.session,
         label=f"candidate_{idx}",
-        on_query_scored=_on_query_scored,
-        on_query_starting=_on_query_starting,
+        on_query_scored=partial(_on_query_scored, callbacks, idx, n_total),
+        on_query_starting=partial(_on_query_starting, callbacks, idx, n_total),
         degradation_checks=[*(degradation_checks or []), elim_check],
         candidate_idx=idx,
         n_total_candidates=n_total,
@@ -550,19 +577,6 @@ async def score_population(
     escalation_signal: EscalationSignal | None = None
     elim_check = PoBBCheck(pobb_config, n_queries=len(dataset))
 
-    def _fire(idx: int, report: CandidateScore) -> None:
-        candidate_scores.append(report)
-        callbacks.on_candidate_scored(idx, n, report.to_dict())
-        if obs:
-            with graceful("CandidateScored emit failed"):
-                obs.emit_write_point(
-                    CandidateScored,
-                    campaign_id=session.state.tracing_campaign_id,
-                    round_num=round_num,
-                    candidate_idx=idx,
-                    report=report.to_dict(),
-                )
-
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         callbacks.on_candidate_started(
@@ -570,12 +584,10 @@ async def score_population(
         )
         # Bind the PoBBCheck to this candidate so its per-query snapshot
         # lands on the live telemetry stream tagged with the right id.
-        _candidate_idx = idx
-
-        def _emit_p_best(snap, _ci=_candidate_idx) -> None:
-            callbacks.on_p_best_update(round_num, _ci, n, snap)
-
-        elim_check.set_current(osp_c.lineage.id, on_snapshot=_emit_p_best)
+        elim_check.set_current(
+            osp_c.lineage.id,
+            on_snapshot=partial(_emit_p_best, callbacks, round_num, idx, n),
+        )
 
         cr_result = await score_one_candidate(
             idx=idx,
@@ -596,7 +608,17 @@ async def score_population(
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:
             osp_c.runtime_failures = [*osp_c.runtime_failures, cr_result.runtime_failure]
-        _fire(idx, cr_result.report)
+        candidate_scores.append(cr_result.report)
+        callbacks.on_candidate_scored(idx, n, cr_result.report.to_dict())
+        if obs:
+            with graceful("CandidateScored emit failed"):
+                obs.emit_write_point(
+                    CandidateScored,
+                    campaign_id=session.state.tracing_campaign_id,
+                    round_num=round_num,
+                    candidate_idx=idx,
+                    report=cr_result.report.to_dict(),
+                )
 
         if cr_result.outcome == CandidateOutcome.LEADER_LOCKED:
             break  # round leader confirmed — skip remaining candidates
