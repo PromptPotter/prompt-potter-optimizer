@@ -37,7 +37,9 @@ import pytest
 
 from promptpotter.application.optimization.escalation import (
     _apply_l2,
+    _apply_l3,
     _parse_l2,
+    _parse_l3,
     apply_sweep_payload_to_osp,
 )
 from promptpotter.application.optimization.l1_validators import detect_invariants
@@ -449,3 +451,64 @@ def test_axis_memory_renderer_compact_block_with_digest():
     assert out.startswith("AXIS MEMORY:")
     assert "  top_axes: persona (effect=0.12)" in out
     assert "  dead_queries: 3 queries never hit" in out
+
+
+# ===========================================================================
+# l3_to_l2_note — sticky L3→L2 channel, invisible to L1
+# ===========================================================================
+
+
+def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
+    """Hard structural guard: the note channel is L2-only. Adding it to
+    ``L1_POSSIBLE`` would let L2 leak L3's L2-private guidance to L1."""
+    from promptpotter.application.optimization.dispatch_hub import SIGNALS
+    from promptpotter.domain.l1_layout import L1_POSSIBLE
+
+    assert "l3_to_l2_note" in SIGNALS
+    assert "l3_to_l2_note" not in L1_POSSIBLE
+
+
+def test_l3_note_is_memory_field_and_survives_clear_volatile():
+    """Stickiness is implemented by two structural facts:
+    (1) ``l3_note`` is in ``MEMORY_FIELDS`` — copy_memory_to forwards it
+        across L2-fire OSP swaps in :func:`_run_transition`.
+    (2) :meth:`clear_volatile` does NOT clear it — its lifecycle is keyed
+        to L3 cadence, not L1 improvement."""
+    assert "l3_note" in OptSearchPoint.MEMORY_FIELDS
+
+    osp = _osp(l3_note="constraint X discovered, steer L2 around it")
+    osp.clear_volatile()
+    assert osp.l3_note == "constraint X discovered, steer L2 around it"
+
+    target = _osp()
+    osp.copy_memory_to(target)
+    assert target.l3_note == osp.l3_note
+
+
+def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
+    """L3 fire wholesale-replaces ``cycle.opt_sp.l3_note`` — even with an
+    empty/missing ``note``, prior content is wiped. That's the contract:
+    each L3 fire produces a complete (or null) note."""
+    from promptpotter.application.optimization.cycle import EscalationState
+
+    osp = _osp(plan="prior plan", l3_note="prior note")
+    raw = {"plan": "x" * 200, "note": "new sticky pointer", "rationale": "test"}
+    result = _parse_l3(raw, osp, prompt="<prompt>")
+    assert result.l3_note == "new sticky pointer"
+
+    # Mirror the order ``_run_transition`` applies: copy memory onto a
+    # fresh OSP (carries the prior note), then apply L3 (overwrites).
+    cycle = types.SimpleNamespace(
+        opt_sp=result.opt_search_point,
+        escalation=EscalationState(),
+        tracking=types.SimpleNamespace(best_accuracy=0.0, best_composite_fitness=0.0),
+    )
+    osp.copy_memory_to(cycle.opt_sp)
+    assert cycle.opt_sp.l3_note == "prior note"  # copy_memory_to forwarded
+    _apply_l3(cycle, result, round_num=5)
+    assert cycle.opt_sp.l3_note == "new sticky pointer"  # _apply_l3 replaced
+
+    # And: missing note → wipe.
+    raw_no_note = {"plan": "y" * 200, "rationale": "test"}
+    result2 = _parse_l3(raw_no_note, _osp(plan="p", l3_note="something"), prompt="<prompt>")
+    assert result2.l3_note == ""

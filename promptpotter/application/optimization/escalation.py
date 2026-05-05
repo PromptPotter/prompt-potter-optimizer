@@ -11,7 +11,9 @@ V1 contract:
   ``probe_round``) + optional ``axis_targeted`` / ``l1_layout`` /
   ``optimizer_params`` / ``task_context``. No L1-surface
   scheme/text/template overrides.
-* L3 writes ``plan`` (required). No ``pipeline_params`` deltas.
+* L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2
+  pointer; survives L2 fires, replaced wholesale on each L3 fire). No
+  ``pipeline_params`` deltas.
 """
 
 from __future__ import annotations
@@ -293,6 +295,8 @@ L2 = LayerStrategy(
 def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
     new_plan = raw.get("plan", opt_sp.plan) if isinstance(raw.get("plan"), str) else opt_sp.plan
     rationale = raw.get("rationale", "L3 modify_plan transition")
+    raw_note = raw.get("note")
+    note = raw_note if isinstance(raw_note, str) else ""
     failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
     if failures:
         logger.warning(
@@ -304,6 +308,7 @@ def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         opt_search_point=opt_sp.mutate(
             plan=new_plan, changes_description=f"L3: {rationale[:80]}", source="l3_plan"
         ),
+        l3_note=note,
         l3_output_failures=failures,
         debug_prompt=prompt,
         debug_response=raw,
@@ -311,6 +316,11 @@ def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+    # Order matters: ``_run_transition`` already ran ``copy_memory_to``
+    # which carried the *prior* l3_note onto the new OSP. We overwrite it
+    # with the L3 fire's output (possibly ``""`` when the LLM omitted
+    # ``note``) — that's the "cleared only when L3 fires again" contract.
+    cycle.opt_sp.l3_note = result.l3_note
     cycle.opt_sp.l3_output_failures = list(result.l3_output_failures)
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,

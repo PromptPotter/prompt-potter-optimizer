@@ -227,6 +227,13 @@ class OptSearchPoint(PromptTemplate):
     escalation_log: list[dict[str, Any]] = Field(default_factory=list)
     warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
     l2_brief: str = ""
+    # Sticky L3→L2 channel: L3 writes, L2 reads via the ``l3_to_l2_note``
+    # signal; never surfaced to L1 (absent from ``L1_POSSIBLE``). Persists
+    # across L2 fires via :data:`MEMORY_FIELDS`; replaced wholesale on each
+    # L3 fire (``_apply_l3``); deliberately NOT cleared by
+    # :meth:`clear_volatile` — its lifecycle is keyed to the L3 cadence,
+    # not the L1 improvement cycle.
+    l3_note: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     l2_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
@@ -250,6 +257,7 @@ class OptSearchPoint(PromptTemplate):
         "escalation_log",
         "warning_inventory",
         "l2_brief",
+        "l3_note",
         "validation_failures",
         "runtime_failures",
         "l2_output_failures",
