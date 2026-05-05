@@ -25,6 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import FailureAnalysis, RuntimeFailure, ValidationFailure
+from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
 
@@ -229,17 +230,21 @@ class OptSearchPoint(PromptTemplate):
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     l2_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
+    l3_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
     failure_analysis: FailureAnalysis | None = None
     round_history: list[RoundSummary] = Field(default_factory=list)
 
     # -- L1-generate surface state (owned by L2 mutations) ----------------
-    l1_section_overrides: dict[str, bool] = Field(default_factory=dict)
-    l1_section_overrides_text: dict[str, str] = Field(default_factory=dict)
-    l1_template_override: str = ""
+    # Per-slot list of placeholder names L2 picks from `L1_POSSIBLE`. The
+    # dispatch hub fills L1's PromptTemplate by walking this layout at
+    # render time. Default covers the mandatory placeholders without
+    # forcing L2 to write a layout on every fire.
+    l1_layout: L1Layout = Field(default_factory=default_l1_layout)
 
     # Fields preserved across L2/L3 transitions via copy_memory_to.
-    # L1 surface overrides MUST be in here so L3-spawned children inherit
-    # in-flight L2 toggles instead of being silently merged from a stale OSP.
+    # L1's layout MUST be in here so L3-spawned children inherit
+    # in-flight L2 layout edits instead of being silently merged from a
+    # stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "l1_critique_text",
         "escalation_log",
@@ -248,11 +253,10 @@ class OptSearchPoint(PromptTemplate):
         "validation_failures",
         "runtime_failures",
         "l2_output_failures",
+        "l3_output_failures",
         "failure_analysis",
         "round_history",
-        "l1_section_overrides",
-        "l1_section_overrides_text",
-        "l1_template_override",
+        "l1_layout",
     )
 
     # -- Memory helpers ----------------------------------------------------

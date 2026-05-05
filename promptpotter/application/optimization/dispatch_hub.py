@@ -541,15 +541,28 @@ class DispatchHub:
 # ---------------------------------------------------------------------------
 
 
-def build_bundle(layer: Layer, cycle: Cycle) -> Bundle:
+def build_bundle(
+    layer: Layer,
+    cycle: Cycle,
+    *,
+    latest_round: RoundResult | None = None,
+) -> Bundle:
     """Snapshot live cycle state into a Bundle for one optimizer LLM call.
 
     Reads the most recent round (if any) for diagnostics + critique, and
     the escalation/tracking counters for ``cycle_position``. Renderers
     don't see ``cycle`` directly — they see the snapshot.
+
+    Pass *latest_round* explicitly for L1_CRITIQUE: the just-completed round
+    has not yet been folded into ``cycle.rounds`` (that happens in
+    ``Cycle.absorb_round`` after critique fires), so the bundle must carry
+    it directly. L2/L3 read off ``cycle.rounds[-1]`` (post-fold).
     """
     rounds_tuple = tuple(cycle.rounds)
-    latest_round = rounds_tuple[-1] if rounds_tuple else None
+    if latest_round is not None and (not rounds_tuple or rounds_tuple[-1] is not latest_round):
+        rounds_tuple = (*rounds_tuple, latest_round)
+    elif latest_round is None and rounds_tuple:
+        latest_round = rounds_tuple[-1]
     latest_diag: RoundDiagnostics | None = (
         getattr(latest_round, "diagnostics", None) if latest_round else None
     )

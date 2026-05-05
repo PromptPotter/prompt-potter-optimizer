@@ -196,15 +196,12 @@ class SweepPayload(BaseModel):
     the sweep batch orchestrator; ``apply_sweep_payload_to_osp`` stamps the
     deltas onto a fresh fork's ``OptSearchPoint`` before the round loop runs.
     Field set is the same L1-surface owned by L2 (see
-    ``OptSearchPoint.l1_section_overrides`` and peers); operator authors a
-    payload by hand to test a specific L1-prompt hypothesis without firing
-    L2.
+    ``OptSearchPoint.l1_layout``); operator authors a payload by hand to
+    test a specific L1-prompt hypothesis without firing L2.
     """
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     reason: str = ""
     brief: str | None = None
-    l1_section_overrides: dict[str, bool] | None = None
-    l1_section_overrides_text: dict[str, str] | None = None
-    l1_template_override: str | None = None
+    l1_layout: dict[str, list[str]] | None = None

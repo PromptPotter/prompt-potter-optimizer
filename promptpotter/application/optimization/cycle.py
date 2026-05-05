@@ -800,6 +800,11 @@ class Cycle:
     # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None
 
+    @property
+    def latest_diagnostics(self) -> Any | None:
+        """Most recent round's :class:`RoundDiagnostics`, if any."""
+        return self.rounds[-1].diagnostics if self.rounds else None
+
     @classmethod
     def start(
         cls,

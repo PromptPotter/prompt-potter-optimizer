@@ -1,18 +1,22 @@
-"""Validators on L2's parsed output dict.
+"""Validators on L2/L3 parsed outputs.
 
-Each validator examines L2's freshly-parsed JSON response and produces a
-``ValidatorOutcome`` (or ``None`` when clean). A non-clean outcome lands on
-``OptSearchPoint.l2_output_failures`` and forces L3 escalation this round —
-L3 is L2's nurse-LLM, analogue of how L2 nurses L1 via validation_failures.
+V1 surface — soft signals only. Layout HARD validators
+(``mandatory_placeholders_present``, ``all_placeholders_known``,
+``no_dups_within_slot``) live in :mod:`domain.l1_layout` and run from
+``escalation._parse_l2`` directly; they roll back to the prior valid
+layout when they fail.
 
-Three starter validators (extensible registry — add more here):
+L2 soft validators here:
+* :data:`L2_DIRECTIVE_LENGTH_FLOOR` — directive is too short to carry signal.
+* :data:`L2_DIRECTIVE_VERBATIM_REPEAT` — same directive as last fire.
 
-* :data:`L2_CROSS_FIELD_DUPLICATION` — same N+ line block in ≥2 of
-  ``{brief, template_override, *text_overrides.values()}``.
-* :data:`L2_VERBATIM_SELF_REPEAT` — L2's ``brief`` this round equals the
-  previous round's brief on the OSP (L2 wrote the same thing again).
-* :data:`L2_CATALOGUE_REDUNDANCY` — a ``text_overrides[section]`` value
-  equals the section's existing override on the OSP (no-op write).
+L3 soft validators here:
+* :data:`L3_PLAN_LENGTH_FLOOR` — plan is too short to carry signal.
+* :data:`L3_PLAN_VERBATIM_REPEAT` — same plan as the prior plan.
+
+All outcomes append to ``opt_sp.l{2,3}_output_failures`` and surface to
+the next fire as self-healing evidence via the unified ``failures``
+signal.
 """
 
 from __future__ import annotations
@@ -23,84 +27,29 @@ from typing import Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
-DEFAULT_DUPLICATION_MIN_LINES = 3
+DIRECTIVE_LENGTH_FLOOR_CHARS = 40
+PLAN_LENGTH_FLOOR_CHARS = 60
 
 
-def _line_blocks(text: str, min_lines: int) -> list[str]:
-    """Return every contiguous block of ``min_lines`` non-blank lines.
-
-    Sliding window: for every starting line ``i``, the block
-    ``lines[i : i + min_lines]`` is included if all its lines are non-blank.
-    Trailing whitespace stripped per line; cross-block matching uses the
-    normalized form.
-    """
-    if not isinstance(text, str) or not text:
-        return []
-    lines = [ln.strip() for ln in text.splitlines()]
-    blocks: list[str] = []
-    for i in range(len(lines) - min_lines + 1):
-        window = lines[i : i + min_lines]
-        if all(window):
-            blocks.append("\n".join(window))
-    return blocks
-
-
-def _gather_l2_text_fields(source_output: Mapping[str, Any]) -> dict[str, str]:
-    """Map of {field_label: text} across L2's text-bearing output fields."""
-    out: dict[str, str] = {}
-    brief = source_output.get("brief")
-    if isinstance(brief, str) and brief:
-        out["brief"] = brief
-    tmpl = source_output.get("template_override")
-    if isinstance(tmpl, str) and tmpl:
-        out["template_override"] = tmpl
-    text_overrides = source_output.get("text_overrides") or {}
-    if isinstance(text_overrides, dict):
-        for section, val in text_overrides.items():
-            if isinstance(val, str) and val:
-                out[f"text_overrides.{section}"] = val
-    return out
-
-
-def _check_cross_field_duplication(
-    source_output: Mapping[str, Any],
-    *,
-    min_lines: int = DEFAULT_DUPLICATION_MIN_LINES,
-    **_: Any,
+def _check_directive_length_floor(
+    source_output: Mapping[str, Any], **_: Any
 ) -> ValidatorOutcome | None:
-    fields = _gather_l2_text_fields(source_output)
-    if len(fields) < 2:
+    directive = source_output.get("directive")
+    if not isinstance(directive, str):
         return None
-    block_origin: dict[str, list[str]] = {}
-    for field_label, text in fields.items():
-        for block in _line_blocks(text, min_lines):
-            block_origin.setdefault(block, []).append(field_label)
-    duplicates: list[dict[str, Any]] = []
-    seen_blocks: set[str] = set()
-    for block, origins in block_origin.items():
-        unique_origins = sorted(set(origins))
-        if len(unique_origins) < 2 or block in seen_blocks:
-            continue
-        seen_blocks.add(block)
-        duplicates.append(
-            {
-                "block": block,
-                "fields": unique_origins,
-                "line_count": min_lines,
-            }
-        )
-    if not duplicates:
+    text = directive.strip()
+    if len(text) >= DIRECTIVE_LENGTH_FLOOR_CHARS:
         return None
     return ValidatorOutcome(
-        validator_id=L2_CROSS_FIELD_DUPLICATION.id,
+        validator_id=L2_DIRECTIVE_LENGTH_FLOOR.id,
         passed=False,
-        score=0.0,
-        evidence={"duplicates": duplicates, "min_lines": min_lines},
+        score=0.5,
+        evidence={"length": len(text), "floor": DIRECTIVE_LENGTH_FLOOR_CHARS},
         nurse_target="l3",
     )
 
 
-def _check_verbatim_self_repeat(
+def _check_directive_verbatim_repeat(
     source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
@@ -108,24 +57,38 @@ def _check_verbatim_self_repeat(
 ) -> ValidatorOutcome | None:
     if opt_sp is None:
         return None
-    new_brief = source_output.get("brief")
-    if not isinstance(new_brief, str) or not new_brief.strip():
+    new_directive = source_output.get("directive")
+    if not isinstance(new_directive, str) or not new_directive.strip():
         return None
-    prev_brief = opt_sp.l2_brief or ""
-    if not prev_brief.strip():
-        return None
-    if new_brief.strip() != prev_brief.strip():
+    prev = (opt_sp.l2_brief or "").strip()
+    if not prev or new_directive.strip() != prev:
         return None
     return ValidatorOutcome(
-        validator_id=L2_VERBATIM_SELF_REPEAT.id,
+        validator_id=L2_DIRECTIVE_VERBATIM_REPEAT.id,
         passed=False,
         score=0.0,
-        evidence={"brief": new_brief},
+        evidence={"directive": new_directive},
         nurse_target="l3",
     )
 
 
-def _check_catalogue_redundancy(
+def _check_plan_length_floor(source_output: Mapping[str, Any], **_: Any) -> ValidatorOutcome | None:
+    plan = source_output.get("plan")
+    if not isinstance(plan, str):
+        return None
+    text = plan.strip()
+    if len(text) >= PLAN_LENGTH_FLOOR_CHARS:
+        return None
+    return ValidatorOutcome(
+        validator_id=L3_PLAN_LENGTH_FLOOR.id,
+        passed=False,
+        score=0.5,
+        evidence={"length": len(text), "floor": PLAN_LENGTH_FLOOR_CHARS},
+        nurse_target="l3",
+    )
+
+
+def _check_plan_verbatim_repeat(
     source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
@@ -133,69 +96,79 @@ def _check_catalogue_redundancy(
 ) -> ValidatorOutcome | None:
     if opt_sp is None:
         return None
-    text_overrides = source_output.get("text_overrides") or {}
-    if not isinstance(text_overrides, dict) or not text_overrides:
+    new_plan = source_output.get("plan")
+    if not isinstance(new_plan, str) or not new_plan.strip():
         return None
-    existing = opt_sp.l1_section_overrides_text or {}
-    redundant: list[dict[str, Any]] = []
-    for section, new_val in text_overrides.items():
-        if not isinstance(new_val, str) or not new_val:
-            continue
-        prev_val = existing.get(section, "")
-        if isinstance(prev_val, str) and prev_val.strip() and new_val.strip() == prev_val.strip():
-            redundant.append({"section": section, "value": new_val})
-    if not redundant:
+    prev = (opt_sp.plan or "").strip()
+    if not prev or new_plan.strip() != prev:
         return None
     return ValidatorOutcome(
-        validator_id=L2_CATALOGUE_REDUNDANCY.id,
+        validator_id=L3_PLAN_VERBATIM_REPEAT.id,
         passed=False,
         score=0.0,
-        evidence={"redundant_overrides": redundant},
+        evidence={"plan": new_plan},
         nurse_target="l3",
     )
 
 
-L2_CROSS_FIELD_DUPLICATION: LLMOutputValidator = LLMOutputValidator(
-    id="l2_cross_field_duplication",
+L2_DIRECTIVE_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
+    id="l2_directive_length_floor",
     description=(
-        "L2 wrote the same N+ line block into two different output fields "
-        "(brief / template_override / text_overrides[*]). Indicates a "
-        "broken strategy mode — L3 must rewrite the plan to refine L2's "
-        "brief shape so it stops duplicating itself."
+        "L2's directive is below the minimum length floor. A short directive "
+        "rarely carries enough strategic signal to steer L1 — the loop is "
+        "wasting a fire. L3 should refine the plan so the next L2 fire "
+        "produces a directive with concrete tactical guidance."
     ),
     nurse_target="l3",
-    check=_check_cross_field_duplication,
+    check=_check_directive_length_floor,
 )
 
 
-L2_VERBATIM_SELF_REPEAT: LLMOutputValidator = LLMOutputValidator(
-    id="l2_verbatim_self_repeat",
+L2_DIRECTIVE_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l2_directive_verbatim_repeat",
     description=(
-        "L2's brief this round equals the previous round's brief "
-        "on the OSP. L2 stalled and repeated itself — no learning. L3 must "
+        "L2's directive this round equals the previous round's directive on "
+        "the OSP. L2 stalled and repeated itself — no learning. L3 must "
         "replan to break the loop."
     ),
     nurse_target="l3",
-    check=_check_verbatim_self_repeat,
+    check=_check_directive_verbatim_repeat,
 )
 
 
-L2_CATALOGUE_REDUNDANCY: LLMOutputValidator = LLMOutputValidator(
-    id="l2_catalogue_redundancy",
+L3_PLAN_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
+    id="l3_plan_length_floor",
     description=(
-        "L2 wrote a text_overrides[section] whose value equals the existing "
-        "override on the OSP for that section. The override changes nothing. "
-        "L3 should refine the plan to direct L2 toward novel mutations."
+        "L3's plan is below the minimum length floor. A terse plan rarely "
+        "carries enough strategic framework to steer L2/L1 — surface as "
+        "evidence so the next L3 fire produces a richer plan."
     ),
     nurse_target="l3",
-    check=_check_catalogue_redundancy,
+    check=_check_plan_length_floor,
+)
+
+
+L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l3_plan_verbatim_repeat",
+    description=(
+        "L3's plan this fire equals the prior plan on the OSP. L3 repeated "
+        "itself — no strategic shift. Surface as evidence; if the loop "
+        "retriggers, the next L3 fire has the prior repetition as input."
+    ),
+    nurse_target="l3",
+    check=_check_plan_verbatim_repeat,
 )
 
 
 L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
-    L2_CROSS_FIELD_DUPLICATION,
-    L2_VERBATIM_SELF_REPEAT,
-    L2_CATALOGUE_REDUNDANCY,
+    L2_DIRECTIVE_LENGTH_FLOOR,
+    L2_DIRECTIVE_VERBATIM_REPEAT,
+)
+
+
+L3_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
+    L3_PLAN_LENGTH_FLOOR,
+    L3_PLAN_VERBATIM_REPEAT,
 )
 
 
@@ -204,8 +177,24 @@ def run_l2_output_validators(
     opt_sp: OptSearchPoint,
 ) -> list[ValidatorOutcome]:
     """Run every registered L2-output validator; return non-None outcomes."""
+    return _run(L2_OUTPUT_VALIDATORS, source_output, opt_sp)
+
+
+def run_l3_output_validators(
+    source_output: Mapping[str, Any],
+    opt_sp: OptSearchPoint,
+) -> list[ValidatorOutcome]:
+    """Run every registered L3-output validator; return non-None outcomes."""
+    return _run(L3_OUTPUT_VALIDATORS, source_output, opt_sp)
+
+
+def _run(
+    validators: tuple[LLMOutputValidator, ...],
+    source_output: Mapping[str, Any],
+    opt_sp: OptSearchPoint,
+) -> list[ValidatorOutcome]:
     outcomes: list[ValidatorOutcome] = []
-    for validator in L2_OUTPUT_VALIDATORS:
+    for validator in validators:
         outcome = validator.run(source_output, opt_sp=opt_sp)
         if outcome is not None:
             outcomes.append(outcome)

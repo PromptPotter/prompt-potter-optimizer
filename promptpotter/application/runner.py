@@ -101,8 +101,6 @@ async def _escalate_or_stop(
     session: Session,
     round_num: int,
     cb: RunCallbacks,
-    *,
-    escalation_check_result: dict | None = None,
 ) -> None:
     """Run L2 escalation; raise ``StopLoop`` if it returned a stop reason."""
     stop = await escalate_l2(
@@ -113,7 +111,6 @@ async def _escalate_or_stop(
         cb.on_phase,
         obs=session.state.obs,
         tracing_campaign_id=session.state.tracing_campaign_id,
-        escalation_check_result=escalation_check_result,
     )
     if stop:
         raise StopLoop(stop)
@@ -381,14 +378,7 @@ async def _force_l2(
     cb: RunCallbacks,
 ) -> None:
     """Force L2 (bypass stall counter) — diag-mode bridge to round-2 peek."""
-    await _escalate_or_stop(
-        cycle,
-        config,
-        session,
-        round_num,
-        cb,
-        escalation_check_result={"forced": "diag_mode"},
-    )
+    await _escalate_or_stop(cycle, config, session, round_num, cb)
 
 
 async def _run_round_loop(
@@ -481,14 +471,7 @@ async def _run_round_loop(
                             else None,
                         )
                     )
-                    await _escalate_or_stop(
-                        cycle,
-                        config,
-                        session,
-                        round_num,
-                        cb,
-                        escalation_check_result=signal.check_result,
-                    )
+                    await _escalate_or_stop(cycle, config, session, round_num, cb)
                 elif signal.is_abort:
                     raise StopLoop(StopReason.ABORT)
                 if session.state.cycle_id:
@@ -730,11 +713,7 @@ def _finalize_run(
                 osp = cycle.opt_sp
                 final_block["diag"] = {
                     "l2_brief": (osp.l2_brief or "").strip(),
-                    "l1_section_overrides": dict(osp.l1_section_overrides or {}),
-                    "l1_section_overrides_text_keys": sorted(
-                        (osp.l1_section_overrides_text or {}).keys()
-                    ),
-                    "l1_template_override": bool(osp.l1_template_override),
+                    "l1_layout": osp.l1_layout.model_dump(),
                 }
             # Seal top-level baseline against final.baseline_accuracy drift.
             session.store.campaigns.update(

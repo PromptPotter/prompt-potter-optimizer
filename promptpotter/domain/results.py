@@ -9,6 +9,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.analysis import EscalationSignal
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 __all__ = [
     "CandidateProposal",
@@ -16,8 +17,8 @@ __all__ = [
     "CycleResult",
     "PayloadOutcome",
     "RoundBaseline",
-    "RoundDiagnostics",
     "RoundMetadata",
+    "RoundPayload",
     "RoundResult",
     "SweepBatchResult",
 ]
@@ -141,7 +142,7 @@ class RoundMetadata(BaseModel):
     escalation_signal: EscalationSignal | None = None
 
 
-class RoundDiagnostics(BaseModel):
+class RoundPayload(BaseModel):
     """Raw round payload — what was tested and the per-candidate detail.
 
     These fields exist for replay (resume rescoring), audit (decisions log),
@@ -184,15 +185,28 @@ class RoundDiagnostics(BaseModel):
     l1_n_duplicate: int = 0
 
 
-class RoundResult(RoundMetadata, RoundDiagnostics):
+class RoundResult(RoundMetadata, RoundPayload):
     """Result of a single feedback cycle round.
 
-    Conjunction of `RoundMetadata` + `RoundDiagnostics`. Fields are flat at
+    Conjunction of `RoundMetadata` + `RoundPayload`. Fields are flat at
     the access level (`result.accuracy`, `result.results`) and serialize to a
     flat dict for wire-format compatibility with `index.json` / `trial_NNNN.json`.
+
+    The post-scoring deterministics (rank distribution, trajectory, near
+    misses, sample diagnostics) live on the optional ``diagnostics`` field
+    as :class:`promptpotter.domain.round_diagnostics.RoundDiagnostics` —
+    computed once after scoring + critique, read everywhere via the
+    dispatch hub's ``diagnostics`` signal.
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
+
+    # Filled in by ``execute_round`` after ``l1_score``; read by the
+    # dispatch hub's ``diagnostics`` signal renderer (layer-agnostic).
+    diagnostics: RoundDiagnostics | None = None
+    # Filled in by ``execute_round`` after ``run_l1_critique`` returns;
+    # read by the dispatch hub's ``critique`` signal renderer.
+    critique: dict | None = None
 
 
 class CycleResult(BaseModel):

@@ -52,30 +52,28 @@ def test_to_job_search_point_projects_prompt_fields_and_few_shot_block():
     assert OptSearchPoint(instruction="X").to_job_search_point().prompt_fields is None
 
 
-def test_copy_memory_carries_l1_surface_overrides_into_adoption_target():
-    """L2-written L1-surface state must survive L2→L3 adoption.
+def test_copy_memory_carries_l1_layout_into_adoption_target():
+    """L2-written L1 layout must survive L2→L3 adoption.
 
-    Regression for the audit finding: ``l1_section_overrides``,
-    ``l1_section_overrides_text`` and ``l1_template_override`` used to live
-    outside ``MEMORY_FIELDS``, so ``copy_memory_to`` silently dropped them
-    when L3 spawned a fresh OSP. Then ``apply_side_effects``'s in-place
-    ``{**existing, **new}`` merge would silently keep stale entries from
-    the OSP that was about to be defeated. Pinning here.
+    The L1 layout is L2's mutation surface for L1's prompt slots; if
+    ``copy_memory_to`` dropped it, an L3-spawned child would silently
+    revert to the default layout, losing in-flight L2 layout edits.
     """
-    parent = OptSearchPoint(
-        l1_section_overrides={"brief_block": False, "warning_inventory": True},
-        l1_section_overrides_text={"brief_block": "use pattern X"},
-        l1_template_override="reframed body with {{l2_brief}}",
+    from promptpotter.domain.l1_layout import L1Layout
+
+    custom = L1Layout(
+        persona=["plan"],
+        task_intent=["l2_directive"],
+        problem_description=["rendered_prompt", "pipeline_axes"],
     )
+    parent = OptSearchPoint(l1_layout=custom)
     child = OptSearchPoint()
     parent.copy_memory_to(child)
 
-    assert child.l1_section_overrides == {"brief_block": False, "warning_inventory": True}
-    assert child.l1_section_overrides_text == {"brief_block": "use pattern X"}
-    assert child.l1_template_override == "reframed body with {{l2_brief}}"
+    assert child.l1_layout.persona == ["plan"]
+    assert child.l1_layout.task_intent == ["l2_directive"]
+    assert child.l1_layout.problem_description == ["rendered_prompt", "pipeline_axes"]
 
-    # Deep-copy contract — mutating the child's dicts must NOT affect the parent.
-    child.l1_section_overrides["new_key"] = True
-    child.l1_section_overrides_text["another"] = "v"
-    assert "new_key" not in parent.l1_section_overrides
-    assert "another" not in parent.l1_section_overrides_text
+    # Deep-copy contract — mutating the child's L1Layout must NOT affect the parent.
+    child.l1_layout.persona.append("diagnostics")
+    assert "diagnostics" not in parent.l1_layout.persona

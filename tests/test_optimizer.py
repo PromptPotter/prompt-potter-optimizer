@@ -1,23 +1,27 @@
-"""Optimizer loop invariants — L1 detector, L2 output validators, PoBB
-elimination, sweep payload round-trip.
+"""Optimizer loop invariants — L1 detector, L2/L3 output validators, PoBB
+elimination, layout validators, sweep payload round-trip.
 
-Four named invariants:
+Six named invariants:
   1. L1 ``detect_invariants``: a candidate is a non-empty unique mutation
      of the parent OSP, else a ValidationFailure attaches → synth-0
      downstream. Idempotent under repeat calls; pipeline_params_override
      counts as mutation.
-  2. L2 output validators (``L2_CROSS_FIELD_DUPLICATION``,
-     ``L2_VERBATIM_SELF_REPEAT``, ``L2_CATALOGUE_REDUNDANCY``) flag the
-     three failure shapes with ``nurse_target='l3'``;
-     ``run_l2_output_validators`` aggregates and the L3 formatter renders
-     validator ids + 'gradual' action so L3 sees the failure type.
-  3. Bayesian PoBB: ``posterior_best_probabilities`` sums to 1.0; clear
+  2. L2 output validators (``L2_DIRECTIVE_LENGTH_FLOOR``,
+     ``L2_DIRECTIVE_VERBATIM_REPEAT``) flag the V1 failure shapes with
+     ``nurse_target='l3'``; ``run_l2_output_validators`` aggregates.
+  3. L3 output validators (``L3_PLAN_LENGTH_FLOOR``,
+     ``L3_PLAN_VERBATIM_REPEAT``) flag the plan-side V1 failures.
+  4. ``validate_l1_layout`` flips ``is_valid`` only on hard failures
+     (mandatory missing / unknown name / dup within slot); the
+     ``layout_unchanged_from_prior`` soft check fires without flipping
+     ``is_valid``.
+  5. Bayesian PoBB: ``posterior_best_probabilities`` sums to 1.0; clear
      leaders collapse to ~1.0; uniform regimes diffuse to ~1/K. ``PoBBCheck``
      respects ``n_min`` floor and ``lock_in_n_min`` lock-in gate;
      ``lock_in=1.0`` disables the lock-in branch.
-  4. ``SweepPayload`` round-trips through ``OptSearchPoint``: brief +
-     section overrides + template override survive ``model_dump`` → reload;
-     dict deltas merge (don't replace); extra keys rejected at parse.
+  6. ``SweepPayload`` round-trips through ``OptSearchPoint``: brief +
+     l1_layout dict survive ``model_dump`` → reload; mandatory layout
+     placeholders enforced; extra keys rejected at parse.
 """
 
 from __future__ import annotations
@@ -26,14 +30,16 @@ import numpy as np
 import pytest
 
 from promptpotter.application.optimization.escalation import apply_sweep_payload_to_osp
-from promptpotter.application.optimization.formatting import format_l2_output_failures_for_l3
 from promptpotter.application.optimization.l1_validators import detect_invariants
 from promptpotter.application.optimization.l2_validators import (
-    L2_CATALOGUE_REDUNDANCY,
-    L2_CROSS_FIELD_DUPLICATION,
-    L2_VERBATIM_SELF_REPEAT,
+    L2_DIRECTIVE_LENGTH_FLOOR,
+    L2_DIRECTIVE_VERBATIM_REPEAT,
+    L3_PLAN_LENGTH_FLOOR,
+    L3_PLAN_VERBATIM_REPEAT,
     run_l2_output_validators,
+    run_l3_output_validators,
 )
+from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
 from promptpotter.domain.run_records import SweepPayload
@@ -97,7 +103,7 @@ def test_duplicate_signature_attaches_validation_failure():
 
 
 # ===========================================================================
-# L2 output validators
+# L2 output validators (V1)
 # ===========================================================================
 
 
@@ -105,78 +111,103 @@ def _osp(**kwargs) -> OptSearchPoint:
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
 
 
-def test_cross_field_duplication_fires_on_repeated_block():
-    block = "step one\nstep two\nstep three"
-    out = L2_CROSS_FIELD_DUPLICATION.run(
-        {
-            "brief": f"intro\n{block}\nclose",
-            "template_override": f"prelude\n{block}\nepilogue",
-            "text_overrides": {},
-        },
-        opt_sp=_osp(),
-    )
+def test_directive_length_floor_fires_on_short_directive():
+    out = L2_DIRECTIVE_LENGTH_FLOOR.run({"directive": "be better"}, opt_sp=_osp())
     assert out is not None
     assert out.passed is False
-    assert out.score == 0.0
     assert out.nurse_target == "l3"
-    duplicates = out.evidence["duplicates"]
-    assert any(block == d["block"] for d in duplicates)
 
 
-def test_verbatim_self_repeat_fires_when_brief_matches_prev():
+def test_directive_verbatim_repeat_fires():
     osp = _osp(l2_brief="Use ONLY model X for now.")
-    out = L2_VERBATIM_SELF_REPEAT.run(
-        {"brief": "Use ONLY model X for now.", "text_overrides": {}},
-        opt_sp=osp,
-    )
+    out = L2_DIRECTIVE_VERBATIM_REPEAT.run({"directive": "Use ONLY model X for now."}, opt_sp=osp)
     assert out is not None
-    assert out.nurse_target == "l3"
-    assert "Use ONLY model X" in out.evidence["brief"]
-
-
-def test_catalogue_redundancy_fires_on_no_op_text_override():
-    osp = _osp(l1_section_overrides_text={"axes_l1": "do not propose model X"})
-    out = L2_CATALOGUE_REDUNDANCY.run(
-        {
-            "brief": "irrelevant",
-            "text_overrides": {"axes_l1": "do not propose model X"},
-        },
-        opt_sp=osp,
-    )
-    assert out is not None
-    assert any(r["section"] == "axes_l1" for r in out.evidence["redundant_overrides"])
+    assert out.score == 0.0
+    assert "Use ONLY model X" in out.evidence["directive"]
 
 
 def test_run_l2_output_validators_aggregates():
-    block = "alpha\nbeta\ngamma"
-    osp = _osp(
-        l2_brief="repeat me",
-        l1_section_overrides_text={"axes_l1": "no-op"},
-    )
-    outcomes = run_l2_output_validators(
-        {
-            "brief": "repeat me",
-            "template_override": f"hi\n{block}\nbye",
-            "text_overrides": {
-                "axes_l1": "no-op",
-                "axes_l2": f"{block}\nfooter",
-            },
-        },
-        opt_sp=osp,
-    )
+    osp = _osp(l2_brief="bad short")
+    outcomes = run_l2_output_validators({"directive": "bad short"}, osp)
     ids = {o.validator_id for o in outcomes}
-    assert "l2_cross_field_duplication" in ids
-    assert "l2_verbatim_self_repeat" in ids
-    assert "l2_catalogue_redundancy" in ids
+    assert "l2_directive_length_floor" in ids
+    assert "l2_directive_verbatim_repeat" in ids
 
 
-def test_format_for_l3_renders_validator_ids_and_action():
-    osp = _osp(l2_brief="repeat me")
-    outcomes = run_l2_output_validators({"brief": "repeat me", "text_overrides": {}}, opt_sp=osp)
-    rendered = format_l2_output_failures_for_l3(outcomes)
-    assert "L2 OUTPUT FAILURES" in rendered
-    assert "l2_verbatim_self_repeat" in rendered
-    assert "gradual" in rendered.lower()
+# ===========================================================================
+# L3 output validators (V1)
+# ===========================================================================
+
+
+def test_plan_length_floor_fires_on_short_plan():
+    out = L3_PLAN_LENGTH_FLOOR.run({"plan": "do better"}, opt_sp=_osp())
+    assert out is not None
+    assert out.passed is False
+    assert out.nurse_target == "l3"
+
+
+def test_plan_verbatim_repeat_fires():
+    osp = _osp(plan="Maintain current strategy and explore persona axis carefully.")
+    out = L3_PLAN_VERBATIM_REPEAT.run(
+        {"plan": "Maintain current strategy and explore persona axis carefully."}, opt_sp=osp
+    )
+    assert out is not None
+    assert out.score == 0.0
+
+
+def test_run_l3_output_validators_aggregates():
+    osp = _osp(plan="short")
+    outcomes = run_l3_output_validators({"plan": "short"}, osp)
+    ids = {o.validator_id for o in outcomes}
+    assert "l3_plan_length_floor" in ids
+    assert "l3_plan_verbatim_repeat" in ids
+
+
+# ===========================================================================
+# L1 layout validators
+# ===========================================================================
+
+
+def test_layout_missing_mandatory_placeholder_is_hard_failure():
+    """Mandatory placeholders must appear somewhere across all slots."""
+    bad = L1Layout(task_intent=["l2_directive"], problem_description=["rendered_prompt"])
+    result = validate_l1_layout(bad)
+    assert result.is_valid is False
+    ids = {o.validator_id for o in result.outcomes}
+    assert "l1_layout_missing_mandatory" in ids
+
+
+def test_layout_unknown_placeholder_is_hard_failure():
+    """Placeholder names must be in L1_POSSIBLE."""
+    bad = L1Layout(
+        task_intent=["l2_directive", "made_up_signal"],
+        problem_description=["rendered_prompt", "pipeline_axes", "plan"],
+    )
+    result = validate_l1_layout(bad)
+    assert result.is_valid is False
+    ids = {o.validator_id for o in result.outcomes}
+    assert "l1_layout_unknown_placeholder" in ids
+
+
+def test_layout_duplicate_within_slot_is_hard_failure():
+    """No slot may list the same placeholder twice."""
+    bad = L1Layout(
+        task_intent=["l2_directive", "l2_directive"],
+        problem_description=["rendered_prompt", "pipeline_axes", "plan"],
+    )
+    result = validate_l1_layout(bad)
+    assert result.is_valid is False
+    ids = {o.validator_id for o in result.outcomes}
+    assert "l1_layout_dups_within_slot" in ids
+
+
+def test_layout_unchanged_from_prior_is_soft():
+    """Soft signal: layout proposed but identical to prior — flag, don't block."""
+    layout = default_l1_layout()
+    result = validate_l1_layout(layout, prior_layout=layout)
+    assert result.is_valid is True  # soft fires WITHOUT flipping is_valid
+    ids = {o.validator_id for o in result.outcomes}
+    assert "l1_layout_unchanged_from_prior" in ids
 
 
 # ===========================================================================
@@ -262,52 +293,39 @@ def test_pobb_locks_in_dominant_leader():
 # ===========================================================================
 
 
+def _full_layout_dict() -> dict[str, list[str]]:
+    """Layout with all mandatory placeholders — passes hard validators."""
+    return default_l1_layout().model_dump()
+
+
 def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
+    layout_dict = _full_layout_dict()
     payload = SweepPayload(
         reason="canonical case",
         brief="reason step-by-step before answering",
-        l1_section_overrides={"axes_l1": False},
-        l1_section_overrides_text={"task_context": "hard reasoning framing"},
-        l1_template_override="{{l2_brief}}\n\nCustom body.",
+        l1_layout=layout_dict,
     )
 
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
     apply_sweep_payload_to_osp(osp, payload)
 
-    # The fields land where compile_prompt_vars reads them (L1-generate overrides).
     assert osp.l2_brief == payload.brief
-    assert osp.l1_section_overrides == {"axes_l1": False}
-    assert osp.l1_section_overrides_text == {"task_context": "hard reasoning framing"}
-    assert osp.l1_template_override == payload.l1_template_override
+    assert osp.l1_layout.model_dump() == layout_dict
 
-    # The same model_dump path the round_data writer uses → OptSearchPoint(**dump).
-    # If any of these four fields stops being a persisted Pydantic field,
-    # this reconstruction loses state and the assertions below fail.
     dump = osp.model_dump()
     reloaded = OptSearchPoint(**dump)
 
     assert reloaded.l2_brief == payload.brief
-    assert reloaded.l1_section_overrides == {"axes_l1": False}
-    assert reloaded.l1_section_overrides_text == {"task_context": "hard reasoning framing"}
-    assert reloaded.l1_template_override == payload.l1_template_override
+    assert reloaded.l1_layout.model_dump() == layout_dict
 
 
-def test_sweep_payload_merges_with_existing_overrides() -> None:
-    """Apply mirrors L2RefineStrategy.apply_side_effects: dict deltas merge,
-    str scalars assign. A second payload extends the first's section dicts
-    (not replace) so a sweep over a non-fresh OSP doesn't drop prior keys."""
-    osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
-    osp.l1_section_overrides = {"plan": True}
-    osp.l1_section_overrides_text = {"l2_brief": "original"}
-
-    payload = SweepPayload(
-        l1_section_overrides={"axes_l1": False},
-        l1_section_overrides_text={"task_context": "added"},
-    )
-    apply_sweep_payload_to_osp(osp, payload)
-
-    assert osp.l1_section_overrides == {"plan": True, "axes_l1": False}
-    assert osp.l1_section_overrides_text == {
-        "l2_brief": "original",
-        "task_context": "added",
+def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
+    """Hard validator: every L1_MANDATORY placeholder must appear somewhere."""
+    bad_layout = {
+        "task_intent": ["l2_directive"],
+        "problem_description": ["rendered_prompt"],  # missing pipeline_axes + plan
     }
+    payload = SweepPayload(brief="x", l1_layout=bad_layout)
+    osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
+    with pytest.raises(ValueError, match="hard validators"):
+        apply_sweep_payload_to_osp(osp, payload)

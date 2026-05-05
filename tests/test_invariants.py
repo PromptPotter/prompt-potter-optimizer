@@ -658,9 +658,7 @@ def _scan_violations() -> set[tuple[str, str]]:
 
 _CYCLE_FORBIDDEN_PROMPT_SURFACE = frozenset(
     {
-        "promptpotter.application.optimization.dispatch",
-        "promptpotter.application.optimization.l1_surface",
-        "promptpotter.application.optimization.l2_surface",
+        "promptpotter.application.optimization.dispatch_hub",
         "promptpotter.application.optimization.l1_critique",
         "promptpotter.application.optimization.transitions",
         "promptpotter.application.optimization.escalation",

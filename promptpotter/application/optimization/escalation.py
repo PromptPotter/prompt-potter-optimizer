@@ -5,6 +5,12 @@ forbidden by ``tests/test_layer_imports.py``. Both layers share the same
 ``LayerStrategy`` shape — per-layer differences live in module-level
 ``_parse_*`` / ``_apply_*`` / ``_*_enter`` / ``_*_exit`` callables wired
 into the ``L2`` and ``L3`` instances.
+
+V1 contract:
+* L2 writes ``directive`` (required) + optional ``l1_layout`` /
+  ``optimizer_params`` / ``task_context``. No ``action`` (no probe rounds),
+  no L1-surface scheme/text/template overrides.
+* L3 writes ``plan`` (required). No ``pipeline_params`` deltas.
 """
 
 from __future__ import annotations
@@ -15,20 +21,26 @@ from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.optimization.cycle import NextAction
-from promptpotter.application.optimization.dispatch import (
-    LAYER_CONFIGS,
+from promptpotter.application.optimization.dispatch_hub import (
+    DispatchHub,
     Layer,
-    build_dispatch_state,
-    compile_prompt_vars,
+    build_bundle,
 )
 from promptpotter.application.optimization.formatting import warning_summary
-from promptpotter.application.optimization.l2_surface import compile_l2_extras
-from promptpotter.application.optimization.l2_validators import run_l2_output_validators
+from promptpotter.application.optimization.l2_validators import (
+    run_l2_output_validators,
+    run_l3_output_validators,
+)
+from promptpotter.application.optimization.llm_call import load_optimizer_prompt
 from promptpotter.application.optimization.transitions import (
-    OptimizerAction,
     TransitionResult,
-    compile_l3_extras,
     run_layer_transition,
+)
+from promptpotter.domain.l1_layout import (
+    L1_LAYOUT_SLOTS,
+    L1Layout,
+    default_l1_layout,
+    validate_l1_layout,
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
@@ -53,22 +65,45 @@ __all__ = [
 ]
 
 
+def _coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
+    """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
+
+    Returns ``None`` when the input is empty or shaped wrong; lets the
+    validator surface mandatory-presence/unknown-name failures uniformly
+    rather than crashing on a Pydantic validation error here.
+    """
+    if not isinstance(raw_layout, dict) or not raw_layout:
+        return None
+    sanitised: dict[str, list[str]] = {}
+    for slot in L1_LAYOUT_SLOTS:
+        vals = raw_layout.get(slot)
+        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
+            sanitised[slot] = list(vals)
+    if not sanitised:
+        return None
+    try:
+        return L1Layout(**sanitised)
+    except Exception:
+        return None
+
+
 def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
-    """Merge sweep-supplied L1 surface deltas onto the OSP — same shape L2 writes."""
-    if payload.l1_section_overrides:
-        opt_sp.l1_section_overrides = {
-            **opt_sp.l1_section_overrides,
-            **payload.l1_section_overrides,
-        }
-    if payload.l1_section_overrides_text:
-        opt_sp.l1_section_overrides_text = {
-            **opt_sp.l1_section_overrides_text,
-            **payload.l1_section_overrides_text,
-        }
-    if payload.l1_template_override:
-        opt_sp.l1_template_override = payload.l1_template_override
+    """Stamp operator's L1-surface deltas on the OSP — same shape L2 writes."""
     if payload.brief:
         opt_sp.l2_brief = payload.brief
+    if payload.l1_layout is not None:
+        layout = _coerce_l1_layout(payload.l1_layout)
+        if layout is None:
+            raise ValueError(
+                f"Sweep payload l1_layout is unparseable: {payload.l1_layout!r}. "
+                "Expect a dict whose keys are L1 layout slots and values are lists of "
+                "placeholder names."
+            )
+        result = validate_l1_layout(layout, prior_layout=opt_sp.l1_layout)
+        if not result.is_valid:
+            ids = sorted({o.validator_id for o in result.outcomes if not o.passed})
+            raise ValueError(f"Sweep payload l1_layout failed hard validators: {ids}")
+        opt_sp.l1_layout = layout
 
 
 # ---------------------------------------------------------------------------
@@ -76,8 +111,7 @@ def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) ->
 # ---------------------------------------------------------------------------
 
 
-ExtrasFn = Callable[["Cycle", dict | None], dict[str, str]]
-ParseFn = Callable[[dict, OptSearchPoint, str, dict | None], TransitionResult]
+ParseFn = Callable[[dict, OptSearchPoint, str], TransitionResult]
 ApplyFn = Callable[["Cycle", TransitionResult, int], None]
 PayloadFn = Callable[["Cycle"], dict[str, Any]]
 ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
@@ -89,48 +123,18 @@ class LayerStrategy:
     template_name: str
     default_temperature: float
     phase: CampaignPhase
-    extras: ExtrasFn
     parse: ParseFn
     apply: ApplyFn
     enter_payload_fn: PayloadFn
     exit_payload_fn: ExitFn
-    needs_candidate_scores: bool = False  # L2 reads cycle.rounds[-1].candidate_scores
 
-    def build_prompt_vars(
-        self,
-        cycle: Cycle,
-        *,
-        pipeline_params: dict | None,
-        round_num: int,
-        escalation_check_result: dict | None,
-    ) -> dict:
-        scores = (
-            cycle.rounds[-1].candidate_scores
-            if self.needs_candidate_scores and cycle.rounds
-            else None
-        )
-        state = build_dispatch_state(
-            self.layer,
-            cycle,
-            round_num=round_num,
-            pipeline_schema=cycle.session.pipeline_schema,
-            pipeline_params=pipeline_params,
-            candidate_scores=scores,
-            escalation_check_result=escalation_check_result,
-        )
-        return compile_prompt_vars(
-            self.layer, state, cycle.opt_sp, extras=self.extras(cycle, pipeline_params)
-        )
+    def build_prompt_vars(self, cycle: Cycle) -> dict[str, str]:
+        bundle = build_bundle(self.layer, cycle)
+        template = load_optimizer_prompt(self.template_name)
+        return DispatchHub.fill_fixed(template, bundle)
 
-    def build_result(
-        self,
-        raw: dict,
-        opt_sp: OptSearchPoint,
-        prompt: str,
-        *,
-        pipeline_params: dict | None,
-    ) -> TransitionResult:
-        return self.parse(raw, opt_sp, prompt, pipeline_params)
+    def build_result(self, raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+        return self.parse(raw, opt_sp, prompt)
 
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         self.apply(cycle, result, round_num)
@@ -147,15 +151,11 @@ class LayerStrategy:
 # ---------------------------------------------------------------------------
 
 
-def _parse_l2(
-    raw: dict, opt_sp: OptSearchPoint, prompt: str, pipeline_params: dict | None
-) -> TransitionResult:
-    section_names = set(LAYER_CONFIGS[Layer.L1_GENERATE].sections.keys())
-
+def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
     changes: dict[str, Any] = {
         "changes_description": f"L2: {raw.get('rationale', 'L2 refine_strategy transition')[:80]}"
     }
-    if raw.get("optimizer_params"):
+    if isinstance(raw.get("optimizer_params"), dict) and raw["optimizer_params"]:
         changes["optimizer_params"] = {**opt_sp.optimizer_params, **raw["optimizer_params"]}
 
     new_task_context = None
@@ -164,43 +164,19 @@ def _parse_l2(
         if merged.to_dict() != opt_sp.task_context.to_dict():
             new_task_context = merged
 
-    try:
-        action = OptimizerAction(raw.get("action", "normal_round"))
-    except ValueError:
-        action = OptimizerAction.NORMAL_ROUND
+    directive = raw.get("directive", "") if isinstance(raw.get("directive"), str) else ""
 
-    brief = raw.get("brief", "") if isinstance(raw.get("brief"), str) else ""
+    proposed_layout = _coerce_l1_layout(raw.get("l1_layout"))
+    layout_outcomes: list = []
+    accepted_layout: L1Layout | None = None
+    if proposed_layout is not None:
+        result = validate_l1_layout(proposed_layout, prior_layout=opt_sp.l1_layout)
+        layout_outcomes = list(result.outcomes)
+        if result.is_valid:
+            accepted_layout = proposed_layout
 
-    def _filter_known(d: Any, kind: str) -> dict:
-        if not isinstance(d, dict):
-            return {}
-        out: dict = {}
-        for k, v in d.items():
-            if k in section_names:
-                out[k] = v
-            else:
-                logger.warning("L2 %s: ignoring unknown section %r", kind, k)
-        return out
-
-    scheme_overrides = {
-        k: bool(v)
-        for k, v in _filter_known(raw.get("scheme_overrides"), "scheme_overrides").items()
-    }
-    text_overrides = {
-        k: str(v) for k, v in _filter_known(raw.get("text_overrides"), "text_overrides").items()
-    }
-    template_override = (
-        raw.get("template_override", "") if isinstance(raw.get("template_override"), str) else ""
-    )
-
-    failures = run_l2_output_validators(
-        {
-            "brief": brief,
-            "template_override": template_override,
-            "text_overrides": dict(text_overrides),
-        },
-        opt_sp,
-    )
+    failures = run_l2_output_validators({"directive": directive}, opt_sp)
+    failures.extend(layout_outcomes)
     if failures:
         logger.warning(
             "L2 output failed %d validator(s): %s",
@@ -211,11 +187,8 @@ def _parse_l2(
     return TransitionResult(
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
         task_context=new_task_context,
-        l2_brief=brief,
-        action=action,
-        scheme_overrides=scheme_overrides,
-        text_overrides=text_overrides,
-        template_override=template_override,
+        l2_brief=directive,
+        l1_layout=accepted_layout,
         l2_output_failures=failures,
         debug_prompt=prompt,
         debug_response=raw,
@@ -227,33 +200,13 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     if result.task_context:
         osp.task_context = result.task_context
     osp.l2_brief = result.l2_brief
-    if result.scheme_overrides:
-        osp.l1_section_overrides = {**osp.l1_section_overrides, **result.scheme_overrides}
-    if result.text_overrides:
-        osp.l1_section_overrides_text = {**osp.l1_section_overrides_text, **result.text_overrides}
-    if result.template_override:
-        osp.l1_template_override = result.template_override
+    if result.l1_layout is not None:
+        osp.l1_layout = result.l1_layout
     osp.l2_output_failures = list(result.l2_output_failures)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
     )
-
-    is_probe = result.action == OptimizerAction.PROBE_ROUND
-    record_decision(
-        cycle.pending_decisions,
-        DecisionKind.PROBE_ROUND_COMMITMENT,
-        {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
-        is_probe,
-        data={
-            "action": str(result.action),
-            "l2_brief_preview": (result.l2_brief or "")[:200],
-            "changes_description": result.opt_search_point.lineage.changes_description or "",
-        },
-        round=round_num,
-    )
-    if is_probe:
-        cycle.probe_next_round = True
 
 
 def _l2_enter(cycle: Cycle) -> dict[str, Any]:
@@ -277,13 +230,8 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
         "param_changes_count": len(result.opt_search_point.optimizer_params),
         "task_context_changed": result.task_context is not None,
-        "scheme_overrides_count": len(result.scheme_overrides),
-        "text_overrides_count": len(result.text_overrides),
-        "template_override_changed": bool(result.template_override),
+        "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_search_point.lineage.changes_description or "",
-        "pipeline_params_changed": result.pipeline_params is not None,
-        "pipeline_params": result.pipeline_params,
-        "action": result.action,
         "warned_queries": warned,
         "top_warning": top,
         "l2_prompt": result.debug_prompt,
@@ -296,48 +244,40 @@ L2 = LayerStrategy(
     template_name="l2_context",
     default_temperature=0.3,
     phase=CampaignPhase.REFINE_STRATEGY,
-    extras=lambda c, _: compile_l2_extras(c.opt_sp),
     parse=_parse_l2,
     apply=_apply_l2,
     enter_payload_fn=_l2_enter,
     exit_payload_fn=_l2_exit,
-    needs_candidate_scores=True,
 )
 
 
 # ---------------------------------------------------------------------------
-# L3 — modify the strategic plan + optional pipeline_params deltas.
+# L3 — modify the strategic plan (V1 minimal — plan only).
 # ---------------------------------------------------------------------------
 
 
-def _parse_l3(
-    raw: dict, opt_sp: OptSearchPoint, prompt: str, pipeline_params: dict | None
-) -> TransitionResult:
-    new_plan = raw.get("plan", opt_sp.plan)
+def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    new_plan = raw.get("plan", opt_sp.plan) if isinstance(raw.get("plan"), str) else opt_sp.plan
     rationale = raw.get("rationale", "L3 modify_plan transition")
-
-    new_pp: dict | None = None
-    pp_changes = raw.get("pipeline_params")
-    if isinstance(pp_changes, dict) and pp_changes:
-        merged = dict(pipeline_params or {})
-        for key, value in pp_changes.items():
-            if isinstance(value, dict) and isinstance(merged.get(key), dict):
-                merged[key] = {**merged[key], **value}
-            else:
-                merged[key] = value
-        new_pp = merged
-
+    failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
+    if failures:
+        logger.warning(
+            "L3 output failed %d validator(s): %s",
+            len(failures),
+            ", ".join(o.validator_id for o in failures),
+        )
     return TransitionResult(
         opt_search_point=opt_sp.mutate(
             plan=new_plan, changes_description=f"L3: {rationale[:80]}", source="l3_plan"
         ),
-        pipeline_params=new_pp,
+        l3_output_failures=failures,
         debug_prompt=prompt,
         debug_response=raw,
     )
 
 
 def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+    cycle.opt_sp.l3_output_failures = list(result.l3_output_failures)
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -362,7 +302,6 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l3_best_composite_fitness_at_entry": cycle.escalation.l3_best_composite_fitness_at_entry,
         "new_plan_preview": str(result.opt_search_point.plan)[:120],
         "changes_description": result.opt_search_point.lineage.changes_description or "",
-        "pipeline_params_changed": result.pipeline_params is not None,
     }
 
 
@@ -371,7 +310,6 @@ L3 = LayerStrategy(
     template_name="l3_plan",
     default_temperature=0.5,
     phase=CampaignPhase.MODIFY_PLAN,
-    extras=lambda c, pp: compile_l3_extras(c, pp),
     parse=_parse_l3,
     apply=_apply_l3,
     enter_payload_fn=_l3_enter,
@@ -387,6 +325,12 @@ L3 = LayerStrategy(
 _TEMP_ATTR: dict[Layer, str] = {Layer.L2: "l2_temperature", Layer.L3: "l3_temperature"}
 
 
+# Module-default L1 layout so apply_sweep_payload_to_osp can be invoked
+# before L2 fires for the first time without importing default_l1_layout
+# at every callsite.
+_ = default_l1_layout  # keep import live for type-checker reachability
+
+
 async def _run_transition(
     transition: LayerStrategy,
     cycle: Cycle,
@@ -397,7 +341,6 @@ async def _run_transition(
     *,
     obs: ObservabilityBridge | None,
     tracing_campaign_id: str,
-    escalation_check_result: dict | None = None,
 ) -> Any:
     """enter → call → adopt → LayerApplied → side-effects → exit."""
     assert cycle.tracking.current_sp is not None
@@ -420,15 +363,13 @@ async def _run_transition(
             client,
             model=config.optimizer_llm.model,
             temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer]),
-            pipeline_params=current_pp,
             round_num=round_num,
-            escalation_check_result=escalation_check_result,
         )
     new_opt = result.opt_search_point
     cycle.opt_sp.copy_memory_to(new_opt)
     cycle.opt_sp = new_opt
     cycle.tracking.current_sp = new_opt.to_job_search_point(
-        base_pipeline_params=result.pipeline_params or current_pp, schema=pipeline_schema
+        base_pipeline_params=current_pp, schema=pipeline_schema
     )
     if obs is not None:
         with graceful(f"LayerApplied({transition.layer}) emit failed"):
@@ -485,7 +426,6 @@ async def escalate_l2(
     on_phase: Callable[[PhaseEvent], None] | None = None,
     obs: ObservabilityBridge | None = None,
     tracing_campaign_id: str = "",
-    escalation_check_result: dict | None = None,
 ) -> StopReason | None:
     """Drive an L2 (or cascading L3) escalation: observe state, fire layer,
     record divergence-gated decisions, return a stop reason or None.
@@ -529,7 +469,6 @@ async def escalate_l2(
             on_phase,
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
-            escalation_check_result=escalation_check_result,
         )
         # Loop 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data

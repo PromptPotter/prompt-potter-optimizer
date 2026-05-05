@@ -13,10 +13,10 @@ from enum import StrEnum
 from typing import TYPE_CHECKING
 
 from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
-from promptpotter.application.optimization.dispatch import (
+from promptpotter.application.optimization.dispatch_hub import (
+    DispatchHub,
     Layer,
-    build_dispatch_state,
-    compile_prompt_vars,
+    build_bundle,
 )
 from promptpotter.application.optimization.elimination import PoBBCheck, PoBBConfig
 from promptpotter.application.optimization.formatting import candidate_summaries
@@ -39,6 +39,9 @@ from promptpotter.application.optimization.l1_validators import (
 from promptpotter.application.optimization.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
+)
+from promptpotter.application.optimization.round_diagnostics import (
+    compute_round_diagnostics,
 )
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
@@ -114,27 +117,13 @@ async def l1_generate(
     pipeline_schema = cycle.session.pipeline_schema
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
-    state = build_dispatch_state(
-        Layer.L1_GENERATE,
-        cycle,
-        round_num=round_num,
-        pipeline_schema=pipeline_schema,
-    )
-    prompt_vars = compile_prompt_vars(
-        Layer.L1_GENERATE,
-        state,
-        opt_sp,
-        extras={
-            "n_variants": str(n_variants),
-            "accuracy_pct": f"{cycle.tracking.current_accuracy:.1%}",
-            "n_queries": str(len(cycle.tracking.current_results)),
-            "rendered_prompt": opt_sp.render(),
-        },
-    )
-
-    template = load_optimizer_prompt("l1_generate")
-    if opt_sp.l1_template_override:
-        template = template.model_copy(update={"problem_description": opt_sp.l1_template_override})
+    bundle = build_bundle(Layer.L1_GENERATE, cycle)
+    template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
+    prompt_vars: dict[str, str] = {
+        "n_variants": str(n_variants),
+        "accuracy_pct": f"{cycle.tracking.current_accuracy:.1%}",
+        "n_queries": str(len(cycle.tracking.current_results)),
+    }
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     generated, meta_prompt = await run_optimizer_node(
@@ -148,11 +137,11 @@ async def l1_generate(
         template=template,
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
-    section_sizes = sorted(
+    slot_sizes = sorted(
         (
-            (name, len(value.rstrip()))
-            for name, value in prompt_vars.items()
-            if value and value.strip()
+            (slot, len(slot_text.rstrip()))
+            for slot in ("persona", "task_intent", "problem_description", "thinking_style")
+            if (slot_text := getattr(template, slot)) and slot_text.strip()
         ),
         key=lambda x: -x[1],
     )
@@ -160,7 +149,7 @@ async def l1_generate(
         "L1 R%d meta-prompt: %d chars | %s",
         round_num,
         len(meta_prompt),
-        " | ".join(f"{n}={s}" for n, s in section_sizes[:6]),
+        " | ".join(f"{n}={s}" for n, s in slot_sizes),
     )
 
     variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
@@ -961,6 +950,17 @@ async def execute_round(
         candidate_scores=round_result.candidate_scores,
     )
 
+    # Compute deterministic post-scoring stats once and attach to the round
+    # result. The dispatch hub's ``diagnostics`` signal reads this; rendering
+    # is layer-agnostic so the same payload feeds L1_CRITIQUE / L2 / L3.
+    rounds_history = [*cycle.rounds, round_result]
+    round_result.diagnostics = compute_round_diagnostics(
+        round_result,
+        rounds_history,
+        session.pipeline_schema,
+        prompt_chars=len(cycle.opt_sp.render()),
+    )
+
     critique_text = ""
     if round_result.results and not skip_critique:
         crit_llm = _llm_client.get_llm_client(config.optimizer_llm.provider)
@@ -976,6 +976,7 @@ async def execute_round(
                 model=config.optimizer_llm.model,
                 recorder=session.state.audit_projection,
             )
+            round_result.critique = critique_result
             critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:
         with graceful("L1CritiqueWritten emit failed"):
