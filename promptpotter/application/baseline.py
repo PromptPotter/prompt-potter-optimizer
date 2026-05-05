@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-from collections.abc import Callable
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -241,19 +240,8 @@ async def prepare_scoring_context(
     )
 
     # ci=0/ct=1 makes the dashboard emitter tick per-query during baseline like L1.
-    on_start_cb: Callable | None = None
-    on_result_cb: Callable | None = None
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.BASELINE, "enter", round=0)
-
-        def _baseline_on_start(query_text: str, qi: int, qt: int) -> None:
-            listener.on_sample_started(0, 1, qi, qt, query_text)
-
-        def _baseline_on_result(result: dict, qi: int, qt: int) -> None:
-            listener.on_sample_scored(0, 1, qi, qt, result)
-
-        on_start_cb = _baseline_on_start
-        on_result_cb = _baseline_on_result
 
     try:
         baseline_results, scores, _cached, _ = await score_search_point(
@@ -261,8 +249,16 @@ async def prepare_scoring_context(
             scoring_set,
             session,
             label="Baseline",
-            on_query_scored=on_result_cb,
-            on_query_starting=on_start_cb,
+            on_query_starting=(
+                (lambda q, qi, qt: listener.on_sample_started(0, 1, qi, qt, q))
+                if listener is not None
+                else None
+            ),
+            on_query_scored=(
+                (lambda r, qi, qt: listener.on_sample_scored(0, 1, qi, qt, r))
+                if listener is not None
+                else None
+            ),
         )
     finally:
         if listener is not None:

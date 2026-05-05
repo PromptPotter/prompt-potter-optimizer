@@ -34,8 +34,9 @@ from promptpotter.application.presentation_writers import (
 )
 from promptpotter.application.run_callbacks import RunCallbacks
 from promptpotter.application.run_observers import (
+    ForkInfo,
     RunObservers,
-    rebuild_run_observers_for_fork,
+    build_run_observers,
 )
 from promptpotter.application.scoring.formula import (
     apply_steer_file,
@@ -592,14 +593,17 @@ async def run_optimization(
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
     if forked and pre_loop_cycle_id:
-        observers = rebuild_run_observers_for_fork(
+        observers = build_run_observers(
             session=session,
             campaign_config=campaign_config,
-            parent_cycle_id=pre_loop_cycle_id,
-            parent_dashboard=observers.dashboard,
+            dataset=dataset,
+            display=observers.display,
             resumed_from_round=session.state.resumed_from_round,
             baseline_accuracy=baseline.baseline_acc,
-            display=observers.display,
+            fork=ForkInfo(
+                parent_cycle_id=pre_loop_cycle_id,
+                parent_dashboard=observers.dashboard,
+            ),
         )
         cb = observers.callbacks
 

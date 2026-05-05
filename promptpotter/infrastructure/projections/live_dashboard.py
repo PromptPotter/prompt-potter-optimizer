@@ -628,8 +628,8 @@ class LiveDashboardProjection(ProjectionBase):
         cand = self._current_round.setdefault("candidates", {}).setdefault(
             idx, {"idx": idx, "total": total}
         )
-        prev = float(cand.get("p_best", p_best.get(current_id, 0.0)))
         current = float(p_best.get(current_id, 0.0))
+        prev = float(cand.get("p_best", current))
         history: list[float] = list(cand.get("p_best_history") or [])
         history.append(current)
         # Cap history at 64 entries — round size rarely exceeds 40.
@@ -652,7 +652,7 @@ class LiveDashboardProjection(ProjectionBase):
         # partial reads and the file is rewritten on the next callback.
 
         # Mirror per-round node I/O live, same shape as round_NNNN.json::nodes.
-        round_idx = self._current_round.get("round", self._state.get("round", 0))
+        round_idx = self._current_round.get("round", 0)
         nodes: dict[str, Any] = {}
         if self._recorder is not None:
             nodes.update(self._recorder.snapshot_nodes())

@@ -171,7 +171,7 @@ def _replay_run(
                 query=query,
                 ground_truth=it.get("ground_truth", ""),
                 origin=origin,
-                llm_provider=pipeline.get("llm_provider", detail.get("model", "")),
+                llm_provider=pipeline.get("llm_provider", ""),
                 prompt_fields_id=detail.get("prompt_fields_id", ""),
                 pipeline_params=pipeline.get("pipeline_params") or None,
                 schema_name=schema.name if schema and schema.name else "",

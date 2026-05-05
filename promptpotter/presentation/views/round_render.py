@@ -97,7 +97,7 @@ def format_elimination_summary(ctx: dict, prior_label: str | None = None) -> str
     n_priors = int(ctx.get("n_priors", 0))
 
     if prior_label is None:
-        idx = ctx.get("triggered_by_prior_idx", ctx.get("triggered_by_prior", -1))
+        idx = ctx.get("triggered_by_prior_idx", -1)
         prior_label = f"prior #{idx}" if isinstance(idx, int) and idx >= 0 else "prior"
 
     return (

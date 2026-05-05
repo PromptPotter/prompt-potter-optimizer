@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import html
 import json
+from collections.abc import Callable
 from typing import Any
 
 from promptpotter.presentation.views.view_models import (
@@ -87,10 +88,13 @@ def _render_final(final: FinalWinnerView) -> str:
     )
 
 
+_RENDERERS: dict[type, Callable[..., str]] = {
+    RoundCompleteView: _render_round_complete,
+    FinalWinnerView: _render_final,
+}
+
+
 def to_html(view: AnyView) -> str:
     """Dispatch a typed view to its HTML renderer; ``""`` for unhandled types."""
-    if isinstance(view, RoundCompleteView):
-        return _render_round_complete(view)
-    if isinstance(view, FinalWinnerView):
-        return _render_final(view)
-    return ""
+    fn = _RENDERERS.get(type(view))
+    return fn(view) if fn else ""

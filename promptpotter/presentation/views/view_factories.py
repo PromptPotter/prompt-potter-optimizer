@@ -23,6 +23,7 @@ typed views from on-disk artifacts. The named round-trip invariant
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -432,6 +433,66 @@ def _score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
     )
 
 
+def _init_enter_from_dict(v: dict) -> InitEnterView:
+    return InitEnterView(
+        warnings=tuple(
+            WarningEntry(title=w.get("title", ""), detail=w.get("detail", ""))
+            for w in v.get("warnings") or []
+        ),
+        max_rounds=v.get("max_rounds", 0),
+        patience=v.get("patience", 0),
+        n_variants=v.get("n_variants", 0),
+        sp_budget_ttest=v.get("sp_budget_ttest", 0),
+        dataset_size=v.get("dataset_size", 0),
+        mde=v.get("mde", 0.0),
+        model=v.get("model", ""),
+        l2_enabled=v.get("l2_enabled", False),
+        l3_enabled=v.get("l3_enabled", False),
+    )
+
+
+def _l1_generate_exit_from_dict(v: dict) -> CandidatesGeneratedView:
+    return CandidatesGeneratedView(
+        **{k: v[k] for k in v if k != "sp_diff" and k != "clone_labels"},
+        clone_labels=tuple(v.get("clone_labels") or []),
+        sp_diff=_sp_diff_from_dict(v.get("sp_diff")),
+    )
+
+
+def _l1_score_exit_from_dict(v: dict) -> RoundCompleteView:
+    return RoundCompleteView(
+        **{k: v[k] for k in v if k != "scores"},
+        scores=tuple(_score_entry_from_dict(s) for s in v.get("scores") or []),
+    )
+
+
+# Pure ``XxxView(**v)`` cases — registry of phase:event → dataclass.
+_PURE_RECONSTRUCT: dict[str, type] = {
+    "init:exit": InitExitView,
+    "l1_generate:enter": RoundStartView,
+    "escalation:enter": EscalationEnterView,
+    "refine_strategy:enter": L2RefineEnterView,
+    "refine_strategy:exit": L2RefineExitView,
+    "probe_round:exit": ProbeExitView,
+    "modify_plan:enter": PlanEnterView,
+    "modify_plan:exit": PlanExitView,
+}
+
+# Cases that need wire-dict adaptation (tuples, nested views, etc.).
+_CUSTOM_RECONSTRUCT: dict[str, Callable[[dict], AnyView]] = {
+    "init:enter": _init_enter_from_dict,
+    "l1_generate:exit": _l1_generate_exit_from_dict,
+    "l1_score:exit": _l1_score_exit_from_dict,
+    "escalation:exit": lambda v: EscalationExitView(
+        classifications=tuple((c[0], c[1]) for c in v.get("classifications") or []),
+    ),
+    "probe_round:enter": lambda v: ProbeEnterView(
+        n_probe_queries=v.get("n_probe_queries", 0),
+        probe_queries=tuple(v.get("probe_queries") or []),
+    ),
+}
+
+
 def view_from_record(record: dict[str, Any]) -> AnyView | None:
     """Reconstruct a typed view from a wire-format ledger payload.
 
@@ -441,58 +502,10 @@ def view_from_record(record: dict[str, Any]) -> AnyView | None:
     if v is None:
         return None
     key = f"{record.get('phase', '')}:{record.get('event', '')}"
-    if key == "init:enter":
-        return InitEnterView(
-            warnings=tuple(
-                WarningEntry(title=w.get("title", ""), detail=w.get("detail", ""))
-                for w in v.get("warnings") or []
-            ),
-            max_rounds=v.get("max_rounds", 0),
-            patience=v.get("patience", 0),
-            n_variants=v.get("n_variants", 0),
-            sp_budget_ttest=v.get("sp_budget_ttest", 0),
-            dataset_size=v.get("dataset_size", 0),
-            mde=v.get("mde", 0.0),
-            model=v.get("model", ""),
-            l2_enabled=v.get("l2_enabled", False),
-            l3_enabled=v.get("l3_enabled", False),
-        )
-    if key == "init:exit":
-        return InitExitView(**v)
-    if key == "l1_generate:enter":
-        return RoundStartView(**v)
-    if key == "l1_generate:exit":
-        return CandidatesGeneratedView(
-            **{k: v[k] for k in v if k != "sp_diff" and k != "clone_labels"},
-            clone_labels=tuple(v.get("clone_labels") or []),
-            sp_diff=_sp_diff_from_dict(v.get("sp_diff")),
-        )
-    if key == "l1_score:exit":
-        return RoundCompleteView(
-            **{k: v[k] for k in v if k != "scores"},
-            scores=tuple(_score_entry_from_dict(s) for s in v.get("scores") or []),
-        )
-    if key == "escalation:enter":
-        return EscalationEnterView(**v)
-    if key == "escalation:exit":
-        return EscalationExitView(
-            classifications=tuple((c[0], c[1]) for c in v.get("classifications") or []),
-        )
-    if key == "refine_strategy:enter":
-        return L2RefineEnterView(**v)
-    if key == "refine_strategy:exit":
-        return L2RefineExitView(**v)
-    if key == "probe_round:enter":
-        return ProbeEnterView(
-            n_probe_queries=v.get("n_probe_queries", 0),
-            probe_queries=tuple(v.get("probe_queries") or []),
-        )
-    if key == "probe_round:exit":
-        return ProbeExitView(**v)
-    if key == "modify_plan:enter":
-        return PlanEnterView(**v)
-    if key == "modify_plan:exit":
-        return PlanExitView(**v)
+    if cls := _PURE_RECONSTRUCT.get(key):
+        return cls(**v)
+    if fn := _CUSTOM_RECONSTRUCT.get(key):
+        return fn(v)
     return None
 
 

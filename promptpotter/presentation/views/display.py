@@ -144,22 +144,6 @@ def _box_line(text: str, width: int = _W) -> str:
     return _h_text("│", "│", text, width=width)
 
 
-def _dbox_top(width: int = _W) -> str:
-    return _h_rule("╔", "╗", width=width, fill="═")
-
-
-def _dbox_bottom(width: int = _W) -> str:
-    return _h_rule("╚", "╝", width=width, fill="═")
-
-
-def _dbox_sep(width: int = _W) -> str:
-    return _h_rule("╠", "╣", width=width, fill="═")
-
-
-def _dbox_line(text: str, width: int = _W) -> str:
-    return _h_text("║", "║", text, width=width)
-
-
 def _fmt_delta(val: float) -> str:
     """Format accuracy delta with color: green positive, red negative, yellow zero."""
     if abs(val) < 0.001:
@@ -190,9 +174,14 @@ def _node_block(label: str, *lines: str, label_right: str = "") -> str:
 
 def _dbox_block(title: str, *lines: str) -> str:
     """Render a double-box block with title header and content lines."""
-    parts = [_dbox_top(), _dbox_line(title), _dbox_sep()]
-    parts.extend(_dbox_line(line) for line in lines)
-    parts.append(_dbox_bottom())
+
+    def line(text: str) -> str:
+        return _h_text("║", "║", text, width=_W)
+
+    parts = [_h_rule("╔", "╗", width=_W, fill="═"), line(title)]
+    parts.append(_h_rule("╠", "╣", width=_W, fill="═"))
+    parts.extend(line(t) for t in lines)
+    parts.append(_h_rule("╚", "╝", width=_W, fill="═"))
     return "\n".join(parts)
 
 

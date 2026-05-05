@@ -2,8 +2,9 @@
 
 ``build_run_observers`` auto-mints session+cycle if missing, opens the
 ``CycleLedger``, builds and binds every projection + display in one pass.
-``rebuild_run_observers_for_fork`` swaps to a forked cycle's own ledger +
-audit dir while leaving telemetry anchored at the family root.
+Pass ``fork=ForkInfo(...)`` to rebuild observers around a forked cycle's
+own ledger + audit dir while leaving the dashboard anchored at the family
+root.
 
 No two-phase init: callers receive a frozen ``RunObservers`` whose callbacks
 already hold the bound ledger. ``run_optimization`` consumes this directly.
@@ -34,7 +35,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.sample import Sample
     from promptpotter.presentation.views.live import LiveDisplay
 
-__all__ = ["RunObservers", "build_run_observers", "rebuild_run_observers_for_fork"]
+__all__ = ["ForkInfo", "RunObservers", "build_run_observers"]
 
 
 @dataclass(frozen=True)
@@ -79,6 +80,14 @@ def _ensure_session_minted(
     )
 
 
+@dataclass(frozen=True)
+class ForkInfo:
+    """Forked-cycle wiring: parent cycle id + family-root dashboard."""
+
+    parent_cycle_id: str
+    parent_dashboard: LiveDashboardProjection
+
+
 def build_run_observers(
     *,
     session: Session,
@@ -88,41 +97,57 @@ def build_run_observers(
     experiment_id: str | None = None,
     resumed_from_round: int | None = None,
     baseline_accuracy: float = 0.0,
+    fork: ForkInfo | None = None,
 ) -> RunObservers:
     """Mint session if needed; open ledger; build + bind every observer.
 
-    The dashboard is anchored to the family root (shared across forks); the
-    audit trail and PoBB stream are per-cycle. ``baseline_accuracy`` is a seed
-    for ``dashboard.json``; the real value lands on the next ``INIT/exit``
+    Pass ``fork=None`` for a fresh cycle (mints a new dashboard anchored at
+    the family root). Pass ``fork=ForkInfo(...)`` when a fork-on-divergence
+    has just minted a sibling cycle — the parent's dashboard is reattached
+    to the fork's audit projection and the ledger inherits from the parent
+    at its current offset. ``baseline_accuracy`` is a seed for
+    ``dashboard.json``; the real value lands on the next ``INIT/exit``
     phase event after baseline runs.
     """
-    _ensure_session_minted(
-        session,
-        campaign_config,
-        dataset,
-        experiment_id=experiment_id,
-        baseline_accuracy=baseline_accuracy,
-    )
+    if fork is None:
+        _ensure_session_minted(
+            session,
+            campaign_config,
+            dataset,
+            experiment_id=experiment_id,
+            baseline_accuracy=baseline_accuracy,
+        )
 
     if session.state.cycle_id is None or session.store is None:
         raise RuntimeError("build_run_observers: session must have cycle_id and store")
 
     cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
-
     audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
     audit.rehydrate_sticky()
     session.state.audit_projection = audit
-
-    dashboard = build_campaign_emitter(
-        session,
-        campaign_config,
-        baseline_accuracy=baseline_accuracy,
-        resumed_from_round=resumed_from_round,
-        recorder=audit,
-    )
     pobb = PoBBStreamProjection.from_cycle_dir(cycle_dir)
 
     ledger = CycleLedger.open(cycle_dir)
+    if fork is None:
+        dashboard = build_campaign_emitter(
+            session,
+            campaign_config,
+            baseline_accuracy=baseline_accuracy,
+            resumed_from_round=resumed_from_round,
+            recorder=audit,
+        )
+    else:
+        dashboard = fork.parent_dashboard
+        dashboard._recorder = audit
+        dashboard.log_fork(
+            old_cycle_id=fork.parent_cycle_id,
+            new_cycle_id=session.state.cycle_id,
+            from_round=resumed_from_round or 0,
+        )
+        parent_dir = CycleDir(session.store.campaigns.campaign_dir(fork.parent_cycle_id))
+        fresh_parent = CycleLedger.open(parent_dir)
+        ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
+
     ledger.bind(dashboard)
     ledger.bind(audit)
     if display is not None:
@@ -134,62 +159,6 @@ def build_run_observers(
         callbacks=RunCallbacks(ledger=ledger),
         audit=audit,
         dashboard=dashboard,
-        pobb=pobb,
-        display=display,
-    )
-
-
-def rebuild_run_observers_for_fork(
-    *,
-    session: Session,
-    campaign_config: CampaignConfig,
-    parent_cycle_id: str,
-    parent_dashboard: LiveDashboardProjection,
-    resumed_from_round: int | None = None,
-    baseline_accuracy: float = 0.0,
-    display: LiveDisplay | None = None,
-) -> RunObservers:
-    """Rebuild observers when ``init_optimization_loop`` forked the cycle.
-
-    The audit projection and PoBB stream switch to the fork's directory.
-    The dashboard stays family-root-anchored — we reattach it to the fork's
-    audit projection and log the lineage record. The ledger is opened on the
-    fork dir and inherits from the parent at the parent's current offset.
-    """
-    if session.state.cycle_id is None or session.store is None:
-        raise RuntimeError("rebuild_run_observers_for_fork: session missing cycle_id/store")
-
-    fork_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
-
-    audit = AuditTrailProjection.from_cycle_dir(fork_dir)
-    audit.rehydrate_sticky()
-    session.state.audit_projection = audit
-
-    parent_dashboard._recorder = audit
-    parent_dashboard.log_fork(
-        old_cycle_id=parent_cycle_id,
-        new_cycle_id=session.state.cycle_id,
-        from_round=resumed_from_round or 0,
-    )
-
-    pobb = PoBBStreamProjection.from_cycle_dir(fork_dir)
-
-    parent_dir = CycleDir(session.store.campaigns.campaign_dir(parent_cycle_id))
-    fresh_parent = CycleLedger.open(parent_dir)
-    fork_ledger = CycleLedger.open(fork_dir)
-    fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
-
-    fork_ledger.bind(parent_dashboard)
-    fork_ledger.bind(audit)
-    if display is not None:
-        fork_ledger.bind(display)
-    fork_ledger.bind(pobb)
-    session.state.ledger = fork_ledger
-
-    return RunObservers(
-        callbacks=RunCallbacks(ledger=fork_ledger),
-        audit=audit,
-        dashboard=parent_dashboard,
         pobb=pobb,
         display=display,
     )

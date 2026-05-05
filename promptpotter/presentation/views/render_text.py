@@ -12,6 +12,7 @@ helper that turns the candidate flat-dict diff into an N-column table.
 from __future__ import annotations
 
 import json
+from collections.abc import Callable
 
 from promptpotter.domain.opt_search_point import group_diff_keys
 from promptpotter.presentation.views.display import (
@@ -412,32 +413,24 @@ def _render_plan_exit(v: PlanExitView) -> str:
     return "\n".join(out)
 
 
+_RENDERERS: dict[type, Callable[..., str]] = {
+    InitEnterView: _render_init_enter,
+    InitExitView: _render_init_exit,
+    RoundStartView: _render_round_start,
+    CandidatesGeneratedView: _render_candidates_generated,
+    RoundCompleteView: _render_round_complete,
+    EscalationEnterView: _render_escalation_enter,
+    EscalationExitView: _render_escalation_exit,
+    L2RefineEnterView: _render_l2_refine_enter,
+    L2RefineExitView: _render_l2_refine_exit,
+    ProbeEnterView: _render_probe_enter,
+    ProbeExitView: _render_probe_exit,
+    PlanEnterView: _render_plan_enter,
+    PlanExitView: _render_plan_exit,
+}
+
+
 def to_text(view: AnyView) -> str:
     """Dispatch a typed view to its ANSI text renderer."""
-    if isinstance(view, InitEnterView):
-        return _render_init_enter(view)
-    if isinstance(view, InitExitView):
-        return _render_init_exit(view)
-    if isinstance(view, RoundStartView):
-        return _render_round_start(view)
-    if isinstance(view, CandidatesGeneratedView):
-        return _render_candidates_generated(view)
-    if isinstance(view, RoundCompleteView):
-        return _render_round_complete(view)
-    if isinstance(view, EscalationEnterView):
-        return _render_escalation_enter(view)
-    if isinstance(view, EscalationExitView):
-        return _render_escalation_exit(view)
-    if isinstance(view, L2RefineEnterView):
-        return _render_l2_refine_enter(view)
-    if isinstance(view, L2RefineExitView):
-        return _render_l2_refine_exit(view)
-    if isinstance(view, ProbeEnterView):
-        return _render_probe_enter(view)
-    if isinstance(view, ProbeExitView):
-        return _render_probe_exit(view)
-    if isinstance(view, PlanEnterView):
-        return _render_plan_enter(view)
-    if isinstance(view, PlanExitView):
-        return _render_plan_exit(view)
-    return ""
+    fn = _RENDERERS.get(type(view))
+    return fn(view) if fn else ""
