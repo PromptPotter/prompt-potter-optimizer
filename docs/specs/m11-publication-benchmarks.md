@@ -93,6 +93,8 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 
 **Out of scope (M12):** campaign launcher, live monitoring (WebSocket/SSE), API extensions for control, polish/deployment.
 
+**Security gate (must land before this track is exposed beyond localhost):** see [`security-audit.md`](security-audit.md) § Webapp endpoint hardening — auth dep on every router, CORS allowlist, Pydantic `extra=forbid`, slow-API rate limiter on cycle-read endpoints.
+
 ### Track 4: Publication Figures Design
 
 **Problem:** Figures and tables must be designed before data collection so Tracks 1 and 2 produce the right data.

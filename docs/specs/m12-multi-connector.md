@@ -29,6 +29,8 @@ Three gaps M12 closes:
 2. **Connector lookup driven by config** — `bootstrap.py:514` currently hardcodes `connectors.get("termnorm")`. Read `pipeline.json::backend_type` (already present in dataset configs) and look up by that. Same for `presentation/api.py` sites that consume `BackendConnection.backend_type`.
 3. **Query parser registry** — `split_query_parts()` (in `services/backend_client.py`) is still TermNorm-shaped. With the second connector, hoist into a per-connector hook (or fold into the wire adapter — to be decided when the second connector lands).
 4. **Workflow nodes** (M6 Wave 4) — outstanding from M6 closure, now unblocked by the connector boundary.
+5. **Multi-tenant `TenantId` newtype** — see [`security-audit.md`](security-audit.md) § SafeName / TenantId. Lite path-validation already landed; the structural newtype migration belongs with the multi-tenant work since it touches every store.
+6. **Prompt-injection Phase 2** — see [`security-audit.md`](security-audit.md) § Prompt-injection Phase 2. Starter fence on untrusted SIGNAL renderers landed; structural lint + output validators + cross-call repeat detection belong with multi-tenant rollout.
 
 
 ### Track 2: Competitor Comparison (Publication Closure)
