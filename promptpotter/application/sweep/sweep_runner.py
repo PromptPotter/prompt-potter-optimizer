@@ -101,7 +101,7 @@ async def run_sweep_batch(
     train_data: list[Sample],
     sweep_payloads: list[tuple[Path, SweepPayload]],
     *,
-    observer_factory: Callable[..., tuple[Any, Any, Any, Any]],
+    observer_factory: Callable[..., Any],
     verbose: bool,
 ) -> SweepBatchResult:
     """Mint one fork per ``SweepPayload`` and run sweep mode on each.
@@ -116,8 +116,7 @@ async def run_sweep_batch(
 
     ``observer_factory`` is bound by the CLI shim to its own ``args``
     + ``campaign_config`` so this orchestrator does not import from
-    ``presentation/cli/``. Signature: ``(session, campaign_dir,
-    baseline_acc) -> (listener, emitter, recorder, display)``.
+    ``presentation/cli/``. Signature: ``(session, baseline_acc) -> RunObservers``.
     """
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline
@@ -200,19 +199,14 @@ async def run_sweep_batch(
             (fork_session.pipeline_params or {}).get("llm_only", {}).get("model"),
         )
 
-        fork_campaign_dir = store.campaigns.campaign_dir(fork_ctx.cycle_id)
-        listener, emitter, _recorder, display = observer_factory(
-            fork_session, fork_campaign_dir, 0.0
-        )
+        observers = observer_factory(fork_session, 0.0)
         fork_result = await _orch_run_optimization(
             train_data,
             campaign_config,
             session=fork_session,
-            listener=listener,
+            observers=observers,
             experiment_id=fork_ctx.state["experiment_id"],
             task_context=fork_ctx.task_context,
-            display=display,
-            emitter=emitter,
             sweep=True,
             fork_payload=payload,
         )

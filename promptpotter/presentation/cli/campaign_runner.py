@@ -41,12 +41,8 @@ from promptpotter.presentation.cli.session import (
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap import Session
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.runner import RunListener
+    from promptpotter.application.run_observers import RunObservers
     from promptpotter.domain.opt_search_point import OptSearchPoint
-    from promptpotter.infrastructure.projections import (
-        AuditTrailProjection,
-        LiveDashboardProjection,
-    )
     from promptpotter.presentation.cli.session import SessionCtx
     from promptpotter.presentation.views.live import LiveDisplay
 
@@ -446,35 +442,6 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     )
 
 
-def _build_live_display(args: argparse.Namespace, *, session, campaign_config, baseline_acc: float):
-    """Pick the live display: full notebook parity in ``-v``, concise otherwise."""
-    from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.presentation.views.display import set_display_tags
-
-    set_display_tags(session.pipeline_schema)
-    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
-    opt = campaign_config.optimization
-
-    from promptpotter.presentation.views.live import LiveDisplay
-
-    if getattr(args, "verbose", False):
-        return LiveDisplay(
-            campaign_rounds=[],
-            baseline_acc=baseline_acc,
-            l1_patience=opt.l1_patience,
-            pipeline_schema=session.pipeline_schema,
-            store=session.store,
-            scoring_formula=scoring_formula,
-        )
-    return LiveDisplay(
-        baseline_acc=baseline_acc,
-        l1_patience=opt.l1_patience,
-        sp_budget_ttest=campaign_config.sp_budget_ttest,
-        scoring_formula=scoring_formula,
-        pipeline_schema=session.pipeline_schema,
-    )
-
-
 def _build_divergence_hint() -> str:
     """Derive the divergence-checked-kinds list from the DECISION_GATING table.
 
@@ -557,46 +524,61 @@ def _prepare_cycle_for_optimize(
     return pipeline_params, baseline_now
 
 
-def _build_run_observers(
+def _build_live_display(
+    args: argparse.Namespace,
+    *,
+    session: Session,
+    campaign_config: CampaignConfig,
+    baseline_acc: float,
+) -> LiveDisplay:
+    """Build the CLI's LiveDisplay — verbose ($-v$) gets full notebook parity, else concise."""
+    from promptpotter.application.scoring.formula import split_scoring_block
+    from promptpotter.presentation.views.display import set_display_tags
+    from promptpotter.presentation.views.live import LiveDisplay as _LiveDisplay
+
+    set_display_tags(session.pipeline_schema)
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
+    opt = campaign_config.optimization
+
+    if getattr(args, "verbose", False):
+        return _LiveDisplay(
+            campaign_rounds=[],
+            baseline_acc=baseline_acc,
+            l1_patience=opt.l1_patience,
+            pipeline_schema=session.pipeline_schema,
+            store=session.store,
+            scoring_formula=scoring_formula,
+        )
+    return _LiveDisplay(
+        baseline_acc=baseline_acc,
+        l1_patience=opt.l1_patience,
+        sp_budget_ttest=campaign_config.sp_budget_ttest,
+        scoring_formula=scoring_formula,
+        pipeline_schema=session.pipeline_schema,
+    )
+
+
+def _build_observers(
     args: argparse.Namespace,
     session: Session,
     campaign_config: CampaignConfig,
-    campaign_dir: Path,
+    train_data: list,
     baseline_acc: float,
-) -> tuple[RunListener, LiveDashboardProjection, AuditTrailProjection, LiveDisplay]:
-    """Wire audit trail + live dashboard + display + listener.
+) -> RunObservers:
+    """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
+    from promptpotter.application.run_observers import build_run_observers
 
-    Built BEFORE baseline so the dashboard ticks through the BASELINE
-    phase and per-query output reaches the terminal. Without this, the
-    CLI goes dark for the entire BASELINE phase. Recorder is built first
-    so the emitter can hold a direct reference (no callback indirection).
-    Side-effect: assigns the recorder to ``session.state.audit_projection``.
-    Display is returned as a separate handle so the entry point can pass
-    it to ``run_optimization`` (which binds it to the cycle ledger).
-    """
-    from promptpotter.application.baseline import build_campaign_emitter
-    from promptpotter.application.runner import RunListener as _RunListener
-    from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.projections import (
-        AuditTrailProjection as _AuditTrailProjection,
-    )
-
-    recorder = _AuditTrailProjection.from_cycle_dir(CycleDir(campaign_dir))
-    recorder.rehydrate_sticky()
-    session.state.audit_projection = recorder
-
-    emitter = build_campaign_emitter(
-        session,
-        campaign_config,
-        baseline_accuracy=baseline_acc,
-        resumed_from_round=getattr(args, "resume_from_round", None),
-        recorder=recorder,
-    )
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, baseline_acc=baseline_acc
     )
-    listener = _RunListener()
-    return listener, emitter, recorder, display
+    return build_run_observers(
+        session=session,
+        campaign_config=campaign_config,
+        dataset=train_data,
+        display=display,
+        resumed_from_round=getattr(args, "resume_from_round", None),
+        baseline_accuracy=baseline_acc,
+    )
 
 
 async def _run_sweep_batch(
@@ -614,10 +596,8 @@ async def _run_sweep_batch(
     """
     from promptpotter.application.sweep import run_sweep_batch
 
-    def observer_factory(
-        session: Session, campaign_dir: Path, baseline_acc: float
-    ) -> tuple[Any, Any, Any, Any]:
-        return _build_run_observers(args, session, campaign_config, campaign_dir, baseline_acc)
+    def observer_factory(session: Session, baseline_acc: float) -> RunObservers:
+        return _build_observers(args, session, campaign_config, train_data, baseline_acc)
 
     result = await run_sweep_batch(
         args,
@@ -720,9 +700,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
                 )
 
     pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
-    listener, emitter, _recorder, display = _build_run_observers(
-        args, session, campaign_config, campaign_dir, pre_baseline_acc
-    )
+    observers = _build_observers(args, session, campaign_config, train_data, pre_baseline_acc)
 
     ctx.save_phase("optimizing")
 
@@ -731,12 +709,10 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
             train_data,
             campaign_config,
             session=session,
-            listener=listener,
+            observers=observers,
             experiment_id=ctx.state["experiment_id"],
             task_context=ctx.task_context,
-            display=display,
             resume_from_round_override=getattr(args, "resume_from_round", None),
-            emitter=emitter,
             no_divergence_check=getattr(args, "no_divergence_check", False),
             fork_on_divergence=getattr(args, "fork_on_divergence", False),
             sweep=getattr(args, "sweep", False),

@@ -76,7 +76,7 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import proportion_test
 
 if TYPE_CHECKING:
-    from promptpotter.application.runner import RunListener
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
@@ -207,7 +207,7 @@ async def score_population(
     dataset: list,
     *,
     degradation_checks: list[StopRule] | None = None,
-    callbacks: RunListener,
+    callbacks: RunCallbacks,
     pobb_config: PoBBConfig,
     round_num: int = 0,
     decisions: list[DecisionRecord] | None = None,
@@ -466,7 +466,7 @@ async def l1_score(
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
-    callbacks: RunListener,
+    callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,
     round_num: int = 0,
@@ -700,7 +700,7 @@ async def execute_round(
     cycle: Cycle,
     round_num: int,
     scoring_set: list[Sample],
-    callbacks: RunListener,
+    callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     *,
     skip_critique: bool = False,

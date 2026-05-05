@@ -42,7 +42,7 @@ if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes import SampleIndex
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.runner import RunListener
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.domain.validators import StopRule
@@ -564,7 +564,7 @@ async def init_services(
 async def _emit_preflight_and_init_session(
     config: CampaignConfig,
     dataset: list[Sample],
-    cb: RunListener,
+    cb: RunCallbacks,
     session: Session,
 ) -> None:
     """Preflight + emit INIT.enter + backend.init_session."""
@@ -730,7 +730,7 @@ def _finalize_loop_state(
     session: Session,
     config: CampaignConfig,
     dataset: list[Sample],
-    cb: RunListener,
+    cb: RunCallbacks,
     *,
     resolved_cycle_id: str | None,
     tracing_campaign_id: str,
@@ -776,7 +776,7 @@ async def init_optimization_loop(
     dataset: list[Sample],
     config: CampaignConfig,
     *,
-    cb: RunListener,
+    cb: RunCallbacks,
     task_context: TaskDecomposition,
     scoring_formula: str | None,
     scoring_round_formula: str | None,

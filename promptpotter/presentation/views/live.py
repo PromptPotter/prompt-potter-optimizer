@@ -50,7 +50,7 @@ if TYPE_CHECKING:
 
 
 class _BarTracker:
-    """tqdm bar lifecycle driven by ``RunListener`` events. Optional helper."""
+    """tqdm bar lifecycle driven by ``RunCallbacks`` events. Optional helper."""
 
     def __init__(self, sp_budget_ttest: int) -> None:
         self.budget = sp_budget_ttest
@@ -101,7 +101,7 @@ class _BarTracker:
 
 
 class LiveDisplay:
-    """Live ``RunListener`` adapter — CLI + notebook share this one class."""
+    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class."""
 
     def __init__(
         self,
@@ -127,7 +127,7 @@ class LiveDisplay:
         # Composite-render context — read by ``on_candidate_scored`` for the
         # per-candidate baseline anchor and by ``on_round_complete`` for the
         # 3-line composite_fitness block. Populated from L1_SCORE:exit views and
-        # mutated on ``scoring_steer:applied``. ``RunListener`` wires its
+        # mutated on ``scoring_steer:applied``. ``RunCallbacks`` wires its
         # shared ctx onto ``self._phase_ctx`` after construction so the
         # display sees the same dict the phase-view builder writes to.
         self._phase_ctx: dict = {}

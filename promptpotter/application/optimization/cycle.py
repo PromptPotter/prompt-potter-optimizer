@@ -740,7 +740,7 @@ class EscalationState:
             return
         if record.phase == "round" and record.event == "complete":
             # Two PhaseRecord("round","complete") records exist per round: the
-            # display-side RunListener emit (no ``improved`` key) and the
+            # display-side RunCallbacks emit (no ``improved`` key) and the
             # audit-side _persist_round emit (carries improved/composite_fitness).
             # Fold only the audit emit so state isn't double-bumped.
             payload = record.payload

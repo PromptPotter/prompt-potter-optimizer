@@ -159,7 +159,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         sp_budget_ttest=20,
     )
 
-    # ``RunListener`` would call ``from_phase_event`` once per event on a
+    # ``RunCallbacks`` would call ``from_phase_event`` once per event on a
     # shared ctx, serialise via ``view_to_wire_dict``, and feed PhaseRecord records
     # to the ledger; subscribers route them via ``on_record``. Mirror that here.
     phase_ctx: dict = {}
@@ -355,6 +355,60 @@ def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, 
     _session_dir, campaign_dir = session_and_campaign_dirs
     data = json.loads((campaign_dir / "index.json").read_text(encoding="utf-8"))
     assert data["parent_session_id"], "index.json must carry parent_session_id"
+
+
+def test_observers_built_via_shared_helper() -> None:
+    """Entry points MUST construct projections + callbacks via ``build_run_observers``.
+
+    Direct ``RunCallbacks()``, ``AuditTrailProjection()``, ``LiveDashboardProjection()``,
+    or ``PoBBStreamProjection()`` construction in ``presentation/`` is forbidden —
+    a new entry point that bypasses the helper would create a divergent observer
+    wiring (different bind order, missing subscribers, two-phase init regression).
+
+    LiveDisplay is allowed because it's a presentation-layer concern that the
+    helper accepts as input. The helper itself owns the ledger + audit + dashboard
+    + pobb construction.
+    """
+    BANNED = {
+        "RunCallbacks",
+        "AuditTrailProjection",
+        "LiveDashboardProjection",
+        "PoBBStreamProjection",
+    }
+    repo_root = Path(__file__).resolve().parents[1]
+    guarded_paths = [
+        repo_root / "promptpotter" / "presentation" / "cli" / "campaign_runner.py",
+        repo_root / "promptpotter" / "presentation" / "views" / "notebook_run.py",
+    ]
+    offenders: list[str] = []
+    for src_path in guarded_paths:
+        tree = ast.parse(src_path.read_text(encoding="utf-8"))
+        for node in ast.walk(tree):
+            if not isinstance(node, ast.Call):
+                continue
+            fn = node.func
+            name = fn.id if isinstance(fn, ast.Name) else None
+            if name in BANNED:
+                rel = src_path.relative_to(repo_root)
+                offenders.append(f"{rel}:{node.lineno}:{name}")
+    assert not offenders, (
+        "Direct observer construction in presentation/ — route through "
+        "application/run_observers.py::build_run_observers:\n" + "\n".join(offenders)
+    )
+
+
+def test_run_callbacks_requires_ledger() -> None:
+    """RunCallbacks must be constructed with a ledger — no two-phase init.
+
+    The pre-refactor ``RunListener`` allowed ``listener=None`` then late-bound the
+    ledger via a setter, which buffered events in a dead path (the ledger was
+    always bound before any event fired). Forbid the regression: dataclass
+    construction without a ledger raises ``TypeError`` at boot.
+    """
+    from promptpotter.application.run_callbacks import RunCallbacks
+
+    with pytest.raises(TypeError):
+        RunCallbacks()  # type: ignore[call-arg]
 
 
 def test_no_direct_artifact_writes_outside_stores() -> None:

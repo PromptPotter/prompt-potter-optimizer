@@ -1,6 +1,6 @@
 """Operator-facing markdown writers — log.md / review.md / archive/*.md.
 
-Called from runner orchestration milestones, NOT from RunListener (which
+Called from runner orchestration milestones, NOT from RunCallbacks (which
 must stay display-only per CLAUDE.md).
 """
 

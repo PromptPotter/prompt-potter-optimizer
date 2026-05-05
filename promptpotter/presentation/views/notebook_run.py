@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 from promptpotter.application.baseline import (
+    CampaignBaseline,
     extract_campaign_baseline,
 )
 from promptpotter.application.baseline import (
@@ -17,6 +18,7 @@ from promptpotter.application.bootstrap import (
 from promptpotter.application.bootstrap import (
     init_services as _init_services,
 )
+from promptpotter.application.run_observers import RunObservers, build_run_observers
 from promptpotter.application.runner import (
     run_optimization as _run_optimization,
 )
@@ -28,7 +30,6 @@ from promptpotter.config.settings import (
     DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.domain.results import CycleResult
-from promptpotter.infrastructure.tracing import ObservabilityBridge
 from promptpotter.presentation.views.display import (
     BOLD,
     GREEN,
@@ -43,13 +44,13 @@ from promptpotter.presentation.views.view_models import FinalWinnerView
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.pipeline_schema import PipelineSchema
+    from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import TaskDecomposition
 
 __all__ = [
     "init_notebook_session",
-    "prepare_scoring_context_notebook",
+    "prepare_baseline_notebook",
     "render_completion",
     "render_completion_html",
     "run_optimization_notebook",
@@ -169,117 +170,91 @@ async def init_notebook_session(
     return session
 
 
-async def prepare_scoring_context_notebook(
+async def prepare_baseline_notebook(
     session: Session,
-    train_data: list | None,
-    campaign_config: CampaignConfig | None = None,
+    train_data: list[Sample],
+    campaign_config: CampaignConfig,
+    *,
     pipeline_params: dict | None = None,
-) -> tuple[OptSearchPoint, list, list, list]:
-    """Notebook variant of ``prepare_scoring_context`` — adds tqdm + per-query lines via ``LiveDisplay``."""
-    scoring_formula: str | None = (
-        split_scoring_block(campaign_config.scoring).per_query if campaign_config else None
-    )
-    n_samples = len(train_data) if train_data else 0
-    baseline_display = LiveDisplay(
+    experiment_id: str | None = None,
+) -> tuple[RunObservers, list[Sample], CampaignBaseline]:
+    """Build observers + score baseline as a separate notebook cell.
+
+    Auto-mints session+cycle, opens the ledger, binds the LiveDisplay so the
+    baseline phase ticks live (same path the CLI uses). Returns observers +
+    dataset + baseline for the next cell to feed into ``run_optimization_notebook``.
+    """
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
+    n_samples = len(train_data) or 1
+    display = LiveDisplay(
         baseline_acc=0.0,
-        l1_patience=campaign_config.optimization.l1_patience if campaign_config else 1,
+        l1_patience=campaign_config.optimization.l1_patience,
         pipeline_schema=session.pipeline_schema,
         scoring_formula=scoring_formula,
-        sp_budget_ttest=n_samples or 1,
+        sp_budget_ttest=n_samples,
+        store=session.store,
     )
 
-    obs = ObservabilityBridge.file_only(session.store.base_dir, session.backend_id)
+    observers = build_run_observers(
+        session=session,
+        campaign_config=campaign_config,
+        dataset=train_data,
+        display=display,
+        experiment_id=experiment_id,
+    )
 
-    baseline, dataset, campaign_rounds, baseline_results = await _prepare_scoring_context(
+    _baseline_osp, dataset, campaign_rounds, _results = await _prepare_scoring_context(
         session.experiment_extract,
         train_data,
         campaign_config,
         pipeline_params=pipeline_params,
         pipeline_schema=session.pipeline_schema,
         svc=session,
-        listener=baseline_display,
-        obs=obs,
+        listener=observers.callbacks,
     )
+    baseline = extract_campaign_baseline(campaign_rounds)
+    if hasattr(display, "set_baseline"):
+        display.set_baseline(baseline.baseline_acc)
 
-    print(f"\nEvaluation data: {len(dataset)} queries")
-    return baseline, dataset, campaign_rounds, baseline_results
+    print(f"\nEvaluation data: {len(dataset)} queries  |  Baseline: {baseline.baseline_acc:.1%}")
+    return observers, dataset, baseline
 
 
 async def run_optimization_notebook(
-    campaign_rounds: list,
-    dataset: list,
+    observers: RunObservers,
+    dataset: list[Sample],
+    baseline: CampaignBaseline,
     campaign_config: CampaignConfig,
     *,
     session: Session,
     langfuse_session_id: str | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
-    session_id: str = "",
-) -> tuple[list, CycleResult | None]:
-    """Run optimization with ``LiveDisplay``. Prints final completion box."""
-    from promptpotter.application.resume import resolve_campaign_id
-
-    bl = extract_campaign_baseline(campaign_rounds)
-    baseline_acc = bl.baseline_acc
-
-    display = LiveDisplay(
-        campaign_rounds=campaign_rounds,
-        baseline_acc=baseline_acc,
-        l1_patience=campaign_config.optimization.l1_patience,
-        pipeline_schema=session.pipeline_schema,
-        store=session.store,
-        scoring_formula=split_scoring_block(
-            campaign_config.scoring if campaign_config else None
-        ).per_query,
-    )
-
-    resolved_cycle_id: str | None = None
-    if experiment_id and session.store:
-        resolved_cycle_id = resolve_campaign_id(session.store, session.backend_id, experiment_id)
-        if resolved_cycle_id is None:
-            print(f"  No campaign matching '{experiment_id}' — starting fresh")
-        else:
-            stored = session.store.campaigns.load(session.backend_id, resolved_cycle_id)
-            if stored:
-                stored_bl = stored.get("baseline_accuracy")
-                if stored_bl is not None and stored_bl != baseline_acc:
-                    print(
-                        f"  {YELLOW}Using stored baseline {stored_bl:.1%}"
-                        f" (notebook had {baseline_acc:.1%}){RESET}"
-                    )
-                    baseline_acc = stored_bl
-
+) -> CycleResult | None:
+    """Run optimization with the observers built in the prior cell."""
     print(f"  {YELLOW}Interrupt of cells can take up to 60 seconds!{RESET}")
     print(f"  {YELLOW}If a dialog pops up, click 'Cancel' and wait 20 seconds.{RESET}")
-
-    if resolved_cycle_id:
-        session.state.cycle_id = resolved_cycle_id
-    if session_id:
-        session.session_id = session_id
 
     result = await _run_optimization(
         dataset,
         campaign_config,
-        baseline=bl,
         session=session,
+        observers=observers,
+        baseline=baseline,
         experiment_id=experiment_id,
         task_context=task_context,
-        display=display,
         langfuse_session_id=langfuse_session_id,
     )
 
-    if not campaign_rounds:
+    if result is None or not result.rounds:
         print(
             f"\n{YELLOW}{BOLD}[INTERRUPTED]{RESET} Feedback cycle "
             f"stopped before any rounds completed."
         )
         print("  Resume: re-run this cell to restart.")
-        return campaign_rounds, result
+        return result
 
-    if result is None:
-        return campaign_rounds, result
-
-    best = max(campaign_rounds, key=lambda r: r["accuracy"])
+    best = max((r.model_dump() for r in result.rounds), key=lambda r: r["accuracy"])
     print(render_completion(result, best_round=best, pipeline_schema=session.pipeline_schema))
     _try_display_html(render_completion_html(result))
 
@@ -289,4 +264,4 @@ async def run_optimization_notebook(
             "artifacts saved. Caller decides whether to continue downstream phases."
         )
 
-    return campaign_rounds, result
+    return result

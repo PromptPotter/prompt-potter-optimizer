@@ -141,19 +141,19 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     assert _open_cycle_ledger(SimpleNamespace(store=None), "cycle_x") is None  # type: ignore[arg-type]
 
 
-def test_runlistener_emits_records_to_ledger(tmp_path: Path) -> None:
-    """RunListener is the single ingress: every callback appends one typed record.
+def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
+    """RunCallbacks is the single ingress: every callback appends one typed record.
 
     Subscribers consume via ``on_record`` only; there is no parallel
     direct-callback path. The records carry the rich payload subscribers
     need (full result dicts, full score reports, view dicts) so any
     consumer can rebuild its view from the ledger alone.
     """
-    from promptpotter.application.runner import RunListener
+    from promptpotter.application.run_callbacks import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
     ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
-    cb = RunListener(ledger=ledger)
+    cb = RunCallbacks(ledger=ledger)
     cb.set_round(3)
 
     cb.on_phase(PhaseEvent(phase="l1_generate", event="enter", round=3, data={"k": "v"}))

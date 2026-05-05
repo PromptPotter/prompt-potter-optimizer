@@ -7,7 +7,7 @@ memo) in one pass.
 
 Two live entry points:
 
-- ``from_phase_event(event, ctx)`` — used by ``RunListener``; the typed
+- ``from_phase_event(event, ctx)`` — used by ``RunCallbacks``; the typed
   view is the single source of truth, and the runner serialises it via
   ``view_to_wire_dict`` before placing it on the ledger payload.
 - ``view_from_record(record_dict)`` — used by ledger subscribers reading
