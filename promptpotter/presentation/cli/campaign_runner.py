@@ -350,11 +350,13 @@ async def _maybe_decompose_task(
 async def cmd_init(args: argparse.Namespace) -> CommandResult:
     """Initialize services, load datasets, configure pipeline, create session.
 
-    Pure prep: no backend calls, no baseline scoring. The baseline runs as
-    phase 0 of ``optimize`` on the ``sp_budget_ttest`` slice. If
-    ``datasets/<name>/task_description.md`` exists (or ``--task-file`` /
-    ``--task-text`` is given), the task description is decomposed once and
-    stored on the session — ``optimize`` reads it from there.
+    No scoring calls — the baseline runs as phase 0 of ``optimize`` on the
+    ``sp_budget_ttest`` slice. The one LLM cost paid here is the
+    ``restructure`` template call (via ``_maybe_decompose_task``) the first
+    time a dataset's ``task_description.md`` (or ``--task-file`` /
+    ``--task-text``) is seen; the result is content-hash cached at
+    ``restructure_cache.json`` so subsequent runs are free. ``optimize``
+    reads the decomposition off the session.
     """
     from promptpotter.application.baseline import prepare_datasets
     from promptpotter.application.config import load_campaign_config as _load_cfg

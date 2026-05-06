@@ -10,8 +10,6 @@ from __future__ import annotations
 
 from pathlib import Path
 
-import mlflow
-
 from promptpotter.config.settings import settings
 from promptpotter.infrastructure.tracing.events import CampaignStart, RoundEnd
 
@@ -35,6 +33,8 @@ class MLflowSink:
 
         if not settings.MLFLOW_ENABLED or not self._cycle_id:
             return
+
+        import mlflow
 
         if not self._initialized:
             tracking_uri = (self._archive_dir / "mlruns").resolve().as_uri()

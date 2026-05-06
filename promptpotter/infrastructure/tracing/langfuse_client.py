@@ -13,7 +13,6 @@ import uuid
 from typing import Any
 
 import httpx
-from langfuse import Langfuse
 
 from promptpotter.config.settings import settings
 from promptpotter.shared.errors import graceful
@@ -38,6 +37,8 @@ class LangfuseLogger:
 
         if self.enabled:
             try:
+                from langfuse import Langfuse
+
                 self.client = Langfuse(
                     public_key=settings.LANGFUSE_PUBLIC_KEY,
                     secret_key=settings.LANGFUSE_SECRET_KEY,
