@@ -92,3 +92,6 @@ datasets/*/cache.json
 
 # Local campaign config (user-specific overrides)
 campaign_config.json
+
+# teach-impeccable skill scratch (unrelated to PromptPotter)
+.impeccable.md

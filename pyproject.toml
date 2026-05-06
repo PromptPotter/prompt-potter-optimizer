@@ -69,7 +69,6 @@ dev = [
     "pytest-cov>=6.0",
     "ruff>=0.3.0",
     "mypy>=1.10.0",
-    "pre-commit>=4.0",
     "deptry>=0.20.0",
 ]
 
@@ -183,7 +182,6 @@ DEP002 = [
     "pytest-cov",
     "ruff",
     "mypy",
-    "pre-commit",
     "deptry",
 ]
 # Optional features — imported lazily with install-message guards.

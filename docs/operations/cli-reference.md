@@ -151,7 +151,7 @@ pip install -e ".[excel]"          # Excel dataset loading
 pip install -e ".[benchmarks]"     # GSM8K, AIME 2025, BBEH (HuggingFace datasets)
 pip install -e ".[observability]"  # Langfuse cloud tracing
 pip install -e ".[anthropic]"      # Anthropic Claude as optimizer LLM
-pip install -e ".[dev]"            # pytest, ruff, mypy, deptry, pre-commit
+pip install -e ".[dev]"            # pytest, ruff, mypy, deptry
 pip install -e ".[all]"            # Everything except [dev]
 pip install -e ".[all,dev]"        # Everything — recommended for contributors
 ```
