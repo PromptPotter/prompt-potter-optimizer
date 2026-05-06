@@ -43,6 +43,7 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 #content-dashboard > .progress-card,
 #content-dashboard > .live-state-card,
 #content-dashboard > .samples-card,
+#content-dashboard > .whatif-card,
 #content-dashboard > .raw-card,
 #content-dashboard > .grid2,
 #content-dashboard > .grid3{max-width:980px;margin-left:auto;margin-right:auto}
@@ -137,6 +138,96 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .samples-list .idx{color:var(--color-text-tertiary);min-width:42px}
 .samples-list .elapsed{color:var(--color-text-tertiary);min-width:50px;text-align:right}
 .samples-list .body{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text-secondary)}
+
+/* What-If ablation panel */
+.whatif-card{margin-bottom:14px}
+.whatif-intro{font-size:11px;color:var(--color-text-secondary);line-height:1.55;margin-bottom:12px}
+.whatif-intro code{font-family:var(--font-mono);background:var(--color-background-secondary);padding:1px 5px;border-radius:3px;color:var(--color-text-primary)}
+.whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:10px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
+.whatif-legend .swatch{display:inline-block;width:13px;height:13px;border-radius:3px;vertical-align:middle;margin-right:5px;border:1.5px solid var(--color-text-tertiary);background:var(--color-background-secondary);text-align:center;line-height:11px;font-size:10px;font-weight:900}
+.whatif-legend .swatch.optional{border-style:dashed}
+.whatif-legend .swatch.disabled{opacity:.4}
+.whatif-legend .swatch.checked{color:var(--color-accent)}
+.whatif-legend .swatch.active{
+  background:linear-gradient(180deg,rgba(245,158,11,0.16) 0%,rgba(245,158,11,0.05) 100%);
+  border:1.5px solid rgba(245,158,11,0.32);
+  box-shadow:0 0 6px rgba(245,158,11,0.18);
+}
+/* Two-pane layout: stats panel on the left, square grid on the right
+   (tiles auto-wrap; wrapper scrolls vertically when narrowed). Left
+   column sized so the right column lands at ``5 × 100 + 4 × 10
+   = 540 px`` at typical viewports — exactly 5 tiles per row, no
+   trailing slack. */
+.whatif-body{display:grid;grid-template-columns:368px minmax(0, 1fr);gap:16px;align-items:start;margin-bottom:14px}
+@media (max-width: 820px){.whatif-body{grid-template-columns:1fr}}
+/* Two-rows-visible viewport. Tiles auto-wrap by available width — narrowing
+   the browser reflows them into 3, 4, … rows, and the wrapper scrolls
+   vertically to reveal the rest. ``max-height`` is set to two tile-rows plus
+   one gap (120 + 11 + 120 = 251 px). */
+/* ``padding`` (top + bottom) gives the hover ``translateY(-2px)`` lift +
+   the box-shadow room so the first-row tiles aren't clipped against the
+   wrapper's top edge. ``max-height`` is bumped from the bare 2 × tile
+   to absorb that padding under ``box-sizing: border-box``. */
+.whatif-grid-wrap{overflow-y:auto;max-height:238px;padding:6px 4px 6px 0}
+.whatif-grid{display:grid;grid-template-columns:repeat(auto-fill, 100px);justify-content:start;gap:10px}
+.whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1}
+.whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
+/* "Used in the actual composite_fitness formula" — milky amber frame,
+   mirrors the user-bubble style in the New Job pane. Light border + soft
+   glow so the tile reads as "important" without shouting. */
+.whatif-sq.in-active{
+  background:linear-gradient(180deg,rgba(245,158,11,0.16) 0%,rgba(245,158,11,0.05) 100%);
+  border:1.5px solid rgba(245,158,11,0.32);
+  box-shadow:0 0 18px rgba(245,158,11,0.16),inset 0 1px 0 rgba(255,255,255,0.04);
+  backdrop-filter:blur(8px);
+  -webkit-backdrop-filter:blur(8px);
+}
+.whatif-sq.disabled{opacity:.32;cursor:not-allowed}
+/* Real tick checkbox — empty grey square; on click a chunky amber ✓
+   fades in. The SVG is sized larger than the box so the check spills
+   slightly past the rounded square frame, which sells "this is checked"
+   at a glance. ``overflow:visible`` lets the glyph leak beyond the box. */
+.whatif-tick{position:absolute;top:5px;left:5px;width:13px;height:13px;border-radius:3px;background:var(--color-background-secondary);border:1.5px solid var(--color-text-tertiary);transition:color .12s;display:flex;align-items:center;justify-content:center;color:transparent;line-height:1;overflow:visible}
+.whatif-tick svg{width:20px;height:20px;display:block;pointer-events:none;filter:drop-shadow(0 0 2px rgba(245,158,11,0.55))}
+.whatif-sq.on .whatif-tick{color:var(--color-accent)}
+.whatif-dir{position:absolute;top:5px;right:7px;font-size:12px;color:var(--color-text-tertiary);font-weight:700;font-family:var(--font-mono);line-height:1}
+.whatif-dir.up{color:var(--color-accent)}
+.whatif-dir.down{color:var(--color-accent)}
+.whatif-ico{color:var(--color-text-secondary);width:34px;height:34px;display:flex;align-items:center;justify-content:center;margin-top:5px}
+.whatif-ico svg{width:100%;height:100%}
+.whatif-sq.in-active .whatif-ico{color:var(--color-text-primary)}
+.whatif-name{font-size:9px;color:var(--color-text-primary);font-weight:500;line-height:1.2;word-break:break-word;font-family:var(--font-mono)}
+/* Stats panel (left side): per-candidate fitness chart. Width is driven
+   by the parent grid column so the panel grows alongside the right-side
+   tile grid. Height stays fixed so the chart canvas reserves a stable
+   area regardless of candidate count. */
+.whatif-stats{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:12px;display:flex;flex-direction:column;gap:6px;width:100%;height:244px;overflow:hidden}
+.whatif-stats-title{font-size:10px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.whatif-stats-winner{font-size:11px;color:var(--color-text-secondary);font-family:var(--font-mono);line-height:1.4}
+.whatif-stats-winner .swap{color:var(--color-accent);font-weight:600}
+.whatif-stats-winner .same{color:var(--color-text-tertiary)}
+/* ``min-height: 0`` is the magic that lets a flex child of a fixed-height
+   parent actually shrink — without it, Chart.js keeps the canvas at its
+   intrinsic size and overflows the panel. */
+.whatif-stats-chart{position:relative;flex:1;min-height:0;width:100%}
+.whatif-stats-empty{color:var(--color-text-tertiary);font-style:italic;font-size:11px;padding:16px 0;text-align:center}
+.whatif-legend-inline{display:flex;gap:10px;font-size:10px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
+.whatif-legend-inline .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
+/* Convention across the panel: transparent amber = data already on disk
+   (the actual ``composite_fitness`` / formula); solid amber = the
+   dynamic, user-driven what-if scenario. */
+.whatif-legend-inline .dot.actual{background:rgba(245,158,11,0.30);border:1px solid rgba(245,158,11,0.45)}
+.whatif-legend-inline .dot.whatif{background:rgba(245,158,11,0.95)}
+.whatif-controls{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap}
+.whatif-status{font-size:11px;color:var(--color-text-secondary);font-family:var(--font-mono)}
+.whatif-actions{display:flex;gap:6px}
+.whatif-btn{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:5px 10px;font-size:11px;cursor:pointer;font-family:inherit;transition:background .15s,color .15s,border-color .15s}
+.whatif-btn:hover{background:#1a1a1a;color:var(--color-text-primary);border-color:var(--color-accent)}
+.whatif-summary{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px;margin-top:14px;line-height:1.6}
+.whatif-summary .rank-up{color:var(--color-accent);font-weight:700}
+.whatif-summary .rank-down{color:var(--color-text-secondary);font-weight:600}
+.whatif-summary .rank-flat{color:var(--color-text-tertiary)}
+.whatif-summary .empty{color:var(--color-text-tertiary);font-style:italic}
 
 /* Raw JSON dump */
 .raw-card details{cursor:pointer}
@@ -580,6 +671,48 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
         <div class="round-grid" id="round-grid"><div style="color:var(--color-text-tertiary);font-size:12px">No round in progress.</div></div>
       </div>
 
+      <div class="card whatif-card">
+        <div class="card-title">
+          What-If
+          <span style="font-size:10px;color:var(--color-text-tertiary);font-weight:400">read-only · ablation preview · current round</span>
+        </div>
+        <div class="whatif-intro">
+          Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>"what if I scored without X?"</em>
+        </div>
+        <div class="whatif-legend">
+          <span><span class="swatch checked">✓</span>selected (counts in what-if)</span>
+          <span><span class="swatch active"></span>used in actual formula</span>
+          <span><span class="swatch optional"></span>available, not in formula</span>
+          <span><span class="swatch disabled"></span>not applicable to this pipeline</span>
+        </div>
+        <div class="whatif-body">
+          <aside class="whatif-stats">
+            <div class="whatif-stats-title">Per-candidate fitness</div>
+            <div class="whatif-legend-inline">
+              <span><span class="dot actual"></span>actual</span>
+              <span><span class="dot whatif"></span>what-if</span>
+            </div>
+            <div class="whatif-stats-winner" id="whatif-winner-line">—</div>
+            <div class="whatif-stats-chart"><canvas id="whatif-chart"></canvas></div>
+            <div class="whatif-stats-empty" id="whatif-stats-empty" style="display:none">Waiting for round candidates…</div>
+          </aside>
+          <div class="whatif-grid-wrap">
+            <div class="whatif-grid" id="whatif-grid">
+              <div style="color:var(--color-text-tertiary);font-size:12px;grid-column:1/-1">Awaiting evaluator registry…</div>
+            </div>
+          </div>
+        </div>
+        <div class="whatif-controls">
+          <div class="whatif-status" id="whatif-status">— evaluators selected</div>
+          <div class="whatif-actions">
+            <button class="whatif-btn" id="whatif-reset-actual">Reset to actual</button>
+            <button class="whatif-btn" id="whatif-select-none">Clear all</button>
+            <button class="whatif-btn" id="whatif-select-all">Select all</button>
+          </div>
+        </div>
+        <div class="whatif-summary" id="whatif-summary"><span class="empty">Waiting for round…</span></div>
+      </div>
+
       <div class="card samples-card">
         <div class="card-title">
           Live samples <span class="real-tag">live · real hit/miss</span>
@@ -802,6 +935,7 @@ async function refreshDashboard(){
   renderPromptVariables(dash);
   renderLiveState(dash);
   renderRoundDetail(dash);
+  renderWhatIf(dash);
   renderLiveSamples(dash);
   renderRawDash(dash);
 
@@ -1343,6 +1477,458 @@ function parseSampleLine(line){
     gt: m[6],
     query: m[7],
   };
+}
+
+// ---------------------------------------------------------------------------
+// What-If panel — read-only client-side ablation. The active composite_fitness
+// on disk is unchanged; this recomputes per-candidate scores under the
+// operator's selected evaluator subset and shows ranking deltas.
+//
+// Score model: ``mean(direction-corrected selected values)``. For a "high is
+// better" evaluator we use ``v`` directly; for "low is better" (error_rate /
+// degraded_rate / runtime_failure_rate) we use ``1 - v`` so the mean is on a
+// uniform [0, 1] scale where larger = better. Selecting zero evaluators
+// shows '—' (no signal).
+// ---------------------------------------------------------------------------
+
+const WHATIF_ICON = {
+  accuracy:                  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>',
+  error_rate:                '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3 2 21h20L12 3z"/><path d="M12 10v5"/><circle cx="12" cy="18" r="0.6" fill="currentColor"/></svg>',
+  degraded_rate:             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12h4l2-6 4 12 2-6h6"/></svg>',
+  runtime_failure_rate:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="m8 8 8 8M16 8l-8 8"/></svg>',
+  latency_norm:              '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M13 2 4 14h7l-1 8 9-12h-7l1-8z" fill="currentColor" fill-opacity=".15"/></svg>',
+  source_recall:             '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m20 20-4.3-4.3"/></svg>',
+  candidate_recall:          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="m4 7 2 2 4-4"/><path d="m4 14 2 2 4-4"/><path d="M13 8h8"/><path d="M13 15h8"/></svg>',
+  cache_hit_rate:            '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>',
+  retrieval_shortfall:       '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="m6 9 6 6 6-6"/><path d="M5 21h14"/></svg>',
+  mean_retrieval_shortfall:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><path d="M14 7h7v7"/></svg>',
+  pipeline_compactness:      '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="12" r="2.5"/><path d="M8 6h6a4 4 0 0 1 4 4v.5"/><path d="M8 18h6a4 4 0 0 0 4-4v-.5"/></svg>',
+  prompt_compactness:        '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4h14v3"/><path d="M9 20h6"/><path d="M12 7v13"/></svg>',
+};
+const WHATIF_FALLBACK_ICON = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="8"/><path d="M9 12h6M12 9v6"/></svg>';
+
+// Mirror of ``promptpotter/application/scoring/evaluators.py::evaluators_meta()``.
+// Lives inline so the panel renders before — and even without — the API
+// fetch landing. The dashboard.json snapshot still wins when present (it
+// reflects the registry the *current cycle* was scored under).
+const WHATIF_INLINE_META = [
+  { name: 'accuracy',                 scope: 'per_round', direction: 'high', node_type: null,
+    description: "Mean per-query score across the round's result set." },
+  { name: 'error_rate',               scope: 'per_round', direction: 'low',  node_type: null,
+    description: 'Fraction of queries that errored (ERROR predicted or exception).' },
+  { name: 'degraded_rate',            scope: 'per_round', direction: 'low',  node_type: null,
+    description: 'Fraction of queries that completed with pipeline degradation warnings.' },
+  { name: 'runtime_failure_rate',     scope: 'per_round', direction: 'low',  node_type: null,
+    description: 'Runtime failure count on OptSP memory, normalized by total queries.' },
+  { name: 'latency_norm',             scope: 'per_round', direction: 'high', node_type: null,
+    description: 'Mean latency normalized against LATENCY_BUDGET_MS (1.0 = instant, 0.0 = ≥ budget).' },
+  { name: 'source_recall',            scope: 'per_round', direction: 'high', node_type: 'candidate_source',
+    description: "Fraction of queries where GT appears in a candidate_source node's output." },
+  { name: 'candidate_recall',         scope: 'per_round', direction: 'high', node_type: 'ranker',
+    description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
+  { name: 'cache_hit_rate',           scope: 'per_round', direction: 'high', node_type: 'cache',
+    description: 'Fraction of queries resolved by a cache node (non-null timing).' },
+  { name: 'retrieval_shortfall',      scope: 'per_query', direction: 'high', node_type: null,
+    description: 'Per-query min(observed/target, 1.0) across nodes with max_*/num_* limits.' },
+  { name: 'mean_retrieval_shortfall', scope: 'per_round', direction: 'high', node_type: null,
+    description: "Mean of retrieval_shortfall across the round's results." },
+  { name: 'pipeline_compactness',     scope: 'per_round', direction: 'low',  node_type: null,
+    description: '1 − (active_steps − 1)/11 — shorter pipelines score higher.' },
+  { name: 'prompt_compactness',       scope: 'per_round', direction: 'high', node_type: null,
+    description: '1 − len(rendered_prompt)/PROMPT_BUDGET_CHARS — shorter prompts score higher.' },
+];
+
+const WHATIF_STATE = {
+  selected: null,    // Set<string> of evaluator names (display-name level — may be namespaced)
+  initialized: false,
+  controlsBound: false,
+  metaFromApi: null,    // upgraded snapshot from /api/v1/evaluators_meta when reachable
+  apiAttempted: false,
+  chart: null,          // Chart.js handle for the per-candidate fitness bar chart
+};
+
+async function whatifEnsureMetaFromApi(){
+  // One-shot upgrade from the live registry endpoint (added 2026-05-06).
+  // The inline registry is enough to render today; this fetch is purely
+  // for forward-compat — if a future evaluator lands and the inline copy
+  // hasn't been updated, the API still surfaces it.
+  if(WHATIF_STATE.apiAttempted) return;
+  WHATIF_STATE.apiAttempted = true;
+  try {
+    const live = await jget(`${API}/evaluators_meta`);
+    if(Array.isArray(live) && live.length){
+      WHATIF_STATE.metaFromApi = live;
+      if(latestDashboard) renderWhatIf(latestDashboard);
+    }
+  } catch(e){ /* no-op — inline meta covers us */ }
+}
+
+function whatifIconFor(displayName, registryName){
+  // Namespaced display names (e.g. ``fuzzy_matching_source_recall``) fall back
+  // to their registry stem icon so node-type-bound metrics render with the
+  // right glyph regardless of which node owns them this round.
+  return WHATIF_ICON[displayName] || WHATIF_ICON[registryName] || WHATIF_FALLBACK_ICON;
+}
+
+function whatifBuildRows(meta, applicable){
+  // For each registry entry: emit one row per namespaced applicable name
+  // (stem or ``<node>_<stem>``); if none match, emit a single greyed row
+  // under the bare registry name. Always renders the full registry so the
+  // operator sees the menu of evaluators that *could* apply.
+  const out = [];
+  const used = new Set();
+  for(const m of meta){
+    const matches = [...applicable].filter(a => a === m.name || a.endsWith('_' + m.name));
+    if(matches.length === 0){
+      out.push({ displayName: m.name, registryName: m.name, applicable: false,
+                 description: m.description, direction: m.direction });
+    } else {
+      for(const an of matches){
+        out.push({ displayName: an, registryName: m.name, applicable: true,
+                   description: m.description, direction: m.direction });
+        used.add(an);
+      }
+    }
+  }
+  // Unknown applicable names (registry shifted under us) — render with the
+  // fallback icon so we don't silently drop signal.
+  for(const an of applicable){
+    if(used.has(an)) continue;
+    out.push({ displayName: an, registryName: an, applicable: true,
+               description: '', direction: 'high' });
+  }
+  return out;
+}
+
+function whatifIdentifiersInFormula(formula){
+  // Extract bare identifiers from the active composite_fitness formula.
+  // Numbers and arithmetic operators are filtered by the regex; the only
+  // identifiers we'll see are evaluator names referenced in the formula.
+  if(!formula) return new Set();
+  const tokens = formula.match(/[a-zA-Z_][a-zA-Z0-9_]*/g) || [];
+  return new Set(tokens);
+}
+
+function renderWhatIf(dash){
+  const grid = document.getElementById('whatif-grid');
+  const summary = document.getElementById('whatif-summary');
+  const status = document.getElementById('whatif-status');
+  if(!grid || !summary || !status) return;
+
+  // Priority: per-cycle snapshot from dashboard.json (most precise — matches
+  // the registry the cycle was scored under) > /api/v1/evaluators_meta (live
+  // registry) > inline mirror (always present, no fetch required).
+  const dashMeta = (dash && Array.isArray(dash.evaluators_meta) && dash.evaluators_meta.length)
+    ? dash.evaluators_meta : null;
+  const meta = dashMeta || WHATIF_STATE.metaFromApi || WHATIF_INLINE_META;
+  if(!WHATIF_STATE.apiAttempted) whatifEnsureMetaFromApi();
+
+  const cr = (dash.current_round && dash.current_round.nodes && dash.current_round.nodes.l1_score) || null;
+  const candidates = (cr && cr.output && cr.output.candidates) || [];
+  const applicable = new Set();
+  for(const c of candidates){
+    const ev = (c.stats && c.stats.evaluators) || {};
+    for(const k of Object.keys(ev)) applicable.add(k);
+  }
+
+  const inActive = whatifIdentifiersInFormula(dash.composite_fitness_formula || '');
+  const rows = whatifBuildRows(meta, applicable);
+
+  // First-time init: default scenario = "the actual formula" so the operator
+  // sees the unchanged ranking. Subsequent renders preserve user toggles.
+  if(!WHATIF_STATE.initialized){
+    WHATIF_STATE.selected = new Set();
+    for(const r of rows){
+      if(r.applicable && inActive.has(r.displayName)) WHATIF_STATE.selected.add(r.displayName);
+    }
+    WHATIF_STATE.initialized = true;
+  } else {
+    // Drop any selections that lost applicability (e.g. pipeline shape changed).
+    for(const n of [...WHATIF_STATE.selected]){
+      if(!applicable.has(n)) WHATIF_STATE.selected.delete(n);
+    }
+  }
+
+  // Bucket order on the grid: in-formula → selected-but-not-in-formula
+  // → applicable-but-neither → not-applicable. Stable within each bucket
+  // so the registry order is preserved when state ties.
+  const bucketOf = (r) => {
+    if(!r.applicable) return 3;
+    if(inActive.has(r.displayName)) return 0;
+    if(WHATIF_STATE.selected.has(r.displayName)) return 1;
+    return 2;
+  };
+  rows.sort((a, b) => bucketOf(a) - bucketOf(b));
+
+  whatifBindControls(rows, inActive);
+  whatifRenderGrid(grid, rows, inActive);
+  whatifRenderSummary(summary, candidates, rows);
+  // Total slots in this round comes from ``dashboard.json::n_variants``
+  // — the chart pre-populates every C0..C(n-1) label even before its
+  // candidate has been scored, so the X axis is stable across the round.
+  const nVariants = Math.max(
+    Number(dash && dash.n_variants) || 0,
+    ...candidates.map(c => Number(c.idx ?? -1) + 1),
+    candidates.length,
+  );
+  whatifRenderChart(candidates, rows, nVariants);
+  const selectableCount = rows.filter(r => r.applicable).length;
+  status.textContent = `${WHATIF_STATE.selected.size} of ${selectableCount} evaluator${selectableCount === 1 ? '' : 's'} selected`;
+}
+
+function whatifRenderGrid(grid, rows, inActive){
+  grid.innerHTML = rows.map((r, i) => {
+    const enabled = WHATIF_STATE.selected.has(r.displayName);
+    const inAct = inActive.has(r.displayName);
+    const klass = ['whatif-sq'];
+    if(enabled) klass.push('on');
+    if(inAct) klass.push('in-active');
+    if(!r.applicable) klass.push('disabled');
+    const dirClass = r.direction === 'low' ? 'down' : 'up';
+    const dirGlyph = r.direction === 'low' ? '↓' : '↑';
+    const ico = whatifIconFor(r.displayName, r.registryName);
+    const title = (r.description || r.displayName).replace(/"/g, '&quot;');
+    return `<div class="${klass.join(' ')}" data-idx="${i}" title="${title}">
+      <div class="whatif-tick"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5"/></svg></div>
+      <div class="whatif-dir ${dirClass}">${dirGlyph}</div>
+      <div class="whatif-ico">${ico}</div>
+      <div class="whatif-name">${escapeHtml(r.displayName)}</div>
+    </div>`;
+  }).join('');
+
+  grid.querySelectorAll('.whatif-sq').forEach(el => {
+    if(el.classList.contains('disabled')) return;
+    el.addEventListener('click', () => {
+      const i = Number(el.dataset.idx);
+      const r = rows[i];
+      if(!r) return;
+      if(WHATIF_STATE.selected.has(r.displayName)) WHATIF_STATE.selected.delete(r.displayName);
+      else WHATIF_STATE.selected.add(r.displayName);
+      if(latestDashboard) renderWhatIf(latestDashboard);
+    });
+  });
+}
+
+function whatifBindControls(rows, inActive){
+  if(WHATIF_STATE.controlsBound) return;
+  const reset = document.getElementById('whatif-reset-actual');
+  const none  = document.getElementById('whatif-select-none');
+  const all   = document.getElementById('whatif-select-all');
+  if(reset){
+    reset.addEventListener('click', () => {
+      const dash = latestDashboard;
+      if(!dash) return;
+      const inActNow = whatifIdentifiersInFormula(dash.composite_fitness_formula || '');
+      const cr = (dash.current_round && dash.current_round.nodes && dash.current_round.nodes.l1_score) || null;
+      const cands = (cr && cr.output && cr.output.candidates) || [];
+      const applicableNow = new Set();
+      for(const c of cands){
+        for(const k of Object.keys((c.stats && c.stats.evaluators) || {})) applicableNow.add(k);
+      }
+      WHATIF_STATE.selected = new Set([...applicableNow].filter(n => inActNow.has(n)));
+      renderWhatIf(dash);
+    });
+  }
+  if(none){
+    none.addEventListener('click', () => {
+      WHATIF_STATE.selected.clear();
+      if(latestDashboard) renderWhatIf(latestDashboard);
+    });
+  }
+  if(all){
+    all.addEventListener('click', () => {
+      const dash = latestDashboard;
+      if(!dash) return;
+      const cr = (dash.current_round && dash.current_round.nodes && dash.current_round.nodes.l1_score) || null;
+      const cands = (cr && cr.output && cr.output.candidates) || [];
+      WHATIF_STATE.selected = new Set();
+      for(const c of cands){
+        for(const k of Object.keys((c.stats && c.stats.evaluators) || {})) WHATIF_STATE.selected.add(k);
+      }
+      renderWhatIf(dash);
+    });
+  }
+  WHATIF_STATE.controlsBound = true;
+}
+
+function whatifScoreCandidate(cand, rows){
+  const ev = (cand.stats && cand.stats.evaluators) || {};
+  let sum = 0, n = 0;
+  for(const sel of WHATIF_STATE.selected){
+    const v = ev[sel];
+    if(v == null) continue;
+    const r = rows.find(rr => rr.displayName === sel);
+    const direction = (r && r.direction) || 'high';
+    const corrected = direction === 'low' ? (1 - v) : v;
+    sum += corrected;
+    n += 1;
+  }
+  return n > 0 ? sum / n : null;
+}
+
+function whatifRenderSummary(el, candidates, rows){
+  if(!candidates.length){
+    el.innerHTML = '<span class="empty">Waiting for round candidates…</span>';
+    return;
+  }
+  if(!WHATIF_STATE.selected.size){
+    el.innerHTML = '<span class="empty">No evaluators selected — pick one or more buttons above to recompute scores.</span>';
+    return;
+  }
+  const lines = candidates.map(c => ({
+    idx: c.idx,
+    actual: (c.stats && typeof c.stats.composite_fitness === 'number') ? c.stats.composite_fitness : null,
+    whatif: whatifScoreCandidate(c, rows),
+  }));
+  const rankActual = whatifRanks(lines, 'actual');
+  const rankWhatif = whatifRanks(lines, 'whatif');
+  const actualWinner = whatifWinner(lines, 'actual');
+  const whatifWinnerC = whatifWinner(lines, 'whatif');
+  let movedUp = 0, movedDown = 0, flat = 0;
+  for(const l of lines){
+    const rA = rankActual.get(l.idx);
+    const rW = rankWhatif.get(l.idx);
+    if(rA == null || rW == null) continue;
+    if(rA > rW)      movedUp += 1;
+    else if(rA < rW) movedDown += 1;
+    else             flat += 1;
+  }
+  const fmt = v => (v == null ? '—' : v.toFixed(3));
+  const winnerSwap = (actualWinner != null && whatifWinnerC != null && actualWinner !== whatifWinnerC);
+  const winnerCell = winnerSwap
+    ? `<span class="rank-up">winner flips C${actualWinner} → C${whatifWinnerC}</span>`
+    : `<span class="rank-flat">winner unchanged (C${actualWinner ?? '—'})</span>`;
+  el.innerHTML = `
+    <div>${winnerCell}</div>
+    <div><span class="rank-up">▲ ${movedUp}</span> moved up · <span class="rank-down">▼ ${movedDown}</span> moved down · <span class="rank-flat">· ${flat}</span> unchanged</div>
+    <div style="margin-top:6px">candidates: ${lines.map(l => {
+      const rA = rankActual.get(l.idx); const rW = rankWhatif.get(l.idx);
+      const arrow = (rA != null && rW != null) ? (rA > rW ? '<span class="rank-up">▲</span>' : rA < rW ? '<span class="rank-down">▼</span>' : '<span class="rank-flat">·</span>') : '<span class="rank-flat">—</span>';
+      return `C${l.idx} ${fmt(l.actual)}→${fmt(l.whatif)} ${arrow}`;
+    }).join(' &nbsp;·&nbsp; ')}</div>
+  `;
+}
+
+function whatifRanks(lines, key){
+  const sortable = lines.filter(l => l[key] != null).slice().sort((a, b) => b[key] - a[key]);
+  const m = new Map();
+  sortable.forEach((l, i) => m.set(l.idx, i + 1));
+  return m;
+}
+
+function whatifWinner(lines, key){
+  let best = null, bestVal = -Infinity;
+  for(const l of lines){
+    const v = l[key];
+    if(v == null) continue;
+    if(v > bestVal){ bestVal = v; best = l.idx; }
+  }
+  return best;
+}
+
+function whatifRenderChart(candidates, rows, nVariants){
+  // Per-candidate fitness chart: thick lines connect the actual
+  // composite_fitness on disk and the user's what-if recompute. Lives in
+  // the left-hand stats panel and updates in lockstep with toggle clicks.
+  // The X axis is pre-populated with all C0..C(n-1) labels for the round
+  // so the chart's footprint is stable even before candidates are scored.
+  const ctx = document.getElementById('whatif-chart');
+  const empty = document.getElementById('whatif-stats-empty');
+  const winnerLine = document.getElementById('whatif-winner-line');
+  if(!ctx) return;
+
+  const total = Math.max(Number(nVariants) || 0, 1);
+  const labels     = Array.from({ length: total }, (_, i) => `C${i}`);
+  const actualData = new Array(total).fill(null);
+  const whatifData = new Array(total).fill(null);
+  for(const c of candidates){
+    const i = Number(c.idx);
+    if(!Number.isFinite(i) || i < 0 || i >= total) continue;
+    const actual = (c.stats && typeof c.stats.composite_fitness === 'number')
+      ? c.stats.composite_fitness : null;
+    const whatif = whatifScoreCandidate(c, rows);
+    actualData[i] = actual;
+    whatifData[i] = whatif;
+  }
+
+  // Winner callout drives off scored candidates only; pre-populated null
+  // slots don't count.
+  const lines = candidates.map(c => ({
+    idx: c.idx,
+    actual: (c.stats && typeof c.stats.composite_fitness === 'number') ? c.stats.composite_fitness : null,
+    whatif: whatifScoreCandidate(c, rows),
+  })).filter(l => l.actual != null || l.whatif != null);
+  if(empty) empty.style.display = lines.length ? 'none' : 'block';
+  if(winnerLine){
+    if(!lines.length){
+      winnerLine.innerHTML = '<span class="same">no candidates yet</span>';
+    } else if(WHATIF_STATE.selected.size === 0){
+      winnerLine.innerHTML = '<span class="same">no evaluators selected</span>';
+    } else {
+      const wA = whatifWinner(lines, 'actual');
+      const wW = whatifWinner(lines, 'whatif');
+      if(wW == null){
+        winnerLine.innerHTML = '<span class="same">what-if not computable on these candidates</span>';
+      } else if(wA != null && wA !== wW){
+        winnerLine.innerHTML = `<span class="swap">winner flips C${wA} → C${wW}</span>`;
+      } else {
+        winnerLine.innerHTML = `<span class="same">winner unchanged · C${wW}</span>`;
+      }
+    }
+  }
+
+  if(WHATIF_STATE.chart){
+    WHATIF_STATE.chart.data.labels = labels;
+    WHATIF_STATE.chart.data.datasets[0].data = actualData;
+    WHATIF_STATE.chart.data.datasets[1].data = whatifData;
+    WHATIF_STATE.chart.update('none');
+    return;
+  }
+
+  if(!window.Chart) return;
+  WHATIF_STATE.chart = new Chart(ctx, {
+    type: 'bar',
+    data: {
+      labels,
+      // Bars rendered as a pair of thin vertical sticks per candidate.
+      // ``categoryPercentage`` keeps each pair to ~45 % of its slot so
+      // there's a clear gap between candidates; ``barPercentage`` lets
+      // the two bars inside each pair sit close together. Transparent
+      // amber = actual (matches the milky tile frame for "in actual
+      // formula"); solid amber = the dynamic what-if score (matches the
+      // checkbox tick).
+      datasets: [
+        { label: 'actual',  data: actualData,
+          backgroundColor: 'rgba(245,158,11,0.55)',
+          borderColor: 'rgba(245,158,11,0.55)',
+          borderWidth: 0,
+          barPercentage: 0.95, categoryPercentage: 0.45, maxBarThickness: 7 },
+        { label: 'what-if', data: whatifData,
+          backgroundColor: 'rgba(245,158,11,0.95)',
+          borderColor: 'rgba(245,158,11,0.95)',
+          borderWidth: 0,
+          barPercentage: 0.95, categoryPercentage: 0.45, maxBarThickness: 7 },
+      ],
+    },
+    options: {
+      // Candidate labels on the X axis, score 0–1 on Y.
+      responsive: true,
+      maintainAspectRatio: false,
+      animation: { duration: 200 },
+      scales: {
+        x: { grid: { display: false }, ticks: { font: { size: 10, family: 'SF Mono, Menlo, Consolas, monospace' }, autoSkip: false } },
+        y: { min: 0, max: 1, grid: { color: '#2a2a2a' }, ticks: { font: { size: 9 }, stepSize: 0.25 } },
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          callbacks: {
+            label: (ctx) => `${ctx.dataset.label}: ${(ctx.parsed.y ?? 0).toFixed(3)}`,
+          },
+        },
+      },
+    },
+  });
 }
 
 function renderLiveSamples(dash){

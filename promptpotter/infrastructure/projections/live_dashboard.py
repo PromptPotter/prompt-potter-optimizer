@@ -64,6 +64,7 @@ def _make_initial_state(
     patience_max: int,
     n_variants: int,
     sp_budget_ttest: int,
+    evaluators_meta: list[dict[str, Any]] | None,
 ) -> dict[str, Any]:
     """Build the scalar-only dashboard dict (no setup/derived fields)."""
     r = resume_from or {}
@@ -102,6 +103,11 @@ def _make_initial_state(
         "wallclock_serialized_at": None,
         "n_variants": n_variants,
         "sp_budget_ttest": sp_budget_ttest,
+        # Static evaluator registry projection — read by the webapp's
+        # What-If panel to render direction-aware (↑/↓ better) ablation
+        # squares for the current candidate set. Persisted from the
+        # registry on each construction; carries no per-round state.
+        "evaluators_meta": evaluators_meta or r.get("evaluators_meta") or [],
     }
 
 
@@ -165,6 +171,7 @@ class _ScalarBlock:
         l1_patience: int,
         n_variants: int,
         sp_budget_ttest: int,
+        evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> None:
         self.patience_max = l1_patience
         self.state: dict[str, Any] = _make_initial_state(
@@ -173,6 +180,7 @@ class _ScalarBlock:
             patience_max=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
+            evaluators_meta=evaluators_meta,
         )
         # Bare short-form formula template (set on INIT:exit). On every
         # candidate score we re-inline the candidate's resolved
@@ -459,6 +467,7 @@ class LiveDashboardProjection(ProjectionBase):
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
         recorder: AuditTrailProjection | None = None,
+        evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
         # Forks share one continuous dashboard.json; per-fork audit
@@ -482,6 +491,7 @@ class LiveDashboardProjection(ProjectionBase):
             l1_patience=l1_patience,
             n_variants=n_variants,
             sp_budget_ttest=sp_budget_ttest,
+            evaluators_meta=evaluators_meta,
         )
         self.round = _RoundBlock()
 
@@ -504,6 +514,7 @@ class LiveDashboardProjection(ProjectionBase):
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
         recorder: AuditTrailProjection | None = None,
+        evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> LiveDashboardProjection | None:
         """Build projection, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
@@ -543,6 +554,7 @@ class LiveDashboardProjection(ProjectionBase):
             resume_from=resume_from,
             cycle_id=cycle_id,
             recorder=recorder,
+            evaluators_meta=evaluators_meta,
         )
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:

@@ -44,6 +44,7 @@ __all__ = [
     "all_evaluators",
     "default_per_round_formula",
     "default_per_round_formula_short",
+    "evaluators_meta",
     "materialize_query_values",
     "materialize_round_values",
 ]
@@ -256,6 +257,14 @@ class Evaluator:
     scope: Scope
     compute: Callable[..., float]
     data_type: DataType = "NUMERIC"
+    # ``high`` = larger raw value is better (accuracy, recall, latency_norm,
+    # …); ``low`` = larger raw value is worse (error_rate, degraded_rate,
+    # runtime_failure_rate). Read by the webapp's What-If panel to
+    # direction-correct values when recomputing under alternative
+    # evaluator subsets. The active composite_fitness formula already
+    # bakes direction in (e.g. ``1 - error_rate``); this field is the
+    # raw-axis semantic.
+    direction: Literal["high", "low"] = "high"
     node_type: str | None = None
     applies: Callable[[PipelineSchema], bool] = field(default=lambda _schema: True)
 
@@ -272,18 +281,21 @@ _REGISTRY: list[Evaluator] = [
         description="Fraction of queries that errored (ERROR predicted or exception).",
         scope="per_round",
         compute=compute_error_rate,
+        direction="low",
     ),
     Evaluator(
         name="degraded_rate",
         description="Fraction of queries that completed with pipeline degradation warnings.",
         scope="per_round",
         compute=compute_degraded_rate,
+        direction="low",
     ),
     Evaluator(
         name="runtime_failure_rate",
         description="Runtime failure count on OptSP memory, normalized by total queries.",
         scope="per_round",
         compute=compute_runtime_failure_rate,
+        direction="low",
     ),
     Evaluator(
         name="latency_norm",
@@ -341,6 +353,7 @@ _REGISTRY: list[Evaluator] = [
         ),
         scope="per_round",
         compute=compute_pipeline_compactness,
+        direction="low",
     ),
     Evaluator(
         name="prompt_compactness",
@@ -358,6 +371,28 @@ _REGISTRY: list[Evaluator] = [
 def all_evaluators() -> list[Evaluator]:
     """Return the full registry (copy)."""
     return list(_REGISTRY)
+
+
+def evaluators_meta() -> list[dict[str, Any]]:
+    """Registry projection for the read-only webapp's What-If panel.
+
+    Drops the ``compute`` callable and ``applies`` predicate (neither is
+    JSON-serializable) and emits the static descriptive fields. The
+    panel determines per-pipeline applicability from whichever names
+    actually show up in a candidate's ``evaluators`` dict — the registry
+    only needs to publish names, descriptions, and direction.
+    """
+    return [
+        {
+            "name": ev.name,
+            "description": ev.description,
+            "scope": ev.scope,
+            "data_type": ev.data_type,
+            "direction": ev.direction,
+            "node_type": ev.node_type,
+        }
+        for ev in _REGISTRY
+    ]
 
 
 def _concrete_round_entries(

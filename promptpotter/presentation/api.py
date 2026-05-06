@@ -575,6 +575,19 @@ async def get_optimizer_pipeline() -> dict[str, Any]:
     return json.loads(_OPTIMIZER_PIPELINE_PATH.read_text(encoding="utf-8"))
 
 
+@_active_router.get("/evaluators_meta")
+async def get_evaluators_meta() -> list[dict[str, Any]]:
+    """Live registry projection — name, description, scope, direction, node_type.
+
+    Read by the webapp's What-If panel so the registry is available even on
+    cycles whose ``dashboard.json`` predates the meta block. Always returns
+    the import-time registry, not a per-cycle snapshot.
+    """
+    from promptpotter.application.scoring.evaluators import evaluators_meta
+
+    return evaluators_meta()
+
+
 class FileEntry(BaseModel):
     path: str = Field(description="Path relative to the scope root, forward slashes")
     scope: Literal["cycle", "family"] = Field(description="Which root the path is under")
