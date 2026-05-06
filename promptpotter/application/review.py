@@ -252,7 +252,7 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
 
 
 def _render_critique(round_data: dict[str, Any]) -> list[str]:
-    from promptpotter.application.optimization.l1_critique import (
+    from promptpotter.application.optimization.dispatch_hub import (
         format_l1_critique_for_prompt,
     )
 

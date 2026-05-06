@@ -16,15 +16,12 @@ from typing import TYPE_CHECKING
 from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
 from promptpotter.application.optimization.dispatch_hub import (
     DispatchHub,
-    Layer,
     build_bundle,
+    format_l1_critique_for_prompt,
 )
 from promptpotter.application.optimization.elimination import PoBBCheck, PoBBConfig
 from promptpotter.application.optimization.formatting import candidate_summaries
-from promptpotter.application.optimization.l1_critique import (
-    format_l1_critique_for_prompt,
-    run_l1_critique,
-)
+from promptpotter.application.optimization.l1_critique import run_l1_critique
 from promptpotter.application.optimization.l1_population import (
     INVALID_SCORES,
     build_score_report,
@@ -118,7 +115,7 @@ async def l1_generate(
     pipeline_schema = cycle.session.pipeline_schema
     tracing_campaign_id = cycle.session.state.tracing_campaign_id
 
-    bundle = build_bundle(Layer.L1_GENERATE, cycle)
+    bundle = build_bundle(cycle)
     template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
     prompt_vars: dict[str, str] = {
         "n_variants": str(n_variants),

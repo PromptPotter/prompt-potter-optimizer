@@ -13,10 +13,11 @@ incremental-refresh contract (``_seen_runs`` cursors) and the archive's
    becomes O(unique_configs).
 
 3. **AxisIndex** — derived axis-keyed view; folds new index entries into
-   ``_axis_values`` via an in-process ``_axis_seen_runs`` cursor; hosts
-   the layer-agnostic ``digest()`` API consumed by L1/L2/L3 prompts via
-   the dispatch hub's ``axis_memory`` signal. Holds a SampleIndex +
-   ConfigIndex internally so refresh updates all three in one walk.
+   ``_axis_values`` via an in-process ``_axis_seen_runs`` cursor; exposes
+   a ``digest()`` API summarising parameter impact / query patterns /
+   failure modes for the zero-signal filter, scoring-set evolution, and
+   ranking heuristics. Holds a SampleIndex + ConfigIndex internally so
+   refresh updates all three in one walk.
 
 Failure-group × axis correlations are recomputed on every refresh — cheap
 at current scale and avoids drift from a throttle.

@@ -111,7 +111,7 @@ The archive answers *"what was actually measured?"* The axis index answers *"acr
 - **Query patterns** — hits/misses per query across all configs. Informative queries are *discriminating* (some hit, some miss); always-easy and always-hard are noise. The zero-signal filter physically excludes the noise; scoring-set evolution gently swaps it out.
 - **Failure modes** — where in the pipeline failures cluster. *"40% of misses fail at web_search"* is the strategic signal L3 needs.
 
-A single layer-agnostic `digest()` is the LLM-context surface — same payload rendered into every L1/L2/L3 prompt via the dispatch hub's `axis_memory` signal.
+`AxisIndex.digest()` summarises these three layers into a flat dict; consumers (zero-signal filter, scoring-set evolution, ranking heuristics) read it directly.
 
 ### What the archive is *not*
 

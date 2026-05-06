@@ -79,7 +79,6 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         Bundle,
         CycleSlice,
         DispatchHub,
-        Layer,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
@@ -122,13 +121,11 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
 
     opt_sp = OptSearchPoint(plan="STRATEGIC PLAN", l2_brief="BRIEF FROM L2")
     bundle = Bundle(
-        layer=Layer.L1_GENERATE,
         opt_sp=opt_sp,
         pipeline_schema=None,
         cycle_slice=cycle_slice,
         latest_diagnostics=diag,
         latest_critique=None,
-        axis_digest=None,
     )
 
     diagnostics_text = DispatchHub.render("diagnostics", bundle)

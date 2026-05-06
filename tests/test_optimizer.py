@@ -414,46 +414,6 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
 
 
 # ===========================================================================
-# axis_memory signal — layer-agnostic AxisIndex digest renderer
-# ===========================================================================
-
-
-def test_axis_memory_signal_registered_and_in_l1_possible():
-    """axis_memory is reachable from the SIGNALS registry and L2 may put it
-    in L1's layout — both anchors are required for the channel to work."""
-    from promptpotter.application.optimization.dispatch_hub import SIGNALS
-    from promptpotter.domain.l1_layout import L1_POSSIBLE
-
-    assert "axis_memory" in SIGNALS
-    assert "axis_memory" in L1_POSSIBLE
-
-
-def test_axis_memory_renderer_empty_digest_returns_empty_string():
-    """No AxisIndex wired (cycle.axes is None) → no AXIS MEMORY section."""
-    from promptpotter.application.optimization.dispatch_hub import _r_axis_memory
-
-    assert _r_axis_memory(types.SimpleNamespace(axis_digest=None)) == ""
-    assert _r_axis_memory(types.SimpleNamespace(axis_digest={})) == ""
-    # Dict with only blank values still collapses to empty.
-    assert _r_axis_memory(types.SimpleNamespace(axis_digest={"top_axes": "", "dead": ""})) == ""
-
-
-def test_axis_memory_renderer_compact_block_with_digest():
-    """Populated digest renders one block with header + indented k:v lines."""
-    from promptpotter.application.optimization.dispatch_hub import _r_axis_memory
-
-    digest = {
-        "top_axes": "persona (effect=0.12)",
-        "dead_queries": "3 queries never hit",
-    }
-    out = _r_axis_memory(types.SimpleNamespace(axis_digest=digest))
-
-    assert out.startswith("AXIS MEMORY:")
-    assert "  top_axes: persona (effect=0.12)" in out
-    assert "  dead_queries: 3 queries never hit" in out
-
-
-# ===========================================================================
 # l3_to_l2_note — sticky L3→L2 channel, invisible to L1
 # ===========================================================================
 

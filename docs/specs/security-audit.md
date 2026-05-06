@@ -84,10 +84,10 @@ their output with:
     </UNTRUSTED_DATASET_CONTENT>
 
 Trusted slots (`plan`, `l2_directive`, `task_context`, `critique`,
-`current_params`, `axis_memory`, `cycle_position`, `l2_history`,
-`pipeline_axes`, `l1_signal_catalogue`, `l1_rendered_prompt`,
-`rendered_prompt`, `l3_to_l2_note`) are NOT wrapped — they are
-operator-authored config or bounded LLM outputs.
+`current_params`, `cycle_position`, `l2_history`, `pipeline_axes`,
+`l1_signal_catalogue`, `l1_rendered_prompt`, `rendered_prompt`,
+`l3_to_l2_note`) are NOT wrapped — they are operator-authored config
+or bounded LLM outputs.
 
 Starter hardening only — see § Prompt-injection Phase 2 below for what
 M12 needs.

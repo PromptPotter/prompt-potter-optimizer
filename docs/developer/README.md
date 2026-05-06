@@ -20,7 +20,7 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. The hub has no state.
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
 **Invariant:** no prompt site summarizes its own data. If a name isn't in `SIGNALS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear.
 
@@ -148,6 +148,7 @@ archive/                            MeasurementArchive
 |------|--------|
 | [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
 | [L1 layout + dispatch hub](l1-generate-surface.md) | `SIGNALS` registry, `L1Layout`, `DispatchHub` |
+| [Dispatch hub visual + index](dispatch-hub.md) | Mermaid flow diagram + per-placeholder source map |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |
 

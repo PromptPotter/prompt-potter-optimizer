@@ -19,7 +19,6 @@ exists to remove.
 
 from __future__ import annotations
 
-import enum
 import json
 import logging
 import re
@@ -45,20 +44,11 @@ __all__ = [
     "Bundle",
     "CycleSlice",
     "DispatchHub",
-    "Layer",
     "build_bundle",
+    "format_l1_critique_for_prompt",
 ]
 
 logger = logging.getLogger(__name__)
-
-
-class Layer(enum.StrEnum):
-    """Optimizer layer that consumes a prompt fill."""
-
-    L1_GENERATE = "L1_GENERATE"
-    L1_CRITIQUE = "L1_CRITIQUE"
-    L2 = "L2"
-    L3 = "L3"
 
 
 # Module-level format constants shared across renderers.
@@ -130,16 +120,11 @@ class Bundle:
     ``fill_*`` methods to produce the prompt text.
     """
 
-    layer: Layer
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
     latest_diagnostics: RoundDiagnostics | None
     latest_critique: dict | None
-    # Cross-cycle axis-keyed digest from ``AxisIndex.digest()``. Same payload
-    # everywhere — layer-agnostic by design. ``None`` when ``cycle.axes`` is
-    # unset.
-    axis_digest: dict[str, str] | None
 
 
 # ---------------------------------------------------------------------------
@@ -400,23 +385,32 @@ def _r_task_context(b: Bundle) -> str:
     return "TASK CONTEXT:\n" + "\n".join(f"  {k}: {v}" for k, v in pairs)
 
 
-def _r_critique(b: Bundle) -> str:
-    """Compact view of the most recent L1_CRITIQUE output dict."""
-    crit = b.latest_critique
-    if not crit:
+def format_l1_critique_for_prompt(critique: dict) -> str:
+    """L1 critique dict → compact text (summary + priority_fix + axes + top-5 highlights).
+
+    Shared between the ``critique`` dispatch signal (which feeds it the raw
+    round dict) and downstream display sites (tracing emit, view factories,
+    review). One formatter — same wire shape everywhere.
+    """
+    if not critique:
         return ""
     parts: list[str] = []
-    if s := crit.get("summary"):
+    if s := critique.get("summary"):
         parts.append(s)
-    if pf := crit.get("priority_fix"):
+    if pf := critique.get("priority_fix"):
         parts.append(f"Priority fix: {pf}")
-    if sa := crit.get("suggested_axes"):
+    if sa := critique.get("suggested_axes"):
         parts.append(f"Suggested axes: {', '.join(sa)}")
-    if fh := crit.get("failure_highlights"):
+    if fh := critique.get("failure_highlights"):
         parts.append("Key failures:")
         for h in fh[:5]:
             parts.append(f"  {h}")
     return "\n".join(parts)
+
+
+def _r_critique(b: Bundle) -> str:
+    """Compact view of the most recent L1_CRITIQUE output dict."""
+    return format_l1_critique_for_prompt(b.latest_critique or {})
 
 
 def _r_current_params(b: Bundle) -> str:
@@ -463,22 +457,6 @@ def _r_cycle_position(b: Bundle) -> str:
     return "\n".join(parts)
 
 
-def _r_axis_memory(b: Bundle) -> str:
-    """Cross-cycle axis-keyed memory — one compact block, identical for every layer.
-
-    Reads the unified digest from the bundle. Empty/absent digest → no
-    section, so the slot collapses cleanly.
-    """
-    digest = b.axis_digest
-    if not digest:
-        return ""
-    lines = ["AXIS MEMORY:"]
-    for k, v in digest.items():
-        if v:
-            lines.append(f"  {k}: {v}")
-    return "\n".join(lines) if len(lines) > 1 else ""
-
-
 def _r_l2_history(b: Bundle) -> str:
     """L3-only: synthetic recap of L2's most recent fire."""
     cs = b.cycle_slice
@@ -513,7 +491,6 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "l1_rendered_prompt": _r_l1_rendered_prompt,
     "cycle_position": _r_cycle_position,
     "l2_history": _r_l2_history,
-    "axis_memory": _r_axis_memory,
 }
 
 
@@ -589,7 +566,6 @@ class DispatchHub:
 
 
 def build_bundle(
-    layer: Layer,
     cycle: Cycle,
     *,
     latest_round: RoundResult | None = None,
@@ -635,13 +611,11 @@ def build_bundle(
     )
 
     return Bundle(
-        layer=layer,
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
         latest_diagnostics=latest_diag,
         latest_critique=latest_crit,
-        axis_digest=cycle.axes.digest() if cycle.axes is not None else None,
     )
 
 

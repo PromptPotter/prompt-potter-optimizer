@@ -21,12 +21,11 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING, Any, Literal
 
 from promptpotter.application.optimization.cycle import NextAction
 from promptpotter.application.optimization.dispatch_hub import (
     DispatchHub,
-    Layer,
     build_bundle,
 )
 from promptpotter.application.optimization.formatting import warning_summary
@@ -123,7 +122,7 @@ ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
 
 @dataclass(frozen=True)
 class LayerStrategy:
-    layer: Layer
+    layer_id: Literal["L2", "L3"]
     template_name: str
     default_temperature: float
     phase: CampaignPhase
@@ -133,7 +132,7 @@ class LayerStrategy:
     exit_payload_fn: ExitFn
 
     def build_prompt_vars(self, cycle: Cycle) -> dict[str, str]:
-        bundle = build_bundle(self.layer, cycle)
+        bundle = build_bundle(cycle)
         template = load_optimizer_prompt(self.template_name)
         return DispatchHub.fill_fixed(template, bundle)
 
@@ -276,7 +275,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 
 
 L2 = LayerStrategy(
-    layer=Layer.L2,
+    layer_id="L2",
     template_name="l2_context",
     default_temperature=0.3,
     phase=CampaignPhase.REFINE_STRATEGY,
@@ -350,7 +349,7 @@ def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
 
 
 L3 = LayerStrategy(
-    layer=Layer.L3,
+    layer_id="L3",
     template_name="l3_plan",
     default_temperature=0.5,
     phase=CampaignPhase.MODIFY_PLAN,
@@ -366,7 +365,7 @@ L3 = LayerStrategy(
 # ---------------------------------------------------------------------------
 
 
-_TEMP_ATTR: dict[Layer, str] = {Layer.L2: "l2_temperature", Layer.L3: "l3_temperature"}
+_TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
 
 
 # Module-default L1 layout so apply_sweep_payload_to_osp can be invoked
@@ -406,7 +405,7 @@ async def _run_transition(
             cycle,
             client,
             model=config.optimizer_llm.model,
-            temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer]),
+            temperature=getattr(config.optimization, _TEMP_ATTR[transition.layer_id]),
             round_num=round_num,
         )
     new_opt = result.opt_search_point
@@ -416,10 +415,10 @@ async def _run_transition(
         base_pipeline_params=current_pp, schema=pipeline_schema
     )
     if obs is not None:
-        with graceful(f"LayerApplied({transition.layer}) emit failed"):
+        with graceful(f"LayerApplied({transition.layer_id}) emit failed"):
             obs.emit_write_point(
                 LayerApplied,
-                layer=transition.layer,
+                layer=transition.layer_id,
                 campaign_id=tracing_campaign_id,
                 round_num=round_num,
                 changes_description=result.opt_search_point.lineage.changes_description or "",

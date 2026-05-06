@@ -28,7 +28,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from promptpotter.application.optimization.l1_critique import (
+from promptpotter.application.optimization.dispatch_hub import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.domain.opt_search_point import (
