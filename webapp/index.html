@@ -180,8 +180,8 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .tree-arrow{display:inline-block;width:10px;font-size:10px;color:var(--color-text-tertiary)}
 
 /* Chat view */
-.chat-content{padding:20px;display:flex;flex-direction:column;gap:16px}
-.chat-job-bar{position:relative;align-self:flex-start}
+.chat-content{padding:0 0 20px;display:flex;flex-direction:column}
+.chat-job-bar{position:relative;align-self:stretch;padding:6px 20px 8px;border-bottom:1px solid var(--color-border-tertiary)}
 .chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;max-width:480px}
 .chat-job-toggle > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .chat-job-toggle:hover{background:#1a1a1a;color:var(--color-text-primary);border-color:var(--color-border-tertiary)}
@@ -197,9 +197,11 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .wf-hero-status{position:absolute;top:6px;right:6px;font-size:11px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
 .wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
-.wf-hero-node{background:#0d0d0d;border:1px solid var(--color-border-tertiary);border-radius:10px;padding:14px 22px;text-align:center;min-width:140px;display:flex;flex-direction:column;align-items:center;gap:2px;position:relative;z-index:2}
-.wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;margin-bottom:4px}
+.wf-hero-node{background:#0d0d0d;border:1px solid var(--color-border-tertiary);border-radius:10px;padding:14px 22px;text-align:left;min-width:140px;display:flex;flex-direction:row;align-items:center;gap:12px;position:relative;z-index:2}
+.wf-hero-node .ico{color:var(--color-text-tertiary);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.wf-hero-node .text-col{display:flex;flex-direction:column;gap:2px;min-width:0}
 .wf-hero-node.llm{
+  flex-direction:column;align-items:stretch;gap:4px;
   background:linear-gradient(180deg,rgba(245,158,11,0.18) 0%,rgba(245,158,11,0.05) 100%);
   border:1px solid var(--color-accent);
   box-shadow:0 0 28px var(--color-accent-glow),inset 0 1px 0 rgba(255,255,255,0.05);
@@ -207,10 +209,12 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   -webkit-backdrop-filter:blur(10px);
   min-width:200px
 }
+.wf-hero-node.llm .head{display:flex;flex-direction:row;align-items:center;justify-content:center;gap:10px}
 .wf-hero-node.llm .ico{color:var(--color-accent)}
-.wf-hero-node .lbl{font-size:10px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
-.wf-hero-node .val{font-size:13px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px}
-.wf-hero-node.llm .val{color:var(--color-accent)}
+.wf-hero-node .lbl{font-size:13px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
+.wf-hero-node.llm .lbl{font-size:20px;color:var(--color-text-primary);letter-spacing:.06em}
+.wf-hero-node .val{font-size:13px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
 .wf-hero-arrow{
   flex:1;max-width:220px;min-width:80px;height:2px;position:relative;margin:0 -1px;
   background:linear-gradient(90deg,transparent 0%,var(--color-accent) 18%,var(--color-accent) 82%,transparent 100%);
@@ -223,7 +227,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:11px;padding:5px 14px;border-radius:999px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.30);color:var(--color-accent);letter-spacing:.04em}
-.chat-grid{display:grid;grid-template-columns:minmax(0,720px) 220px;gap:24px;justify-content:center;flex:1;min-height:0}
+.chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:380px;min-width:0}
 .chat-panel-header{padding:14px 18px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
 .chat-panel-title{font-size:14px;font-weight:500;color:var(--color-text-primary)}
@@ -242,7 +246,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   -webkit-backdrop-filter:blur(8px)
 }
 .chat-msg.ai{align-self:flex-start;background:#0d0d0d;border:1px solid var(--color-border-tertiary);color:var(--color-text-primary);border-bottom-left-radius:4px}
-.chat-input-row{padding:14px 18px;border-top:1px solid var(--color-border-tertiary);display:flex;gap:8px;align-items:flex-end}
+.chat-input-row{padding:14px 18px;display:flex;gap:8px;align-items:flex-end}
 .chat-attach{background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:0;width:40px;height:40px;cursor:pointer;display:inline-flex;align-items:center;justify-content:center;border-radius:8px;transition:background .15s,color .15s,border-color .15s;flex-shrink:0}
 .chat-attach:hover:not(:disabled){background:#1a1a1a;color:var(--color-accent);border-color:var(--color-accent)}
 .chat-attach:disabled{opacity:.55;cursor:not-allowed}
@@ -269,7 +273,45 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-settings-card.optimize{border-color:var(--color-accent);box-shadow:0 0 15px var(--color-accent-glow)}
 .chat-settings-title{font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);margin-bottom:10px;font-weight:600}
 .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:8px 0}
-.toggle-row + .toggle-row{border-top:1px solid var(--color-border-tertiary)}
+.toggle-row.divided{border-top:1px solid var(--color-border-tertiary);margin-top:8px;padding-top:14px}
+.row-separator{height:0;border-top:1px solid var(--color-border-tertiary);margin:10px 0 14px}
+.toggle-row.wand-row{
+  position:relative;border:1px solid var(--color-accent);border-radius:10px;padding:10px 12px;
+  margin:0 -12px;
+  background:radial-gradient(circle at center,rgba(245,158,11,0.10) 0%,rgba(245,158,11,0.02) 70%,transparent 100%);
+  box-shadow:0 0 14px rgba(245,158,11,0.40),inset 0 0 8px rgba(245,158,11,0.15);
+  overflow:visible;
+  animation:wand-frame-pulse 3.2s ease-in-out infinite;
+}
+.toggle-row.wand-row .row-icon{color:var(--color-accent);width:34px;height:34px}
+.toggle-row.wand-row .row-icon svg{width:32px;height:32px}
+.toggle-row.wand-row .name{white-space:nowrap}
+.toggle-row.wand-row .beta-tag{margin-left:6px}
+.toggle-row.wand-row .desc{max-width:180px}
+.toggle-row.wand-row .sparkle{
+  position:absolute;width:4px;height:4px;border-radius:50%;
+  background:var(--color-accent);
+  box-shadow:0 0 6px var(--color-accent),0 0 12px rgba(245,158,11,0.6);
+  opacity:0;pointer-events:none;
+  animation:wand-sparkle 2.6s ease-in-out infinite;
+}
+.toggle-row.wand-row .sparkle.s1{top:-3px;left:18%;animation-delay:0s;animation-duration:2.1s}
+.toggle-row.wand-row .sparkle.s2{top:30%;right:-3px;animation-delay:.7s;animation-duration:3.3s}
+.toggle-row.wand-row .sparkle.s3{bottom:-3px;right:25%;animation-delay:1.5s;animation-duration:2.7s}
+.toggle-row.wand-row .sparkle.s4{bottom:40%;left:-3px;animation-delay:.4s;animation-duration:3.6s;width:3px;height:3px}
+.toggle-row.wand-row .sparkle.s5{top:-2px;right:30%;animation-delay:2.0s;animation-duration:2.4s;width:3px;height:3px}
+.toggle-row.wand-row .sparkle.s6{bottom:-2px;left:38%;animation-delay:1.2s;animation-duration:3.0s;width:3px;height:3px}
+.toggle-row.wand-row .sparkle.s7{top:60%;right:-3px;animation-delay:1.8s;animation-duration:3.5s;width:3px;height:3px}
+.toggle-row.wand-row .sparkle.s8{top:20%;left:-3px;animation-delay:.9s;animation-duration:2.8s;width:3px;height:3px}
+@keyframes wand-sparkle{
+  0%,100%{opacity:0;transform:scale(.3)}
+  40%{opacity:1;transform:scale(1.4)}
+  65%{opacity:.55;transform:scale(.9)}
+}
+@keyframes wand-frame-pulse{
+  0%,100%{box-shadow:0 0 14px rgba(245,158,11,0.40),inset 0 0 8px rgba(245,158,11,0.20)}
+  50%{box-shadow:0 0 22px rgba(245,158,11,0.65),inset 0 0 12px rgba(245,158,11,0.30)}
+}
 .toggle-row .row-text{display:flex;align-items:center;gap:10px;min-width:0;flex:1}
 .toggle-row .row-icon{flex-shrink:0;color:var(--color-text-secondary);display:flex;align-items:center;justify-content:center;width:20px;height:20px}
 .toggle-row .row-body{min-width:0}
@@ -279,6 +321,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .toggle::after{content:'';position:absolute;top:2px;left:2px;width:16px;height:16px;border-radius:50%;background:#9ca3af;transition:left .15s,background .15s}
 .toggle.on{background:var(--color-accent)}
 .toggle.on::after{left:16px;background:#0d0d0d}
+.toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
 .beta-tag{display:inline-block;font-size:9px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-accent);color:#0d0d0d;margin-left:8px;text-transform:uppercase;vertical-align:middle}
 .shell.chat-mode > .sidebar{display:none}
 </style>
@@ -363,18 +406,21 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
         </div>
         <div class="wf-hero-flow">
           <div class="wf-hero-node">
-            <div class="ico"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M11 2v5h4"/></svg></div>
-            <div class="lbl">Input</div><div class="val">Query</div>
+            <div class="ico"><svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 10 13 10 11.5 12.5 8.5 12.5 7 10 2 10"/><path d="M4.6 4.4 2 10v5a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5v-5l-2.6-5.6a1.5 1.5 0 0 0-1.36-.9H5.96a1.5 1.5 0 0 0-1.36.9Z"/></svg></div>
+            <div class="text-col"><div class="lbl">Input</div><div class="val">Query</div></div>
           </div>
           <div class="wf-hero-arrow"></div>
           <div class="wf-hero-node llm">
-            <div class="ico"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="m3 17 11-11"/><path d="M12 4l1.5 1.5"/><path d="M14.5 2.5 16 4l-1.5 1.5L13 4l1.5-1.5Z" fill="currentColor"/><path d="M5 8l1 1M16 11l1 1M9 2l.5 1.2M9 16l.5-1.2"/></svg></div>
-            <div class="lbl">LLM</div><div class="val" id="chat-hero-model">idle</div>
+            <div class="head">
+              <div class="ico"><svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2.5 6.5 18h11Z" fill="currentColor" fill-opacity="0.18"/><path d="M5 18c2.4 1.6 4.7 2 7 2s4.6-.4 7-2"/><path d="M5 18h14"/><path d="m13.6 8.4.55 1.55 1.55.55-1.55.55-.55 1.55-.55-1.55-1.55-.55 1.55-.55Z" fill="currentColor"/><circle cx="10.2" cy="13.2" r="0.7" fill="currentColor"/></svg></div>
+              <div class="lbl">LLM</div>
+            </div>
+            <div class="val" id="chat-hero-model">idle</div>
           </div>
           <div class="wf-hero-arrow"></div>
           <div class="wf-hero-node">
-            <div class="ico"><svg width="20" height="20" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M11 2v5h4"/><path d="M7 12h6M7 14h4"/></svg></div>
-            <div class="lbl">Output</div><div class="val">Answer</div>
+            <div class="ico"><svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z"/><path d="M11 2v5h4"/><path d="M6.5 12.5h6"/><path d="m10.5 10.5 2.5 2-2.5 2"/></svg></div>
+            <div class="text-col"><div class="lbl">Output</div><div class="val">Answer</div></div>
           </div>
         </div>
         <div class="wf-hero-kb"><span class="wf-hero-kb-pill">Knowledge Base</span></div>
@@ -397,6 +443,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
               </div>
             </div>
             <div class="chat-msg ai">Got your pipeline + the dataset. Flip on Auto-tune (BETA) — I'll find a better prompt for it. Want me to turn it on?</div>
+            <div class="chat-msg ai">Which parameter do you want to explore?</div>
           </div>
           <div class="chat-input-row">
             <button class="chat-attach" title="Attach dataset" disabled>
@@ -409,38 +456,38 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 
         <div class="chat-settings">
           <div class="chat-settings-card">
-            <div class="chat-settings-title">Capabilities</div>
+            <div class="chat-settings-title">Settings</div>
             <div class="toggle-row">
               <div class="row-text">
                 <span class="row-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" opacity=".3"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg></span>
-                <div class="row-body"><div class="name">Extended thinking</div><div class="desc">Slower, higher quality</div></div>
+                <div class="row-body"><div class="name">Extended thinking</div></div>
               </div>
-              <div class="toggle on" data-toggle></div>
+              <div class="toggle locked"></div>
             </div>
             <div class="toggle-row">
               <div class="row-text">
                 <span class="row-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="6" stroke="currentColor" stroke-width="1.2" fill="none"/><path d="M2 8h12M8 2c2 1.8 2 10.2 0 12M8 2c-2 1.8-2 10.2 0 12" stroke="currentColor" stroke-width="1.1" fill="none"/></svg></span>
-                <div class="row-body"><div class="name">Web search</div><div class="desc">Live retrieval</div></div>
+                <div class="row-body"><div class="name">Web search</div></div>
               </div>
-              <div class="toggle on" data-toggle></div>
+              <div class="toggle locked"></div>
             </div>
             <div class="toggle-row">
               <div class="row-text">
                 <span class="row-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 4 1.5 8 5 12"/><path d="M11 4l3.5 4L11 12"/><path d="M9.5 3.5l-3 9" opacity=".6"/></svg></span>
-                <div class="row-body"><div class="name">Code execution</div><div class="desc">Sandboxed Python</div></div>
+                <div class="row-body"><div class="name">Code execution</div></div>
               </div>
-              <div class="toggle" data-toggle></div>
+              <div class="toggle locked"></div>
             </div>
-          </div>
-
-          <div class="chat-settings-card optimize">
-            <div class="chat-settings-title">Auto-tune<span class="beta-tag">Beta</span></div>
-            <div class="toggle-row">
+            <div class="row-separator"></div>
+            <div class="toggle-row wand-row">
               <div class="row-text">
-                <span class="row-icon"><svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3 3l1.5 1.5M11.5 11.5L13 13M3 13l1.5-1.5M11.5 4.5L13 3" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg></span>
-                <div class="row-body"><div class="name">Active</div><div class="desc">Quietly evolves parameters across your dataset</div></div>
+                <span class="row-icon">
+                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 13.5 10 6"/><path d="m12 1.5.7 2 2 .7-2 .7-.7 2-.7-2-2-.7 2-.7Z" fill="currentColor"/><path d="m5 2.4.4 1.1 1.1.4-1.1.4L5 5.4l-.4-1.1-1.1-.4 1.1-.4Z" fill="currentColor" opacity=".7"/></svg>
+                </span>
+                <div class="row-body"><div class="name">Optimize prompt while using<span class="beta-tag">Beta</span></div><div class="desc">Quietly evolves parameters across your dataset</div></div>
               </div>
               <div class="toggle on" data-toggle></div>
+              <span class="sparkle s1"></span><span class="sparkle s2"></span><span class="sparkle s3"></span><span class="sparkle s4"></span><span class="sparkle s5"></span><span class="sparkle s6"></span><span class="sparkle s7"></span><span class="sparkle s8"></span>
             </div>
           </div>
         </div>
