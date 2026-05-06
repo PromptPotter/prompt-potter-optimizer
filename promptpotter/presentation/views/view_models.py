@@ -185,7 +185,7 @@ class L2RefineEnterView:
     l1_stall_count: Any
     current_acc: float
     best_acc: float
-    current_params: dict[str, str]
+    l1_config: dict[str, str]
     n_params: int
 
 

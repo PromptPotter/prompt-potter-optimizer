@@ -841,7 +841,7 @@ class Cycle:
         opt_sp = baseline_osp.model_copy(
             update={
                 "task_context": task_context,
-                "optimizer_params": dict(baseline_osp.optimizer_params),
+                "l1_config": dict(baseline_osp.l1_config),
             }
         )
         sp = opt_sp.to_job_search_point(

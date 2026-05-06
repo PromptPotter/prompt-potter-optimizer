@@ -409,8 +409,8 @@ def _r_critique(b: Bundle) -> str:
     return format_l1_critique_for_prompt(b.latest_critique or {})
 
 
-def _r_current_params(b: Bundle) -> str:
-    return f"CURRENT OPTIMIZER PARAMS: {json.dumps(b.opt_sp.optimizer_params)}"
+def _r_l1_config(b: Bundle) -> str:
+    return f"CURRENT L1 CONFIG: {json.dumps(b.opt_sp.l1_config)}"
 
 
 def _r_l1_signal_catalogue(b: Bundle) -> str:
@@ -462,7 +462,7 @@ def _r_l2_history(b: Bundle) -> str:
     return (
         "L2 ADJUSTMENT HISTORY:\n"
         f"  L2 round {cs.l2_round}: "
-        f"params={json.dumps(b.opt_sp.optimizer_params)}, "
+        f"l1_config={json.dumps(b.opt_sp.l1_config)}, "
         f"acc_change={acc_change:+.1%}"
     )
 
@@ -481,7 +481,7 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "failures": _r_failures,
     "task_context": _r_task_context,
     "critique": _r_critique,
-    "current_params": _r_current_params,
+    "l1_config": _r_l1_config,
     "l1_signal_catalogue": _r_l1_signal_catalogue,
     "l1_rendered_prompt": _r_l1_rendered_prompt,
     "cycle_position": _r_cycle_position,

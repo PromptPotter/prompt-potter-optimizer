@@ -109,7 +109,7 @@ The stale-data ladder's rescue step is **samplescan rescue** — "probe" is rese
 
 - `opt_search_point.task_context` — refined task framing (broadcast to all layers next round).
 - `opt_search_point.l1_layout` — per-slot signal-name layout L2 has stamped.
-- `opt_search_point.optimizer_params` — strategy fields (creativity, n_variants, etc.).
+- `opt_search_point.l1_config` — L1 runtime knobs (creativity, n_variants).
 - `decisions[]` with `kind: "probe_round_commitment"` — outcome `True` when L2 set `action = "probe_round"`.
 - `nodes.l2_context.input.prompt` — rendered L2 prompt (incl. the `L1-GENERATE FIELD CATALOGUE` block).
 - `nodes.l2_context.output` — raw LLM JSON dict.

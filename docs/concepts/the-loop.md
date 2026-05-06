@@ -86,7 +86,7 @@ L2's output is a flat dict. Every field is independent — write any combination
 | Field | Effect |
 |-------|--------|
 | `brief` | 2–3 sentence note injected into L1's next prompt as primary signal. |
-| `optimizer_params` | Tune creativity, candidate budget, variant strategy. |
+| `l1_config` | Tune L1 runtime knobs (creativity, candidate budget). |
 | `task_context` | Refine the structured domain understanding. |
 | `scheme_overrides` | `{section: bool}` — gate L1 surface sections on/off. |
 | `text_overrides` | `{section: str}` — replace a section's text with hand-written content. |
@@ -101,7 +101,7 @@ The last three are L2's levers over L1's surface — see [`../developer/l1-gener
 |----------|-----------|
 | **Default.** Critique flags a clear failure pattern. | `brief` (names the axis and direction). |
 | **Quiet.** Failures look noisy; no axis points at one knob. | nothing. Honest non-action — a guess would churn the search. |
-| **Brief + retune.** Pattern is named but search is too narrow / wide. | `brief` + `optimizer_params` (creativity, n_variants). |
+| **Brief + retune.** Pattern is named but search is too narrow / wide. | `brief` + `l1_config` (creativity, n_variants). |
 | **Probe.** One narrow failure dominates; full set adds noise. | `action: probe_round` + `brief` testing the hypothesis on warned queries. |
 | **Toggle off.** A section is firing on a non-issue and pulling variants away. | `scheme_overrides: {section: false}` + `brief`. Override persists until flipped back. |
 | **Replace text.** A section is sparse / generic; L2 has evidence for a substitute. | `text_overrides: {section: "..."}`. Persists across rounds. |

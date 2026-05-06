@@ -9,7 +9,7 @@ into the ``L2`` and ``L3`` instances.
 V1 contract:
 * L2 writes ``task_context`` (broadcast framing refinement, the L2→all
   channel) + ``action`` (``normal_round`` or ``probe_round``) + optional
-  ``axis_targeted`` / ``l1_layout`` / ``optimizer_params``. No
+  ``axis_targeted`` / ``l1_layout`` / ``l1_config``. No
   L1-surface scheme/text/template overrides.
 * L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2
   pointer; survives L2 fires, replaced wholesale on each L3 fire). No
@@ -156,8 +156,8 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
     changes: dict[str, Any] = {
         "changes_description": f"L2: {raw.get('rationale', 'L2 refine_strategy transition')[:80]}"
     }
-    if isinstance(raw.get("optimizer_params"), dict) and raw["optimizer_params"]:
-        changes["optimizer_params"] = {**opt_sp.optimizer_params, **raw["optimizer_params"]}
+    if isinstance(raw.get("l1_config"), dict) and raw["l1_config"]:
+        changes["l1_config"] = {**opt_sp.l1_config, **raw["l1_config"]}
 
     new_task_context = None
     proposed_tc = raw.get("task_context") if isinstance(raw.get("task_context"), dict) else None
@@ -244,7 +244,7 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
     return {
         "l2_round": cycle.escalation.l2_round,
         "l1_stall_count": cycle.escalation.l1_stall_count,
-        "current_params": cycle.opt_sp.optimizer_params,
+        "l1_config": cycle.opt_sp.l1_config,
         "current_accuracy": cycle.tracking.current_accuracy,
         "best_accuracy": cycle.tracking.best_accuracy,
     }
@@ -259,7 +259,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
-        "param_changes_count": len(result.opt_search_point.optimizer_params),
+        "param_changes_count": len(result.opt_search_point.l1_config),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_search_point.lineage.changes_description or "",

@@ -304,13 +304,13 @@ def _escalation_exit(d: dict, ctx: dict) -> EscalationExitView:
 
 
 def _refine_enter(d: dict, ctx: dict) -> L2RefineEnterView:
-    params = d.get("current_params") or {}
+    params = d.get("l1_config") or {}
     return L2RefineEnterView(
         l2_round=d.get("l2_round", "?"),
         l1_stall_count=d.get("l1_stall_count", "?"),
         current_acc=d.get("current_accuracy", 0.0),
         best_acc=d.get("best_accuracy", 0.0),
-        current_params={k: str(v) for k, v in params.items()},
+        l1_config={k: str(v) for k, v in params.items()},
         n_params=len(params),
     )
 

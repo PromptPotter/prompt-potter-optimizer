@@ -195,7 +195,10 @@ class OptSearchPoint(PromptTemplate):
     flat optimizer-memory fields enumerated in :data:`MEMORY_FIELDS`:
 
     - ``lineage``        — identity + provenance (id, parent_id, ...)
-    - ``optimizer_params`` — L2/L3 tuning knobs
+    - ``l1_config`` — L1 runtime knobs (``n_variants``, ``creativity``)
+      set by L2; ``n_variants`` flows into L1's prompt as the
+      ``{{n_variants}}`` caller extra, ``creativity`` sets L1's LLM-call
+      temperature outside the prompt
     - ``task_context``  — structured domain understanding (TaskDecomposition)
     - memory fields     — see :data:`MEMORY_FIELDS` (preserved across L2/L3
       transitions via :meth:`copy_memory_to`).
@@ -210,7 +213,7 @@ class OptSearchPoint(PromptTemplate):
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 
     # -- L2 state ----------------------------------------------------------
-    optimizer_params: dict[str, Any] = Field(default_factory=dict)
+    l1_config: dict[str, Any] = Field(default_factory=dict)
     task_context: TaskDecomposition = Field(default_factory=TaskDecomposition)
 
     @field_validator("task_context", mode="before")
@@ -347,7 +350,7 @@ class OptSearchPoint(PromptTemplate):
         else:
             data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
         # L2/L3 state
-        data["optimizer_params"] = changes.pop("optimizer_params", dict(self.optimizer_params))
+        data["l1_config"] = changes.pop("l1_config", dict(self.l1_config))
         data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
         # Lineage

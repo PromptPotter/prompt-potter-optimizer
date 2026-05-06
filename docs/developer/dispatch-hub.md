@@ -93,13 +93,16 @@ flowchart LR
   L1S --> DIAG
   L1S --> FAIL
 
+  %% L1_SCORE derivation — accuracy_pct (one-way, not loop-closing; normal color)
+  L1S --> AP
+
   %% Red styling for the 10 feedback edges (edges 30..39)
   linkStyle 30,31,32,33,34,35,36,37,38,39 stroke:#B22222,stroke-width:2px
 ```
 
-> Why "AI-generated" for `l1_rendered_prompt` / `task_context` / `l1_config` / `l2_history`: their *content* originates from an LLM (L1's prompt evolution, L2/L3 mutations of `optimizer_params`, L2's `task_context` merges). Their *format* is deterministic, but the strings injected are not. `task_context`'s initial value is seeded by a one-time `restructure` decomposition LLM at `init` time; L2 then refines it each fire — broadcast to every prompt as the persistent task framing.
+> Why "AI-generated" for `l1_rendered_prompt` / `task_context` / `l1_config` / `l2_history`: their *content* originates from an LLM (L1's prompt evolution, L2/L3 mutations of `l1_config`, L2's `task_context` merges). Their *format* is deterministic, but the strings injected are not. `task_context`'s initial value is seeded by a one-time `restructure` decomposition LLM at `init` time; L2 then refines it each fire — broadcast to every prompt as the persistent task framing.
 >
-> `l1_config` bundles two L2-set knobs that govern *how L1 runs*, not what L1 puts in candidates: `n_variants` enters L1's prompt as the `{{n_variants}}` caller extra (a directive — L1 obeys); `temp` sets the L1 LLM call's temperature (configures the API call, never the prompt text). Both currently live on `opt_sp.optimizer_params` (signal name `current_params` in code); the diagram uses `l1_config` as the conceptual grouping. Renaming the field + signal to match the diagram is a follow-up code change.
+> `l1_config` bundles two L2-set knobs that govern *how L1 runs*, not what L1 puts in candidates: `n_variants` enters L1's prompt as the `{{n_variants}}` caller extra (a directive — L1 obeys); `creativity` sets the L1 LLM call's temperature (configures the API call, never the prompt text). Field, signal, and placeholder all share the name `l1_config`.
 >
 > The `rendered_prompt` SIGNAL still exists in code (it's in `SIGNALS` and L1's default layout) — it's literally `opt_sp.render()`, the 8-field `PromptTemplate` compiled into one string. Structurally it's L1_SCORE's output: each round's winner becomes the new `opt_sp`, and next round's L1_GENERATE reads `opt_sp.render()` as its parent prompt. The cycle isn't drawn explicitly — it lives in orchestration (between-round state update), not in placeholder dispatch.
 
@@ -120,7 +123,8 @@ DISPATCH v2 — 13 signals + 3 caller extras
 │   ├─ {{rendered_prompt}} ← opt_sp.render() of the 8-field PromptTemplate
 │   ├─ {{pipeline_axes}}   ← pipeline_schema.{node_param_keys, param_allowed_values,
 │   │                                          param_descriptions, available_models}
-│   └─ {{current_params}}  ← opt_sp.optimizer_params      (L2 only)
+│   └─ {{l1_config}}       ← opt_sp.l1_config             (L2 reads as state;
+│                                                          L1 reads contents via caller extras)
 │
 ├─ Round-end measurement (computed once in execute_round, read by every layer)
 │   ├─ {{diagnostics}}     ← latest_round.diagnostics (RoundDiagnostics from
@@ -135,11 +139,11 @@ DISPATCH v2 — 13 signals + 3 caller extras
 │   ├─ {{l1_rendered_prompt}}  ← L1 next-round preview (recursive fill_l1 over current
 │   │                                                   opt_sp.l1_layout)
 │   ├─ {{cycle_position}}      ← bundle.cycle_slice (round, accuracies, stall counts, probe flag)
-│   └─ {{l2_history}}          ← cycle_slice.l2_round + opt_sp.optimizer_params +
+│   └─ {{l2_history}}          ← cycle_slice.l2_round + opt_sp.l1_config +
 │                                  Δ since L3 entry      (L3 template only)
 │
 └─ L1_GENERATE template scalars (NOT signals — caller extras at l1.py:123-127)
-    ├─ {{n_variants}}     ← min(opt_sp.optimizer_params["n_variants"], opt.n_variants × 3)
+    ├─ {{n_variants}}     ← min(opt_sp.l1_config["n_variants"], opt.n_variants × 3)
     ├─ {{accuracy_pct}}   ← f"{cycle.tracking.current_accuracy:.1%}"
     └─ {{n_queries}}      ← len(cycle.tracking.current_results)
 ```

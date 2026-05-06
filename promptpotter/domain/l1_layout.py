@@ -34,7 +34,7 @@ L1_MANDATORY: frozenset[str] = frozenset(
 )
 
 # Names L2 may pick from when authoring an L1 layout. Subset of the
-# global signal registry — L2-internal signals (e.g. ``current_params``,
+# global signal registry — L2-internal signals (e.g. ``l1_config``,
 # ``l1_signal_catalogue``) are deliberately excluded so L1 can't see
 # L2's own state.
 L1_POSSIBLE: frozenset[str] = frozenset(

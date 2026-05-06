@@ -773,7 +773,7 @@ async def generate_or_load_candidates(
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
     model = config.optimizer_llm.model
-    opt_params = cycle.opt_sp.optimizer_params
+    opt_params = cycle.opt_sp.l1_config
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
     _creativity = opt_params.get("creativity", opt.creativity)
     prompt_preview = cycle.opt_sp.render()[:120]
