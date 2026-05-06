@@ -122,9 +122,9 @@
   "view": {
     "nodes": [
       {"id": "input",       "label": "Dataset",     "kind": "io"},
+      {"id": "restructure", "label": "restructure", "kind": "llm"},
       {"id": "baseline",    "label": "baseline",    "kind": "phase"},
       {"id": "l3_plan",     "label": "l3_plan",     "kind": "llm"},
-      {"id": "restructure", "label": "restructure", "kind": "llm"},
       {"id": "l2_context",  "label": "l2_context",  "kind": "llm"},
       {"id": "l1_generate", "label": "l1_generate", "kind": "llm"},
       {"id": "l1_score",    "label": "l1_score",    "kind": "measurement"},
@@ -132,7 +132,8 @@
       {"id": "output",      "label": "Best SP",     "kind": "io"}
     ],
     "edges": [
-      {"from": "input",       "to": "baseline",    "kind": "forward"},
+      {"from": "input",       "to": "restructure", "kind": "forward"},
+      {"from": "restructure", "to": "baseline",    "kind": "forward"},
       {"from": "baseline",    "to": "l1_generate", "kind": "forward"},
       {"from": "l1_generate", "to": "l1_score",    "kind": "forward"},
       {"from": "l1_score",    "to": "l1_critique", "kind": "forward"},
@@ -141,8 +142,7 @@
       {"from": "l1_critique", "to": "l2_context",  "kind": "escalate",  "label": "L1 stall"},
       {"from": "l2_context",  "to": "l1_generate", "kind": "directive", "label": "brief"},
       {"from": "l1_critique", "to": "l3_plan",     "kind": "escalate",  "label": "L2 stall"},
-      {"from": "l3_plan",     "to": "l1_generate", "kind": "directive", "label": "plan"},
-      {"from": "l3_plan",     "to": "restructure", "kind": "sub"}
+      {"from": "l3_plan",     "to": "l1_generate", "kind": "directive", "label": "plan"}
     ]
   },
   "resolved_schemas": {

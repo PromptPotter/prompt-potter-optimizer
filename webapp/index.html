@@ -35,6 +35,17 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .tab.active{color:var(--color-accent);border-bottom-color:var(--color-accent);font-weight:500;opacity:1}
 .btn-export{margin-left:auto;background:var(--color-background-secondary);color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:7px 14px;font-size:13px;cursor:not-allowed;font-weight:500}
 .content{flex:1;overflow-y:auto;padding:20px}
+/* View Results: center every panel at 980px, matching the New Job hero. The
+   workflow-card is the lone exception — it stays full-width so its dotted
+   canvas extends edge-to-edge. */
+#content-dashboard > .status-bar,
+#content-dashboard > .page-header,
+#content-dashboard > .progress-card,
+#content-dashboard > .live-state-card,
+#content-dashboard > .samples-card,
+#content-dashboard > .raw-card,
+#content-dashboard > .grid2,
+#content-dashboard > .grid3{max-width:980px;margin-left:auto;margin-right:auto}
 .page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:20px}
 .breadcrumb{font-size:12px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
 h1{font-size:22px;font-weight:500;margin-bottom:4px}
@@ -137,13 +148,17 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Workflow canvas */
 .workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);margin-bottom:14px;overflow:hidden}
 .workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
-.workflow-canvas{background:var(--color-background-tertiary);position:relative;width:100%;max-width:800px;aspect-ratio:800/240;margin:0 auto;overflow:hidden;background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px}
+/* Full-width dotted canvas; the inner .workflow-canvas keeps the SVG/nodes centered at 800px. */
+.workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
+.workflow-canvas{position:relative;width:100%;max-width:800px;aspect-ratio:800/266;margin:0 auto;overflow:hidden}
 .wf-node{position:absolute;cursor:pointer;user-select:none}
-.wf-box{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
+.wf-box{position:relative;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
 .wf-box:hover{border-color:var(--color-accent)}
 .wf-box.selected{border-color:var(--color-accent);box-shadow:0 0 0 2px var(--color-accent-glow)}
 .wf-box.active{border-color:var(--color-success);box-shadow:0 0 0 2px rgba(16,185,129,0.25);animation:pulse-active 1.6s ease-in-out infinite}
 @keyframes pulse-active{0%,100%{box-shadow:0 0 0 2px rgba(16,185,129,0.25)}50%{box-shadow:0 0 0 6px rgba(16,185,129,0.40)}}
+.wf-box.active::after{content:"";position:absolute;top:-22px;right:-26px;width:40px;height:40px;background:url(assets/wizard-64x64.png) center/contain no-repeat;image-rendering:pixelated;pointer-events:none;filter:drop-shadow(0 0 4px var(--color-accent-glow)) drop-shadow(0 0 9px rgba(245,158,11,0.55));animation:wizard-hover 2.6s ease-in-out infinite;z-index:4}
+@keyframes wizard-hover{0%,100%{transform:translate(0,0) scale(1)}25%{transform:translate(-1px,-2px) scale(1.02)}50%{transform:translate(0,-3px) scale(1.04)}75%{transform:translate(1px,-2px) scale(1.02)}}
 .wf-box.dim{opacity:.55}
 .wf-box.kind-io{background:var(--color-background-secondary);font-style:italic}
 .wf-box.kind-measurement{background:#1f1a14}
@@ -193,7 +208,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-job-dropdown .row:last-child{border-bottom:none}
 .chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:10px;font-weight:600;flex-shrink:0}
 .chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:11px;text-align:right;word-break:break-all}
-.wf-hero{position:relative;padding:24px 16px 16px;max-width:980px;margin:0 auto;width:100%}
+.wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
 .wf-hero-status{position:absolute;top:6px;right:6px;font-size:11px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
 .wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}
 .wf-hero-flow{display:flex;align-items:center;justify-content:center;gap:0;padding:18px 0 8px}
@@ -227,6 +242,8 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:11px;padding:5px 14px;border-radius:999px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.30);color:var(--color-accent);letter-spacing:.04em}
+.wf-kb-float{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:3;pointer-events:auto}
+.wf-kb-float .wf-hero-kb-pill{font-size:11px;padding:4px 14px;background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.40);box-shadow:0 0 14px rgba(245,158,11,0.22),0 1px 6px rgba(0,0,0,0.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:380px;min-width:0}
 .chat-panel-header{padding:14px 18px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
@@ -423,7 +440,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
             <div class="text-col"><div class="lbl">Output</div><div class="val">Answer</div></div>
           </div>
         </div>
-        <div class="wf-hero-kb"><span class="wf-hero-kb-pill">Knowledge Base</span></div>
       </div>
 
       <div class="chat-grid">
@@ -532,12 +548,15 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
           Optimizer pipeline — current round
           <span style="margin-left:auto;color:#10b981;font-size:11px" id="wf-status">● live</span>
         </div>
-        <div class="workflow-canvas" id="wf-canvas">
-          <svg id="wf-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></svg>
-          <div id="sel-panel" class="sel-panel">
-            <span class="close-btn" onclick="closePanel()">✕</span>
-            <div class="sel-panel-title" id="sp-title">Node</div>
-            <div id="sp-body"></div>
+        <div class="workflow-canvas-bg">
+          <div class="workflow-canvas" id="wf-canvas">
+            <svg id="wf-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></svg>
+            <div id="sel-panel" class="sel-panel">
+              <span class="close-btn" onclick="closePanel()">✕</span>
+              <div class="sel-panel-title" id="sp-title">Node</div>
+              <div id="sp-body"></div>
+            </div>
+            <div class="wf-kb-float"><span class="wf-hero-kb-pill">Knowledge Base</span></div>
           </div>
         </div>
       </div>
@@ -806,14 +825,16 @@ async function refreshDashboard(){
 
 // Pipeline shape never changes — every coordinate is hardcoded so the SVG paths
 // and the HTML node boxes render to the exact same canvas points.
-const CANVAS_W = 800, CANVAS_H = 240;
+const CANVAS_W = 800, CANVAS_H = 266;
 
 const LAYOUT = {
-  input:       { x:  10, y: 110, w:  70, h: 30 },  // Dataset stacked directly above baseline
-  baseline:    { x:  10, y: 170, w:  70, h: 44 },
-  l3_plan:     { x: 265, y:  18, w: 110, h: 30 },
-  restructure: { x: 550, y:  18, w: 120, h: 30 },
-  l2_context:  { x: 265, y:  88, w: 110, h: 30 },
+  // Left column: Dataset → restructure → baseline (init-time chain feeding the L1 row).
+  // All LLM/phase boxes use h=44 so title + sub line ("idle"/model) fit without clipping.
+  input:       { x:  10, y:  50, w:  80, h: 30 },
+  restructure: { x:  10, y: 100, w:  80, h: 44 },
+  baseline:    { x:  10, y: 170, w:  80, h: 44 },
+  l3_plan:     { x: 265, y:  10, w: 110, h: 44 },
+  l2_context:  { x: 265, y:  80, w: 110, h: 44 },
   l1_generate: { x: 160, y: 170, w: 110, h: 44 },
   l1_score:    { x: 290, y: 170, w:  70, h: 44 },
   l1_critique: { x: 380, y: 170, w: 100, h: 44 },
@@ -825,9 +846,10 @@ const LAYOUT = {
 //   L2 (middle):    l1_critique → l2_context → l1_generate (rounded square)
 //   L3 (outer):     l1_critique → l3_plan    → l1_generate (bigger rounded square)
 const EDGES = {
-  // Vertical Dataset → baseline (Dataset is stacked above baseline).
-  'input>baseline':           { kind:'forward',   d:'M45,140 L45,170' },
-  'baseline>l1_generate':     { kind:'forward',   d:'M80,192 L160,192' },
+  // Left column: Dataset → restructure → baseline (init-time chain).
+  'input>restructure':        { kind:'forward',   d:'M50,80 L50,100' },
+  'restructure>baseline':     { kind:'forward',   d:'M50,144 L50,170' },
+  'baseline>l1_generate':     { kind:'forward',   d:'M90,192 L160,192' },
   'l1_generate>l1_score':     { kind:'forward',   d:'M270,192 L290,192' },
   'l1_score>l1_critique':     { kind:'forward',   d:'M360,192 L380,192' },
   'l1_critique>output':       { kind:'forward',   d:'M480,192 L720,192',
@@ -853,8 +875,6 @@ const EDGES = {
   'l3_plan>l1_generate':      { kind:'directive',
                                 d:'M265,33 Q180,33 180,170',
                                 label:'plan',     labelXY:[193, 105] },
-
-  'l3_plan>restructure':      { kind:'sub',       d:'M375,33 L550,33' },
 };
 
 const EDGE_STYLE = {
@@ -862,7 +882,6 @@ const EDGE_STYLE = {
   loop:      { stroke:'#10b981', dash:'5 3', arrow:'arrh-loop', textColor:'#10b981' },
   directive: { stroke:'#f59e0b', dash:'4 3', arrow:'arrh-dir',  textColor:'#f59e0b' },
   escalate:  { stroke:'#ea580c', dash:'2 3', arrow:'arrh-esc',  textColor:'#ea580c' },
-  sub:       { stroke:'#4b5563', dash:'1 3', arrow:null,        textColor:'#6b7280' },
 };
 
 function renderWorkflow(dash){
