@@ -10,7 +10,7 @@ The parent searchpoint was selected for measured reasons. `l1_generate` mutates 
 
 - stall-driven escalation,
 - sibling-yield evidence on the chosen axis, or
-- an explicit `l2_brief`.
+- a refined `task_context` framing from L2.
 
 No data justifying a choice ⇒ do not gamble. Random exploration is reserved for explicit stall.
 
@@ -22,46 +22,46 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
-Channel: `l2_brief` and `plan` arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.l1_layout` over the `SIGNALS` registry (`dispatch_hub.py`).
+Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) arrive on `OptSearchPoint` and surface alongside the panels — `l1_generate` is fan-in, reading both layers' outputs in the same round. Composed by `DispatchHub.fill_l1` walking `opt_sp.l1_layout` over the `SIGNALS` registry (`dispatch_hub.py`).
 
 ## L2-layer — l2_context
 
 Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
 
-- a 2–3 sentence **brief** (a.k.a. `l2_directive`) injected into `l1_generate`'s meta-prompt as primary signal, and
+- a refined `task_context` — the persistent task-framing dict that every layer (L1, L1_CRITIQUE, L2, L3) reads next round, and
 - optional `l1_layout` edits + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).
 
-The brief is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative briefs ("maybe try X") are out of contract. Sliding window of 1: a new brief supersedes the prior; cleared on improvement (when the L2-layer doesn't fire). The next brief evolves from the prior, not from scratch.
+The refinement is **evidence-anchored** — it cites a specific axis, sample, or yield number from the panels. Speculative refinements ("maybe try X") are out of contract. `task_context` is persistent, accumulative: each fire merges deltas onto the existing dict; full rewrites are rare. A proposed update that merges to a no-op against the prior framing is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
 
-Channel: written to `OptSearchPoint.l2_brief`; read only by `l1_generate`. Cleared by `clear_volatile()` on improvement.
+Channel: written to `OptSearchPoint.task_context`; read by every prompt via the `task_context` signal. Persistent across L2 fires until L2 next refines (or L3 replans).
 
 The L2-layer also **heals `l1_generate`** on:
 
 - `ValidationFailure` (`l1_generate` produced a malformed variant), and
 - `RuntimeFailure` from mid-eval `DegradationCheck`.
 
-Healing uses the same surface as a normal brief — framed as a remedial nudge rather than a strategic shift.
+Healing uses the same surface as a normal refinement — framed as a remedial nudge rather than a strategic shift.
 
 The L2-layer may **terminate the loop** on:
 
 - goal reached (composite ≥ goal, sustained one round), or
-- infinite stall (no improvement reachable through brief nudges).
+- infinite stall (no improvement reachable through framing refinements).
 
-The L2-layer escalating to L3 is **rare** — only when the failure mode is outside the brief surface: context-shape mismatch, scoring-set drift, repeated cross-field duplication that a brief cannot resolve. Default: the L2-layer keeps nudging the L1-layer.
+The L2-layer escalating to L3 is **rare** — only when the failure mode is outside the framing surface: context-shape mismatch, scoring-set drift, verbatim-repeat refinements that L2 cannot resolve. Default: the L2-layer keeps refining the framing for L1.
 
 ## L3-layer — l3_plan
 
-Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panels plus `l2_summary` (the prior briefs + their measured lift) and the runtime-failure trail. `l3_plan` produces:
+Fires only on L2-layer stall (L2 patience exceeded). Receives the evidence panels plus `l2_summary` (prior fires + their measured lift) and the runtime-failure trail. `l3_plan` produces:
 
-- a **strategic replan** — rewrites the brief surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant. Channel: written to `OptSearchPoint.plan` (persistent — survives `clear_volatile`) and read by **both** `l1_generate` (constraint on candidates) and `l2_context` (operating context for briefs) — the symmetric injection of L2's brief into L1.
+- a **strategic replan** — rewrites the framing surface, escalation policy, or which axes are in scope; the cycle continues under a new plan rather than a new variant. Channel: written to `OptSearchPoint.plan` (persistent) and read by **every** prompt via the `plan` signal — the strategic frame inside which both L2 (refining task_context) and L1 (generating candidates) operate.
 
 The L3-layer also **heals the L2-layer** on validator outcomes:
 
-- cross-field duplication,
-- verbatim self-repeat across briefs, or
-- catalogue redundancy.
+- `l2_task_context_verbatim_repeat` (proposed framing merged to a no-op),
+- L1 layout HARD-validator failures (mandatory placeholder missing, unknown name, dup within slot), or
+- repeated cross-field issues that the framing refinement surface can't resolve.
 
-These are signs that `l2_context` briefs are thrashing within an axis rather than across the plan-space — the L3-layer rewrites the policy, not just the next brief.
+These are signs that `l2_context` is thrashing within the current plan rather than refining across the plan-space — the L3-layer rewrites the policy, not just the next framing.
 
 The L3-layer may **terminate the loop** on the same two cases as the L2-layer (goal reached / infinite stall). If the L3-layer fires repeatedly inside one cycle, that is the loop's signal that the plan-space itself is exhausted — `l3_plan` should terminate rather than replan again.
 

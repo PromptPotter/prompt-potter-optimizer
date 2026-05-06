@@ -9,7 +9,7 @@ Three named invariants:
      reject ``../`` and other shell metacharacters.
   3. Untrusted-content signals (``diagnostics`` / ``failures``) emerge from
      the dispatch hub wrapped in ``<UNTRUSTED_DATASET_CONTENT>`` fences;
-     trusted signals (``plan`` / ``l2_directive``) are NOT wrapped.
+     trusted signals (``plan`` / ``task_context``) are NOT wrapped.
 """
 
 from __future__ import annotations
@@ -73,7 +73,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     """``diagnostics`` and ``failures`` carry dataset content; both must
     emit inside ``<UNTRUSTED_DATASET_CONTENT>`` so a poisoned sample query
     cannot pose as instructions to the optimizer LLM. Trusted signals
-    (``plan``, ``l2_directive``) stay bare.
+    (``plan``, ``task_context``) stay bare.
     """
     from promptpotter.application.optimization.dispatch_hub import (
         Bundle,
@@ -119,7 +119,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         ],
     )
 
-    opt_sp = OptSearchPoint(plan="STRATEGIC PLAN", l2_brief="BRIEF FROM L2")
+    opt_sp = OptSearchPoint(plan="STRATEGIC PLAN")
     bundle = Bundle(
         opt_sp=opt_sp,
         pipeline_schema=None,
@@ -133,8 +133,8 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert diagnostics_text.endswith("</UNTRUSTED_DATASET_CONTENT>")
     assert poisoned_query in diagnostics_text  # fenced, not stripped
 
-    # Plan + l2_directive are trusted (operator/optimizer-authored) and stay bare.
+    # Plan + task_context are trusted (operator/optimizer-authored) and stay bare.
     plan_text = DispatchHub.render("plan", bundle)
     assert "UNTRUSTED" not in plan_text
-    brief_text = DispatchHub.render("l2_directive", bundle)
-    assert "UNTRUSTED" not in brief_text
+    tc_text = DispatchHub.render("task_context", bundle)
+    assert "UNTRUSTED" not in tc_text

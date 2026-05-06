@@ -225,13 +225,10 @@ class OptSearchPoint(PromptTemplate):
     # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
     escalation_log: list[dict[str, Any]] = Field(default_factory=list)
     warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
-    l2_brief: str = ""
     # Sticky L3→L2 channel: L3 writes, L2 reads via the ``l3_to_l2_note``
     # signal; never surfaced to L1 (absent from ``L1_POSSIBLE``). Persists
     # across L2 fires via :data:`MEMORY_FIELDS`; replaced wholesale on each
-    # L3 fire (``_apply_l3``); deliberately NOT cleared by
-    # :meth:`clear_volatile` — its lifecycle is keyed to the L3 cadence,
-    # not the L1 improvement cycle.
+    # L3 fire (``_apply_l3``).
     l3_note: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
@@ -254,7 +251,6 @@ class OptSearchPoint(PromptTemplate):
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "escalation_log",
         "warning_inventory",
-        "l2_brief",
         "l3_note",
         "validation_failures",
         "runtime_failures",
@@ -264,19 +260,6 @@ class OptSearchPoint(PromptTemplate):
         "round_history",
         "l1_layout",
     )
-
-    # -- Memory helpers ----------------------------------------------------
-
-    def clear_volatile(self) -> None:
-        """Drop ``l2_brief`` after an improving round.
-
-        ``l2_brief`` is produced to steer the next round only, so once L1
-        succeeded the basis for that guidance is stale. The prior round's
-        L1 critique now lives on :attr:`RoundResult.critique` (read by the
-        dispatch hub via ``cycle.latest_round.critique``), so its
-        lifecycle is governed by round retention, not by this method.
-        """
-        self.l2_brief = ""
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
         """Append a log entry; fill the previous entry's pending outcome."""

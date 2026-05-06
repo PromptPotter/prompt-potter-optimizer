@@ -7,8 +7,9 @@ V1 surface — soft signals only. Layout HARD validators
 layout when they fail.
 
 L2 soft validators here:
-* :data:`L2_DIRECTIVE_LENGTH_FLOOR` — directive is too short to carry signal.
-* :data:`L2_DIRECTIVE_VERBATIM_REPEAT` — same directive as last fire.
+* :data:`L2_TASK_CONTEXT_VERBATIM_REPEAT` — proposed ``task_context``
+  refinement produced no semantic change vs the prior OSP framing
+  (either the LLM repeated the existing fields or sent a no-op merge).
 
 L3 soft validators here:
 * :data:`L3_PLAN_LENGTH_FLOOR` — plan is too short to carry signal.
@@ -27,47 +28,35 @@ from typing import Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.validators import LLMOutputValidator, ValidatorOutcome
 
-DIRECTIVE_LENGTH_FLOOR_CHARS = 40
 PLAN_LENGTH_FLOOR_CHARS = 60
 
 
-def _check_directive_length_floor(
-    source_output: Mapping[str, Any], **_: Any
-) -> ValidatorOutcome | None:
-    directive = source_output.get("directive")
-    if not isinstance(directive, str):
-        return None
-    text = directive.strip()
-    if len(text) >= DIRECTIVE_LENGTH_FLOOR_CHARS:
-        return None
-    return ValidatorOutcome(
-        validator_id=L2_DIRECTIVE_LENGTH_FLOOR.id,
-        passed=False,
-        score=0.5,
-        evidence={"length": len(text), "floor": DIRECTIVE_LENGTH_FLOOR_CHARS},
-        nurse_target="l3",
-    )
-
-
-def _check_directive_verbatim_repeat(
+def _check_task_context_verbatim_repeat(
     source_output: Mapping[str, Any],
     *,
     opt_sp: OptSearchPoint | None = None,
     **_: Any,
 ) -> ValidatorOutcome | None:
-    if opt_sp is None:
+    """Fire when L2 *proposed* a task_context update but it merged to a no-op.
+
+    ``escalation._parse_l2`` passes ``task_context_proposed`` (the raw
+    dict L2 emitted) and ``task_context_applied`` (the merged
+    TaskDecomposition or ``None`` when the merge produced no change).
+    A non-empty proposal that yielded ``None`` means the LLM tried but
+    repeated the prior framing — the no-op task_context analogue of a
+    verbatim signal repeat.
+    """
+    proposed = source_output.get("task_context_proposed")
+    applied = source_output.get("task_context_applied")
+    if not isinstance(proposed, dict) or not proposed:
         return None
-    new_directive = source_output.get("directive")
-    if not isinstance(new_directive, str) or not new_directive.strip():
-        return None
-    prev = (opt_sp.l2_brief or "").strip()
-    if not prev or new_directive.strip() != prev:
+    if applied is not None:
         return None
     return ValidatorOutcome(
-        validator_id=L2_DIRECTIVE_VERBATIM_REPEAT.id,
+        validator_id=L2_TASK_CONTEXT_VERBATIM_REPEAT.id,
         passed=False,
         score=0.0,
-        evidence={"directive": new_directive},
+        evidence={"proposed_keys": sorted(proposed.keys())},
         nurse_target="l3",
     )
 
@@ -111,28 +100,15 @@ def _check_plan_verbatim_repeat(
     )
 
 
-L2_DIRECTIVE_LENGTH_FLOOR: LLMOutputValidator = LLMOutputValidator(
-    id="l2_directive_length_floor",
+L2_TASK_CONTEXT_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
+    id="l2_task_context_verbatim_repeat",
     description=(
-        "L2's directive is below the minimum length floor. A short directive "
-        "rarely carries enough strategic signal to steer L1 — the loop is "
-        "wasting a fire. L3 should refine the plan so the next L2 fire "
-        "produces a directive with concrete tactical guidance."
+        "L2's proposed ``task_context`` refinement merged to a no-op "
+        "against the prior OSP framing — the LLM tried to refine but "
+        "produced no semantic delta. L3 must replan to break the loop."
     ),
     nurse_target="l3",
-    check=_check_directive_length_floor,
-)
-
-
-L2_DIRECTIVE_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
-    id="l2_directive_verbatim_repeat",
-    description=(
-        "L2's directive this round equals the previous round's directive on "
-        "the OSP. L2 stalled and repeated itself — no learning. L3 must "
-        "replan to break the loop."
-    ),
-    nurse_target="l3",
-    check=_check_directive_verbatim_repeat,
+    check=_check_task_context_verbatim_repeat,
 )
 
 
@@ -160,10 +136,7 @@ L3_PLAN_VERBATIM_REPEAT: LLMOutputValidator = LLMOutputValidator(
 )
 
 
-L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (
-    L2_DIRECTIVE_LENGTH_FLOOR,
-    L2_DIRECTIVE_VERBATIM_REPEAT,
-)
+L2_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (L2_TASK_CONTEXT_VERBATIM_REPEAT,)
 
 
 L3_OUTPUT_VALIDATORS: tuple[LLMOutputValidator, ...] = (

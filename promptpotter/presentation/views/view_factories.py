@@ -645,7 +645,6 @@ def from_disk_log(
                 total=int(t.get("total", 0)),
                 composite_fitness=float(t.get("composite_fitness", 0.0)),
                 changes_description=(lineage.get("changes_description") or "").strip(),
-                l2_brief=(osp.get("l2_brief") or "").strip(),
                 l1_critique_text=format_l1_critique_for_prompt(t.get("critique") or {}),
                 l1_yield=float(t.get("l1_yield", 1.0)),
                 l1_n_no_op=int(t.get("l1_n_no_op", 0)),

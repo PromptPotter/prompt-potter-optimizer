@@ -38,7 +38,7 @@ async def run_l1_critique(
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict.
 
     L1-critique has no per-section override channel: the template body
-    embeds ``{{plan}}``, ``{{l2_directive}}``, ``{{diagnostics}}`` and
+    embeds ``{{plan}}``, ``{{task_context}}``, ``{{diagnostics}}`` and
     ``{{failures}}`` placeholders that the dispatch hub resolves to
     layer-agnostic signal renderers. ``RoundDiagnostics`` is read off the
     freshly-completed round, so the rank/health/evolution context is one

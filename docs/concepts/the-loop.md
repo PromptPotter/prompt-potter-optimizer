@@ -31,9 +31,9 @@ L2 reframes *how* L1 searches by writing onto the `OptSearchPoint`; L1 still pic
 
 Layers write to a shared `OptSearchPoint`; the next layer reads from there. See [`state-record.md`](state-record.md) for the record's full surface.
 
-- **L2 → L1.** L2 writes a 2–3 sentence `brief` to `OptSearchPoint.l2_brief`. L1-generate reads it next round as primary signal. One-round window: cleared on improvement.
-- **L3 → {L1, L2}.** L3 writes a strategic framework to `OptSearchPoint.plan`. Both L1-generate and L2 read it. L1 treats it as a constraint on generation; L2 as operating context for its brief. Persistent — survives until L3 replaces it.
-- **L1-generate is fan-in.** Reads `plan` (L3) and `l2_brief` (L2) the same round.
+- **L2 → all.** L2 refines `OptSearchPoint.task_context` — a persistent, structured task framing dict (domain, key constraints, examples, optimization goals, etc.). Every prompt (L1, L1-critique, L2, L3) reads it as the broadcast "what is this task" signal. Accumulative across L2 fires; a no-op merge proposal is flagged as `l2_task_context_verbatim_repeat` → L3 heal.
+- **L3 → all.** L3 writes a strategic framework to `OptSearchPoint.plan`. Every prompt reads it. L1 treats it as a constraint on generation; L2 as operating context for its task-framing refinements. Persistent — survives until L3 replaces it.
+- **L1-generate is fan-in.** Reads `plan` (L3), `task_context` (L2), and the deterministic measurement signals all in the same round.
 
 Every optimizer LLM call shares one path: per-call `DispatchState` → `LAYER_CONFIGS[layer]` → `compile_prompt_vars`. Field tables: [`../developer/README.md`](../developer/README.md).
 

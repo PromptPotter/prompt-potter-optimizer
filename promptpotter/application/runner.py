@@ -288,8 +288,6 @@ async def _post_round(
         l1_patience=config.optimization.l1_patience,
         enable_l2=config.optimization.enable_l2,
     )
-    if round_result.improved:
-        cycle.opt_sp.clear_volatile()
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
     _persist_round(cycle, round_result, trial_dict, round_num, session)
@@ -716,7 +714,6 @@ def _finalize_run(
                 # plain optimize on the diag fork.
                 osp = cycle.opt_sp
                 final_block["diag"] = {
-                    "l2_brief": (osp.l2_brief or "").strip(),
                     "l1_layout": osp.l1_layout.model_dump(),
                 }
             # Seal top-level baseline against final.baseline_accuracy drift.

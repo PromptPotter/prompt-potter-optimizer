@@ -15,7 +15,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.runtime_failures` | none | per-round on the OSP itself |
 | **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_output_failures_section}}` |
 | **Renderer** | `_section_validation_failures` | `_section_runtime_failures` | `format_runtime_failures_for_l3` | `format_l2_output_failures_for_l3` |
-| **Healer's writeback** | `cycle.opt_sp.l2_brief` | `l2_brief` / `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
+| **Healer's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
 ## Loop 1 — L2 nurses L1 on `ValidationFailure`
@@ -96,7 +96,7 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 |---|---|---|
 | `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
 | `warning_inventory` | cross-round | (per-query aggregation) |
-| `l2_brief` | one-round window, cleared on improvement | Loop 1, Loop 2 — L2 writeback |
+| `task_context` | persistent, accumulative; merged on each L2 fire | Loop 1, Loop 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Loop 1 — L2 reads |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Loop 2 + 3 |
 | `l2_output_failures` | per-round, set by L2 post-parse | Loop 4 — L3 reads |

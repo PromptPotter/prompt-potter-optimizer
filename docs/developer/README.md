@@ -39,14 +39,15 @@ L1 is the only layer with an L2-mutable layout; the rest run on fixed templates 
 
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
-| `RoundResult.critique` | L1 critique | L1 generate, L2 (`critique` signal via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.l2_brief` | L2 | L1 generate (`l2_directive` signal) | one round (cleared by `clear_volatile`) |
+| `RoundResult.critique` | L1 critique | L2, L3 (`critique` signal via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
+| `OSP.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` signal — broadcast) | persistent, accumulative |
 | `OSP.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
-| `OSP.plan` | L3 | L1 generate, L2 (`plan` signal in both templates) | persistent — never cleared |
+| `OSP.plan` | L3 | every prompt (`plan` signal in all 4 templates) | persistent — never cleared |
+| `OSP.l3_note` | L3 | L2 (`l3_to_l2_note` signal — L2 template only) | persistent until L3 next fires |
 | `OSP.l2_output_failures` | L2 parser + layout validator | L3 (`failures` signal) | persistent until L3 fires |
 | `OSP.l3_output_failures` | L3 parser | L3 next fire (`failures` signal) | persistent |
 
-**Symmetric plan injection:** L3 writes `plan`; both L1 generate and L2 read it via the same `_r_plan` renderer. L1 sees it as a strategic constraint; L2 as the operating context for its directive. (`l2_brief` flows L2→L1; `plan` flows L3→{L1, L2}.)
+**Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
 
 ### Signal registry — what's in `SIGNALS`
 
@@ -54,14 +55,14 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 
 | Signal | Reads from `Bundle` | Used by |
 |--------|---------------------|---------|
-| `plan` | `opt_sp.plan` | L1, L2, L3 |
-| `l2_directive` | `opt_sp.l2_brief` | L1, L3 (preview), L2 (own prior brief) |
-| `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt), L3 (preview) |
+| `plan` | `opt_sp.plan` | L1, L1 critique, L2, L3 |
+| `task_context` | `opt_sp.task_context` | L1, L1 critique, L2, L3 (broadcast) |
+| `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
 | `pipeline_axes` | `pipeline_schema` | L1 (mutation surface) |
-| `diagnostics` | `latest_diagnostics` (`RoundDiagnostics`) | L1, L2, L3 |
-| `failures` | `opt_sp.{validation,runtime,escalation_log,warning_inventory,l2_output,l3_output}_failures` | L1, L2, L3 |
-| `task_context` | `opt_sp.task_context` | L1, L2 |
-| `critique` | `latest_critique` | L1, L2, L3 |
+| `diagnostics` | `latest_diagnostics` (`RoundDiagnostics`) | L1, L1 critique, L2, L3 |
+| `failures` | `opt_sp.{validation,runtime,escalation_log,warning_inventory,l2_output,l3_output}_failures` | L1, L1 critique, L2, L3 |
+| `critique` | `latest_critique` | L2, L3 |
+| `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
 | `current_params` | `opt_sp.optimizer_params` | L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
 | `l1_rendered_prompt` | filled L1 template (recursive into `fill_l1`) | L2, L3 |

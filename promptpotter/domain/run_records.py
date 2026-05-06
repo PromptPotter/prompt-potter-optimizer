@@ -203,5 +203,4 @@ class SweepPayload(BaseModel):
     model_config = ConfigDict(frozen=True, extra="forbid")
 
     reason: str = ""
-    brief: str | None = None
     l1_layout: dict[str, list[str]] | None = None

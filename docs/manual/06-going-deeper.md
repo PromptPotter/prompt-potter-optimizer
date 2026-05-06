@@ -76,7 +76,6 @@ Source: `application/optimization/l1_stats.py::compute_round_1_verdict`. `HEALTH
 |---|---|---|
 | `context_object_honored` ✗ | task_context block too low in prompt | `l1_generate.json` |
 | `param_scope_discipline` ✗ | param boundary too loose, or `param_unlock_round` too low | `l1_generate.json` |
-| `l2_brief_followed` ✗ | L2 brief not elevated in L1's prompt | `l1_generate.json` |
 | `not_only_param_variants` ✗ | L1 only mutates node params | `l1_generate.json` |
 | all ✓ + `yield_rate < 0.20` | L1 too conservative | bump `creativity` or rewrite `l1_critique.json` |
 | all ✓ + `top_lift ≤ 0` | scoring or sample-set issue, not prompt | check `campaign.json::scoring`; check scoring set |

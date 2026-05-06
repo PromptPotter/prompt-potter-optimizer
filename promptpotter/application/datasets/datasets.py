@@ -503,18 +503,16 @@ def _infer_escalation_layer(prev_fields: dict, next_fields: dict) -> str:
     """Classify the transition by which piece of optimizer state changed.
 
     Deterministic, inside-this-file rule (no import from optimization/):
-      - ``plan`` changed              → L3
-      - ``optimizer_params`` changed
-        or ``l2_brief`` set fresh → L2
-      - otherwise                     → L1
+      - ``plan`` changed                       → L3
+      - ``optimizer_params`` or
+        ``task_context`` changed               → L2
+      - otherwise                              → L1
     """
     if prev_fields.get("plan", "") != next_fields.get("plan", ""):
         return "L3"
     if prev_fields.get("optimizer_params", {}) != next_fields.get("optimizer_params", {}):
         return "L2"
-    prev_brief = prev_fields.get("l2_brief", "")
-    next_brief = next_fields.get("l2_brief", "")
-    if next_brief and next_brief != prev_brief:
+    if prev_fields.get("task_context", {}) != next_fields.get("task_context", {}):
         return "L2"
     return "L1"
 
@@ -542,7 +540,7 @@ def _build_row(
     round_context = {
         "opt_search_point": prev_fields,
         "critique": prev_round.get("critique") or {},
-        "l2_brief": prev_fields.get("l2_brief", ""),
+        "task_context": prev_fields.get("task_context", {}),
         "optimizer_params": prev_fields.get("optimizer_params", {}),
         "prev_accuracy": float(prev_round.get("accuracy", 0.0)),
     }

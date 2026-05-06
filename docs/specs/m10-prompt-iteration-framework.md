@@ -43,7 +43,6 @@ Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. T
 |---|---|
 | `context_object_honored` | Each variant references at least one of the three `context_object` items in `changes_description` or new prompt-field text. |
 | `param_scope_discipline` | No variant touches `temperature`/`max_tokens`/`reasoning_effort` while ≥1 prompt field has been unchanged for the past 2 rounds, or before round `param_unlock_round` (default 3). |
-| `l2_brief_followed` | If `opt_search_point.l2_brief` non-empty, ≥1 variant's `changes_description` references a key noun phrase from it. |
 | `not_only_param_variants` | ≥1 variant per round mutates a `PROMPT_STRING_FIELDS` field. |
 | `optimizer_rewind_guard` *(5b — wired only when L2/L3 rebase emission lands)* | If the round emitted a `RebaseAction`, target round must exist + be ≤ current round; `reason` non-empty; payload non-empty (no-op rebase = bug). |
 
@@ -65,7 +64,7 @@ def render_review_md(
 ```
 
 **Per-round section:**
-- L1 inputs: `l2_brief`, critique fed in, three `context_object` items.
+- L1 inputs: `task_context` (broadcast L2-refined framing), critique fed in, three `context_object` items.
 - Behavior-check checklist (✓/✗ + evidence string).
 - Variants table: `variant | composite | accuracy | Δ_parent | Δ_baseline | beat_parent | changes`.
 - This round's critique (output of `l1_critique`).

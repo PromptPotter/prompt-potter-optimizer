@@ -175,15 +175,15 @@ Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial c
 
 **Per-fork protocol:** baseline (cache-hit after the first fork) + 1 full scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`. The leaderboard pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
 
-**Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`SweepPayload`) — the four L1-surface fields L2 already mutates, plus a `reason` label:
+**Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`SweepPayload`) — the L1-surface fields L2 already mutates, plus a `reason` label:
 
 ```json
 {
-  "reason": "step-by-step brief",
-  "brief": "Reason step-by-step in <thinking> tags before producing the final answer.",
-  "l1_section_overrides": {"axes_l1": false},
-  "l1_section_overrides_text": {"task_context": "BBEH targets multi-step deliberation; variants should explore decomposition + verification."},
-  "l1_template_override": null
+  "reason": "step-by-step layout",
+  "l1_layout": {
+    "task_intent": ["task_context"],
+    "problem_description": ["rendered_prompt", "pipeline_axes", "plan", "diagnostics", "failures"]
+  }
 }
 ```
 
@@ -191,12 +191,9 @@ Every field optional; `reason` defaults to empty string. The Pydantic model is `
 
 | Field | Effect on L1 |
 |-------|--------------|
-| `brief` | Stamped onto `OptSearchPoint.l2_brief`. |
-| `l1_section_overrides` | Per-section visibility toggles. |
-| `l1_section_overrides_text` | Per-section text replacements. |
-| `l1_template_override` | Whole-body replacement of L1-generate's `problem_description`. Should contain `{{l2_brief}}`. |
+| `l1_layout` | Per-slot list of signal names; stamped onto `OptSearchPoint.l1_layout`. Mandatory placeholders `{plan, task_context, rendered_prompt, pipeline_axes}` must appear somewhere across the four slots. |
 
-These are the same fields L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
+This is the same L1-surface field L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
 
 **Running a batch:**
 

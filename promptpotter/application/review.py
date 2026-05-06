@@ -10,7 +10,7 @@ Inputs
   baseline / best / final block with ``baseline_composite_fitness``,
   ``prompt_hashes``, ``mode``).
 - ``rounds`` — per-round optimizer state from ``rounds/trial_NNNN.json``,
-  in round order. Carries ``opt_search_point`` (lineage, l2_brief,
+  in round order. Carries ``opt_search_point`` (lineage, task_context,
   critique), composite_fitness, accuracy, l1_yield.
 - ``round_audits`` — per-round LLM I/O from ``.runtime/cache/rounds/round_NNNN.json``,
   same length and order as ``rounds``. Source of L1 variants for the
@@ -199,8 +199,12 @@ def _render_round(
 
 def _render_l1_inputs(osp: dict[str, Any], lineage: dict[str, Any]) -> list[str]:
     parts: list[str] = ["", "**L1 inputs**", ""]
-    brief = (osp.get("l2_brief") or "").strip()
-    parts.append(f"- L2 brief: {brief or '_(none)_'}")
+    tc = osp.get("task_context") or {}
+    if isinstance(tc, dict) and tc:
+        keys = ", ".join(sorted(k for k, v in tc.items() if v))
+        parts.append(f"- task_context fields: {keys or '_(empty)_'}")
+    else:
+        parts.append("- task_context: _(empty)_")
     src = (lineage.get("source") or "").strip()
     if src:
         parts.append(f"- lineage source: `{src}`")

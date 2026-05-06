@@ -6,101 +6,121 @@ The hub is stateless. Every `_r_*` renderer in `SIGNALS` is the construction rec
 
 ## Flow
 
+Inputs on the left fill `{{placeholders}}` in the optimizer process nodes on the right.
+
+- **Amber-rimmed pill node** = optimizer process node — the four LLM prompts (L1_GENERATE, L1_CRITIQUE, L2_CONTEXT, L3_PLAN) plus L1_SCORE (the deterministic scoring/winner-selection node). Same accent color as the webapp's `--color-accent`.
+- **Solid orange node** = deterministic input (schema, round measurements, cycle counters, code constants — no LLM in the chain).
+- **Default node** = AI-generated input.
+- **Red arrow** (firebrick) = the process node that *produces* this input — the feedback edges that close the optimizer's loops. Includes L1_SCORE → `diagnostics` / `failures` (computed from measurements). The L1_GENERATE ↔ L1_SCORE candidate-flow and winner-selection happen between rounds and aren't drawn — the diagram is about placeholder fill, not orchestration.
+
 ```mermaid
 flowchart LR
-  subgraph Writers["upstream writers"]
-    L3W[L3 LLM]
-    L2W[L2 LLM]
-    L1ROUND[L1 round eval]
-    SCH["GET /pipeline"]
-    CYC["Cycle.tracking + escalation"]
-  end
+  classDef det fill:#FFA500,stroke:#cc7a00,color:#000
+  classDef proc fill:#fff3d6,stroke:#f59e0b,stroke-width:4px,color:#000
 
-  subgraph OSP["OptSearchPoint state"]
-    PLAN[plan]
-    BRIEF[l2_brief]
-    L3N[l3_note]
-    LAYOUT[l1_layout]
-    TC[task_context]
-    OP[optimizer_params]
-    FAILS["validation_failures<br/>runtime_failures<br/>escalation_log<br/>warning_inventory<br/>l2_output_failures<br/>l3_output_failures"]
-  end
+  %% AI-generated inputs
+  PLAN[plan]
+  TC[task_context]
+  L3N[l3_to_l2_note]
+  CRIT[critique]
+  L1RP[l1_rendered_prompt]
+  CPAR["l1_config<br/>• n_variants<br/>• temp"]
+  L2H[l2_history]
 
-  subgraph Round["round artifacts"]
-    DIAG[RoundDiagnostics]
-    CRIT[critique dict]
-  end
+  %% Deterministic inputs
+  PAX[pipeline_axes]:::det
+  DIAG[diagnostics]:::det
+  FAIL[failures]:::det
+  CPOS[cycle_position]:::det
+  CAT[l1_signal_catalogue]:::det
+  AP[accuracy_pct]:::det
+  NQ[n_queries]:::det
 
-  L3W --> PLAN
-  L3W --> L3N
-  L2W --> BRIEF
-  L2W --> LAYOUT
-  L1ROUND --> DIAG
-  L1ROUND --> CRIT
-  L1ROUND --> FAILS
-  SCH --> PSCH[PipelineSchema]
-  CYC --> CSL[CycleSlice]
+  %% Process nodes — LLM prompts + score (amber-rimmed pills)
+  L1G([L1_GENERATE]):::proc
+  L1S([L1_SCORE]):::proc
+  L1C([L1_CRITIQUE]):::proc
+  L2P([L2_CONTEXT]):::proc
+  L3P([L3_PLAN]):::proc
 
-  subgraph Bundle["build_bundle(cycle) → frozen Bundle"]
-    direction LR
-    B_OSP[opt_sp]
-    B_PSCH[pipeline_schema]
-    B_DIAG[latest_diagnostics]
-    B_CRIT[latest_critique]
-    B_CSL[cycle_slice]
-  end
+  %% L1_GENERATE inputs (default layout + caller extras)
+  PLAN --> L1G
+  TC --> L1G
+  PAX --> L1G
+  DIAG --> L1G
+  FAIL --> L1G
+  CPAR --> L1G
+  AP --> L1G
+  NQ --> L1G
 
-  PLAN --> B_OSP
-  BRIEF --> B_OSP
-  L3N --> B_OSP
-  LAYOUT --> B_OSP
-  TC --> B_OSP
-  OP --> B_OSP
-  FAILS --> B_OSP
-  DIAG --> B_DIAG
-  CRIT --> B_CRIT
-  PSCH --> B_PSCH
-  CSL --> B_CSL
+  %% L1_CRITIQUE inputs
+  PLAN --> L1C
+  TC --> L1C
+  DIAG --> L1C
+  FAIL --> L1C
 
-  Bundle --> HUB{{"DispatchHub<br/>SIGNALS registry × 14"}}
+  %% L2_CONTEXT inputs
+  PLAN --> L2P
+  L3N --> L2P
+  CPOS --> L2P
+  DIAG --> L2P
+  FAIL --> L2P
+  CRIT --> L2P
+  CPAR --> L2P
+  TC --> L2P
+  CAT --> L2P
+  L1RP --> L2P
 
-  HUB -->|"fill_l1(template, opt_sp.l1_layout, bundle)"| L1G["L1_GENERATE prompt<br/>+ {{n_variants}} {{accuracy_pct}} {{n_queries}}"]
-  HUB -->|"fill_fixed(template, bundle)"| L1C[L1_CRITIQUE prompt]
-  HUB -->|"fill_fixed(template, bundle)"| L2P[L2 prompt]
-  HUB -->|"fill_fixed(template, bundle)"| L3P[L3 prompt]
+  %% L3_PLAN inputs
+  PLAN --> L3P
+  TC --> L3P
+  L2H --> L3P
+  CPOS --> L3P
+  DIAG --> L3P
+  FAIL --> L3P
+  CRIT --> L3P
+  L1RP --> L3P
 
-  L1G --> L1LLM[L1 LLM call]
-  L1C --> L1CLLM[L1_CRITIQUE LLM call]
-  L2P --> L2LLM[L2 LLM call]
-  L3P --> L3LLM[L3 LLM call]
+  %% Feedback edges — what each process node produces (red)
+  L3P --> PLAN
+  L3P --> L3N
+  L2P --> TC
+  L2P --> CPAR
+  L2P --> L2H
+  L2P --> L1RP
+  L1C --> CRIT
+  L1G --> L1RP
+  L1S --> DIAG
+  L1S --> FAIL
 
-  L2LLM -.writes.-> BRIEF
-  L2LLM -.writes.-> LAYOUT
-  L3LLM -.writes.-> PLAN
-  L3LLM -.writes.-> L3N
-  L1LLM --> L1ROUND
-  L1CLLM --> CRIT
+  %% Red styling for the 10 feedback edges (edges 30..39)
+  linkStyle 30,31,32,33,34,35,36,37,38,39 stroke:#B22222,stroke-width:2px
 ```
+
+> Why "AI-generated" for `l1_rendered_prompt` / `task_context` / `l1_config` / `l2_history`: their *content* originates from an LLM (L1's prompt evolution, L2/L3 mutations of `optimizer_params`, L2's `task_context` merges). Their *format* is deterministic, but the strings injected are not. `task_context`'s initial value is seeded by a one-time `restructure` decomposition LLM at `init` time; L2 then refines it each fire — broadcast to every prompt as the persistent task framing.
+>
+> `l1_config` bundles two L2-set knobs that govern *how L1 runs*, not what L1 puts in candidates: `n_variants` enters L1's prompt as the `{{n_variants}}` caller extra (a directive — L1 obeys); `temp` sets the L1 LLM call's temperature (configures the API call, never the prompt text). Both currently live on `opt_sp.optimizer_params` (signal name `current_params` in code); the diagram uses `l1_config` as the conceptual grouping. Renaming the field + signal to match the diagram is a follow-up code change.
+>
+> The `rendered_prompt` SIGNAL still exists in code (it's in `SIGNALS` and L1's default layout) — it's literally `opt_sp.render()`, the 8-field `PromptTemplate` compiled into one string. Structurally it's L1_SCORE's output: each round's winner becomes the new `opt_sp`, and next round's L1_GENERATE reads `opt_sp.render()` as its parent prompt. The cycle isn't drawn explicitly — it lives in orchestration (between-round state update), not in placeholder dispatch.
 
 ## Placeholder index
 
-14 signals + 3 caller extras. `[fenced]` signals wrap output in `<UNTRUSTED_DATASET_CONTENT>` for prompt-injection hardening (echo raw query text + GT + warnings).
+13 signals + 3 caller extras. `[fenced]` signals wrap output in `<UNTRUSTED_DATASET_CONTENT>` for prompt-injection hardening (echo raw query text + GT + warnings).
 
 ```
-DISPATCH v2 — 14 signals + 3 caller extras
+DISPATCH v2 — 13 signals + 3 caller extras
 │
 ├─ Strategic injects (written by another LLM layer)
-│   ├─ {{plan}}            ← opt_sp.plan         (L3 writes; persistent, survives clear_volatile)
-│   ├─ {{l2_directive}}    ← opt_sp.l2_brief     (L2 writes; sliding window 1; cleared on improvement)
+│   ├─ {{plan}}            ← opt_sp.plan         (L3 writes; persistent, never cleared)
+│   ├─ {{task_context}}    ← opt_sp.task_context (seeded by restructure decomposition at init;
+│   │                                              L2 refines via merge — broadcast to every layer)
 │   └─ {{l3_to_l2_note}}   ← opt_sp.l3_note      (L2 template only — L1 explicitly excluded)
 │
 ├─ Current state
 │   ├─ {{rendered_prompt}} ← opt_sp.render() of the 8-field PromptTemplate
 │   ├─ {{pipeline_axes}}   ← pipeline_schema.{node_param_keys, param_allowed_values,
 │   │                                          param_descriptions, available_models}
-│   ├─ {{task_context}}    ← opt_sp.task_context (skip raw_description / upstream_context /
-│   │                                              downstream_context)
-│   └─ {{current_params}}  ← opt_sp.optimizer_params      (L2/L3 only)
+│   └─ {{current_params}}  ← opt_sp.optimizer_params      (L2 only)
 │
 ├─ Round-end measurement (computed once in execute_round, read by every layer)
 │   ├─ {{diagnostics}}     ← latest_round.diagnostics (RoundDiagnostics from
@@ -129,10 +149,10 @@ DISPATCH v2 — 14 signals + 3 caller extras
 | Layer | Template body has `{{...}}`? | How signals reach the LLM |
 |---|---|---|
 | L1_GENERATE  | No — slot bodies are plain text | `fill_l1` walks `opt_sp.l1_layout` (per-slot lists of signal names) and appends rendered signal text to each slot's static body. The 3 caller extras are then substituted by `compile_prompt`. |
-| L1_CRITIQUE  | Yes (`{{plan}}`, `{{l2_directive}}`, `{{diagnostics}}`, `{{failures}}`) | `fill_fixed` regex-extracts `{{name}}`, returns `{name: rendered}`. |
+| L1_CRITIQUE  | Yes (`{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{failures}}`) | `fill_fixed` regex-extracts `{{name}}`, returns `{name: rendered}`. |
 | L2           | Yes | Same as L1_CRITIQUE. |
 | L3           | Yes — plus `{{l2_history}}` available. | Same. |
 
-L1 sees only `L1_POSSIBLE = {plan, l2_directive, rendered_prompt, pipeline_axes, diagnostics, failures, task_context, critique}`. The other six signals are L2/L3-internal.
+L1 sees only `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_axes, diagnostics, failures, critique}`. The other six signals are L2/L3-internal.
 
-L1 layout HARD-validates that `L1_MANDATORY = {plan, l2_directive, rendered_prompt, pipeline_axes}` appears somewhere across the four addressable slots (`persona`, `task_intent`, `problem_description`, `thinking_style` — `answer_format` is template-fixed).
+L1 layout HARD-validates that `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_axes}` appears somewhere across the four addressable slots (`persona`, `task_intent`, `problem_description`, `thinking_style` — `answer_format` is template-fixed).

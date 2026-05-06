@@ -38,21 +38,21 @@ OptimizerAction = Literal["normal_round", "probe_round"]
 class TransitionResult:
     """L2/L3 transition result.
 
-    L2 may write any combination of ``l2_brief``, ``l1_layout``,
-    ``optimizer_params`` and ``task_context``, plus an ``action``
-    selecting ``normal_round`` (default) or ``probe_round`` (re-run only
-    the warned-query subset under the same OSP). L3 writes ``plan`` and
+    L2 may write any combination of ``task_context`` (broadcast framing
+    refinement — the L2→all channel), ``l1_layout`` and
+    ``optimizer_params``, plus an ``action`` selecting
+    ``normal_round`` (default) or ``probe_round`` (re-run only the
+    warned-query subset under the same OSP). L3 writes ``plan`` and
     optionally ``l3_note`` — a sticky pointer to the L2-layer that
     survives across L2 fires until the next L3 fire replaces it. The
     validator outcomes ride alongside so the caller can persist them to
-    the OSP for cross-fire self-healing.
-    ``axis_targeted`` names the axis the directive tests; required prose
-    when ``action="probe_round"``, optional otherwise.
+    the OSP for cross-fire self-healing. ``axis_targeted`` names the axis
+    the L2 fire tests; required prose when ``action="probe_round"``,
+    optional otherwise.
     """
 
     opt_search_point: OptSearchPoint
     task_context: TaskDecomposition | None = None
-    l2_brief: str = ""
     l3_note: str = ""
     action: OptimizerAction = "normal_round"
     axis_targeted: str = ""

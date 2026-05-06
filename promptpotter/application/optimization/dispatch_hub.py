@@ -136,10 +136,6 @@ def _r_plan(b: Bundle) -> str:
     return f"PLAN:\n{b.opt_sp.plan}" if b.opt_sp.plan else ""
 
 
-def _r_l2_directive(b: Bundle) -> str:
-    return f"BRIEF:\n{b.opt_sp.l2_brief}" if b.opt_sp.l2_brief else ""
-
-
 def _r_l3_to_l2_note(b: Bundle) -> str:
     """Sticky L3→L2 pointer. Mounted only in L2's template; absent from
     ``L1_POSSIBLE`` so L1 never sees it."""
@@ -478,7 +474,6 @@ def _r_l2_history(b: Bundle) -> str:
 
 SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "plan": _r_plan,
-    "l2_directive": _r_l2_directive,
     "l3_to_l2_note": _r_l3_to_l2_note,
     "rendered_prompt": _r_rendered_prompt,
     "pipeline_axes": _r_pipeline_axes,

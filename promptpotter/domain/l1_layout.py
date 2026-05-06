@@ -6,8 +6,8 @@ L1's PromptTemplate. ``answer_format`` is template-fixed (output schema
 is a code contract, not L2's call) and absent from the layout.
 
 Lives on ``OptSearchPoint.l1_layout``. L2 mutates it every fire to tune
-what L1 sees. Most fires won't touch the layout — L2 only writes
-``directive`` and the layout stays at its prior valid value.
+what L1 sees. Most fires won't touch the layout — L2 only refines
+``task_context`` and the layout stays at its prior valid value.
 
 Layout validation is split into HARD and SOFT outcomes
 (:func:`validate_l1_layout`):
@@ -27,8 +27,10 @@ from promptpotter.domain.validators import ValidatorOutcome
 # Names every valid L1 layout MUST reference somewhere across its slots.
 # These are the cross-layer protocol fields plus the parent prompt and
 # pipeline mutation surface — without them L1 can't operate.
+# ``task_context`` is the broadcast L2-channel: persistent task framing
+# that L2 refines each fire (no separate per-round directive).
 L1_MANDATORY: frozenset[str] = frozenset(
-    {"plan", "l2_directive", "rendered_prompt", "pipeline_axes"}
+    {"plan", "task_context", "rendered_prompt", "pipeline_axes"}
 )
 
 # Names L2 may pick from when authoring an L1 layout. Subset of the
@@ -38,7 +40,6 @@ L1_MANDATORY: frozenset[str] = frozenset(
 L1_POSSIBLE: frozenset[str] = frozenset(
     {
         "plan",
-        "l2_directive",
         "rendered_prompt",
         "pipeline_axes",
         "diagnostics",
@@ -91,11 +92,12 @@ def default_l1_layout() -> L1Layout:
     """Return the baseline L1 layout used before any L2 fire mutates it.
 
     Mandatory placeholders are spread across ``task_intent`` (the
-    directive — front of mind for the LLM) and ``problem_description``
-    (parent prompt + mutation surface + plan + post-scoring evidence).
+    persistent task framing L2 refines — front of mind for the LLM) and
+    ``problem_description`` (parent prompt + mutation surface + plan +
+    post-scoring evidence).
     """
     return L1Layout(
-        task_intent=["l2_directive"],
+        task_intent=["task_context"],
         problem_description=[
             "rendered_prompt",
             "pipeline_axes",

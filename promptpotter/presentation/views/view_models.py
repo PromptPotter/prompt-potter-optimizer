@@ -262,7 +262,6 @@ class RoundDigestView:
     total: int
     composite_fitness: float
     changes_description: str
-    l2_brief: str
     l1_critique_text: str
     l1_yield: float
     l1_n_no_op: int

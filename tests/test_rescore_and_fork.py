@@ -391,7 +391,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
     )
 
     stores = build_stores(tmp_path, tenant_id=tenant)
-    payload = SweepPayload(reason="probe", brief="explore persona axis")
+    payload = SweepPayload(reason="probe")
     new_cycle = fork_for_sweep_sibling(
         stores.campaigns,
         tenant_id=tenant,
@@ -412,7 +412,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
     fork_runtime_cands = new_dir / ".runtime" / "cache" / "candidates" / "round_0000.json"
     assert not fork_runtime_cands.exists(), (
         "sweep fork must NOT inherit the parent's round-0 candidate cache; "
-        "L1 generation would short-circuit and ignore the sweep payload's brief"
+        "L1 generation would short-circuit and ignore the sweep payload's overrides"
     )
     assert not (new_dir / "rounds" / "round_0000.json").exists(), (
         "sweep fork must NOT inherit any parent rounds; sweep starts fresh from baseline"
@@ -445,7 +445,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(parent)
-    payload = SweepPayload(reason="probe", brief="explore persona axis")
+    payload = SweepPayload(reason="probe")
     new_cycle = fork_for_sweep_sibling(
         stores.campaigns,
         tenant_id=tenant,
@@ -465,7 +465,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     assert data.get("kind") == "sweep_fork"
     assert data.get("source_file") == "02_persona_axis.json"
     assert data.get("sweep_batch_id") == "b2def"
-    assert (data.get("sweep_payload") or {}).get("brief") == "explore persona axis"
+    assert (data.get("sweep_payload") or {}).get("reason") == "probe"
 
 
 # ===========================================================================

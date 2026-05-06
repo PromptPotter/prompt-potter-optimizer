@@ -6,9 +6,10 @@ Seven named invariants:
      of the parent OSP, else a ValidationFailure attaches → synth-0
      downstream. Idempotent under repeat calls; pipeline_params_override
      counts as mutation.
-  2. L2 output validators (``L2_DIRECTIVE_LENGTH_FLOOR``,
-     ``L2_DIRECTIVE_VERBATIM_REPEAT``) flag the V1 failure shapes with
-     ``nurse_target='l3'``; ``run_l2_output_validators`` aggregates.
+  2. L2 output validator ``L2_TASK_CONTEXT_VERBATIM_REPEAT`` fires when a
+     non-empty proposed task_context refinement merges to a no-op
+     against the prior OSP framing; ``run_l2_output_validators``
+     aggregates.
   3. L3 output validators (``L3_PLAN_LENGTH_FLOOR``,
      ``L3_PLAN_VERBATIM_REPEAT``) flag the plan-side V1 failures.
   4. ``validate_l1_layout`` flips ``is_valid`` only on hard failures
@@ -19,9 +20,9 @@ Seven named invariants:
      leaders collapse to ~1.0; uniform regimes diffuse to ~1/K. ``PoBBCheck``
      respects ``n_min`` floor and ``lock_in_n_min`` lock-in gate;
      ``lock_in=1.0`` disables the lock-in branch.
-  6. ``SweepPayload`` round-trips through ``OptSearchPoint``: brief +
-     l1_layout dict survive ``model_dump`` → reload; mandatory layout
-     placeholders enforced; extra keys rejected at parse.
+  6. ``SweepPayload`` round-trips through ``OptSearchPoint``: ``l1_layout``
+     dict survives ``model_dump`` → reload; mandatory layout placeholders
+     enforced; extra keys rejected at parse.
   7. L2 ``action`` channel: ``probe_round`` round-trips through
      ``_parse_l2``; garbage values default to ``normal_round``;
      ``_apply_l2`` sets ``cycle.probe_next_round`` + records a
@@ -44,8 +45,7 @@ from promptpotter.application.optimization.escalation import (
 )
 from promptpotter.application.optimization.l1_validators import detect_invariants
 from promptpotter.application.optimization.l2_validators import (
-    L2_DIRECTIVE_LENGTH_FLOOR,
-    L2_DIRECTIVE_VERBATIM_REPEAT,
+    L2_TASK_CONTEXT_VERBATIM_REPEAT,
     L3_PLAN_LENGTH_FLOOR,
     L3_PLAN_VERBATIM_REPEAT,
     run_l2_output_validators,
@@ -123,27 +123,45 @@ def _osp(**kwargs) -> OptSearchPoint:
     return OptSearchPoint(persona="Expert", instruction="Rank items.", **kwargs)
 
 
-def test_directive_length_floor_fires_on_short_directive():
-    out = L2_DIRECTIVE_LENGTH_FLOOR.run({"directive": "be better"}, opt_sp=_osp())
+def test_task_context_verbatim_repeat_fires_when_proposed_merge_is_no_op():
+    """Non-empty L2 proposal that merges to None ⇒ verbatim-repeat outcome."""
+    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
+        {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": None},
+        opt_sp=_osp(),
+    )
     assert out is not None
     assert out.passed is False
-    assert out.nurse_target == "l3"
-
-
-def test_directive_verbatim_repeat_fires():
-    osp = _osp(l2_brief="Use ONLY model X for now.")
-    out = L2_DIRECTIVE_VERBATIM_REPEAT.run({"directive": "Use ONLY model X for now."}, opt_sp=osp)
-    assert out is not None
     assert out.score == 0.0
-    assert "Use ONLY model X" in out.evidence["directive"]
+    assert out.nurse_target == "l3"
+    assert out.evidence["proposed_keys"] == ["domain"]
 
 
-def test_run_l2_output_validators_aggregates():
-    osp = _osp(l2_brief="bad short")
-    outcomes = run_l2_output_validators({"directive": "bad short"}, osp)
+def test_task_context_verbatim_repeat_skips_when_merge_applied():
+    """A real applied refinement does not fire the validator."""
+    sentinel = object()  # any non-None payload satisfies "applied"
+    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
+        {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": sentinel},
+        opt_sp=_osp(),
+    )
+    assert out is None
+
+
+def test_task_context_verbatim_repeat_skips_when_no_proposal():
+    """No proposed refinement at all ⇒ no verbatim-repeat fire."""
+    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
+        {"task_context_proposed": None, "task_context_applied": None},
+        opt_sp=_osp(),
+    )
+    assert out is None
+
+
+def test_run_l2_output_validators_aggregates_task_context_repeat():
+    outcomes = run_l2_output_validators(
+        {"task_context_proposed": {"domain": "x"}, "task_context_applied": None},
+        _osp(),
+    )
     ids = {o.validator_id for o in outcomes}
-    assert "l2_directive_length_floor" in ids
-    assert "l2_directive_verbatim_repeat" in ids
+    assert "l2_task_context_verbatim_repeat" in ids
 
 
 # ===========================================================================
@@ -182,7 +200,7 @@ def test_run_l3_output_validators_aggregates():
 
 def test_layout_missing_mandatory_placeholder_is_hard_failure():
     """Mandatory placeholders must appear somewhere across all slots."""
-    bad = L1Layout(task_intent=["l2_directive"], problem_description=["rendered_prompt"])
+    bad = L1Layout(task_intent=["task_context"], problem_description=["rendered_prompt"])
     result = validate_l1_layout(bad)
     assert result.is_valid is False
     ids = {o.validator_id for o in result.outcomes}
@@ -192,7 +210,7 @@ def test_layout_missing_mandatory_placeholder_is_hard_failure():
 def test_layout_unknown_placeholder_is_hard_failure():
     """Placeholder names must be in L1_POSSIBLE."""
     bad = L1Layout(
-        task_intent=["l2_directive", "made_up_signal"],
+        task_intent=["task_context", "made_up_signal"],
         problem_description=["rendered_prompt", "pipeline_axes", "plan"],
     )
     result = validate_l1_layout(bad)
@@ -204,7 +222,7 @@ def test_layout_unknown_placeholder_is_hard_failure():
 def test_layout_duplicate_within_slot_is_hard_failure():
     """No slot may list the same placeholder twice."""
     bad = L1Layout(
-        task_intent=["l2_directive", "l2_directive"],
+        task_intent=["task_context", "task_context"],
         problem_description=["rendered_prompt", "pipeline_axes", "plan"],
     )
     result = validate_l1_layout(bad)
@@ -312,32 +330,26 @@ def _full_layout_dict() -> dict[str, list[str]]:
 
 def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     layout_dict = _full_layout_dict()
-    payload = SweepPayload(
-        reason="canonical case",
-        brief="reason step-by-step before answering",
-        l1_layout=layout_dict,
-    )
+    payload = SweepPayload(reason="canonical case", l1_layout=layout_dict)
 
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
     apply_sweep_payload_to_osp(osp, payload)
 
-    assert osp.l2_brief == payload.brief
     assert osp.l1_layout.model_dump() == layout_dict
 
     dump = osp.model_dump()
     reloaded = OptSearchPoint(**dump)
 
-    assert reloaded.l2_brief == payload.brief
     assert reloaded.l1_layout.model_dump() == layout_dict
 
 
 def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
     """Hard validator: every L1_MANDATORY placeholder must appear somewhere."""
     bad_layout = {
-        "task_intent": ["l2_directive"],
+        "task_intent": ["task_context"],
         "problem_description": ["rendered_prompt"],  # missing pipeline_axes + plan
     }
-    payload = SweepPayload(brief="x", l1_layout=bad_layout)
+    payload = SweepPayload(l1_layout=bad_layout)
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
     with pytest.raises(ValueError, match="hard validators"):
         apply_sweep_payload_to_osp(osp, payload)
@@ -364,7 +376,6 @@ def _l2_cycle_stub() -> types.SimpleNamespace:
 
 def test_parse_l2_round_trips_probe_action_and_axis():
     raw = {
-        "directive": "Probe persona axis using the warned subset.",
         "action": "probe_round",
         "axis_targeted": "persona",
         "rationale": "test",
@@ -375,7 +386,7 @@ def test_parse_l2_round_trips_probe_action_and_axis():
 
 
 def test_parse_l2_invalid_action_defaults_to_normal_round():
-    raw = {"directive": "x" * 200, "action": "garbage", "rationale": "test"}
+    raw = {"action": "garbage", "rationale": "test"}
     result = _parse_l2(raw, _osp(), prompt="<prompt>")
     assert result.action == "normal_round"
 
@@ -383,7 +394,6 @@ def test_parse_l2_invalid_action_defaults_to_normal_round():
 def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
     cycle = _l2_cycle_stub()
     raw = {
-        "directive": "Probe persona axis using the warned subset.",
         "action": "probe_round",
         "axis_targeted": "persona",
         "rationale": "test",
@@ -402,7 +412,7 @@ def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
 
 def test_apply_l2_normal_action_records_commitment_without_probe_state():
     cycle = _l2_cycle_stub()
-    raw = {"directive": "x" * 200, "action": "normal_round", "rationale": "test"}
+    raw = {"action": "normal_round", "rationale": "test"}
     result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
     _apply_l2(cycle, result, round_num=3)
 
@@ -411,6 +421,7 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
     assert last.kind == DecisionKind.PROBE_ROUND_COMMITMENT
     assert last.outcome is False
     assert last.data["action"] == "normal_round"
+    assert last.data["task_context_changed"] is False
 
 
 # ===========================================================================
@@ -428,18 +439,13 @@ def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
     assert "l3_to_l2_note" not in L1_POSSIBLE
 
 
-def test_l3_note_is_memory_field_and_survives_clear_volatile():
-    """Stickiness is implemented by two structural facts:
-    (1) ``l3_note`` is in ``MEMORY_FIELDS`` — copy_memory_to forwards it
-        across L2-fire OSP swaps in :func:`_run_transition`.
-    (2) :meth:`clear_volatile` does NOT clear it — its lifecycle is keyed
-        to L3 cadence, not L1 improvement."""
+def test_l3_note_is_memory_field_and_forwarded_via_copy_memory_to():
+    """Stickiness across L2-fire OSP swaps: ``l3_note`` is in
+    ``MEMORY_FIELDS`` so :meth:`copy_memory_to` forwards it onto the
+    fresh OSP that ``_run_transition`` mints."""
     assert "l3_note" in OptSearchPoint.MEMORY_FIELDS
 
     osp = _osp(l3_note="constraint X discovered, steer L2 around it")
-    osp.clear_volatile()
-    assert osp.l3_note == "constraint X discovered, steer L2 around it"
-
     target = _osp()
     osp.copy_memory_to(target)
     assert target.l3_note == osp.l3_note

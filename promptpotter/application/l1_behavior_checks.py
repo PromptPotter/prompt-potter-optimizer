@@ -50,7 +50,7 @@ class CheckContext:
 
     ``prior_rounds`` are the round dicts strictly before ``round_num``,
     in order; ``opt_search_point`` is the OSP snapshot at round-start
-    (carries ``l2_brief`` + the live prompt fields); ``context_object``
+    (carries ``task_context`` + the live prompt fields); ``context_object``
     is the three task-decomposition strings L1's prompt was shown.
     """
 
@@ -172,34 +172,6 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
-def _check_l2_brief_followed(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
-    """When L2 brief present, ≥1 variant must reference one of its phrases."""
-    brief = str(ctx.opt_search_point.get("l2_brief") or "").strip()
-    if not brief:
-        return CheckResult("l2_brief_followed", True, "no L2 brief active")
-    variants = _l1_generate_variants(round_dict)
-    if not variants:
-        return CheckResult("l2_brief_followed", False, "L2 brief set but no variants")
-
-    phrases = _key_phrases(brief, min_len=5)
-    if not phrases:
-        return CheckResult("l2_brief_followed", True, "L2 brief yielded no extractable phrases")
-
-    for v in variants:
-        blob = _variant_text_blob(v)
-        if any(p in blob for p in phrases):
-            return CheckResult(
-                "l2_brief_followed",
-                True,
-                "≥1 variant references brief phrase",
-            )
-    return CheckResult(
-        "l2_brief_followed",
-        False,
-        f"no variant references any of {phrases[:3]}",
-    )
-
-
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """≥1 variant per round must mutate a ``PROMPT_STRING_FIELDS`` field."""
     variants = _l1_generate_variants(round_dict)
@@ -227,7 +199,6 @@ def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext
 CHECK_REGISTRY: dict[str, CheckFn] = {
     "context_object_honored": _check_context_object_honored,
     "param_scope_discipline": _check_param_scope_discipline,
-    "l2_brief_followed": _check_l2_brief_followed,
     "not_only_param_variants": _check_not_only_param_variants,
 }
 

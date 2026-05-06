@@ -7,10 +7,10 @@ forbidden by ``tests/test_layer_imports.py``. Both layers share the same
 into the ``L2`` and ``L3`` instances.
 
 V1 contract:
-* L2 writes ``directive`` (required) + ``action`` (``normal_round`` or
-  ``probe_round``) + optional ``axis_targeted`` / ``l1_layout`` /
-  ``optimizer_params`` / ``task_context``. No L1-surface
-  scheme/text/template overrides.
+* L2 writes ``task_context`` (broadcast framing refinement, the L2→all
+  channel) + ``action`` (``normal_round`` or ``probe_round``) + optional
+  ``axis_targeted`` / ``l1_layout`` / ``optimizer_params``. No
+  L1-surface scheme/text/template overrides.
 * L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2
   pointer; survives L2 fires, replaced wholesale on each L3 fire). No
   ``pipeline_params`` deltas.
@@ -92,8 +92,6 @@ def _coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
 
 def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
     """Stamp operator's L1-surface deltas on the OSP — same shape L2 writes."""
-    if payload.brief:
-        opt_sp.l2_brief = payload.brief
     if payload.l1_layout is not None:
         layout = _coerce_l1_layout(payload.l1_layout)
         if layout is None:
@@ -162,12 +160,11 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         changes["optimizer_params"] = {**opt_sp.optimizer_params, **raw["optimizer_params"]}
 
     new_task_context = None
-    if isinstance(raw.get("task_context"), dict) and raw["task_context"]:
-        merged = opt_sp.task_context.merge(raw["task_context"])
+    proposed_tc = raw.get("task_context") if isinstance(raw.get("task_context"), dict) else None
+    if proposed_tc:
+        merged = opt_sp.task_context.merge(proposed_tc)
         if merged.to_dict() != opt_sp.task_context.to_dict():
             new_task_context = merged
-
-    directive = raw.get("directive", "") if isinstance(raw.get("directive"), str) else ""
 
     raw_action = raw.get("action")
     action: OptimizerAction = (
@@ -185,7 +182,10 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         if result.is_valid:
             accepted_layout = proposed_layout
 
-    failures = run_l2_output_validators({"directive": directive}, opt_sp)
+    failures = run_l2_output_validators(
+        {"task_context_proposed": proposed_tc, "task_context_applied": new_task_context},
+        opt_sp,
+    )
     failures.extend(layout_outcomes)
     if failures:
         logger.warning(
@@ -197,7 +197,6 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
     return TransitionResult(
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
         task_context=new_task_context,
-        l2_brief=directive,
         action=action,
         axis_targeted=axis_targeted,
         l1_layout=accepted_layout,
@@ -211,7 +210,6 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     osp = cycle.opt_sp
     if result.task_context:
         osp.task_context = result.task_context
-    osp.l2_brief = result.l2_brief
     if result.l1_layout is not None:
         osp.l1_layout = result.l1_layout
     osp.l2_output_failures = list(result.l2_output_failures)
@@ -232,7 +230,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         is_probe,
         data={
             "action": result.action,
-            "l2_directive_preview": (result.l2_brief or "")[:200],
+            "task_context_changed": result.task_context is not None,
             "changes_description": result.opt_search_point.lineage.changes_description or "",
             "axis_targeted": result.axis_targeted,
         },
