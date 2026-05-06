@@ -117,12 +117,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .payload-block.empty{color:var(--color-text-tertiary);font-style:italic}
 
 /* Round detail */
-.round-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:12px}
-.round-node{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px 12px}
-.round-node-title{font-size:12px;font-weight:500;color:var(--color-text-primary);margin-bottom:6px;display:flex;justify-content:space-between;align-items:baseline;gap:8px}
-.round-node-title .sub{font-size:10px;color:var(--color-text-tertiary);font-weight:400;font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0}
-.round-node-rows{font-size:11px;color:var(--color-text-secondary);font-family:var(--font-mono);line-height:1.5}
-.round-node-rows .lbl{color:var(--color-text-tertiary)}
 .candidate-row{padding:4px 0;border-top:0.5px dotted var(--color-border-tertiary);font-family:var(--font-mono);font-size:11px}
 .candidate-row:first-child{border-top:none}
 .candidate-row .ci{color:var(--color-text-tertiary)}
@@ -241,7 +235,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:12px;color:var(--color-text-secondary)}
 /* Full-width dotted canvas; the inner .workflow-canvas keeps the SVG/nodes centered at 800px. */
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
-.workflow-canvas{position:relative;width:100%;max-width:800px;aspect-ratio:800/266;margin:0 auto;overflow:hidden}
+.workflow-canvas{position:relative;width:100%;max-width:800px;aspect-ratio:800/274;margin:0 auto;overflow:hidden}
 .wf-node{position:absolute;cursor:pointer;user-select:none}
 .wf-box{position:relative;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
 .wf-box:hover{border-color:var(--color-accent)}
@@ -257,13 +251,11 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .wf-node-title{font-size:11px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .wf-node-sub{font-size:9px;color:var(--color-text-tertiary);margin-top:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 
-.sel-panel{display:none;position:absolute;right:12px;top:12px;width:240px;max-height:88%;overflow-y:auto;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px;font-size:12px;z-index:10;box-shadow:0 4px 14px rgba(0,0,0,.6)}
-.sel-panel.show{display:block}
+.sel-panel{position:absolute;right:12px;top:12px;bottom:12px;width:280px;overflow-y:auto;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:12px;font-size:12px;z-index:10;box-shadow:0 4px 14px rgba(0,0,0,.6)}
 .sel-panel-title{font-weight:500;margin-bottom:8px;font-size:13px}
 .sel-row{display:flex;justify-content:space-between;padding:4px 0;border-bottom:0.5px solid var(--color-border-tertiary);color:var(--color-text-secondary);gap:8px}
 .sel-row:last-child{border-bottom:none}
 .sel-val{color:var(--color-text-primary);font-weight:500;font-family:var(--font-mono);font-size:11px;text-align:right;word-break:break-all}
-.close-btn{float:right;cursor:pointer;color:var(--color-text-tertiary);font-size:14px;line-height:1}
 
 /* Files pane */
 .files-pane{display:flex;height:100%;gap:14px}
@@ -333,7 +325,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:11px;padding:5px 14px;border-radius:999px;background:rgba(245,158,11,0.08);border:1px solid rgba(245,158,11,0.30);color:var(--color-accent);letter-spacing:.04em}
-.wf-kb-float{position:absolute;left:50%;bottom:10px;transform:translateX(-50%);z-index:3;pointer-events:auto}
+.wf-kb-float{position:absolute;left:31%;top:84%;z-index:3;pointer-events:auto}
 .wf-kb-float .wf-hero-kb-pill{font-size:11px;padding:4px 14px;background:rgba(245,158,11,0.12);border-color:rgba(245,158,11,0.40);box-shadow:0 0 14px rgba(245,158,11,0.22),0 1px 6px rgba(0,0,0,0.45);backdrop-filter:blur(4px);-webkit-backdrop-filter:blur(4px)}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:380px;min-width:0}
@@ -636,14 +628,13 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
       <div class="workflow-card">
         <div class="workflow-toolbar">
           <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 3v3l2 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
-          Optimizer pipeline — current round
+          Optimizer pipeline — current round<span id="wf-round" style="margin-left:6px;color:var(--color-text-secondary)"></span>
           <span style="margin-left:auto;color:#10b981;font-size:11px" id="wf-status">● live</span>
         </div>
         <div class="workflow-canvas-bg">
           <div class="workflow-canvas" id="wf-canvas">
             <svg id="wf-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></svg>
             <div id="sel-panel" class="sel-panel">
-              <span class="close-btn" onclick="closePanel()">✕</span>
               <div class="sel-panel-title" id="sp-title">Node</div>
               <div id="sp-body"></div>
             </div>
@@ -661,14 +652,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
         <div class="kv-grid" id="live-state-grid"></div>
         <div class="var-label" style="margin-top:14px">In-flight query payload</div>
         <div class="payload-block empty" id="payload-block">no query in flight</div>
-      </div>
-
-      <div class="card live-state-card">
-        <div class="card-title">
-          Current round detail
-          <span style="font-size:10px;color:var(--color-text-tertiary);font-weight:400">current_round.nodes</span>
-        </div>
-        <div class="round-grid" id="round-grid"><div style="color:var(--color-text-tertiary);font-size:12px">No round in progress.</div></div>
       </div>
 
       <div class="card whatif-card">
@@ -796,7 +779,7 @@ let lastRoundFetched = -1;
 let latestRoundData = null;
 let latestDashboard = null;
 let freqChart = null, trendChart = null;
-let currentNodeSelection = null;
+let currentNodeSelection = 'l1_score';
 let TOPOLOGY = null;        // .view block (nodes + edges) for the workflow render
 let PIPELINE = null;        // full optimizer_pipeline.json — used for static node config fallback
 let lastDashboardOk = 0;    // timestamp of last successful dashboard fetch
@@ -890,6 +873,8 @@ async function refreshDashboard(){
   } catch(e){
     document.getElementById('wf-status').textContent = '● disconnected';
     document.getElementById('wf-status').style.color = '#f87171';
+    const wfRoundEl = document.getElementById('wf-round');
+    if(wfRoundEl) wfRoundEl.textContent = '';
     setStatus('offline', `dashboard.json unreachable for ${CYCLE_ID}`,
       'Start the optimizer: `python -m promptpotter optimize`');
     return;
@@ -911,6 +896,8 @@ async function refreshDashboard(){
   }
   document.getElementById('wf-status').textContent = '● live';
   document.getElementById('wf-status').style.color = '#10b981';
+  const wfRound = document.getElementById('wf-round');
+  if(wfRound) wfRound.textContent = (dash.round != null && dash.round !== '') ? ` ${dash.round}` : '';
   // Stat cards
   document.getElementById('stat-best').textContent = (dash.best ?? 0).toFixed ? Number(dash.best).toFixed(3) : (dash.best ?? '—');
   document.getElementById('stat-queries').textContent = dash.total_queries_scored ?? '—';
@@ -934,7 +921,6 @@ async function refreshDashboard(){
   renderWorkflow(dash);
   renderPromptVariables(dash);
   renderLiveState(dash);
-  renderRoundDetail(dash);
   renderWhatIf(dash);
   renderLiveSamples(dash);
   renderRawDash(dash);
@@ -959,7 +945,7 @@ async function refreshDashboard(){
 
 // Pipeline shape never changes — every coordinate is hardcoded so the SVG paths
 // and the HTML node boxes render to the exact same canvas points.
-const CANVAS_W = 800, CANVAS_H = 266;
+const CANVAS_W = 800, CANVAS_H = 274;
 
 const LAYOUT = {
   // Left column: Dataset → restructure → baseline (init-time chain feeding the L1 row).
@@ -968,11 +954,11 @@ const LAYOUT = {
   restructure: { x:  10, y: 100, w:  80, h: 44 },
   baseline:    { x:  10, y: 170, w:  80, h: 44 },
   l3_plan:     { x: 265, y:  10, w: 110, h: 44 },
-  l2_context:  { x: 265, y:  80, w: 110, h: 44 },
+  l2_context:  { x: 265, y:  67, w: 110, h: 44 },
   l1_generate: { x: 160, y: 170, w: 110, h: 44 },
   l1_score:    { x: 290, y: 170, w:  70, h: 44 },
   l1_critique: { x: 380, y: 170, w: 100, h: 44 },
-  output:      { x: 720, y: 170, w:  70, h: 44 },
+  output:      { x: 380, y: 230, w: 100, h: 40 },
 };
 
 // Each edge: full SVG path + label position. Three nested loops:
@@ -986,21 +972,21 @@ const EDGES = {
   'baseline>l1_generate':     { kind:'forward',   d:'M90,192 L160,192' },
   'l1_generate>l1_score':     { kind:'forward',   d:'M270,192 L290,192' },
   'l1_score>l1_critique':     { kind:'forward',   d:'M360,192 L380,192' },
-  'l1_critique>output':       { kind:'forward',   d:'M480,192 L720,192',
-                                label:'converged', labelXY:[600, 187] },
+  'l1_critique>output':       { kind:'forward',   d:'M430,214 L430,230',
+                                label:'converged', labelXY:[460, 224] },
 
   // L1 inner loop: bow above the row, no waypoint.
-  'l1_critique>l1_generate':  { kind:'loop',
+  'l1_critique>l1_generate':  { kind:'forward',
                                 d:'M430,170 C430,140 215,140 215,170',
                                 label:'next round', labelXY:[322, 144] },
 
-  // L2 middle loop: rounded right-angle through l2_context (y=103).
+  // L2 middle loop: rounded right-angle through l2_context (y=89).
   'l1_critique>l2_context':   { kind:'escalate',
-                                d:'M445,170 Q445,103 375,103',
-                                label:'L1 stall', labelXY:[432, 138] },
+                                d:'M445,170 Q445,89 375,89',
+                                label:'L1 stall', labelXY:[432, 130] },
   'l2_context>l1_generate':   { kind:'directive',
-                                d:'M265,103 Q200,103 200,170',
-                                label:'brief',    labelXY:[215, 138] },
+                                d:'M265,89 Q200,89 200,170',
+                                label:'brief',    labelXY:[215, 130] },
 
   // L3 outer loop: rounded right-angle through l3_plan (y=33).
   'l1_critique>l3_plan':      { kind:'escalate',
@@ -1104,6 +1090,26 @@ function phaseToNodeId(dash){
   return null;
 }
 
+function buildCandidateRows(node){
+  if(!node || !node.output || !Array.isArray(node.output.candidates)) return '';
+  return node.output.candidates.map(c => {
+    const s = c.stats || {};
+    const acc = s.accuracy != null ? (s.accuracy*100).toFixed(1)+'%' : '—';
+    const cf  = s.composite_fitness != null ? Number(s.composite_fitness).toFixed(3) : '—';
+    const hits = s.hits != null ? `${s.hits}/${s.total ?? '?'}` : '—';
+    const inv = s.invalid ? ' <span class="kv-val warn">invalid</span>' : '';
+    const vf = (s.validation_failures||[]).length ? ` · ${s.validation_failures.length} validation failures` : '';
+    return `<div class="candidate-row">
+      <span class="ci">cand #${c.idx ?? '?'}</span>
+      <span class="acc">acc ${acc}</span>
+      · cf ${cf}
+      · ${hits} hits
+      ${inv}
+      ${vf}
+    </div>`;
+  }).join('');
+}
+
 function showNodePanel(id){
   const data = ((latestDashboard||{}).current_round||{}).nodes || {};
   const node = data[id];
@@ -1115,18 +1121,20 @@ function showNodePanel(id){
   document.querySelectorAll('.wf-box').forEach(el => el.classList.remove('selected'));
   const el = document.querySelector(`[data-id="${id}"] .wf-box`);
   if(el) el.classList.add('selected');
-  const panel = document.getElementById('sel-panel');
   document.getElementById('sp-title').textContent = (meta && meta.label) || id;
 
   let rows;
   if(node){
     // Live data this round.
+    const tokens = node.usage
+      ? `${node.usage.prompt_tokens ?? '—'}p / ${node.usage.completion_tokens ?? '—'}c / ${node.usage.total_tokens ?? '—'}t`
+      : '—';
     rows = [
       ['status',    'live · this round'],
       ['template',  (node.input && node.input.template_name) || '—'],
       ['model',     node.model || '—'],
       ['duration',  fmtSecs(node.duration_s)],
-      ['tokens',    node.usage ? (node.usage.total_tokens ?? '—') : '—'],
+      ['tokens',    tokens],
       ['round',     node.round ?? '—'],
       ['timestamp', node.timestamp || '—'],
     ];
@@ -1167,16 +1175,12 @@ function showNodePanel(id){
     rows = [['status', 'no data this round']];
   }
 
-  document.getElementById('sp-body').innerHTML = rows.map(r =>
+  const rowsHtml = rows.map(r =>
     `<div class="sel-row"><span>${r[0]}</span><span class="sel-val">${escapeHtml(String(r[1]))}</span></div>`
   ).join('');
-  panel.classList.add('show');
-}
-
-function closePanel(){
-  currentNodeSelection = null;
-  document.getElementById('sel-panel').classList.remove('show');
-  document.querySelectorAll('.wf-box').forEach(el => el.classList.remove('selected'));
+  const candHtml = id === 'l1_score' ? buildCandidateRows(node) : '';
+  const extra = candHtml ? `<div style="margin-top:10px">${candHtml}</div>` : '';
+  document.getElementById('sp-body').innerHTML = rowsHtml + extra;
 }
 
 function renderPassRate(round){
@@ -1343,18 +1347,18 @@ function renderLiveState(dash){
   const grid = document.getElementById('live-state-grid');
   document.getElementById('formula-row').textContent = dash.composite_fitness_formula_short || dash.composite_fitness_formula || '—';
 
-  // Fields surfaced elsewhere (header, payload block, dedicated cards).
+  // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow toolbar).
   const SHOWN_ELSEWHERE = new Set([
     'cycle_id', 'wallclock_serialized_at',
     'best', 'total_queries_scored', 'last_query_elapsed_s',
     'composite_fitness_formula', 'composite_fitness_formula_short',
     'current_round',
     'current_query_payload',
+    'phase', 'layer', 'round', 'candidate', 'query',
   ]);
 
   const KNOWN_ORDER = [
-    'phase', 'layer', 'round',
-    'candidate', 'query', 'patience',
+    'patience',
     'baseline', 'current_acc', 'n_variants', 'sp_budget_ttest',
     'total_backend_calls', 'error_count', 'degraded_count',
     'query_in_flight', 'query_started_at',
@@ -1404,63 +1408,6 @@ function renderLiveState(dash){
     payloadEl.classList.remove('empty');
     payloadEl.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);
   }
-}
-
-function renderRoundDetail(dash){
-  const grid = document.getElementById('round-grid');
-  const cr = dash.current_round;
-  if(!cr || !cr.nodes || !Object.keys(cr.nodes).length){
-    grid.innerHTML = '<div style="color:var(--color-text-tertiary);font-size:12px">No round in progress.</div>';
-    return;
-  }
-  const nodeKeys = Object.keys(cr.nodes);
-  const blocks = nodeKeys.map(key => {
-    const n = cr.nodes[key];
-    const rows = [];
-    if(n.input && n.input.template_name) rows.push(['template', n.input.template_name]);
-    if(n.model)        rows.push(['model', n.model]);
-    if(n.duration_s != null) rows.push(['duration', fmtSecs(n.duration_s)]);
-    if(n.usage)        rows.push(['tokens', `${n.usage.prompt_tokens ?? '—'}p / ${n.usage.completion_tokens ?? '—'}c / ${n.usage.total_tokens ?? '—'}t`]);
-    if(n.round != null) rows.push(['round', n.round]);
-    if(n.timestamp)    rows.push(['timestamp', n.timestamp]);
-
-    // l1_score per-candidate stats
-    let candHtml = '';
-    if(key === 'l1_score' && n.output && Array.isArray(n.output.candidates)){
-      candHtml = '<div style="margin-top:8px">' +
-        n.output.candidates.map(c => {
-          const s = c.stats || {};
-          const acc = s.accuracy != null ? (s.accuracy*100).toFixed(1)+'%' : '—';
-          const cf  = s.composite_fitness != null ? Number(s.composite_fitness).toFixed(3) : '—';
-          const hits = s.hits != null ? `${s.hits}/${s.total ?? '?'}` : '—';
-          const inv = s.invalid ? ' <span class="kv-val warn">invalid</span>' : '';
-          const vf = (s.validation_failures||[]).length ? ` · ${s.validation_failures.length} validation failures` : '';
-          return `<div class="candidate-row">
-            <span class="ci">cand #${c.idx ?? '?'}</span>
-            <span class="acc">acc ${acc}</span>
-            · cf ${cf}
-            · ${hits} hits
-            ${inv}
-            ${vf}
-          </div>`;
-        }).join('') +
-        '</div>';
-    }
-
-    const sub = n.input && n.input.template_name ? n.input.template_name :
-                key === 'l1_score' ? 'measure_sample' : '';
-    return `<div class="round-node">
-      <div class="round-node-title">
-        <span>${escapeHtml(key)}</span>
-        <span class="sub">${escapeHtml(sub)}</span>
-      </div>
-      <div class="round-node-rows">
-        ${rows.map(r => `<div><span class="lbl">${escapeHtml(r[0])}:</span> ${escapeHtml(String(r[1]))}</div>`).join('')}
-      </div>
-      ${candHtml}
-    </div>`;
-  });
-  grid.innerHTML = `<div style="grid-column:1/-1;font-size:11px;color:var(--color-text-tertiary)">round ${cr.round ?? '—'}</div>` + blocks.join('');
 }
 
 function parseSampleLine(line){
