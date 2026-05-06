@@ -32,9 +32,9 @@ Every signal name in the layout maps to a renderer `(Bundle) → str` in `SIGNAL
 
 `answer_format` is omitted on purpose — it carries L1's output JSON schema (a code contract), not L2's call. Static text in each slot stays; the layout's signal renderings are appended.
 
-`L1_POSSIBLE` (subset of `SIGNALS`) is the menu L2 picks from. L2-internal signals (`l1_config`, `l1_signal_catalogue`, `l1_rendered_prompt`, `l2_history`) are deliberately excluded as SIGNALs into L1's slots — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras (the in-prompt directive + the LLM-call temperature, respectively). `L1_MANDATORY` (`plan`, `task_context`, `rendered_prompt`, `pipeline_axes`) must appear somewhere across the slots — without these L1 has no parent prompt, no plan, no task framing, and no mutation surface.
+`L1_POSSIBLE` (subset of `SIGNALS`) is the menu L2 picks from. L2-internal signals (`l1_config`, `l1_signal_catalogue`, `l1gen_prompt_fields`, `l2_history`) are deliberately excluded as SIGNALs into L1's slots — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras (the in-prompt directive + the LLM-call temperature, respectively). `L1_MANDATORY` (`plan`, `task_context`, `rendered_prompt`, `tunable_params`, `critique`) must appear somewhere across the slots — without these L1 has no parent prompt, no plan, no task framing, no mutation surface, and no round-local failure digest. Dropping any of them fires `l1_layout_missing_mandatory` with `nurse_target='l3'` so L3 replans rather than letting L2 starve L1.
 
-Default layout (`default_l1_layout`): `task_context` in `task_intent`; `rendered_prompt`, `pipeline_axes`, `plan`, `diagnostics`, `failures` in `problem_description`. Most L2 fires don't touch the layout.
+Default layout (`default_l1_layout`): `task_context` in `task_intent`; `rendered_prompt`, `tunable_params`, `plan`, `diagnostics`, `failures`, `critique` in `problem_description`. Most L2 fires don't touch the layout.
 
 ## Dispatch hub — `DispatchHub`
 

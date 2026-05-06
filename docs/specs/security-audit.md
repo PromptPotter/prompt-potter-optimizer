@@ -84,8 +84,8 @@ their output with:
     </UNTRUSTED_DATASET_CONTENT>
 
 Trusted slots (`plan`, `task_context`, `critique`, `l1_config`,
-`cycle_position`, `l2_history`, `pipeline_axes`, `l1_signal_catalogue`,
-`l1_rendered_prompt`, `rendered_prompt`, `l3_to_l2_note`) are NOT
+`cycle_position`, `l2_history`, `tunable_params`, `l1_signal_catalogue`,
+`l1gen_prompt_fields`, `rendered_prompt`, `l3_to_l2_note`) are NOT
 wrapped — they are operator-authored config or bounded LLM outputs.
 
 Starter hardening only — see § Prompt-injection Phase 2 below for what

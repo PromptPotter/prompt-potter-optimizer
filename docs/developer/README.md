@@ -58,18 +58,18 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 | `plan` | `opt_sp.plan` | L1, L1 critique, L2, L3 |
 | `task_context` | `opt_sp.task_context` | L1, L1 critique, L2, L3 (broadcast) |
 | `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
-| `pipeline_axes` | `pipeline_schema` | L1 (mutation surface) |
+| `tunable_params` | `pipeline_schema` | L1 (mutation surface) |
 | `diagnostics` | `latest_diagnostics` (`RoundDiagnostics`) | L1, L1 critique, L2, L3 |
 | `failures` | `opt_sp.{validation,runtime,escalation_log,warning_inventory,l2_output,l3_output}_failures` | L1, L1 critique, L2, L3 |
-| `critique` | `latest_critique` | L2, L3 |
+| `critique` | `latest_critique` | L1, L2, L3 |
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
 | `l1_config` | `opt_sp.l1_config` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
-| `l1_rendered_prompt` | filled L1 template (recursive into `fill_l1`) | L2, L3 |
+| `l1gen_prompt_fields` | filled L1_GENERATE template (recursive into `fill_l1`) | L2, L3 |
 | `cycle_position` | `cycle_slice` (round / stall / best counters) | L2, L3 |
 | `l2_history` | `cycle_slice` + `opt_sp.l1_config` | L3 only |
 
-L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`, `l1_rendered_prompt`, `l2_history`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
+L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`, `l1gen_prompt_fields`, `l2_history`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
 ---
 

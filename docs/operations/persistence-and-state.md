@@ -182,7 +182,7 @@ Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial c
   "reason": "step-by-step layout",
   "l1_layout": {
     "task_intent": ["task_context"],
-    "problem_description": ["rendered_prompt", "pipeline_axes", "plan", "diagnostics", "failures"]
+    "problem_description": ["rendered_prompt", "tunable_params", "plan", "diagnostics", "failures", "critique"]
   }
 }
 ```
@@ -191,7 +191,7 @@ Every field optional; `reason` defaults to empty string. The Pydantic model is `
 
 | Field | Effect on L1 |
 |-------|--------------|
-| `l1_layout` | Per-slot list of signal names; stamped onto `OptSearchPoint.l1_layout`. Mandatory placeholders `{plan, task_context, rendered_prompt, pipeline_axes}` must appear somewhere across the four slots. |
+| `l1_layout` | Per-slot list of signal names; stamped onto `OptSearchPoint.l1_layout`. Mandatory placeholders `{plan, task_context, rendered_prompt, tunable_params, critique}` must appear somewhere across the four slots. |
 
 This is the same L1-surface field L2 writes when it fires — sweep just lets the operator stage one without firing L2. See [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md).
 

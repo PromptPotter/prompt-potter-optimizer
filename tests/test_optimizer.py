@@ -211,7 +211,7 @@ def test_layout_unknown_placeholder_is_hard_failure():
     """Placeholder names must be in L1_POSSIBLE."""
     bad = L1Layout(
         task_intent=["task_context", "made_up_signal"],
-        problem_description=["rendered_prompt", "pipeline_axes", "plan"],
+        problem_description=["rendered_prompt", "tunable_params", "plan"],
     )
     result = validate_l1_layout(bad)
     assert result.is_valid is False
@@ -223,7 +223,7 @@ def test_layout_duplicate_within_slot_is_hard_failure():
     """No slot may list the same placeholder twice."""
     bad = L1Layout(
         task_intent=["task_context", "task_context"],
-        problem_description=["rendered_prompt", "pipeline_axes", "plan"],
+        problem_description=["rendered_prompt", "tunable_params", "plan"],
     )
     result = validate_l1_layout(bad)
     assert result.is_valid is False
@@ -347,7 +347,7 @@ def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
     """Hard validator: every L1_MANDATORY placeholder must appear somewhere."""
     bad_layout = {
         "task_intent": ["task_context"],
-        "problem_description": ["rendered_prompt"],  # missing pipeline_axes + plan
+        "problem_description": ["rendered_prompt"],  # missing tunable_params + plan
     }
     payload = SweepPayload(l1_layout=bad_layout)
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})

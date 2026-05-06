@@ -57,7 +57,7 @@ _AXES_ENUM_PREVIEW = 4
 _NEAR_MISS_RENDER_CAP = 10
 _SAMPLE_RENDER_CAP = 5
 _FAILURE_WARNING_PREVIEW = 1
-_PIPELINE_AXES_MODEL_CAP = 8
+_TUNABLE_PARAMS_MODEL_CAP = 8
 
 # Prompt-injection fence — wraps signals whose body carries untrusted content
 # (sample queries, ground truths, model predictions echoed back, pipeline
@@ -147,7 +147,7 @@ def _r_rendered_prompt(b: Bundle) -> str:
     return f"CURRENT PROMPT:\n---\n{rendered}\n---" if rendered else ""
 
 
-def _r_pipeline_axes(b: Bundle) -> str:
+def _r_tunable_params(b: Bundle) -> str:
     """Compact mutation surface — name + ≤4-value enum hint, no full dump."""
     schema = b.pipeline_schema
     if schema is None:
@@ -155,7 +155,7 @@ def _r_pipeline_axes(b: Bundle) -> str:
     npk = schema.node_param_keys()
     if not npk:
         return ""
-    lines = ["PIPELINE MUTATION AXES (use only these — do not invent):"]
+    lines = ["TUNABLE PIPELINE PARAMS (use only these — do not invent):"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
         if not node or not params:
@@ -178,7 +178,7 @@ def _r_pipeline_axes(b: Bundle) -> str:
         lines.append(f"  {node_name}: {', '.join(bits)}")
     if schema.available_models:
         lines.append("MODELS:")
-        lines.append("  " + ", ".join(list(schema.available_models)[:_PIPELINE_AXES_MODEL_CAP]))
+        lines.append("  " + ", ".join(list(schema.available_models)[:_TUNABLE_PARAMS_MODEL_CAP]))
     return "\n".join(lines)
 
 
@@ -420,13 +420,13 @@ def _r_l1_signal_catalogue(b: Bundle) -> str:
     )
 
 
-def _r_l1_rendered_prompt(b: Bundle) -> str:
-    """The L1 prompt as L1 will see it next round, for L2/L3 to inspect.
+def _r_l1gen_prompt_fields(b: Bundle) -> str:
+    """L1_GENERATE's PromptTemplate fields after layout fill — for L2/L3 to inspect.
 
-    Loads L1's PromptTemplate, applies the current ``opt_sp.l1_layout``
-    via :meth:`DispatchHub.fill_l1`, and renders. The signals inside
-    the layout resolve through the same hub so the inspection reflects
-    what L1 actually receives.
+    Loads L1_GENERATE's 8-field PromptTemplate, applies the current
+    ``opt_sp.l1_layout`` via :meth:`DispatchHub.fill_l1`, and renders.
+    The signals inside the layout resolve through the same hub so the
+    inspection reflects what L1 actually receives next round.
     """
     from promptpotter.application.optimization.llm_call import load_optimizer_prompt
 
@@ -476,14 +476,14 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "plan": _r_plan,
     "l3_to_l2_note": _r_l3_to_l2_note,
     "rendered_prompt": _r_rendered_prompt,
-    "pipeline_axes": _r_pipeline_axes,
+    "tunable_params": _r_tunable_params,
     "diagnostics": _r_diagnostics,
     "failures": _r_failures,
     "task_context": _r_task_context,
     "critique": _r_critique,
     "l1_config": _r_l1_config,
     "l1_signal_catalogue": _r_l1_signal_catalogue,
-    "l1_rendered_prompt": _r_l1_rendered_prompt,
+    "l1gen_prompt_fields": _r_l1gen_prompt_fields,
     "cycle_position": _r_cycle_position,
     "l2_history": _r_l2_history,
 }

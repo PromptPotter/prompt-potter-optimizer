@@ -25,12 +25,16 @@ from pydantic import BaseModel, ConfigDict, Field
 from promptpotter.domain.validators import ValidatorOutcome
 
 # Names every valid L1 layout MUST reference somewhere across its slots.
-# These are the cross-layer protocol fields plus the parent prompt and
-# pipeline mutation surface — without them L1 can't operate.
-# ``task_context`` is the broadcast L2-channel: persistent task framing
-# that L2 refines each fire (no separate per-round directive).
+# These are the cross-layer protocol fields plus the parent prompt,
+# mutation surface, and last-round critique — without them L1 can't
+# operate. ``task_context`` is the broadcast L2-channel (persistent task
+# framing, refined each L2 fire). ``critique`` is the last L1_CRITIQUE
+# output: the round-local evidence digest L1 grounds its next variants
+# in. Dropping critique from the layout fires
+# ``l1_layout_missing_mandatory`` with ``nurse_target='l3'`` — L3
+# replans rather than letting L2 starve L1 of failure context.
 L1_MANDATORY: frozenset[str] = frozenset(
-    {"plan", "task_context", "rendered_prompt", "pipeline_axes"}
+    {"plan", "task_context", "rendered_prompt", "tunable_params", "critique"}
 )
 
 # Names L2 may pick from when authoring an L1 layout. Subset of the
@@ -41,7 +45,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
     {
         "plan",
         "rendered_prompt",
-        "pipeline_axes",
+        "tunable_params",
         "diagnostics",
         "failures",
         "task_context",
@@ -100,10 +104,11 @@ def default_l1_layout() -> L1Layout:
         task_intent=["task_context"],
         problem_description=[
             "rendered_prompt",
-            "pipeline_axes",
+            "tunable_params",
             "plan",
             "diagnostics",
             "failures",
+            "critique",
         ],
     )
 
