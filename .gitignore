@@ -1,20 +1,23 @@
-# Python
+# Python — patterns whose plain names also occur in JS/TS subprojects
+# (`lib/`, `lib64/`, `build/`, `dist/`, `var/`) are anchored with `/` so
+# they only match at repo root. `webapp-react/lib/` was silently ignored
+# by an unanchored `lib/` until 2026-05-07 — don't reintroduce that trap.
 __pycache__/
 *.py[cod]
 *$py.class
 *.so
 .Python
-build/
+/build/
 develop-eggs/
-dist/
+/dist/
 downloads/
 eggs/
 .eggs/
-lib/
-lib64/
+/lib/
+/lib64/
 parts/
 sdist/
-var/
+/var/
 wheels/
 *.egg-info/
 .installed.cfg
@@ -95,3 +98,10 @@ campaign_config.json
 
 # teach-impeccable skill scratch (unrelated to PromptPotter)
 .impeccable.md
+
+# Deployed Next.js static export (`webapp-react/out/` copied to `webapp/`
+# by `npm run deploy`). Pure build artefact — source lives in
+# `webapp-react/`, the FastAPI mount at `promptpotter/main.py` guards for
+# absence, and pip never packages it. Run `npm run deploy` from
+# `webapp-react/` after a fresh checkout to populate it.
+/webapp/
