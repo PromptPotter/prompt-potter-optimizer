@@ -7,6 +7,10 @@ decisive (``max P(best) >= 1 - epsilon``) or the topup budget is exhausted.
 
 Engine: ``shared.statistics.posterior_best_probabilities``. Top-up rule:
 ``n_min_per_arm`` floor first, then the arm with largest posterior SE.
+
+``discover_compare_arms`` resolves the input arms — either from explicit
+cycle ids or by walking the active family — and is the natural front-end
+to ``elevate_to_decisive`` for the CLI's ``compare`` command.
 """
 
 from __future__ import annotations
@@ -14,24 +18,110 @@ from __future__ import annotations
 import asyncio
 import logging
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Literal
 
 import numpy as np
 
 from promptpotter.application.scoring.search_point_scorer import score_search_point
+from promptpotter.domain.search_point import JobSearchPoint
+from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.shared.statistics import posterior_best_probabilities
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.domain.search_point import JobSearchPoint
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["ElevationResult", "elevate_to_decisive"]
+__all__ = [
+    "CompareArmsResult",
+    "ElevationResult",
+    "discover_compare_arms",
+    "elevate_to_decisive",
+]
+
+
+@dataclass(frozen=True)
+class CompareArmsResult:
+    """``error is None`` ⇒ ``arms`` is non-empty and ready for ``elevate_to_decisive``.
+
+    Otherwise ``error`` carries an operator-facing message; the CLI prefixes
+    it with ``ERROR:``. ``cycle_ids`` is the resolved list (post-family
+    discovery) for logging / diagnostics.
+    """
+
+    arms: dict[str, JobSearchPoint]
+    cycle_ids: list[str] = field(default_factory=list)
+    error: str | None = None
+
+
+def discover_compare_arms(
+    session: Session,
+    active_cycle_id: str,
+    cycle_ids: list[str],
+    *,
+    all_family: bool,
+) -> CompareArmsResult:
+    """Resolve the ``compare`` arm set from explicit ids or by family walk.
+
+    Two modes, picked by ``all_family or not cycle_ids``:
+
+    - **Discovery**: walk every cycle whose ``root_cycle_id`` matches the
+      active cycle's family, skip ones missing an index or
+      ``final.winner_pipeline_params`` (logged, not fatal).
+    - **Explicit**: every id must resolve to an index with a winner — first
+      miss returns the error path.
+
+    Either way, an empty ``arms`` returns ``error="no cycles ..."`` so the
+    caller doesn't have to recheck.
+    """
+    discover_family = all_family or not cycle_ids
+
+    if discover_family:
+        family_root = root_cycle_id(active_cycle_id)
+        summaries = session.store.campaigns.list_all(session.backend_id)
+        cycle_ids = [
+            s["campaign_id"] for s in summaries if root_cycle_id(s["campaign_id"]) == family_root
+        ]
+        if not cycle_ids:
+            return CompareArmsResult(
+                arms={},
+                cycle_ids=[],
+                error=f"no cycles found under family {family_root}",
+            )
+        logger.info("compare: discovered %d cycle(s) under family %s", len(cycle_ids), family_root)
+
+    arms: dict[str, JobSearchPoint] = {}
+    for cid in cycle_ids:
+        idx = session.store.campaigns.load(session.backend_id, cid)
+        if idx is None:
+            if discover_family:
+                logger.info("compare: skipping %s (not found)", cid)
+                continue
+            return CompareArmsResult(arms={}, cycle_ids=cycle_ids, error=f"cycle {cid} not found")
+        winner_pp = (idx.get("final") or {}).get("winner_pipeline_params")
+        if not winner_pp:
+            if discover_family:
+                logger.info("compare: skipping %s (no final.winner_pipeline_params)", cid)
+                continue
+            return CompareArmsResult(
+                arms={},
+                cycle_ids=cycle_ids,
+                error=f"cycle {cid} has no final.winner_pipeline_params",
+            )
+        arms[cid] = JobSearchPoint(pipeline_params=winner_pp)
+
+    if not arms:
+        return CompareArmsResult(
+            arms={},
+            cycle_ids=cycle_ids,
+            error="no cycles with final.winner_pipeline_params to compare",
+        )
+
+    return CompareArmsResult(arms=arms, cycle_ids=cycle_ids)
 
 
 @dataclass(frozen=True)

@@ -33,6 +33,7 @@ from promptpotter.config.settings import (
     DEFAULT_EXPERIMENT_ID,
 )
 from promptpotter.infrastructure.store.base import read_text_optional
+from promptpotter.presentation.cli.parsers import build_parser
 from promptpotter.presentation.cli.session import (
     load_campaign_config,
     load_session,
@@ -126,151 +127,6 @@ def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: l
         dataset_name=session.dataset_name,
     )
     return pipeline_params, baseline, build_baseline_cycle_id(baseline, schema, dataset)
-
-
-def _add_global_args(parser: argparse.ArgumentParser) -> None:
-    """Tenant + session + verbosity flags shared across every command."""
-    parser.add_argument("--session", default=None, help="Session ID (default: active)")
-    parser.add_argument(
-        "--tenant",
-        default="default",
-        help="Tenant partition under .promptpotter/projects/ (default: 'default')",
-    )
-    parser.add_argument(
-        "-v",
-        "--verbose",
-        action="store_true",
-        help="Verbose logs (timestamps, module tags, every INFO line)",
-    )
-    parser.add_argument(
-        "--json",
-        action="store_true",
-        dest="json_output",
-        help="Emit machine-readable JSON instead of human-formatted text",
-    )
-
-
-def _add_init_args(p_init: argparse.ArgumentParser) -> None:
-    """Backend + dataset + task overrides for ``init``."""
-    p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
-    p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
-    p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
-    p_init.add_argument("--dataset-name", default=None)
-    p_init.add_argument("--excel-path", default=None)
-    p_init.add_argument("--config", default=None, help="Campaign config JSON file")
-    p_init.add_argument(
-        "--task-file", default=None, help="Override datasets/<name>/task_description.md"
-    )
-    p_init.add_argument(
-        "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
-    )
-
-
-def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
-    """Resume / divergence / mode flags for ``optimize``."""
-    p_opt.add_argument(
-        "--from",
-        dest="resume_from_round",
-        type=int,
-        default=None,
-        metavar="ROUND",
-        help="Resume after round N (archives rounds > N, reloads trial_N). "
-        "Omit to resume from the latest completed round.",
-    )
-    p_opt.add_argument(
-        "--no-divergence-check",
-        dest="no_divergence_check",
-        action="store_true",
-        help="On resume, rescore but skip the decision-replay halt.",
-    )
-    p_opt.add_argument(
-        "--fork-on-divergence",
-        dest="fork_on_divergence",
-        action="store_true",
-        help="On divergence, mint a sibling cycle (with parent_cycle_id) "
-        "and re-run the divergent round under the current scorer.",
-    )
-    mode_group = p_opt.add_mutually_exclusive_group()
-    mode_group.add_argument(
-        "--sweep",
-        dest="sweep",
-        action="store_true",
-        help="M10 cheap-round_data mode: baseline → 1 full scored round → "
-        "1 generation-only round (variants emitted, no scoring) → halt. "
-        "index.json::final.mode lands as 'sweep' so the leaderboard can "
-        "pair sweep cycles with their full counterparts.",
-    )
-    mode_group.add_argument(
-        "--diag",
-        dest="diag",
-        action="store_true",
-        help="M10 diagnostic mode: baseline → 1 full scored round → "
-        "force L2-context (regardless of stall) → 1 generation-only "
-        "round 2 (with L2 overrides applied, no scoring) → halt. "
-        "index.json::final.mode lands as 'diag' and final.diag carries "
-        "L2's evolved L1 surface for the operator to promote.",
-    )
-
-
-def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
-    """Cycle list + PoBB knobs for ``compare``."""
-    p_cmp.add_argument(
-        "cycle_ids",
-        nargs="*",
-        help="cycle ids to compare (each contributes one arm). "
-        "Omit (or pass --all) to auto-discover every cycle in the active "
-        "family with a final winner.",
-    )
-    p_cmp.add_argument(
-        "--all",
-        action="store_true",
-        dest="all_family",
-        help="Auto-discover every cycle in the active family with a final winner. "
-        "Implied when no positional cycle_ids are given.",
-    )
-    p_cmp.add_argument("--epsilon", type=float, default=0.05, help="PoBB threshold (default 0.05)")
-    p_cmp.add_argument(
-        "--max-topups",
-        type=int,
-        default=16,
-        dest="max_topups",
-        help="Upper bound on extra LLM calls (default 16; -1 = unbounded, Ctrl+C to stop).",
-    )
-    p_cmp.add_argument(
-        "--n-min-per-arm",
-        type=int,
-        default=4,
-        dest="n_min_per_arm",
-        help="Sample floor before SE-driven selection kicks in (default 4)",
-    )
-
-
-def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``init`` + ``optimize`` + ``compare``."""
-    parser = argparse.ArgumentParser(
-        prog="python -m promptpotter",
-        description="PromptPotter optimization CLI — init creates a session+cycle, "
-        "optimize runs a campaign against it. Reads happen by opening the artifact "
-        "tree (sessions/{id}/, campaigns/{cycle_id}/) directly.",
-    )
-    _add_global_args(parser)
-    sub = parser.add_subparsers(dest="command", required=True)
-
-    _add_init_args(sub.add_parser("init", help="Create session+cycle for a dataset"))
-    _add_optimize_args(
-        sub.add_parser("optimize", help="Run optimization loop on the active session")
-    )
-    _add_compare_args(
-        sub.add_parser(
-            "compare",
-            help="PoBB-compare cycle winners across the family with adaptive top-up. "
-            "Each cycle's index.json::final.winner_pipeline_params is one arm; "
-            "under-measured arms get one extra score per round until a decisive "
-            "P(best) emerges or the topup budget is exhausted.",
-        )
-    )
-
-    return parser
 
 
 def _mint_session_and_cycle(
@@ -768,14 +624,13 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     """PoBB-compare cycle winners across the family with adaptive top-up."""
     from promptpotter.application.bootstrap import populate_session_scoring
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.optimization.elevation import elevate_to_decisive
+    from promptpotter.application.optimization.elevation import (
+        discover_compare_arms,
+        elevate_to_decisive,
+    )
     from promptpotter.application.scoring.formula import split_scoring_block
-    from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.store import root_cycle_id
 
     ctx = load_session(args)
-    cycle_ids = list(args.cycle_ids)
-    discover_family = args.all_family or not cycle_ids
     session = await init_services_cli(**ctx.init_params)
     session.session_id = ctx.session_id
     session.state.cycle_id = ctx.cycle_id
@@ -797,37 +652,15 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
         max_consecutive_errors=campaign_config.optimization.max_consecutive_errors,
     )
 
-    if discover_family:
-        family_root = root_cycle_id(ctx.cycle_id)
-        summaries = session.store.campaigns.list_all(session.backend_id)
-        cycle_ids = [
-            s["campaign_id"] for s in summaries if root_cycle_id(s["campaign_id"]) == family_root
-        ]
-        if not cycle_ids:
-            return CommandResult(human=f"ERROR: no cycles found under family {family_root}")
-        logger.info("compare: discovered %d cycle(s) under family %s", len(cycle_ids), family_root)
+    armset = discover_compare_arms(
+        session, ctx.cycle_id, list(args.cycle_ids), all_family=args.all_family
+    )
+    if armset.error is not None:
+        return CommandResult(human=f"ERROR: {armset.error}")
 
-    arms: dict[str, JobSearchPoint] = {}
-    for cid in cycle_ids:
-        idx = session.store.campaigns.load(session.backend_id, cid)
-        if idx is None:
-            if discover_family:
-                logger.info("compare: skipping %s (not found)", cid)
-                continue
-            return CommandResult(human=f"ERROR: cycle {cid} not found")
-        winner_pp = (idx.get("final") or {}).get("winner_pipeline_params")
-        if not winner_pp:
-            if discover_family:
-                logger.info("compare: skipping %s (no final.winner_pipeline_params)", cid)
-                continue
-            return CommandResult(human=f"ERROR: cycle {cid} has no final.winner_pipeline_params")
-        arms[cid] = JobSearchPoint(pipeline_params=winner_pp)
-
-    if not arms:
-        return CommandResult(human="ERROR: no cycles with final.winner_pipeline_params to compare")
-
+    discover_family = args.all_family or not args.cycle_ids
     result = await elevate_to_decisive(
-        arms,
+        armset.arms,
         session,
         session.samples or [],
         epsilon=args.epsilon,
