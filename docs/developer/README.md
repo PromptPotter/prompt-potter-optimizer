@@ -59,9 +59,9 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 | `task_context` | `opt_sp.task_context` | L1, L1 critique, L2, L3 (broadcast) |
 | `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
 | `tunable_params` | `pipeline_schema` | L1 (mutation surface) |
-| `diagnostics` | `latest_diagnostics` (`RoundDiagnostics`) | L1, L1 critique, L2, L3 |
+| `diagnostics` | `digest.diagnostics` (`RoundDiagnostics`) | L1, L1 critique, L2, L3 |
 | `failures` | `opt_sp.{validation,runtime,escalation_log,warning_inventory,l2_output,l3_output}_failures` | L1, L1 critique, L2, L3 |
-| `critique` | `latest_critique` | L1, L2, L3 |
+| `critique` | `digest.critique` | L1, L2, L3 |
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
 | `l1_config` | `opt_sp.l1_config` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |

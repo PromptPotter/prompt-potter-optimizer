@@ -46,7 +46,7 @@ Single ingress for every optimizer prompt. Three entry points, all stateless:
 | `fill_l1(template, layout, bundle)` | L1 generate | `PromptTemplate` with layout-driven content appended to slots |
 | `fill_fixed(template, bundle)` | L1 critique, L2, L3 | `{var: text}` kwargs for `compile_prompt` |
 
-`Bundle` is the per-call frozen state: `(layer, opt_sp, pipeline_schema, cycle_slice, latest_diagnostics, latest_critique, axis_digest)`. Built once via `build_bundle(layer, cycle)`; consumed by the fill methods. `axis_digest` is the per-layer `AxisIndex.digest_for_<layer>()` slice, picked at build time so renderers stay layer-agnostic.
+`Bundle` is the per-call frozen state: `(opt_sp, pipeline_schema, cycle_slice, digest)`. Built once via `build_bundle(cycle)`; consumed by the fill methods. `digest` is a `RoundDigest(diagnostics, critique)` — the post-scoring compression chain in one place; renderers read through it instead of off two parallel `latest_*` fields.
 
 L1 generate uses `fill_l1`: walks `L1_LAYOUT_SLOTS`, calls `DispatchHub.render(name, bundle)` per signal, appends results to the slot's static text. L1 critique / L2 / L3 use `fill_fixed`: scans `{{name}}` placeholders in the template body and resolves each through the registry.
 

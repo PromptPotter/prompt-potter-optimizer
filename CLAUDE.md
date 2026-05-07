@@ -89,7 +89,7 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
   projects/{tenant_id}/
     sessions/{session_id}/                         # session.json, journal.md, notes.md
     campaigns/{root_cycle_id}/                     # FAMILY ROOT
-      dashboard.json output.log                    # telemetry, root only (shared across forks)
+      dashboard.json                               # telemetry, root only (shared across forks)
       index.json log.md rounds/ prompts/ langfuse/
       .cache/rounds/{NNNN}.json                    # per-round LLM audit
       forks/{cycle_id}/ diag/ sweeps/              # per-fork audit; telemetry stays at root

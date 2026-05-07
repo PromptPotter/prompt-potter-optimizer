@@ -16,12 +16,6 @@ is a thin router that fans each record kind to a ``_ScalarBlock``
 (top-level scalars + counters) and a ``_RoundBlock`` (per-round nodes /
 candidates / p_best leaderboard), then merges both into one
 ``dashboard.json`` write through ``_persist``.
-
-(Historical: this writer also produced ``output.log`` — a parallel
-narrative stream. Dropped because the per-line format was strictly
-weaker than ``LiveDisplay`` stderr (truncated query, no pred / gt / io
-tokens / sample id), and the structured fact stream lives on
-``ledger.jsonl``.)
 """
 
 from __future__ import annotations

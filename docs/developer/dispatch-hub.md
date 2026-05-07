@@ -166,13 +166,17 @@ DISPATCH v2 — 13 signals + 3 caller extras
 │   └─ {{l1_config}}       ← opt_sp.l1_config             (L2 reads as state;
 │                                                          L1 reads contents via caller extras)
 │
-├─ Round-end measurement (computed once in execute_round, read by every layer)
-│   ├─ {{diagnostics}}     ← latest_round.diagnostics (RoundDiagnostics from
+├─ Round-end measurement — bundle.digest + opt_sp failure streams
+│   ├─ {{diagnostics}}     ← bundle.digest.diagnostics (RoundDiagnostics from
 │   │                                                  compute_round_diagnostics)        [fenced]
-│   ├─ {{failures}}        ← opt_sp.{validation_failures, runtime_failures, escalation_log,
-│   │                                 warning_inventory, l2_output_failures,
-│   │                                 l3_output_failures}                                [fenced]
-│   └─ {{critique}}        ← latest_round.critique (raw L1_CRITIQUE LLM output dict)
+│   ├─ {{critique}}        ← bundle.digest.critique (raw L1_CRITIQUE LLM output dict)
+│   └─ {{failures}}        ← opt_sp.{validation_failures, runtime_failures, escalation_log,
+│                                     warning_inventory, l2_output_failures,
+│                                     l3_output_failures}                                [fenced]
+│
+│   `digest` is one round's compression chain (deterministic readout +
+│   AI-generated critique) wrapped on `Bundle`. `failures` accumulates
+│   across rounds, so it stays on `OptSearchPoint`.
 │
 ├─ L2/L3-internal context
 │   ├─ {{l1_signal_catalogue}} ← sorted L1_POSSIBLE constant — menu L2 picks from for layouts

@@ -614,9 +614,8 @@ class FileContentResponse(BaseModel):
     )
 
 
-# Family-root file-level artifacts (mirror of tests/test_invariants.py::ROOT_TELEMETRY_ARTIFACTS
-# plus output.log which is written next to dashboard.json by LiveDashboardProjection).
-_FAMILY_FILE_LEVEL_ARTIFACTS = ("dashboard.json", "output.log")
+# Family-root file-level artifacts (mirror of tests/test_invariants.py::ROOT_TELEMETRY_ARTIFACTS).
+_FAMILY_FILE_LEVEL_ARTIFACTS = ("dashboard.json",)
 _MAX_PREVIEW_BYTES = 2 * 1024 * 1024  # 2 MiB
 _MAX_FILE_ENTRIES = 5000
 

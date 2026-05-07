@@ -10,7 +10,7 @@ from pathlib import Path
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
 
@@ -27,7 +27,8 @@ async def lifespan(app: FastAPI):
     """Application startup and shutdown lifecycle."""
     logger.info("Starting %s v%s", app.title, app.version)
     logger.info("Environment: %s", settings.ENVIRONMENT)
-    logger.info("Docs available at: /docs")
+    logger.info("Webapp available at: /ui/  (root / redirects there)")
+    logger.info("API docs available at: /docs")
     yield
     logger.info("Shutting down PromptPotter Optimizer")
 
@@ -94,3 +95,9 @@ app.include_router(api._active_router, prefix="/api/v1")
 WEBAPP_DIR = Path(__file__).resolve().parents[1] / "webapp"
 if WEBAPP_DIR.exists():
     app.mount("/ui", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
+
+    # Root redirect — Uvicorn's startup banner prints the bare host:port, so
+    # land the operator on the webapp instead of a 404.
+    @app.get("/", include_in_schema=False)
+    async def root_redirect():
+        return RedirectResponse(url="/ui/", status_code=307)

@@ -79,6 +79,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         Bundle,
         CycleSlice,
         DispatchHub,
+        RoundDigest,
     )
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.domain.round_diagnostics import RoundDiagnostics, SampleDiag
@@ -124,8 +125,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         opt_sp=opt_sp,
         pipeline_schema=None,
         cycle_slice=cycle_slice,
-        latest_diagnostics=diag,
-        latest_critique=None,
+        digest=RoundDigest(diagnostics=diag, critique=None),
     )
 
     diagnostics_text = DispatchHub.render("diagnostics", bundle)

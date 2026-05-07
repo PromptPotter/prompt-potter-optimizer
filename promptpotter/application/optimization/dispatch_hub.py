@@ -26,7 +26,6 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.l1_layout import (
     L1_LAYOUT_SLOTS,
     L1_POSSIBLE,
@@ -44,6 +43,7 @@ __all__ = [
     "Bundle",
     "CycleSlice",
     "DispatchHub",
+    "RoundDigest",
     "build_bundle",
     "format_l1_critique_for_prompt",
 ]
@@ -112,6 +112,28 @@ class CycleSlice:
 
 
 @dataclass(frozen=True)
+class RoundDigest:
+    """One round's post-scoring readouts — the compression chain in one place.
+
+    Two streams the optimizer compresses each round into something every
+    layer can reason about:
+
+    * ``diagnostics`` — deterministic post-scoring readout
+      (:func:`compute_round_diagnostics`).
+    * ``critique`` — the L1_CRITIQUE LLM's compact dict.
+
+    Built once in :func:`build_bundle` from the just-completed
+    ``RoundResult`` and read identically by every signal renderer that
+    needs round-shaped state. ``failures`` is intentionally *not* here —
+    failures accumulate across rounds and live on
+    :class:`OptSearchPoint`; ``_r_failures`` reads ``bundle.opt_sp``.
+    """
+
+    diagnostics: RoundDiagnostics | None
+    critique: dict | None
+
+
+@dataclass(frozen=True)
 class Bundle:
     """One state container per optimizer LLM call.
 
@@ -123,8 +145,7 @@ class Bundle:
     opt_sp: OptSearchPoint
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
-    latest_diagnostics: RoundDiagnostics | None
-    latest_critique: dict | None
+    digest: RoundDigest
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +205,7 @@ def _r_tunable_params(b: Bundle) -> str:
 
 def _r_diagnostics(b: Bundle) -> str:
     """Layer-agnostic full-fidelity render of :class:`RoundDiagnostics`."""
-    d = b.latest_diagnostics
+    d = b.digest.diagnostics
     if d is None:
         return ""
     parts: list[str] = []
@@ -406,7 +427,7 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
 
 def _r_critique(b: Bundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
-    return format_l1_critique_for_prompt(b.latest_critique or {})
+    return format_l1_critique_for_prompt(b.digest.critique or {})
 
 
 def _r_l1_config(b: Bundle) -> str:
@@ -609,11 +630,5 @@ def build_bundle(
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
-        latest_diagnostics=latest_diag,
-        latest_critique=latest_crit,
+        digest=RoundDigest(diagnostics=latest_diag, critique=latest_crit),
     )
-
-
-# Re-export ``PROMPT_STRING_FIELDS`` for callers that need to walk the L1
-# template's slots in render order without re-importing config.
-__all__ += ["PROMPT_STRING_FIELDS"]
