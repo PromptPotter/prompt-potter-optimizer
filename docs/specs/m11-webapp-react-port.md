@@ -1,12 +1,12 @@
 # M11 Webapp — Next.js + Plain-CSS Port
 
-**Status:** Pending. Scaffold not yet created. Vanilla `webapp/index.html` is the migration preservation list. Vanilla a11y + tooltips + resilience pass landed 2026-05-07 (commit `f1dab82`) — patterns documented in this spec are now *real in vanilla*, not aspirational. Port proceeds when operator authorizes the scaffolding.
+**Status:** Shipped (Wave 1 + Wave 2/3 collapsed) 2026-05-07. Scaffold lives at `webapp-react/`; static export is deployed into `webapp/` (the vanilla `webapp/index.html` is gone — its preservation-list role is now historical). Run `npm run deploy` from `webapp-react/` to rebuild + redeploy.
 
 **Implementation:**
-- Stack: **Next.js 15 (App Router) + TypeScript + plain CSS + CSS Modules**. **No Tailwind** (per `m11-publication-benchmarks.md` line 84). React 19. No state library — `useState` + a small context for active cycle.
-- Location: `webapp-react/` (sibling to `webapp/`, kept until cutover).
-- Static deploy: Next.js `output: "export"`, served by FastAPI's existing `/ui` mount. The single-page surface fits comfortably in a static export — no server components needed at runtime.
-- Build pipeline: `npm run build` → `webapp-react/out/` → Python build step copies `out/*` over `webapp/` on release. During development: `next dev` on :3000, FastAPI on :8001, Next config rewrites `/api/*` → `http://127.0.0.1:8001/api/*`.
+- Stack: **Next.js 16 (App Router) + TypeScript + plain CSS + CSS Modules**. **No Tailwind** (per `m11-publication-benchmarks.md` line 84). React 19.
+- Location: `webapp-react/` (the deploy target `webapp/` is the static export).
+- Static deploy: Next.js `output: "export"` + `basePath: "/ui"` + `trailingSlash: true`, served by FastAPI's existing `/ui` mount.
+- Build pipeline: `npm run deploy` (= `next build && node scripts/deploy-to-webapp.mjs`) writes the export over `webapp/`. During development: `next dev` on :3000 (visit `/ui`), FastAPI on :8001, Next config rewrites `/api/*` → `http://127.0.0.1:8001/api/*` (dev only — rewrites are stripped from the export).
 
 **Depends on:** Vanilla a11y / tooltip / resilience pass (DONE — commit `f1dab82`). FastAPI read endpoints (DONE — `m11-webapp-minimal-preview.md`). Active session pointer (DONE).
 **Blocks:** M11 monitoring slices (hard-sample dashboard, per-searchpoint score histogram, family-tree speciation, dataset preview on drop). M12 webapp Phase 2 (control plane, chat panel, wand toggle, multi-cycle).
