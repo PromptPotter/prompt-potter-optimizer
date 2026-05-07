@@ -81,6 +81,8 @@
 [data-theme="light"] .theme-toggle .sun{display:none}
 [data-theme="light"] .theme-toggle .moon{display:block}
 *{box-sizing:border-box;margin:0;padding:0}
+*:focus{outline:none}
+*:focus-visible{outline:2px solid var(--color-accent);outline-offset:2px;border-radius:2px}
 body{font-family:var(--font-sans);background:var(--color-background-tertiary);color:var(--color-text-primary);font-size:15px}
 .shell{display:flex;height:100vh;min-height:700px}
 .sidebar{width:200px;flex-shrink:0;background:var(--color-background-primary);border-right:0.5px solid var(--color-border-tertiary);display:flex;flex-direction:column;padding:16px 0}
@@ -163,7 +165,15 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .status-bar.live{background:var(--color-success-bg);color:var(--color-success);border-color:var(--color-success-border)}
 .status-bar.stale{background:var(--color-warn-bg);color:var(--color-warn);border-color:var(--color-warn-border)}
 .status-bar.offline{background:var(--color-danger-bg);color:var(--color-danger);border-color:var(--color-danger-border)}
-.status-dot{width:8px;height:8px;border-radius:50%;background:currentColor;flex-shrink:0}
+/* Shape carries state in addition to color so users with color-vision
+   deficiency can distinguish live (filled) / stale (ring) / offline (×). */
+.status-dot{width:10px;height:10px;border-radius:50%;background:currentColor;flex-shrink:0;position:relative}
+.status-bar.stale .status-dot{background:transparent;border:1.5px solid currentColor}
+.status-bar.offline .status-dot{background:transparent}
+.status-bar.offline .status-dot::before,
+.status-bar.offline .status-dot::after{content:'';position:absolute;top:50%;left:0;width:100%;height:2px;background:currentColor;border-radius:1px}
+.status-bar.offline .status-dot::before{transform:translateY(-50%) rotate(45deg)}
+.status-bar.offline .status-dot::after{transform:translateY(-50%) rotate(-45deg)}
 .stub-badge{display:inline-block;background:var(--color-danger-bg);color:var(--color-danger);border:0.5px solid var(--color-danger-border);border-radius:4px;padding:1px 6px;font-size:11px;font-weight:600;letter-spacing:.06em;margin-left:6px;text-transform:uppercase;font-family:var(--font-sans)}
 .real-tag{display:inline-block;color:var(--color-success);font-size:11px;font-weight:600;letter-spacing:.06em;margin-left:6px;text-transform:uppercase}
 
@@ -488,6 +498,18 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .toggle.locked{cursor:not-allowed;opacity:.4;pointer-events:none}
 .beta-tag{display:inline-block;font-size:11px;font-weight:700;letter-spacing:.08em;padding:1px 6px;border-radius:4px;background:var(--color-accent);color:var(--color-text-on-accent);margin-left:8px;text-transform:uppercase;vertical-align:middle}
 .shell.chat-mode > .sidebar{display:none}
+
+/* Honor the user's vestibular preference. The wizard mascot, sparkles,
+   pulse-active border, and chevron rotations all stop being motion under
+   this. transition: 0.01ms keeps state changes instant rather than abrupt. */
+@media (prefers-reduced-motion: reduce){
+  *,*::before,*::after{
+    animation-duration:0.01ms !important;
+    animation-iteration-count:1 !important;
+    transition-duration:0.01ms !important;
+    scroll-behavior:auto !important;
+  }
+}
 </style>
 <script>
   /* Apply theme BEFORE the main stylesheet paints to avoid a flash of the
@@ -503,38 +525,38 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 </head>
 <body>
 <div class="shell">
-  <div class="sidebar">
+  <nav class="sidebar" aria-label="Primary">
     <div class="brand">
       <div style="display:flex;align-items:center;gap:8px;margin-bottom:2px">
         <div style="width:22px;height:22px;background:var(--color-accent);border-radius:4px;display:flex;align-items:center;justify-content:center">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><rect x="1" y="1" width="4" height="4" rx="1" fill="white"/><rect x="7" y="1" width="4" height="4" rx="1" fill="white" opacity=".7"/><rect x="1" y="7" width="4" height="4" rx="1" fill="white" opacity=".7"/><rect x="7" y="7" width="4" height="4" rx="1" fill="white" opacity=".4"/></svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><rect x="1" y="1" width="4" height="4" rx="1" fill="white"/><rect x="7" y="1" width="4" height="4" rx="1" fill="white" opacity=".7"/><rect x="1" y="7" width="4" height="4" rx="1" fill="white" opacity=".7"/><rect x="7" y="7" width="4" height="4" rx="1" fill="white" opacity=".4"/></svg>
         </div>
         <span class="brand-name">PromptPotter</span>
       </div>
-      <div class="brand-sub">LIVE PREVIEW</div>
+      <div class="brand-sub" data-term="brand_live_preview">LIVE PREVIEW</div>
     </div>
-    <div class="nav-item active" data-pane="dashboard">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1" opacity=".5"/><rect x="1" y="9" width="6" height="6" rx="1" opacity=".5"/><rect x="9" y="9" width="6" height="6" rx="1" opacity=".5"/></svg>
+    <div class="nav-item active" data-pane="dashboard" role="button" tabindex="0" aria-current="page">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><rect x="1" y="1" width="6" height="6" rx="1"/><rect x="9" y="1" width="6" height="6" rx="1" opacity=".5"/><rect x="1" y="9" width="6" height="6" rx="1" opacity=".5"/><rect x="9" y="9" width="6" height="6" rx="1" opacity=".5"/></svg>
       Dashboard
     </div>
-    <div class="nav-item" data-pane="files">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><path d="M2 3a1 1 0 0 1 1-1h3.5l1.5 1.5H13a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3z" opacity=".4"/><rect x="2" y="5" width="12" height="9" rx="1"/></svg>
+    <div class="nav-item" data-pane="files" role="button" tabindex="0">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><path d="M2 3a1 1 0 0 1 1-1h3.5l1.5 1.5H13a1 1 0 0 1 1 1V13a1 1 0 0 1-1 1H3a1 1 0 0 1-1-1V3z" opacity=".4"/><rect x="2" y="5" width="12" height="9" rx="1"/></svg>
       Files
     </div>
-    <div class="nav-item disabled">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><rect x="2" y="8" width="2" height="6" rx="1"/><rect x="5" y="5" width="2" height="9" rx="1" opacity=".7"/><rect x="8" y="3" width="2" height="11" rx="1" opacity=".5"/><rect x="11" y="6" width="2" height="8" rx="1" opacity=".4"/></svg>
+    <div class="nav-item disabled" data-term="placeholder" role="button" tabindex="-1" aria-disabled="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><rect x="2" y="8" width="2" height="6" rx="1"/><rect x="5" y="5" width="2" height="9" rx="1" opacity=".7"/><rect x="8" y="3" width="2" height="11" rx="1" opacity=".5"/><rect x="11" y="6" width="2" height="8" rx="1" opacity=".4"/></svg>
       Analytics
     </div>
-    <div class="nav-item disabled">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><circle cx="8" cy="8" r="6" opacity=".3"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
+    <div class="nav-item disabled" data-term="placeholder" role="button" tabindex="-1" aria-disabled="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><circle cx="8" cy="8" r="6" opacity=".3"/><path d="M8 4v4l3 2" stroke="currentColor" stroke-width="1.5" fill="none" stroke-linecap="round"/></svg>
       Evaluations
     </div>
-    <div class="nav-item disabled">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><rect x="2" y="2" width="12" height="12" rx="1" opacity=".2"/><rect x="4" y="5" width="8" height="1.5" rx=".75"/><rect x="4" y="8" width="6" height="1.5" rx=".75"/><rect x="4" y="11" width="4" height="1.5" rx=".75"/></svg>
+    <div class="nav-item disabled" data-term="placeholder" role="button" tabindex="-1" aria-disabled="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><rect x="2" y="2" width="12" height="12" rx="1" opacity=".2"/><rect x="4" y="5" width="8" height="1.5" rx=".75"/><rect x="4" y="8" width="6" height="1.5" rx=".75"/><rect x="4" y="11" width="4" height="1.5" rx=".75"/></svg>
       Reports
     </div>
-    <div class="nav-item disabled">
-      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg>
+    <div class="nav-item disabled" data-term="placeholder" role="button" tabindex="-1" aria-disabled="true">
+      <svg width="16" height="16" viewBox="0 0 16 16" fill="currentColor" style="opacity:.6" aria-hidden="true"><circle cx="8" cy="8" r="2.5"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2" stroke="currentColor" stroke-width="1.2" fill="none" stroke-linecap="round"/></svg>
       Settings
     </div>
     <div style="padding:12px 16px;margin-top:12px">
@@ -544,26 +566,26 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
       <div class="sidebar-footer-item">Support</div>
       <div class="sidebar-footer-item">Log out</div>
     </div>
-  </div>
+  </nav>
 
-  <div class="main">
-    <div class="topbar">
-      <input class="search" placeholder="Search analytics..." disabled />
-      <div class="tabs">
-        <div class="tab active" data-tab="chat">New Job</div>
-        <div class="tab" data-tab="dashboard">View Results</div>
-        <div class="tab">Model Audit</div>
-        <div class="tab">Prompts</div>
-        <div class="tab">Datasets</div>
+  <main class="main">
+    <header class="topbar">
+      <input class="search" placeholder="Search analytics..." disabled aria-label="Search analytics" />
+      <div class="tabs" role="tablist" aria-label="Workspace">
+        <div class="tab active" data-tab="chat" role="tab" tabindex="0" aria-selected="true">New Job</div>
+        <div class="tab" data-tab="dashboard" role="tab" tabindex="0" aria-selected="false">View Results</div>
+        <div class="tab" data-term="placeholder" role="tab" tabindex="-1" aria-disabled="true" aria-selected="false">Model Audit</div>
+        <div class="tab" data-term="placeholder" role="tab" tabindex="-1" aria-disabled="true" aria-selected="false">Prompts</div>
+        <div class="tab" data-term="placeholder" role="tab" tabindex="-1" aria-disabled="true" aria-selected="false">Datasets</div>
       </div>
       <button class="btn-export" disabled>Export Data</button>
       <button class="theme-toggle" id="theme-toggle" type="button" title="Toggle bright / dark theme" aria-label="Toggle theme">
-        <svg class="sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round">
+        <svg class="sun" width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" aria-hidden="true">
           <circle cx="8" cy="8" r="3"/><path d="M8 1v2M8 13v2M1 8h2M13 8h2M3.05 3.05l1.4 1.4M11.55 11.55l1.4 1.4M3.05 12.95l1.4-1.4M11.55 4.45l1.4-1.4"/>
         </svg>
-        <svg class="moon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor"><path d="M6 1.5A6.5 6.5 0 1 0 14.5 10 5 5 0 0 1 6 1.5z"/></svg>
+        <svg class="moon" width="16" height="16" viewBox="0 0 16 16" fill="currentColor" aria-hidden="true"><path d="M6 1.5A6.5 6.5 0 1 0 14.5 10 5 5 0 0 1 6 1.5z"/></svg>
       </button>
-    </div>
+    </header>
 
     <div class="content chat-content" id="content-chat">
       <div class="chat-job-bar">
@@ -682,8 +704,8 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
     </div>
 
     <div class="content" id="content-dashboard" style="display:none">
-      <div class="status-bar offline" id="status-bar">
-        <span class="status-dot"></span>
+      <div class="status-bar offline" id="status-bar" role="status" aria-live="polite" aria-atomic="true">
+        <span class="status-dot" aria-hidden="true"></span>
         <span id="status-text">Connecting…</span>
         <span style="margin-left:auto;font-size:12px;opacity:.85" id="status-hint"></span>
       </div>
@@ -715,13 +737,13 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 
       <div class="workflow-card">
         <div class="workflow-toolbar">
-          <svg width="12" height="12" viewBox="0 0 12 12" fill="none"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 3v3l2 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
+          <svg width="12" height="12" viewBox="0 0 12 12" fill="none" aria-hidden="true"><circle cx="6" cy="6" r="5" stroke="currentColor" stroke-width="1"/><path d="M6 3v3l2 1.5" stroke="currentColor" stroke-width="1" stroke-linecap="round"/></svg>
           Optimizer pipeline — current round<span id="wf-round" style="margin-left:6px;color:var(--color-text-secondary)"></span>
-          <span style="margin-left:auto;color:var(--color-success);font-size:12px" id="wf-status">● live</span>
+          <span style="margin-left:auto;color:var(--color-success);font-size:12px" id="wf-status" aria-live="polite">● live</span>
         </div>
         <div class="workflow-canvas-bg">
           <div class="workflow-canvas" id="wf-canvas">
-            <svg id="wf-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none"></svg>
+            <svg id="wf-svg" style="position:absolute;top:0;left:0;width:100%;height:100%;pointer-events:none" aria-hidden="true"></svg>
             <div id="sel-panel" class="sel-panel">
               <div class="sel-panel-title" id="sp-title">Node</div>
               <div id="sp-body"></div>
@@ -732,10 +754,10 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
       </div>
 
       <div class="card live-state-card">
-        <div class="card-title">
+        <h2 class="card-title">
           Live state
           <span style="font-size:11px;color:var(--color-text-tertiary);font-weight:400">all dashboard.json fields</span>
-        </div>
+        </h2>
         <div class="formula-row" id="formula-row" title="composite_fitness_formula">—</div>
         <div class="kv-grid" id="live-state-grid"></div>
         <div class="var-label" style="margin-top:14px">In-flight query payload</div>
@@ -743,10 +765,10 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
       </div>
 
       <div class="card whatif-card">
-        <div class="card-title">
+        <h2 class="card-title">
           What-If
           <span style="font-size:11px;color:var(--color-text-tertiary);font-weight:400">read-only · ablation preview · current round</span>
-        </div>
+        </h2>
         <div class="whatif-intro">
           Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>"what if I scored without X?"</em>
         </div>
@@ -785,24 +807,24 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
       </div>
 
       <div class="card samples-card">
-        <div class="card-title">
+        <h2 class="card-title">
           Live samples <span class="real-tag">live · real hit/miss</span>
-        </div>
+        </h2>
         <div class="samples-list" id="samples-list"><div style="color:var(--color-text-tertiary)">No samples yet.</div></div>
       </div>
 
       <div class="grid3">
         <div class="card">
-          <div class="card-title">Pass Rate (composite) <span class="badge">TOP</span></div>
+          <h2 class="card-title" data-term="composite">Pass Rate (composite) <span class="badge" data-term="badge_top">TOP</span></h2>
           <div id="pass-rate-rows"><div style="color:var(--color-text-tertiary);font-size:13px">Waiting for round…</div></div>
         </div>
         <div class="card">
-          <div class="card-title">Score Frequency <span class="stub-badge">stub · hit/miss inferred</span></div>
+          <h2 class="card-title">Score Frequency <span class="stub-badge" data-term="stub_score_freq">stub · hit/miss inferred</span></h2>
           <div style="position:relative;height:130px"><canvas id="freqChart"></canvas></div>
           <div style="display:flex;justify-content:space-between;font-size:11px;color:var(--color-text-tertiary);margin-top:4px"><span>MISS</span><span>HIT</span></div>
         </div>
         <div class="card">
-          <div class="card-title">Prompt Score Trends</div>
+          <h2 class="card-title">Prompt Score Trends</h2>
           <div style="position:relative;height:130px"><canvas id="trendChart"></canvas></div>
           <div class="legend">
             <span><span class="legend-dot" style="background:var(--color-accent)"></span>BEST</span>
@@ -820,7 +842,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 
       <div class="grid2">
         <div class="card">
-          <div class="card-title">Prompt Variables</div>
+          <h2 class="card-title">Prompt Variables</h2>
           <div class="var-label">Problem description (l1_generate)</div>
           <div class="prompt-box" id="prompt-box">—</div>
         </div>
@@ -834,7 +856,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
           </div>
           <div class="table-wrap">
             <table>
-              <thead><tr><th>ID</th><th>Status <span class="stub-badge">inferred</span></th><th>Query</th><th>Predicted</th><th>Ground truth</th></tr></thead>
+              <thead><tr><th data-term="col_id">ID</th><th data-term="col_status">Status <span class="stub-badge" data-term="stub_inferred">inferred</span></th><th data-term="col_query">Query</th><th data-term="col_predicted">Predicted</th><th data-term="col_ground">Ground truth</th></tr></thead>
               <tbody id="eval-body"><tr><td colspan="5" style="color:var(--color-text-tertiary)">Waiting for round…</td></tr></tbody>
             </table>
           </div>
@@ -854,11 +876,11 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
         </div>
       </div>
     </div>
-  </div>
+  </main>
 </div>
 
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
-<script src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.js"></script>
+<script defer src="https://cdnjs.cloudflare.com/ajax/libs/marked/12.0.2/marked.min.js"></script>
 <script>
 /* Theme-aware color resolution. JS-painted things (Chart.js datasets, SVG
    markers, dynamic inline styles) can't use ``var(...)`` — Canvas/SVG don't
@@ -867,8 +889,94 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    ``--*-rgb`` triplet tokens so alpha overlays follow the theme too. */
 const getCss = (name) => getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 const cssRgba = (rgbVar, alpha) => `rgba(${getCss(rgbVar)},${alpha})`;
-if(window.Chart){ Chart.defaults.color = getCss('--color-text-secondary'); Chart.defaults.borderColor = getCss('--color-border-tertiary'); }
+/* Chart.js loads ``defer``; this inline script runs first so window.Chart is
+   not yet defined. applyChartDefaults() is called inside the bootstrap IIFE
+   below — by then DOMContentLoaded has fired and the deferred CDN scripts
+   have executed. The same function reapplies defaults on theme switch. */
+function applyChartDefaults(){
+  if(window.Chart){
+    Chart.defaults.color = getCss('--color-text-secondary');
+    Chart.defaults.borderColor = getCss('--color-border-tertiary');
+  }
+}
 const API = '/api/v1';
+
+/* Operator vocabulary — single source of truth for in-product tooltips.
+   The imminent React port lifts this verbatim. Keep entries to one short
+   sentence; longer explanations belong in docs/manual/. Static HTML uses
+   ``data-term="key"`` (hydrated by applyTooltips at boot); JS-rendered
+   elements set their own ``title`` from TERMS in the render functions. */
+const TERMS = {
+  // Status banner — thresholds match setStatus() age buckets below
+  status_live:        'Optimizer wrote dashboard.json in the last 30 seconds — running.',
+  status_idle:        'Last write 30s–5m ago. Round between phases or paused.',
+  status_snapshot:    'Last write >5m ago. No live optimizer — viewing a frozen cycle.',
+  status_offline:     'No active session, or dashboard.json unreachable. Run `python -m promptpotter optimize`.',
+  status_nowall:      'Dashboard has no wallclock yet — optimizer probably has not started.',
+
+  // Phase tag (dash.state) → one-sentence definition
+  phase_baseline:           'Baseline scoring of the unmodified starting prompt — the floor the optimizer beats.',
+  phase_l1_generate:        'L1 Generate — produces candidate prompt mutations from current framing + critique.',
+  phase_l1_critique:        'L1 Critique — reads round results, writes the critique L1 Generate consumes next round.',
+  phase_scoring:            'Scoring — running candidates against the dataset to compute composite_fitness.',
+  phase_l2_refining:        'L2 — task-context refinement. Fires when L1 stalls; rewrites the framing L1 reads.',
+  phase_l3_replanning:      'L3 — strategic plan. Fires when L2 stalls; replans the optimizer approach.',
+  phase_between_samples:    'Between samples — short pause between dataset queries during scoring.',
+  phase_between_candidates: 'Between candidates — short pause between candidate evaluations.',
+
+  // Workflow nodes
+  node_baseline:    'Baseline: the unmodified starting prompt, scored as the floor.',
+  node_l1_generate: 'L1 Generate: produces N candidate prompts from current framing + critique.',
+  node_l1_score:    'L1 Score: runs each candidate over the dataset, computes composite_fitness.',
+  node_l1_critique: 'L1 Critique: reads round results, writes the critique L1 Generate reads next round.',
+  node_l2_context:  'L2 Context: rewrites the task framing L1 generation reads. Fires on L1 stall.',
+  node_l3_plan:     'L3 Plan: rewrites the strategy. Fires on L2 stall.',
+
+  // Eval-table column headers
+  col_id:        'Sample ID — stable identifier from the dataset.',
+  col_status:    'Hit / miss for this sample. Inferred client-side from predicted vs ground truth.',
+  col_query:     'Input given to the pipeline for this sample.',
+  col_predicted: 'Top-1 prediction returned by the pipeline.',
+  col_ground:    'Ground-truth answer from the dataset.',
+
+  // composite_fitness — wired on the "Pass Rate (composite)" card title
+  composite: 'composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.',
+
+  // What-if direction arrows
+  whatif_up:   'Higher value is better — counted positively in the what-if mean.',
+  whatif_down: 'Lower value is better — direction-corrected (1 − x) before averaging.',
+
+  // Stub badges + placeholder labels
+  stub_inferred:      'Heuristic display — derived client-side, not authoritative. Real value lives in archive/measurements.',
+  stub_score_freq:    'Inferred bucket counts. Real per-sample scores live in archive/measurements.',
+  badge_top:          'Page-anchor card — primary signal for round health.',
+  placeholder:        'Placeholder label. Not wired up yet; final feature shape may change.',
+  brand_live_preview: 'This page polls dashboard.json every 2s. Read-only — no control plane in this slice.',
+};
+
+/* Walk static HTML at boot and copy ``[data-term="key"]`` → ``title=TERMS[key]``.
+   Cheap; runs once. JS-rendered elements set their own titles from TERMS in
+   their render functions and do not flow through this hydrate pass. */
+function applyTooltips(root){
+  (root || document).querySelectorAll('[data-term]').forEach(el => {
+    const t = TERMS[el.dataset.term];
+    if(t) el.title = t;
+  });
+}
+
+/* Every inline SVG in this file is a decorative icon paired with a text
+   label. Mass-set aria-hidden so screen readers skip them. Skipping any SVG
+   that already declares aria-label / aria-labelledby / role="img" preserves
+   future intentional semantic SVGs. */
+function hideDecorativeSvgs(root){
+  (root || document).querySelectorAll('svg').forEach(svg => {
+    if(svg.hasAttribute('aria-hidden')) return;
+    if(svg.hasAttribute('aria-label') || svg.hasAttribute('aria-labelledby')) return;
+    if(svg.getAttribute('role') === 'img') return;
+    svg.setAttribute('aria-hidden', 'true');
+  });
+}
+
 let CYCLE_ID = null, SESSION_ID = null;
 let lastRoundFetched = -1;
 let latestRoundData = null;
@@ -878,12 +986,31 @@ let currentNodeSelection = 'l1_score';
 let TOPOLOGY = null;        // .view block (nodes + edges) for the workflow render
 let PIPELINE = null;        // full optimizer_pipeline.json — used for static node config fallback
 let lastDashboardOk = 0;    // timestamp of last successful dashboard fetch
+let pollTimer = null;       // setInterval handle; nulled while document.hidden
+let pollAbort = null;       // AbortController for the in-flight dashboard fetch
 
-async function jget(url){
-  const r = await fetch(url);
+async function jget(url, signal){
+  const r = await fetch(url, signal ? {signal} : undefined);
   if(!r.ok) throw new Error(`${r.status} ${url}`);
   return r.json();
 }
+
+/* Polling lifecycle. Pause on tab hide so a backgrounded UI doesn't keep
+   firing fetches; resume on visible. AbortController cancels the previous
+   refreshDashboard() fetch when a new tick starts so stalled requests can't
+   pile up. */
+function startPolling(){
+  if(pollTimer != null) return;
+  pollTimer = setInterval(refreshDashboard, 2000);
+}
+function stopPolling(){
+  if(pollTimer != null){ clearInterval(pollTimer); pollTimer = null; }
+  if(pollAbort){ pollAbort.abort(); pollAbort = null; }
+}
+document.addEventListener('visibilitychange', () => {
+  if(document.hidden) stopPolling();
+  else { startPolling(); refreshDashboard(); }
+});
 
 async function loadActive(){
   try{
@@ -909,10 +1036,11 @@ async function loadTopology(){
   }
 }
 
-function setStatus(kind, text, hint){
+function setStatus(kind, text, hint, termKey){
   const bar = document.getElementById('status-bar');
   bar.classList.remove('live','stale','offline');
   bar.classList.add(kind);
+  bar.title = (termKey && TERMS[termKey]) || '';
   document.getElementById('status-text').textContent = text;
   document.getElementById('status-hint').textContent = hint || '';
 }
@@ -961,17 +1089,24 @@ function updateChatHero(dash){
 }
 
 async function refreshDashboard(){
+  // Abort any in-flight dashboard fetch from the previous tick so slow API
+  // responses can't pile up. AbortError is swallowed below.
+  if(pollAbort) pollAbort.abort();
+  pollAbort = new AbortController();
+  const signal = pollAbort.signal;
   let dash;
   try{
-    const r = await fetchCycleFile('cycle', 'dashboard.json');
+    const url = `${API}/campaigns/${CYCLE_ID}/file?scope=cycle&path=dashboard.json`;
+    const r = await jget(url, signal);
     dash = JSON.parse(r.content);
   } catch(e){
+    if(e.name === 'AbortError') return;
     document.getElementById('wf-status').textContent = '● disconnected';
     document.getElementById('wf-status').style.color = getCss('--color-danger');
     const wfRoundEl = document.getElementById('wf-round');
     if(wfRoundEl) wfRoundEl.textContent = '';
     setStatus('offline', `dashboard.json unreachable for ${CYCLE_ID}`,
-      'Start the optimizer: `python -m promptpotter optimize`');
+      'Start the optimizer: `python -m promptpotter optimize`', 'status_offline');
     return;
   }
   latestDashboard = dash;
@@ -980,14 +1115,14 @@ async function refreshDashboard(){
   const wall = Date.parse(dash.wallclock_serialized_at || '');
   const ageS = isFinite(wall) ? (Date.now() - wall) / 1000 : null;
   if(ageS == null){
-    setStatus('stale', 'No wallclock on dashboard', 'Optimizer may not have started yet');
+    setStatus('stale', 'No wallclock on dashboard', 'Optimizer may not have started yet', 'status_nowall');
   } else if(ageS < 30){
-    setStatus('live', `Live · last write ${ageS.toFixed(0)}s ago`, '');
+    setStatus('live', `Live · last write ${ageS.toFixed(0)}s ago`, '', 'status_live');
   } else if(ageS < 5*60){
-    setStatus('stale', `Idle · last write ${ageS.toFixed(0)}s ago`, 'Round between phases or paused');
+    setStatus('stale', `Idle · last write ${ageS.toFixed(0)}s ago`, 'Round between phases or paused', 'status_idle');
   } else {
     setStatus('stale', `Snapshot · last write ${(ageS/60).toFixed(0)}m ago`,
-      'No live optimizer — viewing a frozen cycle');
+      'No live optimizer — viewing a frozen cycle', 'status_snapshot');
   }
   document.getElementById('wf-status').textContent = '● live';
   document.getElementById('wf-status').style.color = getCss('--color-success');
@@ -1169,10 +1304,17 @@ function renderWorkflow(dash){
     el.style.width  = (pos.w / CANVAS_W * 100) + '%';
     el.style.height = (pos.h / CANVAS_H * 100) + '%';
     el.dataset.id = n.id;
+    if(n.kind !== 'io'){
+      el.setAttribute('role', 'button');
+      el.setAttribute('tabindex', '0');
+      el.setAttribute('aria-label', `Node: ${n.label}`);
+      if(currentNodeSelection === n.id) el.setAttribute('aria-pressed', 'true');
+    }
     const sub = n.kind === 'io' ? '' :
                 n.kind === 'measurement' ? 'system step' :
                 hasData ? (data.model || '—') : 'idle';
-    el.innerHTML = `<div class="${cls.join(' ')}">
+    const nodeTip = TERMS[`node_${n.id}`] || '';
+    el.innerHTML = `<div class="${cls.join(' ')}"${nodeTip ? ` title="${escapeHtml(nodeTip)}"` : ''}>
       <div class="wf-node-title">${escapeHtml(n.label)}</div>
       ${sub ? `<div class="wf-node-sub">${escapeHtml(sub)}</div>` : ''}
     </div>`;
@@ -1399,6 +1541,7 @@ function renderProgress(dash){
   const tag = document.getElementById('phase-tag');
   const rest = document.getElementById('phase-rest');
   tag.textContent = dash.state || '—';
+  tag.title = TERMS[`phase_${String(dash.state || '').toLowerCase()}`] || '';
   rest.textContent = ` round ${dash.round ?? '—'}`;
 
   // Query progress
@@ -1739,12 +1882,15 @@ function whatifRenderGrid(grid, rows, inActive){
     if(!r.applicable) klass.push('disabled');
     const dirClass = r.direction === 'low' ? 'down' : 'up';
     const dirGlyph = r.direction === 'low' ? '↓' : '↑';
+    const dirTip   = r.direction === 'low' ? TERMS.whatif_down : TERMS.whatif_up;
     const ico = whatifIconFor(r.displayName, r.registryName);
     const title = (r.description || r.displayName).replace(/"/g, '&quot;');
-    return `<div class="${klass.join(' ')}" data-idx="${i}" title="${title}">
-      <div class="whatif-tick"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5"/></svg></div>
-      <div class="whatif-dir ${dirClass}">${dirGlyph}</div>
-      <div class="whatif-ico">${ico}</div>
+    const ariaDisabled = !r.applicable ? ' aria-disabled="true"' : '';
+    const tabIdx = r.applicable ? '0' : '-1';
+    return `<div class="${klass.join(' ')}" data-idx="${i}" title="${title}" role="checkbox" tabindex="${tabIdx}" aria-checked="${enabled ? 'true' : 'false'}" aria-label="${escapeHtml(r.displayName)}"${ariaDisabled}>
+      <div class="whatif-tick" aria-hidden="true"><svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round"><path d="M2.5 8.5 L6.5 12.5 L13.5 3.5"/></svg></div>
+      <div class="whatif-dir ${dirClass}" title="${escapeHtml(dirTip)}" aria-hidden="true">${dirGlyph}</div>
+      <div class="whatif-ico" aria-hidden="true">${ico}</div>
       <div class="whatif-name">${escapeHtml(r.displayName)}</div>
     </div>`;
   }).join('');
@@ -2089,8 +2235,14 @@ function renderTree(byScope, _){
     top.className = 'tree-node';
     const head = document.createElement('div');
     head.className = 'tree-dir';
-    head.innerHTML = `<span class="tree-arrow">▾</span>${scope === 'cycle' ? 'cycle (root)' : 'family (telemetry)'}`;
-    head.addEventListener('click', () => top.classList.toggle('tree-collapsed'));
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', 'true');
+    head.innerHTML = `<span class="tree-arrow" aria-hidden="true">▾</span>${scope === 'cycle' ? 'cycle (root)' : 'family (telemetry)'}`;
+    head.addEventListener('click', () => {
+      const collapsed = top.classList.toggle('tree-collapsed');
+      head.setAttribute('aria-expanded', String(!collapsed));
+    });
     top.appendChild(head);
     const children = document.createElement('div');
     children.className = 'tree-children';
@@ -2108,8 +2260,14 @@ function renderTreeInner(node, scope, container){
     sub.className = 'tree-node';
     const head = document.createElement('div');
     head.className = 'tree-dir';
-    head.innerHTML = `<span class="tree-arrow">▾</span>${name}/`;
-    head.addEventListener('click', () => sub.classList.toggle('tree-collapsed'));
+    head.setAttribute('role', 'button');
+    head.setAttribute('tabindex', '0');
+    head.setAttribute('aria-expanded', 'true');
+    head.innerHTML = `<span class="tree-arrow" aria-hidden="true">▾</span>${name}/`;
+    head.addEventListener('click', () => {
+      const collapsed = sub.classList.toggle('tree-collapsed');
+      head.setAttribute('aria-expanded', String(!collapsed));
+    });
     sub.appendChild(head);
     const children = document.createElement('div');
     children.className = 'tree-children';
@@ -2123,9 +2281,13 @@ function renderTreeInner(node, scope, container){
     row.className = 'tree-row';
     row.textContent = f.name;
     row.title = f.path;
+    row.setAttribute('role', 'button');
+    row.setAttribute('tabindex', '0');
+    row.setAttribute('aria-label', `Open file ${f.name}`);
     row.addEventListener('click', () => {
-      document.querySelectorAll('.tree-row').forEach(r => r.classList.remove('selected'));
+      document.querySelectorAll('.tree-row').forEach(r => { r.classList.remove('selected'); r.removeAttribute('aria-current'); });
       row.classList.add('selected');
+      row.setAttribute('aria-current', 'true');
       openFile(scope, f.path);
     });
     container.appendChild(row);
@@ -2164,10 +2326,17 @@ function showPane(pane){
     const el = document.getElementById(id);
     if(el) el.style.display = (k === pane) ? '' : 'none';
   });
-  document.querySelectorAll('.tab[data-tab]').forEach(t =>
-    t.classList.toggle('active', t.dataset.tab === pane));
-  document.querySelectorAll('.nav-item[data-pane]').forEach(i =>
-    i.classList.toggle('active', i.dataset.pane === pane));
+  document.querySelectorAll('.tab[data-tab]').forEach(t => {
+    const on = t.dataset.tab === pane;
+    t.classList.toggle('active', on);
+    t.setAttribute('aria-selected', String(on));
+  });
+  document.querySelectorAll('.nav-item[data-pane]').forEach(i => {
+    const on = i.dataset.pane === pane;
+    i.classList.toggle('active', on);
+    if(on) i.setAttribute('aria-current', 'page');
+    else i.removeAttribute('aria-current');
+  });
   document.querySelector('.shell').classList.toggle('chat-mode', pane === 'chat');
   if(pane === 'files') loadFilesPane();
 }
@@ -2184,6 +2353,32 @@ document.querySelectorAll('.nav-item[data-pane]').forEach(item => {
 
 document.querySelectorAll('[data-toggle]').forEach(t =>
   t.addEventListener('click', () => t.classList.toggle('on')));
+
+/* Delegated keyboard activation. Click-handler-on-div widgets (nav items,
+   tabs, workflow nodes, what-if tiles, tree rows) are styled as <div> for
+   layout reasons but need keyboard parity. Setting role + tabindex on the
+   markup makes them focusable; this handler fires their click on Enter
+   (button/tab/checkbox) or Space (button/tab/checkbox). Escape clears the
+   workflow node selection so keyboard users can leave the side panel. */
+document.addEventListener('keydown', e => {
+  const t = e.target;
+  if(t instanceof HTMLElement){
+    const role = t.getAttribute('role');
+    const isActivate = e.key === 'Enter' || e.key === ' ';
+    if(isActivate && (role === 'button' || role === 'tab' || role === 'checkbox')){
+      if(t.getAttribute('aria-disabled') === 'true') return;
+      e.preventDefault();
+      t.click();
+      return;
+    }
+  }
+  if(e.key === 'Escape' && currentNodeSelection){
+    currentNodeSelection = null;
+    if(latestDashboard) renderWorkflow(latestDashboard);
+    const sel = document.getElementById('sel-panel');
+    if(sel) sel.style.display = 'none';
+  }
+});
 
 (() => {
   const btn = document.getElementById('chat-job-toggle');
@@ -2203,23 +2398,44 @@ document.querySelectorAll('[data-toggle]').forEach(t =>
   document.addEventListener('keydown', e => { if(e.key === 'Escape') close(); });
 })();
 
-/* Theme toggle: flips data-theme on <html>, persists to localStorage,
-   reloads to recolor canvas-rendered things (Chart.js datasets, SVG
-   markers) that captured colors at construction time. */
+/* Theme toggle: flips data-theme on <html>, persists to localStorage, then
+   recolors canvas-rendered things (Chart.js, SVG edges) that captured colors
+   at construction time. CSS variables swap automatically via the :root /
+   [data-theme="light"] cascade — only Canvas/SVG need imperative refresh. */
 document.getElementById('theme-toggle').addEventListener('click', () => {
   const next = document.documentElement.getAttribute('data-theme') === 'light' ? 'dark' : 'light';
   try { localStorage.setItem('promptpotter.theme', next); } catch(_) {}
-  location.reload();
+  if(next === 'light') document.documentElement.setAttribute('data-theme', 'light');
+  else document.documentElement.removeAttribute('data-theme');
+  // Destroy charts so the next render rebuilds them with theme-current colors.
+  if(freqChart){ freqChart.destroy(); freqChart = null; }
+  if(trendChart){ trendChart.destroy(); trendChart = null; }
+  if(WHATIF_STATE.chart){ WHATIF_STATE.chart.destroy(); WHATIF_STATE.chart = null; }
+  applyChartDefaults();
+  // Force a re-render of canvas / SVG surfaces that captured colors at
+  // construction time. CSS-driven surfaces refresh via the cascade.
+  if(latestDashboard){
+    renderWorkflow(latestDashboard);
+    if(latestRoundData){
+      renderPassRate(latestRoundData);
+      renderFreq(latestRoundData);
+    }
+    renderWhatIf(latestDashboard);
+    refreshTrends();
+  }
 });
 
+applyTooltips();
+hideDecorativeSvgs();
 showPane('chat');
 
 /* === Bootstrap === */
 (async () => {
+  applyChartDefaults();
   await loadTopology();
   await loadActive();
   await refreshDashboard();
-  setInterval(refreshDashboard, 2000);
+  startPolling();
 })();
 </script>
 </body>
