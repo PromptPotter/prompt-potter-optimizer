@@ -92,7 +92,16 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 
 ## Live state (forks and the family root)
 
-- `dashboard.json` — current phase, round, candidate, accuracies, in-flight query.
+- `dashboard.json` — current phase, round, candidate, accuracies, in-flight query. Full path:
+  ```
+  .promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json
+  ```
+  The active cycle id is in `.promptpotter/active_session.json`. Open the file directly for live state.
+- **Webapp preview** — same `dashboard.json`, rendered in the browser. In a separate terminal, run:
+  ```bash
+  python -m uvicorn promptpotter.main:app --port 8001
+  ```
+  then open <http://127.0.0.1:8001/ui/>. The page polls `dashboard.json` every 2 s. Reads `active_session.json` on load — `init` a new cycle ⇒ reload the page. Keep `python -m promptpotter optimize` running in another terminal for live refresh.
 - `output.log` — append-only HIT/MISS history, tail-friendly.
 
 Both live at the **root cycle's** dir (the cycle with no `parent_cycle_id`). When you fork, the fork's own dir nests under root at `campaigns/{root_cycle_id}/forks/{cycle_id}/`, but its dashboard / output.log stay at root. One place to tail covers the whole family.
