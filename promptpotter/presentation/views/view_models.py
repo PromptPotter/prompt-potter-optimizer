@@ -55,7 +55,14 @@ class WarningEntry:
 
 @dataclass(frozen=True)
 class InitEnterView:
-    """Pre-baseline init banner — only warnings render to text."""
+    """Pre-baseline init banner — only warnings render to text.
+
+    ``composite_fitness_formula`` (and the short form) are propagated here so
+    ``LiveDashboardProjection`` can stamp them onto ``dashboard.json`` before
+    baseline scoring begins. Without this, the formula would only land at
+    ``INIT.exit`` (after baseline), leaving the live preview's What-If panel
+    without a formula reference for the entire baseline phase.
+    """
 
     warnings: tuple[WarningEntry, ...] = ()
     max_rounds: int = 0
@@ -67,6 +74,8 @@ class InitEnterView:
     model: str = ""
     l2_enabled: bool = False
     l3_enabled: bool = False
+    composite_fitness_formula: str | None = None
+    composite_fitness_formula_short: str | None = None
 
 
 @dataclass(frozen=True)
