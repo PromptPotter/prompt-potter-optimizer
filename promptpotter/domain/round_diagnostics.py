@@ -87,10 +87,6 @@ class RoundDiagnostics:
     error_rate: float = 0.0
     warning_rate: float = 0.0
 
-    # Failure shape this round
-    failures_by_step: dict[str, int] = field(default_factory=dict)
-    failures_by_warning: dict[str, list[str]] = field(default_factory=dict)
-
     # Cycle arc (cumulative across rounds)
     evolution_rows: list[EvolutionRow] = field(default_factory=list)
     trajectory: TrajectoryClass = "healthy"

@@ -58,6 +58,12 @@ _NEAR_MISS_RENDER_CAP = 10
 _SAMPLE_RENDER_CAP = 5
 _FAILURE_WARNING_PREVIEW = 1
 _TUNABLE_PARAMS_MODEL_CAP = 8
+# Runtime-failures stay on OptSearchPoint forever (trend visibility for the
+# state layer) but the unified ``failures`` signal only emits failures
+# first-seen in the last K rounds. Older entries collapse to a single
+# suppression line so the LLM still knows there's tail without paying the
+# token cost. Tightens prompts on long campaigns + small models.
+_RUNTIME_FAILURE_RECENCY_WINDOW = 10
 
 # Prompt-injection fence — wraps signals whose body carries untrusted content
 # (sample queries, ground truths, model predictions echoed back, pipeline
@@ -168,11 +174,24 @@ def _r_rendered_prompt(b: Bundle) -> str:
     return f"CURRENT PROMPT:\n---\n{rendered}\n---" if rendered else ""
 
 
+# Single-entry cache keyed on pipeline_schema identity. The schema is
+# session-immutable, so the rendered string is byte-identical across every
+# round of a session. Skipping the recompute saves CPU and — more importantly
+# for small models — guarantees the same text appears verbatim in every
+# prompt, which trains attention to skip past the static block cheaply.
+# id() is sufficient: a session-long schema can't be GC'd-and-reused mid-run.
+_tunable_params_last: tuple[int, str] | None = None
+
+
 def _r_tunable_params(b: Bundle) -> str:
     """Compact mutation surface — name + ≤4-value enum hint, no full dump."""
+    global _tunable_params_last
     schema = b.pipeline_schema
     if schema is None:
         return ""
+    schema_id = id(schema)
+    if _tunable_params_last is not None and _tunable_params_last[0] == schema_id:
+        return _tunable_params_last[1]
     npk = schema.node_param_keys()
     if not npk:
         return ""
@@ -200,7 +219,9 @@ def _r_tunable_params(b: Bundle) -> str:
     if schema.available_models:
         lines.append("MODELS:")
         lines.append("  " + ", ".join(list(schema.available_models)[:_TUNABLE_PARAMS_MODEL_CAP]))
-    return "\n".join(lines)
+    result = "\n".join(lines)
+    _tunable_params_last = (schema_id, result)
+    return result
 
 
 def _r_diagnostics(b: Bundle) -> str:
@@ -246,22 +267,6 @@ def _r_diagnostics(b: Bundle) -> str:
             td_lines.append(f"  terminate@{step}: {count}")
         td_lines.append(f"  error_rate: {d.error_rate:.0%} | warning_rate: {d.warning_rate:.0%}")
         parts.append("\n".join(td_lines))
-
-    if d.failures_by_step:
-        f_lines = ["FAILURES BY STEP:"]
-        for step, count in sorted(d.failures_by_step.items(), key=lambda x: -x[1]):
-            f_lines.append(f"  {step}: {count}")
-        parts.append("\n".join(f_lines))
-
-    if d.failures_by_warning:
-        w_lines = ["FAILURE WARNING CLASSES:"]
-        for wclass, queries in d.failures_by_warning.items():
-            example = queries[0] if queries else ""
-            w_lines.append(
-                f"  {wclass}: {len(queries)} affected"
-                + (f" — e.g. {example[:60]!r}" if example else "")
-            )
-        parts.append("\n".join(w_lines))
 
     if d.near_misses:
         nm_lines = [f"NEAR MISSES ({len(d.near_misses)} — GT in candidates but not r=1):"]
@@ -332,8 +337,14 @@ def _r_failures(b: Bundle) -> str:
 
     if osp.runtime_failures:
         round_num = b.cycle_slice.round_num
+        cutoff = round_num - _RUNTIME_FAILURE_RECENCY_WINDOW + 1
         new_rfs = [rf for rf in osp.runtime_failures if rf.first_seen_round == round_num]
-        acc_rfs = [rf for rf in osp.runtime_failures if rf.first_seen_round != round_num]
+        acc_rfs = [
+            rf
+            for rf in osp.runtime_failures
+            if rf.first_seen_round != round_num and rf.first_seen_round >= cutoff
+        ]
+        dropped = sum(1 for rf in osp.runtime_failures if rf.first_seen_round < cutoff)
         sec = ["RUNTIME FAILURES (candidates ran but degraded):"]
         if new_rfs:
             sec.append("  NEW (this round):")
@@ -343,6 +354,11 @@ def _r_failures(b: Bundle) -> str:
             sec.append(f"  ACCUMULATED ({len(acc_rfs)} surviving from earlier rounds):")
             for rf in acc_rfs:
                 sec.extend(_format_runtime_failure_lines(rf))
+        if dropped:
+            sec.append(
+                f"  … {dropped} older failures suppressed "
+                f"(first-seen >{_RUNTIME_FAILURE_RECENCY_WINDOW} rounds ago)."
+            )
         parts.append("\n".join(sec))
 
     if osp.escalation_log:

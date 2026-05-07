@@ -86,8 +86,7 @@ def test_pipeline_schema_to_params_is_sparse() -> None:
     )
     pp = schema.to_pipeline_params()
     assert pp == {"steps": ["llm_only"]}, (
-        "to_pipeline_params must be sparse; per-node defaults are backend-owned. "
-        f"Got {pp!r}"
+        f"to_pipeline_params must be sparse; per-node defaults are backend-owned. Got {pp!r}"
     )
 
     # Round-trip through the wire adapter: with a {} override per node, the

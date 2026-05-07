@@ -62,7 +62,6 @@ def compute_round_diagnostics(
 
     rank_buckets, top_k, near_misses, nm_queries, n_valid = _rank_analysis(results, candidate_keys)
     termination_dist, error_rate, warning_rate = _pipeline_health(results)
-    failures_by_step, failures_by_warning = _failure_categories(results, nm_queries)
     evolution_rows, plateau_count, anomalies = _evolution(rounds_history)
     trajectory, trajectory_desc = _trajectory(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
@@ -86,8 +85,6 @@ def compute_round_diagnostics(
         termination_dist=termination_dist,
         error_rate=error_rate,
         warning_rate=warning_rate,
-        failures_by_step=failures_by_step,
-        failures_by_warning=failures_by_warning,
         evolution_rows=evolution_rows,
         trajectory=trajectory,
         trajectory_description=trajectory_desc,
@@ -180,31 +177,6 @@ def _warning_str(w: object) -> str:
     if isinstance(w, dict):
         return f"{w.get('step', 'unknown')}:{w.get('code', 'unknown')}"
     return str(w)
-
-
-def _failure_categories(
-    results: list[dict], nm_queries: set[str]
-) -> tuple[dict[str, int], dict[str, list[str]]]:
-    """Failure counts by termination step + warning class.
-
-    ``failures_by_warning`` keys are warning classes; values are example
-    queries (capped) for the renderer to surface.
-    """
-    by_step: Counter[str] = Counter()
-    by_warning: dict[str, list[str]] = {}
-    for r in results:
-        if r.get("hit") or is_error_result(r):
-            continue
-        if r.get("query", "") in nm_queries:
-            continue
-        pd = r.get("pipeline_data") or {}
-        by_step[pd.get("terminated_at", "unknown")] += 1
-        diag = pd.get("diagnostics") or {}
-        for warning in diag.get("warnings") or ():
-            ws = _warning_str(warning)
-            wclass = ws.split(":", 1)[0]
-            by_warning.setdefault(wclass, []).append(r.get("query", "")[:80])
-    return dict(by_step), {k: v[:5] for k, v in by_warning.items()}
 
 
 def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list[str]]:
