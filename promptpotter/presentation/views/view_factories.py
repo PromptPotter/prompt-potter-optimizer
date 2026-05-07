@@ -239,16 +239,9 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         for i, s in enumerate(d.get("candidate_scores") or [])
     ]
 
-    non_aborted = [s for s in score_entries if not s.escalation_aborted]
-    if non_aborted:
-        best = max(
-            non_aborted,
-            key=lambda s: (
-                s.composite_fitness if s.composite_fitness is not None else s.accuracy,
-                s.accuracy,
-            ),
-        )
-        winner_label, winner_hits, winner_total = best.label, best.hits, best.total
+    winner = _pick_round_winner(score_entries)
+    if winner is not None:
+        winner_label, winner_hits, winner_total = winner.label, winner.hits, winner.total
     else:
         winner_label, winner_hits, winner_total = "?", 0, 0
 
@@ -407,6 +400,24 @@ def _sp_diff_from_dict(d: dict | None) -> SpDiffView:
     )
 
 
+def _pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
+    """Round winner = max non-aborted ``ScoreEntry`` ranked by
+    ``(composite_fitness or accuracy, accuracy)``. Single source of truth for
+    the tiebreak rule shared between the live event ingress (``_l1_score_exit``)
+    and the disk-replay ingress (``from_disk_round``).
+    """
+    non_aborted = [s for s in score_entries if not s.escalation_aborted]
+    if not non_aborted:
+        return None
+    return max(
+        non_aborted,
+        key=lambda s: (
+            s.composite_fitness if s.composite_fitness is not None else s.accuracy,
+            s.accuracy,
+        ),
+    )
+
+
 def _score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
     """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
     into a ``ScoreEntry``. ``fallback_label`` covers in-memory call sites where
@@ -524,17 +535,8 @@ def from_disk_round(
         for i, s in enumerate(round_data.get("candidate_scores") or [])
     ]
 
-    winner_label = ""
-    non_aborted = [s for s in score_entries if not s.escalation_aborted]
-    if non_aborted:
-        best = max(
-            non_aborted,
-            key=lambda s: (
-                s.composite_fitness if s.composite_fitness is not None else s.accuracy,
-                s.accuracy,
-            ),
-        )
-        winner_label = best.label
+    winner = _pick_round_winner(score_entries)
+    winner_label = winner.label if winner is not None else ""
 
     winner_acc = float(round_data.get("accuracy", 0.0))
     baseline_acc = float(round_data.get("baseline_accuracy", 0.0))

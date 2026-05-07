@@ -2,9 +2,9 @@
 
 Two factories build these (``view_factories.py``): ``from_phase_event`` for
 live ``PhaseEvent`` payloads and ``from_disk`` for post-hoc round_data / index
-artifacts. Three render targets consume them (``render_text.py``,
-``render_markdown.py``, ``render_html.py``). Views are pure data: no methods
-that emit text, no I/O.
+artifacts. Two render targets consume them (``render_text.py``,
+``render_markdown.py``); the notebook builds its final-winner HTML inline.
+Views are pure data: no methods that emit text, no I/O.
 
 The named correctness invariant — exercised in ``tests/test_view_factories``
 — is ``from_phase_event(e) == from_disk(write_then_load(e))`` on

@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import html
+import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -39,8 +41,6 @@ from promptpotter.presentation.views.display import (
     render_pipeline_overrides,
 )
 from promptpotter.presentation.views.live import LiveDisplay
-from promptpotter.presentation.views.render_html import to_html
-from promptpotter.presentation.views.view_models import FinalWinnerView
 
 if TYPE_CHECKING:
     from promptpotter.application.config import CampaignConfig
@@ -60,17 +60,26 @@ __all__ = [
 def render_completion_html(result: CycleResult) -> str:
     """HTML render of the final-winner summary, for inline notebook display.
 
-    Reads the on-disk ``index.json`` for the cycle so the rendered shape
-    matches what ``log.md`` would carry. Empty string when the result
-    can't resolve a cycle (no final winner block to render).
+    Empty string when the result has no winner block to render.
     """
     if not result.winner_prompt_fields:
         return ""
-    final = FinalWinnerView(
-        winner_prompt_fields=dict(result.winner_prompt_fields),
-        winner_pipeline_params=dict(result.winner_pipeline_params or {}),
+    prompt_json = html.escape(
+        json.dumps(dict(result.winner_prompt_fields), indent=2, ensure_ascii=False, default=str)
     )
-    return to_html(final)
+    pp_json = html.escape(
+        json.dumps(
+            dict(result.winner_pipeline_params or {}), indent=2, ensure_ascii=False, default=str
+        )
+    )
+    return (
+        "<div style='font-family:monospace'>"
+        "<h3 style='margin:8px 0 4px'>Final Winner</h3>"
+        "<details><summary>Prompt fields</summary>"
+        f"<pre>{prompt_json}</pre></details>"
+        "<details><summary>Pipeline params</summary>"
+        f"<pre>{pp_json}</pre></details></div>"
+    )
 
 
 def _try_display_html(html_body: str) -> bool:
