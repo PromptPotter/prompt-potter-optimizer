@@ -91,7 +91,8 @@ app.include_router(api.backends_router, prefix="/api/v1", tags=["Backends"])
 app.include_router(api.campaigns_router, prefix="/api/v1", tags=["Campaigns"])
 app.include_router(api._active_router, prefix="/api/v1")
 
-# Static webapp mount — single-page read-only preview of the active cycle.
+# Static webapp mount — read-only operator dashboard at /ui (Next.js export
+# from webapp-react/, deployed via `npm run deploy` in that directory).
 WEBAPP_DIR = Path(__file__).resolve().parents[1] / "webapp"
 if WEBAPP_DIR.exists():
     app.mount("/ui", StaticFiles(directory=WEBAPP_DIR, html=True), name="webapp")
