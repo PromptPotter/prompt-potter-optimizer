@@ -659,6 +659,8 @@ def _finalize_run(
             n_rounds=cycle_result.n_rounds,
             finished_at=cycle_result.finished_at,
         )
+    if emitter is not None:
+        emitter.mark_stopped(str(stop_reason or ""))
 
     obs = session.state.obs
     if obs:

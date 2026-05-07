@@ -100,5 +100,5 @@ Full M10 spec: [`../specs/m10-prompt-iteration-framework.md`](../specs/m10-promp
 
 ### Bundling and generality
 
-- One change at a time by default. Carve-out: edits targeting the same observed failure may bundle. Document the decision in `notes.md`.
+- One change at a time by default. Carve-out: edits targeting the same observed failure may bundle.
 - General fix, not specific. When L1 misbehaves on input X, the prompt edit guards against the *class* of mistake. Re-run to verify.

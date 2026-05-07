@@ -404,7 +404,6 @@ def _build_live_display(
             baseline_acc=baseline_acc,
             l1_patience=opt.l1_patience,
             pipeline_schema=session.pipeline_schema,
-            store=session.store,
             scoring_formula=scoring_formula,
         )
     return _LiveDisplay(

@@ -333,7 +333,6 @@ def auto_mint_session(
 
     sessions = session.store.sessions
     sessions.create(session_id, state)
-    sessions.ensure_narrative_files(session_id)
 
     if create_campaign_dir:
         session.store.campaigns.create(

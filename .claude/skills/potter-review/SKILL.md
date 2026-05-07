@@ -99,7 +99,7 @@ Print the `ppot_review.py --sweep` table verbatim, then 1-3 sentences naming the
 
 ## Rules (apply throughout)
 
-- **One change at a time, by default.** The operator may bundle when both edits target the same observed failure — document the bundling decision in `notes.md` when it happens.
+- **One change at a time, by default.** The operator may bundle when both edits target the same observed failure — call out the bundling decision in your review summary.
 - **General fix, not specific.** When L1 misbehaved on input X, the prompt edit guards against the *class* of mistake, not just X. Cite the rule.
 - **Never run `optimize`.** The operator owns long-running commands.
 - **Never edit non-prompt files.** Behaviour-check rules live in `l1_behavior_checks.py` — only the operator (or a separate skill) edits those.

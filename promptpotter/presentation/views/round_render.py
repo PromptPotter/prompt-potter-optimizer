@@ -1,21 +1,18 @@
-"""Per-candidate + round-summary renderers — single module so per-round display surfaces share imports.
+"""Per-candidate + per-query renderers shared by the CLI and notebook surfaces.
 
-Two related sections:
+- ``IndividualSummary`` + ``build_individual_summary`` / ``fmt_individual_header``
+  produce the per-candidate pre-scoring header + post-scoring summary.
+- ``_fmt_query_result`` formats a single HIT/MISS query line plus
+  diagnostic annotations for ``LiveDisplay.on_sample_scored``.
 
-1. **Per-candidate (individual) renderers** — ``IndividualSummary`` is the
-   structured output ``LiveDisplay`` and the notebook's box renderer both
-   compose into their respective layouts. ``build_individual_summary`` /
-   ``fmt_individual_header`` produce pre-scoring header + post-scoring summary.
-
-2. **Round-summary renderers** — ``render_progress_table`` (round-over-round
-   trajectory), ``render_round_stats`` (per-round hits / pipeline / recall),
-   ``render_patience_status`` (patience banner).
+Round-summary renderers (progress table, round stats, patience banner)
+live in ``live.py`` because they have a single caller there.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Literal
+from typing import Literal
 
 from promptpotter.application.optimization.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
@@ -28,7 +25,6 @@ from promptpotter.presentation.views.display import (
     RESET,
     YELLOW,
     _fmt_delta,
-    _node_line,
     _pp_val,
     _step_tag,
     fmt_ci,
@@ -39,10 +35,6 @@ from promptpotter.shared.composite import (
 )
 from promptpotter.shared.errors import is_error_result
 from promptpotter.shared.statistics import wilson_ci
-
-if TYPE_CHECKING:
-    from promptpotter.domain.pipeline_schema import PipelineSchema
-    from promptpotter.domain.results import RoundResult
 
 
 def fmt_pp_override(pp: dict | None) -> str:
@@ -84,45 +76,6 @@ def fmt_individual_header(
     return f"  {label}  {body}"
 
 
-def format_elimination_summary(ctx: dict, prior_label: str | None = None) -> str:
-    """One-line eliminated-candidate summary.
-
-    Example: ``✂ eliminated q7/15  p=0.023 *  vs C3 (of 3 priors)``.
-    ``prior_label`` is the resolved label of the prior that triggered the
-    Wilcoxon rejection; falls back to the integer index in ctx when absent.
-    """
-    q = int(ctx.get("queries_scored", 0))
-    qt = int(ctx.get("total_queries", 0))
-    p = float(ctx.get("triggered_p", 1.0))
-    n_priors = int(ctx.get("n_priors", 0))
-
-    if prior_label is None:
-        idx = ctx.get("triggered_by_prior_idx", -1)
-        prior_label = f"prior #{idx}" if isinstance(idx, int) and idx >= 0 else "prior"
-
-    return (
-        f"{YELLOW}✂ eliminated q{q}/{qt}{RESET}  "
-        f"{fmt_pvalue(p)}  vs {prior_label} (of {n_priors} prior{'s' if n_priors != 1 else ''})"
-    )
-
-
-def format_leader_locked_summary(ctx: dict) -> str:
-    """One-line leader-locked-candidate summary.
-
-    Example: ``✓ leader locked q8/20  p_best=98.5% (of 3 priors)``.
-    Fired when PoBB confirms the current candidate is the round leader past
-    the lock-in threshold and the round terminates early.
-    """
-    q = int(ctx.get("queries_scored", 0))
-    qt = int(ctx.get("total_queries", 0))
-    p_best = float(ctx.get("p_best", 0.0))
-    n_priors = int(ctx.get("n_priors", 0))
-    return (
-        f"{GREEN}✓ leader locked q{q}/{qt}{RESET}  "
-        f"p_best={p_best:.1%} (of {n_priors} prior{'s' if n_priors != 1 else ''})"
-    )
-
-
 @dataclass(frozen=True)
 class IndividualSummary:
     """Structured candidate render — displays pick plain vs box wrapping.
@@ -144,21 +97,6 @@ class IndividualSummary:
     tag: str
     body_line: str
     detail_lines: tuple[str, ...]
-
-
-def _fmt_validation_failure_lines(failures: list[dict]) -> tuple[str, ...]:
-    """Render one '⚠ axis = value ∉ allowed' + '↳ scored 0' pair per failure."""
-    out: list[str] = []
-    for vf in failures:
-        axis = vf.get("axis", "?")
-        value = vf.get("value", "?")
-        allowed = vf.get("allowed") or []
-        allowed_str = ", ".join(allowed[:3]) + (
-            f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
-        )
-        out.append(f"{YELLOW}⚠{RESET} {axis} = {value!r}  ∉ [{allowed_str}]")
-        out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
-    return tuple(out)
 
 
 def build_individual_summary(
@@ -189,12 +127,23 @@ def build_individual_summary(
     mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
 
     if scores.get("invalid"):
-        failures = scores["validation_failures"]
+        # One '⚠ axis = value ∉ allowed' + '↳ scored 0' pair per failure.
+        out: list[str] = []
+        for vf in scores["validation_failures"]:
+            allowed = vf.get("allowed") or []
+            allowed_str = ", ".join(allowed[:3]) + (
+                f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
+            )
+            out.append(
+                f"{YELLOW}⚠{RESET} {vf.get('axis', '?')} = {vf.get('value', '?')!r}  "
+                f"∉ [{allowed_str}]"
+            )
+            out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
         return IndividualSummary(
             status="invalid",
             tag=f"{YELLOW}INVALID{RESET}",
             body_line="",
-            detail_lines=_fmt_validation_failure_lines(failures),
+            detail_lines=tuple(out),
         )
 
     acc = scores["accuracy"]
@@ -214,12 +163,27 @@ def build_individual_summary(
     body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
-    elim_ctx_raw = scores.get("elimination_context") or {}
-    if scores.get("elimination_stopped"):
-        prior_label = elim_ctx_raw.get("triggered_by_prior_label")
-        detail_lines.append(format_elimination_summary(elim_ctx_raw, prior_label))
-    elif elim_ctx_raw.get("leader_locked"):
-        detail_lines.append(format_leader_locked_summary(elim_ctx_raw))
+    elim = scores.get("elimination_context") or {}
+    if scores.get("elimination_stopped") or elim.get("leader_locked"):
+        eq = int(elim.get("queries_scored", 0))
+        eqt = int(elim.get("total_queries", 0))
+        n_priors = int(elim.get("n_priors", 0))
+        prior_s = "" if n_priors == 1 else "s"
+        if scores.get("elimination_stopped"):
+            label = elim.get("triggered_by_prior_label")
+            if label is None:
+                pi = elim.get("triggered_by_prior_idx", -1)
+                label = f"prior #{pi}" if isinstance(pi, int) and pi >= 0 else "prior"
+            detail_lines.append(
+                f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
+                f"{fmt_pvalue(float(elim.get('triggered_p', 1.0)))}  "
+                f"vs {label} (of {n_priors} prior{prior_s})"
+            )
+        else:
+            detail_lines.append(
+                f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
+                f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
+            )
 
     comp = scores.get("composite_fitness")
     degraded = scores.get("degraded_queries", 0)
@@ -248,34 +212,8 @@ def build_individual_summary(
 
 # ===========================================================================
 # Per-query HIT/MISS line formatter — feeds ``LiveDisplay.on_sample_scored``.
-# A single function (``_fmt_query_result``) produces one display line plus
-# zero-or-more annotation lines (diagnostic warnings, stale-data ladder
-# markers). Pure: no I/O, no mutation. Three private helpers carry it.
+# Pure: no I/O, no mutation.
 # ===========================================================================
-
-
-def _infer_terminated_step(step_timings: dict) -> str | None:
-    """Infer last executed step from timing dict (insertion-order fallback)."""
-    last = None
-    for name, t in step_timings.items():
-        if t is not None:
-            last = name
-    return last
-
-
-def _find_gt_rank(r: dict) -> int | None:
-    """Find ground truth rank in candidates. Returns 1-indexed rank or None."""
-    from promptpotter.application.scoring.metrics import find_rank
-
-    gt = r.get("ground_truth", "")
-    if not gt:
-        return None
-    pd = r.get("pipeline_data") or {}
-    for key in ("ranked_candidates", "token_matched_candidates"):
-        rank = find_rank(pd.get(key, []), gt)
-        if rank is not None:
-            return rank
-    return None
 
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
@@ -303,17 +241,19 @@ def _fmt_query_result(
     so markers like ``**bold**`` or ``\\boxed{…}`` collapse to the
     single-token answer.
     """
+    from promptpotter.application.scoring.metrics import find_rank
+
     raw_pred = r.get("predicted") or ""
     pred = extract_display_answer(raw_pred, scoring_formula)[:30]
-    gt = (r.get("ground_truth") or "").strip()[:30]
+    gt_full = r.get("ground_truth", "") or ""
+    gt = gt_full.strip()[:30]
     q = ((r.get("query") or "").replace("\n", " ").strip())[:15]
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")
-    if step_name is None:
-        st = pd.get("step_timings")
-        if st:
-            step_name = _infer_terminated_step(st)
+    if step_name is None and (st := pd.get("step_timings")):
+        # Last non-None entry wins (dict insertion order).
+        step_name = next((n for n, t in reversed(list(st.items())) if t is not None), None)
     step = _step_tag(step_name)
 
     tt = pd.get("total_time")
@@ -325,7 +265,11 @@ def _fmt_query_result(
     else:
         ranked = pd.get("ranked_candidates", [])
         n_cand = len(ranked)
-        gt_rank = _find_gt_rank(r)
+        gt_rank: int | None = None
+        if gt_full:
+            for key in ("ranked_candidates", "token_matched_candidates"):
+                if (gt_rank := find_rank(pd.get(key, []), gt_full)) is not None:
+                    break
         if gt_rank is not None:
             tag = f"MISS {gt_rank}/{n_cand}"
         elif n_cand:
@@ -443,189 +387,3 @@ def _fmt_query_result(
         )
 
     return line
-
-
-# ===========================================================================
-# Round-summary renderers — progress table, round stats, patience banner
-# ===========================================================================
-
-
-def render_progress_table(
-    rounds: list[dict],
-    window: int = 8,
-    *,
-    framed: bool = True,
-) -> str:
-    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau.
-
-    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
-    The ``Composite`` column is always shown so the operator never has to
-    wonder whether composite_fitness was hidden because it equalled accuracy on
-    every round so far.
-
-    ``framed=True`` (default) wraps each line in ``_node_line()`` for
-    box-drawing terminals (live CLI / notebook live view). ``framed=False``
-    emits plain text with a ``PROGRESS`` title for plain-text reports.
-    """
-    if not rounds:
-        return "" if framed else "No rounds to display."
-
-    def wrap(s: str) -> str:
-        return _node_line(s) if framed else s
-
-    row_rnd_w = 5 if framed else 7
-    row_comp_w = 9 if framed else 10
-    trend_w = 8 if framed else 10
-    plateau_step = "+0.0%  <-- plateau" if framed else "+0.0% plateau"
-
-    header = (
-        f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s}"
-        f" {'Rolling Avg':>13s} {'Trend':>{trend_w}s}"
-    )
-
-    lines: list[str] = []
-    if framed:
-        lines.append(wrap(header))
-    else:
-        lines.append("\nPROGRESS")
-        lines.append(f"\n  {header}")
-
-    accs: list[float] = []
-    for rd in rounds:
-        acc = rd.get("accuracy") or 0
-        accs.append(acc)
-        rolling = sum(accs[-window:]) / len(accs[-window:])
-        if len(accs) <= 1:
-            trend = "-"
-        else:
-            d = acc - accs[-2]
-            if abs(d) < 0.001:
-                trend = plateau_step
-            elif d > 0:
-                trend = f"+{d:.1%}"
-            else:
-                trend = f"{d:.1%}"
-        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
-        comp = rd.get("composite_fitness") if rd.get("composite_fitness") is not None else acc
-        row = f"  {rl:<{row_rnd_w}s} {acc:>8.1%} {comp:>{row_comp_w}.4f} {rolling:>12.1%}  {trend}"
-        lines.append(wrap(row))
-
-    if len(accs) >= 3:
-        recent_avg = sum(accs[-3:]) / 3
-        if all(abs(a - recent_avg) < 0.005 for a in accs[-3:]):
-            if framed:
-                lines.append(
-                    wrap(
-                        f"{YELLOW}-- Plateau: rolling avg stable at"
-                        f" {recent_avg:.1%} for 3 rounds{RESET}"
-                    )
-                )
-            else:
-                lines.append(f"  -- Plateau: rolling avg stable at {recent_avg:.1%} for 3 rounds")
-
-    if framed:
-        lines.append(wrap(""))
-    return "\n".join(lines)
-
-
-def render_round_stats(
-    round_result: RoundResult,
-    pipeline_schema: PipelineSchema | None,
-) -> str:
-    """hits/total, candidate count, pipeline terminations, degradation%, recall@1/5.
-
-    Best-effort: the pipeline-stats block is wrapped in try/except and
-    returns an empty string when ``round_result.results`` is empty.
-    """
-    lines: list[str] = []
-    hits = round_result.hits
-    total = round_result.total
-    deprecated = round_result.deprecated
-    if total == 0 and round_result.candidate_scores:
-        best = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
-        hits = best.get("hits", 0)
-        total = best.get("total", 0)
-        deprecated = best.get("deprecated", 0)
-    suffix = f"  ({deprecated} deprecated)" if deprecated else ""
-    lines.append(
-        _node_line(
-            f"hits: {hits}/{total}{suffix}  |  evaluated: "
-            f"{round_result.candidates_scored} candidates"
-        )
-    )
-
-    if not round_result.results:
-        return "\n".join(lines)
-
-    try:
-        from collections import Counter
-
-        from promptpotter.application.optimization.elimination import (
-            candidate_keys_from_schema,
-            get_candidates,
-        )
-        from promptpotter.application.scoring.metrics import find_rank
-
-        candidate_keys = candidate_keys_from_schema(pipeline_schema)
-        results = round_result.results
-        n_results = len(results)
-        terminations: Counter[str] = Counter()
-        degraded = 0
-        for r in results:
-            pd = r.get("pipeline_data") or {}
-            terminations[pd.get("terminated_at", "unknown")] += 1
-            if (pd.get("diagnostics") or {}).get("warnings"):
-                degraded += 1
-
-        if terminations:
-            lines.append(
-                _node_line(
-                    f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in terminations.most_common())}"
-                )
-            )
-        if degraded > 0:
-            lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
-
-        valid = [r for r in results if not is_error_result(r)]
-        if valid:
-
-            def recall_at_k(k: int) -> float:
-                hit_count = 0
-                for r in valid:
-                    rank = find_rank(
-                        get_candidates(r, candidate_keys),
-                        r.get("ground_truth", ""),
-                    )
-                    if rank is not None and rank <= k:
-                        hit_count += 1
-                return hit_count / len(valid)
-
-            lines.append(
-                _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
-            )
-    except Exception:
-        pass
-
-    return "\n".join(lines)
-
-
-def render_patience_status(
-    improved: bool,
-    l1_stall_count: int,
-    l1_patience: int,
-) -> str:
-    """Green tick on improvement; yellow patience counter; red stop on exhaustion."""
-    lines: list[str] = []
-    if improved:
-        lines.append(_node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}"))
-        return "\n".join(lines)
-    lines.append(
-        _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
-    )
-    if l1_stall_count >= l1_patience:
-        lines.append(
-            _node_line(
-                f"{RED}Stopping: patience exhausted ({l1_patience} consecutive stalls){RESET}"
-            )
-        )
-    return "\n".join(lines)

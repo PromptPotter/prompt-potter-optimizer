@@ -26,7 +26,7 @@ Resume = `python -m promptpotter optimize`. No re-`init` needed.
 
 Sessions and campaigns are separate. Today the relation is 1:1; the layout supports 1:N later without reorg.
 
-- `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`, `journal.md` / `notes.md`.
+- `{tenant_id}/sessions/{session_id}/` — operator metadata: `session.json`.
 - `{tenant_id}/campaigns/{cycle_id}/` — per-cycle artifacts. Three bands: **root telemetry** (live observability — `dashboard.json`) at the family root cycle; **per-cycle audit** (`index.json`, `log.md`, `review.md`, `rounds/`, `langfuse/`, `prompts/`) at each cycle's top level; **per-cycle internals** (`.runtime/...`) under a `.runtime/` umbrella. Sibling cycles split by kind into `forks/`, `diag/`, `sweeps/`.
 - `{tenant_id}/archive/` — the **measurement archive**, cross-cycle/session/tenant. See [`../concepts/scoring-and-memory.md`](../concepts/scoring-and-memory.md).
 
@@ -36,7 +36,6 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
   projects/{tenant_id}/
     sessions/{session_id}/
       session.json
-      journal.md / notes.md            # notebook ↔ Claude exchange
     campaigns/{root_cycle_id}/         # family root (no parent_cycle_id)
       # ── Family telemetry (root only, shared across all forks) ──
       dashboard.json                   # live counters; cycle_id field tracks active fork
@@ -97,7 +96,6 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
 | `.runtime/archived/resumed_at_{ts}/` | per cycle | `--from` runs | Mid-cycle rewind sweepup. |
 | `sweeps/{batch_id}/index.json` | family root | sweep mint + per-payload + finalize | Batch metadata: payload list with status. |
-| `journal.md` / `notes.md` | per session | notebook ↔ CLI | User narrative + Claude notes. |
 
 ### `dashboard.json`
 

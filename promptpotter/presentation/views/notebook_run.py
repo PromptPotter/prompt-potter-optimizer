@@ -192,7 +192,6 @@ async def prepare_baseline_notebook(
         pipeline_schema=session.pipeline_schema,
         scoring_formula=scoring_formula,
         sp_budget_ttest=n_samples,
-        store=session.store,
     )
 
     observers = build_run_observers(

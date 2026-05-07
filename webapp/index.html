@@ -648,7 +648,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
           Live state
           <span style="font-size:10px;color:var(--color-text-tertiary);font-weight:400">all dashboard.json fields</span>
         </div>
-        <div class="formula-row" id="formula-row" title="composite_fitness_formula_short">—</div>
+        <div class="formula-row" id="formula-row" title="composite_fitness_formula">—</div>
         <div class="kv-grid" id="live-state-grid"></div>
         <div class="var-label" style="margin-top:14px">In-flight query payload</div>
         <div class="payload-block empty" id="payload-block">no query in flight</div>
@@ -1077,16 +1077,14 @@ function renderWorkflow(dash){
 }
 
 function phaseToNodeId(dash){
-  if(!dash || !dash.phase) return null;
-  const p = String(dash.phase).toLowerCase();
-  const l = String(dash.layer || '').toLowerCase();
-  if(p === 'baseline' || p.includes('baseline')) return 'baseline';
-  if(p.includes('generate')) return 'l1_generate';
-  if(p.includes('critique')) return 'l1_critique';
-  if(p.includes('restructure')) return 'restructure';
-  if(l === 'l2' || p.includes('l2')) return 'l2_context';
-  if(l === 'l3' || p.includes('l3')) return 'l3_plan';
-  if(p.includes('score') || p.includes('measure') || p.includes('eval') || p.includes('round')) return 'l1_score';
+  if(!dash || !dash.state) return null;
+  const s = String(dash.state).toLowerCase();
+  if(s === 'baseline') return 'baseline';
+  if(s === 'l1_generate') return 'l1_generate';
+  if(s === 'l1_critique') return 'l1_critique';
+  if(s === 'l2_refining') return 'l2_context';
+  if(s === 'l3_replanning') return 'l3_plan';
+  if(s === 'scoring' || s === 'between_samples' || s === 'between_candidates') return 'l1_score';
   return null;
 }
 
@@ -1291,9 +1289,8 @@ function estimateQps(dash){
 function renderProgress(dash){
   const tag = document.getElementById('phase-tag');
   const rest = document.getElementById('phase-rest');
-  const phase = dash.phase || '—';
-  tag.textContent = phase;
-  rest.textContent = ` round ${dash.round ?? '—'} · L${(dash.layer || '').replace(/^L/i,'') || '?'}`;
+  tag.textContent = dash.state || '—';
+  rest.textContent = ` round ${dash.round ?? '—'}`;
 
   // Query progress
   const qm = String(dash.query || '').match(/^(\d+)\/(\d+)$/);
@@ -1307,7 +1304,7 @@ function renderProgress(dash){
     qFill.classList.remove('empty');
     const qps = estimateQps(dash);
     const qpsTxt = qps != null ? ` · ${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : '';
-    const inflight = dash.query_in_flight ? ' ⟳' : '';
+    const inflight = dash.state === 'scoring' ? ' ⟳' : '';
     qStats.textContent = `${cur}/${tot} · ${pct}%${qpsTxt}${inflight}`;
   } else {
     qFill.style.width = '0%';
@@ -1345,29 +1342,28 @@ function fmtTime(s){
 
 function renderLiveState(dash){
   const grid = document.getElementById('live-state-grid');
-  document.getElementById('formula-row').textContent = dash.composite_fitness_formula_short || dash.composite_fitness_formula || '—';
+  document.getElementById('formula-row').textContent = dash.composite_fitness_formula || '—';
 
   // Fields surfaced elsewhere (header, payload block, dedicated cards, workflow toolbar).
   const SHOWN_ELSEWHERE = new Set([
     'cycle_id', 'wallclock_serialized_at',
     'best', 'total_queries_scored', 'last_query_elapsed_s',
-    'composite_fitness_formula', 'composite_fitness_formula_short',
+    'composite_fitness_formula',
     'current_round',
     'current_query_payload',
-    'phase', 'layer', 'round', 'candidate', 'query',
+    'state', 'round', 'candidate', 'query',
   ]);
 
   const KNOWN_ORDER = [
     'patience',
     'baseline', 'current_acc', 'n_variants', 'sp_budget_ttest',
     'total_backend_calls', 'error_count', 'degraded_count',
-    'query_in_flight', 'query_started_at',
+    'state', 'state_since', 'stop_reason',
   ];
   const FORMATTERS = {
-    baseline:         v => fmtNum(v),
-    current_acc:      v => fmtNum(v),
-    query_started_at: v => fmtTime(v),
-    query_in_flight:  v => v ? 'yes' : 'no',
+    baseline:    v => fmtNum(v),
+    current_acc: v => fmtNum(v),
+    state_since: v => fmtTime(v),
   };
   const WARN_IF_POSITIVE = new Set(['error_count', 'degraded_count']);
 
@@ -1389,7 +1385,8 @@ function renderLiveState(dash){
     const display = fmt(v);
     const cls = (v == null || v === '' || display === '—') ? 'muted'
               : (WARN_IF_POSITIVE.has(k) && Number(v) > 0) ? 'warn'
-              : (k === 'query_in_flight' && v) ? 'ok'
+              : (k === 'state' && v === 'scoring') ? 'ok'
+              : (k === 'state' && v === 'stopped') ? 'warn'
               : '';
     const label = k.replace(/_/g, ' ');
     return `<div class="kv">
@@ -1403,7 +1400,7 @@ function renderLiveState(dash){
   const payload = dash.current_query_payload;
   if(payload == null || payload === ''){
     payloadEl.classList.add('empty');
-    payloadEl.textContent = dash.query_in_flight ? 'in flight, payload not exposed' : 'no query in flight';
+    payloadEl.textContent = dash.state === 'scoring' ? 'in flight, payload not exposed' : 'no query in flight';
   } else {
     payloadEl.classList.remove('empty');
     payloadEl.textContent = typeof payload === 'string' ? payload : JSON.stringify(payload, null, 2);

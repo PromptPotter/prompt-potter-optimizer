@@ -1,26 +1,31 @@
 """Live ledger subscriber — CLI and notebook share one ``LiveDisplay``.
 
-Surface differentiation via constructor flags, not subclasses:
-- ``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel)
-- ``store`` provided → enables ``note()`` / ``render_claude_notes()`` /
-  ``render_journal()`` (notebook ↔ Claude exchange channel)
+Surface differentiation via constructor flag, not subclasses:
+``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel).
 
 Single ingress: the display consumes ``CycleRecord``s from the per-cycle
-``CycleLedger`` via ``on_record``. Per-query / per-candidate / per-round
-formatters live in sibling modules; this file is the dispatch + tqdm
-bar tracker. Post-hoc reads happen by opening ``campaigns/<cycle_id>/log.md``.
+``CycleLedger`` via ``on_record``. Per-query / per-candidate formatters
+live in ``round_render``; the three round-summary renderers
+(``_render_progress_table`` / ``_render_round_stats`` /
+``_render_patience_status``) are private to this file because nothing
+else calls them. Post-hoc reads happen by opening
+``campaigns/<cycle_id>/log.md``.
 """
 
 from __future__ import annotations
 
-from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import CycleRecord, PhaseRecord, SnapshotRecord
-from promptpotter.infrastructure.store.base import read_text_optional
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.presentation.views.display import (
+    DIM,
+    GREEN,
+    RED,
+    RESET,
+    YELLOW,
     _box_bottom,
     _box_bottom_info,
     _box_line,
@@ -34,73 +39,186 @@ from promptpotter.presentation.views.round_render import (
     _fmt_query_result,
     build_individual_summary,
     fmt_individual_header,
-    render_patience_status,
-    render_progress_table,
-    render_round_stats,
 )
 from promptpotter.shared.composite import (
     render_composite_fitness_block,
 )
+from promptpotter.shared.errors import is_error_result
 
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.store import Stores
 
 
-class _BarTracker:
-    """tqdm bar lifecycle driven by ``RunCallbacks`` events. Optional helper."""
+# ===========================================================================
+# Round-summary renderers — single-caller (``LiveDisplay.on_round_complete``).
+# Inlined here from ``round_render`` so the module surface tracks usage.
+# ===========================================================================
 
-    def __init__(self, sp_budget_ttest: int) -> None:
-        self.budget = sp_budget_ttest
-        self._pbar: Any = None
-        self._cand_idx: int = -1
-        self._in_baseline: bool = False
 
-    def close(self) -> None:
-        if self._pbar is not None:
-            self._pbar.close()
-            self._pbar = None
-        self._cand_idx = -1
+def _render_progress_table(rounds: list[dict], window: int = 8) -> str:
+    """Round-over-round trajectory table: accuracy, composite_fitness, rolling avg, trend, plateau.
 
-    def write(self, line: str) -> None:
-        from tqdm.auto import tqdm
+    Items in ``rounds`` must have at minimum ``round`` and ``accuracy``.
+    The ``Composite`` column is always shown so the operator never has to
+    wonder whether composite_fitness was hidden because it equalled
+    accuracy on every round so far.
+    """
+    if not rounds:
+        return ""
 
-        tqdm.write(line)
+    header = f"{'Round':<7s} {'Accuracy':>9s} {'Composite':>10s} {'Rolling Avg':>13s} {'Trend':>8s}"
+    lines: list[str] = [_node_line(header)]
 
-    def on_phase(self, event: PhaseEvent) -> None:
-        if event.event == "exit":
-            if event.phase == CampaignPhase.BASELINE:
-                self.close()
-                self._in_baseline = False
-            elif event.phase == CampaignPhase.L1_SCORE:
-                self.close()
-        elif event.event == "enter" and event.phase == CampaignPhase.BASELINE:
-            self._in_baseline = True
+    accs: list[float] = []
+    for rd in rounds:
+        acc = rd.get("accuracy") or 0
+        accs.append(acc)
+        rolling = sum(accs[-window:]) / len(accs[-window:])
+        if len(accs) <= 1:
+            trend = "-"
+        else:
+            d = acc - accs[-2]
+            if abs(d) < 0.001:
+                trend = "+0.0%  <-- plateau"
+            elif d > 0:
+                trend = f"+{d:.1%}"
+            else:
+                trend = f"{d:.1%}"
+        rl = "G" if rd.get("round") == "grid" else str(rd.get("round", "?"))
+        comp = rd.get("composite_fitness") if rd.get("composite_fitness") is not None else acc
+        row = f"  {rl:<5s} {acc:>8.1%} {comp:>9.4f} {rolling:>12.1%}  {trend}"
+        lines.append(_node_line(row))
 
-    def on_sample_started(self, ci: int, ct: int, qt: int) -> None:
-        from tqdm.auto import tqdm
-
-        if self._in_baseline:
-            if self._pbar is None:
-                self._pbar = tqdm(total=qt or 1, desc="  baseline", unit="q", leave=False, ncols=60)
-            return
-        if ci != self._cand_idx:
-            self.close()
-            self._cand_idx = ci
-            # Bar tops out at sp_budget_ttest; early t-test elimination leaves
-            # it partially filled — which is the signal, not a bug.
-            self._pbar = tqdm(
-                total=self.budget, desc=f"  cand {ci + 1}/{ct}", unit="q", leave=False, ncols=60
+    if len(accs) >= 3:
+        recent_avg = sum(accs[-3:]) / 3
+        if all(abs(a - recent_avg) < 0.005 for a in accs[-3:]):
+            lines.append(
+                _node_line(
+                    f"{YELLOW}-- Plateau: rolling avg stable at"
+                    f" {recent_avg:.1%} for 3 rounds{RESET}"
+                )
             )
 
-    def on_sample_scored(self) -> None:
-        if self._pbar is not None:
-            self._pbar.update(1)
+    lines.append(_node_line(""))
+    return "\n".join(lines)
 
 
-class LiveDisplay:
-    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class."""
+def _render_round_stats(
+    round_result: RoundResult,
+    pipeline_schema: PipelineSchema | None,
+) -> str:
+    """hits/total, candidate count, pipeline terminations, degradation%, recall@1/5.
+
+    Best-effort: the pipeline-stats block is wrapped in try/except and
+    returns just the hits line when ``round_result.results`` is empty.
+    """
+    lines: list[str] = []
+    hits = round_result.hits
+    total = round_result.total
+    deprecated = round_result.deprecated
+    if total == 0 and round_result.candidate_scores:
+        best = max(round_result.candidate_scores, key=lambda s: s.get("accuracy", 0))
+        hits = best.get("hits", 0)
+        total = best.get("total", 0)
+        deprecated = best.get("deprecated", 0)
+    suffix = f"  ({deprecated} deprecated)" if deprecated else ""
+    lines.append(
+        _node_line(
+            f"hits: {hits}/{total}{suffix}  |  evaluated: "
+            f"{round_result.candidates_scored} candidates"
+        )
+    )
+
+    if not round_result.results:
+        return "\n".join(lines)
+
+    try:
+        from collections import Counter
+
+        from promptpotter.application.optimization.elimination import (
+            candidate_keys_from_schema,
+            get_candidates,
+        )
+        from promptpotter.application.scoring.metrics import find_rank
+
+        candidate_keys = candidate_keys_from_schema(pipeline_schema)
+        results = round_result.results
+        n_results = len(results)
+        terminations: Counter[str] = Counter()
+        degraded = 0
+        for r in results:
+            pd = r.get("pipeline_data") or {}
+            terminations[pd.get("terminated_at", "unknown")] += 1
+            if (pd.get("diagnostics") or {}).get("warnings"):
+                degraded += 1
+
+        if terminations:
+            lines.append(
+                _node_line(
+                    f"Pipeline: {' | '.join(f'{k}:{v}' for k, v in terminations.most_common())}"
+                )
+            )
+        if degraded > 0:
+            lines.append(_node_line(f"Degradation: {degraded / n_results:.0%}"))
+
+        valid = [r for r in results if not is_error_result(r)]
+        if valid:
+
+            def recall_at_k(k: int) -> float:
+                hit_count = 0
+                for r in valid:
+                    rank = find_rank(
+                        get_candidates(r, candidate_keys),
+                        r.get("ground_truth", ""),
+                    )
+                    if rank is not None and rank <= k:
+                        hit_count += 1
+                return hit_count / len(valid)
+
+            lines.append(
+                _node_line(f"Recall: top-1={recall_at_k(1):.0%} top-5={recall_at_k(5):.0%}")
+            )
+    except Exception:
+        pass
+
+    return "\n".join(lines)
+
+
+def _render_patience_status(improved: bool, l1_stall_count: int, l1_patience: int) -> str:
+    """Green tick on improvement; yellow patience counter; red stop on exhaustion."""
+    if improved:
+        return _node_line(f"{GREEN}✓ Improvement detected, auto-continuing...{RESET}")
+    lines = [
+        _node_line(f"{YELLOW}⚠ No improvement ({l1_stall_count}/{l1_patience} patience){RESET}")
+    ]
+    if l1_stall_count >= l1_patience:
+        lines.append(
+            _node_line(
+                f"{RED}Stopping: patience exhausted ({l1_patience} consecutive stalls){RESET}"
+            )
+        )
+    return "\n".join(lines)
+
+
+# ===========================================================================
+# LiveDisplay — RunCallbacks adapter
+# ===========================================================================
+
+
+class LiveDisplay(ProjectionBase):
+    """Live ``RunCallbacks`` adapter — CLI + notebook share this one class.
+
+    When ``sp_budget_ttest`` is provided, tqdm progress bars are rendered
+    inline (CLI feel). The bar lifecycle is fused into ``LiveDisplay``
+    state — no separate inner class.
+
+    Subclasses ``ProjectionBase`` so the ``isinstance`` dispatch over
+    ledger ``CycleRecord`` subtypes lives in one place; this class only
+    overrides ``_handle_phase`` / ``_handle_snapshot``. The ``on_*``
+    public methods stay because pre-cycle paths (``baseline.py``) call
+    them directly without a ledger.
+    """
 
     def __init__(
         self,
@@ -110,7 +228,6 @@ class LiveDisplay:
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list | None = None,
-        store: Stores | None = None,
         sp_budget_ttest: int | None = None,
     ) -> None:
         self.baseline_acc = baseline_acc
@@ -121,22 +238,45 @@ class LiveDisplay:
         self.initial_len = len(self.campaign_rounds)
         self.query_counter = 0
         self._round_num = 0
-        self._store = store
-        self._bars = _BarTracker(sp_budget_ttest) if sp_budget_ttest is not None else None
-        # Composite-render context — read by ``on_candidate_scored`` for the
-        # per-candidate baseline anchor and by ``on_round_complete`` for the
-        # 3-line composite_fitness block. Populated from L1_SCORE:exit views and
-        # mutated on ``scoring_steer:applied``. ``RunCallbacks`` wires its
-        # shared ctx onto ``self._phase_ctx`` after construction so the
-        # display sees the same dict the phase-view builder writes to.
+        # Composite-render context — read by ``on_candidate_scored`` for
+        # the per-candidate baseline anchor and by ``on_round_complete``
+        # for the 3-line composite_fitness block. Populated from
+        # L1_SCORE:exit views and mutated on ``scoring_steer:applied``.
+        # ``RunCallbacks`` wires its shared ctx onto ``self._phase_ctx``
+        # after construction so the display sees the same dict the
+        # phase-view builder writes to.
         self._phase_ctx: dict = {}
         # Per-query Posterior-of-Being-Best snapshot from the prior firing —
         # used to render arrow glyphs (▲/▼) on the next ``on_p_best_update``.
         self._last_p_best: dict[str, float] = {}
+        # Mid-round running leader — updated after each
+        # ``on_candidate_scored`` so the operator sees a one-line
+        # scoreboard between candidates instead of waiting for the
+        # round-summary box past 100+ query lines. Reset on
+        # ``L1_GENERATE:enter``.
+        self._round_best_acc: float | None = None
+        self._round_best_label: str | None = None
+        # tqdm bar lifecycle (CLI surface). When ``sp_budget_ttest`` is
+        # None the bars are skipped entirely; ``_write`` falls back to
+        # plain ``print`` so the notebook surface stays stdout-clean.
+        self._bar_budget = sp_budget_ttest
+        self._bar: Any = None
+        self._bar_cand_idx: int = -1
+        self._in_baseline: bool = False
+
+    # --- tqdm bar helpers (active only when ``_bar_budget`` is set) -----
+
+    def _bars_close(self) -> None:
+        if self._bar is not None:
+            self._bar.close()
+            self._bar = None
+        self._bar_cand_idx = -1
 
     def _write(self, line: str) -> None:
-        if self._bars is not None:
-            self._bars.write(line)
+        if self._bar_budget is not None:
+            from tqdm.auto import tqdm
+
+            tqdm.write(line)
         else:
             print(line, flush=True)
 
@@ -144,76 +284,57 @@ class LiveDisplay:
         """Post-baseline rewire — replace pre-baseline placeholder."""
         self.baseline_acc = fresh
 
-    # --- Ledger subscription ------------------------------------------
+    # --- Ledger subscription (via ProjectionBase) ---------------------
 
-    def on_record(self, record: CycleRecord, offset: int) -> None:
-        """Route a typed record to the corresponding internal handler."""
-        del offset
-        if isinstance(record, PhaseRecord):
-            if record.phase == "round" and record.event == "display":
-                payload = record.payload or {}
-                round_result = payload.get("round_result")
-                l1_stall = int(payload.get("l1_stall_count") or 0)
-                if round_result is not None:
-                    # Re-sync phase ctx from listener-side snapshot so the
-                    # composite_fitness block reads the same baseline anchors the
-                    # listener saw at emit time.
-                    ctx = payload.get("phase_ctx")
-                    if isinstance(ctx, dict):
-                        self._phase_ctx.update(ctx)
-                    self.on_round_complete(round_result, l1_stall)
-                return
-            payload = record.payload or {}
-            view = payload.get("view")
-            data = payload.get("data") or {}
-            event = PhaseEvent(
-                phase=record.phase,
-                event=record.event,
-                round=record.round,
-                data=data,
-            )
-            self.on_phase(event, view)
-        elif isinstance(record, SnapshotRecord):
-            ev = record.event
-            payload = record.payload or {}
-            if ev == "sample_started":
-                self.on_sample_started(
-                    int(record.candidate_idx or 0),
-                    int(record.candidate_total or 0),
-                    int(record.sample_idx or 0),
-                    int(record.sample_total or 0),
-                    payload.get("query_text") or "",
-                )
-            elif ev == "sample_scored":
-                self.on_sample_scored(
-                    int(record.candidate_idx or 0),
-                    int(record.candidate_total or 0),
-                    int(record.sample_idx or 0),
-                    int(record.sample_total or 0),
-                    payload.get("result") or {},
-                )
-            elif ev == "candidate_started":
-                self.on_candidate_started(
-                    int(record.candidate_idx or 0),
-                    int(record.candidate_total or 0),
-                    payload.get("changes_description") or "",
-                    payload.get("pp_override"),
-                )
-            elif ev == "candidate_scored":
+    def _handle_phase(self, record: PhaseRecord) -> None:
+        payload = record.payload or {}
+        if record.phase == "round" and record.event == "display":
+            round_result = payload.get("round_result")
+            if round_result is not None:
+                # Re-sync phase ctx from listener-side snapshot so the
+                # composite_fitness block reads the same baseline anchors
+                # the listener saw at emit time.
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
                     self._phase_ctx.update(ctx)
-                self.on_candidate_scored(
-                    int(record.candidate_idx or 0),
-                    int(record.candidate_total or 0),
-                    payload.get("scores") or {},
-                )
-            elif ev == "p_best_update":
-                self.on_p_best_update(
-                    str(payload.get("current_id") or ""),
-                    int(payload.get("n_queries") or 0),
-                    {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
-                )
+                self.on_round_complete(round_result, int(payload.get("l1_stall_count") or 0))
+            return
+        self.on_phase(
+            PhaseEvent(
+                phase=record.phase,
+                event=record.event,
+                round=record.round,
+                data=payload.get("data") or {},
+            ),
+            payload.get("view"),
+        )
+
+    def _handle_snapshot(self, record: SnapshotRecord) -> None:
+        payload = record.payload or {}
+        ci = int(record.candidate_idx or 0)
+        ct = int(record.candidate_total or 0)
+        qi = int(record.sample_idx or 0)
+        qt = int(record.sample_total or 0)
+        ev = record.event
+        if ev == "sample_started":
+            self.on_sample_started(ci, ct, qi, qt, payload.get("query_text") or "")
+        elif ev == "sample_scored":
+            self.on_sample_scored(ci, ct, qi, qt, payload.get("result") or {})
+        elif ev == "candidate_started":
+            self.on_candidate_started(
+                ci, ct, payload.get("changes_description") or "", payload.get("pp_override")
+            )
+        elif ev == "candidate_scored":
+            ctx = payload.get("phase_ctx")
+            if isinstance(ctx, dict):
+                self._phase_ctx.update(ctx)
+            self.on_candidate_scored(ci, ct, payload.get("scores") or {})
+        elif ev == "p_best_update":
+            self.on_p_best_update(
+                str(payload.get("current_id") or ""),
+                int(payload.get("n_queries") or 0),
+                {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
+            )
 
     # --- Public callback API ------------------------------------------
     #
@@ -223,8 +344,18 @@ class LiveDisplay:
     # forwards ledger-driven events into the same handlers.
 
     def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
-        if self._bars is not None:
-            self._bars.on_phase(event)
+        # Bar lifecycle inline — close on phase-exit boundaries; mark
+        # baseline phase so ``on_sample_started`` opens the right bar.
+        if self._bar_budget is not None:
+            if event.event == "exit":
+                if event.phase == CampaignPhase.BASELINE:
+                    self._bars_close()
+                    self._in_baseline = False
+                elif event.phase == CampaignPhase.L1_SCORE:
+                    self._bars_close()
+            elif event.event == "enter" and event.phase == CampaignPhase.BASELINE:
+                self._in_baseline = True
+
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
         if view is not None:
@@ -252,6 +383,9 @@ class LiveDisplay:
                 self.baseline_acc = view.get("winner_accuracy", self.baseline_acc)
         if event.round is not None:
             self._round_num = event.round
+        if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
+            self._round_best_acc = None
+            self._round_best_label = None
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.query_counter = 0
         if (
@@ -272,8 +406,28 @@ class LiveDisplay:
     ) -> None:
         # Per-query output renders after the result lands; the emitter's
         # dashboard.json surfaces the in-flight state.
-        if self._bars is not None:
-            self._bars.on_sample_started(cand_idx, n_cands, n_queries)
+        if self._bar_budget is None:
+            return
+        from tqdm.auto import tqdm
+
+        if self._in_baseline:
+            if self._bar is None:
+                self._bar = tqdm(
+                    total=n_queries or 1, desc="  baseline", unit="q", leave=False, ncols=60
+                )
+            return
+        if cand_idx != self._bar_cand_idx:
+            self._bars_close()
+            self._bar_cand_idx = cand_idx
+            # Bar tops out at sp_budget_ttest; early t-test elimination
+            # leaves it partially filled — which is the signal, not a bug.
+            self._bar = tqdm(
+                total=self._bar_budget,
+                desc=f"  cand {cand_idx + 1}/{n_cands}",
+                unit="q",
+                leave=False,
+                ncols=60,
+            )
 
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
@@ -288,8 +442,8 @@ class LiveDisplay:
                 scoring_formula=self.scoring_formula,
             )
         )
-        if self._bars is not None:
-            self._bars.on_sample_scored()
+        if self._bar is not None:
+            self._bar.update(1)
 
     def on_p_best_update(self, current_id: str, n_queries: int, p_best: dict[str, float]) -> None:
         """One-line per-query Posterior-of-Being-Best snapshot.
@@ -324,13 +478,11 @@ class LiveDisplay:
     ) -> None:
         # Close any still-open bar (e.g. final query of prior candidate) so
         # the header lands above the fresh bar.
-        if self._bars is not None:
-            self._bars.close()
+        self._bars_close()
         self._write(fmt_individual_header(idx, total, changes_description, pp_override))
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        if self._bars is not None:
-            self._bars.close()
+        self._bars_close()
         w = 66
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
@@ -349,9 +501,31 @@ class LiveDisplay:
         else:
             self._write(f"  {_box_bottom(width=w)}")
 
+        # Mid-round leader scoreboard — one tight line so the operator can read
+        # "is anything beating baseline yet" without scrolling through 100+
+        # query lines to find the round-summary box. Skip invalid candidates
+        # (no comparable accuracy).
+        if summary.status != "invalid":
+            acc = scores.get("accuracy")
+            if isinstance(acc, int | float):
+                self._write(self._fmt_round_leader(label, float(acc), baseline_acc))
+
+    def _fmt_round_leader(self, label: str, acc: float, baseline_acc: float) -> str:
+        """One-liner scoreboard: ``★ leader`` on a new best, ``→`` else."""
+        delta_base = acc - baseline_acc
+        if self._round_best_acc is None or acc > self._round_best_acc:
+            self._round_best_acc = acc
+            self._round_best_label = label
+            sign = "+" if delta_base >= 0 else ""
+            return (
+                f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_base:.1%} vs base){RESET}"
+            )
+        gap = acc - (self._round_best_acc or acc)
+        prior = self._round_best_label or "leader"
+        return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
+
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
-        if self._bars is not None:
-            self._bars.close()
+        self._bars_close()
         self.query_counter = 0
 
         self.campaign_rounds.append(
@@ -373,7 +547,7 @@ class LiveDisplay:
         rn = self._round_num + 1
         self._write("")
         self._write(_node_top(f"ROUND {rn} SUMMARY"))
-        for line in render_progress_table(self.campaign_rounds).split("\n"):
+        for line in _render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
         # Composite block — full mode only. 3-line render: composite_fitness +
         # baseline anchor (line 1), abbreviated formula (line 2), short-
@@ -392,48 +566,12 @@ class LiveDisplay:
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))
-        if stats := render_round_stats(round_result, self.pipeline_schema):
+        if stats := _render_round_stats(round_result, self.pipeline_schema):
             for line in stats.split("\n"):
                 if line:
                     self._write(line)
-        for line in render_patience_status(
+        for line in _render_patience_status(
             round_result.improved, l1_stall_count, self.l1_patience
         ).split("\n"):
             self._write(line)
         self._write(_node_bottom())
-
-    # --- Notebook ↔ Claude exchange channel (active when ``store`` is set) ---
-
-    def _resolve_session_dir(self) -> Path:
-        from promptpotter.infrastructure.store import read_active_pointer
-
-        if self._store is None:
-            raise RuntimeError("note()/render_*() require store=; pass it to LiveDisplay.")
-        _, sid, _cid = read_active_pointer()
-        if not sid:
-            raise RuntimeError(
-                "No active session - run init/auto-mint before calling "
-                "display.note() or display.render_claude_notes()."
-            )
-        return self._store.sessions.session_dir(sid)
-
-    def note(self, action: str, body: str = "") -> None:
-        """Append a narrative note to ``journal.md`` for Claude."""
-        from promptpotter.infrastructure.projections import append_journal
-
-        append_journal(self._resolve_session_dir(), action, body)
-
-    def render_claude_notes(self) -> None:
-        """Render ``notes.md`` inline so Claude's notes appear in a cell."""
-        from promptpotter.infrastructure.projections import read_claude_notes
-        from promptpotter.presentation.views.display import render_markdown_box
-
-        content = read_claude_notes(self._resolve_session_dir()).rstrip()
-        print(render_markdown_box("CLAUDE NOTES", content, "(no claude notes yet)"))
-
-    def render_journal(self) -> None:
-        """Render ``journal.md`` inline - mirror of notes."""
-        from promptpotter.presentation.views.display import render_markdown_box
-
-        content = read_text_optional(self._resolve_session_dir() / "journal.md").rstrip()
-        print(render_markdown_box("JOURNAL", content, "(no journal entries yet)"))

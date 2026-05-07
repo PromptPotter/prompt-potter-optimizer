@@ -29,7 +29,6 @@ The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a ca
 - **Never wipe project data without asking.** Spell out the full path first.
 - **Phases 0–0.5 are silent.** The Phase 0.7 outlook is the first thing the user sees — pick the tier that matches state + intent, don't stack sections.
 - **Treat defaults as correct.** Documented config (BBEH `campaign.json` vs notebook drift, notebook-driven entry, BBEH inline `task_context`) is expected state, not a warning. Warnings come from the anomaly allowlist in Phase 0.7 — nothing else.
-- **Notebook ↔ Claude channel.** Every session has `journal.md` (user narrative) and `notes.md` (your structured notes, tags `[FYI]` / `[RECOMMEND]` / `[BLOCKER]`). Read the journal to pick up intent; append to `notes.md` via Write/Edit so `display.render_claude_notes()` can surface it back.
 
 ---
 

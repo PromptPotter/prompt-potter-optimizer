@@ -63,11 +63,12 @@ SIBLING_GROUP_DIRS = {"forks", "diag", "sweeps"}
 CAMPAIGN_ARTIFACTS = ROOT_TELEMETRY_ARTIFACTS | PER_CYCLE_OPERATOR_ARTIFACTS
 
 # Per-session artifacts under ``sessions/{session_id}/``. ``session.json``
-# is owned by SessionStore; the emitter ensures the rest exist from mint.
+# is owned by SessionStore. ``journal.md`` / ``notes.md`` are NOT in this
+# set — they're a notebook ↔ Claude exchange habit, not a contract; per
+# tests/CLAUDE.md "UX affordances. Journal/notes/HITL exchange surface.
+# It is a habit, not a contract." They appear lazily on first write.
 SESSION_ARTIFACTS = {
     "session.json",
-    "journal.md",
-    "notes.md",
 }
 
 
@@ -118,7 +119,7 @@ def test_artifact_sets_are_disjoint_and_well_formed() -> None:
     assert ROOT_TELEMETRY_ARTIFACTS.isdisjoint(PER_CYCLE_OPERATOR_ARTIFACTS)
     assert SIBLING_GROUP_DIRS.isdisjoint(CAMPAIGN_ARTIFACTS)
     assert PER_CYCLE_INTERNAL_UMBRELLA not in CAMPAIGN_ARTIFACTS
-    assert {"journal.md", "notes.md", "session.json"} <= SESSION_ARTIFACTS
+    assert {"session.json"} <= SESSION_ARTIFACTS
     assert {"dashboard.json"} <= ROOT_TELEMETRY_ARTIFACTS
     assert {"index.json", "log.md", "review.md"} <= PER_CYCLE_OPERATOR_ARTIFACTS
     assert {"forks", "diag", "sweeps"} == SIBLING_GROUP_DIRS

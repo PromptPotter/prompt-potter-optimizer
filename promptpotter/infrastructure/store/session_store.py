@@ -34,12 +34,6 @@ class SessionStore:
     def _state_path(self, session_id: str) -> Path:
         return self.session_dir(session_id) / "session.json"
 
-    def journal_path(self, session_id: str) -> Path:
-        return self.session_dir(session_id) / "journal.md"
-
-    def notes_path(self, session_id: str) -> Path:
-        return self.session_dir(session_id) / "notes.md"
-
     # -- Session CRUD ---------------------------------------------------------
 
     def create(self, session_id: str, state: dict[str, Any]) -> Path:
@@ -71,12 +65,3 @@ class SessionStore:
         data.update(updates)
         data["updated_at"] = datetime.now(UTC).isoformat()
         write_json(path, data)
-
-    # -- Narrative artifacts (touch on mint, append by helpers) ---------------
-
-    def ensure_narrative_files(self, session_id: str) -> None:
-        """Create empty journal.md / notes.md so parity holds from mint."""
-        sdir = self.session_dir(session_id)
-        sdir.mkdir(parents=True, exist_ok=True)
-        for name in ("journal.md", "notes.md"):
-            (sdir / name).touch()

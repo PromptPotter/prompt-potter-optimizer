@@ -87,7 +87,7 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 .promptpotter/
   active_session.json                              # {tenant_id, session_id, cycle_id}
   projects/{tenant_id}/
-    sessions/{session_id}/                         # session.json, journal.md, notes.md
+    sessions/{session_id}/                         # session.json
     campaigns/{root_cycle_id}/                     # FAMILY ROOT
       dashboard.json                               # telemetry, root only (shared across forks)
       index.json log.md rounds/ prompts/ langfuse/
