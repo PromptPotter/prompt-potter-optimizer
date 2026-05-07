@@ -99,6 +99,29 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
     ctx["l1_stall_count"] = 0
     ctx["baseline_accuracy"] = 0.0
 
+    # Resolve the per-round composite formula at INIT.enter so the live
+    # dashboard can stamp it before baseline scoring fires (matches _init_exit
+    # priority: explicit campaign override > schema default > None).
+    explicit = (
+        session.scoring.scorer_round_formula
+        if session is not None and getattr(session, "scoring", None) is not None
+        else None
+    )
+    if explicit:
+        full, short = explicit, None
+    elif schema is None:
+        full, short = None, None
+    else:
+        from promptpotter.application.scoring.evaluators import (
+            default_per_round_formula,
+            default_per_round_formula_short,
+        )
+
+        full = default_per_round_formula(schema)
+        short = default_per_round_formula_short(schema)
+    ctx["composite_fitness_formula"] = full
+    ctx["composite_fitness_formula_short"] = short
+
     return InitEnterView(
         warnings=tuple(
             WarningEntry(title=w.title, detail=w.detail) for w in (d.get("warnings") or [])
@@ -112,6 +135,8 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
         model=config.optimizer_llm.model or "(default)",
         l2_enabled=opt.enable_l2,
         l3_enabled=opt.enable_l3,
+        composite_fitness_formula=full,
+        composite_fitness_formula_short=short,
     )
 
 
@@ -458,6 +483,8 @@ def _init_enter_from_dict(v: dict) -> InitEnterView:
         model=v.get("model", ""),
         l2_enabled=v.get("l2_enabled", False),
         l3_enabled=v.get("l3_enabled", False),
+        composite_fitness_formula=v.get("composite_fitness_formula"),
+        composite_fitness_formula_short=v.get("composite_fitness_formula_short"),
     )
 
 

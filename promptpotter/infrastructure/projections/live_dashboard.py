@@ -371,7 +371,19 @@ class LiveDashboardProjection(ProjectionBase):
                 self._set_state(mapped)
 
         phase, data = event.phase, event.data
-        if phase == CampaignPhase.INIT and event.event == "exit":
+        if phase == CampaignPhase.INIT and event.event == "enter":
+            # Stamp the formula early so it's already on dashboard.json
+            # during baseline scoring (which runs before INIT.exit). Without
+            # this, the live preview's What-If panel has no formula reference
+            # for the entire baseline phase.
+            if view is not None:
+                formula = view.get("composite_fitness_formula")
+                if formula is not None:
+                    s["composite_fitness_formula"] = formula
+                short = view.get("composite_fitness_formula_short")
+                if short is not None:
+                    self.short_formula_template = short
+        elif phase == CampaignPhase.INIT and event.event == "exit":
             cycle = data["state"]
             loop_env = data["env"]
             config = data["config"]
