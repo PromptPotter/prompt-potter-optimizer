@@ -81,7 +81,9 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 
 **Problem:** M9's file-directory view model has no pixel UI.
 
-**Technology:** Next.js + React + Tailwind CSS in `webapp/` directory, consuming the existing FastAPI API which in turn reads the M9 view model. Thin pixel layer on top of a flat data layer — no duplication of render logic.
+**Technology:** Next.js + React in `webapp/` directory, consuming the existing FastAPI API which in turn reads the M9 view model. Thin pixel layer on top of a flat data layer — no duplication of render logic. Styling continues from the vanilla preview's plain CSS + design-token approach (CSS Modules ship with Next.js by default; no Tailwind dependency).
+
+**Status (2026-05-07):** Slice 1 shipped 2026-05-05 as a vanilla `webapp/index.html` preview (see [`m11-webapp-minimal-preview.md`](m11-webapp-minimal-preview.md)). Next.js + React migration is now imminent — the vanilla file is the migration preservation list, not an iteration target. All Track 3 deliverables below land in the Next.js codebase.
 
 **Deliverables:**
 
@@ -89,9 +91,18 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 2. **Dashboard** — backend list, campaign summary cards, overall stats.
 3. **Campaign detail** — convergence chart (accuracy vs round), trial timeline, best vs baseline comparison. Data comes from the M9 view model via the API.
 4. **Trial inspector** — prompt diff view, per-query results table, failure analysis display.
-5. **Benchmark results display** — comparison tables from `docs/research/benchmarks.md` data (populated in Track 1), interactive convergence plots.
+5. **Migration of M11-vanilla views** — port the shipped Dashboard, Files, View Results pane, workflow canvas, and What-If ablation card into the Next.js + React codebase. Preserve every wired / held-real-estate / load-bearing element from the vanilla preservation list. Bake in baseline a11y + semantic HTML + `prefers-reduced-motion` + typed data shapes (`dashboard.json` / `OptSearchPoint` / `archive/measurements/`) as new-codebase requirements.
+6. **Additive monitoring containers** — read-only views the operator has flagged as M11 expansion homes:
+   - **Hard-sample dashboard** *alongside* the existing live-samples card (don't replace it). Surfaces samples that consistently fail across candidates and rounds via `SampleIndex.dead()`. Reference: [`hard-sample-sorter.md`](hard-sample-sorter.md). Likely sidebar slot: Analytics.
+   - **Per-searchpoint score histogram across rounds.** Pairs with hard-sample dashboard — see which samples each searchpoint got right/wrong and how that distribution shifted round over round. Source: `archive/measurements/` via `measurements_for_config(predicate)`. Likely sidebar slot: Analytics.
+   - **Family-tree / speciation view.** Read-only. Root on the left (baseline searchpoint), branches rightward as the population speciates through L2/L3 transitions. Source: `OptSearchPoint.lineage` + `campaigns/{cycle_id}/rounds/round_NNNN.json`. Likely sidebar slot: Evaluations. Operator-flagged "very important."
+   - **Dataset preview view on drop.** When the user attaches a dataset, render a dedicated preview surface (not just a filename pill). Pairs with the canonical entry-flow shape — drop dataset → see preview → wand toggle on → quiet evolution starts.
+7. **M12 launcher draft scaffolding** — first-draft surfaces staged in M11 to inform M12's launcher / control design (the resolved shape ships in M12 Wave 3). Both drafts coexist with the structured-form shape from deliverable 3 above; M11–M12 designs *one* launcher that covers both.
+   - Chat panel staged as a candidate user-facing front-end for the existing `restructure` optimizer node (downstream of `l3_plan`). Prefilled conversation is illustrative of the eventual UX. Yet to fulfill what the campaign configuration form covers — both shapes are in play.
+   - Wand "always-on background optimization" toggle staged as a candidate control surface (live optimization vs offline campaign framing). Coexists with discrete start / pause / resume / stop until M12 resolves which surface ships.
+8. **Benchmark results display** — comparison tables from `docs/research/benchmarks.md` data (populated in Track 1), interactive convergence plots.
 
-**Out of scope (M12):** campaign launcher, live monitoring (WebSocket/SSE), API extensions for control, polish/deployment.
+**Out of scope (M12):** campaign launcher wire-up to real backend, live monitoring (WebSocket/SSE), API extensions for control, polish/deployment.
 
 **Security gate (must land before this track is exposed beyond localhost):** see [`security-audit.md`](security-audit.md) § Webapp endpoint hardening — auth dep on every router, CORS allowlist, Pydantic `extra=forbid`, slow-API rate limiter on cycle-read endpoints.
 

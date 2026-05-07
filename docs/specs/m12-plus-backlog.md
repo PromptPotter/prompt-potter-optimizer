@@ -39,6 +39,7 @@ M12+ is the opportunistic bucket. Items here ship after M12 as user demand, time
 | Model comparison matrix | Same benchmark across multiple target LLMs |
 | Web scrape ablation | Quality vs cost/latency tradeoff for backends that do web retrieval |
 | Public service deployment | Auth, rate limiting, multi-tenancy hardening, billing. Builds on M9's `TenantContext` + M12's enforcement |
+| User-editable `pipeline.json` + initial values in the UI | Operator-flagged 2026-05-07. Today `datasets/{name}/pipeline.json` is filesystem-edited only. Webapp surface for "define your own pipeline" — author the node graph + initial param values directly in the UI. Pairs with the M12 dataset preview view + connector-driven pipeline visualization. Out of M12 scope; logged here so the M12 webapp doesn't accidentally close the door on it |
 
 ### Research Extensions
 

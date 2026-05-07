@@ -69,12 +69,22 @@ Three gaps M12 closes:
 
 **Webapp views:**
 
-1. **Campaign configuration form** — dataset + pipeline + connector selection, `campaign.json` builder, scan variant editor.
-2. **Real-time progress dashboard** — current round, candidates, live accuracy, L1/L2/L3 status, log tail.
-3. **Control panel** — pause / resume / stop buttons wired to the control surface.
-4. **Polish + deployment** — production build config, Docker Compose (FastAPI + webapp), environment configuration.
+The launcher and control shapes are still being designed across M11–M12. Two candidate shapes are both in play and the deliverable for this track is to land *one* that satisfies both. Neither is yet sufficient on its own.
 
-**Multi-tenant hook-up:** M12 is also the right moment to activate the `TenantContext` seam shaped in M9. Auth middleware populates it; `infrastructure/store/` starts enforcing `{tenant_id}/...` path prefixes. Whitelabel becomes viable.
+1. **Campaign configuration form** — dataset + pipeline + connector selection, `campaign.json` builder, scan variant editor. The structured-form shape: every knob the optimizer takes is editable, no ambiguity, reproducible from the JSON it produces. Strength: completeness, auditability, the obvious target for power users and reproducibility.
+2. **Chat panel** (operator-staged in M11's "New Job" tab, 2026-05-07) — conversation-shaped entry. First-draft framing: drop dataset → see dataset preview → wand toggle on → quiet evolution starts; the chat is the conversation surface for that flow. Direction: wires to the existing `restructure` optimizer node (downstream of `l3_plan`) as its user-facing surface. Strength: low-friction onboarding, matches the operator's "fix a broken LLM pipeline in half a day, then it just works" launch positioning. Yet to fulfill what the configuration form covers (every knob, scan-variant editing, reproducible JSON output).
+3. **Dataset preview view on drop** — when the user attaches a dataset (currently only a filename chip in M11), render a dedicated preview surface. Pairs with both shapes above.
+4. **Control surface — discrete buttons vs. wand toggle.** Same dual-design tension as the launcher:
+   - *Discrete pause / resume / stop buttons* — explicit, unambiguous, model-the-state. The structured shape.
+   - *Wand "always-on background optimization" toggle* — operator-staged in M11. Live optimization that quietly evolves while production runs (live mode vs offline campaign). The framing the operator wants kept explicit until later versions. Yet to cover the explicit-state surface that discrete buttons give for free.
+   Wave 3 wires whichever resolved shape into `POST /control` (pause / resume / stop endpoints stay; only the user-facing surface is the open question).
+5. **Real-time progress dashboard** — current round, candidates, live accuracy, L1/L2/L3 status, log tail. Live update via SSE/WebSocket replaces M11's 2 s polling.
+6. **Pipeline visualization is connector-driven, not connector-specific** — renders whatever the active connector's `pipeline.json` declares. Re-renders on dataset / session switch. Currently TermNorm is the only registered connector, so its 5-node shape is what appears, but the visualization itself is shape-agnostic.
+7. **Polish + deployment** — production build config, Docker Compose (FastAPI + webapp), environment configuration.
+
+**Open M11–M12 design question:** how the configuration-form completeness and the chat-panel low-friction shape converge into one launcher (and analogously, how discrete control and the wand toggle converge). M11 prototypes the chat + wand drafts; M12 Wave 3 ships the resolved shape.
+
+**Multi-tenant hook-up:** M12 is also the right moment to activate the `TenantContext` seam shaped in M9. Auth middleware populates it; `infrastructure/store/` starts enforcing `{tenant_id}/...` path prefixes. Whitelabel becomes viable. Sidebar `Log out` lights up under this work.
 
 ---
 

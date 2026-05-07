@@ -1,6 +1,6 @@
 # M11 Webapp — Minimal Read-Only Preview
 
-**Status:** SHIPPED (2026-05-05) — ugly, read-only, used in concert with the file tree. Replacement (Next.js Track 3 full coverage) is still future work.
+**Status:** Slice 1 shipped (2026-05-05) — vanilla `webapp/index.html`, ugly, read-only, used in concert with the file tree. Slice 1 ≠ all of M11 webapp scope. Further M11 monitoring slices (hard-sample dashboard sibling to live samples, per-searchpoint score histogram across rounds, family-tree speciation view, dataset preview on drop) still belong in M11 and land **in the imminent Next.js + React port**, not in further vanilla iteration. The vanilla file is now the migration preservation list, not an iteration target. The color-only status banner semantics (live / stale / offline) is migration-deferred — fixed in the Next.js port baseline alongside the rest of the a11y groundwork.
 **Implementation:**
 - API: `_active_router` + `/campaigns/{cycle_id}/files` + `/campaigns/{cycle_id}/file` + `/optimizer/pipeline` in `promptpotter/presentation/api.py`.
 - Static mount: `app.mount("/ui", StaticFiles(...))` in `promptpotter/main.py`; bundle at `webapp/index.html` (single file, vanilla JS + Chart.js + marked CDNs).
@@ -36,7 +36,7 @@ Visual target: hand-supplied stub at `C:\Users\dsacc\Downloads\curator_dashboard
 |---|---|---|---|
 | Sidebar nav (Dashboard, Analytics, Evaluations, Reports, Settings) | Two real, rest stubs | "Dashboard" + "Files" become tabs that swap the main pane. Others render `<disabled>` style. | none |
 | Sidebar `+ New Analysis` | Stub (disabled) | — | — |
-| Topbar tabs (New, View Results, Model Audit, Prompts, Datasets) | Stubs | Visual only; first-load active = "View Results". | none |
+| Topbar tabs (New Job, View Results, Model Audit, Prompts, Datasets) | Mixed | Spec previously read "first-load active = View Results". Operator-confirmed 2026-05-07: **first-load active is now "New Job"** — deliberate launcher pre-shape ahead of M12 Wave 2's API extensions. The "New Job" tab is M12 Track 3 load-bearing scaffold (chat panel = future user-facing surface for the existing `restructure` optimizer node; wand toggle = canonical control surface). View Results / Model Audit / Prompts / Datasets remain stubs / read-only payloads. | none |
 | Topbar `Search analytics…` | Stub | — | — |
 | Topbar `Export Data` | Stub | — | — |
 | Breadcrumb | Real | `"Cycle » {cycle_id}"` | `GET /api/v1/active` |
