@@ -10,7 +10,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
@@ -334,7 +334,9 @@ def configure_and_apply_pipeline(
             valid_overrides.setdefault(pnode, {})["prompt"] = template.render()
             log(f"Starting prompt: {dataset_name}/prompts/[{pnode}|{starting_name}].json → {pnode}")
 
-    pipeline_params = filtered.to_pipeline_params() if filtered else {"steps": active}
+    pipeline_params: dict[str, Any] = (
+        filtered.to_pipeline_params() if filtered else {"steps": active}
+    )
     # Operator's ``pipeline_overrides`` + the resolved starting prompt land
     # directly on the sparse wire payload — never into ``current_config``,
     # which stays the backend's source of truth.
