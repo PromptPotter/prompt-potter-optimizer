@@ -193,7 +193,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             obs=None,
             resumed_from_round=0,
         ),
-        scoring=SimpleNamespace(scoring_set=[]),
+        scoring=SimpleNamespace(scoring_set=[], scorer_round_formula=None),
         pipeline_schema=None,
     )
     fire(

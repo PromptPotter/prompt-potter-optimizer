@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.review import render_review_md
+from promptpotter.application.round_audit import load_round_audits
 from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.presentation.views.render_markdown import to_markdown
 from promptpotter.presentation.views.view_factories import from_disk_log
@@ -218,18 +219,7 @@ def write_review_md(session: Session, cycle: Cycle) -> None:
             else []
         )
         cycle_dir = store.campaign_dir(session.state.cycle_id)
-        rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
-        round_audits: list[dict | None] = []
-        for round_data in rounds:
-            round_num = int(round_data.get("round") or 0)
-            audit_path = rounds_dir / f"round_{round_num:04d}.json"
-            audit: dict | None = None
-            if audit_path.is_file():
-                try:
-                    audit = json.loads(audit_path.read_text(encoding="utf-8"))
-                except (OSError, json.JSONDecodeError):
-                    audit = None
-            round_audits.append(audit)
+        round_audits = load_round_audits(cycle_dir, rounds)
         td = cycle.opt_sp.task_context
         context_object = [
             td.pipeline_purpose,

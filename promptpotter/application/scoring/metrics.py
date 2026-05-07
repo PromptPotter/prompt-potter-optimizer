@@ -265,8 +265,8 @@ def compute_composite_fitness(
     runtime_failure_count = 0
     validation_failure_count = 0
     if opt_sp is not None:
-        runtime_failure_count = len(getattr(opt_sp, "runtime_failures", []) or [])
-        validation_failure_count = len(getattr(opt_sp, "validation_failures", []) or [])
+        runtime_failure_count = len(opt_sp.runtime_failures)
+        validation_failure_count = len(opt_sp.validation_failures)
 
     if validation_failure_count > 0:
         composite_fitness = 0.0

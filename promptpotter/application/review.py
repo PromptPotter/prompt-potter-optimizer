@@ -34,6 +34,7 @@ from promptpotter.application.l1_behavior_checks import (
     run_all_checks,
 )
 from promptpotter.application.l1_stats import L1Stats, compute_l1_stats
+from promptpotter.application.round_audit import extract_l1_variants
 
 __all__ = ["render_review_md"]
 
@@ -227,7 +228,7 @@ def _render_check_checklist(checks: list[CheckResult]) -> list[str]:
 
 
 def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> list[str]:
-    variants = _extract_variants(audit)
+    variants = extract_l1_variants(audit)
     if not variants:
         return []
     parts: list[str] = ["**Variants**", ""]
@@ -265,17 +266,6 @@ def _render_critique(round_data: dict[str, Any]) -> list[str]:
         return []
     quoted = critique.replace("\n", "\n> ")
     return ["**Critique**", "", f"> {quoted}", ""]
-
-
-def _extract_variants(audit: dict[str, Any] | None) -> list[dict[str, Any]]:
-    if not audit:
-        return []
-    nodes = audit.get("nodes") or {}
-    node = nodes.get("l1_generate") or {}
-    response = ((node.get("output") or {}).get("response")) or {}
-    if isinstance(response, dict):
-        return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
-    return []
 
 
 def _is_generation_only(round_data: dict[str, Any]) -> bool:

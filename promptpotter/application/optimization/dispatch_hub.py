@@ -362,17 +362,14 @@ def _r_failures(b: Bundle) -> str:
         if warned:
             parts.append(f"WARNING INVENTORY: {warned} queries with recurring pipeline warnings.")
 
-    if osp.l2_output_failures:
-        sec = ["L2 OUTPUT VALIDATOR FAILURES (deterministic checks caught L2 thrashing):"]
-        for o in osp.l2_output_failures:
-            sec.append(f"  • {o.validator_id} (score={o.score:.2f})")
-        parts.append("\n".join(sec))
-
-    if l3_failures := getattr(osp, "l3_output_failures", None):
-        sec = ["L3 OUTPUT VALIDATOR FAILURES (deterministic checks caught L3 thrashing):"]
-        for o in l3_failures:
-            sec.append(f"  • {o.validator_id} (score={o.score:.2f})")
-        parts.append("\n".join(sec))
+    for label, outcomes in (("L2", osp.l2_output_failures), ("L3", osp.l3_output_failures)):
+        if outcomes:
+            sec = [
+                f"{label} OUTPUT VALIDATOR FAILURES "
+                f"(deterministic checks caught {label} thrashing):"
+            ]
+            sec.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
+            parts.append("\n".join(sec))
 
     return _fence_untrusted("\n\n".join(parts))
 
@@ -602,10 +599,8 @@ def build_bundle(
         rounds_tuple = (*rounds_tuple, latest_round)
     elif latest_round is None and rounds_tuple:
         latest_round = rounds_tuple[-1]
-    latest_diag: RoundDiagnostics | None = (
-        getattr(latest_round, "diagnostics", None) if latest_round else None
-    )
-    latest_crit: dict | None = getattr(latest_round, "critique", None) if latest_round else None
+    latest_diag = latest_round.diagnostics if latest_round else None
+    latest_crit = latest_round.critique if latest_round else None
     round_num = latest_round.round + 1 if latest_round else 0
 
     cs = CycleSlice(

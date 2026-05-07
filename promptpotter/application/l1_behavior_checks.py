@@ -18,6 +18,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from promptpotter.application.round_audit import extract_l1_variants
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 
 __all__ = [
@@ -69,17 +70,6 @@ CheckFn = Callable[[dict[str, Any], CheckContext], CheckResult]
 _WORD_RE = re.compile(r"[A-Za-z][A-Za-z_\-]{2,}")
 
 
-def _l1_generate_variants(round_dict: dict[str, Any]) -> list[dict[str, Any]]:
-    """Pull the variants list from a round dict; empty when L1 didn't fire."""
-    nodes = round_dict.get("nodes") or {}
-    node = nodes.get("l1_generate") or {}
-    response = ((node.get("output") or {}).get("response")) or {}
-    if isinstance(response, dict):
-        variants = response.get("variants") or []
-        return [v for v in variants if isinstance(v, dict)]
-    return []
-
-
 def _variant_text_blob(variant: dict[str, Any]) -> str:
     """All free-form variant text checks may scan against."""
     parts = [str(variant.get("changes_description") or "")]
@@ -109,7 +99,7 @@ def _key_phrases(text: str, *, min_len: int = 4, max_phrases: int = 6) -> list[s
 def _check_context_object_honored(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """Each variant must reference at least one ``context_object`` item."""
     items = [c for c in ctx.context_object if isinstance(c, str) and c.strip()]
-    variants = _l1_generate_variants(round_dict)
+    variants = extract_l1_variants(round_dict)
     if not items:
         return CheckResult("context_object_honored", True, "no context_object items to honour")
     if not variants:
@@ -136,7 +126,7 @@ def _check_context_object_honored(round_dict: dict[str, Any], ctx: CheckContext)
 
 def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """No param-scope mutations while prompt-field exploration hasn't settled."""
-    variants = _l1_generate_variants(round_dict)
+    variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("param_scope_discipline", True, "no variants emitted")
 
@@ -174,7 +164,7 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext)
 
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """≥1 variant per round must mutate a ``PROMPT_STRING_FIELDS`` field."""
-    variants = _l1_generate_variants(round_dict)
+    variants = extract_l1_variants(round_dict)
     if not variants:
         return CheckResult("not_only_param_variants", True, "no variants emitted")
 
@@ -236,7 +226,7 @@ def _stale_prompt_field(ctx: CheckContext) -> str | None:
     recent_two = ctx.prior_rounds[-2:]
     mutated_fields: set[str] = set()
     for r in recent_two:
-        for v in _l1_generate_variants(r):
+        for v in extract_l1_variants(r):
             pp = v.get("pipeline_params_override") or {}
             mutated_fields.update(k for k in pp if k in PROMPT_STRING_FIELDS)
     for field_name in PROMPT_STRING_FIELDS:

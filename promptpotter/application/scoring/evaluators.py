@@ -78,7 +78,7 @@ def compute_runtime_failure_rate(
 ) -> float:
     if not results or opt_sp is None:
         return 0.0
-    count = len(getattr(opt_sp, "runtime_failures", []) or [])
+    count = len(opt_sp.runtime_failures)
     return min(count / len(results), 1.0)
 
 

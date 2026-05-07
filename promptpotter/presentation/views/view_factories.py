@@ -101,8 +101,7 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
 
     return InitEnterView(
         warnings=tuple(
-            WarningEntry(title=getattr(w, "title", ""), detail=getattr(w, "detail", ""))
-            for w in (d.get("warnings") or [])
+            WarningEntry(title=w.title, detail=w.detail) for w in (d.get("warnings") or [])
         ),
         max_rounds=ctx["max_rounds"],
         patience=ctx["patience"],
@@ -121,8 +120,8 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
     session = d["env"]
     ctx["baseline_accuracy"] = cycle.tracking.current_accuracy
     ctx["baseline_composite_fitness"] = cycle.tracking.current_composite_fitness
-    schema = getattr(session, "pipeline_schema", None)
-    explicit = getattr(session, "scorer_round_formula", None)
+    schema = session.pipeline_schema
+    explicit = session.scoring.scorer_round_formula
     if explicit:
         full, short = explicit, None
     elif schema is None:

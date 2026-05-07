@@ -18,13 +18,13 @@ No new persistence; pure derivation from disk artifacts.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any
 
 from promptpotter.application.l1_behavior_checks import CheckContext, run_all_checks
 from promptpotter.application.l1_stats import (
     compute_l1_stats,
 )
+from promptpotter.application.round_audit import load_round_audits
 
 __all__ = [
     "JSPRow",
@@ -238,7 +238,7 @@ def _row_from_cycle(
     cs = stores.campaigns
     rounds = cs.load_rounds_range(backend_id, cycle_id, 0, n_rounds - 1) if n_rounds else []
     cycle_dir = cs.campaign_dir(cycle_id)
-    audits = _load_round_audits(cycle_dir, rounds)
+    audits = load_round_audits(cycle_dir, rounds)
 
     parent_session_id = cycle_summary.get("parent_session_id") or ""
     dataset = _lookup_dataset(stores, parent_session_id)
@@ -285,26 +285,6 @@ def _row_from_cycle(
         l2_fires=stats.l2_fires,
         stop_reason=str(final.get("stop_reason") or cycle_summary.get("stop_reason") or ""),
     )
-
-
-def _load_round_audits(
-    cycle_dir: Path, rounds: list[dict[str, Any]]
-) -> list[dict[str, Any] | None]:
-    import json
-
-    rounds_dir = cycle_dir / ".runtime" / "cache" / "rounds"
-    out: list[dict[str, Any] | None] = []
-    for round_data in rounds:
-        round_num = int(round_data.get("round") or 0)
-        path = rounds_dir / f"round_{round_num:04d}.json"
-        if path.is_file():
-            try:
-                out.append(json.loads(path.read_text(encoding="utf-8")))
-                continue
-            except (OSError, json.JSONDecodeError):
-                pass
-        out.append(None)
-    return out
 
 
 def _compute_behavior_results(
