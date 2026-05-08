@@ -200,7 +200,7 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         action=action,
         axis_targeted=axis_targeted,
         l1_layout=accepted_layout,
-        l2_output_failures=failures,
+        l2_guard_breaches=failures,
         debug_prompt=prompt,
         debug_response=raw,
     )
@@ -212,7 +212,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
         osp.task_context = result.task_context
     if result.l1_layout is not None:
         osp.l1_layout = result.l1_layout
-    osp.l2_output_failures = list(result.l2_output_failures)
+    osp.l2_guard_breaches = list(result.l2_guard_breaches)
     cycle.escalation.record_l2_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -306,7 +306,7 @@ def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
             plan=new_plan, changes_description=f"L3: {rationale[:80]}", source="l3_plan"
         ),
         l3_note=note,
-        l3_output_failures=failures,
+        l3_guard_breaches=failures,
         debug_prompt=prompt,
         debug_response=raw,
     )
@@ -318,7 +318,7 @@ def _apply_l3(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     # with the L3 fire's output (possibly ``""`` when the LLM omitted
     # ``note``) — that's the "cleared only when L3 fires again" contract.
     cycle.opt_sp.l3_note = result.l3_note
-    cycle.opt_sp.l3_output_failures = list(result.l3_output_failures)
+    cycle.opt_sp.l3_guard_breaches = list(result.l3_guard_breaches)
     cycle.escalation.record_l3_fired(
         best_accuracy=cycle.tracking.best_accuracy,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
@@ -514,10 +514,10 @@ async def escalate_l2(
         # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
-        if cycle.opt_sp.l2_output_failures and opt.enable_l3:
-            logger.info(
+        if cycle.opt_sp.l2_guard_breaches and opt.enable_l3:
+            logger.warning(
                 "L3 force-triggered by %d L2-output validator failure(s) at round %d",
-                len(cycle.opt_sp.l2_output_failures),
+                len(cycle.opt_sp.l2_guard_breaches),
                 round_num,
             )
             await _run_transition(

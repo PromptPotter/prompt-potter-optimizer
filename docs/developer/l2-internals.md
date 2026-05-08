@@ -15,7 +15,7 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `DecisionKin
 
 ## Inputs — via the hub
 
-L2's prompt template (`l2_context/1` in `optimizer_pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_config}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `SIGNALS` registry. L2 does not see `l2_output_failures` / `l3_output_failures` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's prompt template (`l2_context/1` in `optimizer_pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_config}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `SIGNALS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
 One signal is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
@@ -39,7 +39,7 @@ All fields are optional. Missing fields leave the corresponding OSP state untouc
 - `task_context`: dict of refined framing fields, merged onto `opt_sp.task_context` via `TaskDecomposition.merge`. A non-empty proposal that produces zero delta is flagged as `l2_task_context_verbatim_repeat` → L3 heal trigger.
 - `action`: `"normal_round"` (default) or `"probe_round"`. Probe re-runs only the warned-query subset under the same OSP next round.
 - `axis_targeted`: the axis this fire tests. Required prose when `action="probe_round"`; otherwise stamped on the cycle for the next probe-outcome render.
-- `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.l2_output_failures`.
+- `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.l2_guard_breaches`.
 - `l1_config`: merged onto a `mutate()`-derived child OSP. Two known knobs today: `n_variants` (in-prompt directive to L1 via `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt).
 
 ## How L2 steers L1
@@ -60,7 +60,7 @@ if result.task_context:
     osp.task_context = result.task_context
 if result.l1_layout is not None:
     osp.l1_layout = result.l1_layout
-osp.l2_output_failures = list(result.l2_output_failures)
+osp.l2_guard_breaches = list(result.l2_guard_breaches)
 cycle.escalation.record_l2_fired(...)
 if result.axis_targeted:
     cycle.last_l2_axis = result.axis_targeted
@@ -75,7 +75,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 ## Wound 4 — L2 self-healing via L3
 
-`run_l2_output_validators` (`l2_validators.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_output_failures` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_output_failures` signal on its next fire.
+`run_l2_output_validators` (`l2_validators.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` signal on its next fire.
 
 ## File-line anchors
 
@@ -83,7 +83,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 - `LayerStrategy`, `_parse_l2`, `_apply_l2`, `L2`: `escalation.py`
 - `TransitionResult`: `promptpotter/application/optimization/transitions.py`
 - L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']`
-- OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_config`, `l2_output_failures`
+- OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_config`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
 - Task-context verbatim-repeat: `promptpotter/application/optimization/l2_validators.py::L2_TASK_CONTEXT_VERBATIM_REPEAT`
 

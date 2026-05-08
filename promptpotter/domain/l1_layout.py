@@ -14,7 +14,7 @@ Layout validation is split into HARD and SOFT outcomes
 
 * HARD — mandatory missing / unknown placeholder / dups within slot →
   rollback to prior layout, append ``ValidatorOutcome`` to
-  ``opt_sp.l2_output_failures`` for self-healing next L2 fire.
+  ``opt_sp.l2_guard_breaches`` for self-healing next L2 fire.
 * SOFT — layout unchanged from prior → apply with warning logged.
 """
 
@@ -34,7 +34,7 @@ from promptpotter.domain.validators import ValidatorOutcome
 # ``l1_layout_missing_mandatory`` with ``nurse_target='l3'`` — L3
 # replans rather than letting L2 starve L1 of failure context.
 L1_MANDATORY: frozenset[str] = frozenset(
-    {"plan", "task_context", "rendered_prompt", "tunable_params", "critique"}
+    {"plan", "task_context", "rendered_prompt", "pipeline_param_catalogue", "critique"}
 )
 
 # Names L2 may pick from when authoring an L1 layout. Subset of the
@@ -45,7 +45,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
     {
         "plan",
         "rendered_prompt",
-        "tunable_params",
+        "pipeline_param_catalogue",
         "diagnostics",
         "validation_failures",
         "runtime_failures",
@@ -105,7 +105,7 @@ def default_l1_layout() -> L1Layout:
         task_intent=["task_context"],
         problem_description=[
             "rendered_prompt",
-            "tunable_params",
+            "pipeline_param_catalogue",
             "plan",
             "diagnostics",
             "validation_failures",

@@ -216,6 +216,11 @@ def build_individual_summary(
 # ===========================================================================
 
 
+def _ellide(s: str, n: int) -> str:
+    """Truncate *s* to *n* chars; append ``…`` when cut so the operator sees it."""
+    return s if len(s) <= n else s[: n - 1] + "…"
+
+
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
     """Append a per-sample annotation line under the query it describes.
 
@@ -244,10 +249,10 @@ def _fmt_query_result(
     from promptpotter.application.scoring.metrics import find_rank
 
     raw_pred = r.get("predicted") or ""
-    pred = extract_display_answer(raw_pred, scoring_formula)[:30]
+    pred = _ellide(extract_display_answer(raw_pred, scoring_formula), 30)
     gt_full = r.get("ground_truth", "") or ""
-    gt = gt_full.strip()[:30]
-    q = ((r.get("query") or "").replace("\n", " ").strip())[:15]
+    gt = _ellide(gt_full.strip(), 30)
+    q = _ellide((r.get("query") or "").replace("\n", " ").strip(), 15)
     err = r.get("error") or ("pipeline error" if is_error_result(r) else None)
     pd = r.get("pipeline_data") or {}
     step_name = pd.get("terminated_at")

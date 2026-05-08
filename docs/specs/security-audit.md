@@ -85,7 +85,7 @@ The fence shape:
     </UNTRUSTED_DATASET_CONTENT>
 
 Trusted slots (`plan`, `task_context`, `critique`, `l1_config`,
-`l2_output_failures`, `l3_output_failures`, `tunable_params`,
+`l2_guard_breaches`, `l3_guard_breaches`, `pipeline_param_catalogue`,
 `l1_signal_catalogue`, `rendered_prompt`, `l3_to_l2_note`) are
 NOT wrapped — they are operator-authored config, bounded LLM
 outputs, or fully-bounded optimizer state (registry validator-ids
@@ -178,7 +178,7 @@ Phase 2 work:
    make it structural by separating signal-renderer return types
    (`TrustedText` vs `UntrustedText`).
 2. **Output validators** on every optimizer LLM call. Some already
-   exist (`l2_output_failures`, `l3_output_failures`); extend to L1
+   exist (`l2_guard_breaches`, `l3_guard_breaches`); extend to L1
    generate + L1 critique with shape constraints (no raw paths, no
    `<system>` tags, no leaked env-var names).
 3. **Cross-call repeat detection** — if the same suspect string

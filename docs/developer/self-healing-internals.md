@@ -11,10 +11,10 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **Producer → Nurse** | L1 → L2 | L1 → L2 | L2 → L3 | L2 → L3 |
 | **Detector** | `L1_SCHEMA_COMPLIANCE` validator | `DegradationCheck` (mid-eval) | `escalate_l2` patience | `L2_*` validators (post-parse) |
 | **Failure record class** | `ValidationFailure` | `RuntimeFailure` | (patience event, no record) | `ValidatorOutcome` |
-| **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_output_failures` |
+| **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_guard_breaches` |
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.runtime_failures` | none | per-round on the OSP itself |
-| **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_output_failures_section}}` |
-| **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_output_failures` |
+| **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_guard_breaches_section}}` |
+| **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_guard_breaches` |
 | **Nurse's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
@@ -46,8 +46,8 @@ End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.r
 L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
 - `{{runtime_failures}}` — accumulated `RuntimeFailure` trail (plus `escalation_log` and `warning_inventory` adjuncts) rendered by `_r_runtime_failures()`.
-- `{{l2_output_failures}}` — Wound 4 evidence rendered by `_r_l2_output_failures()`.
-- `{{l3_output_failures}}` — L3's own past validator failures rendered by `_r_l3_output_failures()`.
+- `{{l2_guard_breaches}}` — Wound 4 evidence rendered by `_r_l2_guard_breaches()`.
+- `{{l3_guard_breaches}}` — L3's own past validator failures rendered by `_r_l3_guard_breaches()`.
 - `{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{critique}}`.
 
 L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPoint.plan`; feeds both L1's `{{plan}}` slot and the next L2 invocation. Only wound with cross-layer authority — L3 changes pipeline composition or strategy framing.
@@ -62,9 +62,9 @@ L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPo
 | `l2_verbatim_self_repeat` | L2's `brief` this round equals previous round's brief on OSP |
 | `l2_catalogue_redundancy` | `text_overrides[section]` equals existing override on OSP for that section |
 
-Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_output_failures` and are written by `apply_side_effects` to `cycle.opt_sp.l2_output_failures`.
+Validators run inside `L2RefineStrategy.build_result()` between LLM-output parse and `TransitionResult` construction. Outcomes ride on `TransitionResult.l2_guard_breaches` and are written by `apply_side_effects` to `cycle.opt_sp.l2_guard_breaches`.
 
-When `cycle.opt_sp.l2_output_failures` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
+When `cycle.opt_sp.l2_guard_breaches` is non-empty after L2 runs, `escalate_l2` invokes `L3ModifyPlan` *immediately* — bypassing `l2_patience` and `l3_patience`. Broken L2 output is not "wait and see". Trigger is deterministic from L2's output (already on the round file), so resume reproduces it without a separate decision record.
 
 ## Validators are Evaluator-shaped
 
@@ -99,7 +99,7 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 | `task_context` | persistent, accumulative; merged on each L2 fire | Wound 1, Wound 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L2 reads |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
-| `l2_output_failures` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
+| `l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
 | `failure_analysis` | per-round | (round-over-round feedback) |
 
 The L1 critique itself lives on `RoundResult.critique` (a dict, not in `MEMORY_FIELDS`); the dispatch hub's `critique` signal reads it from `cycle.latest_round.critique`.

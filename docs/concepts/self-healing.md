@@ -9,7 +9,7 @@ Failures attach to the candidate that produced them, never to the round. Four wo
 | **Wound 1** | L1 → `L1_SCHEMA_COMPLIANCE` (gen-time) → L2 | `ValidationFailure` | `validation_failures` |
 | **Wound 2** | L1 → `DegradationCheck` (mid-eval) → L2 | `RuntimeFailure` | `runtime_failures` (accumulates) |
 | **Wound 3** | L2 → `l2_patience` exhausted → L3 | (none — patience event) | `escalation.l2.stall_count` |
-| **Wound 4** | L2 → `L2_OUTPUT_VALIDATORS` (post-parse) → L3 | `ValidatorOutcome` | `l2_output_failures` |
+| **Wound 4** | L2 → `L2_OUTPUT_VALIDATORS` (post-parse) → L3 | `ValidatorOutcome` | `l2_guard_breaches` |
 
 - **Wound 1.** L1 proposed a value outside the allowed set. Synthetic 0; no backend call. L2 next round writes guidance shifting L1 toward the allowed region.
 - **Wound 2.** Candidate ran but degraded (e.g. 100% `reasoning_budget_exhausted`). Real score, candidate eliminated mid-eval, failure mirrored to outer memory. L2 reshapes its own outputs; trail accumulates across rounds.

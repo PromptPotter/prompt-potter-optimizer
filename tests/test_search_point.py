@@ -64,7 +64,7 @@ def test_copy_memory_carries_l1_layout_into_adoption_target():
     custom = L1Layout(
         persona=["plan"],
         task_intent=["task_context"],
-        problem_description=["rendered_prompt", "tunable_params"],
+        problem_description=["rendered_prompt", "pipeline_param_catalogue"],
     )
     parent = OptSearchPoint(l1_layout=custom)
     child = OptSearchPoint()
@@ -72,7 +72,7 @@ def test_copy_memory_carries_l1_layout_into_adoption_target():
 
     assert child.l1_layout.persona == ["plan"]
     assert child.l1_layout.task_intent == ["task_context"]
-    assert child.l1_layout.problem_description == ["rendered_prompt", "tunable_params"]
+    assert child.l1_layout.problem_description == ["rendered_prompt", "pipeline_param_catalogue"]
 
     # Deep-copy contract — mutating the child's L1Layout must NOT affect the parent.
     child.l1_layout.persona.append("diagnostics")

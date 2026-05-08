@@ -235,8 +235,8 @@ class OptSearchPoint(PromptTemplate):
     l3_note: str = ""
     validation_failures: list[ValidationFailure] = Field(default_factory=list)
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
-    l2_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
-    l3_output_failures: list[ValidatorOutcome] = Field(default_factory=list)
+    l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
+    l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
     failure_analysis: FailureAnalysis | None = None
     round_history: list[RoundSummary] = Field(default_factory=list)
 
@@ -257,8 +257,8 @@ class OptSearchPoint(PromptTemplate):
         "l3_note",
         "validation_failures",
         "runtime_failures",
-        "l2_output_failures",
-        "l3_output_failures",
+        "l2_guard_breaches",
+        "l3_guard_breaches",
         "failure_analysis",
         "round_history",
         "l1_layout",

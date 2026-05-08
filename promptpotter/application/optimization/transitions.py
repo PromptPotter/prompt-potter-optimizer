@@ -57,8 +57,8 @@ class TransitionResult:
     action: OptimizerAction = "normal_round"
     axis_targeted: str = ""
     l1_layout: L1Layout | None = None
-    l2_output_failures: list[ValidatorOutcome] = field(default_factory=list)
-    l3_output_failures: list[ValidatorOutcome] = field(default_factory=list)
+    l2_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
+    l3_guard_breaches: list[ValidatorOutcome] = field(default_factory=list)
     debug_prompt: str = ""
     debug_response: dict | None = None
 

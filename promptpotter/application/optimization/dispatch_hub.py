@@ -56,7 +56,7 @@ _AXES_ENUM_PREVIEW = 4
 _NEAR_MISS_RENDER_CAP = 10
 _SAMPLE_RENDER_CAP = 5
 _FAILURE_WARNING_PREVIEW = 1
-_TUNABLE_PARAMS_MODEL_CAP = 8
+_PIPELINE_PARAM_CATALOGUE_MODEL_CAP = 8
 # Runtime-failures stay on OptSearchPoint forever (trend visibility for the
 # state layer) but the ``runtime_failures`` signal only emits failures
 # first-seen in the last K rounds. Older entries collapse to a single
@@ -125,7 +125,7 @@ class RoundDigest:
     ``RoundResult`` and read identically by every signal renderer that
     needs round-shaped state. The four failure renderers
     (``_r_validation_failures`` / ``_r_runtime_failures`` /
-    ``_r_l2_output_failures`` / ``_r_l3_output_failures``) are
+    ``_r_l2_guard_breaches`` / ``_r_l3_guard_breaches``) are
     intentionally *not* here — failures accumulate across rounds and
     live on :class:`OptSearchPoint`; all four renderers read
     ``bundle.opt_sp``.
@@ -176,22 +176,30 @@ def _r_rendered_prompt(b: Bundle) -> str:
 # for small models — guarantees the same text appears verbatim in every
 # prompt, which trains attention to skip past the static block cheaply.
 # id() is sufficient: a session-long schema can't be GC'd-and-reused mid-run.
-_tunable_params_last: tuple[int, str] | None = None
+_pipeline_param_catalogue_last: tuple[int, str] | None = None
 
 
-def _r_tunable_params(b: Bundle) -> str:
-    """Compact mutation surface — name + ≤4-value enum hint, no full dump."""
-    global _tunable_params_last
+def _r_pipeline_param_catalogue(b: Bundle) -> str:
+    """Pipeline-param search-space menu — name + ≤4-value enum hint, no full dump.
+
+    Carries the *available* options (allowed enums + models) the LLM picks
+    from when proposing ``pipeline_params_override`` — symmetric with
+    ``l1_signal_catalogue`` (the menu L2 picks from for L1's layout).
+    """
+    global _pipeline_param_catalogue_last
     schema = b.pipeline_schema
     if schema is None:
         return ""
     schema_id = id(schema)
-    if _tunable_params_last is not None and _tunable_params_last[0] == schema_id:
-        return _tunable_params_last[1]
+    if (
+        _pipeline_param_catalogue_last is not None
+        and _pipeline_param_catalogue_last[0] == schema_id
+    ):
+        return _pipeline_param_catalogue_last[1]
     npk = schema.node_param_keys()
     if not npk:
         return ""
-    lines = ["TUNABLE PIPELINE PARAMS (use only these — do not invent):"]
+    lines = ["PIPELINE PARAM CATALOGUE (use only these — do not invent):"]
     for node_name, params in npk.items():
         node = schema.get_node(node_name)
         if not node or not params:
@@ -214,9 +222,11 @@ def _r_tunable_params(b: Bundle) -> str:
         lines.append(f"  {node_name}: {', '.join(bits)}")
     if schema.available_models:
         lines.append("MODELS:")
-        lines.append("  " + ", ".join(list(schema.available_models)[:_TUNABLE_PARAMS_MODEL_CAP]))
+        lines.append(
+            "  " + ", ".join(list(schema.available_models)[:_PIPELINE_PARAM_CATALOGUE_MODEL_CAP])
+        )
     result = "\n".join(lines)
-    _tunable_params_last = (schema_id, result)
+    _pipeline_param_catalogue_last = (schema_id, result)
     return result
 
 
@@ -422,31 +432,34 @@ def _r_runtime_failures(b: Bundle) -> str:
     return _fence_untrusted("\n\n".join(parts))
 
 
-def _r_l2_output_failures(b: Bundle) -> str:
-    """Wound 4 — L2_CONTEXT post-parse validator outcomes.
+def _r_l2_guard_breaches(b: Bundle) -> str:
+    """Wound 4 — L2_CONTEXT post-parse guard outcomes.
 
     Set by ``run_l2_output_validators`` after parsing L2's LLM output;
-    non-empty triggers immediate L3 fire. Plain (only ``validator_id``
-    from a controlled registry + ``score`` float — no untrusted content).
+    non-empty triggers immediate L3 fire. "Guard breach" — programmatic
+    guards on L2's LLM output, distinct from ``validation_failures`` /
+    ``runtime_failures`` (pipeline evidence from L1 candidate runs).
+    Plain (only ``validator_id`` from a controlled registry + ``score``
+    float — no untrusted content).
     """
-    outcomes = b.opt_sp.l2_output_failures
+    outcomes = b.opt_sp.l2_guard_breaches
     if not outcomes:
         return ""
-    lines = ["L2 OUTPUT VALIDATOR FAILURES (deterministic checks caught L2 thrashing):"]
+    lines = ["L2 GUARD BREACHES (post-parse guards on L2's output caught thrashing):"]
     lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
     return "\n".join(lines)
 
 
-def _r_l3_output_failures(b: Bundle) -> str:
-    """L3_PLAN post-parse validator outcomes — L3's self-healing evidence.
+def _r_l3_guard_breaches(b: Bundle) -> str:
+    """L3_PLAN post-parse guard outcomes — L3's self-healing evidence.
 
-    L3 sees its own past failures to avoid repeating them. Plain (only
+    L3 sees its own past breaches to avoid repeating them. Plain (only
     ``validator_id`` + ``score``).
     """
-    outcomes = b.opt_sp.l3_output_failures
+    outcomes = b.opt_sp.l3_guard_breaches
     if not outcomes:
         return ""
-    lines = ["L3 OUTPUT VALIDATOR FAILURES (deterministic checks caught L3 thrashing):"]
+    lines = ["L3 GUARD BREACHES (post-parse guards on L3's output caught thrashing):"]
     lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
     return "\n".join(lines)
 
@@ -524,12 +537,12 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "plan": _r_plan,
     "l3_to_l2_note": _r_l3_to_l2_note,
     "rendered_prompt": _r_rendered_prompt,
-    "tunable_params": _r_tunable_params,
+    "pipeline_param_catalogue": _r_pipeline_param_catalogue,
     "diagnostics": _r_diagnostics,
     "validation_failures": _r_validation_failures,
     "runtime_failures": _r_runtime_failures,
-    "l2_output_failures": _r_l2_output_failures,
-    "l3_output_failures": _r_l3_output_failures,
+    "l2_guard_breaches": _r_l2_guard_breaches,
+    "l3_guard_breaches": _r_l3_guard_breaches,
     "task_context": _r_task_context,
     "critique": _r_critique,
     "l1_config": _r_l1_config,

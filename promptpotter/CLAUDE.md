@@ -1,5 +1,7 @@
 # promptpotter/ — agent contract for L1 / L2 / L3
 
+This file covers the L1/L2/L3 **agent contracts** — what each layer reads, writes, and decides; when each escalates; what triggers healing. Channels, signal routing, and the four-wound graph live in [`docs/developer/dispatch-hub.md`](../docs/developer/dispatch-hub.md) — that's the canonical info-flow doc.
+
 The optimizer is three nested generation loops. Each layer mutates with cause, never at random.
 
 The cycle has hardcoded stop conditions (e.g. `max_rounds`). On top of those, **the L2-layer and L3-layer may decide on their own to terminate the loop** — see below.

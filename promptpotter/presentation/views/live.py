@@ -14,6 +14,7 @@ else calls them. Post-hoc reads happen by opening
 
 from __future__ import annotations
 
+import time
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -54,6 +55,16 @@ if TYPE_CHECKING:
 # Round-summary renderers — single-caller (``LiveDisplay.on_round_complete``).
 # Inlined here from ``round_render`` so the module surface tracks usage.
 # ===========================================================================
+
+
+def _fmt_elapsed(seconds: float) -> str:
+    """Render a wall-clock duration as ``Xm YYs`` or ``Xh YYm``."""
+    s = int(seconds)
+    if s < 60:
+        return f"{s}s"
+    if s < 3600:
+        return f"{s // 60}m {s % 60:02d}s"
+    return f"{s // 3600}h {(s % 3600) // 60:02d}m"
 
 
 def _render_progress_table(rounds: list[dict], window: int = 8) -> str:
@@ -246,9 +257,16 @@ class LiveDisplay(ProjectionBase):
         # after construction so the display sees the same dict the
         # phase-view builder writes to.
         self._phase_ctx: dict = {}
-        # Per-sample Posterior-of-Being-Best snapshot from the prior firing —
-        # used to render arrow glyphs (▲/▼) on the next ``on_p_best_update``.
+        # Posterior-of-Being-Best is rendered once per round (in the round
+        # summary block), not per sample. ``_last_p_best`` holds the prior
+        # round's final distribution so arrow glyphs (▲/▼) show direction
+        # of change across rounds; ``_current_p_best`` accumulates the
+        # latest mid-round snapshot. Per-sample mid-round detail still
+        # lands in ``dashboard.json`` for the webapp.
         self._last_p_best: dict[str, float] = {}
+        self._current_p_best: dict[str, float] = {}
+        self._current_p_best_id: str = ""
+        self._current_p_best_n: int = 0
         # Mid-round running leader — updated after each
         # ``on_candidate_scored`` so the operator sees a one-line
         # scoreboard between candidates instead of waiting for the
@@ -256,6 +274,11 @@ class LiveDisplay(ProjectionBase):
         # ``L1_GENERATE:enter``.
         self._round_best_acc: float | None = None
         self._round_best_label: str | None = None
+        # Wall-clock anchor — set on ``L1_GENERATE:enter`` so the
+        # round-summary block can report elapsed seconds. ``None`` means
+        # "no measurement yet" (resume points, pre-baseline) — render
+        # falls back to omitting the elapsed field.
+        self._round_started_at: float | None = None
         # tqdm bar lifecycle (CLI surface). When ``sp_budget_ttest`` is
         # None the bars are skipped entirely; ``_write`` falls back to
         # plain ``print`` so the notebook surface stays stdout-clean.
@@ -386,6 +409,7 @@ class LiveDisplay(ProjectionBase):
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round_best_acc = None
             self._round_best_label = None
+            self._round_started_at = time.monotonic()
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
             self.sample_counter = 0
         if (
@@ -446,13 +470,28 @@ class LiveDisplay(ProjectionBase):
             self._bar.update(1)
 
     def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
-        """One-line per-sample Posterior-of-Being-Best snapshot.
+        """Stash latest Posterior-of-Being-Best snapshot for the round-end roll-up.
 
-        Top-5 candidates by P(best); current candidate marked with asterisks;
-        arrow glyphs show direction of change since the previous query.
+        Per-sample mid-round detail lives in ``dashboard.json``; the
+        terminal sees one consolidated p_best line in the round-summary
+        box (rendered by ``_render_p_best_line``).
         """
         if not p_best:
             return
+        self._current_p_best = dict(p_best)
+        self._current_p_best_id = current_id
+        self._current_p_best_n = n_samples
+
+    def _render_p_best_line(self) -> str | None:
+        """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).
+
+        Returns ``None`` when no p_best has been seen this round (e.g.
+        single-candidate rounds skip the t-test). Arrows compare against
+        the prior round's final snapshot.
+        """
+        p_best = self._current_p_best
+        if not p_best:
+            return None
         last = self._last_p_best
         top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
         parts: list[str] = []
@@ -461,13 +500,12 @@ class LiveDisplay(ProjectionBase):
             arrow = ""
             if prev is not None:
                 if prob > prev + 1e-4:
-                    arrow = "▲"  # BLACK UP-POINTING TRIANGLE
+                    arrow = "▲"
                 elif prob < prev - 1e-4:
-                    arrow = "▼"  # BLACK DOWN-POINTING TRIANGLE
-            tag = f"*{cid[:6]}*" if cid == current_id else cid[:6]
+                    arrow = "▼"
+            tag = f"*{cid[:6]}*" if cid == self._current_p_best_id else cid[:6]
             parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        self._write(f"       p_best q{n_samples}: " + " ".join(parts))
-        self._last_p_best = dict(p_best)
+        return f"P(best) @ q{self._current_p_best_n}: " + " | ".join(parts)
 
     def on_candidate_started(
         self,
@@ -545,10 +583,24 @@ class LiveDisplay(ProjectionBase):
         )
 
         rn = self._round_num + 1
+        elapsed_label = ""
+        if self._round_started_at is not None:
+            elapsed = time.monotonic() - self._round_started_at
+            elapsed_label = f" — {_fmt_elapsed(elapsed)}"
+        self._round_started_at = None
         self._write("")
-        self._write(_node_top(f"ROUND {rn} SUMMARY"))
+        self._write(_node_top(f"ROUND {rn} SUMMARY{elapsed_label}"))
         for line in _render_progress_table(self.campaign_rounds).split("\n"):
             self._write(line)
+        if (p_best_line := self._render_p_best_line()) is not None:
+            self._write(_node_line(p_best_line))
+        # Roll p_best snapshot into the cross-round baseline so next
+        # round's arrows compare against this round's final.
+        if self._current_p_best:
+            self._last_p_best = self._current_p_best
+            self._current_p_best = {}
+            self._current_p_best_id = ""
+            self._current_p_best_n = 0
         # Composite block — full mode only. 3-line render: composite_fitness +
         # baseline anchor (line 1), abbreviated formula (line 2), short-
         # name evaluator values (line 3). Anchored to the campaign

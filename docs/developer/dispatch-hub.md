@@ -11,7 +11,7 @@ Inputs (left) fill placeholders in optimizer process nodes (right).
 - **Amber pill** — optimizer process node: the four LLM prompts (L1_GENERATE, L1_CRITIQUE, L2_CONTEXT, L3_PLAN) plus L1_SCORE (deterministic).
 - **Solid orange** — deterministic input (schema, measurements, counters, constants).
 - **Default node** — AI-generated input (content originates from another LLM stage).
-- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `validation_failures`, `runtime_failures`) are computed, so they draw in normal color. `l2_output_failures` and `l3_output_failures` are LLM-produced (post-parse validators on L2's / L3's own output), so their producer edges are red.
+- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `validation_failures`, `runtime_failures`) are computed, so they draw in normal color. `l2_guard_breaches` and `l3_guard_breaches` are LLM-produced (post-parse validators on L2's / L3's own output), so their producer edges are red.
 
 ```mermaid
 flowchart LR
@@ -33,12 +33,12 @@ flowchart LR
 
   %% LLM-output validator failures — produced by L2/L3 post-parse.
   %% Sits outside the L1_SCORE readouts cluster because the producers are L2P / L3P.
-  L2OF[l2_output_failures¹²]
-  L3OF[l3_output_failures¹³]
+  L2OF[l2_guard_breaches¹²]
+  L3OF[l3_guard_breaches¹³]
 
   %% Loop-Settings — read-only loop-time constants
   subgraph LS["Loop-Settings"]
-    TUN[tunable_params⁹]:::det
+    TUN[pipeline_param_catalogue⁹]:::det
     CAT[l1_signal_catalogue¹]:::det
   end
   style LS fill:none,stroke:#888,stroke-dasharray: 5 5
@@ -87,7 +87,7 @@ flowchart LR
   RFAIL --> L1C
 
   %% L2_CONTEXT inputs — sees measurement-derived failures only.
-  %% L2 doesn't see l2_output_failures because Wound 4 fires L3 immediately
+  %% L2 doesn't see l2_guard_breaches because Wound 4 fires L3 immediately
   %% when they appear; L3 replans, then L2 fires fresh against the new plan.
   PLAN --> L2P
   L3N --> L2P
@@ -145,10 +145,10 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Wound 2 evidence
   - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-sample warnings). Same producer cluster, same lifecycle — honest aggregation.
   - Fenced because it echoes pipeline warning strings.
-- ¹² **`l2_output_failures`** ← `opt_sp.l2_output_failures` · Wound 4 evidence
+- ¹² **`l2_guard_breaches`** ← `opt_sp.l2_guard_breaches` · Wound 4 evidence
   - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
   - Set by L2_CONTEXT post-parse validators (`run_l2_output_validators`); non-empty triggers immediate L3 fire. **L3-only consumer** because L2 doesn't fire while these are outstanding (L3 replans first, then L2 fires fresh).
-- ¹³ **`l3_output_failures`** ← `opt_sp.l3_output_failures` · L3 self-healing evidence
+- ¹³ **`l3_guard_breaches`** ← `opt_sp.l3_guard_breaches` · L3 self-healing evidence
   - Plain (only `validator_id`🧩 + `score`🧩).
   - Set by L3_PLAN post-parse validators. **L3-only consumer** — L3 reads its own past failures to avoid repeating them on next replan.
 - ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵ + ¹¹)
@@ -169,7 +169,7 @@ This is where the reader's mental model of a round usually starts: candidates we
 - **`rendered_prompt`** ← `opt_sp.render()`
   - 8-field `PromptTemplate` compiled to one string
   - Structurally L1_SCORE's output: each round's winner becomes next round's `opt_sp`, so its render is the next parent prompt. The cycle lives in orchestration, not the diagram.
-- ⁹ **`tunable_params`** ← attributes on `pipeline_schema`: `node_param_keys`🧩, `param_allowed_values`🧩, `param_descriptions`🧩, `available_models`🧩
+- ⁹ **`pipeline_param_catalogue`** ← attributes on `pipeline_schema`: `node_param_keys`🧩, `param_allowed_values`🧩, `param_descriptions`🧩, `available_models`🧩
   - ≤4 enum values per param, ≤40-char description fallback, ≤8 models
 - **`l1_config`** ← `opt_sp.l1_config`
   - Bundles two L2_CONTEXT-set knobs that govern *how L1_GENERATE runs*, not what L1_GENERATE puts in candidates: `n_variants`🧩, `creativity`🧩
@@ -194,8 +194,8 @@ Substituted directly by `compile_prompt`; not signals.
 ## Mechanics
 
 - **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, tunable_params, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 5 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_output_failures`, `l3_output_failures`) are L2_CONTEXT / L3_PLAN-internal.
-- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, tunable_params, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 5 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`) are L2_CONTEXT / L3_PLAN-internal.
+- **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
 ## Future — possible merge of L1_SCORE readouts
 

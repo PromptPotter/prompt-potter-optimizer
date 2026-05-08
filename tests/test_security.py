@@ -10,7 +10,7 @@ Three named invariants:
   3. Untrusted-content signals (``diagnostics`` / ``validation_failures`` /
      ``runtime_failures``) emerge from the dispatch hub wrapped in
      ``<UNTRUSTED_DATASET_CONTENT>`` fences; trusted signals (``plan``,
-     ``task_context``, ``l2_output_failures``, ``l3_output_failures``)
+     ``task_context``, ``l2_guard_breaches``, ``l3_guard_breaches``)
      are NOT wrapped.
 """
 
@@ -77,7 +77,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     ``<UNTRUSTED_DATASET_CONTENT>`` so a poisoned sample query / pipeline
     warning string cannot pose as instructions to the optimizer LLM.
     Trusted signals (``plan``, ``task_context``, the ``diagnostics``
-    STATUS prefix, ``l2_output_failures``, ``l3_output_failures``) stay
+    STATUS prefix, ``l2_guard_breaches``, ``l3_guard_breaches``) stay
     bare — they are operator-authored, fully-bounded optimizer state.
     """
     from promptpotter.application.optimization.dispatch_hub import (
@@ -145,7 +145,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 first_seen_round=1,
             )
         ],
-        l2_output_failures=[
+        l2_guard_breaches=[
             ValidatorOutcome(
                 validator_id="l2_verbatim_self_repeat",
                 passed=False,
@@ -154,7 +154,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
                 nurse_target="l3",
             )
         ],
-        l3_output_failures=[
+        l3_guard_breaches=[
             ValidatorOutcome(
                 validator_id="l3_plan_verbatim_repeat",
                 passed=False,
@@ -192,13 +192,13 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert rfail_text.endswith("</UNTRUSTED_DATASET_CONTENT>")
     assert poisoned_warning in rfail_text
 
-    # l2_output_failures + l3_output_failures emit only validator_id +
+    # l2_guard_breaches + l3_guard_breaches emit only validator_id +
     # score (registry-bounded) — plain, not fenced.
-    l2of_text = DispatchHub.render("l2_output_failures", bundle)
+    l2of_text = DispatchHub.render("l2_guard_breaches", bundle)
     assert "UNTRUSTED" not in l2of_text
     assert "l2_verbatim_self_repeat" in l2of_text
 
-    l3of_text = DispatchHub.render("l3_output_failures", bundle)
+    l3of_text = DispatchHub.render("l3_guard_breaches", bundle)
     assert "UNTRUSTED" not in l3of_text
     assert "l3_plan_verbatim_repeat" in l3of_text
 
