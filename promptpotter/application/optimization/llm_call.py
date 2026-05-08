@@ -374,9 +374,19 @@ def _try_langfuse(name: str) -> PromptTemplate | None:
 
 
 def load_optimizer_prompt(name: str) -> PromptTemplate:
-    """Load optimizer prompt: Langfuse production → manifest registry fallback."""
+    """Load optimizer prompt: Langfuse production → manifest registry fallback.
+
+    Every load runs through :func:`dispatch_hub.validate_template`, so a
+    template that references a slot not in
+    :data:`dispatch_hub.SIGNALS` (and not in the per-template extras list)
+    raises at load time rather than silently rendering empty.
+    """
+    from promptpotter.application.optimization.dispatch_hub import validate_template
+
     lf_prompt = _try_langfuse(name)
-    return lf_prompt or _load_local(name)
+    template = lf_prompt or _load_local(name)
+    validate_template(name, template)
+    return template
 
 
 def push_all_to_langfuse(*, label: str = "production") -> dict[str, bool]:

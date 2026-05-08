@@ -18,6 +18,7 @@ exists to remove.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import re
@@ -43,9 +44,51 @@ __all__ = [
     "CycleSlice",
     "DispatchHub",
     "RoundDigest",
+    "SignalKind",
     "build_bundle",
     "format_l1_critique_for_prompt",
+    "validate_template",
 ]
+
+
+class SignalKind(enum.StrEnum):
+    """Kind tag for each :data:`SIGNALS` entry.
+
+    Lightweight classification — no schema, no enforcement, just a hint for
+    readers and the future cadence-rules engine that wants to fan signals
+    by category. The four kinds split along *origin*, not consumer:
+
+    * ``MEASUREMENT`` — raw evidence from L1 candidate runs (validation +
+      runtime failures, plus the deterministic round-end diagnostics).
+    * ``DERIVED`` — computed from measurements (rankings, distributions,
+      pipeline-health summaries, the param catalogue).
+    * ``TRACE`` — narrative state from prior LLM calls (critique, plan,
+      task_context, the rendered current prompt).
+    * ``DIRECTIVE`` — active instructions to a downstream layer (the
+      sticky L3→L2 note; the L1 placeholder menu L2 picks from).
+    """
+
+    MEASUREMENT = "measurement"
+    DERIVED = "derived"
+    TRACE = "trace"
+    DIRECTIVE = "directive"
+
+
+@dataclass(frozen=True)
+class _Signal:
+    """One :data:`SIGNALS` entry — kind tag + Bundle-shaped renderer + doc.
+
+    Renderers stay plain ``Callable[[Bundle], str]`` — no Pydantic schema,
+    no freshness budget, no producer indirection. This wrapper exists to
+    carry the kind tag and a one-line description; everything else stays
+    as it is on main.
+    """
+
+    name: str
+    kind: SignalKind
+    render: Callable[[Bundle], str]
+    description: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -533,29 +576,133 @@ def _r_l1_signal_catalogue(b: Bundle) -> str:
 # ---------------------------------------------------------------------------
 
 
-SIGNALS: dict[str, Callable[[Bundle], str]] = {
-    "plan": _r_plan,
-    "l3_to_l2_note": _r_l3_to_l2_note,
-    "rendered_prompt": _r_rendered_prompt,
-    "pipeline_param_catalogue": _r_pipeline_param_catalogue,
-    "diagnostics": _r_diagnostics,
-    "validation_failures": _r_validation_failures,
-    "runtime_failures": _r_runtime_failures,
-    "l2_guard_breaches": _r_l2_guard_breaches,
-    "l3_guard_breaches": _r_l3_guard_breaches,
-    "task_context": _r_task_context,
-    "critique": _r_critique,
-    "l1_config": _r_l1_config,
-    "l1_signal_catalogue": _r_l1_signal_catalogue,
+SIGNALS: dict[str, _Signal] = {
+    "plan": _Signal(
+        "plan",
+        SignalKind.TRACE,
+        _r_plan,
+        "L3's strategic plan text. Persistent until next L3 fire.",
+    ),
+    "l3_to_l2_note": _Signal(
+        "l3_to_l2_note",
+        SignalKind.DIRECTIVE,
+        _r_l3_to_l2_note,
+        "Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
+    ),
+    "rendered_prompt": _Signal(
+        "rendered_prompt",
+        SignalKind.TRACE,
+        _r_rendered_prompt,
+        "Current best searchpoint's compiled prompt body.",
+    ),
+    "pipeline_param_catalogue": _Signal(
+        "pipeline_param_catalogue",
+        SignalKind.DERIVED,
+        _r_pipeline_param_catalogue,
+        "Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
+    ),
+    "diagnostics": _Signal(
+        "diagnostics",
+        SignalKind.DERIVED,
+        _r_diagnostics,
+        "Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
+    ),
+    "validation_failures": _Signal(
+        "validation_failures",
+        SignalKind.MEASUREMENT,
+        _r_validation_failures,
+        "Wound 1: L1 parse-time validator failures (per-axis, per-value).",
+    ),
+    "runtime_failures": _Signal(
+        "runtime_failures",
+        SignalKind.MEASUREMENT,
+        _r_runtime_failures,
+        "Wound 2: DegradationCheck mid-eval evidence + escalation_log + warning inventory.",
+    ),
+    "l2_guard_breaches": _Signal(
+        "l2_guard_breaches",
+        SignalKind.MEASUREMENT,
+        _r_l2_guard_breaches,
+        "Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
+    ),
+    "l3_guard_breaches": _Signal(
+        "l3_guard_breaches",
+        SignalKind.MEASUREMENT,
+        _r_l3_guard_breaches,
+        "L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
+    ),
+    "task_context": _Signal(
+        "task_context",
+        SignalKind.TRACE,
+        _r_task_context,
+        "Persistent task framing dict refined by L2; broadcast to all four prompts.",
+    ),
+    "critique": _Signal(
+        "critique",
+        SignalKind.TRACE,
+        _r_critique,
+        "Compact view of the most recent L1_CRITIQUE LLM output dict.",
+    ),
+    "l1_config": _Signal(
+        "l1_config",
+        SignalKind.TRACE,
+        _r_l1_config,
+        "Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
+    ),
+    "l1_signal_catalogue": _Signal(
+        "l1_signal_catalogue",
+        SignalKind.DERIVED,
+        _r_l1_signal_catalogue,
+        "L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
+    ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Template-side allowed-extras + load-time validation.
+# ---------------------------------------------------------------------------
+
+
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+# Per-template names that arrive as caller-supplied ``compile_prompt`` extras
+# rather than dispatch-hub signals. Anything outside ``SIGNALS ∪ extras`` in
+# a template body is a typo — :func:`validate_template` raises rather than
+# letting :meth:`DispatchHub.fill_fixed` silently drop the placeholder.
+_TEMPLATE_EXTRAS: dict[str, set[str]] = {
+    "l1_generate": {"n_variants"},
+    "l1_critique": set(),
+    "l2_context": set(),
+    "l3_plan": set(),
+    "restructure": {"consultation_instruction"},
+}
+
+
+def validate_template(name: str, template: PromptTemplate) -> None:
+    """Raise :class:`KeyError` if any ``{{slot}}`` isn't a signal or known extra.
+
+    Closes the silent-drop bug: :meth:`DispatchHub.fill_fixed` only
+    populates ``out[name]`` when ``name in SIGNALS``, so a typo in a
+    template body would render to empty and never surface. Called from
+    :func:`promptpotter.application.optimization.llm_call.load_optimizer_prompt`
+    after every load (Langfuse or local manifest).
+    """
+    extras = _TEMPLATE_EXTRAS.get(name, set())
+    text = template.render()
+    referenced = set(_PLACEHOLDER_RE.findall(text))
+    unknown = referenced - SIGNALS.keys() - extras
+    if unknown:
+        raise KeyError(
+            f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
+            f"Add to dispatch_hub.SIGNALS or to _TEMPLATE_EXTRAS[{name!r}] if "
+            "the slot is a caller-supplied extra."
+        )
 
 
 # ---------------------------------------------------------------------------
 # DispatchHub — render / fill_l1 / fill_fixed.
 # ---------------------------------------------------------------------------
-
-
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 class DispatchHub:
@@ -567,10 +714,10 @@ class DispatchHub:
 
     @staticmethod
     def render(name: str, bundle: Bundle) -> str:
-        renderer = SIGNALS.get(name)
-        if renderer is None:
+        sig = SIGNALS.get(name)
+        if sig is None:
             raise KeyError(f"Unknown signal: {name}")
-        return renderer(bundle)
+        return sig.render(bundle)
 
     @staticmethod
     def fill_l1(

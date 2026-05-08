@@ -478,3 +478,37 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     raw_no_note = {"plan": "y" * 200, "rationale": "test"}
     result2 = _parse_l3(raw_no_note, _osp(plan="p", l3_note="something"), prompt="<prompt>")
     assert result2.l3_note == ""
+
+
+# ===========================================================================
+# Phase 0 — typed SIGNALS + load-time template validation
+# ===========================================================================
+#
+# Closes the silent-drop bug: ``DispatchHub.fill_fixed`` skips template names
+# not in ``SIGNALS``, so a typo would render to empty and never surface.
+# ``validate_template`` raises at load time. Two tiny invariants:
+#   1. every shipping optimizer prompt loads without raising (positive case);
+#   2. a deliberate unknown slot raises ``KeyError`` (validator actually works).
+
+
+def test_optimizer_prompts_load_with_no_unresolvable_slots():
+    """Every shipping optimizer prompt's ``{{slot}}`` references resolve."""
+    from promptpotter.application.optimization.llm_call import (
+        list_optimizer_prompts,
+        load_optimizer_prompt,
+    )
+
+    names = list_optimizer_prompts()
+    assert names, "expected at least one optimizer prompt registered"
+    for name in names:
+        load_optimizer_prompt(name)  # raises KeyError on unknown slot
+
+
+def test_validate_template_raises_on_unknown_slot():
+    """Typo guard: a slot not in SIGNALS and not in _TEMPLATE_EXTRAS raises."""
+    from promptpotter.application.optimization.dispatch_hub import validate_template
+    from promptpotter.domain.opt_search_point import PromptTemplate
+
+    bad = PromptTemplate(task_intent="see {{not_a_signal}}")
+    with pytest.raises(KeyError, match="not_a_signal"):
+        validate_template("l1_critique", bad)
