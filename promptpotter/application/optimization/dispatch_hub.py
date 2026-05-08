@@ -103,13 +103,11 @@ class CycleSlice:
     current_accuracy: float
     best_accuracy: float
     best_round: int
-    best_composite_fitness: float
     l1_stall_count: int
     l2_round: int
     l2_stall_count: int
     l3_round: int
     l3_stall_count: int
-    l3_best_composite_fitness_at_entry: float
 
 
 @dataclass(frozen=True)
@@ -517,35 +515,6 @@ def _r_l1_signal_catalogue(b: Bundle) -> str:
     )
 
 
-def _r_l1gen_prompt_fields(b: Bundle) -> str:
-    """L1_GENERATE's PromptTemplate fields after layout fill — for L2/L3 to inspect.
-
-    Loads L1_GENERATE's 8-field PromptTemplate, applies the current
-    ``opt_sp.l1_layout`` via :meth:`DispatchHub.fill_l1`, and renders.
-    The signals inside the layout resolve through the same hub so the
-    inspection reflects what L1 actually receives next round.
-    """
-    from promptpotter.application.optimization.llm_call import load_optimizer_prompt
-
-    template = load_optimizer_prompt("l1_generate")
-    filled = DispatchHub.fill_l1(template, b.opt_sp.l1_layout, b)
-    return f"L1 PROMPT (next-round preview):\n---\n{filled.render()}\n---"
-
-
-def _r_l2_history(b: Bundle) -> str:
-    """L3-only: synthetic recap of L2's most recent fire."""
-    cs = b.cycle_slice
-    if cs.l2_round == 0:
-        return ""
-    acc_change = cs.best_composite_fitness - cs.l3_best_composite_fitness_at_entry
-    return (
-        "L2 ADJUSTMENT HISTORY:\n"
-        f"  L2 round {cs.l2_round}: "
-        f"l1_config={json.dumps(b.opt_sp.l1_config)}, "
-        f"acc_change={acc_change:+.1%}"
-    )
-
-
 # ---------------------------------------------------------------------------
 # Signal registry — lookup by name from layouts / templates / fill_*.
 # ---------------------------------------------------------------------------
@@ -565,8 +534,6 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "critique": _r_critique,
     "l1_config": _r_l1_config,
     "l1_signal_catalogue": _r_l1_signal_catalogue,
-    "l1gen_prompt_fields": _r_l1gen_prompt_fields,
-    "l2_history": _r_l2_history,
 }
 
 
@@ -649,9 +616,8 @@ def build_bundle(
     """Snapshot live cycle state into a Bundle for one optimizer LLM call.
 
     Reads the most recent round (if any) for diagnostics + critique, and
-    the escalation/tracking counters for the ``diagnostics`` STATUS prefix
-    + ``l2_history``. Renderers don't see ``cycle`` directly — they see
-    the snapshot.
+    the escalation/tracking counters for the ``diagnostics`` STATUS prefix.
+    Renderers don't see ``cycle`` directly — they see the snapshot.
 
     Pass *latest_round* explicitly for L1_CRITIQUE: the just-completed round
     has not yet been folded into ``cycle.rounds`` (that happens in
@@ -669,13 +635,11 @@ def build_bundle(
         current_accuracy=cycle.tracking.current_accuracy,
         best_accuracy=cycle.tracking.best_accuracy,
         best_round=cycle.tracking.best_round,
-        best_composite_fitness=cycle.tracking.best_composite_fitness,
         l1_stall_count=cycle.escalation.l1_stall_count,
         l2_round=cycle.escalation.l2_round,
         l2_stall_count=cycle.escalation.l2_stall_count,
         l3_round=cycle.escalation.l3_round,
         l3_stall_count=cycle.escalation.l3_stall_count,
-        l3_best_composite_fitness_at_entry=cycle.escalation.l3_best_composite_fitness_at_entry,
     )
 
     return Bundle(

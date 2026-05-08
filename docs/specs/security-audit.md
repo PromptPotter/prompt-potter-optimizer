@@ -85,11 +85,11 @@ The fence shape:
     </UNTRUSTED_DATASET_CONTENT>
 
 Trusted slots (`plan`, `task_context`, `critique`, `l1_config`,
-`l2_history`, `l2_output_failures`, `l3_output_failures`,
-`tunable_params`, `l1_signal_catalogue`, `l1gen_prompt_fields`,
-`rendered_prompt`, `l3_to_l2_note`) are NOT wrapped — they are
-operator-authored config, bounded LLM outputs, or fully-bounded
-optimizer state (registry validator-ids + scores). The `diagnostics`
+`l2_output_failures`, `l3_output_failures`, `tunable_params`,
+`l1_signal_catalogue`, `rendered_prompt`, `l3_to_l2_note`) are
+NOT wrapped — they are operator-authored config, bounded LLM
+outputs, or fully-bounded optimizer state (registry validator-ids
++ scores). The `diagnostics`
 STATUS prefix is also unwrapped (cycle counters are trusted optimizer
 state); only the dataset-content body is fenced.
 

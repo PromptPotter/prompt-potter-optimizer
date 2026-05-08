@@ -19,7 +19,6 @@ flowchart LR
   classDef proc fill:#fff3d6,stroke:#f59e0b,stroke-width:4px,color:#000
 
   %% Standalone AI-generated inputs (not produced inside a single LLM stage)
-  L1PF[l1gen_prompt_fields⁷]
   CPAR["l1_config<br/>• n_variants<br/>• temp"]
 
   %% L1_SCORE readouts — distinct hub variables, same producer cluster.
@@ -51,7 +50,7 @@ flowchart LR
 
   %% Standalone L2-produced signals
   TC[task_context³]
-  L2H[l2_history¹⁰]
+  LAYOUT[l1_layout⁷]
 
   %% L1_CRITIQUE + its produced signal
   subgraph L1CG[" "]
@@ -69,6 +68,7 @@ flowchart LR
   style L3G fill:none,stroke:none
 
   %% L1_GENERATE inputs — sees measurement-derived failures only.
+  %% LAYOUT is structural (drives fill_l1's slot walk), not content.
   PLAN --> L1G
   TC --> L1G
   TUN --> L1G
@@ -77,7 +77,7 @@ flowchart LR
   RFAIL --> L1G
   CRIT --> L1G
   CPAR --> L1G
-  L1PF --> L1G
+  LAYOUT --> L1G
 
   %% L1_CRITIQUE inputs
   PLAN --> L1C
@@ -98,27 +98,23 @@ flowchart LR
   CPAR --> L2P
   TC --> L2P
   CAT --> L2P
-  L1PF --> L2P
 
   %% L3_PLAN inputs — universal nurse: sees all four failure variants.
   PLAN --> L3P
   TC --> L3P
-  L2H --> L3P
   DIAG --> L3P
   VFAIL --> L3P
   RFAIL --> L3P
   L2OF --> L3P
   L3OF --> L3P
   CRIT --> L3P
-  L1PF --> L3P
 
   %% LLM-produced feedback edges (red)
   L3P --> PLAN
   L3P --> L3N
   L2P --> TC
   L2P --> CPAR
-  L2P --> L2H
-  L2P --> L1PF
+  L2P --> LAYOUT
   L1C --> CRIT
   L2P --> L2OF
   L3P --> L3OF
@@ -128,13 +124,13 @@ flowchart LR
   L1S --> VFAIL
   L1S --> RFAIL
 
-  %% Red styling for the 9 LLM-produced feedback edges (edges 34..42)
-  linkStyle 34,35,36,37,38,39,40,41,42 stroke:#B22222,stroke-width:2px
+  %% Red styling for the 8 LLM-produced feedback edges (edges 31..38)
+  linkStyle 31,32,33,34,35,36,37,38 stroke:#B22222,stroke-width:2px
 ```
 
 ## Reference
 
-15 signals + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+13 signals + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
 ### Round-end measurement — what L1_SCORE + L1_CRITIQUE leave behind
 
@@ -180,16 +176,14 @@ This is where the reader's mental model of a round usually starts: candidates we
   - `n_variants`🧩 enters L1_GENERATE only via the `{{n_variants}}` caller extra (a directive — L1_GENERATE obeys)
   - `creativity`🧩 sets the L1_GENERATE LLM call's temperature; never reaches the prompt text
   - Field, signal, and placeholder all share the name `l1_config`
+- ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · structural, not a SIGNAL
+  - L2_CONTEXT-only writer; consumed by `DispatchHub.fill_l1` as the per-slot signal-name list that drives the slot walk
+  - Decides *which* signal renderings land in each L1 addressable slot (`persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩) — content is rendered separately by the listed signals' `_r_*` functions
+  - Not registered in `SIGNALS`; never resolves a `{{l1_layout}}` placeholder. Shape-shifts L1's prompt rather than filling a slot in it
 
 ### L2_CONTEXT / L3_PLAN-internal
 
 - ¹ **`l1_signal_catalogue`** ← sorted `L1_POSSIBLE` (`domain/l1_layout.py`) · menu L2_CONTEXT picks from when assembling L1_GENERATE's layout.
-- ⁷ **`l1gen_prompt_fields`** ← recursive `fill_l1` over current `opt_sp.l1_layout` against L1_GENERATE's 8-field template
-  - Snapshot of what L1_GENERATE will receive next round
-  - L2_CONTEXT is the sole writer (via the layout) — hence no `L1G → l1gen_prompt_fields` arrow in the diagram
-  - 4 addressable slots: `persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩
-  - 2 template-fixed (non-addressable) slots: `instruction`🧩, `answer_format`🧩
-- ¹⁰ **`l2_history`** ← `cycle_slice.l2_round`🧩 + prior `opt_sp.l1_config` snapshot + Δ best-fitness since L3_PLAN entry · L3_PLAN-only synthetic recap.
 
 ### Caller extras — L1_GENERATE template scalars (`l1.py:120`)
 
@@ -200,7 +194,7 @@ Substituted directly by `compile_prompt`; not signals.
 ## Mechanics
 
 - **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, tunable_params, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 7 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l1gen_prompt_fields`, `l2_history`, `l2_output_failures`, `l3_output_failures`) are L2_CONTEXT / L3_PLAN-internal.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, tunable_params, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 5 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_output_failures`, `l3_output_failures`) are L2_CONTEXT / L3_PLAN-internal.
 - **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, tunable_params, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
 ## Future — possible merge of L1_SCORE readouts

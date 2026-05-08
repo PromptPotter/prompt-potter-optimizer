@@ -45,7 +45,6 @@ End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.r
 
 L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
-- `{{l2_history}}` — recent L2 adjustments + Δ best-fitness since L3_PLAN entry, rendered by `_r_l2_history()`.
 - `{{runtime_failures}}` — accumulated `RuntimeFailure` trail (plus `escalation_log` and `warning_inventory` adjuncts) rendered by `_r_runtime_failures()`.
 - `{{l2_output_failures}}` — Wound 4 evidence rendered by `_r_l2_output_failures()`.
 - `{{l3_output_failures}}` — L3's own past validator failures rendered by `_r_l3_output_failures()`.

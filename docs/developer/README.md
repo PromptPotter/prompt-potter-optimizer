@@ -68,10 +68,8 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
 | `l1_config` | `opt_sp.l1_config` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
-| `l1gen_prompt_fields` | filled L1_GENERATE template (recursive into `fill_l1`) | L2, L3 |
-| `l2_history` | `cycle_slice` + `opt_sp.l1_config` | L3 only |
 
-L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`, `l1gen_prompt_fields`, `l2_history`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
+L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
 ---
 
