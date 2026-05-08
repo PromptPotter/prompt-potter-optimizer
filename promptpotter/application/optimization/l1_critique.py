@@ -38,11 +38,11 @@ async def run_l1_critique(
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict.
 
     L1-critique has no per-section override channel: the template body
-    embeds ``{{plan}}``, ``{{task_context}}``, ``{{diagnostics}}`` and
-    ``{{failures}}`` placeholders that the dispatch hub resolves to
-    layer-agnostic signal renderers. ``RoundDiagnostics`` is read off the
-    freshly-completed round, so the rank/health/evolution context is one
-    bundle hop away.
+    embeds ``{{plan}}``, ``{{task_context}}``, ``{{diagnostics}}``,
+    ``{{validation_failures}}`` and ``{{runtime_failures}}`` placeholders
+    that the dispatch hub resolves to layer-agnostic signal renderers.
+    ``RoundDiagnostics`` is read off the freshly-completed round, so the
+    rank/health/evolution context is one bundle hop away.
     """
     bundle = build_bundle(cycle, latest_round=round_result)
     from promptpotter.application.optimization.llm_call import load_optimizer_prompt

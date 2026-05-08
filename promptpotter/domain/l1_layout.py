@@ -47,7 +47,8 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "rendered_prompt",
         "tunable_params",
         "diagnostics",
-        "failures",
+        "validation_failures",
+        "runtime_failures",
         "task_context",
         "critique",
     }
@@ -107,7 +108,8 @@ def default_l1_layout() -> L1Layout:
             "tunable_params",
             "plan",
             "diagnostics",
-            "failures",
+            "validation_failures",
+            "runtime_failures",
             "critique",
         ],
     )

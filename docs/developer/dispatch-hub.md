@@ -11,7 +11,7 @@ Inputs (left) fill placeholders in optimizer process nodes (right).
 - **Amber pill** — optimizer process node: the four LLM prompts (L1_GENERATE, L1_CRITIQUE, L2_CONTEXT, L3_PLAN) plus L1_SCORE (deterministic).
 - **Solid orange** — deterministic input (schema, measurements, counters, constants).
 - **Default node** — AI-generated input (content originates from another LLM stage).
-- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `failures`, `accuracy_pct`) are computed, so they draw in normal color.
+- **Red arrow** — LLM-produced edge: the feedback loops that close the optimizer. L1_SCORE outputs (`diagnostics`, `validation_failures`, `runtime_failures`) are computed, so they draw in normal color. `l2_output_failures` and `l3_output_failures` are LLM-produced (post-parse validators on L2's / L3's own output), so their producer edges are red.
 
 ```mermaid
 flowchart LR
@@ -22,16 +22,24 @@ flowchart LR
   L1PF[l1gen_prompt_fields⁷]
   CPAR["l1_config<br/>• n_variants<br/>• temp"]
 
-  %% Standalone deterministic inputs
-  CPOS[cycle_position⁶]:::det
-  DIAG[diagnostics⁴]:::det
-  FAIL[failures⁵]:::det
-  AP[accuracy_pct²]:::det
+  %% L1_SCORE readouts — distinct hub variables, same producer cluster.
+  %% diagnostics is per-round on Bundle.digest; the failures variants
+  %% accumulate on OptSearchPoint cross-round.
+  subgraph SR["L1_SCORE readouts"]
+    DIAG["diagnostics⁴<br/>• STATUS: round, current, best, stalls<br/>• trajectory + evolution<br/>• rank dist, anomalies, near-misses<br/>• pipeline health, probe outcome"]:::det
+    VFAIL["validation_failures⁵<br/>• Loop 1 (parse-time)<br/>• axis, value, allowed, reason"]:::det
+    RFAIL["runtime_failures¹¹<br/>• Loop 2 (mid-eval)<br/>• runtime_failures, escalation_log, warning_inventory"]:::det
+  end
+  style SR fill:none,stroke:#888,stroke-dasharray: 5 5
+
+  %% LLM-output validator failures — produced by L2/L3 post-parse.
+  %% Sits outside the L1_SCORE readouts cluster because the producers are L2P / L3P.
+  L2OF[l2_output_failures¹²]
+  L3OF[l3_output_failures¹³]
 
   %% Loop-Settings — read-only loop-time constants
   subgraph LS["Loop-Settings"]
     TUN[tunable_params⁹]:::det
-    NQ[n_queries]:::det
     CAT[l1_signal_catalogue¹]:::det
   end
   style LS fill:none,stroke:#888,stroke-dasharray: 5 5
@@ -60,43 +68,47 @@ flowchart LR
   end
   style L3G fill:none,stroke:none
 
-  %% L1_GENERATE inputs (default layout + caller extras + L1PF self-view)
+  %% L1_GENERATE inputs — sees measurement-derived failures only.
   PLAN --> L1G
   TC --> L1G
   TUN --> L1G
   DIAG --> L1G
-  FAIL --> L1G
+  VFAIL --> L1G
+  RFAIL --> L1G
   CRIT --> L1G
   CPAR --> L1G
-  AP --> L1G
-  NQ --> L1G
   L1PF --> L1G
 
   %% L1_CRITIQUE inputs
   PLAN --> L1C
   TC --> L1C
   DIAG --> L1C
-  FAIL --> L1C
+  VFAIL --> L1C
+  RFAIL --> L1C
 
-  %% L2_CONTEXT inputs
+  %% L2_CONTEXT inputs — sees measurement-derived failures only.
+  %% L2 doesn't see l2_output_failures because Loop 4 fires L3 immediately
+  %% when they appear; L3 replans, then L2 fires fresh against the new plan.
   PLAN --> L2P
   L3N --> L2P
-  CPOS --> L2P
   DIAG --> L2P
-  FAIL --> L2P
+  VFAIL --> L2P
+  RFAIL --> L2P
   CRIT --> L2P
   CPAR --> L2P
   TC --> L2P
   CAT --> L2P
   L1PF --> L2P
 
-  %% L3_PLAN inputs
+  %% L3_PLAN inputs — universal nurse: sees all four failure variants.
   PLAN --> L3P
   TC --> L3P
   L2H --> L3P
-  CPOS --> L3P
   DIAG --> L3P
-  FAIL --> L3P
+  VFAIL --> L3P
+  RFAIL --> L3P
+  L2OF --> L3P
+  L3OF --> L3P
   CRIT --> L3P
   L1PF --> L3P
 
@@ -108,34 +120,44 @@ flowchart LR
   L2P --> L2H
   L2P --> L1PF
   L1C --> CRIT
+  L2P --> L2OF
+  L3P --> L3OF
 
   %% L1_SCORE derivations — deterministic; normal color
   L1S --> DIAG
-  L1S --> FAIL
-  L1S --> AP
+  L1S --> VFAIL
+  L1S --> RFAIL
 
-  %% Red styling for the 7 LLM-produced feedback edges (edges 32..38)
-  linkStyle 32,33,34,35,36,37,38 stroke:#B22222,stroke-width:2px
+  %% Red styling for the 9 LLM-produced feedback edges (edges 34..42)
+  linkStyle 34,35,36,37,38,39,40,41,42 stroke:#B22222,stroke-width:2px
 ```
 
 ## Reference
 
-13 signals + 3 caller extras, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+15 signals + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
 ### Round-end measurement — what L1_SCORE + L1_CRITIQUE leave behind
 
 This is where the reader's mental model of a round usually starts: candidates were scored, results condensed, critique produced. These outputs are what the next round's prompts read.
 
-- ⁴ **`diagnostics`** [fenced] ← `bundle.digest.diagnostics`
-  - `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE)
-  - trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
-- ⁵ **`failures`** [fenced] ← attributes on `opt_sp`: `validation_failures`🧩, `runtime_failures`🧩, `escalation_log`🧩, `warning_inventory`🧩, `l2_output_failures`🧩, `l3_output_failures`🧩
-  - Accumulates across rounds — that's why it lives on `OptSearchPoint`, not in the per-round `Bundle.digest`
-- ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵)
+- ⁴ **`diagnostics`** ← STATUS prefix (plain) + fenced `RoundDiagnostics` body
+  - **STATUS prefix** ← `bundle.cycle_slice` — `round`🧩, `current`🧩 (parent fitness `f"{cs.current_accuracy:.1%}"`), `best`🧩 (acc + round), `L1 stall`🧩 (rounds), and — when fired — `L2 fired`🧩 (count + stall), `L3 fired`🧩 (count + stall). Plain text (cycle counters are trusted optimizer state, not untrusted dataset content). Always renders, including pre-round-1 when `digest.diagnostics is None`. Despite the `current`/`best` accuracy labels, the rendered values are mean composite *fitness* under the active scorer, not hit-rates.
+  - **Body** [fenced] ← `bundle.digest.diagnostics`: `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE) — trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
+- ⁵ **`validation_failures`** [fenced] ← `opt_sp.validation_failures` · Loop 1 evidence
+  - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
+  - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
+- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Loop 2 evidence
+  - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-query warnings). Same producer cluster, same lifecycle — honest aggregation.
+  - Fenced because it echoes pipeline warning strings.
+- ¹² **`l2_output_failures`** ← `opt_sp.l2_output_failures` · Loop 4 evidence
+  - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
+  - Set by L2_CONTEXT post-parse validators (`run_l2_output_validators`); non-empty triggers immediate L3 fire. **L3-only consumer** because L2 doesn't fire while these are outstanding (L3 replans first, then L2 fires fresh).
+- ¹³ **`l3_output_failures`** ← `opt_sp.l3_output_failures` · L3 self-healing evidence
+  - Plain (only `validator_id`🧩 + `score`🧩).
+  - Set by L3_PLAN post-parse validators. **L3-only consumer** — L3 reads its own past failures to avoid repeating them on next replan.
+- ⁸ **`critique`** ← `bundle.digest.critique` (L1_CRITIQUE output, consumes ⁴ + ⁵ + ¹¹)
   - Compact view via `format_l1_critique_for_prompt`
   - `summary`🧩, `priority_fix`🧩, `suggested_axes`🧩, `failure_highlights`🧩 (top 5)
-
-`accuracy_pct` is also an L1_SCORE-derived readout but reaches L1_GENERATE as a template scalar, not a signal — see *Caller extras* below.
 
 ### Strategic injects — L3_PLAN writes, L2_CONTEXT refines, persistent
 
@@ -167,22 +189,20 @@ This is where the reader's mental model of a round usually starts: candidates we
   - L2_CONTEXT is the sole writer (via the layout) — hence no `L1G → l1gen_prompt_fields` arrow in the diagram
   - 4 addressable slots: `persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩
   - 2 template-fixed (non-addressable) slots: `instruction`🧩, `answer_format`🧩
-- ⁶ **`cycle_position`** ← `bundle.cycle_slice`
-  - Round, best (acc + round), current acc, L1_GENERATE / L2_CONTEXT / L3_PLAN stalls, probe-scheduled flag 🧩
 - ¹⁰ **`l2_history`** ← `cycle_slice.l2_round`🧩 + prior `opt_sp.l1_config` snapshot + Δ best-fitness since L3_PLAN entry · L3_PLAN-only synthetic recap.
 
-### Caller extras — L1_GENERATE template scalars (`l1.py:120-124`)
+### Caller extras — L1_GENERATE template scalars (`l1.py:120`)
 
 Substituted directly by `compile_prompt`; not signals.
 
 - **`n_variants`** ← `min(opt_sp.l1_config["n_variants"], opt.n_variants × 3)` · directive — L1_GENERATE obeys.
-- ² **`accuracy_pct`** ← `f"{cycle.tracking.current_accuracy:.1%}"`
-  - Despite the name, this is the parent searchpoint's mean composite *fitness* under the active scorer, not a hit-rate
-  - `current_accuracy` is the historical tracker attribute on the cycle
-- **`n_queries`** ← `len(cycle.tracking.current_results)` · scoring-set size.
 
 ## Mechanics
 
 - **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, tunable_params, diagnostics, failures, critique}` 🧩; the other 6 signals are L2_CONTEXT / L3_PLAN-internal.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, tunable_params, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 7 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l1gen_prompt_fields`, `l2_history`, `l2_output_failures`, `l3_output_failures`) are L2_CONTEXT / L3_PLAN-internal.
 - **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, tunable_params, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
+
+## Future — possible merge of L1_SCORE readouts
+
+The three `L1_SCORE readouts` (`diagnostics`, `validation_failures`, `runtime_failures`) are kept as distinct hub variables today because their lifecycles diverge: `diagnostics` is per-round on `Bundle.digest`; the failure variants accumulate on `OptSearchPoint` cross-round. Unifying them into one `MeasurementReadout` object would require either widening `RoundDigest` with cross-round views (duplicates state) or moving accumulating failure fields off OSP (breaks the per-candidate-attribution invariant in `self-healing-internals.md`). Park until the readout shapes have stabilized.

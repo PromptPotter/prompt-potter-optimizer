@@ -117,11 +117,7 @@ async def l1_generate(
 
     bundle = build_bundle(cycle)
     template = DispatchHub.fill_l1(load_optimizer_prompt("l1_generate"), opt_sp.l1_layout, bundle)
-    prompt_vars: dict[str, str] = {
-        "n_variants": str(n_variants),
-        "accuracy_pct": f"{cycle.tracking.current_accuracy:.1%}",
-        "n_queries": str(len(cycle.tracking.current_results)),
-    }
+    prompt_vars: dict[str, str] = {"n_variants": str(n_variants)}
 
     output_schema = build_l1_output_schema(pipeline_schema) if pipeline_schema else None
     generated, meta_prompt = await run_optimizer_node(

@@ -16,8 +16,8 @@ L3 soft validators here:
 * :data:`L3_PLAN_VERBATIM_REPEAT` — same plan as the prior plan.
 
 All outcomes append to ``opt_sp.l{2,3}_output_failures`` and surface to
-the next fire as self-healing evidence via the unified ``failures``
-signal.
+L3's next fire as self-healing evidence via the ``l2_output_failures``
+and ``l3_output_failures`` dispatch-hub signals.
 """
 
 from __future__ import annotations

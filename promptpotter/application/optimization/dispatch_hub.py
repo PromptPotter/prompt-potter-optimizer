@@ -6,8 +6,7 @@ typed :class:`Bundle` per-call state, and the two rendering paths:
 * :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.l1_layout``
   for L1_GENERATE. Returns a modified ``PromptTemplate`` whose slots have
   layout-driven content appended; remaining ``{{var}}`` placeholders
-  (``n_variants`` / ``accuracy_pct`` / ``n_queries``) are extras filled by
-  L1's caller via ``compile_prompt``.
+  (``n_variants``) are extras filled by L1's caller via ``compile_prompt``.
 * :meth:`DispatchHub.fill_fixed` — walks a fixed template's body for
   L1_CRITIQUE / L2 / L3 and produces a ``{name → rendered}`` dict suitable
   for ``compile_prompt(**hub_dict, **extras)``.
@@ -59,7 +58,7 @@ _SAMPLE_RENDER_CAP = 5
 _FAILURE_WARNING_PREVIEW = 1
 _TUNABLE_PARAMS_MODEL_CAP = 8
 # Runtime-failures stay on OptSearchPoint forever (trend visibility for the
-# state layer) but the unified ``failures`` signal only emits failures
+# state layer) but the ``runtime_failures`` signal only emits failures
 # first-seen in the last K rounds. Older entries collapse to a single
 # suppression line so the LLM still knows there's tail without paying the
 # token cost. Tightens prompts on long campaigns + small models.
@@ -101,20 +100,16 @@ class CycleSlice:
     """
 
     round_num: int
-    rounds: tuple[RoundResult, ...]
     current_accuracy: float
     best_accuracy: float
     best_round: int
     best_composite_fitness: float
-    current_composite_fitness: float
     l1_stall_count: int
     l2_round: int
     l2_stall_count: int
-    l2_best_composite_fitness_at_entry: float
     l3_round: int
     l3_stall_count: int
     l3_best_composite_fitness_at_entry: float
-    probe_next_round: bool
 
 
 @dataclass(frozen=True)
@@ -130,9 +125,12 @@ class RoundDigest:
 
     Built once in :func:`build_bundle` from the just-completed
     ``RoundResult`` and read identically by every signal renderer that
-    needs round-shaped state. ``failures`` is intentionally *not* here —
-    failures accumulate across rounds and live on
-    :class:`OptSearchPoint`; ``_r_failures`` reads ``bundle.opt_sp``.
+    needs round-shaped state. The four failure renderers
+    (``_r_validation_failures`` / ``_r_runtime_failures`` /
+    ``_r_l2_output_failures`` / ``_r_l3_output_failures``) are
+    intentionally *not* here — failures accumulate across rounds and
+    live on :class:`OptSearchPoint`; all four renderers read
+    ``bundle.opt_sp``.
     """
 
     diagnostics: RoundDiagnostics | None
@@ -225,10 +223,33 @@ def _r_tunable_params(b: Bundle) -> str:
 
 
 def _r_diagnostics(b: Bundle) -> str:
-    """Layer-agnostic full-fidelity render of :class:`RoundDiagnostics`."""
+    """Layer-agnostic round readout: STATUS header (cycle counters, plain) +
+    fenced body (RoundDiagnostics dataset content).
+
+    STATUS lists round, parent fitness, best fitness, and per-layer stall +
+    fire counters. It renders even before the first round closes (when
+    ``digest.diagnostics`` is None), since cycle counters are always
+    populated. The fenced body follows only when ``RoundDiagnostics`` is
+    available — wrapped in ``<UNTRUSTED_DATASET_CONTENT>`` because it
+    echoes raw queries / GTs / pipeline warnings.
+    """
+    sections: list[str] = []
+    cs = b.cycle_slice
+    status: list[str] = [
+        f"STATUS: round {cs.round_num} | current {cs.current_accuracy:.1%} | "
+        f"best {cs.best_accuracy:.1%} @ round {cs.best_round}"
+    ]
+    if cs.l1_stall_count > 0:
+        status.append(f"  L1 stall: {cs.l1_stall_count} rounds")
+    if cs.l2_round > 0:
+        status.append(f"  L2 fired: {cs.l2_round}x (stall: {cs.l2_stall_count})")
+    if cs.l3_round > 0:
+        status.append(f"  L3 fired: {cs.l3_round}x (stall: {cs.l3_stall_count})")
+    sections.append("\n".join(status))
+
     d = b.digest.diagnostics
     if d is None:
-        return ""
+        return "\n\n".join(sections)
     parts: list[str] = []
 
     if d.evolution_rows:
@@ -317,23 +338,43 @@ def _r_diagnostics(b: Bundle) -> str:
             f"hit_rate={po.hit_rate:.0%} delta={po.delta_vs_full:+.1%}"
         )
 
-    return _fence_untrusted("\n\n".join(parts))
+    if parts:
+        sections.append(_fence_untrusted("\n\n".join(parts)))
+    return "\n\n".join(sections)
 
 
-def _r_failures(b: Bundle) -> str:
-    """Unified — validation + runtime + escalation + warnings + L2/L3 output."""
+def _r_validation_failures(b: Bundle) -> str:
+    """Loop 1 — L1 parse-time deterministic validator.
+
+    Fenced because it echoes LLM-proposed values (``vf.value``), which
+    the LLM could have written as anything.
+    """
+    osp = b.opt_sp
+    if not osp.validation_failures:
+        return ""
+    sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
+    for vf in osp.validation_failures:
+        allowed_str = ", ".join((vf.allowed or [])[:5])
+        sec.append(
+            f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
+            + (f" allowed=[{allowed_str}]" if allowed_str else "")
+        )
+    return _fence_untrusted("\n".join(sec))
+
+
+def _r_runtime_failures(b: Bundle) -> str:
+    """Loop 2 — DegradationCheck mid-eval evidence + escalation + warnings.
+
+    Bundles ``runtime_failures`` (per-candidate elimination from
+    ``DegradationCheck``) with ``escalation_log`` (cross-round
+    pipeline-step degradation rates) and ``warning_inventory`` (recurring
+    per-query warnings). All three are L1_SCORE-derived "the pipeline
+    misbehaved at runtime" evidence with the same lifecycle (cross-round
+    on OSP) — keeping them in one renderer is honest aggregation, not a
+    grab-bag. Fenced because it echoes pipeline warning strings.
+    """
     osp = b.opt_sp
     parts: list[str] = []
-
-    if osp.validation_failures:
-        sec = ["L1 VALIDATION FAILURES (last round produced invalid variants):"]
-        for vf in osp.validation_failures:
-            allowed_str = ", ".join((vf.allowed or [])[:5])
-            sec.append(
-                f"  axis={vf.axis} value={vf.value!r} reason={vf.reason}"
-                + (f" allowed=[{allowed_str}]" if allowed_str else "")
-            )
-        parts.append("\n".join(sec))
 
     if osp.runtime_failures:
         round_num = b.cycle_slice.round_num
@@ -378,20 +419,42 @@ def _r_failures(b: Bundle) -> str:
         if warned:
             parts.append(f"WARNING INVENTORY: {warned} queries with recurring pipeline warnings.")
 
-    for label, outcomes in (("L2", osp.l2_output_failures), ("L3", osp.l3_output_failures)):
-        if outcomes:
-            sec = [
-                f"{label} OUTPUT VALIDATOR FAILURES "
-                f"(deterministic checks caught {label} thrashing):"
-            ]
-            sec.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
-            parts.append("\n".join(sec))
-
+    if not parts:
+        return ""
     return _fence_untrusted("\n\n".join(parts))
 
 
+def _r_l2_output_failures(b: Bundle) -> str:
+    """Loop 4 — L2_CONTEXT post-parse validator outcomes.
+
+    Set by ``run_l2_output_validators`` after parsing L2's LLM output;
+    non-empty triggers immediate L3 fire. Plain (only ``validator_id``
+    from a controlled registry + ``score`` float — no untrusted content).
+    """
+    outcomes = b.opt_sp.l2_output_failures
+    if not outcomes:
+        return ""
+    lines = ["L2 OUTPUT VALIDATOR FAILURES (deterministic checks caught L2 thrashing):"]
+    lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
+    return "\n".join(lines)
+
+
+def _r_l3_output_failures(b: Bundle) -> str:
+    """L3_PLAN post-parse validator outcomes — L3's self-healing evidence.
+
+    L3 sees its own past failures to avoid repeating them. Plain (only
+    ``validator_id`` + ``score``).
+    """
+    outcomes = b.opt_sp.l3_output_failures
+    if not outcomes:
+        return ""
+    lines = ["L3 OUTPUT VALIDATOR FAILURES (deterministic checks caught L3 thrashing):"]
+    lines.extend(f"  • {o.validator_id} (score={o.score:.2f})" for o in outcomes)
+    return "\n".join(lines)
+
+
 def _format_runtime_failure_lines(rf: Any) -> list[str]:
-    """Two-line render of one RuntimeFailure for the unified ``failures`` signal."""
+    """Two-line render of one RuntimeFailure for ``runtime_failures``."""
     rate_pct = round(float(rf.degraded_rate) * 100)
     cfg_parts = [f"{k}={v}" for k, v in (rf.observed_config or {}).items() if k != "prompt"]
     cfg_str = ", ".join(cfg_parts[:6]) if cfg_parts else "(config n/a)"
@@ -469,24 +532,6 @@ def _r_l1gen_prompt_fields(b: Bundle) -> str:
     return f"L1 PROMPT (next-round preview):\n---\n{filled.render()}\n---"
 
 
-def _r_cycle_position(b: Bundle) -> str:
-    cs = b.cycle_slice
-    parts = [
-        "CYCLE POSITION:",
-        f"  round: {cs.round_num}",
-        f"  best: {cs.best_accuracy:.1%} @ round {cs.best_round}",
-        f"  current: {cs.current_accuracy:.1%}",
-        f"  l1 stall: {cs.l1_stall_count} rounds",
-    ]
-    if cs.l2_round > 0:
-        parts.append(f"  l2 fired: {cs.l2_round}x (stall: {cs.l2_stall_count})")
-    if cs.l3_round > 0:
-        parts.append(f"  l3 fired: {cs.l3_round}x (stall: {cs.l3_stall_count})")
-    if cs.probe_next_round:
-        parts.append("  probe scheduled for next round")
-    return "\n".join(parts)
-
-
 def _r_l2_history(b: Bundle) -> str:
     """L3-only: synthetic recap of L2's most recent fire."""
     cs = b.cycle_slice
@@ -512,13 +557,15 @@ SIGNALS: dict[str, Callable[[Bundle], str]] = {
     "rendered_prompt": _r_rendered_prompt,
     "tunable_params": _r_tunable_params,
     "diagnostics": _r_diagnostics,
-    "failures": _r_failures,
+    "validation_failures": _r_validation_failures,
+    "runtime_failures": _r_runtime_failures,
+    "l2_output_failures": _r_l2_output_failures,
+    "l3_output_failures": _r_l3_output_failures,
     "task_context": _r_task_context,
     "critique": _r_critique,
     "l1_config": _r_l1_config,
     "l1_signal_catalogue": _r_l1_signal_catalogue,
     "l1gen_prompt_fields": _r_l1gen_prompt_fields,
-    "cycle_position": _r_cycle_position,
     "l2_history": _r_l2_history,
 }
 
@@ -602,39 +649,33 @@ def build_bundle(
     """Snapshot live cycle state into a Bundle for one optimizer LLM call.
 
     Reads the most recent round (if any) for diagnostics + critique, and
-    the escalation/tracking counters for ``cycle_position``. Renderers
-    don't see ``cycle`` directly — they see the snapshot.
+    the escalation/tracking counters for the ``diagnostics`` STATUS prefix
+    + ``l2_history``. Renderers don't see ``cycle`` directly — they see
+    the snapshot.
 
     Pass *latest_round* explicitly for L1_CRITIQUE: the just-completed round
     has not yet been folded into ``cycle.rounds`` (that happens in
-    ``Cycle.absorb_round`` after critique fires), so the bundle must carry
-    it directly. L2/L3 read off ``cycle.rounds[-1]`` (post-fold).
+    ``Cycle.absorb_round`` after critique fires). L2/L3 callers can omit
+    it — we fall back to ``cycle.rounds[-1]`` (post-fold).
     """
-    rounds_tuple = tuple(cycle.rounds)
-    if latest_round is not None and (not rounds_tuple or rounds_tuple[-1] is not latest_round):
-        rounds_tuple = (*rounds_tuple, latest_round)
-    elif latest_round is None and rounds_tuple:
-        latest_round = rounds_tuple[-1]
+    if latest_round is None and cycle.rounds:
+        latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
     round_num = latest_round.round + 1 if latest_round else 0
 
     cs = CycleSlice(
         round_num=round_num,
-        rounds=rounds_tuple,
         current_accuracy=cycle.tracking.current_accuracy,
         best_accuracy=cycle.tracking.best_accuracy,
         best_round=cycle.tracking.best_round,
         best_composite_fitness=cycle.tracking.best_composite_fitness,
-        current_composite_fitness=cycle.tracking.current_composite_fitness,
         l1_stall_count=cycle.escalation.l1_stall_count,
         l2_round=cycle.escalation.l2_round,
         l2_stall_count=cycle.escalation.l2_stall_count,
-        l2_best_composite_fitness_at_entry=cycle.escalation.l2_best_composite_fitness_at_entry,
         l3_round=cycle.escalation.l3_round,
         l3_stall_count=cycle.escalation.l3_stall_count,
         l3_best_composite_fitness_at_entry=cycle.escalation.l3_best_composite_fitness_at_entry,
-        probe_next_round=cycle.probe_next_round,
     )
 
     return Bundle(

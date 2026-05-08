@@ -14,7 +14,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 | **OSP storage** | `validation_failures` | `runtime_failures` | `escalation.l2.stall_count` | `l2_output_failures` |
 | **Outer-memory mirror** | none (L2 reads `candidate_scores`) | cumulative on `cycle.opt_sp.runtime_failures` | none | per-round on the OSP itself |
 | **Nurse prompt slot** | `{{validation_failures}}` | `{{runtime_failures}}` | (whole `l3_plan` template) | `{{l2_output_failures_section}}` |
-| **Renderer** | `_section_validation_failures` | `_section_runtime_failures` | `format_runtime_failures_for_l3` | `format_l2_output_failures_for_l3` |
+| **Renderer** | `_r_validation_failures` | `_r_runtime_failures` | `_r_runtime_failures` | `_r_l2_output_failures` |
 | **Healer's writeback** | `cycle.opt_sp.task_context` | `task_context` / scheme + text overrides | `cycle.opt_sp.plan` | `cycle.opt_sp.plan` |
 | **Score effect** | synthetic 0 (Path 1 in `score_population`) | real score, candidate eliminated mid-eval | none | none — fires after L2 ran |
 
@@ -24,7 +24,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 
 Failures land on `OptSearchPoint.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 
-L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_section_validation_failures()`. L2 writes a brief pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
+L2's template (`optimizer_pipeline.json::resolved_prompts['l2_context/1']`) renders `{{validation_failures}}` via `_r_validation_failures()`. L2 writes a brief pointing L1 toward the allowed region. Healing is gradual — if L1 still proposes invalid values next round, the validator fires again and L2 gets fresh evidence.
 
 ## Loop 2 — L2 nurses L1 on `RuntimeFailure`
 
@@ -37,7 +37,7 @@ Both produce `EscalationSignal(target=ELIMINATE_CANDIDATE)`. `score_population` 
 
 End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.runtime_failures`, deduplicated by `(source, dominant_warning, observed_config)`. Never cleared — represents discovered runtime constraints.
 
-`_section_runtime_failures()` partitions into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`). ACCUMULATED is the real signal — surviving items mean L2's prior angle didn't take. L2 updates its outputs; if ACCUMULATED keeps growing, Loop 3 takes over.
+`_r_runtime_failures()` partitions into NEW (this round) vs ACCUMULATED (`first_seen_round != current_round`). ACCUMULATED is the real signal — surviving items mean L2's prior angle didn't take. L2 updates its outputs; if ACCUMULATED keeps growing, Loop 3 takes over.
 
 ## Loop 3 — L3 replans on L2 stall
 
@@ -45,10 +45,11 @@ End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.r
 
 L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
-- `{{l2_summary}}` — recent L2 adjustments + accuracy delta from `cycle.escalation.l2`.
-- `{{runtime_failures_section}}` — accumulated `RuntimeFailure` trail rendered by `format_runtime_failures_for_l3()`.
-- `{{l2_output_failures_section}}` — Loop 4 evidence rendered by `format_l2_output_failures_for_l3()`.
-- `{{rendered_prompt}}`, `{{pipeline_section}}`, `{{axes_digest}}`.
+- `{{l2_history}}` — recent L2 adjustments + Δ best-fitness since L3_PLAN entry, rendered by `_r_l2_history()`.
+- `{{runtime_failures}}` — accumulated `RuntimeFailure` trail (plus `escalation_log` and `warning_inventory` adjuncts) rendered by `_r_runtime_failures()`.
+- `{{l2_output_failures}}` — Loop 4 evidence rendered by `_r_l2_output_failures()`.
+- `{{l3_output_failures}}` — L3's own past validator failures rendered by `_r_l3_output_failures()`.
+- `{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{critique}}`.
 
 L3 writes a new `plan` (and optionally `pipeline_params`). Lands on `OptSearchPoint.plan`; feeds both L1's `{{plan}}` slot and the next L2 invocation. Only loop with cross-layer authority — L3 changes pipeline composition or strategy framing.
 
