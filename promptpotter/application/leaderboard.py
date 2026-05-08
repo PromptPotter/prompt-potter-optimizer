@@ -20,11 +20,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.l1_behavior_checks import CheckContext, run_all_checks
-from promptpotter.application.l1_stats import (
-    compute_l1_stats,
+from promptpotter.application.optimization.l1_behavior_checks import (
+    CheckContext,
+    run_all_checks,
 )
-from promptpotter.application.round_audit import load_round_audits
+from promptpotter.application.optimization.l1_stats import compute_l1_stats
+from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 
 __all__ = [
     "JSPRow",

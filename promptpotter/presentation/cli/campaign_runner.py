@@ -40,9 +40,9 @@ from promptpotter.presentation.cli.session import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
-    from promptpotter.application.run_observers import RunObservers
+    from promptpotter.application.optimization.observers import RunObservers
     from promptpotter.domain.opt_search_point import OptSearchPoint
     from promptpotter.presentation.cli.session import SessionCtx
     from promptpotter.presentation.views.live import LiveDisplay
@@ -140,7 +140,7 @@ def _mint_session_and_cycle(
     dataset_count: int,
 ) -> str:
     """Mint session+cycle with the CLI's pipeline-snapshot extras."""
-    from promptpotter.application.bootstrap import auto_mint_session
+    from promptpotter.application.bootstrap.session import auto_mint_session
 
     session_id, _ = auto_mint_session(
         session,
@@ -423,7 +423,7 @@ def _build_observers(
     baseline_acc: float,
 ) -> RunObservers:
     """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
-    from promptpotter.application.run_observers import build_run_observers
+    from promptpotter.application.optimization.observers import build_run_observers
 
     display = _build_live_display(
         args, session=session, campaign_config=campaign_config, baseline_acc=baseline_acc
@@ -629,7 +629,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
 async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     """PoBB-compare cycle winners across the family with adaptive top-up."""
-    from promptpotter.application.bootstrap import populate_session_scoring
+    from promptpotter.application.bootstrap.scoring_context import populate_session_scoring
     from promptpotter.application.config import configure_and_apply_pipeline
     from promptpotter.application.optimization.elevation import (
         discover_compare_arms,

@@ -18,7 +18,6 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.application.round_audit import extract_l1_variants
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 
 __all__ = [
@@ -26,8 +25,27 @@ __all__ = [
     "PARAM_SCOPE_KEYS",
     "CheckContext",
     "CheckResult",
+    "extract_l1_variants",
     "run_all_checks",
 ]
+
+
+def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]]:
+    """Walk ``nodes.l1_generate.output.response.variants`` on a round/audit dict.
+
+    The same shape rides on both the round-summary dict (as written into
+    ``index.json::rounds[N]``) and the per-round audit dict
+    (``round_NNNN.json``); both are read by this codepath. Empty list when L1
+    didn't fire or the response is malformed.
+    """
+    if not container:
+        return []
+    nodes = container.get("nodes") or {}
+    node = nodes.get("l1_generate") or {}
+    response = ((node.get("output") or {}).get("response")) or {}
+    if isinstance(response, dict):
+        return [v for v in (response.get("variants") or []) if isinstance(v, dict)]
+    return []
 
 
 # Per-node LLM-call params that are NOT prompt fields. A round that touches

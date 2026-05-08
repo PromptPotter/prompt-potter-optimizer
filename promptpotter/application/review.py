@@ -27,14 +27,14 @@ from __future__ import annotations
 
 from typing import Any
 
-from promptpotter.application.l1_behavior_checks import (
+from promptpotter.application.optimization.l1_behavior_checks import (
     CHECK_REGISTRY,
     CheckContext,
     CheckResult,
+    extract_l1_variants,
     run_all_checks,
 )
-from promptpotter.application.l1_stats import L1Stats, compute_l1_stats
-from promptpotter.application.round_audit import extract_l1_variants
+from promptpotter.application.optimization.l1_stats import L1Stats, compute_l1_stats
 
 __all__ = ["render_review_md"]
 

@@ -31,11 +31,38 @@ from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AuditTrailProjection"]
+__all__ = ["AuditTrailProjection", "audit_rounds_dir", "load_round_audits"]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
 _BASELINE_ROUND_SENTINEL = -1
+
+
+def audit_rounds_dir(cycle_dir: Path) -> Path:
+    """``{cycle_dir}/.runtime/cache/rounds`` — per-round audit folder."""
+    return cycle_dir.joinpath(*_ROUNDS_SUBPATH)
+
+
+def load_round_audits(cycle_dir: Path, rounds: list[dict[str, Any]]) -> list[dict[str, Any] | None]:
+    """Load ``round_NNNN.json`` for each round; ``None`` on missing/corrupt.
+
+    Output is parallel to *rounds* — slot ``N`` is the audit dict (or ``None``)
+    for ``rounds[N]``. Corrupt JSON or absent file is non-fatal: the matching
+    slot is ``None`` and the operator-facing render degrades gracefully.
+    """
+    rd = audit_rounds_dir(cycle_dir)
+    out: list[dict[str, Any] | None] = []
+    for round_data in rounds:
+        round_num = int(round_data.get("round") or 0)
+        path = rd / f"round_{round_num:04d}.json"
+        if path.is_file():
+            try:
+                out.append(json.loads(path.read_text(encoding="utf-8")))
+                continue
+            except (OSError, json.JSONDecodeError) as exc:
+                logger.debug("audit load failed: %s — %s", path.name, exc)
+        out.append(None)
+    return out
 
 
 def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:

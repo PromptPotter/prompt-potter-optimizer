@@ -12,10 +12,8 @@ from promptpotter.application.baseline import (
     extract_campaign_baseline,
     prepare_scoring_context,
 )
-from promptpotter.application.bootstrap import (
-    Session,
-    init_optimization_loop,
-)
+from promptpotter.application.bootstrap import init_optimization_loop
+from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import (
@@ -25,14 +23,9 @@ from promptpotter.application.optimization.escalation import (
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
-from promptpotter.application.presentation_writers import (
-    refresh_tenant_leaderboards,
-    write_log_md,
-    write_review_md,
-)
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_observers import (
+from promptpotter.application.optimization.observers import (
     ForkInfo,
+    RunCallbacks,
     RunObservers,
     build_run_observers,
 )
@@ -56,6 +49,11 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.presentation.writers import (
+    refresh_tenant_leaderboards,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:

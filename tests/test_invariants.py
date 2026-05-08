@@ -394,7 +394,7 @@ def test_observers_built_via_shared_helper() -> None:
                 offenders.append(f"{rel}:{node.lineno}:{name}")
     assert not offenders, (
         "Direct observer construction in presentation/ — route through "
-        "application/run_observers.py::build_run_observers:\n" + "\n".join(offenders)
+        "application/optimization/observers.py::build_run_observers:\n" + "\n".join(offenders)
     )
 
 
@@ -406,7 +406,7 @@ def test_run_callbacks_requires_ledger() -> None:
     always bound before any event fired). Forbid the regression: dataclass
     construction without a ledger raises ``TypeError`` at boot.
     """
-    from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.application.optimization.observers import RunCallbacks
 
     with pytest.raises(TypeError):
         RunCallbacks()  # type: ignore[call-arg]

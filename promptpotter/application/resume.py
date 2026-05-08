@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.config import CampaignConfig
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.infrastructure.store import Stores
 

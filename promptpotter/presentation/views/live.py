@@ -21,6 +21,13 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.live_state import (
+    LiveStateCore,
+    apply_p_best_update,
+    apply_phase,
+    roll_p_best_at_round_complete,
+    top_n_p_best,
+)
 from promptpotter.presentation.views.display import (
     DIM,
     GREEN,
@@ -38,9 +45,9 @@ from promptpotter.presentation.views.display import (
 from promptpotter.presentation.views.render_text import to_text
 from promptpotter.presentation.views.round_render import (
     _fmt_query_result,
-    build_individual_summary,
     fmt_individual_header,
 )
+from promptpotter.presentation.views.view_factories import individual_summary_from_dict
 from promptpotter.shared.composite import (
     render_composite_fitness_block,
 )
@@ -241,14 +248,16 @@ class LiveDisplay(ProjectionBase):
         campaign_rounds: list | None = None,
         sp_budget_ttest: int | None = None,
     ) -> None:
-        self.baseline_acc = baseline_acc
+        # Per-cycle scalars live on a shared ``LiveStateCore`` (round number,
+        # baseline + best anchors, P(best) round snapshot) so the dashboard
+        # projection and this terminal renderer maintain one shape, not two.
+        self._core = LiveStateCore(baseline_acc=baseline_acc)
         self.l1_patience = l1_patience
         self.pipeline_schema = pipeline_schema
         self.scoring_formula = scoring_formula
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
-        self._round_num = 0
         # Composite-render context — read by ``on_candidate_scored`` for
         # the per-candidate baseline anchor and by ``on_round_complete``
         # for the 3-line composite_fitness block. Populated from
@@ -257,16 +266,6 @@ class LiveDisplay(ProjectionBase):
         # after construction so the display sees the same dict the
         # phase-view builder writes to.
         self._phase_ctx: dict = {}
-        # Posterior-of-Being-Best is rendered once per round (in the round
-        # summary block), not per sample. ``_last_p_best`` holds the prior
-        # round's final distribution so arrow glyphs (▲/▼) show direction
-        # of change across rounds; ``_current_p_best`` accumulates the
-        # latest mid-round snapshot. Per-sample mid-round detail still
-        # lands in ``dashboard.json`` for the webapp.
-        self._last_p_best: dict[str, float] = {}
-        self._current_p_best: dict[str, float] = {}
-        self._current_p_best_id: str = ""
-        self._current_p_best_n: int = 0
         # Mid-round running leader — updated after each
         # ``on_candidate_scored`` so the operator sees a one-line
         # scoreboard between candidates instead of waiting for the
@@ -303,9 +302,16 @@ class LiveDisplay(ProjectionBase):
         else:
             print(line, flush=True)
 
+    @property
+    def baseline_acc(self) -> float:
+        """Running baseline anchor — read-only mirror of the shared core."""
+        return self._core.baseline_acc
+
     def set_baseline(self, fresh: float) -> None:
         """Post-baseline rewire — replace pre-baseline placeholder."""
-        self.baseline_acc = fresh
+        self._core.baseline_acc = fresh
+        if fresh > self._core.best_acc:
+            self._core.best_acc = fresh
 
     # --- Ledger subscription (via ProjectionBase) ---------------------
 
@@ -393,19 +399,11 @@ class LiveDisplay(ProjectionBase):
             typed = view_from_record(record)
             if typed is not None and (rendered := to_text(typed)):
                 self._write(rendered)
-            # Track the running baseline directly from view dicts. INIT:exit
-            # carries the post-baseline accuracy; L1_SCORE:exit promotes the
-            # round winner to baseline when it improved.
-            if event.phase == CampaignPhase.INIT and event.event == "exit":
-                self.baseline_acc = view.get("baseline_acc", self.baseline_acc)
-            elif (
-                event.phase == CampaignPhase.L1_SCORE
-                and event.event == "exit"
-                and view.get("improved")
-            ):
-                self.baseline_acc = view.get("winner_accuracy", self.baseline_acc)
-        if event.round is not None:
-            self._round_num = event.round
+        # Round number + baseline/best anchors flow through the shared core
+        # (INIT:exit carries the post-baseline accuracy; L1_SCORE:exit on
+        # ``improved`` promotes the new winner). ``view=None`` still tracks
+        # the round number.
+        apply_phase(self._core, event, view)
         if event.phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             self._round_best_acc = None
             self._round_best_label = None
@@ -476,11 +474,7 @@ class LiveDisplay(ProjectionBase):
         terminal sees one consolidated p_best line in the round-summary
         box (rendered by ``_render_p_best_line``).
         """
-        if not p_best:
-            return
-        self._current_p_best = dict(p_best)
-        self._current_p_best_id = current_id
-        self._current_p_best_n = n_samples
+        apply_p_best_update(self._core, current_id, n_samples, p_best)
 
     def _render_p_best_line(self) -> str | None:
         """Top-5 P(best) snapshot with cross-round arrow glyphs (▲/▼).
@@ -489,13 +483,11 @@ class LiveDisplay(ProjectionBase):
         single-candidate rounds skip the t-test). Arrows compare against
         the prior round's final snapshot.
         """
-        p_best = self._current_p_best
-        if not p_best:
+        if not self._core.current_p_best:
             return None
-        last = self._last_p_best
-        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
+        last = self._core.last_p_best
         parts: list[str] = []
-        for cid, prob in top:
+        for cid, prob in top_n_p_best(self._core.current_p_best):
             prev = last.get(cid)
             arrow = ""
             if prev is not None:
@@ -503,9 +495,9 @@ class LiveDisplay(ProjectionBase):
                     arrow = "▲"
                 elif prob < prev - 1e-4:
                     arrow = "▼"
-            tag = f"*{cid[:6]}*" if cid == self._current_p_best_id else cid[:6]
+            tag = f"*{cid[:6]}*" if cid == self._core.current_p_best_id else cid[:6]
             parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        return f"P(best) @ q{self._current_p_best_n}: " + " | ".join(parts)
+        return f"P(best) @ q{self._core.current_p_best_n}: " + " | ".join(parts)
 
     def on_candidate_started(
         self,
@@ -525,7 +517,7 @@ class LiveDisplay(ProjectionBase):
         label = f"C{idx + 1}"
         baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
         baseline_comp = self._phase_ctx.get("baseline_composite_fitness")
-        summary = build_individual_summary(
+        summary = individual_summary_from_dict(
             scores, baseline_acc, baseline_composite_fitness=baseline_comp
         )
 
@@ -582,7 +574,7 @@ class LiveDisplay(ProjectionBase):
             }
         )
 
-        rn = self._round_num + 1
+        rn = self._core.round_num + 1
         elapsed_label = ""
         if self._round_started_at is not None:
             elapsed = time.monotonic() - self._round_started_at
@@ -596,11 +588,7 @@ class LiveDisplay(ProjectionBase):
             self._write(_node_line(p_best_line))
         # Roll p_best snapshot into the cross-round baseline so next
         # round's arrows compare against this round's final.
-        if self._current_p_best:
-            self._last_p_best = self._current_p_best
-            self._current_p_best = {}
-            self._current_p_best_id = ""
-            self._current_p_best_n = 0
+        roll_p_best_at_round_complete(self._core)
         # Composite block — full mode only. 3-line render: composite_fitness +
         # baseline anchor (line 1), abbreviated formula (line 2), short-
         # name evaluator values (line 3). Anchored to the campaign

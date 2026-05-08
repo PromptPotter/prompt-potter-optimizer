@@ -78,7 +78,7 @@ from promptpotter.shared.errors import graceful
 from promptpotter.shared.statistics import proportion_test
 
 if TYPE_CHECKING:
-    from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.application.optimization.observers import RunCallbacks
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
