@@ -8,7 +8,7 @@ import { Sidebar, type Pane } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { StatusBar } from "@/components/status/StatusBar";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
-import { WhatIfPanel } from "@/components/whatif/WhatIfPanel";
+import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { PassRateCard } from "@/components/eval/PassRateCard";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
@@ -187,7 +187,7 @@ export function DashboardPane() {
               <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />
               <TrendChart cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             </div>
-            <WhatIfPanel dash={dash} themeKey={themeKey} />
+            <FitnessPanel dash={dash} themeKey={themeKey} />
             <LiveSamplesCard dash={dash} />
             <EvalTable round={latestRound} />
             <RawJsonCard dash={dash} />

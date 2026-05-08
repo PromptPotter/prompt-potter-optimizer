@@ -2,7 +2,7 @@
 import { useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { TERMS } from "@/lib/terms";
-import { WhatIfPanel } from "@/components/whatif/WhatIfPanel";
+import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 
 interface Props {
   cycleId: string | null;
@@ -178,7 +178,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <WhatIfPanel dash={dash} themeKey={themeKey} />
+              <FitnessPanel dash={dash} themeKey={themeKey} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12

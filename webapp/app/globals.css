@@ -104,7 +104,6 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 #content-dashboard > .progress-card,
 #content-dashboard > .live-state-card,
 #content-dashboard > .samples-card,
-#content-dashboard > .whatif-card,
 #content-dashboard > .raw-card,
 #content-dashboard > .grid2,
 #content-dashboard > .grid3{max-width:980px;margin-left:auto;margin-right:auto}
@@ -212,8 +211,25 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .samples-list .body{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--color-text-secondary)}
 .samples-empty{color:var(--color-text-tertiary);font-size:12px;font-style:italic;padding:14px 8px;text-align:center}
 
-/* What-If panel */
-.whatif-card{margin-bottom:14px}
+/* Fitness card — chart-first surface with two progressive-disclosure
+   chips (Composite, What-If). Default view = single bar per candidate
+   (accuracy); chips reveal paired bars and the ablation widget. The card
+   auto-shrinks to the chart width by default; opening the What-If body
+   expands it to dashboard-wide so the tile grid fits. */
+.fitness-card{margin-bottom:14px;width:fit-content;max-width:480px;margin-left:auto;margin-right:auto}
+.fitness-card.whatif-open{width:auto;max-width:980px}
+.fitness-toggles{display:flex;gap:6px}
+.fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
+.fitness-chip:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.fitness-chip.on{background:var(--color-background-tint-active);color:var(--color-accent);border-color:rgba(var(--color-accent-rgb),0.55)}
+.fitness-chart-frame{position:relative;height:240px;width:440px;max-width:100%;margin:0 auto}
+.fitness-legend{display:flex;justify-content:center;gap:14px;font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
+.fitness-legend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
+.fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
+.fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
+.fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+.fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary)}
+.fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
 .whatif-intro{font-size:12px;color:var(--color-text-secondary);line-height:1.55;margin-bottom:12px}
 .whatif-intro code{font-family:var(--font-mono);background:var(--color-background-secondary);padding:1px 5px;border-radius:3px;color:var(--color-text-primary)}
 .whatif-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:11px;color:var(--color-text-tertiary);margin-bottom:14px;letter-spacing:.04em}
@@ -226,9 +242,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
   border:1.5px solid rgba(var(--color-accent-rgb),0.32);
   box-shadow:0 0 6px rgba(var(--color-accent-rgb),0.18);
 }
-.whatif-body{display:grid;grid-template-columns:368px minmax(0,1fr);gap:16px;align-items:start;margin-bottom:14px}
-@media (max-width: 820px){.whatif-body{grid-template-columns:1fr}}
-.whatif-grid-wrap{overflow-y:auto;max-height:238px;padding:6px 4px 6px 0}
+.whatif-grid-wrap{overflow-y:auto;max-height:300px;padding:6px 4px 6px 0;margin-bottom:12px}
 .whatif-grid{display:grid;grid-template-columns:repeat(auto-fill,100px);justify-content:start;gap:10px}
 .whatif-sq{position:relative;width:100px;background:var(--color-background-secondary);border:1.5px dashed var(--color-border-tertiary);border-radius:9px;padding:13px 7px 10px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:7px;text-align:center;transition:border-color .15s,background .15s,opacity .15s,transform .1s,box-shadow .15s;height:108px;user-select:none;z-index:1;font-family:inherit}
 .whatif-sq:hover:not(.disabled){border-color:var(--color-accent);transform:translateY(-2px);box-shadow:0 4px 12px rgba(0,0,0,0.35);z-index:3}
@@ -250,17 +264,6 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .whatif-ico svg{width:100%;height:100%}
 .whatif-sq.in-active .whatif-ico{color:var(--color-text-primary)}
 .whatif-name{font-size:11px;color:var(--color-text-primary);font-weight:500;line-height:1.2;word-break:break-word;font-family:var(--font-mono)}
-.whatif-stats{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:12px;display:flex;flex-direction:column;gap:6px;width:100%;height:244px;overflow:hidden}
-.whatif-stats-title{font-size:11px;letter-spacing:.06em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
-.whatif-stats-winner{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono);line-height:1.4}
-.whatif-stats-winner .swap{color:var(--color-accent);font-weight:600}
-.whatif-stats-winner .same{color:var(--color-text-tertiary)}
-.whatif-stats-chart{position:relative;flex:1;min-height:0;width:100%}
-.whatif-stats-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
-.whatif-legend-inline{display:flex;gap:10px;font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono)}
-.whatif-legend-inline .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:4px;vertical-align:middle}
-.whatif-legend-inline .dot.actual{background:rgba(var(--color-accent-rgb),0.30);border:1px solid rgba(var(--color-accent-rgb),0.45)}
-.whatif-legend-inline .dot.whatif{background:rgba(var(--color-accent-rgb),0.95)}
 .whatif-controls{display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;gap:10px;flex-wrap:wrap}
 .whatif-status{font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono)}
 .whatif-actions{display:flex;gap:6px}

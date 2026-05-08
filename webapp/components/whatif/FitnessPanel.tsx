@@ -1,9 +1,10 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { TERMS } from "@/lib/terms";
 import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
 import { whatifIconFor } from "./icons";
-import { WhatIfStats } from "./WhatIfStats";
+import { FitnessChart } from "./FitnessChart";
+import { setFitnessState, useFitnessState } from "./fitness-store";
 import { parseSampleLine } from "@/lib/sample-line";
 import type { DashboardSnapshot } from "@/lib/poll";
 
@@ -11,6 +12,7 @@ interface Candidate {
   idx?: number;
   stats?: {
     composite_fitness?: number;
+    accuracy?: number;
     evaluators?: Record<string, number>;
   };
   // Live HIT/MISS lines from LiveDashboardProjection. Populated per-sample
@@ -58,9 +60,18 @@ function pickWinner(lines: { idx: number; v: number | null }[]): number | null {
   return best;
 }
 
-export function WhatIfPanel({ dash, themeKey }: Props) {
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [initialized, setInitialized] = useState(false);
+export function FitnessPanel({ dash, themeKey }: Props) {
+  // Default view: chart-only (one bar per candidate = accuracy). The
+  // composite chip pairs the formula-weighted score; the what-if chip
+  // opens the ablation widget below the chart. State lives in a module
+  // store so swapping tabs (New Job ↔ View Results) preserves chip and
+  // selection state across the FitnessPanel unmount.
+  const { showComposite, showWhatIf, selected, seeded } = useFitnessState();
+  const setShowComposite = (v: boolean | ((p: boolean) => boolean)) =>
+    setFitnessState({ showComposite: typeof v === "function" ? v(showComposite) : v });
+  const setShowWhatIf = (v: boolean | ((p: boolean) => boolean)) =>
+    setFitnessState({ showWhatIf: typeof v === "function" ? v(showWhatIf) : v });
+  const setSelected = (s: Set<string>) => setFitnessState({ selected: s });
 
   const dashMeta = (dash && Array.isArray((dash as { evaluators_meta?: unknown }).evaluators_meta) && ((dash as { evaluators_meta?: unknown[] }).evaluators_meta?.length ?? 0) > 0)
     ? ((dash as { evaluators_meta: typeof WHATIF_INLINE_META }).evaluators_meta) : null;
@@ -143,12 +154,12 @@ export function WhatIfPanel({ dash, themeKey }: Props) {
   // `viewApplicable` so pre-staging (no candidates yet) still pre-checks the
   // formula's evaluators against the meta-registry rows.
   useEffect(() => {
-    if (initialized) {
+    if (seeded) {
       const drop = [...selected].filter((n) => !viewApplicable.has(n));
       if (drop.length) {
         const next = new Set(selected);
         for (const n of drop) next.delete(n);
-        setSelected(next);
+        setFitnessState({ selected: next });
       }
       return;
     }
@@ -157,9 +168,8 @@ export function WhatIfPanel({ dash, themeKey }: Props) {
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
     }
-    setSelected(seed);
-    setInitialized(true);
-  }, [rows, inActive, viewApplicable, initialized, selected]);
+    setFitnessState({ selected: seed, seeded: true });
+  }, [rows, inActive, viewApplicable, seeded, selected]);
 
   const toggle = (name: string) => {
     const next = new Set(selected);
@@ -183,8 +193,13 @@ export function WhatIfPanel({ dash, themeKey }: Props) {
   };
 
   const selectableCount = rows.filter((r) => r.applicable).length;
+  const nVariants = Math.max(
+    Number((dash as { n_variants?: number } | null)?.n_variants) || 0,
+    ...candidates.map((c) => Number(c.idx ?? -1) + 1),
+    candidates.length,
+  );
 
-  // Rank summary
+  // Rank summary (only rendered when What-If is open)
   let summary: React.ReactNode;
   if (candidates.length === 0) {
     summary = (
@@ -259,88 +274,114 @@ export function WhatIfPanel({ dash, themeKey }: Props) {
   }
 
   return (
-    <div className="card whatif-card">
+    <div className={`card fitness-card${showWhatIf ? " whatif-open" : ""}`}>
       <div className="card-title">
-        <span>What-If Ablation</span>
-        <span className="badge">scoring preview</span>
-      </div>
-      <div className="whatif-intro">
-        Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>&quot;what if I scored without X?&quot;</em>
-      </div>
-      <div className="whatif-legend">
-        <span><span className="swatch checked">✓</span>selected (counts in what-if)</span>
-        <span><span className="swatch active" />used in actual formula</span>
-        <span><span className="swatch optional" />available, not in formula</span>
-        <span><span className="swatch disabled" />not applicable to this pipeline</span>
-      </div>
-      <div className="whatif-controls">
-        <span className="whatif-status">{selected.size} of {selectableCount} evaluator{selectableCount === 1 ? "" : "s"} selected</span>
-        <div className="whatif-actions">
-          <button type="button" className="whatif-btn" onClick={resetActual}>Reset to actual</button>
-          <button type="button" className="whatif-btn" onClick={selectNone}>None</button>
-          <button type="button" className="whatif-btn" onClick={selectAll}>All</button>
+        <span>Per-candidate fitness</span>
+        <div className="fitness-toggles" role="group" aria-label="Score views">
+          <button
+            type="button"
+            className={`fitness-chip${showComposite ? " on" : ""}`}
+            aria-pressed={showComposite}
+            onClick={() => setShowComposite((v) => !v)}
+            title="Pair the formula-weighted composite score alongside the accuracy bar."
+          >
+            Composite
+          </button>
+          <button
+            type="button"
+            className={`fitness-chip${showWhatIf ? " on" : ""}`}
+            aria-pressed={showWhatIf}
+            onClick={() => setShowWhatIf((v) => !v)}
+            title="Open the what-if ablation: pick evaluators to recompute scores client-side."
+          >
+            What-If
+          </button>
         </div>
       </div>
-      <div className="whatif-body">
-        <WhatIfStats
-          candidates={candidates}
-          selected={selected}
-          rows={rows}
-          nVariants={Math.max(
-            Number((dash as { n_variants?: number } | null)?.n_variants) || 0,
-            ...candidates.map((c) => Number(c.idx ?? -1) + 1),
-            candidates.length,
-          )}
-          themeKey={themeKey}
-        />
-        <div className="whatif-grid-wrap">
-          <div className="whatif-grid">
-          {rows.map((r, idx) => {
-            const enabled = selected.has(r.displayName);
-            const inAct = inActive.has(r.displayName);
-            const cls = ["whatif-sq"];
-            if (enabled) cls.push("on");
-            if (inAct) cls.push("in-active");
-            if (!r.applicable) cls.push("disabled");
-            const dirClass = r.direction === "low" ? "down" : "up";
-            const dirGlyph = r.direction === "low" ? "↓" : "↑";
-            const dirTip = r.direction === "low" ? TERMS.whatif_down : TERMS.whatif_up;
-            return (
-              <button
-                key={`${r.registryName}__${r.displayName}__${idx}`}
-                type="button"
-                className={cls.join(" ")}
-                disabled={!r.applicable}
-                role="checkbox"
-                aria-checked={enabled}
-                aria-disabled={!r.applicable}
-                aria-label={r.displayName}
-                tabIndex={r.applicable ? 0 : -1}
-                title={r.description || r.displayName}
-                onClick={() => r.applicable && toggle(r.displayName)}
-              >
-                <span className="whatif-tick" aria-hidden="true">
-                  <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
-                  </svg>
-                </span>
-                <span className={`whatif-dir ${dirClass}`} title={dirTip} aria-hidden="true">{dirGlyph}</span>
-                <span className="whatif-ico">
-                  {whatifIconFor(r.displayName, r.registryName)}
-                </span>
-                <span className="whatif-name">{r.displayName}</span>
-              </button>
-            );
-          })}
-          {rows.length === 0 && (
-            <div className="whatif-stats-empty" style={{ gridColumn: "1 / -1" }}>
-              Evaluator registry loads once the optimizer publishes round 1.
-            </div>
-          )}
+      {(showComposite || showWhatIf) && (
+        <div className="fitness-legend">
+          <span><span className="dot accuracy" />accuracy</span>
+          {showComposite && <span><span className="dot composite" />composite</span>}
+          {showWhatIf && <span><span className="dot whatif" />what-if</span>}
+        </div>
+      )}
+      <FitnessChart
+        candidates={candidates}
+        selected={selected}
+        rows={rows}
+        nVariants={nVariants}
+        showComposite={showComposite}
+        showWhatIf={showWhatIf}
+        themeKey={themeKey}
+      />
+      {showWhatIf && (
+        <div className="fitness-whatif">
+          <div className="whatif-intro">
+            Toggle evaluators on/off to recompute candidate scores as <code>mean(direction-corrected selected)</code> and watch the candidate ranking shift. The actual <code>composite_fitness</code> on disk is unchanged — this is a client-side preview to explore <em>&quot;what if I scored without X?&quot;</em>
           </div>
+          <div className="whatif-legend">
+            <span><span className="swatch checked">✓</span>selected (counts in what-if)</span>
+            <span><span className="swatch active" />used in actual formula</span>
+            <span><span className="swatch optional" />available, not in formula</span>
+            <span><span className="swatch disabled" />not applicable to this pipeline</span>
+          </div>
+          <div className="whatif-controls">
+            <span className="whatif-status">{selected.size} of {selectableCount} evaluator{selectableCount === 1 ? "" : "s"} selected</span>
+            <div className="whatif-actions">
+              <button type="button" className="whatif-btn" onClick={resetActual}>Reset to actual</button>
+              <button type="button" className="whatif-btn" onClick={selectNone}>None</button>
+              <button type="button" className="whatif-btn" onClick={selectAll}>All</button>
+            </div>
+          </div>
+          <div className="whatif-grid-wrap">
+            <div className="whatif-grid">
+              {rows.map((r, idx) => {
+                const enabled = selected.has(r.displayName);
+                const inAct = inActive.has(r.displayName);
+                const cls = ["whatif-sq"];
+                if (enabled) cls.push("on");
+                if (inAct) cls.push("in-active");
+                if (!r.applicable) cls.push("disabled");
+                const dirClass = r.direction === "low" ? "down" : "up";
+                const dirGlyph = r.direction === "low" ? "↓" : "↑";
+                const dirTip = r.direction === "low" ? TERMS.whatif_down : TERMS.whatif_up;
+                return (
+                  <button
+                    key={`${r.registryName}__${r.displayName}__${idx}`}
+                    type="button"
+                    className={cls.join(" ")}
+                    disabled={!r.applicable}
+                    role="checkbox"
+                    aria-checked={enabled}
+                    aria-disabled={!r.applicable}
+                    aria-label={r.displayName}
+                    tabIndex={r.applicable ? 0 : -1}
+                    title={r.description || r.displayName}
+                    onClick={() => r.applicable && toggle(r.displayName)}
+                  >
+                    <span className="whatif-tick" aria-hidden="true">
+                      <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="3.2" strokeLinecap="round" strokeLinejoin="round">
+                        <path d="M2.5 8.5 L6.5 12.5 L13.5 3.5" />
+                      </svg>
+                    </span>
+                    <span className={`whatif-dir ${dirClass}`} title={dirTip} aria-hidden="true">{dirGlyph}</span>
+                    <span className="whatif-ico">
+                      {whatifIconFor(r.displayName, r.registryName)}
+                    </span>
+                    <span className="whatif-name">{r.displayName}</span>
+                  </button>
+                );
+              })}
+              {rows.length === 0 && (
+                <div className="fitness-empty" style={{ gridColumn: "1 / -1" }}>
+                  Evaluator registry loads once the optimizer publishes round 1.
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="whatif-summary">{summary}</div>
         </div>
-      </div>
-      <div className="whatif-summary">{summary}</div>
+      )}
     </div>
   );
 }
