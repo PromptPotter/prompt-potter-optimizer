@@ -330,18 +330,35 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Chat / New-Job pane — wf-hero pipeline, chat panel, settings card.
    Lifted from vanilla webapp/index.html (chat-content section). */
 .chat-content{padding:0 0 20px;display:flex;flex-direction:column}
-.chat-job-bar{position:relative;align-self:stretch;padding:6px 20px 8px;border-bottom:1px solid var(--color-border-tertiary)}
-.chat-job-toggle{background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:inline-flex;align-items:center;gap:8px;padding:6px 10px;border-radius:8px;font-size:14px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;max-width:480px}
-.chat-job-toggle > span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.chat-job-bar{align-self:stretch;padding:6px 20px 8px;border-bottom:1px solid var(--color-border-tertiary)}
+/* In chat-mode the sidebar is hidden, so the bar spans the full browser
+   width. Chip-row is absolutely positioned at 50%/50% of the toggle so
+   the chips visually centre against the full viewport regardless of
+   how long the ``ds`` label runs. ``ds`` is capped at 30% width and
+   ellipsises so it never crowds the centred chip cluster. */
+.chat-job-toggle{position:relative;background:transparent;border:1px solid transparent;color:var(--color-text-secondary);display:flex;align-items:center;gap:10px;padding:6px 12px;border-radius:8px;font-size:13px;font-weight:500;cursor:pointer;transition:background .15s,border-color .15s,color .15s;font-family:inherit;width:100%;max-width:none;text-align:left;min-height:44px}
+.chat-job-toggle .grid{flex:0 0 auto}
+.chat-job-toggle .ds{flex:0 1 auto;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;max-width:30%;font-weight:600;color:var(--color-text-primary);font-size:13px}
+.chat-job-toggle .chip-row{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);display:flex;align-items:center;gap:12px;flex-wrap:nowrap;z-index:1}
+.chat-job-toggle .chip{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border:1px solid var(--color-border-tertiary);border-radius:999px;font-size:14px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);flex-shrink:0;font-family:var(--font-mono);line-height:1.3}
+.chat-job-toggle .chip-lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;font-family:inherit}
+.chat-job-toggle .chip strong{color:var(--color-text-primary);font-weight:600;font-size:14px}
+.chat-job-toggle .chip-baseline{color:var(--color-text-tertiary);font-weight:500}
 .chat-job-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-border-tertiary)}
-.chat-job-toggle .chev{transition:transform .15s;flex-shrink:0}
+.chat-job-toggle .chev{transition:transform .15s;flex-shrink:0;margin-left:auto}
 .chat-job-toggle[aria-expanded="true"]{background:var(--color-background-primary);color:var(--color-text-primary);border-color:var(--color-border-tertiary)}
 .chat-job-toggle[aria-expanded="true"] .chev{transform:rotate(180deg);color:var(--color-accent)}
-.chat-job-dropdown{position:absolute;top:calc(100% + 6px);left:20px;min-width:280px;max-width:420px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:10px 14px;box-shadow:0 8px 24px rgba(0,0,0,.55);z-index:20}
-.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:7px 0;border-bottom:1px solid var(--color-border-tertiary)}
+.chat-job-dropdown{margin-top:8px;background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:6px 14px 12px;display:grid;grid-template-columns:minmax(260px,300px) 1fr;gap:0 18px;align-items:start}
+.chat-job-dropdown .job-section{padding:8px 0 4px}
+.chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border-tertiary);padding-left:18px;min-width:0}
+@media (max-width:760px){.chat-job-dropdown{grid-template-columns:1fr}.chat-job-dropdown .job-whatif{border-left:none;padding-left:0;border-top:1px solid var(--color-border-tertiary);padding-top:12px}}
+.chat-job-dropdown .section-title{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:700;padding:4px 0 6px;border-bottom:1px solid var(--color-border-tertiary);margin-bottom:4px}
+.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:6px 0;border-bottom:1px solid var(--color-border-tertiary)}
 .chat-job-dropdown .row:last-child{border-bottom:none}
 .chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;flex-shrink:0}
 .chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:12px;text-align:right;word-break:break-all}
+.chat-job-dropdown .job-footer{grid-column:1/-1;margin-top:8px;padding:8px 10px;border:1px dashed var(--color-border-tertiary);border-radius:8px;color:var(--color-text-tertiary);font-size:11px;text-align:center;font-style:italic}
+@media (prefers-reduced-motion:reduce){.chat-job-toggle .chev{transition:none}}
 .wf-hero{position:relative;padding:24px 16px 42px;max-width:980px;margin:0 auto;width:100%}
 .wf-hero-status{position:absolute;top:6px;right:6px;font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px;padding:4px 10px;border:1px solid var(--color-warn-border);border-radius:999px;background:var(--color-warn-bg)}
 .wf-hero-status .dot{width:6px;height:6px;border-radius:50%;background:var(--color-success);box-shadow:0 0 8px var(--color-success)}

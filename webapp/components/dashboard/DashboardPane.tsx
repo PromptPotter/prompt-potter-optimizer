@@ -42,6 +42,7 @@ export function DashboardPane() {
   const [cycleId, setCycleId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
+  const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
   const [latestRound, setLatestRound] = useState<RoundData | null>(null);
   const [lastRoundFetched, setLastRoundFetched] = useState<number>(-1);
@@ -94,7 +95,10 @@ export function DashboardPane() {
       try {
         const r = await fetchCycleFile(cycleId, "cycle", "index.json");
         const idx = JSON.parse(r.content);
-        if (!cancelled) setDatasetTitle(idx.dataset_name || idx.cycle_id || cycleId);
+        if (!cancelled) {
+          setDatasetTitle(idx.dataset_name || idx.cycle_id || cycleId);
+          setCycleStartedAt(typeof idx.created_at === "string" ? idx.created_at : null);
+        }
       } catch {
         if (!cancelled) setDatasetTitle(cycleId);
       }
@@ -152,7 +156,7 @@ export function DashboardPane() {
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         {tab === "newjob" ? (
-          <ChatPane cycleId={cycleId} sessionId={sessionId} datasetTitle={datasetTitle} dash={dash} />
+          <ChatPane cycleId={cycleId} sessionId={sessionId} datasetTitle={datasetTitle} dash={dash} cycleStartedAt={cycleStartedAt} themeKey={themeKey} />
         ) : pane === "dashboard" ? (
           <div className="content" id="content-dashboard">
             <StatusBar

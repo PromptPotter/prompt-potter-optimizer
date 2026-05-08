@@ -115,6 +115,7 @@ export function WhatIfStats({ candidates, selected, rows, nVariants, themeKey }:
         barPercentage: 0.95,
         categoryPercentage: 0.45,
         maxBarThickness: 7,
+        minBarLength: 2,
       },
       {
         label: "what-if",

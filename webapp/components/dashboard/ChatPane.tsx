@@ -1,12 +1,16 @@
 "use client";
 import { useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { TERMS } from "@/lib/terms";
+import { WhatIfPanel } from "@/components/whatif/WhatIfPanel";
 
 interface Props {
   cycleId: string | null;
   sessionId: string | null;
   datasetTitle: string | null;
   dash: DashboardSnapshot | null;
+  cycleStartedAt: string | null;
+  themeKey: string;
 }
 
 function fmt(v: unknown): string {
@@ -14,15 +18,108 @@ function fmt(v: unknown): string {
   return String(v);
 }
 
+// Format a duration in seconds as compact "Xh Ym" / "Xm" / "Xs".
+function fmtDuration(sec: number): string {
+  if (!Number.isFinite(sec) || sec < 0) return "—";
+  if (sec < 90) return `${Math.round(sec)}s`;
+  const m = Math.round(sec / 60);
+  if (m < 90) return `${m}m`;
+  const h = Math.floor(m / 60);
+  const rm = m % 60;
+  return rm === 0 ? `${h}h` : `${h}h ${rm}m`;
+}
+
 // Vanilla "New Job" pane, ported verbatim. Inert UI — chat input + most
 // toggles are disabled. The wand-row toggle is the lone interactive element
-// (purely visual, mirrors vanilla). Control plane lands in M12.
-export function ChatPane({ cycleId, sessionId, datasetTitle, dash }: Props) {
+// (purely visual, mirrors vanilla). Control plane lands in M12 — see
+// docs/specs/m12-newjob-status-bar.md for the interactive write path.
+export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedAt, themeKey }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
 
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
+  const bestPctOnly = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—";
+  const baseline = typeof dash?.baseline === "number" ? dash.baseline : null;
+  const baselinePct =
+    baseline != null && Number.isFinite(baseline) ? `${(baseline * 100).toFixed(0)}%` : null;
+
+  // Spend block — written by LiveDashboardProjection from per-sample
+  // step_tokens (backend bucket) + ledger TokenUsageRecord (loop bucket).
+  // OpenRouter calls ship USD via the wire; other providers resolve
+  // through shared/spend.py's rate table. When neither path produces a
+  // figure (rate_known stays false), the chip falls back to a token-
+  // count display ("1.2M tok") instead of pretending it's $0.
+  type SpendBucket = {
+    used_usd?: number;
+    input_tokens?: number;
+    output_tokens?: number;
+    rate_known?: boolean;
+    model?: string | null;
+  };
+  const spendBlock = (dash as Record<string, unknown> | null)?.spend as
+    | {
+        backend?: SpendBucket;
+        loop?: SpendBucket;
+        total_used_usd?: number;
+        budget_usd?: number | null;
+      }
+    | undefined;
+  const backendBucket = spendBlock?.backend ?? {};
+  const loopBucket = spendBlock?.loop ?? {};
+  const backendUsd = typeof backendBucket.used_usd === "number" ? backendBucket.used_usd : 0;
+  const loopUsd = typeof loopBucket.used_usd === "number" ? loopBucket.used_usd : 0;
+  const totalUsd =
+    typeof spendBlock?.total_used_usd === "number"
+      ? spendBlock.total_used_usd
+      : backendUsd + loopUsd;
+  const usedUsd = totalUsd > 0 ? totalUsd : null;
+  const budgetUsd = typeof spendBlock?.budget_usd === "number" ? spendBlock.budget_usd : null;
+  const rateKnown = !!(backendBucket.rate_known || loopBucket.rate_known);
+  const totalTokens =
+    (backendBucket.input_tokens ?? 0) +
+    (backendBucket.output_tokens ?? 0) +
+    (loopBucket.input_tokens ?? 0) +
+    (loopBucket.output_tokens ?? 0);
+  const fmtTokens = (n: number): string => {
+    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
+    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
+    return `${n} tok`;
+  };
+  const fmtUsd = (n: number): string => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
+  const spendChip =
+    rateKnown && usedUsd != null && usedUsd > 0
+      ? fmtUsd(usedUsd)
+      : totalTokens > 0
+        ? fmtTokens(totalTokens)
+        : "—";
+  const spendTooltip =
+    rateKnown && (backendUsd > 0 || loopUsd > 0)
+      ? `Backend ${fmtUsd(backendUsd)} • Loop ${fmtUsd(loopUsd)}`
+      : TERMS.newjob_bar_spend;
+  const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
+  const deltaPerSpend =
+    best != null && baseline != null && usedUsd != null && usedUsd > 0
+      ? (best - baseline) / usedUsd
+      : null;
+  const effChip =
+    deltaPerSpend != null ? `${(deltaPerSpend * 100).toFixed(2)} pp/$` : "—";
+
+  // ETA to budget — pure client-side derivation. Burn rate = used / cycle_age,
+  // ETA = remaining_budget / burn. Renders "—" until spend is wired or when
+  // budget is uncapped / already spent.
+  const etaChip = (() => {
+    if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
+    const startedMs = Date.parse(cycleStartedAt);
+    if (!Number.isFinite(startedMs)) return "—";
+    const ageSec = (Date.now() - startedMs) / 1000;
+    if (ageSec <= 0 || usedUsd <= 0) return "—";
+    if (usedUsd >= budgetUsd) return "spent";
+    const burn = usedUsd / ageSec; // $/sec
+    const remainingSec = (budgetUsd - usedUsd) / burn;
+    return fmtDuration(remainingSec);
+  })();
+
   const heroModel = (() => {
     const nodes = (dash?.current_round?.nodes as Record<string, { model?: string }> | undefined) ?? {};
     return nodes.l1_generate?.model ?? "idle";
@@ -30,7 +127,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash }: Props) {
 
   return (
     <div className="content chat-content" id="content-chat">
-      <div className="chat-job-bar">
+      <div className={`chat-job-bar${jobOpen ? " open" : ""}`}>
         <button
           type="button"
           className="chat-job-toggle"
@@ -43,18 +140,49 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash }: Props) {
             <rect x="1" y="8" width="5" height="5" rx="1" opacity=".55" />
             <rect x="8" y="8" width="5" height="5" rx="1" opacity=".35" />
           </svg>
-          <span>{datasetTitle || cycleId || "New Job"}</span>
+          <span className="ds">{datasetTitle || cycleId || "New Job"}</span>
+          <span className="chip-row">
+            <span className="chip" title={TERMS.newjob_bar_best}>
+              <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
+              {baselinePct && <span className="chip-baseline"> / {baselinePct}</span>}
+            </span>
+            <span className="chip" title={spendTooltip}>
+              <span className="chip-lbl">Spend</span> <strong>{spendChip}</strong>
+            </span>
+            <span className="chip" title={TERMS.newjob_bar_budget}>
+              <span className="chip-lbl">Budget</span> <strong>{budgetChip}</strong>
+            </span>
+            <span className="chip" title={TERMS.newjob_bar_eta}>
+              <span className="chip-lbl">ETA</span> <strong>{etaChip}</strong>
+            </span>
+            <span className="chip" title={TERMS.newjob_bar_eff}>
+              <span className="chip-lbl">Δ/$</span> <strong>{effChip}</strong>
+            </span>
+          </span>
           <svg className="chev" width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="m3 4.5 3 3 3-3" />
           </svg>
         </button>
         {jobOpen && (
-          <div className="chat-job-dropdown">
-            <div className="row"><span className="lbl">Cycle</span><span className="val">{fmt(cycleId)}</span></div>
-            <div className="row"><span className="lbl">Session</span><span className="val">{fmt(sessionId)}</span></div>
-            <div className="row"><span className="lbl">Dataset</span><span className="val">{fmt(datasetTitle)}</span></div>
-            <div className="row"><span className="lbl">Best</span><span className="val">{best != null ? `${best.toFixed(3)} (${accPct})` : "—"}</span></div>
-            <div className="row"><span className="lbl">Updated</span><span className="val">{fmt(dash?.wallclock_serialized_at)}</span></div>
+          <div className="chat-job-dropdown" role="region" aria-label="Job status and configuration">
+            <div className="job-section">
+              <div className="section-title">Identity</div>
+              <div className="row"><span className="lbl">Cycle</span><span className="val">{fmt(cycleId)}</span></div>
+              <div className="row"><span className="lbl">Session</span><span className="val">{fmt(sessionId)}</span></div>
+              <div className="row"><span className="lbl">Dataset</span><span className="val">{fmt(datasetTitle)}</span></div>
+              <div className="row"><span className="lbl">Updated</span><span className="val">{fmt(dash?.wallclock_serialized_at)}</span></div>
+              <div className="section-title" style={{ marginTop: 12 }}>Spend</div>
+              <div className="row"><span className="lbl">Backend</span><span className="val">{rateKnown ? fmtUsd(backendUsd) : `${(backendBucket.input_tokens ?? 0) + (backendBucket.output_tokens ?? 0)} tok`}</span></div>
+              <div className="row"><span className="lbl">Loop</span><span className="val">{rateKnown ? fmtUsd(loopUsd) : `${(loopBucket.input_tokens ?? 0) + (loopBucket.output_tokens ?? 0)} tok`}</span></div>
+              <div className="row"><span className="lbl">Total</span><span className="val">{usedUsd != null ? fmtUsd(usedUsd) : "—"}</span></div>
+              <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
+            </div>
+            <div className="job-whatif">
+              <WhatIfPanel dash={dash} themeKey={themeKey} />
+            </div>
+            <div className="job-footer" title={TERMS.newjob_bar_adjust}>
+              Adjust spend / finishing criteria — wired in M12
+            </div>
           </div>
         )}
       </div>
