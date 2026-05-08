@@ -97,6 +97,14 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         "index.json::final.mode lands as 'diag' and final.diag carries "
         "L2's evolved L1 surface for the operator to promote.",
     )
+    p_opt.add_argument(
+        "--refresh-rates",
+        dest="refresh_rates",
+        action="store_true",
+        help="Force-refetch the LLM provider rate table from upstream "
+        "(otherwise the cached table is reused for 24 h, with the "
+        "in-repo bundled floor as fallback).",
+    )
 
 
 def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:

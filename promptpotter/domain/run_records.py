@@ -29,6 +29,7 @@ __all__ = [
     "PhaseRecord",
     "SnapshotRecord",
     "SweepPayload",
+    "TokenUsageRecord",
     "record_decision",
 ]
 
@@ -151,12 +152,41 @@ class SnapshotRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class TokenUsageRecord(BaseModel):
+    """One LLM call's token + cost telemetry — fans into ``dashboard.json::spend``.
+
+    ``kind`` splits the spend rollup into ``backend`` (in-pipeline LLM
+    nodes) and ``loop`` (optimizer meta-prompts: l1/l2/l3/critique). The
+    dashboard projection sums each bucket independently so the operator
+    sees ``Backend $X • Loop $Y`` rather than a fused total.
+
+    ``cost_usd`` is set when the provider returned USD on the wire
+    (OpenRouter's ``usage.cost``); otherwise the projection resolves it
+    via ``shared/spend.py``'s rate table. Token counts are always
+    populated so the chip can fall back to a token-count display when
+    no rate is on file for the model.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["token_usage"] = "token_usage"
+    kind: Literal["optimizer", "backend"]
+    node: str
+    model: str | None = None
+    input_tokens: int
+    output_tokens: int
+    duration_s: float = 0.0
+    cost_usd: float | None = None
+    round: int | None = None
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union — Pydantic uses ``record_type`` to pick the right model
 # when parsing a dict back into a CycleRecord (e.g. when iterating a ledger
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 CycleRecord = Annotated[
-    DecisionRecord | PhaseRecord | SnapshotRecord,
+    DecisionRecord | PhaseRecord | SnapshotRecord | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]
 

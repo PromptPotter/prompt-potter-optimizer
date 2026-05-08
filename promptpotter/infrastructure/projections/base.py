@@ -1,16 +1,23 @@
 """ProjectionBase — typed-record routing for ledger subscribers.
 
 Every concrete projection in this package isinstance-dispatches the same
-three ``CycleRecord`` subtypes (``PhaseRecord`` / ``SnapshotRecord`` / ``DecisionRecord``).
-This base owns that dispatch in one place: subclasses override only the
-hooks they care about, and adding a new ``CycleRecord`` subtype touches one
-file instead of N. Default hooks are no-ops so writers that don't care
-about a kind stay silent without boilerplate.
+``CycleRecord`` subtypes (``PhaseRecord`` / ``SnapshotRecord`` /
+``DecisionRecord`` / ``TokenUsageRecord``). This base owns that dispatch
+in one place: subclasses override only the hooks they care about, and
+adding a new ``CycleRecord`` subtype touches one file instead of N.
+Default hooks are no-ops so writers that don't care about a kind stay
+silent without boilerplate.
 """
 
 from __future__ import annotations
 
-from promptpotter.domain.run_records import CycleRecord, DecisionRecord, PhaseRecord, SnapshotRecord
+from promptpotter.domain.run_records import (
+    CycleRecord,
+    DecisionRecord,
+    PhaseRecord,
+    SnapshotRecord,
+    TokenUsageRecord,
+)
 
 __all__ = ["ProjectionBase"]
 
@@ -24,7 +31,10 @@ class ProjectionBase:
             self._handle_snapshot(record)
         elif isinstance(record, DecisionRecord):
             self._handle_decision(record)
+        elif isinstance(record, TokenUsageRecord):
+            self._handle_token_usage(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
     def _handle_decision(self, record: DecisionRecord) -> None: ...
+    def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...

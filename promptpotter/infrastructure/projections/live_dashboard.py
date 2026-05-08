@@ -27,11 +27,12 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
+from promptpotter.shared.spend import compute_usd
 
 if TYPE_CHECKING:
     from promptpotter.domain.phases import PhaseEvent
@@ -54,6 +55,26 @@ _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
     CampaignPhase.ESCALATION: "escalation",
 }
+
+
+def _empty_bucket() -> dict[str, Any]:
+    """One ``state["spend"]`` sub-bucket — backend or loop."""
+    return {
+        "used_usd": 0.0,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "rate_known": False,
+        "model": None,
+    }
+
+
+def _empty_spend() -> dict[str, Any]:
+    return {
+        "backend": _empty_bucket(),
+        "loop": _empty_bucket(),
+        "total_used_usd": 0.0,
+        "budget_usd": None,
+    }
 
 
 # Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
@@ -170,6 +191,15 @@ class LiveDashboardProjection(ProjectionBase):
             # Read by the webapp What-If panel for direction-aware
             # (↑/↓ better) ablation squares.
             "evaluators_meta": evaluators_meta or r.get("evaluators_meta") or [],
+            # Spend rollup — split into ``backend`` (per-sample wire LLM
+            # calls) and ``loop`` (optimizer L1/L2/L3/critique meta-prompt
+            # calls) so the operator reads "Backend $X • Loop $Y" rather
+            # than a fused number. ``total_used_usd`` is recomputed on
+            # every persist. Per-step USD is taken from the wire when the
+            # provider returned one (today only OpenRouter does), else
+            # rate-tabled via ``shared/spend.py``. budget_usd is set from
+            # campaign.optimization.spend_budget_usd at INIT:exit.
+            "spend": r.get("spend") or _empty_spend(),
         }
         # Bare short-form formula template (set on INIT:exit). Used per-
         # candidate in ``_build_l1_score_block`` to pair each candidate's
@@ -391,6 +421,10 @@ class LiveDashboardProjection(ProjectionBase):
             s["baseline"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
+            # Spend ceiling is set once at INIT:exit; resume picks it up
+            # from the on-disk dashboard.json::spend block via _resume_from.
+            budget = getattr(config.optimization, "spend_budget_usd", None)
+            s["spend"]["budget_usd"] = float(budget) if budget is not None else None
             if view is not None:
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
@@ -426,10 +460,92 @@ class LiveDashboardProjection(ProjectionBase):
         s["total_queries_scored"] += 1
         if not is_cached:
             s["total_backend_calls"] += 1
+            self._accumulate_spend(pd)
 
         s["current_query_payload"] = None
         s["last_query_elapsed_s"] = round(query_time, 2)
         self._set_state("between_candidates" if last_in_candidate else "between_samples")
+
+    def _accumulate_spend(self, pipeline_data: dict) -> None:
+        """Sum per-sample backend tokens into ``state["spend"]["backend"]``.
+
+        Reads ``pipeline_data.step_tokens`` (per-LLM-node ``{input,
+        output, cost_usd?}``) and ``pipeline_data.llm_provider`` (model
+        string). When a step entry carries ``cost_usd`` (set by the
+        backend when the wire LLM is OpenRouter), it short-circuits the
+        rate-table lookup. Otherwise ``shared/spend.py`` resolves USD
+        from the model string; unknown models still bump token totals so
+        the chip falls back to a token-count display rather than a fake
+        zero. Cached samples skip this call (no fresh wire cost).
+        """
+        step_tokens = pipeline_data.get("step_tokens") or {}
+        if not isinstance(step_tokens, dict):
+            return
+        in_tok = 0
+        out_tok = 0
+        wire_cost: float | None = None
+        for entry in step_tokens.values():
+            if not isinstance(entry, dict):
+                continue
+            in_tok += int(entry.get("input", 0) or 0)
+            out_tok += int(entry.get("output", 0) or 0)
+            step_cost = entry.get("cost_usd")
+            if step_cost is not None:
+                wire_cost = (wire_cost or 0.0) + float(step_cost)
+        if in_tok == 0 and out_tok == 0:
+            return
+        model = pipeline_data.get("llm_provider")
+        self._add_to_bucket("backend", in_tok, out_tok, model, wire_cost)
+
+    def _handle_token_usage(self, record: TokenUsageRecord) -> None:
+        """Route an optimizer LLM call into ``state["spend"]["loop"]``.
+
+        Backend-kind events arriving here (none today, but kept for
+        symmetry) are folded into the backend bucket. Per-call
+        ``cost_usd`` (set by ``llm_call.py`` when OpenRouter returned a
+        figure) wins over rate-table lookup; otherwise the rate table
+        is consulted via ``compute_usd``.
+        """
+        bucket = "loop" if record.kind == "optimizer" else "backend"
+        self._add_to_bucket(
+            bucket,
+            int(record.input_tokens),
+            int(record.output_tokens),
+            record.model,
+            record.cost_usd,
+        )
+        self._persist()
+
+    def _add_to_bucket(
+        self,
+        bucket: str,
+        in_tok: int,
+        out_tok: int,
+        model: str | None,
+        wire_cost_usd: float | None,
+    ) -> None:
+        """Single mutator for both spend buckets. Recomputes the running total.
+
+        ``wire_cost_usd`` is the provider-reported USD for this call, if
+        any (today only OpenRouter ships it). When provided, it
+        short-circuits the rate lookup; this is the path that matches
+        the operator's invoice. Otherwise the rate table is consulted.
+        """
+        spend = self.state["spend"]
+        b = spend.setdefault(bucket, _empty_bucket())
+        b["input_tokens"] += in_tok
+        b["output_tokens"] += out_tok
+        if model and not b.get("model"):
+            b["model"] = model
+        usd = compute_usd(model, in_tok, out_tok, override_usd=wire_cost_usd)
+        if usd is not None:
+            b["used_usd"] = round(b["used_usd"] + usd, 6)
+            b["rate_known"] = True
+        spend["total_used_usd"] = round(
+            spend.get("backend", {}).get("used_usd", 0.0)
+            + spend.get("loop", {}).get("used_usd", 0.0),
+            6,
+        )
 
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)

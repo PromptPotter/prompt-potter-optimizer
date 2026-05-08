@@ -79,7 +79,7 @@ Repository = "https://github.com/runfish5/prompt-potter-optimizer"
 include = ["promptpotter*"]
 
 [tool.setuptools.package-data]
-promptpotter = ["py.typed"]
+promptpotter = ["py.typed", "shared/data/rates.json"]
 
 [tool.pytest.ini_options]
 asyncio_mode = "auto"

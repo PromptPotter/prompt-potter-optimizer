@@ -155,8 +155,17 @@ def build_run_observers(
     ledger.bind(pobb)
     session.state.ledger = ledger
 
+    callbacks = RunCallbacks(ledger=ledger)
+    # Route every optimizer ``emit_token_usage`` call into the cycle
+    # ledger via on_token_usage → TokenUsageRecord; the dashboard
+    # projection sums these into spend.loop. The sink is process-global,
+    # so a subsequent build_run_observers call cleanly replaces it.
+    from promptpotter.infrastructure.llm import set_token_usage_sink
+
+    set_token_usage_sink(callbacks.on_token_usage)
+
     return RunObservers(
-        callbacks=RunCallbacks(ledger=ledger),
+        callbacks=callbacks,
         audit=audit,
         dashboard=dashboard,
         pobb=pobb,

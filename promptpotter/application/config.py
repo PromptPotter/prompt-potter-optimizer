@@ -110,6 +110,15 @@ class OptimizationConfig(BaseModel):
     l3_patience: int | None = Field(1)
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
+    spend_budget_usd: float | None = Field(
+        None,
+        description=(
+            "Operator-set spend ceiling in USD for the whole cycle "
+            "(optimizer + backend LLM calls). None = uncapped. Surfaces on "
+            "dashboard.json::spend.budget_usd; not yet enforced — see "
+            "docs/specs/m11-spend-tracking.md."
+        ),
+    )
 
     degradation_threshold: float = Field(...)
 

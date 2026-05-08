@@ -206,6 +206,10 @@ async def llm_call(
 
         duration_s = round(time.monotonic() - _t0, 2)
 
+        # OpenRouter returns ``usage.cost``/``total_cost`` with USD already
+        # computed; other providers leave this slot empty and the spend
+        # projection rate-tables the tokens.
+        cost_raw = response.usage.get("cost") or response.usage.get("total_cost")
         emit_token_usage(
             TokenUsage(
                 node=node or "llm_call",
@@ -213,6 +217,8 @@ async def llm_call(
                 input_tokens=response.usage.get("prompt_tokens", 0),
                 output_tokens=response.usage.get("completion_tokens", 0),
                 duration_s=duration_s,
+                model=response.model,
+                cost_usd=float(cost_raw) if cost_raw is not None else None,
             )
         )
 

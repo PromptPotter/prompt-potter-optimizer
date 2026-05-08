@@ -580,6 +580,14 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
     digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
     """
+    # Keep the spend chip honest against provider re-pricing. The cache
+    # has a 24 h TTL so this is a no-op on most starts; --refresh-rates
+    # forces a fetch. Network failure logs + falls back to the prior cache
+    # or the in-repo bundled floor — offline starts still resolve rates.
+    from promptpotter.shared.spend import refresh_rates
+
+    refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
     session = await init_services_cli(**ctx.init_params)

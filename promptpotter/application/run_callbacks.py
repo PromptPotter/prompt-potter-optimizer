@@ -5,8 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
+from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.infrastructure.llm import TokenUsage
 from promptpotter.presentation.views.view_factories import (
     from_phase_event,
     view_to_wire_dict,
@@ -129,3 +130,24 @@ class RunCallbacks:
 
     def set_round(self, round_num: int) -> None:
         self._current_round = round_num
+
+    def on_token_usage(self, usage: TokenUsage) -> None:
+        """Forward an ``emit_token_usage`` event into the ledger.
+
+        Installed as ``infrastructure.llm.set_token_usage_sink`` by the
+        runner, so every optimizer LLM call's token + cost lands as a
+        ``TokenUsageRecord``. The dashboard projection sums the records
+        into ``dashboard.json::spend.loop``.
+        """
+        self._emit(
+            TokenUsageRecord(
+                kind=usage.kind,
+                node=usage.node,
+                model=usage.model,
+                input_tokens=int(usage.input_tokens),
+                output_tokens=int(usage.output_tokens),
+                duration_s=float(usage.duration_s),
+                cost_usd=usage.cost_usd,
+                round=self._current_round,
+            )
+        )

@@ -75,6 +75,7 @@ dmypy.json
 Thumbs.db
 
 data/
+!promptpotter/shared/data/
 
 # Linting cache
 .ruff_cache/
