@@ -36,12 +36,12 @@ import types
 import numpy as np
 import pytest
 
-from promptpotter.application.optimization.escalation import (
+from promptpotter.application.optimization.escalation import apply_sweep_payload_to_osp
+from promptpotter.application.optimization.escalation.firing import (
     _apply_l2,
     _apply_l3,
     _parse_l2,
     _parse_l3,
-    apply_sweep_payload_to_osp,
 )
 from promptpotter.application.optimization.l1_validators import detect_invariants
 from promptpotter.application.optimization.l2_validators import (
@@ -362,7 +362,7 @@ def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
 
 def _l2_cycle_stub() -> types.SimpleNamespace:
     """Minimal Cycle attributes _apply_l2 reads."""
-    from promptpotter.application.optimization.cycle import EscalationState
+    from promptpotter.application.optimization.escalation.state import EscalationState
 
     return types.SimpleNamespace(
         opt_sp=_osp(),
@@ -455,7 +455,7 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     """L3 fire wholesale-replaces ``cycle.opt_sp.l3_note`` — even with an
     empty/missing ``note``, prior content is wiped. That's the contract:
     each L3 fire produces a complete (or null) note."""
-    from promptpotter.application.optimization.cycle import EscalationState
+    from promptpotter.application.optimization.escalation.state import EscalationState
 
     osp = _osp(plan="prior plan", l3_note="prior note")
     raw = {"plan": "x" * 200, "note": "new sticky pointer", "rationale": "test"}

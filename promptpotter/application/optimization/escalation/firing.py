@@ -23,11 +23,11 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.optimization.cycle import NextAction
 from promptpotter.application.optimization.dispatch_hub import (
     DispatchHub,
     build_bundle,
 )
+from promptpotter.application.optimization.escalation.state import NextAction
 from promptpotter.application.optimization.formatting import warning_summary
 from promptpotter.application.optimization.l2_validators import (
     run_l2_output_validators,

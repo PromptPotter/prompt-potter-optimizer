@@ -26,7 +26,6 @@ __all__ = [
     "OptimizationConfig",
     "OptimizerLLMConfig",
     "PreflightWarning",
-    "compute_preflight_metrics",
     "configure_and_apply_pipeline",
     "create_llm_client",
     "load_campaign_config",
@@ -182,18 +181,6 @@ def load_campaign_config(raw: dict | CampaignConfig) -> CampaignConfig:
     return CampaignConfig.model_validate(raw)
 
 
-@dataclass
-class PreflightMetrics:
-    eff_queries: int
-    queries_label: str
-    pipeline_label: str
-    nodes_detail: str | None
-    est_calls: int | None
-    l2_label: str
-    l3_label: str
-    strategy: str
-
-
 @dataclass(frozen=True)
 class PreflightWarning:
     """Structured pre-run warning surfaced before a campaign kicks off."""
@@ -225,45 +212,6 @@ def run_preflight_checks(config: CampaignConfig, dataset: list) -> list[Prefligh
     if (w := _check_sp_budget_vs_dataset(config, dataset)) is not None:
         warnings.append(w)
     return warnings
-
-
-def compute_preflight_metrics(
-    config: CampaignConfig,
-    session: Session | None,
-    dataset_size: int,
-    *,
-    exclude_nodes: list[str] | None = None,
-) -> PreflightMetrics:
-    """Derive display-ready metrics from ``CampaignConfig`` + ``Session``. Pure."""
-    sp_budget = config.sp_budget_ttest
-    eff_queries = min(sp_budget, dataset_size) if dataset_size > 0 else sp_budget
-    queries_label = f"{eff_queries} of {dataset_size}"
-
-    schema = session.pipeline_schema if session else None
-    active_nodes = list(schema.active_steps) if schema else []
-    excluded = exclude_nodes or []
-    total_nodes = len(active_nodes) + len(excluded)
-    if active_nodes:
-        pipeline_label = f"{len(active_nodes)} of {total_nodes} nodes"
-        nodes_detail: str | None = ", ".join(active_nodes)
-    else:
-        pipeline_label = "(default pipeline)"
-        nodes_detail = None
-
-    opt = config.optimization
-    per_round = eff_queries + (opt.n_variants - 1) * int(eff_queries * 0.6)
-    est_calls = opt.max_rounds * per_round if opt.max_rounds is not None else None
-
-    return PreflightMetrics(
-        eff_queries=eff_queries,
-        queries_label=queries_label,
-        pipeline_label=pipeline_label,
-        nodes_detail=nodes_detail,
-        est_calls=est_calls,
-        l2_label=f"enabled, patience={opt.l2_patience}" if opt.enable_l2 else "disabled",
-        l3_label=f"enabled, patience={opt.l3_patience}" if opt.enable_l3 else "disabled",
-        strategy="FREEFORM",
-    )
 
 
 def configure_and_apply_pipeline(

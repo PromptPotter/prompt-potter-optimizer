@@ -17,13 +17,11 @@ from promptpotter.application.bootstrap import (
     init_optimization_loop,
 )
 from promptpotter.application.config import CampaignConfig
-from promptpotter.application.optimization.cycle import (
-    Cycle,
-    NextAction,
-    build_escalation_entry,
-)
+from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import (
+    NextAction,
     apply_sweep_payload_to_osp,
+    build_escalation_entry,
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates

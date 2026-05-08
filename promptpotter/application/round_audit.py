@@ -23,7 +23,6 @@ from typing import Any
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "audit_rounds_dir",
     "extract_l1_variants",
     "load_round_audits",
 ]

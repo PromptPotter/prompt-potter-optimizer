@@ -22,7 +22,7 @@ from promptpotter.infrastructure.llm import LLMClientBase
 
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
-    from promptpotter.application.optimization.escalation import LayerStrategy
+    from promptpotter.application.optimization.escalation.firing import LayerStrategy
 
 __all__ = [
     "OptimizerAction",

@@ -211,7 +211,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     into every round_data JSON; resume now rebuilds from the ledger. This test
     drives both paths over an identical sequence and asserts they agree.
     """
-    from promptpotter.application.optimization.cycle import EscalationState
+    from promptpotter.application.optimization.escalation.state import EscalationState
 
     ledger = CycleLedger.open(CycleDir(tmp_path / "cyc"))
 
