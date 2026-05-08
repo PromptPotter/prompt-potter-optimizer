@@ -24,7 +24,21 @@
   /* Mono stack: Cascadia Mono first so Windows ClearType gets the heaviest
      hinted face it has; SF Mono picks up macOS; fallbacks for everyone else. */
   --font-mono:"Cascadia Mono","SF Mono",Menlo,Consolas,monospace;
+  /* Scrollbar — VS Code dark+ palette, rectangular, no roundness. */
+  --scrollbar-thumb:rgba(121,121,121,.4);
+  --scrollbar-thumb-hover:rgba(100,100,100,.7);
+  --scrollbar-thumb-active:rgba(191,191,191,.4);
 }
+
+/* Universal scrollbar style. Applies to <html>, <body>, and every scroll
+   container on the page so the look is consistent (overrides UA chrome). */
+*{scrollbar-width:thin;scrollbar-color:var(--scrollbar-thumb) transparent}
+*::-webkit-scrollbar{width:16px;height:16px}
+*::-webkit-scrollbar-track{background:transparent}
+*::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:0}
+*::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover)}
+*::-webkit-scrollbar-thumb:active{background:var(--scrollbar-thumb-active)}
+*::-webkit-scrollbar-corner{background:transparent}
 
 /* Bright theme — sky-blue surfaces with earthy-brown accent and warm sandy
    tints. Largest areas (page + cards) sit in the *middle* of the lightness
@@ -58,6 +72,9 @@
   --color-warn:#8b5a2b;
   --color-warn-bg:rgba(var(--color-accent-rgb),0.16);
   --color-warn-border:rgba(var(--color-accent-rgb),0.45);
+  --scrollbar-thumb:rgba(100,100,100,.4);
+  --scrollbar-thumb-hover:rgba(100,100,100,.7);
+  --scrollbar-thumb-active:rgba(0,0,0,.6);
 }
 
 *{box-sizing:border-box;margin:0;padding:0}
@@ -383,6 +400,10 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .wf-hero-node .lbl{font-size:14px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
 .wf-hero-node.llm .lbl{font-size:22px;color:var(--color-text-primary);letter-spacing:.06em}
 .wf-hero-node .val{font-size:14px;font-weight:500;color:var(--color-text-primary);font-family:var(--font-mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px}
+.wf-hero-node-toggle{cursor:pointer;font:inherit;color:inherit;text-align:left;transition:border-color .15s,box-shadow .15s,background .15s}
+.wf-hero-node-toggle:hover{border-color:var(--color-accent)}
+.wf-hero-node-toggle:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent-glow)}
+.wf-hero-node-toggle[aria-pressed="true"]{border-color:var(--color-accent);box-shadow:inset 0 0 0 1px var(--color-accent),0 0 14px var(--color-accent-glow)}
 .wf-hero-node.llm .val{color:var(--color-accent);align-self:center;text-align:center;max-width:220px}
 .wf-hero-arrow{
   flex:1;max-width:220px;min-width:80px;height:2px;position:relative;margin:0 -1px;
@@ -396,6 +417,19 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:12px;padding:5px 14px;border-radius:999px;background:rgba(var(--color-accent-rgb),0.08);border:1px solid rgba(var(--color-accent-rgb),0.30);color:var(--color-accent);letter-spacing:.04em}
+.wf-samples-zone{display:flex;justify-content:center;margin-top:24px;padding:0 8px}
+.wf-samples-block{width:100%;max-width:760px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:240px;min-height:160px;max-height:70vh}
+.wf-samples-scroll{flex:1;min-height:0;overflow:auto}
+.wf-samples-table{width:100%;border-collapse:separate;border-spacing:0;background:var(--color-background-secondary);table-layout:fixed}
+.wf-samples-table thead th{position:sticky;top:0;z-index:1;padding:8px 12px;font-size:10px;letter-spacing:.10em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600;text-align:left;background:var(--color-background-secondary);border-bottom:1px solid var(--color-border-tertiary)}
+.wf-samples-table tbody td{padding:8px 12px;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);border-bottom:1px solid var(--color-border-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:0}
+.wf-samples-table .col-id{width:48px;color:var(--color-text-tertiary)}
+.wf-samples-table .col-input,.wf-samples-table .col-output{width:auto}
+.wf-samples-table .col-tries{width:54px;text-align:right;color:var(--color-text-secondary)}
+.wf-samples-table .col-surprise{width:78px;text-align:right;font-variant-numeric:tabular-nums}
+.wf-samples-table tbody tr:last-child td{border-bottom:none}
+.wf-samples-footer{padding:8px 12px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:flex-end}
+.wf-samples-footer .counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0;padding:0 20px}
 @media (max-width:980px){.chat-grid{grid-template-columns:1fr}}
 .chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:380px;min-width:0}

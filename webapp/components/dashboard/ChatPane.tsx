@@ -1,8 +1,9 @@
 "use client";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
+import { HardSamplesTable } from "@/components/dashboard/HardSamplesTable";
 
 interface Props {
   cycleId: string | null;
@@ -36,6 +37,13 @@ function fmtDuration(sec: number): string {
 export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedAt, themeKey }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
+  const [samplesOpen, setSamplesOpen] = useState(false);
+  const toggleSamples = () => setSamplesOpen((v) => !v);
+  // Auto-open as soon as a cycle is bound — saves the operator one click per
+  // page reload during dev. Manual close still sticks within the session.
+  useEffect(() => {
+    if (cycleId) setSamplesOpen(true);
+  }, [cycleId]);
 
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
@@ -193,7 +201,13 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
           <span>production · {accPct}</span>
         </div>
         <div className="wf-hero-flow">
-          <div className="wf-hero-node">
+          <button
+            type="button"
+            className="wf-hero-node wf-hero-node-toggle"
+            aria-pressed={samplesOpen}
+            aria-label={samplesOpen ? "Hide dataset preview" : "Show dataset preview"}
+            onClick={toggleSamples}
+          >
             <div className="ico">
               <svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
                 <polyline points="18 10 13 10 11.5 12.5 8.5 12.5 7 10 2 10" />
@@ -201,7 +215,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               </svg>
             </div>
             <div className="text-col"><div className="lbl">Input</div><div className="val">Query</div></div>
-          </div>
+          </button>
           <div className="wf-hero-arrow" />
           <div className="wf-hero-node llm">
             <div className="head">
@@ -219,7 +233,13 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
             <div className="val">{heroModel}</div>
           </div>
           <div className="wf-hero-arrow" />
-          <div className="wf-hero-node">
+          <button
+            type="button"
+            className="wf-hero-node wf-hero-node-toggle"
+            aria-pressed={samplesOpen}
+            aria-label={samplesOpen ? "Hide dataset preview" : "Show dataset preview"}
+            onClick={toggleSamples}
+          >
             <div className="ico">
               <svg width="28" height="28" viewBox="0 0 20 20" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1Z" />
@@ -229,8 +249,9 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               </svg>
             </div>
             <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
-          </div>
+          </button>
         </div>
+        {samplesOpen && <HardSamplesTable cycleId={cycleId} />}
       </div>
 
       <div className="chat-grid">

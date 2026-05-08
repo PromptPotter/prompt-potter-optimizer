@@ -52,3 +52,40 @@ export interface FilesListing {
 export function fetchFiles(cycleId: string, signal?: AbortSignal): Promise<FilesListing> {
   return jget<FilesListing>(`${API}/campaigns/${cycleId}/files`, signal);
 }
+
+export interface DatasetItem {
+  sample_id: number;
+  query: string;
+  ground_truth: string;
+  task?: string | null;
+  n_obs: number;
+  surprise: number;
+}
+
+export interface DatasetPreview {
+  name: string;
+  row_count: number;
+  train_count: number;
+  test_count: number;
+  items: DatasetItem[];
+}
+
+export function fetchDatasetPreview(
+  name: string,
+  limit = 25,
+  signal?: AbortSignal,
+): Promise<DatasetPreview> {
+  return jget<DatasetPreview>(
+    `${API}/datasets/${encodeURIComponent(name)}/preview?limit=${limit}`,
+    signal,
+  );
+}
+
+export async function fetchActiveDatasetName(
+  cycleId: string,
+  signal?: AbortSignal,
+): Promise<string | null> {
+  const file = await fetchCycleFile(cycleId, "family", "index.json", signal);
+  const parsed = JSON.parse(file.content) as { header?: { dataset_name?: string } };
+  return parsed.header?.dataset_name ?? null;
+}
