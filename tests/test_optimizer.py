@@ -512,3 +512,88 @@ def test_validate_template_raises_on_unknown_slot():
     bad = PromptTemplate(task_intent="see {{not_a_signal}}")
     with pytest.raises(KeyError, match="not_a_signal"):
         validate_template("l1_critique", bad)
+
+
+# ===========================================================================
+# Phase 1 — axis_memory signal wires AxisIndex.digest() into prompts
+# ===========================================================================
+#
+# Closes flaw 5: MeasurementArchive is rich, dispatch_hub.SIGNALS doesn't
+# surface it. The format helpers already exist in
+# intelligence/indexes/format.py; this signal is wiring, not new computation.
+
+
+def _empty_cycle_slice():
+    from promptpotter.application.optimization.dispatch_hub import CycleSlice
+
+    return CycleSlice(
+        round_num=0,
+        current_accuracy=0.0,
+        best_accuracy=0.0,
+        best_round=0,
+        l1_stall_count=0,
+        l2_round=0,
+        l2_stall_count=0,
+        l3_round=0,
+        l3_stall_count=0,
+    )
+
+
+def test_axis_memory_renders_when_axes_digest_yields_content():
+    """``axis_memory`` wraps :meth:`AxisIndex.digest` into a labeled block."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+
+    fake_axes = types.SimpleNamespace(
+        digest=lambda: {
+            "axis_rankings": "persona (effect=0.234, strong)",
+            "persistent_failures": "3 chronic failures",
+        }
+    )
+    bundle = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None),
+        axes=fake_axes,
+    )
+    out = DispatchHub.render("axis_memory", bundle)
+    assert out.startswith("AXIS MEMORY")
+    assert "axis rankings: persona (effect=0.234, strong)" in out
+    assert "persistent failures: 3 chronic failures" in out
+
+
+def test_axis_memory_empty_when_axes_or_digest_absent():
+    """Pre-first-round and empty-digest paths render to empty string."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+
+    base_kwargs = {
+        "opt_sp": OptSearchPoint(),
+        "pipeline_schema": None,
+        "cycle_slice": _empty_cycle_slice(),
+        "digest": RoundDigest(diagnostics=None, critique=None),
+    }
+
+    no_axes = Bundle(**base_kwargs, axes=None)
+    assert DispatchHub.render("axis_memory", no_axes) == ""
+
+    empty_digest = Bundle(
+        **base_kwargs,
+        axes=types.SimpleNamespace(digest=lambda: None),
+    )
+    assert DispatchHub.render("axis_memory", empty_digest) == ""
+
+
+def test_axis_memory_listed_in_l1_possible_and_default_layout():
+    """L1 wiring: L2 may pick axis_memory; default layout includes it."""
+    from promptpotter.domain.l1_layout import L1_POSSIBLE, default_l1_layout
+
+    assert "axis_memory" in L1_POSSIBLE
+    assert "axis_memory" in default_l1_layout().problem_description

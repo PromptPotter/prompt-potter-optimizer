@@ -169,6 +169,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         pipeline_schema=None,
         cycle_slice=cycle_slice,
         digest=RoundDigest(diagnostics=diag, critique=None),
+        axes=None,
     )
 
     diagnostics_text = DispatchHub.render("diagnostics", bundle)

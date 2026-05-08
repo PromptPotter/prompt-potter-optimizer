@@ -37,6 +37,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.application.optimization.cycle import Cycle
 
 __all__ = [
@@ -191,6 +192,7 @@ class Bundle:
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
     digest: RoundDigest
+    axes: AxisIndex | None
 
 
 # ---------------------------------------------------------------------------
@@ -571,6 +573,53 @@ def _r_l1_signal_catalogue(b: Bundle) -> str:
     )
 
 
+# Order in which AxisIndex.digest() keys are surfaced to the optimizer LLM.
+# Effect-driven items first (rankings, top values, trends, exhausted axes)
+# so attention lands on what to mutate; sample-side findings second
+# (persistent failures, clusters, bottleneck); narrative tail last
+# (improvement attribution). Keys absent from the digest are skipped.
+_AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
+    "axis_rankings",
+    "top_values",
+    "value_trends",
+    "exhausted_axes",
+    "persistent_failures",
+    "failure_clusters",
+    "bottleneck_distribution",
+    "failure_group_insights",
+    "dead_queries",
+    "discriminating_queries",
+    "volatile_queries",
+    "improvement_attribution",
+)
+
+
+def _r_axis_memory(b: Bundle) -> str:
+    """Cross-cycle axis & sample memory derived from the MeasurementArchive.
+
+    Wraps :meth:`AxisIndex.digest` — the axis-keyed view that aggregates
+    effect sizes, persistent failures, failure clusters, value trends,
+    and exhausted axes across this dataset's prior cycles. Empty when
+    ``cycle.axes`` isn't initialised (pre-first-round) or the digest
+    yields nothing. The formatters this signal aggregates already exist
+    in ``intelligence/indexes/format.py``; the wiring here is the only
+    new code — no new computation, no new query path.
+    """
+    if b.axes is None:
+        return ""
+    digest = b.axes.digest()
+    if not digest:
+        return ""
+    lines = ["AXIS MEMORY (cross-cycle observations from MeasurementArchive):"]
+    for key in _AXIS_MEMORY_LABEL_ORDER:
+        val = digest.get(key)
+        if val is None:
+            continue
+        label = key.replace("_", " ")
+        lines.append(f"  {label}: {val}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 # ---------------------------------------------------------------------------
 # Signal registry — lookup by name from layouts / templates / fill_*.
 # ---------------------------------------------------------------------------
@@ -654,6 +703,13 @@ SIGNALS: dict[str, _Signal] = {
         SignalKind.DERIVED,
         _r_l1_signal_catalogue,
         "L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
+    ),
+    "axis_memory": _Signal(
+        "axis_memory",
+        SignalKind.DERIVED,
+        _r_axis_memory,
+        "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
+        "failure clusters, value trends, exhausted axes.",
     ),
 }
 
@@ -807,4 +863,5 @@ def build_bundle(
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
         digest=RoundDigest(diagnostics=latest_diag, critique=latest_crit),
+        axes=cycle.axes,
     )
