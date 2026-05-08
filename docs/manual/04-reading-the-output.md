@@ -1,6 +1,6 @@
 # Reading the output
 
-While a campaign runs, three streams tell you what's happening: per-query lines, round summaries, and annotation lines.
+While a campaign runs, three streams tell you what's happening: per-sample lines, round summaries, and annotation lines.
 
 ## Lifecycle at a glance
 
@@ -21,14 +21,14 @@ Each round runs four steps in sequence:
 |------|--------------|
 | **Generate** | L1 evolves N candidates from the previous round's critique + axis-index intelligence. |
 | **Evaluate** | Each candidate scored query-by-query. After `elimination_n_min=4`, PoBB can stop scoring inferior candidates early. |
-| **Critique** | Reads raw per-query results. Produces structured analysis: failure clusters, what to try next. |
+| **Critique** | Reads raw per-sample results. Produces structured analysis: failure clusters, what to try next. |
 | **Winner** | Round's fittest beats current best by ≥ improvement threshold → new best, baseline advances. Else patience++. |
 
 When `l1_patience` consecutive rounds bring no improvement, **L2** fires. When L2-adjusted rounds also stall, **L3** fires. Self-healing fires on validation / runtime failure regardless of patience — see [`../concepts/self-healing.md`](../concepts/self-healing.md).
 
 Between rounds (in order): AxisIndex refresh, zero-signal filter (off by default), exploration/exploitation rebalance (on by default).
 
-## Per-query lines
+## Per-sample lines
 
 ```
 0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'was the hypothesis disproved?'

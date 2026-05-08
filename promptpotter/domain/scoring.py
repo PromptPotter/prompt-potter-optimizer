@@ -7,8 +7,8 @@ primitives, and ``rescore_results`` mutator live in
 Each dataset declares a scoring formula in ``campaign.json`` under ``"scoring"``.
 Accepted shapes:
 
-- **String shorthand** — interpreted as ``per_query``; ``per_round`` uses the evaluator-registry default.
-- **Twin form** — ``{"per_query": "...", "per_round": "..."}``; omitted keys fall back to defaults.
+- **String shorthand** — interpreted as ``per_sample``; ``per_round`` uses the evaluator-registry default.
+- **Twin form** — ``{"per_sample": "...", "per_round": "..."}``; omitted keys fall back to defaults.
 
 A missing ``scoring`` key raises in ``compile_scorer`` — there is no implicit default.
 """
@@ -19,7 +19,7 @@ from collections.abc import Callable
 from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict, runtime_checkable
 
 # ---------------------------------------------------------------------------
-# Per-query result types
+# Per-sample result types
 # ---------------------------------------------------------------------------
 
 
@@ -40,7 +40,7 @@ class PipelineData(TypedDict, total=False):
 
 
 class QueryMeasurement(TypedDict):
-    """Core per-query measurement result.
+    """Core per-sample measurement result.
 
     Raw trace fields (``query``, ``ground_truth``, ``predicted``, ``error``,
     ``pipeline_data``) are populated at measurement time. ``hit`` and ``fitness``
@@ -139,8 +139,8 @@ EMPTY_SCORER_ID = "none"
 
 
 class ScoringSpec(NamedTuple):
-    """Parsed ``campaign.json::scoring`` block — ``(per_query, per_round, scorer_id)``."""
+    """Parsed ``campaign.json::scoring`` block — ``(per_sample, per_round, scorer_id)``."""
 
-    per_query: str | None
+    per_sample: str | None
     per_round: str | None
     scorer_id: str

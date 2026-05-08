@@ -261,12 +261,12 @@ async def measure_sample(
             "ground_truth_rank": gt_rank,
             "pipeline_data": pd,
         }
-        # Populate per-query evaluator values.
-        from promptpotter.application.scoring.evaluators import materialize_query_values
+        # Populate per-sample evaluator values.
+        from promptpotter.application.scoring.evaluators import materialize_sample_values
 
-        query_evaluators = materialize_query_values(pipeline_schema, result)  # type: ignore[arg-type]
-        if query_evaluators:
-            pd["evaluators"] = query_evaluators
+        sample_evaluators = materialize_sample_values(pipeline_schema, result)  # type: ignore[arg-type]
+        if sample_evaluators:
+            pd["evaluators"] = sample_evaluators
         from promptpotter.application.scoring.formula import rescore_results
 
         assert session.scoring.scorer is not None, "session.scoring.scorer required for measurement"

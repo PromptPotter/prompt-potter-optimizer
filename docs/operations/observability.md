@@ -20,15 +20,15 @@ Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_p
 | Escalation check | Event | check type, fired/not, reason |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
-## Per-query P(best) stream
+## Per-sample P(best) stream
 
-PoBB emits a per-query Posterior-of-Being-Best snapshot for every candidate. Surfaced on every monitoring channel:
+PoBB emits a per-sample Posterior-of-Being-Best snapshot for every candidate. Surfaced on every monitoring channel:
 
 | Channel | Path | Cadence | Format |
 |---|---|---|---|
-| Live dashboard fields | `dashboard.json::current_round.nodes.candidates[].p_best` (also `.p_best_delta`, `.p_best_history`, `.p_best_n_queries`) + `current_round.p_best_top` (top-5 sorted) | per-query overwrite | scalar floats |
-| CLI / notebook | stderr via `LiveDisplay` | per-query | one line: `p_best q14: *c042* 44.0%▲ c017 28.4%▼ ...` |
-| Append-only stream | `campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | per-query append | `{round, query_idx, current_id, n_queries, p_best, p_best_delta}` |
+| Live dashboard fields | `dashboard.json::current_round.nodes.candidates[].p_best` (also `.p_best_delta`, `.p_best_history`, `.p_best_n_samples`) + `current_round.p_best_top` (top-5 sorted) | per-sample overwrite | scalar floats |
+| CLI / notebook | stderr via `LiveDisplay` | per-sample | one line: `p_best q14: *c042* 44.0%▲ c017 28.4%▼ ...` |
+| Append-only stream | `campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl` | per-sample append | `{round, sample_idx, current_id, n_samples, p_best, p_best_delta}` |
 | Round-end digest | `campaigns/{cycle_id}/log.md` § P(best) trajectory | once per round | per-candidate Unicode sparkline + final % |
 
 The JSONL stream is canonical replay. Dashboard fields and `log.md` sparkline are derived views.
@@ -87,7 +87,7 @@ Line 1 names the observation. Line 2 names the repair or consequence. A finding 
 
 `dashboard.json::last_scoring_metadata` holds the structured finding. Each entry point reads from there and formats using this convention — data lives in one place, only rendering is per-surface.
 
-### Per-query annotation order
+### Per-sample annotation order
 
 Annotations render in this order, with mutual exclusion on the status line:
 

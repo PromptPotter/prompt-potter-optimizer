@@ -33,7 +33,7 @@ def content_hash(
     ``sha256(rendered_prompt + sorted_query_gt_pairs
     + pipeline_params)[:16]``
 
-    Order of dataset queries does not affect the hash.
+    Order of dataset samples does not affect the hash.
     ``pipeline_params`` is included when non-empty so that different
     pipeline configurations produce distinct hashes.
     """

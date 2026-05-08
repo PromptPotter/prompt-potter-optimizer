@@ -20,12 +20,12 @@ from promptpotter.application.scoring.evaluators import (
     default_per_round_formula,
     materialize_round_values,
 )
-from promptpotter.application.scoring.formula import compile_round_scorer, extract_candidate_label
+from promptpotter.application.scoring.formula import compile_round_scorer, extract_item_label
 from promptpotter.domain.analysis import (
     FailureAnalysis,
     FailurePattern,
-    QueryDifficulty,
-    QueryProfile,
+    SampleDifficulty,
+    SampleProfile,
 )
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
@@ -44,21 +44,21 @@ __all__ = [
     "Evaluator",
     "all_evaluators",
     "compile_failure_analysis",
-    "compile_query_difficulty",
+    "compile_sample_difficulty",
     "compute_composite_fitness",
-    "count_degraded_queries",
+    "count_degraded_samples",
     "extract_sample_diagnostics",
     "find_rank",
     "is_degraded",
 ]
 
 
-def find_rank(candidates: list, ground_truth: str) -> int | None:
-    """Return 1-based rank of *ground_truth* in *candidates*, or None."""
-    if not candidates or not ground_truth:
+def find_rank(items: list, ground_truth: str) -> int | None:
+    """Return 1-based rank of *ground_truth* in *items*, or None."""
+    if not items or not ground_truth:
         return None
-    for i, c in enumerate(candidates):
-        if extract_candidate_label(c) == ground_truth:
+    for i, c in enumerate(items):
+        if extract_item_label(c) == ground_truth:
             return i + 1
     return None
 
@@ -91,13 +91,13 @@ def _compute_accuracy(results: list[QueryMeasurement]) -> dict:
     }
 
 
-def count_degraded_queries(results: Sequence[Mapping[str, Any]]) -> int:
-    """Count queries that have pipeline degradation warnings."""
+def count_degraded_samples(results: Sequence[Mapping[str, Any]]) -> int:
+    """Count samples that have pipeline degradation warnings."""
     return sum(1 for r in results if is_degraded(r))
 
 
 # ---------------------------------------------------------------------------
-# Per-query diagnostics — typed mixed values (bool/int/str/None), keyed off
+# Per-sample diagnostics — typed mixed values (bool/int/str/None), keyed off
 # ``PipelineNode.node_type``.
 # ---------------------------------------------------------------------------
 
@@ -106,7 +106,7 @@ def extract_sample_diagnostics(
     result: Mapping[str, Any],
     pipeline_schema: PipelineSchema,
 ) -> dict[str, float | bool | int | str | None]:
-    """Extract per-query diagnostic signals; per-query complement to ``compute_composite_fitness``."""
+    """Extract per-sample diagnostic signals; per-sample complement to ``compute_composite_fitness``."""
     pd = result.get("pipeline_data") or {}
     gt = result.get("ground_truth", "")
     diag: dict[str, float | bool | int | str | None] = {
@@ -132,10 +132,10 @@ def extract_sample_diagnostics(
     return diag
 
 
-def _gt_pos(candidates: list, gt: str) -> int | None:
-    """0-based position of *gt* in *candidates*, or None."""
-    for i, c in enumerate(candidates):
-        if extract_candidate_label(c) == gt:
+def _gt_pos(items: list, gt: str) -> int | None:
+    """0-based position of *gt* in *items*, or None."""
+    for i, c in enumerate(items):
+        if extract_item_label(c) == gt:
             return i
     return None
 
@@ -241,7 +241,7 @@ def compute_composite_fitness(
       non-duplicate) L1 variants; defaults to 1.0 for non-L1 calls.
 
     The composite_fitness is **recorded, not gating**: ``select_fittest``
-    compares candidates on ``accuracy`` (the user's per-query scoring
+    compares candidates on ``accuracy`` (the user's per-sample scoring
     function). Composite is displayed and persisted so operators can see
     whether a win came with hidden costs.
     """
@@ -271,14 +271,14 @@ def compute_composite_fitness(
     if validation_failure_count > 0:
         composite_fitness = 0.0
 
-    degraded = count_degraded_queries(results)
+    degraded = count_degraded_samples(results)
 
     return {
         **base,
         **evaluator_values,
         "evaluators": dict(evaluator_values),
         "composite_fitness": round(composite_fitness, 6),
-        "degraded_queries": degraded,
+        "degraded_samples": degraded,
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
     }
@@ -362,7 +362,7 @@ def compile_failure_analysis(
         patterns.append(
             FailurePattern(
                 name=_auto_name(key),
-                query_count=len(group),
+                sample_count=len(group),
                 fraction=len(group) / total_failures,
                 diagnostic_key=key,
                 example_queries=[r.get("query", "") for r in group[:max_examples]],
@@ -379,30 +379,30 @@ def compile_failure_analysis(
     )
 
 
-def compile_query_difficulty(
+def compile_sample_difficulty(
     historical_results: Sequence[Sequence[Mapping[str, Any]]],
-) -> QueryDifficulty:
-    """Classify queries by hit rate across multiple scoring rounds.
+) -> SampleDifficulty:
+    """Classify samples by hit rate across multiple scoring rounds.
 
     Deprecated samples (fatal warnings) are skipped so hit-rate
     classification isn't biased by garbage measurements.
     """
     from promptpotter.application.optimization.elimination import is_deprecated
 
-    query_hits: dict[str, list[bool]] = defaultdict(list)
+    sample_hits: dict[str, list[bool]] = defaultdict(list)
     for round_results in historical_results:
         for r in round_results:
             if is_deprecated(r):
                 continue
             q = r.get("query", "")
             if q:
-                query_hits[q].append(bool(r.get("hit")))
+                sample_hits[q].append(bool(r.get("hit")))
 
     profiles = []
-    for query, hits in sorted(query_hits.items()):
+    for query, hits in sorted(sample_hits.items()):
         hit_rate = sum(hits) / len(hits) if hits else 0.0
         profiles.append(
-            QueryProfile(
+            SampleProfile(
                 query=query,
                 hit_rate=hit_rate,
                 n_measurements=len(hits),
@@ -410,4 +410,4 @@ def compile_query_difficulty(
             )
         )
 
-    return QueryDifficulty(profiles=profiles)
+    return SampleDifficulty(profiles=profiles)

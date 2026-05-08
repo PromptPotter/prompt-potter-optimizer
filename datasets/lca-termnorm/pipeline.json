@@ -302,7 +302,7 @@
         "observation_mappings": [
           {
             "pipeline_key": "final_ranking",
-            "output_field": "ranked_candidates",
+            "output_field": "ranked_items",
             "is_llm": true
           }
         ],
@@ -466,7 +466,7 @@
       "fields": [
         "profile_summary",
         "core_concept_description",
-        "ranked_candidates"
+        "ranked_items"
       ],
       "json_schema": {
         "type": "object",
@@ -479,7 +479,7 @@
             "type": "string",
             "description": "Description of the core concept match"
           },
-          "ranked_candidates": {
+          "ranked_items": {
             "type": "array",
             "description": "Candidates ranked by relevance score",
             "items": {
@@ -523,7 +523,7 @@
         "required": [
           "profile_summary",
           "core_concept_description",
-          "ranked_candidates"
+          "ranked_items"
         ]
       }
     }

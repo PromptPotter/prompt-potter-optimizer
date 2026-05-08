@@ -24,7 +24,7 @@ Three effects at the load boundary:
 
 - **Excluded from primary statistics.** `hits`, `total`, `errors`, accuracy denominator computed over valid rows only. The `deprecated` count surfaces alongside.
 - **Evicted from cache.** Loaded prior measurements filter out deprecated entries before any cache-hit logic. The query falls through to a fresh backend call. Re-measurements tagged `retry_of_deprecated_cache`, prefixed 🔄.
-- **Tagged `DEPR` in the per-query view.** Not HIT, not MISS — third class. Round summaries print `hits/total (N deprecated)`.
+- **Tagged `DEPR` in the per-sample view.** Not HIT, not MISS — third class. Round summaries print `hits/total (N deprecated)`.
 
 The trace itself stays in `archive/measurements/` — the archive is the forensic record. Eviction lives one layer up. Rescoring re-applies the active scorer's *judgment*; deprecation re-applies the runtime's *validity check*.
 
@@ -49,9 +49,9 @@ How to run fork: [`../operations/persistence-and-state.md`](../operations/persis
 
 ## Composite — recorded, not gating
 
-The scorer split above is per-query: each trace gets a `score`/`hit`. The **composite** is one level up — a single per-round number combining accuracy with health, latency, recall, and prompt verbosity. What the operator watches.
+The scorer split above is per-sample: each trace gets a `score`/`hit`. The **composite** is one level up — a single per-round number combining accuracy with health, latency, recall, and prompt verbosity. What the operator watches.
 
-Composite is **recorded, not gating**. Round-winner selection compares candidates on per-query accuracy; composite displays alongside so a win that came with hidden costs (errors that cancelled gains, latency blow-up, doubled prompt) surfaces in the leaderboard. Hot-swap mechanism + full evaluator list + steering examples: [`../operations/persistence-and-state.md § Steering composite scoring`](../operations/persistence-and-state.md).
+Composite is **recorded, not gating**. Round-winner selection compares candidates on per-sample accuracy; composite displays alongside so a win that came with hidden costs (errors that cancelled gains, latency blow-up, doubled prompt) surfaces in the leaderboard. Hot-swap mechanism + full evaluator list + steering examples: [`../operations/persistence-and-state.md § Steering composite scoring`](../operations/persistence-and-state.md).
 
 ---
 

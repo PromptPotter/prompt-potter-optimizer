@@ -151,7 +151,7 @@ CORS already permissive in `main.py`; same-origin so no preflight matters.
 ## Live update strategy
 
 Single `setInterval(refresh, 2000)`:
-1. `GET /api/v1/campaigns/{cycle_id}/file?scope=cycle&path=dashboard.json` → re-render stat cards, workflow node states, prompt variables, breadcrumb meta time.
+1. `GET /api/v1/campaigns/{cycle_id}/file?scope=cycle&path=dashboard.json` → re-render stat cards, workflow node states, prompt variables, breadcrumb timestamp.
 2. If `dashboard.round` changed since last tick → fetch newest `rounds/round_{round-1}.json` for the trends chart + score-frequency chart + evaluation table.
 3. Files pane: refresh on tab open + on user click of "↻", not on the polling tick.
 

@@ -389,7 +389,7 @@ class LangfuseSink:
         ok = self._lf.create_dataset(
             name=dataset_name,
             description="Production ground truth queries for prompt evaluation",
-            metadata={"n_queries": len(gt_map)},
+            metadata={"n_samples": len(gt_map)},
         )
         if not ok:
             raise RuntimeError(

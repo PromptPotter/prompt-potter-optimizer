@@ -128,7 +128,7 @@ class CandidatesGeneratedView:
 
     n_candidates: int
     source: str  # "disk" | "llm"
-    n_scoring_queries: int
+    n_scoring_samples: int
     l1_yield: float
     l1_n_no_op: int
     l1_n_duplicate: int
@@ -204,7 +204,7 @@ class L2RefineExitView:
     task_context_changed: bool
     action: str
     changes_description: str
-    warned_queries: int
+    warned_samples: int
     top_warning: str
     l2_prompt: str
     l2_response_json: Any | None
@@ -212,7 +212,7 @@ class L2RefineExitView:
 
 @dataclass(frozen=True)
 class ProbeEnterView:
-    n_probe_queries: int
+    n_probe_samples: int
     probe_queries: tuple[str, ...]
 
 

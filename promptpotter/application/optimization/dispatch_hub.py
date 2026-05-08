@@ -368,7 +368,7 @@ def _r_runtime_failures(b: Bundle) -> str:
     Bundles ``runtime_failures`` (per-candidate elimination from
     ``DegradationCheck``) with ``escalation_log`` (cross-round
     pipeline-step degradation rates) and ``warning_inventory`` (recurring
-    per-query warnings). All three are L1_SCORE-derived "the pipeline
+    per-sample warnings). All three are L1_SCORE-derived "the pipeline
     misbehaved at runtime" evidence with the same lifecycle (cross-round
     on OSP) — keeping them in one renderer is honest aggregation, not a
     grab-bag. Fenced because it echoes pipeline warning strings.

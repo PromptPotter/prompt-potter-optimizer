@@ -46,7 +46,7 @@ Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live 
 
 Read these. Don't recommend parameter tweaks unless the user asks. Don't classify data volume ("minimal"/"substantial") or propose leaderboard picks unbidden.
 
-**Reading per-query display lines:** when the dataset loader assigns `sample_id` (BBEH today), each line carries a `#NNN` column right after the time — e.g. `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'`. Use the ID to refer to specific samples across runs.
+**Reading per-sample display lines:** when the dataset loader assigns `sample_id` (BBEH today), each line carries a `#NNN` column right after the time — e.g. `0.0s #042 MISS [ai]📖 -> 'unknown' gt:'disproved' q:'…'`. Use the ID to refer to specific samples across runs.
 
 ## Phase −1: Bootstrap (only on cold start, otherwise silent)
 
@@ -114,7 +114,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json` (active cycle id in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `init`. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-query HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
+**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json` (active cycle id in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `init`. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 

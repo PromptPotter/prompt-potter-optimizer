@@ -17,7 +17,7 @@ if TYPE_CHECKING:
 
 
 @dataclass
-class QueryRecord:
+class SampleRecord:
     """Per-sample pattern summary across measurements."""
 
     query: str
@@ -33,7 +33,7 @@ class FailureCluster:
     """Samples grouped by shared failure reason."""
 
     failure_mode: str
-    query_count: int
+    sample_count: int
     fraction: float
     example_queries: list[str] = field(default_factory=list)
 
@@ -71,7 +71,7 @@ class SampleIndex:
         self._degradation_counts: dict[int, int] = defaultdict(int)
         self._flips: list[dict[str, Any]] = []
         # Cache for derived query records; cleared on ingest.
-        self._cache_records: list[QueryRecord] | None = None
+        self._cache_records: list[SampleRecord] | None = None
 
     def register(self, sample: Sample) -> None:
         """Register a Sample at dataset-load time."""
@@ -195,8 +195,8 @@ class SampleIndex:
     def all_flips(self) -> list[dict]:
         return self._flips
 
-    def records(self) -> list[QueryRecord]:
-        """Build per-sample QueryRecord list, cached until next ingest."""
+    def records(self) -> list[SampleRecord]:
+        """Build per-sample SampleRecord list, cached until next ingest."""
         if self._cache_records is not None:
             return self._cache_records
         records = []
@@ -208,7 +208,7 @@ class SampleIndex:
             sample = self._samples.get(sid)
             query = sample.query if sample else ""
             records.append(
-                QueryRecord(
+                SampleRecord(
                     query=query,
                     sample_id=sid,
                     hit_rate=round(hit_rate, 4),
@@ -226,9 +226,9 @@ class SampleIndex:
         min_observations: int = 1,
         include_always_hit: bool = True,
         include_always_miss: bool = True,
-    ) -> list[QueryRecord]:
+    ) -> list[SampleRecord]:
         """Zero-signal samples — always-hit and/or always-miss."""
-        out: list[QueryRecord] = []
+        out: list[SampleRecord] = []
         for r in self.records():
             if len(self._hits.get(r.sample_id, [])) < min_observations:
                 continue
@@ -238,7 +238,7 @@ class SampleIndex:
                 out.append(r)
         return out
 
-    def discriminating(self, min_variance: float = 0.1) -> list[QueryRecord]:
+    def discriminating(self, min_variance: float = 0.1) -> list[SampleRecord]:
         """Samples whose outcome varies across configurations."""
         return [r for r in self.records() if r.variance >= min_variance]
 
@@ -267,7 +267,7 @@ class SampleIndex:
         out.sort(key=lambda r: -r.delta)
         return out
 
-    def persistent_failures(self, min_streak: int = 3) -> list[QueryRecord]:
+    def persistent_failures(self, min_streak: int = 3) -> list[SampleRecord]:
         """Intractable (hit_rate == 0) + chronic (failed last ``min_streak``) samples."""
         records = []
         for r in self.records():
@@ -292,7 +292,7 @@ class SampleIndex:
             clusters.append(
                 FailureCluster(
                     failure_mode=mode,
-                    query_count=len(sids),
+                    sample_count=len(sids),
                     fraction=len(sids) / total if total else 0.0,
                     example_queries=example_queries,
                 )

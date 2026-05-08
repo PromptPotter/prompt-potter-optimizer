@@ -37,7 +37,7 @@ class ExecutionResultItem(BaseModel):
     ground_truth: str
     predicted: str
     confidence: float = 0.0
-    ranked_candidates: list[dict[str, Any]] = Field(default_factory=list)
+    ranked_items: list[dict[str, Any]] = Field(default_factory=list)
     latency_ms: float = 0.0
     pipeline_data: dict[str, Any] = Field(default_factory=dict)
     status: str = "success"

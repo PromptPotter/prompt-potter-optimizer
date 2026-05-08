@@ -143,7 +143,7 @@ def emit_token_usage(usage: TokenUsage) -> None:
         logger.warning(
             "optimizer node %r prompt at %d tokens (threshold=%d) — tune the "
             "template or drop context; large meta-prompts reduce signal-to-noise "
-            "for the meta-LLM and risk provider TPM caps",
+            "for the optimizer LLM and risk provider TPM caps",
             usage.node,
             usage.input_tokens,
             threshold,

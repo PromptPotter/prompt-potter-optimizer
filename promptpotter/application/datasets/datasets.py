@@ -325,7 +325,7 @@ DATASET_LOADERS: dict[str, Callable[..., list[Sample]]] = {
 }
 """Map dataset name → loader function. Register new datasets here.
 
-``load_potter_traces`` is a specialized meta-optimization replay loader
+``load_potter_traces`` is a specialized prior-run replay loader
 whose rows carry extra fields (round_context, score_delta, …) beyond
 Sample's schema. It is available via direct import but not routed
 through the Sample-typed registry.

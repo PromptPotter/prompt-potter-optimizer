@@ -40,6 +40,6 @@ One wild mutation can't waste the round; round winners are unaffected. This is w
 
 ## How user-visible
 
-Per-query `⚠ … ↳` annotations. Audit trail, not alerts.
+Per-sample `⚠ … ↳` annotations. Audit trail, not alerts.
 
 For implementation wiring see [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).

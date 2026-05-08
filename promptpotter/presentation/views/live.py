@@ -4,7 +4,7 @@ Surface differentiation via constructor flag, not subclasses:
 ``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel).
 
 Single ingress: the display consumes ``CycleRecord``s from the per-cycle
-``CycleLedger`` via ``on_record``. Per-query / per-candidate formatters
+``CycleLedger`` via ``on_record``. Per-sample / per-candidate formatters
 live in ``round_render``; the three round-summary renderers
 (``_render_progress_table`` / ``_render_round_stats`` /
 ``_render_patience_status``) are private to this file because nothing
@@ -137,12 +137,12 @@ def _render_round_stats(
         from collections import Counter
 
         from promptpotter.application.optimization.elimination import (
-            candidate_keys_from_schema,
-            get_candidates,
+            get_ranked_items,
+            ranked_item_keys_from_schema,
         )
         from promptpotter.application.scoring.metrics import find_rank
 
-        candidate_keys = candidate_keys_from_schema(pipeline_schema)
+        ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
         results = round_result.results
         n_results = len(results)
         terminations: Counter[str] = Counter()
@@ -169,7 +169,7 @@ def _render_round_stats(
                 hit_count = 0
                 for r in valid:
                     rank = find_rank(
-                        get_candidates(r, candidate_keys),
+                        get_ranked_items(r, ranked_item_keys),
                         r.get("ground_truth", ""),
                     )
                     if rank is not None and rank <= k:
@@ -236,7 +236,7 @@ class LiveDisplay(ProjectionBase):
         self.scoring_formula = scoring_formula
         self.campaign_rounds = campaign_rounds if campaign_rounds is not None else []
         self.initial_len = len(self.campaign_rounds)
-        self.query_counter = 0
+        self.sample_counter = 0
         self._round_num = 0
         # Composite-render context — read by ``on_candidate_scored`` for
         # the per-candidate baseline anchor and by ``on_round_complete``
@@ -246,7 +246,7 @@ class LiveDisplay(ProjectionBase):
         # after construction so the display sees the same dict the
         # phase-view builder writes to.
         self._phase_ctx: dict = {}
-        # Per-query Posterior-of-Being-Best snapshot from the prior firing —
+        # Per-sample Posterior-of-Being-Best snapshot from the prior firing —
         # used to render arrow glyphs (▲/▼) on the next ``on_p_best_update``.
         self._last_p_best: dict[str, float] = {}
         # Mid-round running leader — updated after each
@@ -332,7 +332,7 @@ class LiveDisplay(ProjectionBase):
         elif ev == "p_best_update":
             self.on_p_best_update(
                 str(payload.get("current_id") or ""),
-                int(payload.get("n_queries") or 0),
+                int(payload.get("n_samples") or 0),
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
 
@@ -387,7 +387,7 @@ class LiveDisplay(ProjectionBase):
             self._round_best_acc = None
             self._round_best_label = None
         if event.phase == CampaignPhase.ESCALATION and event.event == "exit":
-            self.query_counter = 0
+            self.sample_counter = 0
         if (
             event.phase == CampaignPhase.INIT
             and event.event == "exit"
@@ -402,9 +402,9 @@ class LiveDisplay(ProjectionBase):
                 self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_started(
-        self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, query_text: str
+        self, cand_idx: int, n_cands: int, sample_idx: int, n_samples: int, query_text: str
     ) -> None:
-        # Per-query output renders after the result lands; the emitter's
+        # Per-sample output renders after the result lands; the emitter's
         # dashboard.json surfaces the in-flight state.
         if self._bar_budget is None:
             return
@@ -413,7 +413,7 @@ class LiveDisplay(ProjectionBase):
         if self._in_baseline:
             if self._bar is None:
                 self._bar = tqdm(
-                    total=n_queries or 1, desc="  baseline", unit="q", leave=False, ncols=60
+                    total=n_samples or 1, desc="  baseline", unit="q", leave=False, ncols=60
                 )
             return
         if cand_idx != self._bar_cand_idx:
@@ -430,10 +430,10 @@ class LiveDisplay(ProjectionBase):
             )
 
     def on_sample_scored(
-        self, cand_idx: int, n_cands: int, query_idx: int, n_queries: int, result: dict
+        self, cand_idx: int, n_cands: int, sample_idx: int, n_samples: int, result: dict
     ) -> None:
-        self.query_counter += 1
-        prefix = f"  [{self.query_counter:>3d}] "
+        self.sample_counter += 1
+        prefix = f"  [{self.sample_counter:>3d}] "
         self._write(
             _fmt_query_result(
                 result,
@@ -445,8 +445,8 @@ class LiveDisplay(ProjectionBase):
         if self._bar is not None:
             self._bar.update(1)
 
-    def on_p_best_update(self, current_id: str, n_queries: int, p_best: dict[str, float]) -> None:
-        """One-line per-query Posterior-of-Being-Best snapshot.
+    def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
+        """One-line per-sample Posterior-of-Being-Best snapshot.
 
         Top-5 candidates by P(best); current candidate marked with asterisks;
         arrow glyphs show direction of change since the previous query.
@@ -466,7 +466,7 @@ class LiveDisplay(ProjectionBase):
                     arrow = "▼"  # BLACK DOWN-POINTING TRIANGLE
             tag = f"*{cid[:6]}*" if cid == current_id else cid[:6]
             parts.append(f"{tag} {prob * 100:4.1f}%{arrow}")
-        self._write(f"       p_best q{n_queries}: " + " ".join(parts))
+        self._write(f"       p_best q{n_samples}: " + " ".join(parts))
         self._last_p_best = dict(p_best)
 
     def on_candidate_started(
@@ -526,7 +526,7 @@ class LiveDisplay(ProjectionBase):
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
         self._bars_close()
-        self.query_counter = 0
+        self.sample_counter = 0
 
         self.campaign_rounds.append(
             {

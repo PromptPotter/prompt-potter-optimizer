@@ -13,7 +13,7 @@ interface Candidate {
     composite_fitness?: number;
     evaluators?: Record<string, number>;
   };
-  // Live HIT/MISS lines from LiveDashboardProjection. Populated per-query
+  // Live HIT/MISS lines from LiveDashboardProjection. Populated per-sample
   // before stats lands at candidate-eval completion.
   samples?: string[];
 }

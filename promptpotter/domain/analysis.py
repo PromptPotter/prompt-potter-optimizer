@@ -1,6 +1,6 @@
 """Analysis and escalation data models.
 
-Pure data containers for failure patterns, query difficulty, and escalation
+Pure data containers for failure patterns, sample difficulty, and escalation
 signals. No I/O, no service dependencies.
 """
 
@@ -13,10 +13,10 @@ from typing import Any, Literal
 
 @dataclass
 class FailurePattern:
-    """A cluster of query failures sharing the same diagnostic signature."""
+    """A cluster of sample failures sharing the same diagnostic signature."""
 
     name: str
-    query_count: int
+    sample_count: int
     fraction: float
     diagnostic_key: tuple[str, ...]
     example_queries: list[str] = field(default_factory=list)
@@ -36,8 +36,12 @@ DifficultyClass = Literal["easy", "discriminating", "hard", "dead"]
 
 
 @dataclass
-class QueryProfile:
-    """Per-query difficulty profile across measurements."""
+class SampleProfile:
+    """Per-sample difficulty profile across measurements.
+
+    ``query`` is the sample's input-string field (parallel naming with
+    :class:`Sample.query` and :class:`QueryMeasurement.query`).
+    """
 
     query: str
     hit_rate: float
@@ -46,25 +50,25 @@ class QueryProfile:
 
 
 @dataclass
-class QueryDifficulty:
-    """Aggregate query difficulty classification."""
+class SampleDifficulty:
+    """Aggregate per-sample difficulty classification."""
 
-    profiles: list[QueryProfile] = field(default_factory=list)
+    profiles: list[SampleProfile] = field(default_factory=list)
 
     @property
-    def easy(self) -> list[QueryProfile]:
+    def easy(self) -> list[SampleProfile]:
         return [p for p in self.profiles if p.classification == "easy"]
 
     @property
-    def discriminating(self) -> list[QueryProfile]:
+    def discriminating(self) -> list[SampleProfile]:
         return [p for p in self.profiles if p.classification == "discriminating"]
 
     @property
-    def hard(self) -> list[QueryProfile]:
+    def hard(self) -> list[SampleProfile]:
         return [p for p in self.profiles if p.classification == "hard"]
 
     @property
-    def dead(self) -> list[QueryProfile]:
+    def dead(self) -> list[SampleProfile]:
         return [p for p in self.profiles if p.classification == "dead"]
 
 
@@ -148,9 +152,9 @@ class RuntimeFailure:
     """A runtime-observed health failure on a candidate's scoring run.
 
     Sibling of ``ValidationFailure`` in the self-healing canon, but
-    populated AFTER the candidate ran — from per-query degradation
+    populated AFTER the candidate ran — from per-sample degradation
     evidence (e.g. a candidate with ``max_tokens=150`` that classifies
-    as ``reasoning_budget_exhausted`` on 7/7 queries). Attributes
+    as ``reasoning_budget_exhausted`` on 7/7 samples). Attributes
     the failure to the specific candidate that caused it, not the
     round, so winners are never penalised for losers' runtime issues.
 
@@ -165,7 +169,7 @@ class RuntimeFailure:
     source: str  # e.g. "degradation_check" | "empty_output_check"
     dominant_warning: str  # e.g. "llm_only:reasoning_budget_exhausted"
     warning_types: dict[str, int]  # full histogram of warning types seen
-    degraded_rate: float  # fraction of scored queries that degraded
+    degraded_rate: float  # fraction of scored samples that degraded
     degraded_count: int
     total_scored: int
     observed_config: dict[str, Any]  # snapshot of the offending node's config

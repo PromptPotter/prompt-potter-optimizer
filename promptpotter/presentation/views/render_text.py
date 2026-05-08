@@ -313,7 +313,7 @@ def _render_escalation_enter(v: EscalationEnterView) -> str:
     extras = [f"{wt}: {count} occurrences" for wt, count in v.warning_types.items()]
     return "\n" + _node_block(
         "ESCALATION",
-        f"{YELLOW}Degraded: {v.degraded_rate:.0%} of queries{RESET}",
+        f"{YELLOW}Degraded: {v.degraded_rate:.0%} of samples{RESET}",
         *extras,
         label_right=f"{v.check_name} → {v.target}",
     )
@@ -351,9 +351,9 @@ def _render_l2_refine_exit(v: L2RefineExitView) -> str:
     out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{tc}{probe}"]
     if v.changes_description:
         out.append(f"    {v.changes_description}")
-    if v.warned_queries:
+    if v.warned_samples:
         out.append(
-            f"    {YELLOW}⚠ {v.warned_queries} queries with recurring "
+            f"    {YELLOW}⚠ {v.warned_samples} samples with recurring "
             f"pipeline warnings ({v.top_warning}){RESET}"
         )
 
@@ -378,15 +378,15 @@ def _render_probe_enter(v: ProbeEnterView) -> str:
         extras.append(f"  ... +{len(v.probe_queries) - 5} more")
     return "\n" + _node_block(
         "PROBE ROUND",
-        "Testing warned queries with new settings...",
+        "Testing warned samples with new settings...",
         *extras,
-        label_right=f"{v.n_probe_queries} queries",
+        label_right=f"{v.n_probe_samples} samples",
     )
 
 
 def _render_probe_exit(v: ProbeExitView) -> str:
     if not v.n_probed:
-        return f"  {YELLOW}⚡ Probe: no matching queries found{RESET}"
+        return f"  {YELLOW}⚡ Probe: no matching samples found{RESET}"
     rate = v.probe_hits / v.n_probed
     color = GREEN if rate > 0.5 else YELLOW
     return f"  {color}⚡ Probe: {v.probe_hits}/{v.n_probed} hits ({rate:.0%}){RESET}"

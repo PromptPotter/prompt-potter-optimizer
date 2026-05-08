@@ -90,7 +90,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 │   ├── .cache/rounds/round_{round:03d}.json      # per-round LLM action audit (internal)
 │   ├── dashboard.json                   # live counters
 │   ├── events.jsonl                     # human navigation log
-│   ├── output.log                       # per-query audit
+│   ├── output.log                       # per-sample audit
 │   ├── recon.json                       # this campaign's scan result (was recon_results.json)
 │   ├── index.json                       # cycle metadata + trial index + parent_session_id
 │   ├── prompts/{family}/{version}/      # rendered optimizer prompts
@@ -167,7 +167,7 @@ Consequences:
 ```
 CampaignConfig  (Pydantic, persisted as datasets/{name}/campaign.json)
     User-authored knobs only. Every field overridable from JSON.
-    ├── scoring (string | {per_query, per_round})
+    ├── scoring (string | {per_sample, per_round})
     ├── starting_prompt, sp_budget_ttest, recon_sample_size
     ├── exclude_nodes, pipeline_overrides
     ├── optimization (nested sub-model — ALL loop knobs: thresholds, patience,

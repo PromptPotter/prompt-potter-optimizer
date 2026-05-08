@@ -96,7 +96,7 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 | Field | Lifecycle | Loop |
 |---|---|---|
 | `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
-| `warning_inventory` | cross-round | (per-query aggregation) |
+| `warning_inventory` | cross-round | (per-sample aggregation) |
 | `task_context` | persistent, accumulative; merged on each L2 fire | Loop 1, Loop 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Loop 1 — L2 reads |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Loop 2 + 3 |

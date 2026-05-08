@@ -6,7 +6,7 @@
 
 export interface EvaluatorMeta {
   name: string;
-  scope: "per_round" | "per_query";
+  scope: "per_round" | "per_sample";
   direction: "high" | "low";
   node_type: string | null;
   description: string;
@@ -14,7 +14,7 @@ export interface EvaluatorMeta {
 
 export const WHATIF_INLINE_META: EvaluatorMeta[] = [
   { name: "accuracy",                 scope: "per_round", direction: "high", node_type: null,
-    description: "Mean per-query score across the round's result set." },
+    description: "Mean per-sample score across the round's result set." },
   { name: "error_rate",               scope: "per_round", direction: "low",  node_type: null,
     description: "Fraction of queries that errored (ERROR predicted or exception)." },
   { name: "degraded_rate",            scope: "per_round", direction: "low",  node_type: null,
@@ -29,8 +29,8 @@ export const WHATIF_INLINE_META: EvaluatorMeta[] = [
     description: "Fraction of queries where GT appears in a ranker node's final_ranking." },
   { name: "cache_hit_rate",           scope: "per_round", direction: "high", node_type: "cache",
     description: "Fraction of queries resolved by a cache node (non-null timing)." },
-  { name: "retrieval_shortfall",      scope: "per_query", direction: "high", node_type: null,
-    description: "Per-query min(observed/target, 1.0) across nodes with max_*/num_* limits." },
+  { name: "retrieval_shortfall",      scope: "per_sample", direction: "high", node_type: null,
+    description: "Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits." },
   { name: "mean_retrieval_shortfall", scope: "per_round", direction: "high", node_type: null,
     description: "Mean of retrieval_shortfall across the round's results." },
   { name: "pipeline_compactness",     scope: "per_round", direction: "low",  node_type: null,

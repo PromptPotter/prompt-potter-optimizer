@@ -137,7 +137,7 @@ def is_error_result(result: Mapping[str, Any]) -> bool:
 
 
 def is_degraded(result: Mapping[str, Any]) -> bool:
-    """A query is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
+    """A sample is degraded iff its pipeline_data.diagnostics.warnings list is non-empty."""
     return bool((result.get("pipeline_data") or {}).get("diagnostics", {}).get("warnings"))
 
 

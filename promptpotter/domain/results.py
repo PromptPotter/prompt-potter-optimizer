@@ -43,8 +43,8 @@ class CandidateScore:
     pipeline_params_override: dict | None = None
     escalation_aborted: bool = False
     elimination_stopped: bool = False
-    scored_queries: int = 0
-    expected_queries: int = 0
+    scored_samples: int = 0
+    expected_samples: int = 0
     invalid: bool = False
     resumed_from_cache: bool = False
     validation_failures: list[dict] = field(default_factory=list)
@@ -69,8 +69,8 @@ class CandidateScore:
             "evaluators": dict(self.evaluators),
             "escalation_aborted": self.escalation_aborted,
             "elimination_stopped": self.elimination_stopped,
-            "scored_queries": self.scored_queries,
-            "expected_queries": self.expected_queries,
+            "scored_samples": self.scored_samples,
+            "expected_samples": self.expected_samples,
             "invalid": self.invalid,
             "resumed_from_cache": self.resumed_from_cache,
             "validation_failures": list(self.validation_failures),
@@ -134,7 +134,7 @@ class RoundMetadata(BaseModel):
     # ``improved`` is True (else None — no test run). Stored so log.md / a
     # webapp can render significance without re-running the test.
     p_value: float | None = None
-    degraded_queries: int = 0
+    degraded_samples: int = 0
     # Count of samples discarded as deprecated (fatal warnings) on the
     # round-winner's scoring run; excluded from hits/total/accuracy and
     # surfaced in round summary for operator transparency.

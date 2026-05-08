@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Any
 
 if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes.axis import AxisImpact
-    from promptpotter.application.intelligence.indexes.sample import FailureCluster, QueryRecord
+    from promptpotter.application.intelligence.indexes.sample import FailureCluster, SampleRecord
 
 
 def _value_preview(value: Any) -> str:
@@ -21,7 +21,7 @@ def _fmt_axis_rankings(rankings: list[AxisImpact]) -> str:
 def _fmt_clusters(clusters: list[FailureCluster], *, with_counts: bool) -> str:
     if with_counts:
         return "; ".join(
-            f"{c.failure_mode} ({c.fraction:.0%}, {c.query_count} queries)" for c in clusters
+            f"{c.failure_mode} ({c.fraction:.0%}, {c.sample_count} samples)" for c in clusters
         )
     return "; ".join(f"{c.failure_mode} ({c.fraction:.0%})" for c in clusters)
 
@@ -32,7 +32,7 @@ def _fmt_bottleneck(bottleneck: dict[str, float] | None) -> str | None:
     return "; ".join(f"{step}: {frac:.0%}" for step, frac in bottleneck.items())
 
 
-def _fmt_persistent_failures(persistent: list[QueryRecord], *, terse: bool = False) -> str:
+def _fmt_persistent_failures(persistent: list[SampleRecord], *, terse: bool = False) -> str:
     intractable = [q for q in persistent if q.hit_rate == 0]
     chronic = [q for q in persistent if q.hit_rate > 0]
     parts: list[str] = []

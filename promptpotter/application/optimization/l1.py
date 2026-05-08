@@ -44,7 +44,7 @@ from promptpotter.application.optimization.round_diagnostics import (
 from promptpotter.application.scoring.metrics import (
     _compute_accuracy,
     compute_composite_fitness,
-    count_degraded_queries,
+    count_degraded_samples,
 )
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
@@ -183,26 +183,26 @@ async def l1_generate(
 # ---------------------------------------------------------------------------
 
 
-def _on_query_scored(
+def _on_sample_scored(
     callbacks: RunCallbacks,
     idx: int,
     n_total: int,
     result,
-    query_idx: int,
+    sample_idx: int,
     query_total: int,
 ) -> None:
-    callbacks.on_sample_scored(idx, n_total, query_idx, query_total, result)
+    callbacks.on_sample_scored(idx, n_total, sample_idx, query_total, result)
 
 
-def _on_query_starting(
+def _on_sample_starting(
     callbacks: RunCallbacks,
     idx: int,
     n_total: int,
     query_text,
-    query_idx: int,
+    sample_idx: int,
     query_total: int,
 ) -> None:
-    callbacks.on_sample_started(idx, n_total, query_idx, query_total, query_text)
+    callbacks.on_sample_started(idx, n_total, sample_idx, query_total, query_text)
 
 
 def _emit_p_best(
@@ -425,8 +425,8 @@ async def score_one_candidate(
         dataset,
         cycle.session,
         label=f"candidate_{idx}",
-        on_query_scored=partial(_on_query_scored, callbacks, idx, n_total),
-        on_query_starting=partial(_on_query_starting, callbacks, idx, n_total),
+        on_sample_scored=partial(_on_sample_scored, callbacks, idx, n_total),
+        on_sample_starting=partial(_on_sample_starting, callbacks, idx, n_total),
         degradation_checks=[*(degradation_checks or []), elim_check],
         candidate_idx=idx,
         n_total_candidates=n_total,
@@ -568,14 +568,14 @@ async def score_population(
     all_candidate_results: dict[str, list[QueryMeasurement]] = {}
     candidate_scores: list[CandidateScore] = []
     escalation_signal: EscalationSignal | None = None
-    elim_check = PoBBCheck(pobb_config, n_queries=len(dataset))
+    elim_check = PoBBCheck(pobb_config, n_samples=len(dataset))
 
     for idx, osp_c in enumerate(population):
         pipeline_params_override = proposals[idx].pipeline_params_override or None
         callbacks.on_candidate_started(
             idx, n, osp_c.lineage.changes_description or "", pipeline_params_override
         )
-        # Bind the PoBBCheck to this candidate so its per-query snapshot
+        # Bind the PoBBCheck to this candidate so its per-sample snapshot
         # lands on the live telemetry stream tagged with the right id.
         elim_check.set_current(
             osp_c.lineage.id,
@@ -739,7 +739,7 @@ async def l1_score(
         candidates_scored=len(scored),
         candidate_scores=[cs.to_dict() for cs in candidate_scores],
         decisions=[d.to_dict() for d in decisions],
-        degraded_queries=count_degraded_queries(best_results),
+        degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],
         escalation_signal=escalation_signal,
         evaluators=best_scores,
@@ -910,7 +910,7 @@ async def execute_round(
         "enter",
         round=round_num,
         n_candidates=len(candidates),
-        n_queries=len(scoring_set),
+        n_samples=len(scoring_set),
         current_best_accuracy=cycle.tracking.current_accuracy,
         improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=cycle.tracking.current_sp.pipeline_params,

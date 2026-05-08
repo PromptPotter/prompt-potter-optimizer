@@ -259,7 +259,7 @@ def test_registry_scopes_are_valid():
     names = {ev.name for ev in all_evaluators()}
     assert {"accuracy", "error_rate", "latency_norm", "source_recall"}.issubset(names)
     for ev in all_evaluators():
-        assert ev.scope in ("per_query", "per_round")
+        assert ev.scope in ("per_sample", "per_round")
         assert ev.data_type in ("NUMERIC", "BOOLEAN")
 
 

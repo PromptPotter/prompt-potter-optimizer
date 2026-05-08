@@ -20,7 +20,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NamedTuple, cast
 
-from promptpotter.application.optimization.elimination import update_query_tracker
+from promptpotter.application.optimization.elimination import update_sample_tracker
 from promptpotter.application.optimization.escalation.state import EscalationState
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.application.scoring.metrics import (
@@ -608,7 +608,7 @@ class Cycle:
             self.opt_sp.failure_analysis = None
         all_results: list = [r for rs in rr.all_candidate_results.values() for r in rs]
         if all_results:
-            update_query_tracker(self.opt_sp.warning_inventory, all_results)
+            update_sample_tracker(self.opt_sp.warning_inventory, all_results)
         existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
         for cs in rr.candidate_scores:
             for rf_dict in cs.get("runtime_failures") or []:
@@ -626,7 +626,7 @@ class Cycle:
                 accuracy=rr.accuracy,
                 composite_fitness=rr.composite_fitness,
                 improved=rr.improved,
-                degraded_queries=rr.degraded_queries,
+                degraded_samples=rr.degraded_samples,
                 pipeline_params=rr.pipeline_params,
                 candidate_scores=list(rr.candidate_scores),
             )
@@ -786,4 +786,3 @@ def resume_with_divergence_check(
         cycle.restore_from_trial(prior[-1])
     cycle.escalation = EscalationState.from_ledger(session.state.ledger)
     return None
-

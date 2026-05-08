@@ -277,7 +277,7 @@ def test_pobb_should_stop_threshold():
 
 def test_pobb_check_n_min_floor():
     """Below n_min queries, no signal is emitted regardless of separation."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_queries=10)
+    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=10)
     check.register_completed([1.0] * 10, candidate_id="winner")
     check.set_current("loser")
     # 3 queries < n_min=4 — too early to fire even though signal is huge.
@@ -287,7 +287,7 @@ def test_pobb_check_n_min_floor():
 
 def test_pobb_check_high_signal_stops_inferior():
     """Loser candidate vs strong prior fires within ≤5 queries at ε=0.05."""
-    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_queries=20)
+    check = PoBBCheck(PoBBConfig(n_min=4, epsilon=0.05), n_samples=20)
     check.register_completed([1.0] * 20, candidate_id="winner")
     check.set_current("loser")
     sig = check.check([{"fitness": 0.0}] * 5, candidate_idx=1, n_total_candidates=2)
@@ -302,7 +302,7 @@ def test_pobb_check_high_signal_stops_inferior():
 def test_pobb_locks_in_dominant_leader():
     """Current candidate dominating prior past lock_in_n_min fires LEADER_LOCKED."""
     check = PoBBCheck(
-        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_queries=20
+        PoBBConfig(n_min=4, epsilon=0.05, lock_in=0.95, lock_in_n_min=8), n_samples=20
     )
     # Prior: weak candidate. Current: clear leader.
     check.register_completed([0.0] * 20, candidate_id="weak_prior")

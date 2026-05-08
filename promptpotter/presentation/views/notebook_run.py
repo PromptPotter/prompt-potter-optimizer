@@ -193,7 +193,7 @@ async def prepare_baseline_notebook(
     baseline phase ticks live (same path the CLI uses). Returns observers +
     dataset + baseline for the next cell to feed into ``run_optimization_notebook``.
     """
-    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     n_samples = len(train_data) or 1
     display = LiveDisplay(
         baseline_acc=0.0,

@@ -69,7 +69,7 @@ Every change L2 makes is on this record. Nothing is lost between rounds because 
 
 ## What the record is NOT
 
-- It is not the trace archive. Per-query results live in `archive/measurements/` and are referenced by ID.
+- It is not the trace archive. Per-sample results live in `archive/measurements/` and are referenced by ID.
 - It is not the pipeline configuration. The frozen target pipeline shape lives in `JobSearchPoint`, projected from this record on demand.
 - It is not the campaign config. Operator knobs (max rounds, patience, n_variants ceiling) live on `CampaignConfig` and never mutate.
 

@@ -17,30 +17,27 @@ Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter a
 - **Cross-run memory.** Every datapoint is stored; the optimizer carries what it learned into the next run.
 
 
-## ⚡ The Workflow: 1 → 2 → 3 → Prompt Optimized
+## The Optimization Loop
 
-**Automated prompt engineering in three steps.** No manual A/B testing, no spreadsheet of variants. Drop in a labeled dataset, declare what's tunable in your LLM pipeline, run the critique-guided optimizer — for RAG pipelines, LLM agents, and any multi-step LLM workflow.
+PromptPotter is a **critique-guided feedback cycle** for prompt and pipeline tuning. Each round generates candidates, scores them against your dataset, and critiques the results to steer the next round.
 
-### 1️⃣ &nbsp; Provide a labeled dataset
-Input/output pairs (plus any extra context). Every candidate prompt and pipeline configuration is scored against this.
+**One round:**
+- generate
+- score
+- critique
 
-### 2️⃣ &nbsp; Drop in your `pipeline.json`
-Lists what your LLM pipeline does *and* which settings PromptPotter is allowed to change — models, temperature, prompts, thresholds, anything you put on the list. **It only touches what's on the list. Nothing else.** (The `/potter-run` Claude Code skill writes the JSON from a chat — no hand-authoring required.)
+When the inner layer stalls, an outer layer steps in to redirect — see [the-loop.md](docs/concepts/the-loop.md) for the full mechanics.
 
-### 3️⃣ &nbsp; Optimize
-Run the critique-guided feedback cycle — PromptPotter's flavour of **LLM-driven program evolution**. The optimization loop is self-contained: it measures the baseline, generates prompt and pipeline candidates, scores them, runs L1 critique on failures, and iterates.
+## How to Optimize LLM Prompts in 3 Steps
 
-> [!TIP]
-> ## ✨ → Prompt optimized.
+Works for RAG pipelines, LLM agents, and any multi-step LLM workflow.
+
+Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. PromptPotter tries variations, keeps the ones improving, drops the rest — round after round, until results stop getting better. ✨ **Prompt optimized.**
 
 > [!IMPORTANT]
 > **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
 >
 > **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp *(planned)*
-
-## 🔄 The 3-layer loop
-
-A **critique-guided** feedback cycle: each round generates candidates, scores them, and produces a structured **L1 critique** that steers the next round. When the inner layer stalls, an outer layer steps in to redirect — see [the-loop.md](docs/concepts/the-loop.md) for the full mechanics.
 
 ## ⭐ Features
 

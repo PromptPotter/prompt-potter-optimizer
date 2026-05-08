@@ -249,7 +249,7 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
     return CandidatesGeneratedView(
         n_candidates=d.get("n_candidates", 0),
         source="disk" if d.get("loaded_from_disk") else "llm",
-        n_scoring_queries=d.get("n_scoring_queries", 0),
+        n_scoring_samples=d.get("n_scoring_samples", 0),
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
         l1_n_duplicate=n_dup,
@@ -338,7 +338,7 @@ def _refine_exit(d: dict, ctx: dict) -> L2RefineExitView:
         task_context_changed=bool(d.get("task_context_changed", False)),
         action=d.get("action", "continue"),
         changes_description=d.get("changes_description", ""),
-        warned_queries=d.get("warned_queries", 0),
+        warned_samples=d.get("warned_samples", 0),
         top_warning=d.get("top_warning", ""),
         l2_prompt=d.get("l2_prompt", "") or "",
         l2_response_json=d.get("l2_response"),
@@ -348,7 +348,7 @@ def _refine_exit(d: dict, ctx: dict) -> L2RefineExitView:
 def _probe_enter(d: dict, ctx: dict) -> ProbeEnterView:
     queries = list(d.get("probe_queries") or [])
     return ProbeEnterView(
-        n_probe_queries=d.get("n_probe_queries", len(queries)),
+        n_probe_samples=d.get("n_probe_samples", len(queries)),
         probe_queries=tuple(queries),
     )
 
@@ -524,7 +524,7 @@ _CUSTOM_RECONSTRUCT: dict[str, Callable[[dict], AnyView]] = {
         classifications=tuple((c[0], c[1]) for c in v.get("classifications") or []),
     ),
     "probe_round:enter": lambda v: ProbeEnterView(
-        n_probe_queries=v.get("n_probe_queries", 0),
+        n_probe_samples=v.get("n_probe_samples", 0),
         probe_queries=tuple(v.get("probe_queries") or []),
     ),
 }
@@ -592,7 +592,7 @@ def from_disk_round(
 def _load_p_best_trajectory(
     streams_dir: Path | None, round_num: int
 ) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """Load per-query P(best) snapshots from the JSONL stream for a single round.
+    """Load per-sample P(best) snapshots from the JSONL stream for a single round.
 
     Returns ``(trajectory, stopped_at)`` — trajectory is candidate_id →
     list of P(best) values across queries; stopped_at is candidate_id →
@@ -616,7 +616,7 @@ def _load_p_best_trajectory(
                 rec = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            qi = int(rec.get("query_idx", -1))
+            qi = int(rec.get("sample_idx", -1))
             for cid, prob in (rec.get("p_best") or {}).items():
                 trajectory.setdefault(str(cid), []).append(float(prob))
                 last_seen[str(cid)] = qi

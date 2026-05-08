@@ -44,8 +44,8 @@ from promptpotter.application.intelligence.indexes.config import ConfigIndex
 from promptpotter.application.intelligence.indexes.sample import (
     FailureCluster,
     HardnessRecord,
-    QueryRecord,
     SampleIndex,
+    SampleRecord,
 )
 
 __all__ = [
@@ -55,7 +55,7 @@ __all__ = [
     "ConfigIndex",
     "FailureCluster",
     "HardnessRecord",
-    "QueryRecord",
     "SampleIndex",
+    "SampleRecord",
     "ValueRecord",
 ]

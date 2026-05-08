@@ -56,7 +56,7 @@ _PHASE_TO_STATE: dict[str, str] = {
 }
 
 
-# Per-query terminator badge for the compact ``fmt_sample_line`` rendering;
+# Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
 # unmapped nodes render as the first two characters of the node name.
 _NODE_BADGES: dict[str, str] = {
     "llm_only": "ai",
@@ -350,7 +350,7 @@ class LiveDashboardProjection(ProjectionBase):
                 ci,
                 ct,
                 payload.get("current_id") or "",
-                int(payload.get("n_queries") or 0),
+                int(payload.get("n_samples") or 0),
                 {str(k): float(v) for k, v in (payload.get("p_best") or {}).items()},
             )
             self._persist()
@@ -498,10 +498,10 @@ class LiveDashboardProjection(ProjectionBase):
         idx: int,
         total: int,
         current_id: str,
-        n_queries: int,
+        n_samples: int,
         p_best: dict[str, float],
     ) -> None:
-        """Merge per-query P(best) into the candidate slot + top-5 leaderboard.
+        """Merge per-sample P(best) into the candidate slot + top-5 leaderboard.
 
         Stores each candidate's ``p_best``, signed delta vs prior query, and
         a capped trajectory list. Also publishes the round-wide top-5 sorted
@@ -518,7 +518,7 @@ class LiveDashboardProjection(ProjectionBase):
         cand["p_best"] = current
         cand["p_best_delta"] = current - prev
         cand["p_best_history"] = history
-        cand["p_best_n_queries"] = n_queries
+        cand["p_best_n_samples"] = n_samples
 
         # Round-wide leaderboard (top-5 by P(best)).
         top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]

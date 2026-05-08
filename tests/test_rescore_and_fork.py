@@ -238,7 +238,7 @@ def _prior(query: str, predicted: str = "p", gt: str = "g") -> dict:
 
 
 def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -> None:
-    """The load-bearing invariant: a partial state.results merged with cached_query_results
+    """The load-bearing invariant: a partial state.results merged with cached_sample_results
     yields back every dataset query the archive already covered.
 
     Aborted runs must not shrink an already-fuller archive — without this the
@@ -247,13 +247,13 @@ def test_merge_with_unprocessed_priors_preserves_full_archive_on_partial_run() -
     """
     queries = [f"q{i}" for i in range(20)]
     dataset_queries = set(queries)
-    cached_query_results = {q: _prior(q) for q in queries}
+    cached_sample_results = {q: _prior(q) for q in queries}
     # Simulate a partial run: 6 cache hits + 1 fresh measurement.
     state_results = [_prior(q) for q in queries[:7]]
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         state_results,
-        cached_query_results=cached_query_results,
+        cached_sample_results=cached_sample_results,
         dataset_queries=dataset_queries,
         deprecated_samples={},
         scorer=compile_scorer(formula),
@@ -268,7 +268,7 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
     """Only dataset queries get merged; evicted (deprecated) priors are excluded
     so they re-measure on the next encounter."""
     dataset_queries = {"q1", "q2"}
-    cached_query_results = {
+    cached_sample_results = {
         "q1": _prior("q1"),
         "q2": _prior("q2"),
         "q_off": _prior("q_off"),  # not in current dataset
@@ -277,7 +277,7 @@ def test_merge_with_unprocessed_priors_filters_off_dataset_and_evicted() -> None
     formula = "exact_match(predicted, ground_truth)"
     merged = merge_with_unprocessed_priors(
         [],
-        cached_query_results=cached_query_results,
+        cached_sample_results=cached_sample_results,
         dataset_queries=dataset_queries,
         deprecated_samples=deprecated,
         scorer=compile_scorer(formula),

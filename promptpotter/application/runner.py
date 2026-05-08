@@ -567,7 +567,7 @@ async def run_optimization(
         campaign_config,
         cb=cb,
         task_context=resolved_task_context,
-        scoring_formula=scoring_spec.per_query,
+        scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
         no_divergence_check=no_divergence_check,

@@ -17,7 +17,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.scoring.metrics import count_degraded_queries
+from promptpotter.application.scoring.metrics import count_degraded_samples
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
 from promptpotter.shared.errors import is_error_result
@@ -35,12 +35,12 @@ __all__ = [
     "PoBBSnapshot",
     "ResultClassification",
     "build_degradation_checks",
-    "candidate_keys_from_schema",
     "classify_result",
     "extract_warning_types",
-    "get_candidates",
+    "get_ranked_items",
     "is_deprecated",
-    "update_query_tracker",
+    "ranked_item_keys_from_schema",
+    "update_sample_tracker",
 ]
 
 
@@ -120,8 +120,8 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
 # ---------------------------------------------------------------------------
 
 
-def candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
-    """Derive pipeline_data candidate keys from schema's ranker/candidate_source nodes."""
+def ranked_item_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
+    """Derive pipeline_data keys carrying ranked items from schema's ranker/candidate_source nodes."""
     if not schema:
         return []
     keys: list[str] = []
@@ -131,10 +131,10 @@ def candidate_keys_from_schema(schema: PipelineSchema | None) -> list[str]:
     return keys
 
 
-def get_candidates(r: Mapping[str, Any], candidate_keys: list[str] | None = None) -> list:
-    """Extract candidates from a result dict, checking keys in order."""
+def get_ranked_items(r: Mapping[str, Any], ranked_item_keys: list[str] | None = None) -> list:
+    """Extract ranked items from a result dict, checking keys in order."""
     pd = r.get("pipeline_data") or {}
-    for key in candidate_keys or []:
+    for key in ranked_item_keys or []:
         val = pd.get(key)
         if val:
             return val
@@ -155,11 +155,11 @@ def is_deprecated(result: Mapping[str, Any]) -> bool:
     return classify_result(result).is_fatal
 
 
-def update_query_tracker(
+def update_sample_tracker(
     tracker: dict[str, dict],
     results: list[QueryMeasurement],
 ) -> None:
-    """Merge results into the per-query warning inventory (mutates tracker)."""
+    """Merge results into the per-sample warning inventory (mutates tracker)."""
     for r in results:
         query = r.get("query", "")
         if not query:
@@ -224,9 +224,9 @@ class DegradationCheck:
 
     name = "degradation"
 
-    def __init__(self, threshold: float = 0.4, min_queries: int = 3) -> None:
+    def __init__(self, threshold: float = 0.4, min_samples: int = 3) -> None:
         self.threshold = threshold
-        self.min_queries = min_queries
+        self.min_samples = min_samples
 
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
@@ -251,9 +251,9 @@ class DegradationCheck:
                 )
 
         n = len(results)
-        if n < self.min_queries:
+        if n < self.min_samples:
             return None
-        degraded = count_degraded_queries(results)
+        degraded = count_degraded_samples(results)
         rate = degraded / n
         if rate < self.threshold:
             return None
@@ -278,11 +278,11 @@ class DegradationCheck:
 
 @dataclass(frozen=True)
 class PoBBSnapshot:
-    """Per-query PoBB snapshot for telemetry."""
+    """Per-sample PoBB snapshot for telemetry."""
 
     p_best: dict[str, float]
     current_id: str
-    n_queries: int
+    n_samples: int
 
 
 @dataclass(frozen=True)
@@ -300,12 +300,12 @@ class PoBBCheck:
 
     name = "elimination"
 
-    def __init__(self, config: PoBBConfig, *, n_queries: int) -> None:
+    def __init__(self, config: PoBBConfig, *, n_samples: int) -> None:
         self.n_min = config.n_min
         self.epsilon = config.epsilon
         self.lock_in = config.lock_in
         self.lock_in_n_min = config.lock_in_n_min
-        self.n_queries = n_queries
+        self.n_samples = n_samples
         self.priors: dict[str, list[float]] = {}
         self.prior_ids: list[str] = []
         self._current_id: str = ""
@@ -343,7 +343,7 @@ class PoBBCheck:
         cid = self._current_id or "__current__"
         histories: dict[str, list[float]] = {**self.priors, cid: scores}
         snapshot = posterior_best_probabilities(histories)
-        snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_queries=n)
+        snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_samples=n)
         self._last_snapshot = snap
         if self._on_snapshot is not None:
             self._on_snapshot(snap)
@@ -364,7 +364,7 @@ class PoBBCheck:
                 self.name,
                 {
                     "queries_scored": n,
-                    "total_queries": self.n_queries,
+                    "total_samples": self.n_samples,
                     "n_priors": len(self.priors),
                     "p_best": float(p_best_current),
                     "lock_in": float(self.lock_in),
@@ -383,7 +383,7 @@ class PoBBCheck:
             self.name,
             {
                 "queries_scored": n,
-                "total_queries": self.n_queries,
+                "total_samples": self.n_samples,
                 "n_priors": len(self.priors),
                 "p_best": float(p_best_current),
                 "epsilon": float(self.epsilon),
@@ -396,7 +396,7 @@ class PoBBCheck:
 
 
 def build_degradation_checks(config: CampaignConfig) -> list[StopRule]:
-    """Per-query checks (degradation). PoBBCheck is built by the runner."""
+    """Per-sample checks (degradation). PoBBCheck is built by the runner."""
     opt = config.optimization
     checks: list[StopRule] = []
     if opt.degradation_threshold > 0:

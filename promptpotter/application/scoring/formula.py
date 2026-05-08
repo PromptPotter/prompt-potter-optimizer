@@ -4,7 +4,7 @@ The compiler turns a ``campaign.json::scoring`` formula string into a
 callable that scores one ``QueryMeasurement`` dict; ``rescore_results`` is the
 sole writer of top-level ``hit``/``score`` and the ``scored`` audit map.
 
-Per-query formula namespace:
+Per-sample formula namespace:
 
     hit                 — bool (1/0), exact match at rank 1
     ground_truth_rank   — int or None, 1-based position in ranking
@@ -13,7 +13,7 @@ Per-query formula namespace:
     ground_truth        — str, expected answer
     error               — str or None
     <node_name>         — SimpleNamespace of that node's pipeline_data
-    evaluators          — SimpleNamespace of per-query Evaluator values
+    evaluators          — SimpleNamespace of per-sample Evaluator values
 
 Per-round formula namespace is built from ``application/scoring/evaluators`` —
 every registered per-round evaluator whose ``applies(schema)`` is True
@@ -59,8 +59,8 @@ __all__ = [
     "auto_scorer_id",
     "compile_round_scorer",
     "compile_scorer",
-    "extract_candidate_label",
     "extract_display_answer",
+    "extract_item_label",
     "rescore_results",
     "split_scoring_block",
 ]
@@ -70,12 +70,15 @@ STEER_FILENAME = "scoring_steer.json"
 
 
 # ---------------------------------------------------------------------------
-# Candidate-label extraction — one definition, used by metrics/evaluators/views
+# Ranked-item label extraction — one definition, used by metrics/evaluators/views
 # ---------------------------------------------------------------------------
 
 
-def extract_candidate_label(c: Any) -> str:
-    """Return display name of a candidate (dict ``{candidate: ...}``, list/tuple, or string)."""
+def extract_item_label(c: Any) -> str:
+    """Return display label of a ranked item (dict ``{candidate: ...}``, list/tuple, or string).
+
+    The wire-side dict key remains ``candidate`` (TermNorm output shape).
+    """
     if isinstance(c, dict):
         return str(c.get("candidate", c))
     return c[0] if isinstance(c, (list, tuple)) else str(c)
@@ -259,7 +262,7 @@ _SAFE_BUILTINS = {
 # (``().__class__.__base__.__subclasses__()`` reaches anything). Block at the
 # AST instead: no Attribute access (kills .__class__), no comprehensions, no
 # lambdas, no walrus, no subscript. Names are unrestricted because the
-# per-query namespace is shaped by ``pipeline_data`` and varies per dataset;
+# per-sample namespace is shaped by ``pipeline_data`` and varies per dataset;
 # the boundary is "no attribute access, no unknown calls" — every Call must
 # resolve to a name in ``_SAFE_BUILTINS`` ∪ ``SCORING_FUNCTIONS`` ∪ namespace.
 _ALLOWED_AST_NODES: frozenset[type[ast.AST]] = frozenset(
@@ -358,7 +361,7 @@ def compile_scorer(formula: str | None) -> Callable[[dict], float]:
         )
 
     tree = ast.parse(formula, "<scoring>", "eval")
-    _validate_ast(tree, source="per_query scoring formula")
+    _validate_ast(tree, source="per_sample scoring formula")
     code = compile(tree, "<scoring>", "eval")
 
     def _scorer(result: dict) -> float:
@@ -428,23 +431,23 @@ def _default_round_scorer(values: dict[str, float]) -> float:
 # ---------------------------------------------------------------------------
 
 
-def auto_scorer_id(per_query: str | None) -> str:
+def auto_scorer_id(per_sample: str | None) -> str:
     """Stable scorer id from formula hash; ``None``/empty → ``default_hit``."""
-    if not per_query:
+    if not per_sample:
         return DEFAULT_SCORER_ID
-    h = hashlib.sha256(per_query.encode("utf-8")).hexdigest()[:10]
+    h = hashlib.sha256(per_sample.encode("utf-8")).hexdigest()[:10]
     return f"auto_{h}"
 
 
 def split_scoring_block(
     block: str | dict[str, str] | None,
 ) -> ScoringSpec:
-    """Normalize the campaign ``scoring`` field to ``(per_query, per_round, scorer_id)``."""
+    """Normalize the campaign ``scoring`` field to ``(per_sample, per_round, scorer_id)``."""
     if isinstance(block, dict):
-        per_query = block.get("per_query")
+        per_sample = block.get("per_sample")
         per_round = block.get("per_round")
-        scorer_id = block.get("id") or auto_scorer_id(per_query)
-        return ScoringSpec(per_query, per_round, scorer_id)
+        scorer_id = block.get("id") or auto_scorer_id(per_sample)
+        return ScoringSpec(per_sample, per_round, scorer_id)
     if isinstance(block, str) and block:
         return ScoringSpec(block, None, auto_scorer_id(block))
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)

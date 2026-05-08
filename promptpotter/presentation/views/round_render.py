@@ -1,4 +1,4 @@
-"""Per-candidate + per-query renderers shared by the CLI and notebook surfaces.
+"""Per-candidate + per-sample renderers shared by the CLI and notebook surfaces.
 
 - ``IndividualSummary`` + ``build_individual_summary`` / ``fmt_individual_header``
   produce the per-candidate pre-scoring header + post-scoring summary.
@@ -155,8 +155,8 @@ def build_individual_summary(
 
     aborted = bool(scores.get("escalation_aborted"))
     if aborted:
-        scored_q = scores.get("scored_queries", n)
-        expected_q = scores.get("expected_queries", n)
+        scored_q = scores.get("scored_samples", n)
+        expected_q = scores.get("expected_samples", n)
         hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
     else:
         hit_str = f"{hits}/{n} hits"
@@ -186,7 +186,7 @@ def build_individual_summary(
             )
 
     comp = scores.get("composite_fitness")
-    degraded = scores.get("degraded_queries", 0)
+    degraded = scores.get("degraded_samples", 0)
 
     if comp is not None:
         detail_lines.append(
@@ -211,13 +211,13 @@ def build_individual_summary(
 
 
 # ===========================================================================
-# Per-query HIT/MISS line formatter — feeds ``LiveDisplay.on_sample_scored``.
+# Per-sample HIT/MISS line formatter — feeds ``LiveDisplay.on_sample_scored``.
 # Pure: no I/O, no mutation.
 # ===========================================================================
 
 
 def _append_annotation(line: str, indent: str, color: str, emoji: str, text: str) -> str:
-    """Append a per-query annotation line under the query it describes.
+    """Append a per-sample annotation line under the query it describes.
 
     ``indent`` mirrors the query line's leading whitespace so the emoji sits
     directly under the HIT/MISS tag instead of floating at column 0.
@@ -263,11 +263,11 @@ def _fmt_query_result(
     elif r.get("hit"):
         tag = "HIT"
     else:
-        ranked = pd.get("ranked_candidates", [])
+        ranked = pd.get("ranked_items", [])
         n_cand = len(ranked)
         gt_rank: int | None = None
         if gt_full:
-            for key in ("ranked_candidates", "token_matched_candidates"):
+            for key in ("ranked_items", "token_matches"):
                 if (gt_rank := find_rank(pd.get(key, []), gt_full)) is not None:
                     break
         if gt_rank is not None:

@@ -45,7 +45,7 @@ __all__ = ["QueryLoopResult", "merge_with_unprocessed_priors", "score_search_poi
 def merge_with_unprocessed_priors(
     results: list[QueryMeasurement],
     *,
-    cached_query_results: dict[str, QueryMeasurement],
+    cached_sample_results: dict[str, QueryMeasurement],
     dataset_queries: set[str],
     deprecated_samples: dict[str, QueryMeasurement],
     scorer: Scorer | None,
@@ -59,7 +59,7 @@ def merge_with_unprocessed_priors(
     """
     processed = {r["query"] for r in results}
     merged = list(results)
-    for q, prior in cached_query_results.items():
+    for q, prior in cached_sample_results.items():
         if q not in dataset_queries or q in processed or q in deprecated_samples:
             continue
         entry = cast(QueryMeasurement, dict(prior))
@@ -153,13 +153,13 @@ def _build_scoring_error_signal(
 
 
 def _split_off_deprecated_samples(
-    cached_query_results: dict[str, QueryMeasurement],
+    cached_sample_results: dict[str, QueryMeasurement],
 ) -> tuple[dict[str, QueryMeasurement], dict[str, QueryMeasurement]]:
     """Load-side cache split: (kept, deprecated rows that need fresh re-measure)."""
     from promptpotter.application.optimization.elimination import is_deprecated
 
-    deprecated = {q: r for q, r in cached_query_results.items() if is_deprecated(r)}
-    kept = {q: r for q, r in cached_query_results.items() if q not in deprecated}
+    deprecated = {q: r for q, r in cached_sample_results.items() if is_deprecated(r)}
+    kept = {q: r for q, r in cached_sample_results.items() if q not in deprecated}
     return kept, deprecated
 
 
@@ -169,9 +169,9 @@ class _LoopContext:
 
     search_point: JobSearchPoint
     session: Session
-    cached_query_results: dict[str, QueryMeasurement]
-    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None
-    on_query_starting: Callable[[str, int, int], None] | None
+    cached_sample_results: dict[str, QueryMeasurement]
+    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None
+    on_sample_starting: Callable[[str, int, int], None] | None
     axes: AxisIndex | None
     scorer: Scorer  # narrowed from session.scoring.scorer (asserted non-None on construction)
     scorer_id: str
@@ -245,7 +245,7 @@ async def _process_cache_hit(
 ) -> _SampleOutcome:
     """Materialize a prior-cache result, append, and check escalation."""
     cached_r = _materialize_cached(
-        ctx.cached_query_results[sample.query],
+        ctx.cached_sample_results[sample.query],
         ctx.scorer,
         ctx.scorer_id,
         ctx.scorer_formula,
@@ -254,8 +254,8 @@ async def _process_cache_hit(
     # Overlay current-run sample_id — archived traces may predate the field.
     cached_r["sample_id"] = sample.id
     state.results.append(cached_r)
-    if ctx.on_query_scored is not None:
-        ctx.on_query_scored(cached_r, idx, dataset_len)
+    if ctx.on_sample_scored is not None:
+        ctx.on_sample_scored(cached_r, idx, dataset_len)
     # Elimination must see cached rows too — otherwise a candidate
     # whose priors already dominate it runs one extra real query.
     esc = check_escalation()
@@ -276,8 +276,8 @@ async def _process_fresh_sample(
             cached_deprecated, ctx.scorer, ctx.scorer_id, ctx.scorer_formula
         )
         display_cached["sample_id"] = sample.id
-        if ctx.on_query_scored is not None:
-            ctx.on_query_scored(display_cached, idx, dataset_len)
+        if ctx.on_sample_scored is not None:
+            ctx.on_sample_scored(display_cached, idx, dataset_len)
         from promptpotter.infrastructure.llm import (
             DEPR_RETRY_COOLDOWN_SEC,
             wait_with_countdown,
@@ -303,8 +303,8 @@ async def _process_fresh_sample(
     else:
         state.consecutive_errors = 0
 
-    if ctx.on_query_scored is not None:
-        ctx.on_query_scored(result, idx, dataset_len)
+    if ctx.on_sample_scored is not None:
+        ctx.on_sample_scored(result, idx, dataset_len)
 
     esc = check_escalation()
     return _SampleOutcome(escalation=esc) if esc else _SampleOutcome()
@@ -315,10 +315,10 @@ async def _run_query_loop(
     dataset: list[Sample],
     session: Session,
     *,
-    cached_query_results: dict[str, QueryMeasurement],
+    cached_sample_results: dict[str, QueryMeasurement],
     deprecated_samples: dict[str, QueryMeasurement],
-    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None,
-    on_query_starting: Callable[[str, int, int], None] | None,
+    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None,
+    on_sample_starting: Callable[[str, int, int], None] | None,
     degradation_checks: list[StopRule] | None,
     candidate_idx: int,
     n_total_candidates: int,
@@ -331,9 +331,9 @@ async def _run_query_loop(
     ctx = _LoopContext(
         search_point=search_point,
         session=session,
-        cached_query_results=cached_query_results,
-        on_query_scored=on_query_scored,
-        on_query_starting=on_query_starting,
+        cached_sample_results=cached_sample_results,
+        on_sample_scored=on_sample_scored,
+        on_sample_starting=on_sample_starting,
         axes=axes,
         scorer=session.scoring.scorer,
         scorer_id=session.scoring.scorer_id,
@@ -355,12 +355,12 @@ async def _run_query_loop(
                 logger.debug("Graceful stop after query %d/%d.", len(state.results), len(dataset))
                 return QueryLoopResult(state.results, completed=False, stop_reason="graceful")
 
-            if on_query_starting is not None:
-                on_query_starting(sample.query, i, len(dataset))
+            if on_sample_starting is not None:
+                on_sample_starting(sample.query, i, len(dataset))
 
             handler = (
                 _process_cache_hit
-                if sample.query in cached_query_results
+                if sample.query in cached_sample_results
                 else _process_fresh_sample
             )
             outcome = await handler(sample, i, len(dataset), state, ctx, _check_escalation)
@@ -400,8 +400,8 @@ async def score_search_point(
     session: Session,
     *,
     label: str = "Score",
-    on_query_scored: Callable[[QueryMeasurement, int, int], None] | None = None,
-    on_query_starting: Callable[[str, int, int], None] | None = None,
+    on_sample_scored: Callable[[QueryMeasurement, int, int], None] | None = None,
+    on_sample_starting: Callable[[str, int, int], None] | None = None,
     source: str = "",
     degradation_checks: list[StopRule] | None = None,
     candidate_idx: int = 0,
@@ -420,17 +420,17 @@ async def score_search_point(
     safe_label = label.lower().replace(" ", "_")
     run_id = f"{safe_label}_{content_hash[:8]}"
 
-    cached_query_results: dict[str, QueryMeasurement] = {}
+    cached_sample_results: dict[str, QueryMeasurement] = {}
     if store and backend_id:
         from promptpotter.application.optimization.elimination import is_deprecated
 
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
-        cached_query_results = cast(
+        cached_sample_results = cast(
             "dict[str, QueryMeasurement]",
             store.archive.load_reusable_results(backend_id, node_configs, is_fatal=is_deprecated),
         )
 
-    cached_query_results, deprecated_samples = _split_off_deprecated_samples(cached_query_results)
+    cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
     if deprecated_samples:
         logger.info(
             "Evicted %d deprecated prior result(s) (fatal warnings); will remeasure.",
@@ -442,10 +442,10 @@ async def score_search_point(
 
     # Preamble: when the JSP-keyed archive already covers some/all of this
     # dataset's queries, announce the split so the operator sees inline
-    # whether the upcoming per-query lines are cache replays vs fresh
+    # whether the upcoming per-sample lines are cache replays vs fresh
     # measurements. Suppressed when no priors match the current dataset.
     cached_in_dataset = sum(
-        1 for q in cached_query_results if q in dataset_queries and q not in deprecated_samples
+        1 for q in cached_sample_results if q in dataset_queries and q not in deprecated_samples
     )
     if cached_in_dataset:
         total = len(dataset)
@@ -459,7 +459,7 @@ async def score_search_point(
     def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:
         return merge_with_unprocessed_priors(
             results,
-            cached_query_results=cached_query_results,
+            cached_sample_results=cached_sample_results,
             dataset_queries=dataset_queries,
             deprecated_samples=deprecated_samples,
             scorer=session.scoring.scorer,
@@ -506,10 +506,10 @@ async def score_search_point(
         search_point,
         dataset,
         session,
-        cached_query_results=cached_query_results,
+        cached_sample_results=cached_sample_results,
         deprecated_samples=deprecated_samples,
-        on_query_scored=on_query_scored,
-        on_query_starting=on_query_starting,
+        on_sample_scored=on_sample_scored,
+        on_sample_starting=on_sample_starting,
         degradation_checks=degradation_checks,
         candidate_idx=candidate_idx,
         n_total_candidates=n_total_candidates,

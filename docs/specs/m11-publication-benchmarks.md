@@ -70,7 +70,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 **Deliverables:**
 
 1. **Tiered storage design.** Replace the binary `items` / `excluded` split with tiers: `items` (active), `probation` (recently excluded, eligible for re-admission after N rounds or on pipeline change), `cold` (archived, read-only, surfaced to L1 critique/L2 as context). Define promotion/demotion rules.
-2. **Exposure to L2/L1 critique.** Thread the cold tier into the SearchMemory digest as a dedicated signal ("zero-signal inventory: 12 trivial, 7 intractable") so the LLM tiers can reason about dataset shape rather than just per-query outcomes.
+2. **Exposure to L2/L1 critique.** Thread the cold tier into the SearchMemory digest as a dedicated signal ("zero-signal inventory: 12 trivial, 7 intractable") so the LLM tiers can reason about dataset shape rather than just per-sample outcomes.
 3. **Shrink guard.** Add a hard floor tied to `sp_budget_ttest`. Decide strict vs soft empirically on BBEH — log how often the guard fires, whether it blocks the filter during long runs, and whether campaigns that hit the guard underperform.
 4. **Degradation-canary role for always-hit.** Re-examine the symmetric treatment. Always-hit queries have value as regression signals; exclusion may be the wrong action even when they're zero-signal for *candidate ranking*. Possibly split the two branches: always-miss → excluded outright, always-hit → demoted to probation + used as canary.
 5. **Ablation row.** Add a "zero-signal filter on vs off" row to the Track 2 ablation table on BBEH. Confirms the feature actually earns its place before it lands in the paper.
@@ -90,7 +90,7 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 1. **Scaffolding** — `webapp/` directory with Next.js project, API client module, layout shell, dev proxy to FastAPI.
 2. **Dashboard** — backend list, campaign summary cards, overall stats.
 3. **Campaign detail** — convergence chart (accuracy vs round), trial timeline, best vs baseline comparison. Data comes from the M9 view model via the API.
-4. **Trial inspector** — prompt diff view, per-query results table, failure analysis display.
+4. **Trial inspector** — prompt diff view, per-sample results table, failure analysis display.
 5. **Migration of M11-vanilla views** — port the shipped Dashboard, Files, View Results pane, workflow canvas, and What-If ablation card into the Next.js + React codebase. Preserve every wired / held-real-estate / load-bearing element from the vanilla preservation list. Bake in baseline a11y + semantic HTML + `prefers-reduced-motion` + typed data shapes (`dashboard.json` / `OptSearchPoint` / `archive/measurements/`) as new-codebase requirements.
 6. **Additive monitoring containers** — read-only views the operator has flagged as M11 expansion homes:
    - **Hard-sample dashboard** *alongside* the existing live-samples card (don't replace it). Surfaces samples that consistently fail across candidates and rounds via `SampleIndex.dead()`. Reference: [`hard-sample-sorter.md`](hard-sample-sorter.md). Likely sidebar slot: Analytics.

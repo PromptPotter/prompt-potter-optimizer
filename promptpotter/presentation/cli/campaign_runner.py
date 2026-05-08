@@ -395,7 +395,7 @@ def _build_live_display(
     from promptpotter.presentation.views.live import LiveDisplay as _LiveDisplay
 
     set_display_tags(session.pipeline_schema)
-    scoring_formula = split_scoring_block(campaign_config.scoring).per_query
+    scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     opt = campaign_config.optimization
 
     if getattr(args, "verbose", False):
@@ -643,7 +643,7 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
     populate_session_scoring(
         session,
         obs=None,
-        scoring_formula=scoring_spec.per_query,
+        scoring_formula=scoring_spec.per_sample,
         scoring_round_formula=scoring_spec.per_round,
         scorer_id=scoring_spec.scorer_id,
         experiment_id=ctx.state.get("experiment_id", ""),

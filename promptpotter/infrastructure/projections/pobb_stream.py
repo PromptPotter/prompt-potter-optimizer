@@ -1,4 +1,4 @@
-"""PoBBStreamProjection — appends per-query Posterior-of-Being-Best snapshots
+"""PoBBStreamProjection — appends per-sample Posterior-of-Being-Best snapshots
 to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 
 Subscribed to the same ``CycleLedger`` as the other projections. Filters on
@@ -30,10 +30,10 @@ _STREAMS_SUBPATH = (".runtime", "streams")
 
 
 class PoBBStreamProjection(ProjectionBase):
-    """Appends per-query P(best) snapshots to one JSONL file per round.
+    """Appends per-sample P(best) snapshots to one JSONL file per round.
 
     File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
-    audit dir. Each line is a JSON object with ``round``, ``query_idx``,
+    audit dir. Each line is a JSON object with ``round``, ``sample_idx``,
     ``current_id``, ``p_best`` (cid → prob), ``p_best_delta`` (cid → delta
     vs previous query), and ``stopped`` (cids whose p_best fell below ε
     on this query — currently encoded as the singleton ``[current_id]``
@@ -80,9 +80,9 @@ class PoBBStreamProjection(ProjectionBase):
 
         line = {
             "round": int(record.round),
-            "query_idx": int(record.sample_idx if record.sample_idx is not None else -1),
+            "sample_idx": int(record.sample_idx if record.sample_idx is not None else -1),
             "current_id": str(payload.get("current_id", "")),
-            "n_queries": int(payload.get("n_queries", 0)),
+            "n_samples": int(payload.get("n_samples", 0)),
             "p_best": p_best,
             "p_best_delta": deltas,
         }

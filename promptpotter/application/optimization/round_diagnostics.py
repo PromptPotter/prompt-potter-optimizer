@@ -13,8 +13,8 @@ import logging
 from collections import Counter
 
 from promptpotter.application.optimization.elimination import (
-    candidate_keys_from_schema,
-    get_candidates,
+    get_ranked_items,
+    ranked_item_keys_from_schema,
 )
 from promptpotter.application.scoring.metrics import extract_sample_diagnostics, find_rank
 from promptpotter.domain.pipeline_schema import PipelineSchema
@@ -57,15 +57,17 @@ def compute_round_diagnostics(
     ``ProbeOutcome`` summary computed from the warned-query subset
     accuracy vs. the pre-probe full-set best.
     """
-    candidate_keys = candidate_keys_from_schema(pipeline_schema)
+    ranked_item_keys = ranked_item_keys_from_schema(pipeline_schema)
     results = round_result.results or []
 
-    rank_buckets, top_k, near_misses, nm_queries, n_valid = _rank_analysis(results, candidate_keys)
+    rank_buckets, top_k, near_misses, nm_queries, n_valid = _rank_analysis(
+        results, ranked_item_keys
+    )
     termination_dist, error_rate, warning_rate = _pipeline_health(results)
     evolution_rows, plateau_count, anomalies = _evolution(rounds_history)
     trajectory, trajectory_desc = _trajectory(rounds_history)
     diff_lines = _cross_candidate_diff(round_result)
-    samples = _sample_diagnostics(results, candidate_keys, pipeline_schema)
+    samples = _sample_diagnostics(results, ranked_item_keys, pipeline_schema)
     probe_outcome: ProbeOutcome | None = None
     if probe_just_completed:
         subset_size = len(results)
@@ -105,12 +107,12 @@ def compute_round_diagnostics(
 
 
 def _rank_analysis(
-    results: list[dict], candidate_keys: list[str] | None
+    results: list[dict], ranked_item_keys: list[str] | None
 ) -> tuple[dict[str, int], dict[int, float], list[NearMiss], set[str], int]:
-    """Where did ground truth land in each query's candidate ranking?"""
-    keys = candidate_keys or None
+    """Where did ground truth land in each sample's ranked-item list?"""
+    keys = ranked_item_keys or None
     rank_map: dict[int, int | None] = {
-        i: find_rank(get_candidates(r, keys), r.get("ground_truth", ""))
+        i: find_rank(get_ranked_items(r, keys), r.get("ground_truth", ""))
         for i, r in enumerate(results)
         if not is_error_result(r)
     }
@@ -207,7 +209,7 @@ def _evolution(rounds: list[RoundResult]) -> tuple[list[EvolutionRow], int, list
                 round=r.round,
                 accuracy=r.accuracy,
                 delta=delta,
-                degraded=r.degraded_queries,
+                degraded=r.degraded_samples,
                 n_candidates=len(r.candidate_scores or ()),
                 changed_axes=changed_axes,
             )
@@ -321,7 +323,7 @@ def _cross_candidate_diff(round_result: RoundResult) -> list[str]:
 
 def _sample_diagnostics(
     results: list[dict],
-    candidate_keys: list[str] | None,
+    ranked_item_keys: list[str] | None,
     pipeline_schema: PipelineSchema | None,
 ) -> list[SampleDiag]:
     """Per-sample tactical view (≤8 actionable misses, capped for token budget)."""
@@ -331,7 +333,7 @@ def _sample_diagnostics(
             continue
         pd = r.get("pipeline_data") or {}
         diag = pd.get("diagnostics") or {}
-        rank = find_rank(get_candidates(r, candidate_keys), r.get("ground_truth", ""))
+        rank = find_rank(get_ranked_items(r, ranked_item_keys), r.get("ground_truth", ""))
         sd: dict | None = None
         if pipeline_schema is not None:
             sd = extract_sample_diagnostics(r, pipeline_schema)

@@ -12,7 +12,7 @@ Two families:
 - :class:`OptimizationEvent` — Topology A (live campaign trace). One
   Langfuse trace per campaign; rounds and nodes nest underneath. Emitted
   inline from the optimization loop.
-- :class:`MeasurementEvent` — Topology B (per-query dataset trace). One
+- :class:`MeasurementEvent` — Topology B (per-sample dataset trace). One
   Langfuse trace per query, linked to dataset items. Emitted by the
   backfill replayer reading ``archive/measurements/`` from disk.
 """
@@ -41,7 +41,7 @@ class DatasetRegistered:
 
     Used by both topologies — the cloud-side ``query → item_id`` mapping
     produced here is shared between the live forward path (which links
-    DatasetRun spans) and the backfill replayer (which links per-query
+    DatasetRun spans) and the backfill replayer (which links per-sample
     traces).
     """
 

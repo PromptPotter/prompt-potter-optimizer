@@ -318,7 +318,7 @@ class MeasurementArchive:
         node_configs: list[tuple[str, dict]],
         is_fatal: Callable[[dict[str, Any]], bool] | None = None,
     ) -> dict[str, dict[str, Any]]:
-        """Build per-query cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive."""
+        """Build per-sample cache from prior runs sharing *node_configs* (exact: reuse all non-error; partial: prefix-trusted only). ``is_fatal`` ensures a saved valid retry isn't shadowed by an older deprecated archive."""
         if not node_configs:
             return {}
         chain_len = len(node_configs)

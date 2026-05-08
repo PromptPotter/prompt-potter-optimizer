@@ -235,13 +235,13 @@ async def prepare_scoring_context(
     populate_session_scoring(
         session,
         obs=obs,
-        scoring_formula=spec.per_query,
+        scoring_formula=spec.per_sample,
         scoring_round_formula=spec.per_round,
         scorer_id=spec.scorer_id,
         source="baseline",
     )
 
-    # ci=0/ct=1 makes the dashboard emitter tick per-query during baseline like L1.
+    # ci=0/ct=1 makes the dashboard emitter tick per-sample during baseline like L1.
     if listener is not None:
         emit_phase(listener.on_phase, CampaignPhase.BASELINE, "enter", round=0)
 
@@ -251,12 +251,12 @@ async def prepare_scoring_context(
             scoring_set,
             session,
             label="Baseline",
-            on_query_starting=(
+            on_sample_starting=(
                 (lambda q, qi, qt: listener.on_sample_started(0, 1, qi, qt, q))
                 if listener is not None
                 else None
             ),
-            on_query_scored=(
+            on_sample_scored=(
                 (lambda r, qi, qt: listener.on_sample_scored(0, 1, qi, qt, r))
                 if listener is not None
                 else None
@@ -288,7 +288,7 @@ class DatasetSummary(NamedTuple):
     train_data: list[Sample] | None
     index_terms: list[str]
     splits: dict[str, list[Sample]]
-    n_unique_queries: int
+    n_unique_samples: int
 
 
 def prepare_datasets(
@@ -340,7 +340,7 @@ def prepare_datasets(
         train_data=splits["train"] or None,
         index_terms=sorted(gt_set),
         splits=splits,
-        n_unique_queries=len(all_queries),
+        n_unique_samples=len(all_queries),
     )
 
 

@@ -129,9 +129,9 @@ class PhaseRecord(BaseModel):
 
 
 class SnapshotRecord(BaseModel):
-    """An in-flight live-state snapshot — per-query / per-candidate / per-round.
+    """An in-flight live-state snapshot — per-sample / per-candidate / per-round.
 
-    Snapshots are display state for the live dashboard and per-query log.
+    Snapshots are display state for the live dashboard and per-sample log.
     The ``event`` discriminator says what the snapshot represents
     (``sample_started``, ``sample_scored``, ``candidate_started``,
     ``candidate_scored``); ``payload`` carries the full data the consumer

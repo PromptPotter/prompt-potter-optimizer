@@ -10,10 +10,10 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **Campaign** | One complete optimization run as the operator sees it. | filesystem `campaigns/{root_cycle_id}/` | [`campaign-tree.md`](campaign-tree.md) |
 | **Candidate** | One member of a round's population. Prompt fields + pipeline parameters. | `OptSearchPoint` (`OSP`) | [`state-record.md`](state-record.md) |
 | **Catalogue** | Code-derived menu of signal names (`L1_POSSIBLE`) L2 may put in `l1_layout`; rendered into L2's prompt as the `l1_signal_catalogue` signal. | `L1_POSSIBLE` | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |
-| **Critique** | L1's per-round analysis. Reads raw per-query results; feeds L1-generate next round. | `l1_critique`, `RoundResult.critique` | [`the-loop.md`](the-loop.md) |
+| **Critique** | L1's per-round analysis. Reads raw per-sample results; feeds L1-generate next round. | `l1_critique`, `RoundResult.critique` | [`the-loop.md`](the-loop.md) |
 | **Cycle** | Internal id (`cycle_id`) for one optimization run; survives forks via `root_cycle_id`. A campaign is one cycle family. | `cycle_id`, `root_cycle_id`, `CycleLedger`, `CycleRecord` | [`campaign-tree.md`](campaign-tree.md) |
 | **Dataset** | The master query list + ground-truth answers in `datasets/{name}/`. | `Session.samples`, `list[Sample]` | [`../manual/03-first-campaign.md`](../manual/03-first-campaign.md) |
-| **Fitness** | The numeric output of the scorer. Per-query `fitness: float`; round-aggregate `composite_fitness`. | `QueryMeasurement.fitness`, `composite_fitness` | [`scoring-and-memory.md`](scoring-and-memory.md) |
+| **Fitness** | The numeric output of the scorer. Per-sample `fitness: float`; round-aggregate `composite_fitness`. | `QueryMeasurement.fitness`, `composite_fitness` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **Fork** | New cycle minted from a divergence point in an existing one. Sibling under the same `root_cycle_id`. | `DecisionEvent` kind `FORK_CUT` | [`campaign-tree.md`](campaign-tree.md) |
 | **Hit** | Boolean: rank-1 exact match against ground truth. Independent of fitness. | `QueryMeasurement.hit` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **L1 / L2 / L3** | The three layers of the loop: generate / refine / plan. | `Layer.L1_GENERATE`, `Layer.L2_CONTEXT`, `Layer.L3_PLAN` | [`the-loop.md`](the-loop.md) |
@@ -42,7 +42,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 
 ## Words we never use loosely
 
-- **`score`** — always qualified: per-query *fitness*, round-level *composite fitness*, *accuracy* (% correct), *validator health*. Bare "score" is forbidden in prose.
+- **`score`** — always qualified: per-sample *fitness*, round-level *composite fitness*, *accuracy* (% correct), *validator health*. Bare "score" is forbidden in prose.
 - **`config`** / **`params`** — always qualified: `pipeline_params`, `pipeline_params_override`, `l1_config`, `node_config` (wire-only).
 - **`run`** — operator-facing: prefer **campaign**. The word `run_id` survives only as the content-hash key in `archive/measurements/{run_id}.json`.
 - **`state`** — qualified: *escalation state* (the FSM), *campaign bundle* (the per-cycle wiring), or named explicitly.

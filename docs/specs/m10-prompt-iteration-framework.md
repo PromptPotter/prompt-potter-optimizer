@@ -155,7 +155,7 @@ class OptimizerAction(BaseModel):
                                          # (set by runner from the layer that emitted it)
 ```
 
-L2 and L3 emit `rebase` through their existing JSON-output channel — no new optimizer-side plumbing. **L1 cannot rebase** (asymmetry: only meta-layers may; L1 is the thing being rebased *on*).
+L2 and L3 emit `rebase` through their existing JSON-output channel — no new optimizer-side plumbing. **L1 cannot rebase** (asymmetry: only outer layers (L2/L3) may; L1 is the thing being rebased *on*).
 
 **Operator caller (M10 deliverable).** `optimize --sweep` becomes a thin harness over the primitive:
 

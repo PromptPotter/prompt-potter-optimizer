@@ -4,7 +4,7 @@ The registry (``_REGISTRY``) is the single source of truth for which round-
 and query-level evaluators exist; each entry's ``compute`` callable is defined
 in this same module just below. Per-round evaluators receive the round's
 result list (and optionally an ``OptSearchPoint`` for memory-derived signals);
-per-query evaluators receive a single result. Every compute fn returns a
+per-sample evaluators receive a single result. Every compute fn returns a
 float in [0, 1].
 """
 
@@ -15,7 +15,7 @@ from dataclasses import dataclass, field
 from functools import partial
 from typing import TYPE_CHECKING, Any, Literal
 
-from promptpotter.application.scoring.formula import extract_candidate_label
+from promptpotter.application.scoring.formula import extract_item_label
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
     from promptpotter.domain.scoring import QueryMeasurement
 
 
-Scope = Literal["per_query", "per_round"]
+Scope = Literal["per_sample", "per_round"]
 DataType = Literal["NUMERIC", "BOOLEAN"]
 
 
@@ -45,8 +45,8 @@ __all__ = [
     "default_per_round_formula",
     "default_per_round_formula_short",
     "evaluators_meta",
-    "materialize_query_values",
     "materialize_round_values",
+    "materialize_sample_values",
 ]
 
 
@@ -125,7 +125,7 @@ def _compute_recall(
         raw = pd.get(candidate_key)
         candidates: list = list(raw) if isinstance(raw, list) else []
         gt = r.get("ground_truth", "")
-        if any(extract_candidate_label(c) == gt for c in candidates):
+        if any(extract_item_label(c) == gt for c in candidates):
             found += 1
     return found / len(scoped)
 
@@ -174,7 +174,7 @@ def has_limit_node(schema: PipelineSchema) -> bool:
 def _retrieval_shortfall_for_result(
     result: QueryMeasurement, schema: PipelineSchema
 ) -> float | None:
-    """Per-query min(observed / target, 1.0) across all limit-bearing nodes.
+    """Per-sample min(observed / target, 1.0) across all limit-bearing nodes.
 
     Returns None when no limit-bearing node has a list-valued output on this
     result; lets the per-round aggregator skip queries with nothing to measure.
@@ -192,7 +192,7 @@ def _retrieval_shortfall_for_result(
     return sum(ratios) / len(ratios)
 
 
-def compute_retrieval_shortfall_per_query(
+def compute_retrieval_shortfall_per_sample(
     *, result: QueryMeasurement, schema: PipelineSchema | None = None, **_: Any
 ) -> float:
     if schema is None:
@@ -272,7 +272,7 @@ class Evaluator:
 _REGISTRY: list[Evaluator] = [
     Evaluator(
         name="accuracy",
-        description="Mean per-query score across the round's result set.",
+        description="Mean per-sample score across the round's result set.",
         scope="per_round",
         compute=compute_accuracy,
     ),
@@ -332,11 +332,11 @@ _REGISTRY: list[Evaluator] = [
     Evaluator(
         name="retrieval_shortfall",
         description=(
-            "Per-query min(observed/target, 1.0) across nodes with max_*/num_* limits "
+            "Per-sample min(observed/target, 1.0) across nodes with max_*/num_* limits "
             "on list-valued outputs. 1.0 = target met or exceeded."
         ),
-        scope="per_query",
-        compute=compute_retrieval_shortfall_per_query,
+        scope="per_sample",
+        compute=compute_retrieval_shortfall_per_sample,
         applies=has_limit_node,
     ),
     Evaluator(
@@ -432,14 +432,14 @@ def materialize_round_values(
     return values
 
 
-def materialize_query_values(
+def materialize_sample_values(
     schema: PipelineSchema,
     result: QueryMeasurement,
 ) -> dict[str, float]:
-    """Run every per-query evaluator that applies on a single result."""
+    """Run every per-sample evaluator that applies on a single result."""
     values: dict[str, float] = {}
     for ev in _REGISTRY:
-        if ev.scope != "per_query":
+        if ev.scope != "per_sample":
             continue
         if not ev.applies(schema):
             continue

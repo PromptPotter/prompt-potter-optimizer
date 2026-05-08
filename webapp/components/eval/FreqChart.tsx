@@ -50,7 +50,7 @@ function bucketScores(results: ResultRow[]): number[] {
 
 // Parse the live sample lines from `dash.current_round.nodes.l1_score
 // .output.candidates[*].samples[]` into pseudo-results so the chart can
-// bucket per-query HIT/MISS without waiting for round completion.
+// bucket per-sample HIT/MISS without waiting for round completion.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   const score = (dash?.current_round?.nodes as
     | Record<string, { output?: { candidates?: CandidateLike[] } }>

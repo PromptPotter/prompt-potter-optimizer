@@ -49,7 +49,7 @@ The knob set is read from the backend's self-description at init.
 
 ## The critique step
 
-After scoring, before the next round's generate, the critique runs. The only place in the loop that reads raw per-query results. Feeds forward:
+After scoring, before the next round's generate, the critique runs. The only place in the loop that reads raw per-sample results. Feeds forward:
 
 - **L1 Generate next round** — primary signal, unless L2 has just fired.
 - **L2 Refine on escalation** — L2 builds on the critique rather than re-deriving it.

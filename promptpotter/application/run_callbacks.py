@@ -113,18 +113,18 @@ class RunCallbacks:
         self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:
-        """Per-query PoBB snapshot — archive-only, not divergence-gated."""
+        """Per-sample PoBB snapshot — archive-only, not divergence-gated."""
         self._snapshot(
             "p_best_update",
             ci,
             ct,
             {
                 "current_id": str(snapshot.current_id),
-                "n_queries": int(snapshot.n_queries),
+                "n_samples": int(snapshot.n_samples),
                 "p_best": dict(snapshot.p_best),
             },
             round_num=round_num,
-            sample_idx=int(snapshot.n_queries) - 1,
+            sample_idx=int(snapshot.n_samples) - 1,
         )
 
     def set_round(self, round_num: int) -> None:

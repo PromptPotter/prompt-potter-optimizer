@@ -258,7 +258,7 @@ class RoundSummary(BaseModel):
     prompt_fields_id: str = Field(description="OptSearchPoint ID for this round_data's prompt")
     accuracy: float = Field(description="Accuracy achieved in this round_data")
     hits: int = Field(description="Number of correct matches")
-    total: int = Field(description="Total number of evaluated queries")
+    total: int = Field(description="Total number of evaluated samples")
     improved: bool = Field(description="Whether this round_data improved over the previous best")
     created_at: str = Field(description="ISO 8601 creation timestamp")
 
@@ -579,9 +579,9 @@ async def get_optimizer_pipeline() -> dict[str, Any]:
 async def get_evaluators_meta() -> list[dict[str, Any]]:
     """Live registry projection — name, description, scope, direction, node_type.
 
-    Read by the webapp's What-If panel so the registry is available even on
-    cycles whose ``dashboard.json`` predates the meta block. Always returns
-    the import-time registry, not a per-cycle snapshot.
+    Read by the webapp's What-If panel so the evaluator registry is available
+    even when a cycle's ``dashboard.json`` doesn't include ``cycle_info``.
+    Always returns the import-time registry, not a per-cycle snapshot.
     """
     from promptpotter.application.scoring.evaluators import evaluators_meta
 

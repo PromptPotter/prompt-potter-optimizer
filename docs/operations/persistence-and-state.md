@@ -91,7 +91,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `langfuse/` | per cycle | during optimization | Trace shadow + `events.jsonl` mirror. Not read for state reconstruction. |
 | `prompts/` | per cycle | when prompts render | Rendered optimizer prompts. |
 | `.runtime/ledger.jsonl` | per cycle | every fact | Append-only `Decision` / `Phase` / `Snapshot` stream. |
-| `.runtime/streams/round_NNNN_p_best.jsonl` | per cycle | per-query | PoBB Posterior-of-Being-Best snapshots. |
+| `.runtime/streams/round_NNNN_p_best.jsonl` | per cycle | per-sample | PoBB Posterior-of-Being-Best snapshots. |
 | `.runtime/cache/rounds/round_NNNN.json` | per cycle | each round | Per-node I/O: l1_generate, l1_critique, l1_score, l2/l3 (when escalated). |
 | `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
 | `.runtime/archived/resumed_at_{ts}/` | per cycle | `--from` runs | Mid-cycle rewind sweepup. |
@@ -106,7 +106,7 @@ Scalar-only live dashboard. Atomically rewritten on every event. Carries display
 One JSON object per node that ran. Fields: `round`, `started_at`, `finished_at`, `nodes` (keyed by node type):
 
 - `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` — LLM meta-prompt calls. Each has `input.template_fields`, `input.variables`, `output.response`, `usage`, `model`, `duration_s`.
-- `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid; `output.candidates[*].samples` lists per-query outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
+- `l1_score` — scoring phase. `input.candidates` lists what L1 generate produced; `output.candidates[*].stats` carries accuracy/composite/hits/total/invalid; `output.candidates[*].samples` lists per-sample outcomes (`qi`, `sample_id`, `hit`, `cached`, `time_s`, `terminated_at`, `input_tokens`, `output_tokens`, `prediction`, `ground_truth`, `query`).
 
 ### `rounds/round_NNNN.json`
 
@@ -143,7 +143,7 @@ python -m promptpotter optimize --from 2
 
 Archives `rounds/round_0003.json` onward into `campaigns/{cycle_id}/.runtime/archived/resumed_at_<ts>/`, rebuilds the round file index for rounds 0–2, restores optimizer state from round 2's trial, resumes at round 3.
 
-- **Preserved:** the content-addressed measurement archive. Per-query results unchanged under the new search replay from `archive/measurements/` without backend calls.
+- **Preserved:** the content-addressed measurement archive. Per-sample results unchanged under the new search replay from `archive/measurements/` without backend calls.
 - **Discarded:** rounds after N are moved aside, not deleted. Inspectable in the archive directory.
 
 **Editing optimizer state by hand.** Open `campaigns/{cycle_id}/rounds/round_{N:04d}.json` and edit before `optimize --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
@@ -238,7 +238,7 @@ Gated by `applies(schema)` — only present when the corresponding pipeline node
 
 | Name | Range | Meaning |
 | --- | --- | --- |
-| `accuracy` | `[0, 1]` | Mean per-query score |
+| `accuracy` | `[0, 1]` | Mean per-sample score |
 | `error_rate` | `[0, 1]` | Fraction of errored queries |
 | `degraded_rate` | `[0, 1]` | Fraction with degradation warnings |
 | `runtime_failure_rate` | `[0, 1]` | OptSP runtime-failure count, normalized |
@@ -254,7 +254,7 @@ Helpers: `min`, `max`, `float`, `int`, `bool`, `abs`, `round`, `log`, `sqrt`, `e
 
 ### When NOT to steer
 
-Per-query steering is intentionally not supported by file-drop. Changing `compile_scorer` mid-run rewrites recorded `hit`/`score` semantics on every prior trace, triggering the divergence-replay walker on next resume. The right tool there is `optimize --fork-on-divergence`, which forks a new cycle from the divergence point under the new policy.
+Per-sample steering is intentionally not supported by file-drop. Changing `compile_scorer` mid-run rewrites recorded `hit`/`score` semantics on every prior trace, triggering the divergence-replay walker on next resume. The right tool there is `optimize --fork-on-divergence`, which forks a new cycle from the divergence point under the new policy.
 
 ### Composite block in operator surfaces
 

@@ -147,7 +147,7 @@ This is where the reader's mental model of a round usually starts: candidates we
   - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
   - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
 - ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Loop 2 evidence
-  - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-query warnings). Same producer cluster, same lifecycle — honest aggregation.
+  - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-sample warnings). Same producer cluster, same lifecycle — honest aggregation.
   - Fenced because it echoes pipeline warning strings.
 - ¹² **`l2_output_failures`** ← `opt_sp.l2_output_failures` · Loop 4 evidence
   - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).

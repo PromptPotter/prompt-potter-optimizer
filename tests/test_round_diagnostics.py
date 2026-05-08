@@ -45,7 +45,7 @@ def _miss(query: str, gt: str) -> dict:
 
 
 def test_rank_lookup_no_schema_lands_everything_not_found():
-    """No schema → no candidate_keys → find_rank always None → not_found bucket only."""
+    """No schema → no ranked_item_keys → find_rank always None → not_found bucket only."""
     results = [_hit("q1", "a"), _miss("q2", "b"), _miss("q3", "c")]
     rr = _round(0, 0.33, results)
     diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)

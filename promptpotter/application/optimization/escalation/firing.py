@@ -265,7 +265,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "action": result.action,
         "axis_targeted": result.axis_targeted,
-        "warned_queries": warned,
+        "warned_samples": warned,
         "top_warning": top,
         "l2_prompt": result.debug_prompt,
         "l2_response": result.debug_response,

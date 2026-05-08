@@ -46,7 +46,7 @@ class RoundSummary(BaseModel):
     """Compact per-round record persisted on ``OptSearchPoint.round_history``.
 
     Mirrors the trajectory-relevant fields of ``RoundResult`` — enough for
-    ``build_trajectory_report`` (needs ``.accuracy``). Drops raw per-query
+    ``build_trajectory_report`` (needs ``.accuracy``). Drops raw per-sample
     results and per-candidate results, which remain on the transient
     ``Cycle.rounds`` list.
     """
@@ -57,7 +57,7 @@ class RoundSummary(BaseModel):
     accuracy: float
     composite_fitness: float = 0.0
     improved: bool = False
-    degraded_queries: int = 0
+    degraded_samples: int = 0
     pipeline_params: dict | None = None
     candidate_scores: list[dict] = Field(default_factory=list)
 
