@@ -344,7 +344,7 @@ def _r_diagnostics(b: Bundle) -> str:
 
 
 def _r_validation_failures(b: Bundle) -> str:
-    """Loop 1 — L1 parse-time deterministic validator.
+    """Wound 1 — L1 parse-time deterministic validator.
 
     Fenced because it echoes LLM-proposed values (``vf.value``), which
     the LLM could have written as anything.
@@ -363,7 +363,7 @@ def _r_validation_failures(b: Bundle) -> str:
 
 
 def _r_runtime_failures(b: Bundle) -> str:
-    """Loop 2 — DegradationCheck mid-eval evidence + escalation + warnings.
+    """Wound 2 — DegradationCheck mid-eval evidence + escalation + warnings.
 
     Bundles ``runtime_failures`` (per-candidate elimination from
     ``DegradationCheck``) with ``escalation_log`` (cross-round
@@ -425,7 +425,7 @@ def _r_runtime_failures(b: Bundle) -> str:
 
 
 def _r_l2_output_failures(b: Bundle) -> str:
-    """Loop 4 — L2_CONTEXT post-parse validator outcomes.
+    """Wound 4 — L2_CONTEXT post-parse validator outcomes.
 
     Set by ``run_l2_output_validators`` after parsing L2's LLM output;
     non-empty triggers immediate L3 fire. Plain (only ``validator_id``

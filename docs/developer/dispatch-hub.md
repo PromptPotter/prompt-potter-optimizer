@@ -27,8 +27,8 @@ flowchart LR
   %% accumulate on OptSearchPoint cross-round.
   subgraph SR["L1_SCORE readouts"]
     DIAG["diagnostics⁴<br/>• STATUS: round, current, best, stalls<br/>• trajectory + evolution<br/>• rank dist, anomalies, near-misses<br/>• pipeline health, probe outcome"]:::det
-    VFAIL["validation_failures⁵<br/>• Loop 1 (parse-time)<br/>• axis, value, allowed, reason"]:::det
-    RFAIL["runtime_failures¹¹<br/>• Loop 2 (mid-eval)<br/>• runtime_failures, escalation_log, warning_inventory"]:::det
+    VFAIL["validation_failures⁵<br/>• Wound 1 (parse-time)<br/>• axis, value, allowed, reason"]:::det
+    RFAIL["runtime_failures¹¹<br/>• Wound 2 (mid-eval)<br/>• runtime_failures, escalation_log, warning_inventory"]:::det
   end
   style SR fill:none,stroke:#888,stroke-dasharray: 5 5
 
@@ -87,7 +87,7 @@ flowchart LR
   RFAIL --> L1C
 
   %% L2_CONTEXT inputs — sees measurement-derived failures only.
-  %% L2 doesn't see l2_output_failures because Loop 4 fires L3 immediately
+  %% L2 doesn't see l2_output_failures because Wound 4 fires L3 immediately
   %% when they appear; L3 replans, then L2 fires fresh against the new plan.
   PLAN --> L2P
   L3N --> L2P
@@ -143,13 +143,13 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ⁴ **`diagnostics`** ← STATUS prefix (plain) + fenced `RoundDiagnostics` body
   - **STATUS prefix** ← `bundle.cycle_slice` — `round`🧩, `current`🧩 (parent fitness `f"{cs.current_accuracy:.1%}"`), `best`🧩 (acc + round), `L1 stall`🧩 (rounds), and — when fired — `L2 fired`🧩 (count + stall), `L3 fired`🧩 (count + stall). Plain text (cycle counters are trusted optimizer state, not untrusted dataset content). Always renders, including pre-round-1 when `digest.diagnostics is None`. Despite the `current`/`best` accuracy labels, the rendered values are mean composite *fitness* under the active scorer, not hit-rates.
   - **Body** [fenced] ← `bundle.digest.diagnostics`: `RoundDiagnostics` from `compute_round_diagnostics` (built deterministically by L1_SCORE) — trajectory + recent-rounds evolution, anomalies, rank dist + top-k, pipeline-health termination split, failures by step / warning class, near-misses, cross-candidate diff, diversity, cache-share, miss-sample, prompt-size warning, probe outcome 🧩
-- ⁵ **`validation_failures`** [fenced] ← `opt_sp.validation_failures` · Loop 1 evidence
+- ⁵ **`validation_failures`** [fenced] ← `opt_sp.validation_failures` · Wound 1 evidence
   - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
   - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
-- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Loop 2 evidence
+- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Wound 2 evidence
   - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-sample warnings). Same producer cluster, same lifecycle — honest aggregation.
   - Fenced because it echoes pipeline warning strings.
-- ¹² **`l2_output_failures`** ← `opt_sp.l2_output_failures` · Loop 4 evidence
+- ¹² **`l2_output_failures`** ← `opt_sp.l2_output_failures` · Wound 4 evidence
   - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
   - Set by L2_CONTEXT post-parse validators (`run_l2_output_validators`); non-empty triggers immediate L3 fire. **L3-only consumer** because L2 doesn't fire while these are outstanding (L3 replans first, then L2 fires fresh).
 - ¹³ **`l3_output_failures`** ← `opt_sp.l3_output_failures` · L3 self-healing evidence

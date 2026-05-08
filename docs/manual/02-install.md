@@ -1,6 +1,6 @@
 # Install
 
-Four steps. Takes a couple of minutes.
+Five steps. Takes a couple of minutes.
 
 ## 1. Get a Groq API key
 

@@ -35,7 +35,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 | **Scoring set** | The active subset of the dataset used for the current round. | `ScoringContext.scoring_set` | [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md) |
 | **Search memory** | Cross-campaign axis-keyed digest. Feeds L1, L2, L3. | `variant_axis_index` | [`scoring-and-memory.md`](scoring-and-memory.md) |
 | **Section override** | L2's write that toggles a section off or replaces its text on the candidate. Persists across rounds. | `l1_section_overrides`, `l1_section_overrides_text` | [`state-record.md`](state-record.md) |
-| **Self-healing** | Four LLM-to-LLM failure repair loops (Loop 1–4). Recovery from broken outputs. | `heal_l1_validation`, etc. | [`self-healing.md`](self-healing.md) |
+| **Self-healing** | Four LLM-to-LLM wounds (Wound 1–4) — producer leaves a failure, detector catches it, nurse layer tends it next round. | `heal_l1_validation`, etc. | [`self-healing.md`](self-healing.md) |
 | **Session** | Operator workspace at `sessions/{session_id}/`. Hosts campaigns. | `Session` | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
 | **Sweep** | Breadth-first comparison of N L1-prompt hypotheses via fork siblings. | — | [`campaign-tree.md`](campaign-tree.md) |
 | **Winner** | The fittest candidate of a round that clears the improvement threshold. | `DecisionEvent` kind `ROUND_WINNER` | [`the-loop.md`](the-loop.md) |

@@ -32,7 +32,7 @@ When the inner layer stalls, an outer layer steps in to redirect — see [the-lo
 
 Works for RAG pipelines, LLM agents, and any multi-step LLM workflow.
 
-Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. PromptPotter tries variations, keeps the ones improving, drops the rest — round after round, until results stop getting better. ✨ **Prompt optimized.**
+Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. Each round, PromptPotter generates variations 🧪, scores them ⚖️, and keeps the winners 🏆. It stops when results plateau. ✨ **Prompt optimized.**
 
 > [!IMPORTANT]
 > **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.

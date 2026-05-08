@@ -511,7 +511,7 @@ async def escalate_l2(
             obs=obs,
             tracing_campaign_id=tracing_campaign_id,
         )
-        # Loop 4: post-L2 validator failure force-triggers L3 to heal L2's
+        # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
         # output. Trigger is deterministic from L2's output (rides on round_data
         # JSON), so resume reproduces it without a separate decision record.
         if cycle.opt_sp.l2_output_failures and opt.enable_l3:

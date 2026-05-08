@@ -60,8 +60,8 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 
 - **Prompt exposure** — expose the prompt as a `PromptTemplate`. PromptPotter reads, displays, and optimises it. See [`README.md § Prompt structure`](README.md).
 - **Optimizer-discoverable parameters** — declare accepted parameters and valid values. PromptPotter picks these up automatically as optimisation axes.
-- **Self-healing Loop 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE`; L2 teaches L1 not to repeat. See [`self-healing-internals.md`](self-healing-internals.md).
-- **Self-healing Loop 2** — `RuntimeFailure` attached to the candidate mid-eval; L2 adjusts; L3 replans on persistence.
+- **Self-healing Wound 1** — `ValidationFailure` caught at L1 parse time by `L1_SCHEMA_COMPLIANCE`; L2 teaches L1 not to repeat. See [`self-healing-internals.md`](self-healing-internals.md).
+- **Self-healing Wound 2** — `RuntimeFailure` attached to the candidate mid-eval; L2 adjusts; L3 replans on persistence.
 - **Warnings → optimizer context** — per-sample warnings accumulate in `warning_inventory` and feed L2's surface field.
 - **Warnings → escalation counter** — sustained degradation increments a patience counter.
 - **Warnings → search-point attachment** — failures pin to the exact configuration that caused them, not the round.
@@ -73,7 +73,7 @@ Capabilities are opt-in. A deterministic node declares none; an LLM node in the 
 
 | Resource | Covers |
 |----------|--------|
-| [![self-healing-internals](https://img.shields.io/badge/self--healing--internals-red?style=for-the-badge)](self-healing-internals.md) | Four LLM-to-LLM healing loops |
+| [![self-healing-internals](https://img.shields.io/badge/self--healing--internals-red?style=for-the-badge)](self-healing-internals.md) | Four LLM-to-LLM wounds |
 | [![candidate-elimination](https://img.shields.io/badge/candidate--elimination-black?style=for-the-badge)](../methods/candidate-elimination.md) | Full elimination ladder — validation skip through PoBB cutoff |
 | [![developer/README](https://img.shields.io/badge/developer%2FREADME-red?style=for-the-badge)](README.md) | Architecture brief — prompt structure, dispatch, scoring node, cross-run memory |
 | [![observability](https://img.shields.io/badge/observability-black?style=for-the-badge)](../operations/observability.md) | Node tracing and Langfuse integration |

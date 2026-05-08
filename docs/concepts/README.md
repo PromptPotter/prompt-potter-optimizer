@@ -22,7 +22,7 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 | Page | Covers |
 |------|--------|
 | [The three-layer loop](the-loop.md) | L1 / L2 / L3 cadence, how they communicate, and L2 in detail |
-| [Self-healing](self-healing.md) | Four LLM-to-LLM healing loops |
+| [Self-healing](self-healing.md) | Four LLM-to-LLM wounds (producer → detector → nurse) |
 | [State record](state-record.md) | The OSP carrying CONTEXT, PLAN, prompt fields, and L2 overrides |
 | [Scoring and memory](scoring-and-memory.md) | Traces are facts; scores are policy; the measurement archive |
 | [Campaign tree](campaign-tree.md) | Cycles, forks, and the sweep primitive |

@@ -19,14 +19,12 @@ Each round runs four steps in sequence:
 
 | Step | What happens |
 |------|--------------|
-| **Generate** | L1 evolves N candidates from the previous round's critique + axis-index intelligence. |
-| **Evaluate** | Each candidate scored query-by-query. After `elimination_n_min=4`, PoBB can stop scoring inferior candidates early. |
-| **Critique** | Reads raw per-sample results. Produces structured analysis: failure clusters, what to try next. |
-| **Winner** | Round's fittest beats current best by ≥ improvement threshold → new best, baseline advances. Else patience++. |
+| 🧪 **Generate** | The optimizer proposes N new candidates, informed by last round's critique. |
+| ⚖️ **Evaluate** | Each candidate is scored query-by-query. Inferior candidates can be eliminated early once there's enough statistical evidence (~4+ samples). |
+| 📝 **Critique** | The optimizer reads the raw results and writes a structured analysis: where it failed, what to try next. |
+| 🏆 **Winner** | Round's best beats the current best by ≥ improvement threshold → new best. Otherwise patience ticks up. |
 
-When `l1_patience` consecutive rounds bring no improvement, **L2** fires. When L2-adjusted rounds also stall, **L3** fires. Self-healing fires on validation / runtime failure regardless of patience — see [`../concepts/self-healing.md`](../concepts/self-healing.md).
-
-Between rounds (in order): AxisIndex refresh, zero-signal filter (off by default), exploration/exploitation rebalance (on by default).
+When patience runs out, an **outer loop** steps in to redirect (see [chapter 1 — When the optimizer gets stuck](01-what-is-promptpotter.md#when-the-optimizer-gets-stuck)). Self-healing also fires whenever a candidate produces invalid or broken output — full mechanics in [`../concepts/self-healing.md`](../concepts/self-healing.md).
 
 ## Per-sample lines
 
@@ -61,7 +59,7 @@ NEXT: continue L1
 | Field | Meaning |
 |-------|---------|
 | Winner | Best candidate (of N) and improvement over previous best. "No winner" line if nothing beat it. |
-| Layer | L1 (normal), L2 (stall recovery — rewrites framing), L3 (L2 stall — rewrites strategy). |
+| Layer | [L1](../concepts/the-loop.md) (normal), L2 (stall recovery — rewrites framing), L3 (L2 stall — rewrites strategy). |
 | Patience | Consecutive no-improvement rounds. Hits the configured max → escalates. |
 | Queries | Scored count + cache hit %. |
 | CRITIQUE | 2–4 lines of optimizer's own analysis. |
@@ -83,14 +81,14 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
   ↳ L2 will steer next round away from this region
 ```
 
-The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it.
+The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../concepts/self-healing.md`](../concepts/self-healing.md).
 
 ## Where results land
 
 - `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
 - `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`.
 
-## Live state (forks and the family root)
+## Live state ([forks and the family root](../concepts/campaign-tree.md))
 
 - `dashboard.json` — current phase, round, candidate, accuracies, in-flight query. Full path:
   ```

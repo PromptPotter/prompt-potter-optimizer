@@ -60,9 +60,9 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 | `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
 | `tunable_params` | `pipeline_schema` | L1 (mutation surface) |
 | `diagnostics` | STATUS prefix from `cycle_slice` (round / stall / best counters) + `digest.diagnostics` (`RoundDiagnostics`) body | L1, L1 critique, L2, L3 |
-| `validation_failures` | `opt_sp.validation_failures` (Loop 1, fenced) | L1, L1 critique, L2, L3 |
-| `runtime_failures` | `opt_sp.runtime_failures` + `escalation_log` + `warning_inventory` (Loop 2, fenced) | L1, L1 critique, L2, L3 |
-| `l2_output_failures` | `opt_sp.l2_output_failures` (Loop 4, plain) | L3 only |
+| `validation_failures` | `opt_sp.validation_failures` (Wound 1, fenced) | L1, L1 critique, L2, L3 |
+| `runtime_failures` | `opt_sp.runtime_failures` + `escalation_log` + `warning_inventory` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
+| `l2_output_failures` | `opt_sp.l2_output_failures` (Wound 4, plain) | L3 only |
 | `l3_output_failures` | `opt_sp.l3_output_failures` (L3 self-heal, plain) | L3 only |
 | `critique` | `digest.critique` | L1, L2, L3 |
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |

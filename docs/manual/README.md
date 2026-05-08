@@ -1,6 +1,6 @@
-# Manual
+# User Manual
 
-The boardgame manual for PromptPotter. Read these chapters in order — by the end you'll have installed it, run your first campaign, and know how to read what comes out.
+Read in order — by the end you'll have installed PromptPotter, run your first campaign, and know how to read what comes out.
 
 1. [What is PromptPotter?](01-what-is-promptpotter.md) — one paragraph + three concepts.
 2. [Install](02-install.md) — Groq API key, `.env`, `pip install`.
@@ -9,4 +9,4 @@ The boardgame manual for PromptPotter. Read these chapters in order — by the e
 5. [Troubleshooting](05-troubleshooting.md) — common errors and what to try.
 6. [Going deeper](06-going-deeper.md) — pointers into the reference folders once you want to understand the internals.
 
-Nothing in this folder mentions Python classes, module paths, or internal state files. If a chapter needs those to explain itself, it belongs in `concepts/` or `developer/`, not here.
+> No Python classes, module paths, or internal state files in this folder. Internals live in `concepts/` or `developer/`.
