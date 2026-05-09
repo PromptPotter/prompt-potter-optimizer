@@ -51,7 +51,7 @@ Full spec: [`m12-multi-connector.md`](m12-multi-connector.md)
 
 ## M12+: Backlog -- Future
 
-Polish, cost tracking, MCP server mode, multimodal, L4 self-optimization completion (M10 ships the partial; M12+ adds the residual adapter), and everything in the [Backlog table](#backlog-unscheduled) below. Ships opportunistically after M12.
+Polish, cost tracking, MCP server mode, multimodal, and everything in the [Backlog table](#backlog-unscheduled) below. Ships opportunistically after M12. (L4 self-optimization completion was promoted to M12 — M10 partial → M11 connector → M12 closure run; see `m12-multi-connector.md` Track 4.)
 
 Full spec: [`m12-plus-backlog.md`](m12-plus-backlog.md)
 
@@ -65,7 +65,7 @@ M9 shipped. The two remaining backbone milestones below exist to make M12 land c
 
 Manual refinement of the four optimizer prompts (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`), gated on a per-cycle `review.md` artifact, an extensible behavior-check registry, a `rounds_to_95` headline metric, and a cross-cycle leaderboard keyed by prompt-hash. Headline goal: ≥95% training-set accuracy in ≤5 rounds on at least two pipelines (`llm_only` and TermNorm) under the same prompt revision. Lifted out of the original M9 Track 1. Without M10, every M11 benchmark number is sampled from an under-tuned loop.
 
-**Doubles as L4 partial implementation.** `proxy_lift_corr`, `optimize --sweep`, the behavior-check registry, and the `review.md` feature extraction are the manually-operated form of the self-optimization infrastructure listed in [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md). M12+ later swaps the human for an outer-loop LLM and adds the residual "PromptPotter-as-backend" adapter.
+**Doubles as L4 partial implementation.** `proxy_lift_corr`, `optimize --sweep`, the behavior-check registry, and the `review.md` feature extraction are the manually-operated form of the self-optimization infrastructure. M10 also pins the `optimizer_pipeline.json` contract (parity test against backend `pipeline.json`) and ships a self-optimization fixture under `datasets/promptpotter/` (per `m10-cleanup.md` §3.5 + §1). M11 ships the PromptPotter-as-backend connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5) — the residual adapter that was originally parked in M12+. M12 swaps the human for the outer-loop LLM in the actual closure run ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4).
 
 Full spec: [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md).
 
@@ -167,7 +167,7 @@ Full spec: [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
 | Hard-sample sorter | Standalone capability — expose δ_s leaderboard + candidate×sample heatmap as a product surface. Spec: [`hard-sample-sorter.md`](hard-sample-sorter.md). Phase 1 (data primitive + spec) shipped; phase 2 (CLI/notebook ASCII heatmap) and phase 3 (webapp heatmap under M11 track) unscheduled. |
 | Evolutionary operators | GA/DE population-based search |
 | MCP server mode | Expose tools to Claude Code |
-| Self-optimization (L4) | PromptPotter optimizes its own meta-prompts recursively. M10 ships the partial implementation (proxy reward, cheap-trial mechanism, conformance checks); M12+ adds the residual PromptPotter-as-backend adapter. |
+| ~~Self-optimization (L4)~~ | **Promoted to M12** (no longer M12+). M10 ships partial (proxy reward, cheap-trial mechanism, conformance checks) + `optimizer_pipeline.json` contract pin + self-optimization fixture under `datasets/promptpotter/` (`m10-cleanup.md` §3.5 + §1). M11 ships the PromptPotter-as-backend connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5). M12 ships the outer-loop closure run ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4) — including findings doc on whether meta-optimization improved target-task accuracy. |
 | Cost tracking | Token usage and cost per campaign/round/variant |
 | Model comparison matrix | Same benchmark across multiple target LLMs |
 

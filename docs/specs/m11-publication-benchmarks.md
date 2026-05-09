@@ -122,6 +122,58 @@ Each ablation runs 3 seeds on **BBEH mini** (same split as Track 1 head-to-head)
 
 Track 4 runs first or in parallel with Track 1a.
 
+### Track 5: PromptPotter-as-backend Connector
+
+**Problem:** M12's L4 self-optimization closure (running PromptPotter
+on its own meta-prompts) needs a `Connector` that wraps L1/L2/L3
+behind the same wire shape as TermNorm. The data shape and contract
+parity test land in M10 (`docs/specs/m10-cleanup.md` §3.5 +
+self-optimization fixture under `datasets/promptpotter/`); M11 is
+the right milestone to land the connector itself, because:
+
+- M11 ablation work touches the connector boundary anyway (Track 2
+  exercises L1/L2/L3 individually).
+- Registering a second connector exercises the
+  `promptpotter/connectors/` abstraction end-to-end without the
+  cross-repo burden of coordinating with TermNorm.
+- M12's "second connector" Track 1 deliverable then has a real
+  candidate already on disk — M12 doesn't need to invent one.
+
+**Deliverables:**
+
+1. **`promptpotter/connectors/promptpotter.py`** — wraps L1, L2, L3,
+   `l1_critique`, and `restructure` as a `Connector` (sibling shape
+   to `promptpotter/connectors/termnorm.py`). Self-registers via
+   `register(Connector(...))` at import.
+2. **Connector wire shape.** Implements the four hooks bundled per
+   `Connector`: `wire_adapter` (translates a `JobSearchPoint` into
+   an L1/L2/L3 invocation against a fixed trace-replay fixture),
+   `session_factory` (in-process, no external service),
+   `extract_experiment` (reads `archive/measurements/` rows for the
+   PromptPotter dataset), `resolve_ground_truth` (compares the
+   meta-prompt's `next_brief` to the archived `score_delta`).
+3. **`datasets/promptpotter/pipeline.json`** — describes the L1 /
+   L2 / L3 / `l1_critique` / `restructure` nodes against the
+   pinned `pipeline.json` contract from M10 §3.5. Validates against
+   the M10 parity test alongside `optimizer_pipeline.json`.
+4. **Bootstrap lookup hook.** `bootstrap.py` `connectors.get(...)`
+   call already reads `pipeline.json::backend_type` (M12 Track 1
+   work) — confirm the PromptPotter connector loads correctly via
+   `backend_type: "promptpotter"`.
+5. **Smoke run.** A 1-round campaign against the M10 trace-replay
+   fixture (`datasets/promptpotter/`) — exercises the connector
+   end-to-end without an actual outer-loop optimization (that's
+   M12's Track 4). Test added under `tests/`.
+
+**Out of scope for M11 Track 5:** the actual L4 closure run (M12).
+Track 5 ships the connector + smoke-tests it; the outer-loop
+optimization that improves L1/L2/L3 prompts is M12 work.
+
+**Cross-ref:** `docs/specs/m10-cleanup.md` §3.5 +
+self-optimization fixture; `docs/specs/m12-multi-connector.md`
+Track 1 (now names this connector explicitly as the "second
+connector").
+
 ---
 
 ## Wave Sequencing
@@ -136,8 +188,8 @@ Wave 2: Track 1 (BBEH PromptPotter + head-to-head notebooks) + Track 3 (webapp s
 Wave 3: Track 1 (HotPotQA full run if non-saturated, result tables) + Track 2 (ablations on BBEH) + Track 3 (read-only views)
         — parallel; data and pixels converge
 
-Wave 4: Track 3 (benchmark results display)
-        — needs Track 1 data tables
+Wave 4: Track 3 (benchmark results display) + Track 5 (PromptPotter-as-backend connector)
+        — needs Track 1 data tables; Track 5 lands once M10 §3.5 + fixture are in place
 ```
 
 ## Entry Criteria
@@ -158,6 +210,7 @@ Wave 4: Track 3 (benchmark results display)
 - [ ] `docs/publication-figures.md` designed and populated
 - [ ] Webapp read-only views live: dashboard, campaign detail, trial inspector, benchmark results
 - [ ] Webapp reads from M9 view model (no parallel render pipeline)
+- [ ] `promptpotter/connectors/promptpotter.py` registered; `datasets/promptpotter/pipeline.json` validates against the M10 §3.5 contract; smoke run completes against the M10 trace-replay fixture
 
 ## Key Existing Code
 
