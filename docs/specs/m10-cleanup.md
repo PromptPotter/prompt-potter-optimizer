@@ -106,7 +106,7 @@ docs-vs-claims — it's also code-vs-§0. Specifically grep for:
   (excluding `TYPE_CHECKING`-gated imports, which are legitimate).
   Today: zero confirmed runtime leaks; the
   `domain/sample.py` → `SampleIndex` import is `TYPE_CHECKING`-gated
-  and OK. Strengthen `tests/test_layer_imports.py` to grep `domain/`
+  and OK. Strengthen `tests/test_invariants.py` (in `test_no_unexpected_runtime_layer_violations`) to grep `domain/`
   explicitly so future leaks fail loud.
 - **`observed_node()` coverage on every optimizer LLM call.** Each
   of `l1_generate`, `l1_critique`, `l2_context`, `l3_plan` wrapped.
@@ -128,7 +128,7 @@ docs-vs-claims — it's also code-vs-§0. Specifically grep for:
 also audits surface that lives outside `promptpotter/` but is part
 of the operator's interface:
 
-- `webapp-react/components/dashboard/` — list every `.tsx`. For each:
+- `webapp/components/dashboard/` — list every `.tsx`. For each:
   what does it render, which `dashboard.json` field does it read?
   Specific decisions: `ChatPane.tsx`, `WorkflowCanvas.tsx` — keep
   (load-bearing) or drop?
@@ -554,7 +554,7 @@ to scoring-set mutation.
 **Decide-during-audit drops** (items §1 surfaced; default skeptical
 of keeping; commit to drop or keep when the audit closes):
 
-- `webapp-react/components/dashboard/ChatPane.tsx`,
+- `webapp/components/dashboard/ChatPane.tsx`,
   `WorkflowCanvas.tsx` — keep only if §1 confirms an active operator
   use case. (Not in the same situation as
   `ProgressCard`/`LiveStateCard`, which were verified non-redundant
@@ -748,7 +748,7 @@ Concrete examples:
 - `infrastructure/projections/*.py` — observability / read-only
   ledger subscribers. Out-of-bounds: must not write campaign artifacts
   beyond their declared allowlist (already enforced by
-  `tests/test_artifact_parity.py`).
+  `tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores` + `test_artifact_sets_are_disjoint_and_well_formed`).
 - `presentation/cli/campaign_runner.py` — entry-point / CLI shell.
   Out-of-bounds: must not implement business logic; must call into
   `application/`. The thin-shell rule from §0's entry-point scope
@@ -999,7 +999,7 @@ Each step is a small, reviewable PR. No mega-merge.
   `task_description.md`, and one or two archived rounds of
   trace-replay fixture data per §1's self-optimization fixture
   deliverable.
-- `tests/test_layer_imports.py` includes an explicit grep that fails
+- `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations` includes an explicit grep that fails
   on any non-`TYPE_CHECKING` `domain/` import of `application/` or
   `infrastructure/`.
 - Every optimizer LLM call site in
@@ -1029,7 +1029,7 @@ has a number.
 | Tests collected (`pytest --collect-only -q`) | 199 | ≤180 | TBD |
 | Test files under `tests/` | 15 | ≤12 | TBD |
 | Concepts in `docs/architecture.md` backbone table (was: root `CLAUDE.md`) | ~11 | ≤8 | TBD |
-| Components in `webapp-react/components/` | TBD | −25% | TBD |
+| Components in `webapp/components/` | TBD | −25% | TBD |
 | Top-level docs (`docs/concepts/` + `docs/operations/` + `docs/developer/`) | TBD | as audit decides | TBD |
 | Specs in `docs/specs/` (excl. `archive/`) | TBD | as audit decides | TBD |
 | `pyproject.toml` `[all,dev]` extras count | TBD | −10% | TBD |
