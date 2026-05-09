@@ -72,8 +72,9 @@ Two architectural commitments shape every bucket on this page:
   parameter shapes, and prompt slots all come from the backend's
   self-description — PromptPotter has zero hardcoded knowledge of the
   target system. New backend = new `pipeline.json`, no PromptPotter
-  code change. The `pipeline.json` contract is pinned in
-  `docs/developer/pipeline-json-contract.md` (per m10-cleanup §3.5).
+  code change. The `pipeline.json` contract is **to be pinned** in
+  `docs/developer/pipeline-json-contract.md` (deliverable per
+  m10-cleanup §3.5; not yet on disk).
 - **Two-layer searchpoints + self-optimization.** `JobSearchPoint` is
   the frozen target spec being measured (prompt + pipeline params,
   content-hashed). `OptSearchPoint` is the optimizer's own working
@@ -156,9 +157,11 @@ renderer, period.** No sidecar paths, no out-of-band state mounting.
 
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. A test (`tests/test_layer_imports.py`) enforces
-that data types stay free of I/O so the orchestrator can be reused
-without dragging a backend client along. SearchPoint types are
+per-entry-point copies. Hexagonal layer separation is enforced by
+`tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`
+(plus `test_cycle_does_not_import_prompt_surface`) so data types
+stay free of I/O and the orchestrator can be reused without dragging
+a backend client along. SearchPoint types are
 **immutable**: once created, their fields can't change. That makes
 their content hash a trustworthy identity, which is what lets
 `--from N` resume a campaign with different hyperparameters and
@@ -168,9 +171,10 @@ ingress; resume + fork ride dedicated checkpoint records on the
 ledger. Display and observability subscribe to the ledger as
 read-only views — never write campaign artifacts of their own.
 **Single-writer invariant on the ledger** (pinned by
-`tests/test_artifact_parity.py`): any module besides the ledger
-writing to `events.jsonl`, or any projection writing outside its
-declared allowlist, fails the test. **The MeasurementArchive (the
+`tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores`
++ `test_artifact_sets_are_disjoint_and_well_formed`): any module
+besides the ledger writing to `events.jsonl`, or any projection
+writing outside its declared allowlist, fails the tests. **The MeasurementArchive (the
 other persistence layer, see "Measurement archive" below) does not
 have this invariant today** — there are 13 raw call sites;
 m10-cleanup §3.7 adds the facade that brings the archive under the
@@ -196,13 +200,13 @@ state) without adding complexity.
 (`notebooks/optimization_campaign.ipynb`) is a thin UI shell — every
 non-display code cell calls into `application/` (no orchestration
 logic, no scoring, no LLM calls authored in the notebook).
-Verifiable via `tests/test_layer_imports.py` extension: notebook
+Verifiable via `tests/test_invariants.py` extension: notebook
 cells whitelist-imports from `application/` + `presentation/views/`
 only. Additional notebooks
 (currently `notebooks/bbeh_potter.ipynb`) are **work-in-progress** —
 kept but not part of the documented entry-point surface. Mark them
 WIP in cell-1 markdown so a reader knows status at a glance. The
-webapp (`webapp-react/`) renders read-only views over `dashboard.json`
+webapp (`webapp/`) renders read-only views over `dashboard.json`
 plus a file-tree view; any panel reading from a disk file we don't
 already commit to writing is aspirational and out of M10. The `init`
 command + `/potter-run` slash command sit in `presentation/` and
@@ -284,8 +288,7 @@ the PR description.
   backend's API surface to PromptPotter. Don't simplify "because
   TermNorm is the only consumer today."
 - **Hexagonal layer separation test**
-  (`tests/test_layer_imports.py`) — without it, the three entry
-  points drift.
+  (`tests/test_invariants.py::test_no_unexpected_runtime_layer_violations` + `test_cycle_does_not_import_prompt_surface`) — without it, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. Today's symbols
   (`Decision`/`DecisionKind`) and the post-cleanup symbols
