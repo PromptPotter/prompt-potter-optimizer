@@ -1,10 +1,17 @@
-"""Pipeline discovery — parse backend ``GET /pipeline`` into ``PipelineSchema``."""
+"""Parse a backend ``GET /pipeline`` response into a ``PipelineSchema``.
+
+Pure dict → domain transforms. No I/O, no async, no infrastructure
+dependency — the network fetch lives in
+``application/bootstrap/pipeline_view.py``. Backends are self-describing
+(`pipelines.default` for step order, per-node ``optimizer`` sub-objects,
+top-level ``resolved_schemas`` / ``resolved_prompts`` registries keyed by
+``"{family}/{version}"``); zero hardcoded defaults.
+"""
 
 from __future__ import annotations
 
 import logging
-from datetime import UTC
-from typing import TYPE_CHECKING, Any
+from typing import Any
 
 from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
@@ -14,12 +21,9 @@ from promptpotter.domain.pipeline_schema import (
     PipelineSchema,
 )
 
-if TYPE_CHECKING:
-    from promptpotter.infrastructure.backend import BackendClient
-
 logger = logging.getLogger(__name__)
 
-__all__ = ["compute_pipeline_view", "parse_pipeline_response", "parse_resolved_schema"]
+__all__ = ["parse_pipeline_response", "parse_resolved_schema"]
 
 
 def parse_resolved_schema(resolved: dict[str, Any]) -> NodeOutputSchema:
@@ -162,35 +166,3 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
         nodes=steps,
         available_models=config.get("available_models", []),
     )
-
-
-async def compute_pipeline_view(
-    backend_client: BackendClient,
-) -> dict[str, Any]:
-    """Build a view of the backend pipeline.
-
-    Returns a dict with keys:
-      backend_pipeline  — PipelineSchema.model_dump()
-      computed_nodes    — pipeline nodes as dicts (direct copy for now)
-      fetched_at        — ISO timestamp
-      source            — "live" | "default"
-    """
-    from datetime import datetime
-
-    try:
-        raw: dict[str, Any] | None = await backend_client.fetch_pipeline()
-        source = "live"
-    except Exception:
-        logger.warning("Backend unreachable at %s; returning empty schema", backend_client.base_url)
-        raw = None
-        source = "default"
-
-    schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
-    computed_nodes = [s.model_dump() for s in schema.nodes]
-
-    return {
-        "backend_pipeline": schema.model_dump(),
-        "computed_nodes": computed_nodes,
-        "fetched_at": datetime.now(UTC).isoformat(),
-        "source": source,
-    }

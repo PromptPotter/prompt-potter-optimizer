@@ -19,7 +19,7 @@ from promptpotter.application.optimization.l1_validators import (
     build_l1_output_schema,
     validate_overrides,
 )
-from promptpotter.application.pipeline_discovery import parse_pipeline_response
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineNode, PipelineSchema
 
 

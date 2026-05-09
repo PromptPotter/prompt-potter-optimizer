@@ -45,7 +45,7 @@ Both backends and the optimizer loop declare pipelines as JSON. Optimizer's at `
 
 The `pipelines` dict composes named sequences from the node pool. The same node can appear in multiple sequences.
 
-Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against top-level `resolved_prompts` / `resolved_schemas` registries — same shape `parse_pipeline_response` (`application/pipeline_discovery.py`) consumes for backends. The optimizer manifest carries the registries inline; the backend serves them via `GET /pipeline`.
+Prompts and structured-output schemas are referenced by `(family, version)` from each node's `config` and resolved against top-level `resolved_prompts` / `resolved_schemas` registries — same shape `parse_pipeline_response` (`domain/pipeline_parsing.py`) consumes for backends. The optimizer manifest carries the registries inline; the backend serves them via `GET /pipeline`.
 
 ## Node capabilities
 

@@ -24,7 +24,6 @@ from promptpotter.application.datasets.datasets import (
     DATASET_LOADERS,
     samples_from_dicts,
 )
-from promptpotter.application.pipeline_discovery import parse_pipeline_response
 from promptpotter.config.settings import (
     DEFAULT_BACKEND_ID,
     DEFAULT_BACKEND_URL,
@@ -32,6 +31,7 @@ from promptpotter.config.settings import (
     settings,
 )
 from promptpotter.domain.backend import BackendConnection
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.store import (

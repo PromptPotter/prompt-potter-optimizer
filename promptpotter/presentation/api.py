@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
-from promptpotter.application.pipeline_discovery import compute_pipeline_view
+from promptpotter.application.bootstrap.pipeline_view import compute_pipeline_view
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir

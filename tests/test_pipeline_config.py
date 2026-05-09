@@ -27,7 +27,7 @@ import pytest
 from pydantic import ValidationError
 
 from promptpotter.application.config import CampaignConfig, load_campaign_config
-from promptpotter.application.pipeline_discovery import parse_pipeline_response
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
 from promptpotter.domain.pipeline_schema import (
     NodePromptMeta,
     ObservationMapping,

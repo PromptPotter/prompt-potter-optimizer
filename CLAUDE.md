@@ -86,26 +86,7 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 ## Persistence
 
-```
-.promptpotter/
-  active_session.json                              # {tenant_id, session_id, cycle_id}
-  projects/{tenant_id}/
-    sessions/{session_id}/                         # session.json
-    campaigns/{root_cycle_id}/                     # FAMILY ROOT
-      dashboard.json                               # telemetry — wire format for /ui webapp; root only (shared across forks); carries recent_rules (rolling 8) + current_signals (latest snapshot per layer)
-      index.json                                   # per-cycle manifest — cycle_id, parent_cycle_id, rounds[] summary, backend_id
-      log.md                                       # human-readable cycle log (post-cycle)
-      langfuse/ prompts/                           # tracing artifacts (only when Langfuse FileSink active)
-      .runtime/cache/rounds/{NNNN}.json            # per-round LLM audit (resume + replay state)
-      .runtime/signals.jsonl                       # cadence/rule_fired stream — one line per firing (post_round)
-      .runtime/streams/round_NNNN_p_best.jsonl     # PoBB per-sample posterior snapshots
-      forks/{cycle_id}/ diag/ sweeps/              # per-fork audit; telemetry stays at root
-    archive/measurements/{run_id}.json             # MeasurementArchive — DB core
-```
-
-**Fork lineage:** each fork's `index.json` carries `parent_cycle_id` (back-pointer); to enumerate forks from a cycle, `ls forks/`, `diag/`, `sweeps/*/forks/`. No forward `children[]` index — walk the directories.
-
-`archive/` is cross-cycle/session/tenant. One row = `(sample × config → outcome)`. Retrieval views: `measurements_for_sample()`, `measurements_for_config(predicate)`. Cache reuse + LLM digests are derived views over this archive. **Reads happen by opening files** — no read CLI.
+`.promptpotter/` holds two trees: `sessions/{session_id}/` (operator workspace) and `campaigns/{root_cycle_id}/` (one cycle family per directory; siblings under `forks/`, `diag/`, `sweeps/`). Telemetry (`dashboard.json`) lives at the family root — shared across forks. Per-cycle audit (`index.json`, `log.md`, `rounds/`, `langfuse/`, `prompts/`) at each cycle's top level; runtime internals (ledger, cache, P(best) streams) under `.runtime/`. Cross-cycle `archive/measurements/` is the MeasurementArchive — DB core. **Reads happen by opening files** — no read CLI. Full tree, fork lineage, and recovery workflows: [`docs/operations/persistence-and-state.md`](docs/operations/persistence-and-state.md). Layer contracts: [`promptpotter/infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md).
 
 ## Per-dataset configuration
 
@@ -113,20 +94,11 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 ## Conventions (non-derivable)
 
-- **PEP 604** type hints; `logging` module only (no `print()` in `promptpotter/`); ruff line-length **100**; `APP_VERSION` in `config/settings.py`.
+Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs/developer/conventions.md`](docs/developer/conventions.md).
+
 - **No backward compatibility** — see the **STOP** section above. Non-negotiable.
-- **No fallbacks in service code.** Two sanctioned exceptions: `score_population()` synthetic-0 on `validation_failures`; load-boundary deprecated-sample gate (uses `classify_result()` fatal codes). Any new fallback must be documented alongside these.
 - **`eval` banned from identifiers and prose.** Exception: the `Evaluator` class + direct registry consumers (`evaluators` field, `all_evaluators()`, `materialize_*_values`). Use loop / round / searchpoint / sample / measurement / scoring / fitness / trial / critique. Domain vocabulary: evolve, generation, population, mutation, selection, individual.
-- Pipeline components are **nodes**.
-- Optimizer LLM calls go through `llm_call()` (`application/optimization/llm_call.py`), never `chat()`.
-- Escalation flows via return value (`QueryLoopResult.escalation_signal`), not exception. Use `graceful()` (`shared/errors.py`) where exceptions must escape.
-- **Tests are subtractive.** Each guards a named invariant (`tests/CLAUDE.md`). No volume tests, ≤2–3 monkeypatches per test.
-- **Direct field access** — `dict[key]` for guaranteed fields, not `.get(key, fallback)`.
-- **CLI timeouts: 30s default for ALL commands.** Increase only when told "ready for data collection". **Never run `campaign_runner` with `run_in_background`** — always foreground.
-- **Commit messages: HARD CAP 800 chars total** (incl. trailer). Title <70. Terse bullets — no motivation essays. Over 800 → rewrite, do not commit-and-fix-later. Conventional commits (`feat:`, `fix:`, `docs:`, …).
-- Comments default to none — only non-obvious *why*.
-- **Docstring trimming is out of charter for LOC-shrink work.** Existing module / class / function docstrings explain WHY (invariants, contracts, hidden constraints) and are user-facing value. Do **not** trim them as a shortcut to a smaller diff. Real LOC wins come from pattern unification (one shape covers two cases), dead-code removal, inlining single-use helpers, fixing god-objects — never from shrinking explainers. If a docstring is genuinely an essay restating what the code does, ask first.
-- **Vocabulary.** A dataset row is a **sample**. The input-string field on a sample is `query` — parallel naming across `Sample.query`, `BackendResult.query`, `QueryMeasurement.query`. Use `query` *only* as a field name or when describing genuine retrieval / TermNorm wire; never as a synonym for "sample" elsewhere. Use `sample` for everything that aggregates over rows: `n_samples`, `per_sample` scoring scope, `SampleProfile`, `SampleDifficulty`, `SampleRecord`, `compile_sample_difficulty`, `update_sample_tracker`, `count_degraded_samples`, `degraded_samples`. **Do not** use the phrase **"query ranking"** — it doesn't pick out any one of three unrelated activities; pick the precise name: `posterior elimination` (PoBB, `application/optimization/elimination.py`), `Rasch sort` with axes `sample-difficulty rank` + `candidate-ability rank` (`application/intelligence/hard_sample_sorter.py`), or the backend's `llm_ranking` node (per-sample item ordering). The umbrella concept "how query budget is spent across N candidates per round" is **`candidate budget allocation`** — implemented by posterior elimination. `candidate` = a prompt SearchPoint variant; **never** a retrieval-list item (those are `ranked_items`). `meta-prompt` = the L1/L2/L3/Critique LLM template (synonymous with "optimizer prompt"; field-standard from PromptWizard / DSPy / OPRO).
+- **Vocabulary.** A dataset row is a **sample**. The input-string field on a sample is `query` — parallel naming across `Sample.query`, `BackendResult.query`, `QueryMeasurement.query`. Use `query` *only* as a field name or when describing genuine retrieval / TermNorm wire; never as a synonym for "sample" elsewhere. Use `sample` for everything that aggregates over rows: `n_samples`, `per_sample` scoring scope, `SampleProfile`, `SampleDifficulty`, `SampleRecord`, `compile_sample_difficulty`, `update_sample_tracker`, `count_degraded_samples`, `degraded_samples`. **Do not** use the phrase **"query ranking"** — pick the precise name: `posterior elimination` (PoBB, `application/optimization/elimination.py`), `Rasch sort` with axes `sample-difficulty rank` + `candidate-ability rank` (`application/intelligence/hard_sample_sorter.py`), or the backend's `llm_ranking` node (per-sample item ordering). The umbrella "how query budget is spent across N candidates per round" is **`candidate budget allocation`** — implemented by posterior elimination. `candidate` = a prompt SearchPoint variant; **never** a retrieval-list item (those are `ranked_items`). `meta-prompt` = the L1/L2/L3/Critique LLM template (synonymous with "optimizer prompt"; field-standard from PromptWizard / DSPy / OPRO).
 
 ## Known issues
 
@@ -139,4 +111,6 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 ## Pointers
 
-`docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · `tests/CLAUDE.md` test charter.
+**Per-layer contracts** (progressive disclosure — load only the layer you're touching): [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) (L1/L2/L3 agent contracts) · [`promptpotter/application/CLAUDE.md`](promptpotter/application/CLAUDE.md) (orchestration shape) · [`promptpotter/domain/CLAUDE.md`](promptpotter/domain/CLAUDE.md) (frozen models) · [`promptpotter/infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) (ledger + projections + stores) · [`promptpotter/presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) (CLI + API + views).
+
+**Topical docs:** `docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · [`docs/developer/conventions.md`](docs/developer/conventions.md) full style + code-shape rules · `tests/CLAUDE.md` test charter.

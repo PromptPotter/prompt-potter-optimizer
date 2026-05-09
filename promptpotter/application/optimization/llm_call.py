@@ -79,7 +79,7 @@ def get_optimizer_schema() -> PipelineSchema:
     uses for backend pipelines, so the optimizer is itself a pipeline that
     can later be optimized.
     """
-    from promptpotter.application.pipeline_discovery import parse_resolved_schema
+    from promptpotter.domain.pipeline_parsing import parse_resolved_schema
     from promptpotter.domain.pipeline_schema import PipelineNode
 
     data = _load_optimizer_manifest()

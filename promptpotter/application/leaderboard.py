@@ -167,7 +167,7 @@ def format_runs_md(rows: list[LeaderboardRow]) -> str:
         )
         parts.append(f"## L1-generate `{l1g or '?'}` · {dataset} · {pipeline}")
         parts.append("")
-        parts += _runs_table([_run_row_cells(r) for r in group_rows])
+        parts += _md_table(_RUN_HEADERS, [_run_row_cells(r) for r in group_rows])
         parts.append("")
 
     sweep_rows = sorted(
@@ -180,7 +180,7 @@ def format_runs_md(rows: list[LeaderboardRow]) -> str:
         parts.append("Sweep-mode cycles ranked by round-1 top-lift — used to narrow down")
         parts.append("candidate L1 prompts before promoting to full runs.")
         parts.append("")
-        parts += _sweep_table([_sweep_row_cells(r) for r in sweep_rows])
+        parts += _md_table(_SWEEP_HEADERS, [_sweep_row_cells(r) for r in sweep_rows])
         parts.append("")
 
     return "\n".join(parts).rstrip() + "\n"
@@ -211,14 +211,6 @@ def _sweep_row_cells(r: LeaderboardRow) -> tuple[str, ...]:
         f"{r.behavior_pass_rate * 100:.0f}%",
         f"{r.baseline_acc:.2f}",
     )
-
-
-def _runs_table(rows: list[tuple[str, ...]]) -> list[str]:
-    return _md_table(_RUN_HEADERS, rows)
-
-
-def _sweep_table(rows: list[tuple[str, ...]]) -> list[str]:
-    return _md_table(_SWEEP_HEADERS, rows)
 
 
 def _md_table(headers: tuple[str, ...], rows: list[tuple[str, ...]]) -> list[str]:
