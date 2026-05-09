@@ -701,3 +701,41 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         escalate_on_yield_drought=True,
     )
     assert evaluate_round(no_evidence).next_action == NextAction.CONTINUE
+
+
+# ===========================================================================
+# Phase 3.1 — DecisionTrace data model (scaffolding for mid-round diagnosis)
+# ===========================================================================
+#
+# Phase 3 of the Routed Dispatch plan needs richer per-candidate decision
+# context than the current `Decision` records carry. DecisionTrace is the
+# data shape; writer + reader land in Phase 3.2+. One contract test:
+# extra="forbid" + frozen, plus model_dump_json round-trips losslessly.
+
+
+def test_decision_trace_shape_and_json_roundtrip():
+    """DecisionTrace is frozen + extra-forbid; survives a JSON round-trip."""
+    from promptpotter.domain.decision_trace import DecisionTrace
+
+    trace = DecisionTrace(
+        decision_kind="eliminate",
+        candidate_id="c3",
+        at_sample_index=6,
+        p_best_at_decision=0.03,
+        leaderboard_at_decision=[("c1", 0.78), ("c2", 0.45), ("c3", 0.03)],
+        sample_outcomes_so_far=[True, True, False, True, False, False],
+        target_axis="persona",
+    )
+
+    # extra="forbid" — unknown kwarg rejected by Pydantic.
+    with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
+        DecisionTrace(
+            decision_kind="eliminate",
+            candidate_id="c3",
+            at_sample_index=0,
+            unknown_field="x",
+        )
+
+    # JSON round-trip: equal after dump+reload.
+    reloaded = DecisionTrace.model_validate_json(trace.model_dump_json())
+    assert reloaded == trace
