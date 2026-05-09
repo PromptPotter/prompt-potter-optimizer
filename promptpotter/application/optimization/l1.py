@@ -1071,15 +1071,22 @@ async def execute_round(
         # Critique is round-over-round feedback; survive a malformed LLM
         # response rather than crash the campaign.
         with graceful("L1 critique failed; continuing without round-over-round feedback"):
-            critique_result = await run_l1_critique(
-                cycle,
-                round_result,
-                session.pipeline_schema,
-                crit_llm,
+            async with observed_node(
+                f"l1_critique_r{round_num}",
+                "llm/meta",
+                obs=obs,
+                campaign_id=session.state.tracing_campaign_id,
                 round_num=round_num,
-                model=config.optimizer_llm.model,
-                recorder=session.state.audit_projection,
-            )
+            ):
+                critique_result = await run_l1_critique(
+                    cycle,
+                    round_result,
+                    session.pipeline_schema,
+                    crit_llm,
+                    round_num=round_num,
+                    model=config.optimizer_llm.model,
+                    recorder=session.state.audit_projection,
+                )
             round_result.critique = critique_result
             critique_text = format_l1_critique_for_prompt(critique_result)
     if obs and critique_text:

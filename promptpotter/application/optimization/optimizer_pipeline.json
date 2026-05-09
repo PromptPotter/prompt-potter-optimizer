@@ -95,6 +95,11 @@
     }
   },
   "pipelines": {
+    "default": [
+      "l1_generate",
+      "l1_score",
+      "l1_critique"
+    ],
     "l1_round": [
       "l1_generate",
       "l1_score"

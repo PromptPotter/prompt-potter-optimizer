@@ -146,17 +146,126 @@ code; cleanup ships in lockstep with the §4 drop PR.
 - `docs/specs/m11-webapp-react-port.md` — historical migration spec; the `webapp-react/` references describe the actual migration path that was taken (status: shipped 2026-05-07) and are accurate as historical record.
 - Notebook lint drift in `docs/research/bbeh-comparison/*.ipynb` and `notebooks/optimization_campaign.ipynb` — pre-existing, verified via `git stash` round-trip; orthogonal to this audit slice; needs its own cleanup PR.
 
+## Slice A — code-violation grep + webapp/API/writers audit
+
+### Code-violation grep (11 targets)
+
+| # | Target | Verdict | Notes |
+|---|---|---|---|
+| 1 | Per-error retry of `(sample, candidate)` pairs | PASS | No retry queue or `attempt += 1` near sample/candidate sites in `application/scoring/` or `application/optimization/`. |
+| 2 | Single-failure aborts of a candidate | PASS | `validation_failure` / `runtime_failure` are aggregated for reporting (`l1_population.py`, `l1_validators.py`, `dispatch_hub.py`); abort lives in `elimination.py` behind `DegradationCheck` (threshold-gated, not first-failure). |
+| 3 | Sidecar prompt-fill paths outside dispatch-hub | PASS | All `compile_prompt` / `render` calls flow through `application/optimization/llm_call.py` → `dispatch_hub`. |
+| 4 | In-round LLM calls outside `l1_*` / `l2_*` / `l3_*` | PASS | All LLM calls route through `run_optimizer_node()` in `llm_call.py`. Single exception: `decomposition.py` (init-time task-context decomposition; not in-round). |
+| 5 | Optimizer code reading tracing data | PASS | All `infrastructure/tracing/` imports from `application/` are write-side only (`observed_node`, event emission). |
+| 6 | Hardcoded backend / node / param names in `application/` or `domain/` | PASS | Backend identity confined to `connectors/termnorm.py` per §0.5. |
+| 7 | In-memory-only round-crossing state with no disk mirror | DEFERRED | §3.8 deliverable (`tests/test_reconstructable_state.py`); not yet built — surfaces violations once it lands. |
+| 8 | Write-side data duplication (ledger vs. projections) | SEE SUB-DOC | Full mapping in `m10-cleanup-ledger-vs-projections.md`. One drift item (cadence rule firing — three write locations); resolves cleanly via §4 drop of `SignalsProjection`. |
+| 9 | Hexagonal layer leaks (`domain/` → `application/` / `infrastructure/`) | PASS | Zero confirmed runtime leaks; `domain/sample.py → SampleIndex` stays `TYPE_CHECKING`-gated. Enforced by `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`. |
+| 10 | `observed_node()` coverage on optimizer LLM calls | **FIX APPLIED** | `l1_generate` (`l1.py:913`) ✓, `l2_context`/`l3_plan` (`escalation/firing.py:395`) ✓, `l1_critique` (`l1.py:1074`) was UNWRAPPED — wrapped in this slice. |
+| 11 | `MeasurementArchive` direct access outside facade (§3.7) | DEFERRED | 13 sites confirmed as expected (facade is §3.7 deliverable, not yet built): `infrastructure/tracing/replay.py:131,152,240,267,322`; `presentation/writers.py:135,136`; `application/bootstrap/scoring_context.py:300`; `application/scoring/search_point_scorer.py:430,488`; `application/optimization/elevation.py:234`; `application/intelligence/indexes/axis.py:305,317`. |
+
+### Webapp + API + writers audit
+
+**`webapp/components/` (10 components, mixed paths):**
+
+| Component | Path | Verdict | Reason |
+|---|---|---|---|
+| `ChatPane.tsx` | `dashboard/` | KEEP | Spend tracking + budget ETA + hard-samples toggle. Inert chat surface (M12 wires control). |
+| `WorkflowCanvas.tsx` | `workflow/` | KEEP | Central pipeline visualizer; rendered by `DashboardPane.tsx`. (Not under `dashboard/` — earlier scan missed it.) |
+| `SignalsPanel.tsx` | `dashboard/` | DROP (§4) | Already on §4 drop list. |
+| `StuckDiagnosis.tsx` | `dashboard/` | DROP (§4) | Already on §4 drop list. |
+| `ProgressCard.tsx` | `dashboard/` | KEEP | Live round/candidate progress + QPS estimator. Non-redundant. |
+| `LiveStateCard.tsx` | `dashboard/` | KEEP | Full live-state KV grid; only panel that surfaces complete `dashboard.json` snapshot. |
+| `HeroSummary.tsx` | `dashboard/` | KEEP | Primary stat + sparkline. Anchors viewport. |
+| `LiveSamplesCard.tsx` | `dashboard/` | KEEP | Real-time per-sample HIT/MISS stream. |
+| `HardSamplesTable.tsx` | `dashboard/` | KEEP | Hard-sample sorter / Rasch leaderboard (load-bearing per §0). |
+| `DashboardPane.tsx` | `dashboard/` | KEEP | Page composition root. |
+
+**`presentation/api.py` routes (22 routes):**
+
+All 21 extant routes load-bearing or sanctioned (backend registration, multi-backend onboarding, dashboard polling, audit reads). `/file-content` confirmed absent (matches spec). `/datasets/{name}/preview` present and serving the hard-sample dashboard data path per §0.
+
+**`presentation/writers.py::refresh_tenant_leaderboards()`:**
+
+Writes `archive/runs.md`, `archive/individuals.md`, `archive/hard_samples.md`, `archive/README.md`. Called from `runner.py:158, 781`. **Verdict: DROP candidate.** No CLAUDE.md / docs / `/potter-run` skill mentions of the output files. Aspirational write-side surface with no confirmed read-side consumer. Data is derivable from MeasurementArchive on demand.
+
+**`infrastructure/tracing/mlflow_sink.py`:**
+
+Opt-in alternate sink (`MLFLOW_ENABLED`). Code comment: "operators have requested MLflow as a first-class observability target." **Verdict: KEEP — promote to §0 as named optional sink alongside Langfuse.** Update `docs/architecture.md` Tracing bucket prose to acknowledge.
+
+**`l1_critique_text` on-disk decision:**
+
+Already wrapped via `observed_node()` (after this slice's fix). Captured in `langfuse/events.jsonl` AND audit trail (`add_action()`). The audit-trail capture covers all four optimizer LLM calls — see ledger-vs-projections sub-doc Note 1 for the broader open question about projection-only LLM I/O. **No action in this audit slice.**
+
+### Code change applied
+
+- `promptpotter/application/optimization/l1.py:1073-1090` — wrapped the `run_l1_critique()` call in `async with observed_node("l1_critique_r{round}", "llm/meta", ...)` mirroring the `l1_generate` pattern at `l1.py:913`. Closes target 10. Tests pass.
+
+## Slice B (this PR — completed)
+
+Three deliverables, all batched into the same commit as Slice A
+per the user's direct-to-main + scope-large workflow.
+
+### 1. OptSearchPoint field audit
+
+Full audit at [`m10-cleanup-osp-fields.md`](m10-cleanup-osp-fields.md).
+Findings:
+
+- **Count correction:** spec says 22 (14 own + 8 inherited);
+  reality is 21 (13 own + 8 inherited). Cut target re-baselined
+  to 13 - 4 = 9 own surviving fields.
+- **Clean drop (immediate, §4-eligible):** `warning_inventory` —
+  duplicate of `validation_failures` + `runtime_failures`; no
+  reader treats it as source of truth.
+- **Refactors / renames (smaller PRs):** `l1_config` →
+  `l1_overrides` + add to `MEMORY_FIELDS`; `escalation_log` →
+  typed `CycleLedger` event (pairs with §3.7); `round_history` →
+  `@property` over ledger (pairs with §3.8).
+- **Consolidation candidate:** the four failure-list fields
+  (`validation_failures`, `runtime_failures`, `l2_guard_breaches`,
+  `l3_guard_breaches`) could unify into one `FailureLog` keyed by
+  source layer, with `failure_analysis` as the derived view.
+  Design decision; flagged for §4.5 or sub-spec.
+
+### 2. Free-deliverable verification (hard-sample dashboard)
+
+§0 claims the hard-sample dashboard is "fully wired today." Verified:
+
+- `GET /datasets/{name}/preview` API route present in
+  `presentation/api.py` and serving sample data.
+- `webapp/components/dashboard/HardSamplesTable.tsx` present and
+  imported by `DashboardPane.tsx`.
+- `webapp/components/chat/ChatPane.tsx:254` toggles the table on
+  the chat side via the markdown render path
+  (`_render_hard_samples`).
+
+§0 claim holds. No action.
+
+### 3. Self-optimization fixture
+
+Built `datasets/promptpotter/` per `m10-cleanup.md` §1 deliverable:
+
+- `dataset.md` — operator guide; sibling shape to
+  `datasets/gsm8k/dataset.md`; documents the M11 connector
+  consumer.
+- `task_description.md` — minimal framing: optimize the
+  L1/L1_CRITIQUE/L2/L3 meta-prompts.
+- `golden_traces.json` — two shape-faithful rows in the
+  `load_potter_traces` output contract: one L1→L1 transition
+  (round 0 → 1, GSM8K-shaped baseline; `score_delta=+0.07`) and
+  one L1→L2 escalation transition (round 3 → 4; `score_delta=+0.05`).
+  Both rows roundtrip cleanly through `OptSearchPoint.model_validate`
+  + `render()`.
+
+The fixture deliberately omits `pipeline.json` / `campaign.json` /
+`prompts/` — those are M11 connector deliverables. The M10 ask is
+only the trace shape on disk before any consumer.
+
 ## Next slices (per `m10-cleanup.md` §1, future PRs)
 
-- Code-violation grep list (8 grep targets — per-error retry,
-  sidecar prompt-fill paths, hexagonal layer leaks, observed_node
-  coverage, MeasurementArchive direct access, etc).
-- Webapp + API + writers audit (`webapp/components/dashboard/`,
-  FastAPI routes, `presentation/writers.py`).
-- OSP field audit (22 fields → ≤18 own; map each to a §0 bucket).
-- Free-deliverable verification (hard-sample dashboard data path).
-- Self-optimization fixture (build `datasets/promptpotter/` per
-  m10-cleanup §1 deliverable).
 - Notebook lint cleanup (pre-existing ruff drift in
   `docs/research/bbeh-comparison/*.ipynb` +
   `notebooks/optimization_campaign.ipynb`) — own commit.
+- Decision needed (flagged from ledger-vs-projections audit): is
+  the audit trail's projection-only LLM I/O capture sanctioned, or
+  should an `LLMCallRecord` ledger event back it?
