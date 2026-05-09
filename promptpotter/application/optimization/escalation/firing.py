@@ -1,7 +1,8 @@
 """Layer-escalation driver — L2 / L3 strategies + L1→L2→L3 fan-out.
 
 One-way arrow: this module imports from ``cycle.py``; the reverse is
-forbidden by ``tests/test_layer_imports.py``. Both layers share the same
+forbidden by ``tests/test_invariants.py::test_no_unexpected_runtime_layer_violations``.
+Both layers share the same
 ``LayerStrategy`` shape — per-layer differences live in module-level
 ``_parse_*`` / ``_apply_*`` / ``_*_enter`` / ``_*_exit`` callables wired
 into the ``L2`` and ``L3`` instances.

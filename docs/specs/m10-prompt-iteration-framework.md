@@ -72,7 +72,7 @@ def render_review_md(
 
 **Header:** four prompt-template hashes, `L1Stats` block, behavior-violation summary, **round-1 verdict** (see Track 5).
 
-Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the round-1 gate has something to read. `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` gains `review.md`.
+Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the round-1 gate has something to read. `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` gains `review.md`.
 
 ### 3. L1Stats
 
@@ -279,7 +279,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 | Surface compile path | `application/optimization/pipeline.py::compile_l1_surface`, `compile_l2_surface`, `compile_l1_critique_blob` |
 | Cycle finalize / round emission | `application/runner.py` |
 | Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
-| Parity test | `tests/test_artifact_parity.py::PER_CYCLE_AUDIT_ARTIFACTS` |
+| Parity test | `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` |
 | **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
 | **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard.py` (telemetry binds to root with no `parent_cycle_id`) |
 

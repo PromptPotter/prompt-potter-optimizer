@@ -26,7 +26,8 @@ campaign event stream.
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
 second dispatch path because the base class is the only one. Subscribers
 MUST NOT write campaign artifacts beyond their declared allowlist (guarded
-by `tests/test_artifact_parity.py`).
+by `tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores`
++ `test_artifact_sets_are_disjoint_and_well_formed`).
 
 ## Stores — composite over leaves
 
