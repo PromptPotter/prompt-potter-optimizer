@@ -24,9 +24,9 @@ from __future__ import annotations
 
 import json
 from collections.abc import Callable
-from dataclasses import asdict
+from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 from promptpotter.application.optimization.dispatch_hub import (
     format_l1_critique_for_prompt,
@@ -36,6 +36,16 @@ from promptpotter.domain.opt_search_point import (
     flatten_sp_summary,
 )
 from promptpotter.domain.phases import PhaseEvent
+from promptpotter.presentation.views.display import (
+    CYAN,
+    GREEN,
+    RESET,
+    YELLOW,
+    _fmt_delta,
+    fmt_ci,
+    fmt_pvalue,
+)
+from promptpotter.presentation.views.round_render import fmt_pp_override
 from promptpotter.presentation.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
@@ -61,15 +71,151 @@ from promptpotter.presentation.views.view_models import (
     SpDiffView,
     WarningEntry,
 )
+from promptpotter.shared.composite import render_composite_fitness_oneliner
 from promptpotter.shared.statistics import min_detectable_effect, proportion_test, wilson_ci
 
 __all__ = [
+    "IndividualSummary",
     "from_disk_log",
     "from_disk_round",
     "from_phase_event",
+    "individual_summary_from_dict",
     "view_from_record",
     "view_to_wire_dict",
 ]
+
+
+@dataclass(frozen=True)
+class IndividualSummary:
+    """Structured candidate render — displays pick plain vs box wrapping.
+
+    Pieces the two displays can compose independently:
+
+    - ``tag`` — compact status slot (``80.0% [77-82%]`` or ``INVALID``);
+      notebook puts it on the top-right of the box, CLI appends it to
+      ``cand k/N``.
+    - ``body_line`` — the mutations + hits + delta line; the notebook
+      renders it as an inner box line, the CLI as an indented second line.
+    - ``detail_lines`` — ordered extras (elimination summary, the 1-line
+      composite_fitness-with-Δ render, degraded-count tag, or validation-failure
+      entries); rendered inline by both displays, with the last entry
+      folded onto the bottom info rule by callers that support it.
+    """
+
+    status: Literal["ok", "invalid", "aborted", "eliminated"]
+    tag: str
+    body_line: str
+    detail_lines: tuple[str, ...]
+
+
+def individual_summary_from_dict(
+    scores: dict,
+    baseline_acc: float,
+    *,
+    baseline_composite_fitness: float | None = None,
+) -> IndividualSummary:
+    """Classify a candidate score report and pre-format all display pieces.
+
+    Single source of truth for what the CLI and notebook show per candidate.
+    Invalid > aborted > eliminated > ok precedence matches the report's
+    exclusive flag semantics (invalid never runs the backend; aborted and
+    eliminated are mutually exclusive by construction in
+    ``_handle_scored_candidate``).
+
+    Per-candidate composite_fitness render is intentionally 1 line —
+    ``composite_fitness=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
+    don't dump 60 lines of identical formula text into the terminal. The
+    formula + per-evaluator breakdown lands once per round in the round
+    summary block.
+
+    *baseline_composite_fitness* anchors the Δ against the campaign's first-round
+    composite_fitness — even at deep rounds the operator sees how far the run
+    has come from origin. ``None`` collapses to the no-Δ form.
+    """
+    mutations = fmt_pp_override(scores.get("pipeline_params_override"))
+    mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
+
+    if scores.get("invalid"):
+        out: list[str] = []
+        for vf in scores["validation_failures"]:
+            allowed = vf.get("allowed") or []
+            allowed_str = ", ".join(allowed[:3]) + (
+                f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
+            )
+            out.append(
+                f"{YELLOW}⚠{RESET} {vf.get('axis', '?')} = {vf.get('value', '?')!r}  "
+                f"∉ [{allowed_str}]"
+            )
+            out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
+        return IndividualSummary(
+            status="invalid",
+            tag=f"{YELLOW}INVALID{RESET}",
+            body_line="",
+            detail_lines=tuple(out),
+        )
+
+    acc = scores["accuracy"]
+    hits = scores.get("hits", 0)
+    n = scores.get("total", 0)
+    ci_lo, ci_hi = wilson_ci(hits, n)
+    delta = acc - baseline_acc
+    tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
+
+    aborted = bool(scores.get("escalation_aborted"))
+    if aborted:
+        scored_q = scores.get("scored_samples", n)
+        expected_q = scores.get("expected_samples", n)
+        hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
+    else:
+        hit_str = f"{hits}/{n} hits"
+    body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
+
+    detail_lines: list[str] = []
+    elim = scores.get("elimination_context") or {}
+    if scores.get("elimination_stopped") or elim.get("leader_locked"):
+        eq = int(elim.get("queries_scored", 0))
+        eqt = int(elim.get("total_queries", 0))
+        n_priors = int(elim.get("n_priors", 0))
+        prior_s = "" if n_priors == 1 else "s"
+        if scores.get("elimination_stopped"):
+            label = elim.get("triggered_by_prior_label")
+            if label is None:
+                pi = elim.get("triggered_by_prior_idx", -1)
+                label = f"prior #{pi}" if isinstance(pi, int) and pi >= 0 else "prior"
+            detail_lines.append(
+                f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
+                f"{fmt_pvalue(float(elim.get('triggered_p', 1.0)))}  "
+                f"vs {label} (of {n_priors} prior{prior_s})"
+            )
+        else:
+            detail_lines.append(
+                f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
+                f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
+            )
+
+    comp = scores.get("composite_fitness")
+    degraded = scores.get("degraded_samples", 0)
+
+    if comp is not None:
+        detail_lines.append(
+            render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness)
+        )
+    if degraded:
+        detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
+
+    status: Literal["ok", "aborted", "eliminated"]
+    if aborted:
+        status = "aborted"
+    elif scores.get("elimination_stopped"):
+        status = "eliminated"
+    else:
+        status = "ok"
+    return IndividualSummary(
+        status=status,
+        tag=tag,
+        body_line=body_line,
+        detail_lines=tuple(detail_lines),
+    )
 
 
 def _truncate(s: str, max_len: int) -> str:

@@ -15,7 +15,7 @@ from typing import TYPE_CHECKING, Any
 from pydantic import BaseModel, ConfigDict, Field
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.infrastructure.llm import LLMClientBase
 
 logger = logging.getLogger(__name__)
@@ -108,6 +108,16 @@ class OptimizationConfig(BaseModel):
     enable_l3: bool = Field(True, description="System invariant — L3 is part of the architecture")
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
+    escalate_on_yield_drought: bool = Field(
+        False,
+        description=(
+            "Cadence rule l2_axis_yield_drought: when AxisIndex shows zero axes "
+            "with effect_size > NOISE_THRESHOLD AND L1 has stalled at least one "
+            "round, fire L2 immediately (preempts l1_patience). Closes the "
+            "calendar-driven escalation gap (Routed Dispatch flaw 3); off by "
+            "default — opt-in until validated on the M10 datasets."
+        ),
+    )
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
     spend_budget_usd: float | None = Field(

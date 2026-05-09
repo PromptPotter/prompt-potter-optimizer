@@ -15,12 +15,10 @@ from promptpotter.application.baseline import (
     prepare_scoring_context as _prepare_scoring_context,
 )
 from promptpotter.application.bootstrap import (
-    Session,
-)
-from promptpotter.application.bootstrap import (
     init_services as _init_services,
 )
-from promptpotter.application.run_observers import RunObservers, build_run_observers
+from promptpotter.application.bootstrap.session import Session
+from promptpotter.application.optimization.observers import RunObservers, build_run_observers
 from promptpotter.application.runner import (
     run_optimization as _run_optimization,
 )

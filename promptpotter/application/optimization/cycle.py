@@ -50,7 +50,7 @@ from promptpotter.shared.statistics import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema

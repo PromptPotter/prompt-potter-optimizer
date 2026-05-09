@@ -2,7 +2,7 @@
 
 Visual + reference for `promptpotter/application/optimization/dispatch_hub.py` — the registry that fills `{{placeholders}}` in the four optimizer prompts. Pairs with [`l1-generate-surface.md`](l1-generate-surface.md) (L1_GENERATE's layout surface) and [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
 
-The hub is stateless. Each `_r_*` renderer in `SIGNALS` is the construction recipe for one placeholder; the hub looks the name up, renders, returns a dict.
+The hub is stateless. `SIGNALS` is a typed `dict[str, _Signal]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: Bundle → str`, and a docstring. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
 ## Flow
 
@@ -52,6 +52,12 @@ flowchart LR
   TC[task_context³]
   LAYOUT[l1_layout⁷]
 
+  %% Cross-round AxisIndex digest
+  AXM[axis_memory¹⁴]:::det
+
+  %% PoBB decision trail — surfaced to L1_CRITIQUE
+  DTS[decision_trace_summary¹⁶]:::det
+
   %% L1_CRITIQUE + its produced signal
   subgraph L1CG[" "]
     L1C([L1_CRITIQUE]):::proc
@@ -78,6 +84,10 @@ flowchart LR
   CRIT --> L1G
   CPAR --> L1G
   LAYOUT --> L1G
+  AXM --> L1G
+
+  %% PoBB decision trail — surfaced to L1_CRITIQUE
+  L1S --> DTS
 
   %% L1_CRITIQUE inputs
   PLAN --> L1C
@@ -85,6 +95,7 @@ flowchart LR
   DIAG --> L1C
   VFAIL --> L1C
   RFAIL --> L1C
+  DTS --> L1C
 
   %% L2_CONTEXT inputs — sees measurement-derived failures only.
   %% L2 doesn't see l2_guard_breaches because Wound 4 fires L3 immediately
@@ -98,6 +109,7 @@ flowchart LR
   CPAR --> L2P
   TC --> L2P
   CAT --> L2P
+  AXM --> L2P
 
   %% L3_PLAN inputs — universal nurse: sees all four failure variants.
   PLAN --> L3P
@@ -108,6 +120,7 @@ flowchart LR
   L2OF --> L3P
   L3OF --> L3P
   CRIT --> L3P
+  AXM --> L3P
 
   %% LLM-produced feedback edges (red)
   L3P --> PLAN
@@ -124,13 +137,20 @@ flowchart LR
   L1S --> VFAIL
   L1S --> RFAIL
 
-  %% Red styling for the 8 LLM-produced feedback edges (edges 31..38)
+  %% Red styling for the 8 LLM-produced feedback edges (post-round)
   linkStyle 31,32,33,34,35,36,37,38 stroke:#B22222,stroke-width:2px
 ```
 
 ## Reference
 
-13 signals + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+14 signals + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+
+Each entry in `SIGNALS` is a frozen `_Signal(name, kind, render, doc)`. `kind` is one of:
+
+- **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `validation_failures`, `runtime_failures`).
+- **DERIVED** — view/digest over MeasurementArchive or AxisIndex (e.g. `axis_memory`, `decision_trace_summary`).
+- **TRACE** — narrative state from prior LLM calls (e.g. `critique`, `plan`, `task_context`).
+- **DIRECTIVE** — short-lived directive consumed by exactly one downstream layer (e.g. `l3_to_l2_note`).
 
 ### Round-end measurement — what L1_SCORE + L1_CRITIQUE leave behind
 
@@ -164,6 +184,11 @@ This is where the reader's mental model of a round usually starts: candidates we
   - 3 model-only sub-fields skipped by the renderer: `raw_description`🧩, `upstream_context`🧩, `downstream_context`🧩
 - **`l3_to_l2_note`** ← `opt_sp.l3_note` · L2_CONTEXT template only; explicitly excluded from L1_GENERATE.
 
+### Cross-round derived
+
+- ¹⁴ **`axis_memory`** (DERIVED) ← `cycle.axes.digest()` — AxisIndex per-axis effect_size + sample-coverage; consumed by L1_GENERATE, L2_CONTEXT, L3_PLAN. Empty when AxisIndex isn't yet initialised (round 1).
+- ¹⁶ **`decision_trace_summary`** (DERIVED) ← `RoundResult.decision_traces` slice (PoBB writes traces at each promote/eliminate decision; `domain/decision_trace.py`). Consumed by L1_CRITIQUE; carries the per-candidate decision narrative (kind, p_best at decision, leaderboard) so critique can ground its post-mortem in the elimination trail.
+
 ### Current state
 
 - **`rendered_prompt`** ← `opt_sp.render()`
@@ -193,8 +218,8 @@ Substituted directly by `compile_prompt`; not signals.
 
 ## Mechanics
 
-- **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique}` 🧩; the other 5 signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`) are L2_CONTEXT / L3_PLAN-internal.
+- **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any `{{slot}}` is not in the `SIGNALS` registry.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`, `decision_trace_summary`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
 - **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
 ## Future — possible merge of L1_SCORE readouts

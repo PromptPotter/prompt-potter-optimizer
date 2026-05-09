@@ -29,7 +29,7 @@ from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.shared.statistics import posterior_best_probabilities
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
     from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
@@ -320,11 +320,14 @@ async def elevate_to_decisive(
                 # over a few thousand draws), runs once per topup.
                 cur_p = posterior_best_probabilities(histories, rng=rng)
                 cur_best = max(cur_p, key=lambda k: cur_p[k])
-                print(
-                    f"[topup #{sum(topups.values())}] arm={chosen} "
-                    f"n={len(histories[chosen])} fitness={float(new_fitness):.3f} "
-                    f"P_best={cur_p[cur_best]:.2f} ({cur_best})",
-                    flush=True,
+                logger.debug(
+                    "[topup #%d] arm=%s n=%d fitness=%.3f P_best=%.2f (%s)",
+                    sum(topups.values()),
+                    chosen,
+                    len(histories[chosen]),
+                    float(new_fitness),
+                    cur_p[cur_best],
+                    cur_best,
                 )
         else:
             logger.warning(

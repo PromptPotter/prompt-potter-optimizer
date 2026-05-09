@@ -25,7 +25,7 @@ Three gaps M12 closes:
 
 **Outstanding (Track 1 deliverables):**
 
-1. **Second connector** — pick a real target (minimal LLM-only or a new backend). One file under `promptpotter/connectors/`, registered via `register(Connector(...))`. Bootstrap looks it up by `pipeline.json::backend_type`.
+1. **Second connector — `promptpotter/connectors/promptpotter.py`** (PromptPotter-as-backend). Lands from M11 Track 5; M12 confirms it loads via `bootstrap.py` and runs end-to-end. The connector wraps L1 / L2 / L3 / `l1_critique` / `restructure` against `optimizer_pipeline.json`'s pinned shape (see `m10-cleanup.md` §3.5 parity test). This is the "real target" — cheapest second connector, exercises the abstraction without cross-repo burden, AND becomes the foundation for Track 4 (L4 self-optimization closure). Original wording ("pick a real target — minimal LLM-only or a new backend") superseded once M11 Track 5 ships.
 2. **Connector lookup driven by config** — `bootstrap.py:514` currently hardcodes `connectors.get("termnorm")`. Read `pipeline.json::backend_type` (already present in dataset configs) and look up by that. Same for `presentation/api.py` sites that consume `BackendConnection.backend_type`.
 3. **Query parser registry** — `split_query_parts()` (in `services/backend_client.py`) is still TermNorm-shaped. With the second connector, hoist into a per-connector hook (or fold into the wire adapter — to be decided when the second connector lands).
 4. **Workflow nodes** (M6 Wave 4) — outstanding from M6 closure, now unblocked by the connector boundary.
@@ -86,6 +86,41 @@ The launcher and control shapes are still being designed across M11–M12. Two c
 
 **Multi-tenant hook-up:** M12 is also the right moment to activate the `TenantContext` seam shaped in M9. Auth middleware populates it; `infrastructure/store/` starts enforcing `{tenant_id}/...` path prefixes. Whitelabel becomes viable. Sidebar `Log out` lights up under this work.
 
+### Track 4: L4 Self-Optimization Closure
+
+**Problem:** §0 of `m10-cleanup.md` claims PromptPotter optimizes its own meta-prompts via `optimizer_pipeline.json`. M10 pins the contract + ships a fixture. M11 ships the connector. M12 closes the loop by actually running the outer-loop optimization that improves L1/L2/L3 prompts. This was originally parked in `m12-plus-backlog.md` as "L4 — completion"; promoted to M12 because the M11 connector lands the residual blocker, making the actual run a small step rather than a separate milestone.
+
+**Deliverables:**
+
+1. **Outer-loop campaign on PromptPotter dataset.** Point `python -m promptpotter optimize` at `datasets/promptpotter/` (the M10 fixture + M11 expansion of archived rounds) using the M11 PromptPotter connector. Run 5–10 rounds. The campaign optimizes PromptPotter's own L1 / L2 / L3 / `l1_critique` / `restructure` meta-prompts.
+2. **`proxy_lift_corr` validation on the meta-loop.** Per `m10-prompt-iteration-framework.md`, M10 ships `proxy_lift_corr ≥ 0.6` as the L1-tuning gate. M12 Track 4 confirms the same gate holds when the optimizer is optimizing itself (i.e., the proxy reward correlates with cycle outcome on the meta-task too). If correlation breaks, that's a finding worth publishing — the framework's meta-stability as a positive or negative result.
+3. **Cross-cycle digest of meta-prompt evolution.** Same `archive/measurements/` mechanism as target-task campaigns; the M10 §3.7 facade serves both. Operator can read meta-prompt history the same way they read TermNorm campaign history — no parallel infrastructure.
+4. **Findings doc.** `docs/research/l4-self-optimization-results.md`: did meta-optimization improve target-task accuracy on a held-out benchmark (e.g., BBEH or HotPotQA)? What was the cost? What changed in the meta-prompts? Pairs with M12 Track 2 (publication closure).
+
+**Why M12 not M12+:** the M11 connector + M10 fixture/contract eliminate the residual blocker. What's left is "run the loop" — same orchestration code as any other campaign, just with the PromptPotter connector. The publication value (closing the L4 story) is significant enough to belong in the headline milestone.
+
+**Cross-ref:** `docs/specs/m10-cleanup.md` §3.5 + self-optimization fixture; `docs/specs/m11-publication-benchmarks.md` Track 5 (connector); `docs/specs/m12-plus-backlog.md` (L4-completion item removed since it's now in M12); `docs/specs/roadmap.md` updated L4 line.
+
+### Track 3.5: Orchestrator Daemon (control plane structural shape)
+
+**Problem:** Track 3 above describes the launcher / control surface as REST endpoints (`POST /campaigns`, `POST /control`) — that's the half-step. The structural endpoint of "control plane" is an **orchestrator daemon**: `optimize` runs as a long-lived process owning `Session` and `LoopState`; CLI / notebook / webapp all become HTTP clients of the same orchestrator. This adds a **fourth I/O kind** beyond `m10-cleanup.md` §0's three (Persistence / Display / Control-local) — call it **Control-remote**.
+
+Track 3.5 names the daemon explicitly so M12 Track 3's launcher / control work doesn't accidentally ship a halfway-daemon (in-process-per-request orchestrator with no state coherence between requests).
+
+**Decision option** (defer to M12 author): land Track 3.5 as a separate sub-spec `docs/specs/m12-orchestrator-daemon.md` for clarity, OR keep inline here if the section stays small. Either way, must explicitly address:
+
+- **The fourth I/O kind ("Control-remote") and what it is and isn't allowed to do** — parallel to `m10-cleanup.md` §0's three-kind invariant. Allowed: receive control commands (start/pause/resume/stop), expose `Session`/`LoopState` snapshots, route campaign output. Not allowed: writing campaign artifacts directly (still goes through `CycleLedger.append`); reading tracing data (still fan-out only).
+- **How `Session` becomes a daemon-owned object.** Either in-process-mutable (cheap; daemon owns the lifetime) or projection-over-the-ledger (expensive; enables multi-process + trivial restart). Decide based on whether multi-process state coherence is required.
+- **How CLI / notebook / webapp become HTTP clients of the same orchestrator.** Concrete: what does `python -m promptpotter optimize` do when the daemon is running? Does it spawn a daemon if none exists, or hard-fail with "start the daemon first"? Same question for notebook + webapp.
+- **State authority decision** (Item 3 coupling). If the daemon needs multi-process / restart-survival, pull `m10-cleanup.md` §3.8's reconstructable-state invariant forward into a partial event-sourcing migration (Session-as-projection over ledger). The M10 invariant makes this a smaller move when needed; if not needed, mutable Session in-daemon is fine.
+- **Coupling with M12 Track 1 (multi-connector) and Track 4 (L4 closure).** Daemon mode means the connector instance is daemon-owned (not per-request); the L4 closure outer-loop campaign runs as a daemon-managed long-lived job.
+
+**Out of scope for Track 3.5:** anything Track 3 ships standalone — the launcher form, the control-button design, the dashboard chrome. Track 3.5 is purely the daemon shape; Track 3 is the user-facing UI on top.
+
+**Why land Track 3.5 in M12 not later:** the multi-tenant work in Track 3 already touches every store boundary. Adding the daemon shape on top of in-process orchestration later would mean revisiting the same boundaries twice. Better to design Track 3 + 3.5 together so the launcher is daemon-shaped from the start.
+
+**Note on `m10-cleanup.md` §6 question 4 sub-bullet:** that sub-bullet is the gate that catches accidental daemon prep before M12. Track 3.5 is the planned crossing of that gate — design-spec change first, code change second.
+
 ---
 
 ## Wave Sequencing
@@ -100,8 +135,11 @@ Wave 2: Track 1 (second connector + workflow nodes) + Track 3 (API extensions)
 Wave 3: Track 2 (cited competitor numbers + figures) + Track 3 (launcher + live monitoring)
         — parallel; publication closes, webapp gains control
 
-Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPROv2 reproduction if needed)
-        — ship
+Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPROv2 reproduction if needed) + Track 4 (L4 outer-loop run)
+        — ship; L4 closure runs against M11 connector + M10 fixture
+
+Wave 5: Track 3.5 (orchestrator daemon)
+        — depends on Tracks 1+3+4 stabilizing; reshapes control plane around daemon ownership of Session
 ```
 
 ## Entry Criteria
@@ -120,6 +158,8 @@ Wave 4: Track 3 (multi-tenant activation + polish + deployment) + Track 2 (MIPRO
 - [ ] Webapp can launch, monitor, and control a campaign end-to-end
 - [ ] `TenantContext` enforced at `infrastructure/store/` boundary; whitelabel viable
 - [ ] Publication final draft complete
+- [ ] L4 self-optimization closure (Track 4): outer-loop campaign on `datasets/promptpotter/` via the M11 connector ran end-to-end; findings doc at `docs/research/l4-self-optimization-results.md` documents whether meta-optimization improved target-task accuracy
+- [ ] Orchestrator daemon (Track 3.5): control-plane shape decided (in-process-mutable Session vs Session-as-projection); daemon spec landed (sub-spec or inline); CLI / notebook / webapp client behavior defined when daemon is running
 
 ## Key Existing Code
 

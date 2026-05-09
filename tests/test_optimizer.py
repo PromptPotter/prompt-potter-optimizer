@@ -478,3 +478,356 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     raw_no_note = {"plan": "y" * 200, "rationale": "test"}
     result2 = _parse_l3(raw_no_note, _osp(plan="p", l3_note="something"), prompt="<prompt>")
     assert result2.l3_note == ""
+
+
+# ===========================================================================
+# Phase 0 — typed SIGNALS + load-time template validation
+# ===========================================================================
+#
+# Closes the silent-drop bug: ``DispatchHub.fill_fixed`` skips template names
+# not in ``SIGNALS``, so a typo would render to empty and never surface.
+# ``validate_template`` raises at load time. Two tiny invariants:
+#   1. every shipping optimizer prompt loads without raising (positive case);
+#   2. a deliberate unknown slot raises ``KeyError`` (validator actually works).
+
+
+def test_optimizer_prompts_load_with_no_unresolvable_slots():
+    """Every shipping optimizer prompt's ``{{slot}}`` references resolve."""
+    from promptpotter.application.optimization.llm_call import (
+        list_optimizer_prompts,
+        load_optimizer_prompt,
+    )
+
+    names = list_optimizer_prompts()
+    assert names, "expected at least one optimizer prompt registered"
+    for name in names:
+        load_optimizer_prompt(name)  # raises KeyError on unknown slot
+
+
+def test_validate_template_raises_on_unknown_slot():
+    """Typo guard: a slot not in SIGNALS and not in _TEMPLATE_EXTRAS raises."""
+    from promptpotter.application.optimization.dispatch_hub import validate_template
+    from promptpotter.domain.opt_search_point import PromptTemplate
+
+    bad = PromptTemplate(task_intent="see {{not_a_signal}}")
+    with pytest.raises(KeyError, match="not_a_signal"):
+        validate_template("l1_critique", bad)
+
+
+# ===========================================================================
+# Phase 1 — axis_memory signal wires AxisIndex.digest() into prompts
+# ===========================================================================
+#
+# Closes flaw 5: MeasurementArchive is rich, dispatch_hub.SIGNALS doesn't
+# surface it. The format helpers already exist in
+# intelligence/indexes/format.py; this signal is wiring, not new computation.
+
+
+def _empty_cycle_slice():
+    from promptpotter.application.optimization.dispatch_hub import CycleSlice
+
+    return CycleSlice(
+        round_num=0,
+        current_accuracy=0.0,
+        best_accuracy=0.0,
+        best_round=0,
+        l1_stall_count=0,
+        l2_round=0,
+        l2_stall_count=0,
+        l3_round=0,
+        l3_stall_count=0,
+    )
+
+
+def test_axis_memory_renders_when_axes_digest_yields_content():
+    """``axis_memory`` wraps :meth:`AxisIndex.digest` into a labeled block."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+
+    fake_axes = types.SimpleNamespace(
+        digest=lambda: {
+            "axis_rankings": "persona (effect=0.234, strong)",
+            "persistent_failures": "3 chronic failures",
+        }
+    )
+    bundle = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+        axes=fake_axes,
+    )
+    out = DispatchHub.render("axis_memory", bundle)
+    assert out.startswith("AXIS MEMORY")
+    assert "axis rankings: persona (effect=0.234, strong)" in out
+    assert "persistent failures: 3 chronic failures" in out
+
+
+def test_axis_memory_empty_when_axes_or_digest_absent():
+    """Pre-first-round and empty-digest paths render to empty string."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+
+    base_kwargs = {
+        "opt_sp": OptSearchPoint(),
+        "pipeline_schema": None,
+        "cycle_slice": _empty_cycle_slice(),
+        "digest": RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+    }
+
+    no_axes = Bundle(**base_kwargs, axes=None)
+    assert DispatchHub.render("axis_memory", no_axes) == ""
+
+    empty_digest = Bundle(
+        **base_kwargs,
+        axes=types.SimpleNamespace(digest=lambda: None),
+    )
+    assert DispatchHub.render("axis_memory", empty_digest) == ""
+
+
+def test_axis_memory_listed_in_l1_possible_and_default_layout():
+    """L1 wiring: L2 may pick axis_memory; default layout includes it."""
+    from promptpotter.domain.l1_layout import L1_POSSIBLE, default_l1_layout
+
+    assert "axis_memory" in L1_POSSIBLE
+    assert "axis_memory" in default_l1_layout().problem_description
+
+
+def test_decision_trace_summary_signal():
+    """Phase 3.3: decision_trace_summary renders the latest round's traces compactly."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.l1_population import build_decision_trace
+
+    traces = [
+        build_decision_trace(
+            decision_kind="eliminate",
+            candidate_id="cand_aaa",
+            at_sample_index=4,
+            p_best_at_decision=0.03,
+            snapshot={"cand_bbb": 0.78, "cand_aaa": 0.03},
+            sample_outcomes=[True, False, False, True],
+        ),
+        build_decision_trace(
+            decision_kind="promote",
+            candidate_id="cand_bbb",
+            at_sample_index=8,
+            p_best_at_decision=None,
+            snapshot={"cand_bbb": 0.62, "cand_aaa": 0.05},
+            sample_outcomes=[True] * 6 + [False] * 2,
+        ),
+    ]
+    bundle = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=traces),
+        axes=None,
+    )
+
+    out = DispatchHub.render("decision_trace_summary", bundle)
+    assert out.startswith("DECISION TRACES")
+    assert "eliminate c=cand_aaa@s4" in out
+    assert "promote c=cand_bbb@s8" in out
+    assert "P(best)=0.03" in out
+    assert "hits=6 misses=2" in out
+
+    # Empty digest path renders nothing.
+    empty = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+        axes=None,
+    )
+    assert DispatchHub.render("decision_trace_summary", empty) == ""
+
+
+# ===========================================================================
+# Phase 2a — cadence rules engine reproduces prior observe_round FSM
+# ===========================================================================
+#
+# Closes flaw 3 (calendar-driven escalation) by lifting observe_round's FSM
+# into a typed, declarative rule evaluator. Phase 2a is behaviour-preserving:
+# the default rule set must reproduce the prior FSM exactly. One test, four
+# assertions — one per branch of the original if/elif chain.
+
+
+def test_default_round_rules_reproduce_observe_round_fsm():
+    """Phase 2a parity: DEFAULT_ROUND_RULES matches observe_round's branches."""
+    from promptpotter.application.optimization.cadence import (
+        SignalInputs,
+        evaluate_round,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    # Branch 1 — perfect accuracy → STOP_PERFECT (priority 100)
+    perfect = SignalInputs(
+        improved=True,
+        current_accuracy=1.0,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(perfect).next_action == NextAction.STOP_PERFECT
+
+    # Branch 2 — stall < patience → CONTINUE (priority 50)
+    continuing = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(continuing).next_action == NextAction.CONTINUE
+
+    # Branch 3 — patience exhausted, L2 disabled → STOP_L1_PATIENCE (priority 30)
+    no_l2 = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=3,
+        l1_patience=3,
+        enable_l2=False,
+    )
+    assert evaluate_round(no_l2).next_action == NextAction.STOP_L1_PATIENCE
+
+    # Branch 4 — patience exhausted, L2 enabled → FIRE_L2 (priority 10)
+    fire = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=3,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(fire).next_action == NextAction.FIRE_L2
+
+
+def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
+    """Phase 2b: yield-drought rule preempts l1_continue when on; quiet when off."""
+    from promptpotter.application.optimization.cadence import (
+        SignalInputs,
+        evaluate_round,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    # Drought + opt-in + L1 has stalled at least one round → FIRE_L2 (priority 60)
+    drought_on = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=0,
+        escalate_on_yield_drought=True,
+    )
+    assert evaluate_round(drought_on).next_action == NextAction.FIRE_L2
+
+    # Same drought + flag off → CONTINUE (l1_continue at priority 50 wins)
+    drought_off = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=0,
+        escalate_on_yield_drought=False,
+    )
+    assert evaluate_round(drought_off).next_action == NextAction.CONTINUE
+
+    # Pre-first-round (axes not initialised) → CONTINUE even with flag on
+    no_evidence = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=None,
+        escalate_on_yield_drought=True,
+    )
+    assert evaluate_round(no_evidence).next_action == NextAction.CONTINUE
+
+
+# ===========================================================================
+# Phase 3.1 — DecisionTrace data model (scaffolding for mid-round diagnosis)
+# ===========================================================================
+#
+# Phase 3 of the Routed Dispatch plan needs richer per-candidate decision
+# context than the current `Decision` records carry. DecisionTrace is the
+# data shape; writer + reader land in Phase 3.2+. One contract test:
+# extra="forbid" + frozen, plus model_dump_json round-trips losslessly.
+
+
+def test_decision_trace_shape_and_json_roundtrip():
+    """DecisionTrace is frozen + extra-forbid; survives a JSON round-trip."""
+    from promptpotter.domain.decision_trace import DecisionTrace
+
+    trace = DecisionTrace(
+        decision_kind="eliminate",
+        candidate_id="c3",
+        at_sample_index=6,
+        p_best_at_decision=0.03,
+        leaderboard_at_decision=[("c1", 0.78), ("c2", 0.45), ("c3", 0.03)],
+        sample_outcomes_so_far=[True, True, False, True, False, False],
+        target_axis="persona",
+    )
+
+    # extra="forbid" — unknown kwarg rejected by Pydantic.
+    with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
+        DecisionTrace(
+            decision_kind="eliminate",
+            candidate_id="c3",
+            at_sample_index=0,
+            unknown_field="x",
+        )
+
+    # JSON round-trip: equal after dump+reload.
+    reloaded = DecisionTrace.model_validate_json(trace.model_dump_json())
+    assert reloaded == trace
+
+
+def test_build_decision_trace_writer_contract():
+    """build_decision_trace dumps the wire shape; leaderboard is sorted desc + top-K."""
+    from promptpotter.application.optimization.l1_population import build_decision_trace
+    from promptpotter.domain.decision_trace import DecisionTrace
+
+    snapshot = {"a": 0.10, "b": 0.55, "c": 0.20, "d": 0.05, "e": 0.05, "f": 0.05}
+    trace_dict = build_decision_trace(
+        decision_kind="eliminate",
+        candidate_id="a",
+        at_sample_index=4,
+        p_best_at_decision=0.10,
+        snapshot=snapshot,
+        sample_outcomes=[True, False, False, True],
+    )
+
+    leaderboard = trace_dict["leaderboard_at_decision"]
+    assert [cid for cid, _ in leaderboard] == ["b", "c", "a", "d", "e"]
+    assert all(leaderboard[i][1] >= leaderboard[i + 1][1] for i in range(len(leaderboard) - 1))
+
+    # Wire shape must round-trip back into the frozen model.
+    reloaded = DecisionTrace.model_validate(trace_dict)
+    assert reloaded.decision_kind == "eliminate"
+    assert reloaded.candidate_id == "a"
+    assert reloaded.sample_outcomes_so_far == [True, False, False, True]
+
+    # All three kinds accepted.
+    for kind in ("eliminate", "complete", "promote"):
+        DecisionTrace.model_validate(
+            build_decision_trace(
+                decision_kind=kind,
+                candidate_id="x",
+                at_sample_index=0,
+                p_best_at_decision=None,
+                snapshot=None,
+                sample_outcomes=[],
+            )
+        )

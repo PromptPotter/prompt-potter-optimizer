@@ -51,6 +51,7 @@ L1_POSSIBLE: frozenset[str] = frozenset(
         "runtime_failures",
         "task_context",
         "critique",
+        "axis_memory",
     }
 )
 
@@ -111,6 +112,7 @@ def default_l1_layout() -> L1Layout:
             "validation_failures",
             "runtime_failures",
             "critique",
+            "axis_memory",
         ],
     )
 

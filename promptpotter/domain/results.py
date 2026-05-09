@@ -169,6 +169,12 @@ class RoundPayload(BaseModel):
     # escalate_l2, …). Consumed by the divergence replay walker in
     # ``application/optimization/cycle.py``.
     decisions: list[dict] = Field(default_factory=list)
+    # Per-candidate narrative DecisionTrace records — eliminate / promote /
+    # complete with sample-outcome trails and leaderboard at decision time.
+    # Consumed by the ``L1_CRITIQUE`` prompt via the dispatch hub's
+    # ``decision_trace_summary`` signal. Optional in persistence — empty
+    # when no PoBB decisions fired this round.
+    decision_traces: list[dict] = Field(default_factory=list)
     evaluators: dict[str, float] = Field(default_factory=dict)
     # Scoring-set evolution events emitted during this round (only populated
     # when ``scoring_set.enabled``; empty otherwise). Persisted to the

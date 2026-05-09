@@ -29,6 +29,12 @@ from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.live_state import (
+    LiveStateCore,
+    apply_p_best_update,
+    apply_phase,
+    top_n_p_best,
+)
 from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
@@ -79,6 +85,12 @@ def _empty_spend() -> dict[str, Any]:
 
 # Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
 # unmapped nodes render as the first two characters of the node name.
+# Cap on ``state["recent_rules"]`` — rolling buffer the StuckDiagnosis
+# webapp widget reads. 8 covers the last few rounds of post-round FSM
+# firings without bloating dashboard.json.
+_RECENT_RULES_CAP = 8
+
+
 _NODE_BADGES: dict[str, str] = {
     "llm_only": "ai",
     "llm_ranking": "ai",
@@ -200,6 +212,12 @@ class LiveDashboardProjection(ProjectionBase):
             # rate-tabled via ``shared/spend.py``. budget_usd is set from
             # campaign.optimization.spend_budget_usd at INIT:exit.
             "spend": r.get("spend") or _empty_spend(),
+            # Phase 4 — last N cadence-rule firings + latest signal_inputs
+            # snapshot per layer. Webapp's StuckDiagnosis reads these to
+            # name *which* signal is at floor/ceiling without opening
+            # ``.runtime/signals.jsonl``.
+            "recent_rules": list(r.get("recent_rules") or []),
+            "current_signals": dict(r.get("current_signals") or {}),
         }
         # Bare short-form formula template (set on INIT:exit). Used per-
         # candidate in ``_build_l1_score_block`` to pair each candidate's
@@ -210,6 +228,16 @@ class LiveDashboardProjection(ProjectionBase):
         # Per-round candidate dict — reset at L1_GENERATE/enter and at
         # round-complete.
         self._round: dict[str, Any] = {"round": 0, "candidates": {}}
+        # Shared per-cycle scalars — round number, baseline + best anchors,
+        # P(best) round snapshot. The terminal renderer (LiveDisplay) holds
+        # the same shape so both subscribers maintain one accumulator
+        # surface, not two. The JSON dict above is the persisted shape;
+        # the core is the in-memory truth for those scalars.
+        self._core = LiveStateCore(
+            round_num=int(self.state.get("round") or 0),
+            baseline_acc=float(self.state.get("baseline") or 0.0),
+            best_acc=float(self.state.get("best") or 0.0),
+        )
 
         self._persist()
 
@@ -308,6 +336,11 @@ class LiveDashboardProjection(ProjectionBase):
     # no second dispatch path elsewhere.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
+        if record.phase == "cadence" and record.event == "rule_fired":
+            self._absorb_rule_fired(record)
+            self._persist()
+            return
+
         if record.phase == "round" and record.event == "display":
             payload = record.payload or {}
             round_result = payload.get("round_result")
@@ -441,6 +474,13 @@ class LiveDashboardProjection(ProjectionBase):
             s["round"] = data.get("round", s["round"])
             s["degraded_count"] = 0
 
+        # Mirror baseline/best/round into the shared core so both renderers
+        # read the same accumulator. The JSON dict remains the persisted
+        # shape; the core is the in-memory truth.
+        apply_phase(self._core, event, view)
+        if self._core.best_acc > float(s.get("best") or 0.0):
+            s["best"] = self._core.best_acc
+
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
         s = self.state
         s["candidate"] = f"C{ci + 1}/{ct}"
@@ -550,6 +590,42 @@ class LiveDashboardProjection(ProjectionBase):
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
 
+    def _absorb_rule_fired(self, record: PhaseRecord) -> None:
+        """Fold a ``cadence/rule_fired`` event into ``dashboard.json``.
+
+        Appends to ``state["recent_rules"]`` (rolling, capped) and overwrites
+        ``state["current_signals"][layer]`` with the latest snapshot. The
+        webapp's ``StuckDiagnosis`` widget reads both — recent_rules names
+        the last N firings, current_signals exposes the predicate inputs.
+        """
+        payload = record.payload or {}
+        entry = {
+            "round": record.round,
+            "timestamp": record.timestamp,
+            "layer": payload.get("layer"),
+            "rule_name": payload.get("rule_name"),
+            "rule_priority": payload.get("rule_priority"),
+            "next_action": payload.get("next_action"),
+            "reason": payload.get("reason"),
+            "signal_inputs": payload.get("signal_inputs") or {},
+        }
+        recent: list[dict[str, Any]] = list(self.state.get("recent_rules") or [])
+        recent.append(entry)
+        if len(recent) > _RECENT_RULES_CAP:
+            recent = recent[-_RECENT_RULES_CAP:]
+        self.state["recent_rules"] = recent
+
+        layer = entry["layer"]
+        if isinstance(layer, str):
+            current: dict[str, Any] = dict(self.state.get("current_signals") or {})
+            current[layer] = {
+                "round": record.round,
+                "rule_name": entry["rule_name"],
+                "next_action": entry["next_action"],
+                "signal_inputs": entry["signal_inputs"],
+            }
+            self.state["current_signals"] = current
+
     def _absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:
         s = self.state
         if accuracy > s["best"]:
@@ -636,9 +712,12 @@ class LiveDashboardProjection(ProjectionBase):
         cand["p_best_history"] = history
         cand["p_best_n_samples"] = n_samples
 
+        # Mirror the latest snapshot into the shared core so both renderers
+        # see the same round-wide P(best) state.
+        apply_p_best_update(self._core, current_id, n_samples, p_best)
+
         # Round-wide leaderboard (top-5 by P(best)).
-        top = sorted(p_best.items(), key=lambda kv: -kv[1])[:5]
-        self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top]
+        self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
 
     def _build_l1_score_block(
         self,

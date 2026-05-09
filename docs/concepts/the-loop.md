@@ -10,7 +10,7 @@ Three layers, three cadences. L1 fires every round. L2 fires only when L1 stalls
 │         ↓                                                              │
 │  L1 CRITIQUE — analyze fitness; direct next generation                 │
 │                                                                        │
-│  ── ESCALATION (when L1 stalls) ────────────────────────────────────── │
+│  ── ESCALATION (cadence rules over SignalInputs) ──────────────────── │
 │  L2 REFINE CONTEXT — rewrite the task framing fed to L1                │
 │  L3 MODIFY PLAN — rewrite the strategic plan L1 works within           │
 └────────────────────────────────────────────────────────────────────────┘
@@ -60,6 +60,8 @@ After scoring, before the next round's generate, the critique runs. The only pla
 
 When L3 fires, the next round still has L3, L2, and L1 all running. Higher layers don't replace lower ones; they constrain them.
 
+Post-round transitions are decided by **cadence rules over `SignalInputs`** (`application/optimization/cadence/`), not a hard-coded patience FSM. The default rule set reproduces the prior behaviour exactly (`perfect_accuracy` → STOP_PERFECT, `l1_continue` → CONTINUE while stall < patience, `l1_to_l2` → FIRE_L2 on patience exhaustion). One opt-in rule layers on top: `l2_axis_yield_drought` (priority 60) escalates to L2 when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor — gated by `campaign.json::optimization.escalate_on_yield_drought`. Predicates are pure functions over a frozen snapshot; adding a rule is one row in `cadence/rules.py`. Each firing is recorded as a `cadence/rule_fired` PhaseRecord — see [`../operations/observability.md`](../operations/observability.md#cadence-rule-signal-stream-signalsjsonl).
+
 ---
 
 ## L2 in detail
@@ -68,7 +70,7 @@ The optimizer's strategist. Doesn't write prompts — shapes what the prompt-wri
 
 ### When L2 fires
 
-After every L1 round the runner checks whether best accuracy improved. If yes, L2 stays out. If no, the L1 stall counter ticks; once it hits `l1_patience`, L2 fires the next round. On healthy campaigns L2 stays dormant for many rounds.
+After every L1 round the cadence engine evaluates rules over a `SignalInputs` snapshot. Default path: if best accuracy improved, the L1 stall counter resets and L2 stays out; if not, stall ticks, and once it hits `l1_patience` the `l1_to_l2` rule fires L2 next round. Opt-in path: when `escalate_on_yield_drought` is set, the `l2_axis_yield_drought` rule (priority 60) preempts the patience wait — fires L2 as soon as AxisIndex shows zero axes above the noise floor with at least one stall round on the clock. On healthy campaigns L2 stays dormant for many rounds.
 
 ### What L2 sees
 
@@ -109,4 +111,4 @@ The last three are L2's levers over L1's surface — see [`../developer/l1-gener
 
 ---
 
-Five LLM call sites: `restructure` (one-time decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). Broader paradigm: [`../research/related-work.md`](../research/related-work.md). Fitness comparison uses PoBB — see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). Self-healing: [`self-healing.md`](self-healing.md).
+Five LLM call sites: `restructure` (one-time decomposition at init), `l1_generate`, `l1_critique`, `l2_context`, `l3_plan`. The critique-and-refine pattern is inspired by [PromptWizard](https://arxiv.org/abs/2405.18369). Broader paradigm: [`../research/related-work.md`](../research/related-work.md). Fitness comparison uses PoBB — see [`../methods/candidate-elimination.md`](../methods/candidate-elimination.md). Self-healing: [`self-healing.md`](self-healing.md). Cadence + signal stream: [`../operations/observability.md`](../operations/observability.md#cadence-rule-signal-stream-signalsjsonl).

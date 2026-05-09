@@ -127,7 +127,7 @@ def test_open_cycle_ledger_lands_under_cycle_dir(tmp_path: Path) -> None:
     """
     from types import SimpleNamespace
 
-    from promptpotter.application.bootstrap import _open_cycle_ledger
+    from promptpotter.application.bootstrap.session import _open_cycle_ledger
     from promptpotter.infrastructure.store import build_stores
 
     stores = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
@@ -149,7 +149,7 @@ def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
     need (full result dicts, full score reports, view dicts) so any
     consumer can rebuild its view from the ledger alone.
     """
-    from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.application.optimization.observers import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
     ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))

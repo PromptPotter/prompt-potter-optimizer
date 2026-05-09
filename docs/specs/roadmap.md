@@ -51,7 +51,7 @@ Full spec: [`m12-multi-connector.md`](m12-multi-connector.md)
 
 ## M12+: Backlog -- Future
 
-Polish, cost tracking, MCP server mode, multimodal, L4 self-optimization completion (M10 ships the partial; M12+ adds the residual adapter), and everything in the [Backlog table](#backlog-unscheduled) below. Ships opportunistically after M12.
+Polish, cost tracking, MCP server mode, multimodal, and everything in the [Backlog table](#backlog-unscheduled) below. Ships opportunistically after M12. (L4 self-optimization completion was promoted to M12 — M10 partial → M11 connector → M12 closure run; see `m12-multi-connector.md` Track 4.)
 
 Full spec: [`m12-plus-backlog.md`](m12-plus-backlog.md)
 
@@ -65,7 +65,7 @@ M9 shipped. The two remaining backbone milestones below exist to make M12 land c
 
 Manual refinement of the four optimizer prompts (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`), gated on a per-cycle `review.md` artifact, an extensible behavior-check registry, a `rounds_to_95` headline metric, and a cross-cycle leaderboard keyed by prompt-hash. Headline goal: ≥95% training-set accuracy in ≤5 rounds on at least two pipelines (`llm_only` and TermNorm) under the same prompt revision. Lifted out of the original M9 Track 1. Without M10, every M11 benchmark number is sampled from an under-tuned loop.
 
-**Doubles as L4 partial implementation.** `proxy_lift_corr`, `optimize --sweep`, the behavior-check registry, and the `review.md` feature extraction are the manually-operated form of the self-optimization infrastructure listed in [`m12-plus-backlog.md § Self-optimization`](m12-plus-backlog.md). M12+ later swaps the human for an outer-loop LLM and adds the residual "PromptPotter-as-backend" adapter.
+**Doubles as L4 partial implementation.** `proxy_lift_corr`, `optimize --sweep`, the behavior-check registry, and the `review.md` feature extraction are the manually-operated form of the self-optimization infrastructure. M10 also pins the `optimizer_pipeline.json` contract (parity test against backend `pipeline.json`) and ships a self-optimization fixture under `datasets/promptpotter/` (per `m10-cleanup.md` §3.5 + §1). M11 ships the PromptPotter-as-backend connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5) — the residual adapter that was originally parked in M12+. M12 swaps the human for the outer-loop LLM in the actual closure run ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4).
 
 Full spec: [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md).
 
@@ -119,6 +119,8 @@ Spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.m
 
 **Goal:** ≥95% training-set accuracy in ≤5 rounds on at least two pipelines (`llm_only` and TermNorm) under the same prompt revision. When this holds, optimizer prompts are "configured" and M11 picks up to validate on the test set + run the benchmark numbers. Timeline target: ~1 week of manual iteration once the framework lands.
 
+**Routed Dispatch infrastructure shipped on `feat/routed-dispatch-v2`** — typed `dispatch_hub.SIGNALS` with load-time `validate_template`, `axis_memory` cross-round signal, cadence rules engine (`application/optimization/cadence/`) with opt-in `l2_axis_yield_drought`, `DecisionTrace` surfaced into `l1_critique` via `decision_trace_summary`, `SignalsProjection` writing `.runtime/signals.jsonl` with `dashboard.json::recent_rules` mirror. M10's prompt-iteration goal now runs on top of these. The five tracks below remain the spec; the loop that executes them is now signal-driven rather than patience-only.
+
 The 3-layer LLM-driven program-evolution loop is plumbed end-to-end through M8 + M9 backbone work. The loop runs; it does not yet **converge well**. `l1_generate` is the principal bottleneck since the whole loop only descends gradient when L1 produces useful variants. Auto-tuning the prompts is too expensive in the small-N regime, so M10 builds the framework for a manual ping-pong between running and prompt-editing — with auto-checks that flag known-bad L1 behaviors so each iteration produces a clear "did the fix land" verdict.
 
 Five tracks:
@@ -143,6 +145,8 @@ Full spec: [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.
 
 Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, l1_critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
 
+The Routed Dispatch arc shipped `SignalsPanel` (rolling list of recent cadence-rule firings) and `StuckDiagnosis` (per-layer verdict from the latest `signal_inputs` snapshot) — read from `dashboard.json::recent_rules` + `dashboard.json::current_signals`. These are the precondition for M12 streaming (live signal stream via SSE/WebSocket).
+
 **Entry criteria:** M10 exit gate passed (optimizer prompts configured).
 
 **Exit gate:** BBEH results with statistical rigor (3 seeds, CIs) including head-to-head vs CAPO/GEPA/MIPROv2/BootstrapFewShot at identical model + split. HotPotQA saturation assessed (benchmarked if non-saturated). Ablation results complete. Webapp read-only views live. First publication figures generated.
@@ -163,7 +167,7 @@ Full spec: [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
 | Hard-sample sorter | Standalone capability — expose δ_s leaderboard + candidate×sample heatmap as a product surface. Spec: [`hard-sample-sorter.md`](hard-sample-sorter.md). Phase 1 (data primitive + spec) shipped; phase 2 (CLI/notebook ASCII heatmap) and phase 3 (webapp heatmap under M11 track) unscheduled. |
 | Evolutionary operators | GA/DE population-based search |
 | MCP server mode | Expose tools to Claude Code |
-| Self-optimization (L4) | PromptPotter optimizes its own meta-prompts recursively. M10 ships the partial implementation (proxy reward, cheap-trial mechanism, conformance checks); M12+ adds the residual PromptPotter-as-backend adapter. |
+| ~~Self-optimization (L4)~~ | **Promoted to M12** (no longer M12+). M10 ships partial (proxy reward, cheap-trial mechanism, conformance checks) + `optimizer_pipeline.json` contract pin + self-optimization fixture under `datasets/promptpotter/` (`m10-cleanup.md` §3.5 + §1). M11 ships the PromptPotter-as-backend connector ([`m11-publication-benchmarks.md`](m11-publication-benchmarks.md) Track 5). M12 ships the outer-loop closure run ([`m12-multi-connector.md`](m12-multi-connector.md) Track 4) — including findings doc on whether meta-optimization improved target-task accuracy. |
 | Cost tracking | Token usage and cost per campaign/round/variant |
 | Model comparison matrix | Same benchmark across multiple target LLMs |
 

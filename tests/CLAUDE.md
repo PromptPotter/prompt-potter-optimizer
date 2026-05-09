@@ -16,7 +16,11 @@ A test earns its place only if it guards one of these:
 1. **Named invariants from root CLAUDE.md.** Persistence parity
    (`CAMPAIGN_ARTIFACTS` / `SESSION_ARTIFACTS`), rescore-on-load +
    decision-replay + fork, `score_search_point` as the single scoring gateway,
-   nested-only `pipeline_params`, round-boundary dataset mutation.
+   nested-only `pipeline_params`, round-boundary dataset mutation, cadence
+   rules engine (`evaluate_round` over `DEFAULT_ROUND_RULES`), and the
+   `cadence/rule_fired` two-writer parity (`SignalsProjection` →
+   `.runtime/signals.jsonl` and `LiveDashboardProjection` →
+   `dashboard.json::recent_rules`).
 2. **Statistical / numerical correctness.** Bayesian Posterior-of-Being-Best
    (joint Normal-CLT posterior, Monte Carlo argmax), composite scoring,
    per-dataset scorer formulas. The math must be wrong-reveal, not
@@ -62,6 +66,7 @@ When a contract is renamed, restructured, or replaced:
 
 Target **≤ 15 test files, ≤ 200 collected tests**. Above that, prune before
 adding. Canary: `python -m pytest tests/ --collect-only -q | tail -1`.
+Currently at 199; one-test margin to the 200 ceiling.
 
 ## Fixtures (`conftest.py`)
 

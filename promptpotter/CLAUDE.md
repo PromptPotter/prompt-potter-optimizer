@@ -21,6 +21,7 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 - `parent_baseline` — parent composite + per-sample tally + delta to beat.
 - `sibling_yield` — prior round per-axis yield: `axis | n_tried | n_beat_parent | mean_delta`.
 - `escalation_panel` — `stall_rounds`, `last_winner_axis`, `params_unlocked`, `exploration_budget ∈ {tight, normal, wide}`.
+- `axis_memory` — cross-round AxisIndex digest (`cycle.axes.digest()`); per-axis effect_size vs noise floor.
 
 If a panel field speaks against a mutation, `l1_generate` does not propose it.
 
@@ -28,7 +29,9 @@ Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) a
 
 ## L2-layer — l2_context
 
-Fires only on L1-layer stall. Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
+Fires on L1-layer stall (default) or yield drought when opted in (cadence rule `l2_axis_yield_drought`, gated by `campaign.json::optimization.escalate_on_yield_drought` — fires when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor). Post-round transitions are decided by `cadence.evaluate_round(SignalInputs)` over `DEFAULT_ROUND_RULES`; the rule set is the policy and replaces the prior FSM.
+
+Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
 
 - a refined `task_context` — the persistent task-framing dict that every layer (L1, L1_CRITIQUE, L2, L3) reads next round, and
 - optional `l1_layout` edits + optimizer-param tweaks (never pipeline_params — those belong to `l1_generate`'s surface).

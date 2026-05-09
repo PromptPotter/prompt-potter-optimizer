@@ -251,7 +251,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
             <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
           </button>
         </div>
-        {samplesOpen && <HardSamplesTable cycleId={cycleId} />}
+        {samplesOpen && <HardSamplesTable cycleId={cycleId} dash={dash} />}
       </div>
 
       <div className="chat-grid">

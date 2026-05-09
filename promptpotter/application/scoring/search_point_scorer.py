@@ -32,7 +32,7 @@ from promptpotter.shared.errors import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap import Session
+    from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint
@@ -450,10 +450,13 @@ async def score_search_point(
     if cached_in_dataset:
         total = len(dataset)
         fresh = total - cached_in_dataset
-        print(
-            f"{label} cache: {cached_in_dataset}/{total} already measured for this JSP "
-            f"— will replay {cached_in_dataset}, measure {fresh} fresh.",
-            flush=True,
+        logger.debug(
+            "%s cache: %d/%d already measured for this JSP — will replay %d, measure %d fresh.",
+            label,
+            cached_in_dataset,
+            total,
+            cached_in_dataset,
+            fresh,
         )
 
     def _merged_view(results: list[QueryMeasurement]) -> list[QueryMeasurement]:

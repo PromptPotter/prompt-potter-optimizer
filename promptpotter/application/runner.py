@@ -12,10 +12,8 @@ from promptpotter.application.baseline import (
     extract_campaign_baseline,
     prepare_scoring_context,
 )
-from promptpotter.application.bootstrap import (
-    Session,
-    init_optimization_loop,
-)
+from promptpotter.application.bootstrap import init_optimization_loop
+from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import (
@@ -25,14 +23,9 @@ from promptpotter.application.optimization.escalation import (
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
-from promptpotter.application.presentation_writers import (
-    refresh_tenant_leaderboards,
-    write_log_md,
-    write_review_md,
-)
-from promptpotter.application.run_callbacks import RunCallbacks
-from promptpotter.application.run_observers import (
+from promptpotter.application.optimization.observers import (
     ForkInfo,
+    RunCallbacks,
     RunObservers,
     build_run_observers,
 )
@@ -56,6 +49,11 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
+from promptpotter.presentation.writers import (
+    refresh_tenant_leaderboards,
+    write_log_md,
+    write_review_md,
+)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -161,6 +159,21 @@ def _persist_round(
 
     if _rr := session.state.audit_projection:
         _rr.flush()
+
+
+def _count_positive_yield_axes(cycle: Cycle) -> int | None:
+    """Count axes with effect_size above the AxisIndex noise floor.
+
+    Returns ``None`` when AxisIndex isn't initialised (pre-first-round); a
+    rule consulting this signal must treat ``None`` as "no evidence yet."
+    The threshold mirrors :data:`promptpotter.application.intelligence.indexes.axis.NOISE_THRESHOLD`
+    (= 0.02) — same definition the digest formatter uses.
+    """
+    if cycle.axes is None:
+        return None
+    from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+
+    return sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
 
 
 def _refresh_axes_and_filter(
@@ -280,11 +293,34 @@ async def _post_round(
     deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function persists
     the post-observe state and dispatches the chosen action.
     """
+    axes_with_positive_yield = _count_positive_yield_axes(cycle)
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         enable_l2=config.optimization.enable_l2,
+        axes_with_positive_yield=axes_with_positive_yield,
+        escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
+    )
+    # Phase 4 — emit the matched rule + signal snapshot so the SignalsProjection
+    # writes ``.runtime/signals.jsonl`` and the dashboard mirrors recent_rules.
+    emit_phase(
+        cb.on_phase,
+        "cadence",
+        "rule_fired",
+        round=round_num,
+        layer="post_round",
+        rule_name=event.rule_name,
+        rule_priority=event.rule_priority,
+        next_action=event.next_action.value,
+        reason=event.reason,
+        signal_inputs={
+            "improved": round_result.improved,
+            "current_accuracy": cycle.tracking.current_accuracy,
+            "l1_stall_count": cycle.escalation.l1_stall_count,
+            "l1_patience": config.optimization.l1_patience,
+            "axes_with_positive_yield": axes_with_positive_yield,
+        },
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 

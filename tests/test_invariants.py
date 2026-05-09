@@ -358,6 +358,81 @@ def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, 
     assert data["parent_session_id"], "index.json must carry parent_session_id"
 
 
+def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
+    """Phase 4 — a ``cadence/rule_fired`` PhaseRecord lands in two places.
+
+    SignalsProjection appends one line to ``.runtime/signals.jsonl`` (the
+    on-disk trail past the dashboard's rolling window). LiveDashboardProjection
+    mirrors the same fire into ``dashboard.json::recent_rules`` so the
+    webapp's StuckDiagnosis widget reads it without a second file fetch.
+
+    The shared contract is the payload shape — ``layer``, ``rule_name``,
+    ``rule_priority``, ``next_action``, ``reason``, ``signal_inputs``.
+    Two writers, one truth.
+    """
+    from promptpotter.domain.cycle_paths import CycleDir, RootCycleDir
+    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.infrastructure.projections import (
+        LiveDashboardProjection,
+        SignalsProjection,
+    )
+
+    campaign_dir = tmp_path / "campaigns" / "cycle_signals_test"
+    campaign_dir.mkdir(parents=True)
+    session_dir = tmp_path / "sessions" / "s_test"
+    session_dir.mkdir(parents=True)
+
+    dashboard = LiveDashboardProjection(
+        RootCycleDir(campaign_dir),
+        session_dir,
+        l1_patience=3,
+        n_variants=5,
+        sp_budget_ttest=20,
+    )
+    signals = SignalsProjection.from_cycle_dir(CycleDir(campaign_dir))
+
+    record = PhaseRecord(
+        phase="cadence",
+        event="rule_fired",
+        round=2,
+        payload={
+            "layer": "post_round",
+            "rule_name": "l2_axis_yield_drought",
+            "rule_priority": 60,
+            "next_action": "fire_l2",
+            "reason": "axis yield drought: 0 axes with effect > noise at L1 stall 1/3",
+            "signal_inputs": {
+                "improved": False,
+                "current_accuracy": 0.5,
+                "l1_stall_count": 1,
+                "l1_patience": 3,
+                "axes_with_positive_yield": 0,
+            },
+        },
+    )
+    dashboard.on_record(record, 0)
+    signals.on_record(record, 0)
+
+    # Writer 1 — on-disk JSONL trail under .runtime/.
+    jsonl_path = campaign_dir / ".runtime" / "signals.jsonl"
+    assert jsonl_path.exists(), "SignalsProjection must write .runtime/signals.jsonl"
+    lines = jsonl_path.read_text(encoding="utf-8").splitlines()
+    assert len(lines) == 1
+    written = json.loads(lines[0])
+    assert written["rule_name"] == "l2_axis_yield_drought"
+    assert written["next_action"] == "fire_l2"
+    assert written["signal_inputs"]["axes_with_positive_yield"] == 0
+
+    # Writer 2 — dashboard.json mirror, rolling buffer + per-layer current.
+    dash = json.loads((campaign_dir / "dashboard.json").read_text(encoding="utf-8"))
+    assert "recent_rules" in dash and len(dash["recent_rules"]) == 1
+    mirrored = dash["recent_rules"][0]
+    assert mirrored["rule_name"] == "l2_axis_yield_drought"
+    assert mirrored["layer"] == "post_round"
+    assert "current_signals" in dash
+    assert dash["current_signals"]["post_round"]["rule_name"] == "l2_axis_yield_drought"
+
+
 def test_observers_built_via_shared_helper() -> None:
     """Entry points MUST construct projections + callbacks via ``build_run_observers``.
 
@@ -375,6 +450,7 @@ def test_observers_built_via_shared_helper() -> None:
         "AuditTrailProjection",
         "LiveDashboardProjection",
         "PoBBStreamProjection",
+        "SignalsProjection",
     }
     repo_root = Path(__file__).resolve().parents[1]
     guarded_paths = [
@@ -394,7 +470,7 @@ def test_observers_built_via_shared_helper() -> None:
                 offenders.append(f"{rel}:{node.lineno}:{name}")
     assert not offenders, (
         "Direct observer construction in presentation/ — route through "
-        "application/run_observers.py::build_run_observers:\n" + "\n".join(offenders)
+        "application/optimization/observers.py::build_run_observers:\n" + "\n".join(offenders)
     )
 
 
@@ -406,7 +482,7 @@ def test_run_callbacks_requires_ledger() -> None:
     always bound before any event fired). Forbid the regression: dataclass
     construction without a ledger raises ``TypeError`` at boot.
     """
-    from promptpotter.application.run_callbacks import RunCallbacks
+    from promptpotter.application.optimization.observers import RunCallbacks
 
     with pytest.raises(TypeError):
         RunCallbacks()  # type: ignore[call-arg]

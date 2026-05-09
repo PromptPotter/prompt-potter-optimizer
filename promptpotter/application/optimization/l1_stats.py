@@ -15,7 +15,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.l1_behavior_checks import CheckResult
+from promptpotter.application.optimization.l1_behavior_checks import CheckResult
 
 __all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
 

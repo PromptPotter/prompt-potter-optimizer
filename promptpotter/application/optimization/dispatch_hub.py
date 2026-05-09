@@ -18,6 +18,7 @@ exists to remove.
 
 from __future__ import annotations
 
+import enum
 import json
 import logging
 import re
@@ -36,6 +37,7 @@ from promptpotter.domain.results import RoundResult
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 if TYPE_CHECKING:
+    from promptpotter.application.intelligence.indexes import AxisIndex
     from promptpotter.application.optimization.cycle import Cycle
 
 __all__ = [
@@ -43,9 +45,51 @@ __all__ = [
     "CycleSlice",
     "DispatchHub",
     "RoundDigest",
+    "SignalKind",
     "build_bundle",
     "format_l1_critique_for_prompt",
+    "validate_template",
 ]
+
+
+class SignalKind(enum.StrEnum):
+    """Kind tag for each :data:`SIGNALS` entry.
+
+    Lightweight classification — no schema, no enforcement, just a hint for
+    readers and the future cadence-rules engine that wants to fan signals
+    by category. The four kinds split along *origin*, not consumer:
+
+    * ``MEASUREMENT`` — raw evidence from L1 candidate runs (validation +
+      runtime failures, plus the deterministic round-end diagnostics).
+    * ``DERIVED`` — computed from measurements (rankings, distributions,
+      pipeline-health summaries, the param catalogue).
+    * ``TRACE`` — narrative state from prior LLM calls (critique, plan,
+      task_context, the rendered current prompt).
+    * ``DIRECTIVE`` — active instructions to a downstream layer (the
+      sticky L3→L2 note; the L1 placeholder menu L2 picks from).
+    """
+
+    MEASUREMENT = "measurement"
+    DERIVED = "derived"
+    TRACE = "trace"
+    DIRECTIVE = "directive"
+
+
+@dataclass(frozen=True)
+class _Signal:
+    """One :data:`SIGNALS` entry — kind tag + Bundle-shaped renderer + doc.
+
+    Renderers stay plain ``Callable[[Bundle], str]`` — no Pydantic schema,
+    no freshness budget, no producer indirection. This wrapper exists to
+    carry the kind tag and a one-line description; everything else stays
+    as it is on main.
+    """
+
+    name: str
+    kind: SignalKind
+    render: Callable[[Bundle], str]
+    description: str
+
 
 logger = logging.getLogger(__name__)
 
@@ -114,12 +158,16 @@ class CycleSlice:
 class RoundDigest:
     """One round's post-scoring readouts — the compression chain in one place.
 
-    Two streams the optimizer compresses each round into something every
+    Three streams the optimizer compresses each round into something every
     layer can reason about:
 
     * ``diagnostics`` — deterministic post-scoring readout
       (:func:`compute_round_diagnostics`).
     * ``critique`` — the L1_CRITIQUE LLM's compact dict.
+    * ``decision_traces`` — per-candidate eliminate / promote / complete
+      records produced by PoBB writers (Phase 3.2). Empty when no PoBB
+      decisions fired this round; consumed by the
+      ``decision_trace_summary`` signal.
 
     Built once in :func:`build_bundle` from the just-completed
     ``RoundResult`` and read identically by every signal renderer that
@@ -133,6 +181,7 @@ class RoundDigest:
 
     diagnostics: RoundDiagnostics | None
     critique: dict | None
+    decision_traces: list[dict]
 
 
 @dataclass(frozen=True)
@@ -148,6 +197,7 @@ class Bundle:
     pipeline_schema: PipelineSchema | None
     cycle_slice: CycleSlice
     digest: RoundDigest
+    axes: AxisIndex | None
 
 
 # ---------------------------------------------------------------------------
@@ -528,34 +578,232 @@ def _r_l1_signal_catalogue(b: Bundle) -> str:
     )
 
 
+# Order in which AxisIndex.digest() keys are surfaced to the optimizer LLM.
+# Effect-driven items first (rankings, top values, trends, exhausted axes)
+# so attention lands on what to mutate; sample-side findings second
+# (persistent failures, clusters, bottleneck); narrative tail last
+# (improvement attribution). Keys absent from the digest are skipped.
+_AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
+    "axis_rankings",
+    "top_values",
+    "value_trends",
+    "exhausted_axes",
+    "persistent_failures",
+    "failure_clusters",
+    "bottleneck_distribution",
+    "failure_group_insights",
+    "dead_queries",
+    "discriminating_queries",
+    "volatile_queries",
+    "improvement_attribution",
+)
+
+
+_DECISION_TRACE_RENDER_CAP = 10
+
+
+def _r_decision_trace_summary(b: Bundle) -> str:
+    """Compact view of the latest round's per-candidate decision traces.
+
+    Reads ``b.digest.decision_traces`` (Phase 3.2 writer output). Emits
+    the most recent ``_DECISION_TRACE_RENDER_CAP`` entries — eliminate /
+    promote / complete kinds with sample-outcome trails and leaderboard
+    at decision time. Empty when no traces this round.
+    """
+    traces = b.digest.decision_traces
+    if not traces:
+        return ""
+    lines = ["DECISION TRACES (last round, per-candidate):"]
+    for t in traces[-_DECISION_TRACE_RENDER_CAP:]:
+        kind = t.get("decision_kind", "?")
+        cid = (t.get("candidate_id") or "")[:8]
+        n = t.get("at_sample_index", 0)
+        outcomes = t.get("sample_outcomes_so_far") or []
+        hits = sum(1 for o in outcomes if o)
+        misses = len(outcomes) - hits
+        lb = t.get("leaderboard_at_decision") or []
+        head_bits = [f"{kind} c={cid}@s{n}"]
+        if (p := t.get("p_best_at_decision")) is not None:
+            head_bits.append(f"P(best)={float(p):.2f}")
+        if lb:
+            top = ", ".join(f"{cid_[:6]}:{score:.2f}" for cid_, score in lb[:3])
+            head_bits.append(f"top: {top}")
+        head_bits.append(f"trail: hits={hits} misses={misses}")
+        lines.append("  " + " | ".join(head_bits))
+    return "\n".join(lines)
+
+
+def _r_axis_memory(b: Bundle) -> str:
+    """Cross-cycle axis & sample memory derived from the MeasurementArchive.
+
+    Wraps :meth:`AxisIndex.digest` — the axis-keyed view that aggregates
+    effect sizes, persistent failures, failure clusters, value trends,
+    and exhausted axes across this dataset's prior cycles. Empty when
+    ``cycle.axes`` isn't initialised (pre-first-round) or the digest
+    yields nothing. The formatters this signal aggregates already exist
+    in ``intelligence/indexes/format.py``; the wiring here is the only
+    new code — no new computation, no new query path.
+    """
+    if b.axes is None:
+        return ""
+    digest = b.axes.digest()
+    if not digest:
+        return ""
+    lines = ["AXIS MEMORY (cross-cycle observations from MeasurementArchive):"]
+    for key in _AXIS_MEMORY_LABEL_ORDER:
+        val = digest.get(key)
+        if val is None:
+            continue
+        label = key.replace("_", " ")
+        lines.append(f"  {label}: {val}")
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
 # ---------------------------------------------------------------------------
 # Signal registry — lookup by name from layouts / templates / fill_*.
 # ---------------------------------------------------------------------------
 
 
-SIGNALS: dict[str, Callable[[Bundle], str]] = {
-    "plan": _r_plan,
-    "l3_to_l2_note": _r_l3_to_l2_note,
-    "rendered_prompt": _r_rendered_prompt,
-    "pipeline_param_catalogue": _r_pipeline_param_catalogue,
-    "diagnostics": _r_diagnostics,
-    "validation_failures": _r_validation_failures,
-    "runtime_failures": _r_runtime_failures,
-    "l2_guard_breaches": _r_l2_guard_breaches,
-    "l3_guard_breaches": _r_l3_guard_breaches,
-    "task_context": _r_task_context,
-    "critique": _r_critique,
-    "l1_config": _r_l1_config,
-    "l1_signal_catalogue": _r_l1_signal_catalogue,
+SIGNALS: dict[str, _Signal] = {
+    "plan": _Signal(
+        "plan",
+        SignalKind.TRACE,
+        _r_plan,
+        "L3's strategic plan text. Persistent until next L3 fire.",
+    ),
+    "l3_to_l2_note": _Signal(
+        "l3_to_l2_note",
+        SignalKind.DIRECTIVE,
+        _r_l3_to_l2_note,
+        "Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
+    ),
+    "rendered_prompt": _Signal(
+        "rendered_prompt",
+        SignalKind.TRACE,
+        _r_rendered_prompt,
+        "Current best searchpoint's compiled prompt body.",
+    ),
+    "pipeline_param_catalogue": _Signal(
+        "pipeline_param_catalogue",
+        SignalKind.DERIVED,
+        _r_pipeline_param_catalogue,
+        "Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
+    ),
+    "diagnostics": _Signal(
+        "diagnostics",
+        SignalKind.DERIVED,
+        _r_diagnostics,
+        "Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
+    ),
+    "validation_failures": _Signal(
+        "validation_failures",
+        SignalKind.MEASUREMENT,
+        _r_validation_failures,
+        "Wound 1: L1 parse-time validator failures (per-axis, per-value).",
+    ),
+    "runtime_failures": _Signal(
+        "runtime_failures",
+        SignalKind.MEASUREMENT,
+        _r_runtime_failures,
+        "Wound 2: DegradationCheck mid-eval evidence + escalation_log + warning inventory.",
+    ),
+    "l2_guard_breaches": _Signal(
+        "l2_guard_breaches",
+        SignalKind.MEASUREMENT,
+        _r_l2_guard_breaches,
+        "Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
+    ),
+    "l3_guard_breaches": _Signal(
+        "l3_guard_breaches",
+        SignalKind.MEASUREMENT,
+        _r_l3_guard_breaches,
+        "L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
+    ),
+    "task_context": _Signal(
+        "task_context",
+        SignalKind.TRACE,
+        _r_task_context,
+        "Persistent task framing dict refined by L2; broadcast to all four prompts.",
+    ),
+    "critique": _Signal(
+        "critique",
+        SignalKind.TRACE,
+        _r_critique,
+        "Compact view of the most recent L1_CRITIQUE LLM output dict.",
+    ),
+    "l1_config": _Signal(
+        "l1_config",
+        SignalKind.TRACE,
+        _r_l1_config,
+        "Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
+    ),
+    "l1_signal_catalogue": _Signal(
+        "l1_signal_catalogue",
+        SignalKind.DERIVED,
+        _r_l1_signal_catalogue,
+        "L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
+    ),
+    "axis_memory": _Signal(
+        "axis_memory",
+        SignalKind.DERIVED,
+        _r_axis_memory,
+        "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
+        "failure clusters, value trends, exhausted axes.",
+    ),
+    "decision_trace_summary": _Signal(
+        "decision_trace_summary",
+        SignalKind.MEASUREMENT,
+        _r_decision_trace_summary,
+        "Per-candidate eliminate/promote/complete trail with leaderboard at decision time.",
+    ),
 }
+
+
+# ---------------------------------------------------------------------------
+# Template-side allowed-extras + load-time validation.
+# ---------------------------------------------------------------------------
+
+
+_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
+
+
+# Per-template names that arrive as caller-supplied ``compile_prompt`` extras
+# rather than dispatch-hub signals. Anything outside ``SIGNALS ∪ extras`` in
+# a template body is a typo — :func:`validate_template` raises rather than
+# letting :meth:`DispatchHub.fill_fixed` silently drop the placeholder.
+_TEMPLATE_EXTRAS: dict[str, set[str]] = {
+    "l1_generate": {"n_variants"},
+    "l1_critique": set(),
+    "l2_context": set(),
+    "l3_plan": set(),
+    "restructure": {"consultation_instruction"},
+}
+
+
+def validate_template(name: str, template: PromptTemplate) -> None:
+    """Raise :class:`KeyError` if any ``{{slot}}`` isn't a signal or known extra.
+
+    Closes the silent-drop bug: :meth:`DispatchHub.fill_fixed` only
+    populates ``out[name]`` when ``name in SIGNALS``, so a typo in a
+    template body would render to empty and never surface. Called from
+    :func:`promptpotter.application.optimization.llm_call.load_optimizer_prompt`
+    after every load (Langfuse or local manifest).
+    """
+    extras = _TEMPLATE_EXTRAS.get(name, set())
+    text = template.render()
+    referenced = set(_PLACEHOLDER_RE.findall(text))
+    unknown = referenced - SIGNALS.keys() - extras
+    if unknown:
+        raise KeyError(
+            f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
+            f"Add to dispatch_hub.SIGNALS or to _TEMPLATE_EXTRAS[{name!r}] if "
+            "the slot is a caller-supplied extra."
+        )
 
 
 # ---------------------------------------------------------------------------
 # DispatchHub — render / fill_l1 / fill_fixed.
 # ---------------------------------------------------------------------------
-
-
-_PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 class DispatchHub:
@@ -567,10 +815,10 @@ class DispatchHub:
 
     @staticmethod
     def render(name: str, bundle: Bundle) -> str:
-        renderer = SIGNALS.get(name)
-        if renderer is None:
+        sig = SIGNALS.get(name)
+        if sig is None:
             raise KeyError(f"Unknown signal: {name}")
-        return renderer(bundle)
+        return sig.render(bundle)
 
     @staticmethod
     def fill_l1(
@@ -641,6 +889,7 @@ def build_bundle(
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
+    latest_traces = list(latest_round.decision_traces) if latest_round else []
     round_num = latest_round.round + 1 if latest_round else 0
 
     cs = CycleSlice(
@@ -659,5 +908,10 @@ def build_bundle(
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
-        digest=RoundDigest(diagnostics=latest_diag, critique=latest_crit),
+        digest=RoundDigest(
+            diagnostics=latest_diag,
+            critique=latest_crit,
+            decision_traces=latest_traces,
+        ),
+        axes=cycle.axes,
     )
