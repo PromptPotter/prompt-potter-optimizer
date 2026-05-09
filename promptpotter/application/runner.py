@@ -29,11 +29,7 @@ from promptpotter.application.optimization.observers import (
     RunObservers,
     build_run_observers,
 )
-from promptpotter.application.scoring.formula import (
-    apply_steer_file,
-    apply_zero_signal_exclusions,
-    split_scoring_block,
-)
+from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import (
     CampaignPhase,
@@ -49,11 +45,7 @@ from promptpotter.domain.run_records import (
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
-from promptpotter.presentation.writers import (
-    refresh_tenant_leaderboards,
-    write_log_md,
-    write_review_md,
-)
+from promptpotter.presentation.writers import write_log_md, write_review_md
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
@@ -154,8 +146,6 @@ def _persist_round(
             )
         write_log_md(session)
         write_review_md(session, cycle)
-        with graceful("Tenant leaderboard refresh failed"):
-            refresh_tenant_leaderboards(session)
 
     if _rr := session.state.audit_projection:
         _rr.flush()
@@ -174,107 +164,6 @@ def _count_positive_yield_axes(cycle: Cycle) -> int | None:
     from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
 
     return sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
-
-
-def _refresh_axes_and_filter(
-    cycle: Cycle,
-    config: CampaignConfig,
-    session: Session,
-    dataset: list[Sample],
-    round_num: int,
-    cb: RunCallbacks,
-) -> None:
-    """Refresh AxisIndex; round-boundary mutation #1 — prune zero-signal queries."""
-    if not cycle.axes:
-        return
-
-    if session.store and session.backend_id:
-        cycle.axes.refresh(
-            session.store,
-            session.backend_id,
-            scorer=session.scoring.scorer,
-            scorer_id=session.scoring.scorer_id,
-            scorer_formula=session.scoring.scorer_formula,
-        )
-
-    zsf = config.optimization.zero_signal_filter_enabled
-    dataset_name = session.dataset_name
-    if not (zsf and dataset_name and session.store is not None):
-        return
-
-    with graceful("Zero-signal filter failed"):
-        excluded = apply_zero_signal_exclusions(
-            store=session.store,
-            dataset_name=dataset_name,
-            axes=cycle.axes,
-            active_dataset=dataset,
-            min_observations=config.optimization.zero_signal_filter_min_observations,
-            campaign_id=session.state.cycle_id or "",
-        )
-        if not excluded:
-            return
-        excl_q = {e["query"] for e in excluded}
-        session.scoring.scoring_set[:] = [
-            s for s in session.scoring.scoring_set if s.query not in excl_q
-        ]
-        always_miss = sum(1 for e in excluded if e["hit_rate"] == 0.0)
-        emit_phase(
-            cb.on_phase,
-            "zero_signal_filter",
-            "applied",
-            round=round_num,
-            count=len(excluded),
-            always_miss=always_miss,
-            always_hit=len(excluded) - always_miss,
-            examples=[e["query"] for e in excluded[:3]],
-            dataset_name=dataset_name,
-        )
-
-
-def _evolve_scoring_set_if_enabled(
-    cycle: Cycle,
-    round_result: RoundResult,
-    round_num: int,
-    dataset: list[Sample],
-    config: CampaignConfig,
-    session: Session,
-    cb: RunCallbacks,
-) -> None:
-    """Round-boundary mutation #2 (off by default): Rasch+KG swap, in-memory only."""
-    exp_cfg = config.optimization.exploration
-    if not (exp_cfg.enabled and cycle.rounds):
-        return
-
-    from promptpotter.application.intelligence.exploration import (
-        build_scoring_set_event,
-        evolve_scoring_set,
-    )
-
-    with graceful("ScoringSet evolve failed"):
-        ss_result = evolve_scoring_set(
-            full_dataset=dataset,
-            current_scoring_set=session.scoring.scoring_set,
-            rounds=cycle.rounds,
-            config=exp_cfg,
-            elimination_n_min=config.optimization.elimination_n_min,
-        )
-        # Cache the posterior on the cycle so finalize can reuse it.
-        if ss_result.rasch is not None:
-            cycle.last_rasch_posterior = ss_result.rasch
-        if not (ss_result.swapped_in or ss_result.swapped_out):
-            return
-        session.scoring.scoring_set[:] = ss_result.new_scoring_set
-        event = build_scoring_set_event(round_num=round_num, result=ss_result)
-        round_result.scoring_set_events.append(event)
-        emit_phase(
-            cb.on_phase,
-            "scoring_set",
-            "evolved",
-            round=round_num,
-            swapped_out=event["swapped_out"],
-            swapped_in=event["swapped_in"],
-            new_scoring_set_size=event["new_scoring_set_size"],
-        )
 
 
 async def _post_round(
@@ -302,37 +191,18 @@ async def _post_round(
         axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
     )
-    # Emit the matched rule + signal snapshot so the SignalsProjection
-    # writes ``.runtime/signals.jsonl`` and the dashboard mirrors recent_rules.
-    emit_phase(
-        cb.on_phase,
-        "escalation",
-        "rule_fired",
-        round=round_num,
-        layer="post_round",
-        rule_name=event.rule_name,
-        rule_priority=event.rule_priority,
-        next_action=event.next_action.value,
-        reason=event.reason,
-        signal_inputs={
-            "improved": round_result.improved,
-            "current_accuracy": cycle.tracking.current_accuracy,
-            "l1_stall_count": cycle.escalation.l1_stall_count,
-            "l1_patience": config.optimization.l1_patience,
-            "axes_with_positive_yield": axes_with_positive_yield,
-        },
-    )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
     _persist_round(cycle, round_result, trial_dict, round_num, session)
 
-    # Hot-swap composite_fitness formula via scoring_steer.json BEFORE round-boundary
-    # mutations so next round evaluates under the new formula.
-    with graceful("Scoring steer apply failed"):
-        apply_steer_file(session, round_num, cb.on_phase)
-
-    _refresh_axes_and_filter(cycle, config, session, dataset, round_num, cb)
-    _evolve_scoring_set_if_enabled(cycle, round_result, round_num, dataset, config, session, cb)
+    if cycle.axes and session.store and session.backend_id:
+        cycle.axes.refresh(
+            session.store,
+            session.backend_id,
+            scorer=session.scoring.scorer,
+            scorer_id=session.scoring.scorer_id,
+            scorer_formula=session.scoring.scorer_formula,
+        )
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)
@@ -777,5 +647,3 @@ def _finalize_run(
                 )
         write_log_md(session, hard_samples_artifact=artifact)
         write_review_md(session, cycle)
-        with graceful("Tenant leaderboard refresh failed"):
-            refresh_tenant_leaderboards(session)

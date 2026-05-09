@@ -24,17 +24,13 @@ from __future__ import annotations
 
 import ast
 import hashlib
-import json
 import logging
 import math
 import re
 from collections.abc import Callable
-from datetime import UTC, datetime
-from pathlib import Path
 from types import SimpleNamespace
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.domain.phases import emit_phase
 from promptpotter.domain.scoring import (
     DEFAULT_SCORER_ID,
     RoundScorer,
@@ -43,19 +39,13 @@ from promptpotter.domain.scoring import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.application.bootstrap.session import Session
-    from promptpotter.application.intelligence.indexes import AxisIndex
-    from promptpotter.domain.phases import PhaseEvent
-    from promptpotter.infrastructure.store import Stores
+    pass
 
 logger = logging.getLogger(__name__)
 
 __all__ = [
     "DISPLAY_EXTRACTORS",
     "SCORING_FUNCTIONS",
-    "STEER_FILENAME",
-    "apply_steer_file",
-    "apply_zero_signal_exclusions",
     "auto_scorer_id",
     "compile_round_scorer",
     "compile_scorer",
@@ -64,9 +54,6 @@ __all__ = [
     "rescore_results",
     "split_scoring_block",
 ]
-
-
-STEER_FILENAME = "scoring_steer.json"
 
 
 # ---------------------------------------------------------------------------
@@ -451,156 +438,3 @@ def split_scoring_block(
     if isinstance(block, str) and block:
         return ScoringSpec(block, None, auto_scorer_id(block))
     return ScoringSpec(None, None, DEFAULT_SCORER_ID)
-
-
-# ---------------------------------------------------------------------------
-# Composite-score steering — between-round formula hot-swap
-# ---------------------------------------------------------------------------
-
-
-def _archive_name(ts: datetime) -> str:
-    return f"scoring_steer.applied.{ts.strftime('%Y%m%dT%H%M%S')}.json"
-
-
-def _read_steer_file(path: Path) -> dict | None:
-    """Load + shape-validate the steer file. Returns None on shape failure."""
-    try:
-        raw = path.read_text(encoding="utf-8").strip()
-    except OSError as exc:
-        logger.warning("scoring_steer: read failed (%s)", exc)
-        return None
-    if not raw:
-        return None
-    try:
-        parsed = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        logger.warning("scoring_steer: invalid JSON (%s) — leaving file in place", exc)
-        return None
-    if not isinstance(parsed, dict) or "per_round" not in parsed:
-        logger.warning(
-            "scoring_steer: missing 'per_round' key — got %r — leaving file in place",
-            list(parsed) if isinstance(parsed, dict) else type(parsed).__name__,
-        )
-        return None
-    return parsed
-
-
-def apply_steer_file(
-    session: Session,
-    round_num: int,
-    on_phase: Callable[[PhaseEvent], None] | None = None,
-) -> str | None:
-    """Hot-swap per_round formula via cycle/scoring_steer.json; archive on success."""
-    if not session.state.cycle_id or session.store is None:
-        return None
-
-    cycle_dir = session.store.campaigns.campaign_dir(session.state.cycle_id)
-    steer_path = cycle_dir / STEER_FILENAME
-    if not steer_path.exists():
-        return None
-
-    parsed = _read_steer_file(steer_path)
-    if parsed is None:
-        return None
-
-    formula = parsed["per_round"]
-    if not isinstance(formula, str) or not formula.strip():
-        logger.warning("scoring_steer: 'per_round' must be a non-empty string")
-        return None
-
-    try:
-        from promptpotter.application.scoring.evaluators import all_evaluators
-
-        smoke_ns = {ev.name: 0.5 for ev in all_evaluators() if ev.scope == "per_round"} | {
-            "accuracy": 0.5
-        }
-        scorer = compile_round_scorer(formula)
-        scorer(smoke_ns)
-    except (SyntaxError, NameError, TypeError, ValueError) as exc:
-        logger.warning(
-            "scoring_steer: formula failed to compile (%s) — leaving file in place. Formula: %s",
-            exc,
-            formula,
-        )
-        return None
-
-    prev_formula = session.scoring.scorer_round_formula
-    session.scoring.round_scorer = scorer
-    session.scoring.scorer_round_formula = formula
-
-    archive = cycle_dir / _archive_name(datetime.now(UTC))
-    try:
-        steer_path.rename(archive)
-    except OSError as exc:
-        logger.warning("scoring_steer: archive rename failed (%s)", exc)
-
-    emit_phase(
-        on_phase,
-        "scoring_steer",
-        "applied",
-        round=round_num,
-        formula=formula,
-        previous_formula=prev_formula,
-        archive=archive.name,
-    )
-    logger.info(
-        "scoring_steer: per_round formula swapped at round %d → %s",
-        round_num,
-        formula,
-    )
-    return formula
-
-
-# ---------------------------------------------------------------------------
-# Zero-signal sample filter — round-boundary deterministic dataset pruning
-# ---------------------------------------------------------------------------
-
-
-def apply_zero_signal_exclusions(
-    *,
-    store: Stores,
-    dataset_name: str,
-    axes: AxisIndex,
-    active_dataset: list,
-    min_observations: int,
-    campaign_id: str = "",
-) -> list[dict[str, Any]]:
-    """Prune always-hit / always-miss queries; mutates active_dataset in place."""
-    dead = axes.sample_index.dead(min_observations=min_observations)
-    if not dead:
-        return []
-
-    active_queries = {s.query for s in active_dataset}
-    new_exclusions = [d for d in dead if d.query in active_queries]
-    if not new_exclusions:
-        return []
-
-    exclusion_payload = [
-        {
-            "query": d.query,
-            "reason": "zero_signal",
-            "hit_rate": d.hit_rate,
-            "observations": d.n_measurements,
-            "campaign_id": campaign_id,
-        }
-        for d in new_exclusions
-    ]
-
-    moved = store.backends.exclude_dataset_items(
-        dataset_name,
-        exclusion_payload,
-    )
-    if moved == 0:
-        return []
-
-    excluded_set = {e["query"] for e in exclusion_payload}
-    active_dataset[:] = [s for s in active_dataset if s.query not in excluded_set]
-
-    logger.info(
-        "Zero-signal filter excluded %d samples from dataset %r (min_observations=%d, campaign=%s)",
-        moved,
-        dataset_name,
-        min_observations,
-        campaign_id or "-",
-    )
-    return exclusion_payload

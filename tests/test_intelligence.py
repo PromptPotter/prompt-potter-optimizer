@@ -33,7 +33,6 @@ from promptpotter.application.intelligence.hard_sample_archive import (
 )
 from promptpotter.application.intelligence.indexes import AxisIndex, SampleIndex
 from promptpotter.application.leaderboard import build_individuals_rows
-from promptpotter.application.scoring.formula import apply_zero_signal_exclusions
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
@@ -466,40 +465,3 @@ def test_exclude_and_restore_dataset_items(tmp_path: Path) -> None:
     assert data is not None
     assert {d["query"] for d in data["items"]} == {"a", "b", "c"}
     assert data["excluded"] == []
-
-
-def test_apply_zero_signal_exclusions_mutates_active_and_disk(tmp_path: Path) -> None:
-    store = build_stores(tmp_path / "projects", datasets_root=tmp_path / "datasets")
-    samples = [
-        Sample(id=0, query="always_miss", ground_truth="X"),
-        Sample(id=1, query="always_hit", ground_truth="Y"),
-        Sample(id=2, query="varies", ground_truth="Z"),
-    ]
-    store.backends.save_dataset("train", samples)
-
-    axes = _seed_axes(
-        {
-            "always_miss": [False] * 6,
-            "always_hit": [True] * 6,
-            "varies": [True, False, True, False, True],
-        }
-    )
-    active = list(samples)
-
-    excluded = apply_zero_signal_exclusions(
-        store=store,
-        dataset_name="train",
-        axes=axes,
-        active_dataset=active,
-        min_observations=5,
-        campaign_id="cyc_test",
-    )
-
-    assert {e["query"] for e in excluded} == {"always_miss", "always_hit"}
-    # In-memory list was mutated in place.
-    assert [s.query for s in active] == ["varies"]
-    # Disk mirrors the same decision.
-    data = store.backends.load_dataset("train")
-    assert data is not None
-    assert [d["query"] for d in data["items"]] == ["varies"]
-    assert {e["item"]["query"] for e in data["excluded"]} == {"always_miss", "always_hit"}

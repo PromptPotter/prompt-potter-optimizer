@@ -10,9 +10,8 @@ Each module here owns one view over the ledger's record stream:
   ``campaigns/{cycle_id}/.runtime/cache/rounds/round_NNNN.json``. Per-cycle
   scope; constructor takes ``CycleDir`` so a fork's recorder cannot
   accidentally write to the parent's tree.
-* :mod:`signals` — appends escalation rule firings to
-  ``campaigns/{cycle_id}/.runtime/signals.jsonl``. Per-cycle scope;
-  constructor takes ``CycleDir``.
+* :mod:`pobb_stream` — appends per-sample P(best) updates to
+  ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 """
 
 from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
@@ -25,14 +24,12 @@ from promptpotter.infrastructure.projections.live_state import (
     top_n_p_best,
 )
 from promptpotter.infrastructure.projections.pobb_stream import PoBBStreamView
-from promptpotter.infrastructure.projections.signals import SignalsProjection
 
 __all__ = [
     "AuditTrailView",
     "LiveDashboardView",
     "LiveStateCore",
     "PoBBStreamView",
-    "SignalsProjection",
     "apply_p_best_update",
     "apply_phase",
     "roll_p_best_at_round_complete",

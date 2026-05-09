@@ -278,9 +278,6 @@ class Cycle:
             "evaluators": dict(rr.evaluators),
             "critique": rr.critique,
             "opt_search_point": self.opt_sp.model_dump(),
-            **(
-                {"scoring_set_events": list(rr.scoring_set_events)} if rr.scoring_set_events else {}
-            ),
         }
 
     def baseline_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundBaseline:

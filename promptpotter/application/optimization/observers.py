@@ -29,7 +29,6 @@ from promptpotter.infrastructure.projections import (
     AuditTrailView,
     LiveDashboardView,
     PoBBStreamView,
-    SignalsProjection,
 )
 from promptpotter.presentation.views.view_factories import (
     from_phase_event,
@@ -190,7 +189,6 @@ class RunObservers:
     audit: AuditTrailView
     dashboard: LiveDashboardView
     pobb: PoBBStreamView
-    signals: SignalsProjection
     display: LiveDisplay | None
 
 
@@ -271,7 +269,6 @@ def build_run_observers(
     audit.rehydrate_sticky()
     session.state.audit_projection = audit
     pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
-    signals = SignalsProjection.from_cycle_dir(cycle_dir)
 
     ledger = CycleEventLog.open(cycle_dir)
     if fork is None:
@@ -299,7 +296,6 @@ def build_run_observers(
     if display is not None:
         ledger.bind(display)
     ledger.bind(pobb)
-    ledger.bind(signals)
     session.state.ledger = ledger
 
     callbacks = RunCallbacks(ledger=ledger)
@@ -316,6 +312,5 @@ def build_run_observers(
         audit=audit,
         dashboard=dashboard,
         pobb=pobb,
-        signals=signals,
         display=display,
     )

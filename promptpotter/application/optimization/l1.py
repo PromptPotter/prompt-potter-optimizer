@@ -24,7 +24,6 @@ from promptpotter.application.optimization.formatting import candidate_summaries
 from promptpotter.application.optimization.l1_critique import run_l1_critique
 from promptpotter.application.optimization.l1_population import (
     INVALID_SCORES,
-    build_decision_trace,
     build_score_report,
     parse_population,
     pobb_decision_data,
@@ -240,18 +239,13 @@ class CandidateOutcome(StrEnum):
 class CandidateRunResult:
     """One candidate's full lifecycle output. ``runtime_failure`` is the
     caller's signal to append to ``osp_c.runtime_failures``; the function
-    cannot mutate it directly because the OSP is shared with other paths.
-
-    ``decision_traces`` carry the per-candidate narrative (eliminate /
-    complete) records produced this candidate's lifecycle — empty for
-    SKIPPED_VALIDATION / REPLAYED_FROM_CACHE / aborted paths."""
+    cannot mutate it directly because the OSP is shared with other paths."""
 
     outcome: CandidateOutcome
     results: list[QueryMeasurement] = field(default_factory=list)
     report: CandidateScore = None  # type: ignore[assignment]
     runtime_failure: RuntimeFailure | None = None
     escalation_signal: EscalationSignal | None = None
-    decision_traces: list[dict] = field(default_factory=list)
 
 
 @dataclass(frozen=True)
@@ -450,14 +444,6 @@ async def score_one_candidate(
         elim_check.register_completed(
             [r.get("fitness", 0.0) for r in results], candidate_id=osp_c.lineage.id
         )
-        cache_trace = build_decision_trace(
-            decision_kind="complete",
-            candidate_id=osp_c.lineage.id,
-            at_sample_index=len(results),
-            p_best_at_decision=None,
-            snapshot={},
-            sample_outcomes=[bool(r.get("hit", False)) for r in results],
-        )
         return CandidateRunResult(
             outcome=CandidateOutcome.REPLAYED_FROM_CACHE,
             results=results,
@@ -470,7 +456,6 @@ async def score_one_candidate(
                 resumed_from_cache=True,
                 l1_diversity=l1_diversity,
             ),
-            decision_traces=[cache_trace],
         )
 
     # Path 3 — scored. Snapshot priors BEFORE eval registers this candidate.
@@ -543,48 +528,6 @@ async def score_one_candidate(
             round=round_num,
         )
 
-    sample_outcomes = [bool(r.get("hit", False)) for r in results]
-    decision_traces: list[dict] = []
-    if effect.elimination_decision is not None:
-        _, data = effect.elimination_decision
-        decision_traces.append(
-            build_decision_trace(
-                decision_kind="eliminate",
-                candidate_id=osp_c.lineage.id,
-                at_sample_index=len(results),
-                p_best_at_decision=float(data.get("p_best", 0.0)),
-                snapshot=data.get("p_best_snapshot") or {},
-                sample_outcomes=sample_outcomes,
-            )
-        )
-    elif effect.leader_lock_decision is not None:
-        _, data = effect.leader_lock_decision
-        decision_traces.append(
-            build_decision_trace(
-                decision_kind="complete",
-                candidate_id=osp_c.lineage.id,
-                at_sample_index=len(results),
-                p_best_at_decision=float(data.get("p_best", 0.0)),
-                snapshot=data.get("p_best_snapshot") or {},
-                sample_outcomes=sample_outcomes,
-            )
-        )
-    elif len(results) == len(dataset) and not effect.aborted:
-        # Full-completion: scored every sample without elim or lock-in.
-        # Pull the most recent posterior snapshot if PoBB had one.
-        snap_obj = elim_check.latest_snapshot()
-        snap = snap_obj.p_best if snap_obj else {}
-        decision_traces.append(
-            build_decision_trace(
-                decision_kind="complete",
-                candidate_id=osp_c.lineage.id,
-                at_sample_index=len(results),
-                p_best_at_decision=snap.get(osp_c.lineage.id) if snap else None,
-                snapshot=snap,
-                sample_outcomes=sample_outcomes,
-            )
-        )
-
     residual = (
         None if (effect.elimination_stopped or effect.leader_locked_loose or not signal) else signal
     )
@@ -600,7 +543,6 @@ async def score_one_candidate(
         report=report,
         runtime_failure=effect.runtime_failure,
         escalation_signal=residual if outcome == CandidateOutcome.ESCALATED else None,
-        decision_traces=decision_traces,
     )
 
 
@@ -616,7 +558,6 @@ async def score_population(
     pobb_config: PoBBConfig,
     round_num: int = 0,
     decisions: list[ResumeCheckpointRecord] | None = None,
-    decision_traces: list[dict] | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
     """Score each individual; dispatch over three exit paths (validation/cache/scored).
@@ -665,8 +606,6 @@ async def score_population(
         all_candidate_results[osp_c.lineage.id] = cr_result.results
         if cr_result.runtime_failure is not None:
             osp_c.runtime_failures = [*osp_c.runtime_failures, cr_result.runtime_failure]
-        if decision_traces is not None and cr_result.decision_traces:
-            decision_traces.extend(cr_result.decision_traces)
         candidate_scores.append(cr_result.report)
         callbacks.on_candidate_scored(idx, n, cr_result.report.to_dict())
         if obs:
@@ -719,7 +658,6 @@ async def l1_score(
 
     osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
     decisions: list[ResumeCheckpointRecord] = []
-    decision_traces: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
         osp_population,
@@ -731,7 +669,6 @@ async def l1_score(
         pobb_config=pobb_config,
         round_num=round_num,
         decisions=decisions,
-        decision_traces=decision_traces,
         l1_diversity=yield_stats.l1_yield,
     )
 
@@ -782,23 +719,6 @@ async def l1_score(
         round=round_num,
     )
 
-    # Round-winner narrative trace: mirror the PoBB sites' shape but use
-    # accuracy as the leaderboard metric (no per-sample posterior at
-    # round end). Skipped when no candidate beat the baseline.
-    if winner_id:
-        winner_results = all_candidate_results.get(winner_id, [])
-        accuracy_snapshot = {cs.candidate_id: cs.accuracy for cs in candidate_scores}
-        decision_traces.append(
-            build_decision_trace(
-                decision_kind="promote",
-                candidate_id=winner_id,
-                at_sample_index=len(winner_results),
-                p_best_at_decision=None,
-                snapshot=accuracy_snapshot,
-                sample_outcomes=[bool(r.get("hit", False)) for r in winner_results],
-            )
-        )
-
     base = _compute_accuracy(best_results)
     improved = best_acc > baseline.accuracy + improvement_threshold
     p_value: float | None = None
@@ -825,7 +745,6 @@ async def l1_score(
         candidates_scored=len(scored),
         candidate_scores=[cs.to_dict() for cs in candidate_scores],
         decisions=[d.to_dict() for d in decisions],
-        decision_traces=list(decision_traces),
         degraded_samples=count_degraded_samples(best_results),
         deprecated=base["deprecated"],
         escalation_signal=escalation_signal,

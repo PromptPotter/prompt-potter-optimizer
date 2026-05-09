@@ -168,7 +168,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
         opt_sp=opt_sp,
         pipeline_schema=None,
         cycle_slice=cycle_slice,
-        digest=RoundDigest(diagnostics=diag, critique=None, decision_traces=[]),
+        digest=RoundDigest(diagnostics=diag, critique=None),
         axes=None,
     )
 

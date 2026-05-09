@@ -557,7 +557,7 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
         opt_sp=OptSearchPoint(),
         pipeline_schema=None,
         cycle_slice=_empty_cycle_slice(),
-        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+        digest=RoundDigest(diagnostics=None, critique=None),
         axes=fake_axes,
     )
     out = DispatchHub.render("axis_memory", bundle)
@@ -578,7 +578,7 @@ def test_axis_memory_empty_when_axes_or_digest_absent():
         "opt_sp": OptSearchPoint(),
         "pipeline_schema": None,
         "cycle_slice": _empty_cycle_slice(),
-        "digest": RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+        "digest": RoundDigest(diagnostics=None, critique=None),
     }
 
     no_axes = InjectionBundle(**base_kwargs, axes=None)
@@ -597,59 +597,6 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 
     assert "axis_memory" in L1_POSSIBLE
     assert "axis_memory" in default_l1_layout().problem_description
-
-
-def test_decision_trace_summary_signal():
-    """Phase 3.3: decision_trace_summary renders the latest round's traces compactly."""
-    from promptpotter.application.optimization.dispatch_hub import (
-        DispatchHub,
-        InjectionBundle,
-        RoundDigest,
-    )
-    from promptpotter.application.optimization.l1_population import build_decision_trace
-
-    traces = [
-        build_decision_trace(
-            decision_kind="eliminate",
-            candidate_id="cand_aaa",
-            at_sample_index=4,
-            p_best_at_decision=0.03,
-            snapshot={"cand_bbb": 0.78, "cand_aaa": 0.03},
-            sample_outcomes=[True, False, False, True],
-        ),
-        build_decision_trace(
-            decision_kind="promote",
-            candidate_id="cand_bbb",
-            at_sample_index=8,
-            p_best_at_decision=None,
-            snapshot={"cand_bbb": 0.62, "cand_aaa": 0.05},
-            sample_outcomes=[True] * 6 + [False] * 2,
-        ),
-    ]
-    bundle = InjectionBundle(
-        opt_sp=OptSearchPoint(),
-        pipeline_schema=None,
-        cycle_slice=_empty_cycle_slice(),
-        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=traces),
-        axes=None,
-    )
-
-    out = DispatchHub.render("decision_trace_summary", bundle)
-    assert out.startswith("DECISION TRACES")
-    assert "eliminate c=cand_aaa@s4" in out
-    assert "promote c=cand_bbb@s8" in out
-    assert "P(best)=0.03" in out
-    assert "hits=6 misses=2" in out
-
-    # Empty digest path renders nothing.
-    empty = InjectionBundle(
-        opt_sp=OptSearchPoint(),
-        pipeline_schema=None,
-        cycle_slice=_empty_cycle_slice(),
-        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
-        axes=None,
-    )
-    assert DispatchHub.render("decision_trace_summary", empty) == ""
 
 
 # ===========================================================================
@@ -754,80 +701,3 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         escalate_on_yield_drought=True,
     )
     assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
-
-
-# ===========================================================================
-# Phase 3.1 — DecisionTrace data model (scaffolding for mid-round diagnosis)
-# ===========================================================================
-#
-# Phase 3 of the Routed Dispatch plan needs richer per-candidate decision
-# context than the current `Decision` records carry. DecisionTrace is the
-# data shape; writer + reader land in Phase 3.2+. One contract test:
-# extra="forbid" + frozen, plus model_dump_json round-trips losslessly.
-
-
-def test_decision_trace_shape_and_json_roundtrip():
-    """DecisionTrace is frozen + extra-forbid; survives a JSON round-trip."""
-    from promptpotter.domain.decision_trace import DecisionTrace
-
-    trace = DecisionTrace(
-        decision_kind="eliminate",
-        candidate_id="c3",
-        at_sample_index=6,
-        p_best_at_decision=0.03,
-        leaderboard_at_decision=[("c1", 0.78), ("c2", 0.45), ("c3", 0.03)],
-        sample_outcomes_so_far=[True, True, False, True, False, False],
-        target_axis="persona",
-    )
-
-    # extra="forbid" — unknown kwarg rejected by Pydantic.
-    with pytest.raises(Exception):  # noqa: B017 — Pydantic ValidationError
-        DecisionTrace(
-            decision_kind="eliminate",
-            candidate_id="c3",
-            at_sample_index=0,
-            unknown_field="x",
-        )
-
-    # JSON round-trip: equal after dump+reload.
-    reloaded = DecisionTrace.model_validate_json(trace.model_dump_json())
-    assert reloaded == trace
-
-
-def test_build_decision_trace_writer_contract():
-    """build_decision_trace dumps the wire shape; leaderboard is sorted desc + top-K."""
-    from promptpotter.application.optimization.l1_population import build_decision_trace
-    from promptpotter.domain.decision_trace import DecisionTrace
-
-    snapshot = {"a": 0.10, "b": 0.55, "c": 0.20, "d": 0.05, "e": 0.05, "f": 0.05}
-    trace_dict = build_decision_trace(
-        decision_kind="eliminate",
-        candidate_id="a",
-        at_sample_index=4,
-        p_best_at_decision=0.10,
-        snapshot=snapshot,
-        sample_outcomes=[True, False, False, True],
-    )
-
-    leaderboard = trace_dict["leaderboard_at_decision"]
-    assert [cid for cid, _ in leaderboard] == ["b", "c", "a", "d", "e"]
-    assert all(leaderboard[i][1] >= leaderboard[i + 1][1] for i in range(len(leaderboard) - 1))
-
-    # Wire shape must round-trip back into the frozen model.
-    reloaded = DecisionTrace.model_validate(trace_dict)
-    assert reloaded.decision_kind == "eliminate"
-    assert reloaded.candidate_id == "a"
-    assert reloaded.sample_outcomes_so_far == [True, False, False, True]
-
-    # All three kinds accepted.
-    for kind in ("eliminate", "complete", "promote"):
-        DecisionTrace.model_validate(
-            build_decision_trace(
-                decision_kind=kind,
-                candidate_id="x",
-                at_sample_index=0,
-                p_best_at_decision=None,
-                snapshot=None,
-                sample_outcomes=[],
-            )
-        )

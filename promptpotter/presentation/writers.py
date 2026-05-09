@@ -7,13 +7,12 @@ must stay display-only per CLAUDE.md).
 from __future__ import annotations
 
 import json
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store import archive_views, root_cycle_id
+from promptpotter.infrastructure.store import root_cycle_id
 from promptpotter.presentation.views.render_markdown import to_markdown
 from promptpotter.presentation.views.view_factories import from_disk_log
 from promptpotter.shared.errors import graceful
@@ -22,11 +21,7 @@ if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.optimization.cycle import Cycle
 
-__all__ = [
-    "refresh_tenant_leaderboards",
-    "write_log_md",
-    "write_review_md",
-]
+__all__ = ["write_log_md", "write_review_md"]
 
 
 def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:
@@ -97,110 +92,6 @@ def _load_fork_indices(cycle_dir: Path) -> list[dict] | None:
         except (OSError, json.JSONDecodeError):
             continue
     return out
-
-
-def refresh_tenant_leaderboards(session: Session) -> None:
-    """Refresh tenant archive/ dashboards: runs.md, individuals.md, hard_samples.md, README.md."""
-    from promptpotter.application.intelligence.hard_sample_archive import (
-        build_archive_hard_samples_artifact,
-    )
-    from promptpotter.application.leaderboard import (
-        build_individuals_rows,
-        build_leaderboard_rows,
-        format_individuals_md,
-        format_runs_md,
-    )
-    from promptpotter.presentation.views.render_markdown import render_hard_sample_heatmap
-
-    if session.store is None:
-        return
-    out_dir = session.store.base_dir / "archive"
-    out_dir.mkdir(parents=True, exist_ok=True)
-
-    backend_id = session.backend_id
-    generated_at = datetime.now(UTC).strftime("%Y-%m-%d %H:%M UTC")
-
-    with graceful("archive/ refresh failed"):
-        rows = build_leaderboard_rows(session.store)
-        dataset_label = _pick_dataset_label(rows)
-        runs_body = f"# Runs\n\n_Generated {generated_at}._\n\n" + format_runs_md(rows)
-        (out_dir / "runs.md").write_text(runs_body, encoding="utf-8")
-
-        ind_rows = build_individuals_rows(session.store, backend_id)
-        ind_body = f"# Individuals\n\n_Generated {generated_at}._\n\n" + format_individuals_md(
-            ind_rows
-        )
-        (out_dir / "individuals.md").write_text(ind_body, encoding="utf-8")
-
-        artifact = build_archive_hard_samples_artifact(session.store, backend_id)
-        sample_lookup = _build_sample_query_lookup(session.store, backend_id)
-        heatmap = render_hard_sample_heatmap(artifact, sample_query_lookup=sample_lookup)
-        title = f"# Hard Samples — {dataset_label}" if dataset_label else "# Hard Samples"
-        if heatmap:
-            hs_body = f"{title}\n\n_Generated {generated_at}._\n\n```\n{heatmap}\n```\n"
-        else:
-            hs_body = (
-                f"{title}\n\n_Generated {generated_at}._\n\n"
-                "_No measurements yet — run a cycle first._\n"
-            )
-        (out_dir / "hard_samples.md").write_text(hs_body, encoding="utf-8")
-
-        (out_dir / "README.md").write_text(_render_archive_readme(), encoding="utf-8")
-
-
-def _pick_dataset_label(rows: list[Any]) -> str:
-    """Pick a single dataset label for headers when one dominates."""
-    seen: dict[str, int] = {}
-    for r in rows:
-        d = getattr(r, "dataset", "") or ""
-        if d and d != "?":
-            seen[d] = seen.get(d, 0) + 1
-    if not seen:
-        return ""
-    if len(seen) == 1:
-        return next(iter(seen))
-    return ", ".join(sorted(seen))
-
-
-def _build_sample_query_lookup(stores: Any, backend_id: str) -> dict[int, str]:
-    """First-seen ``sample_id → query`` map across the archive."""
-    out: dict[int, str] = {}
-    for entry in archive_views.list_runs(stores, backend_id):
-        run_id = entry.get("run_id")
-        if not run_id:
-            continue
-        detail = archive_views.load_run(stores, backend_id, run_id)
-        if detail is None:
-            continue
-        for item in detail.get("measurements", []):
-            sid = item.get("sample_id")
-            if sid is None:
-                continue
-            sid_int = int(sid)
-            if sid_int in out:
-                continue
-            q = (item.get("query") or "").strip()
-            if q:
-                out[sid_int] = q
-    return out
-
-
-def _render_archive_readme() -> str:
-    return (
-        "# archive — cross-cycle dashboards for this tenant\n"
-        "\n"
-        "Open the .md files at the top of this folder to see what's been measured.\n"
-        "\n"
-        "| File              | Question it answers                                            |\n"
-        "|-------------------|----------------------------------------------------------------|\n"
-        "| `runs.md`         | What cycles has this tenant produced and how did they go?      |\n"
-        "| `individuals.md`  | Which target configs have been measured, ranked by mean score? |\n"
-        "| `hard_samples.md` | Which dataset samples are hardest? Heatmap + Rasch leaderboard.|\n"
-        "\n"
-        "Subdirs hold machine state the optimizer needs at runtime — measurement\n"
-        "facts, prompt-alias dedup, backend registrations. Don't read these by hand;\n"
-        "each .md above derives its view from this archive on every round-end.\n"
-    )
 
 
 def write_review_md(session: Session, cycle: Cycle) -> None:
