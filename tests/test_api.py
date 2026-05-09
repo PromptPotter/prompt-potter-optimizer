@@ -168,7 +168,7 @@ def test_active_returns_404_when_pointer_missing(
 ) -> None:
     client, _ = seeded_tenant
     monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH",
+        "promptpotter.infrastructure.store._ACTIVE_SESSION_PATH",
         tmp_path / "missing_active.json",
     )
     resp = client.get("/api/v1/active")
@@ -187,7 +187,7 @@ def test_active_returns_pointer_when_present(
         encoding="utf-8",
     )
     monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH",
+        "promptpotter.infrastructure.store._ACTIVE_SESSION_PATH",
         pointer_path,
     )
     resp = client.get("/api/v1/active")

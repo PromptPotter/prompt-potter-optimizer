@@ -187,7 +187,7 @@ All 21 extant routes load-bearing or sanctioned (backend registration, multi-bac
 
 **`presentation/writers.py::refresh_tenant_leaderboards()`:**
 
-Writes `archive/runs.md`, `archive/individuals.md`, `archive/hard_samples.md`, `archive/README.md`. Called from `runner.py:158, 781`. **Verdict: DROP candidate.** No CLAUDE.md / docs / `/potter-run` skill mentions of the output files. Aspirational write-side surface with no confirmed read-side consumer. Data is derivable from MeasurementArchive on demand.
+Writes `archive/runs.md`, `archive/individuals.md`, `archive/hard_samples.md`, `archive/README.md`. Called from `runner.py:158, 781`. **Verdict: DROP candidate.** No CLAUDE.md / docs / `/potter-run` skill mentions of the output files. Aspirational write-side surface with no confirmed read-side consumer. Data is derivable from MeasurementArchive on demand. **DROPPED in pass-3 commit 1** — runtime trigger gone in pass-1 commit 3 (`refresh_tenant_leaderboards`); pass-3 deletes the underlying `application/leaderboard.py` (413 LOC) + `scripts/ppot_review.py` + the leaderboard-shaped test in `tests/test_intelligence.py`.
 
 **`infrastructure/tracing/mlflow_sink.py`:**
 

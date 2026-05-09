@@ -43,7 +43,6 @@ def build_campaign_emitter(
     recorder: Any | None = None,
 ) -> Any:
     """Build the live dashboard projection from session + config. Single factory shared by CLI and runner."""
-    from promptpotter.application.scoring.evaluators import evaluators_meta
     from promptpotter.infrastructure.projections import LiveDashboardView
 
     opt = campaign_config.optimization
@@ -57,7 +56,6 @@ def build_campaign_emitter(
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         resumed_from_round=resumed_from_round,
         recorder=recorder,
-        evaluators_meta=evaluators_meta(),
     )
 
 

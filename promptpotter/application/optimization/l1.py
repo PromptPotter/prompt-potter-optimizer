@@ -26,7 +26,6 @@ from promptpotter.application.optimization.dispatch_hub import (
     format_l1_critique_for_prompt,
 )
 from promptpotter.application.optimization.elimination import PoBBCheck, PoBBConfig
-from promptpotter.application.optimization.formatting import candidate_summaries
 from promptpotter.application.optimization.l1_critique import run_l1_critique
 from promptpotter.application.optimization.l1_population import (
     INVALID_SCORES,
@@ -100,6 +99,23 @@ __all__ = [
     "l1_score",
     "score_population",
 ]
+
+
+def candidate_summaries(proposals: list[CandidateProposal]) -> list[dict]:
+    """Build compact per-candidate summary dicts for phase event data."""
+    summaries = []
+    for i, cp in enumerate(proposals):
+        prompt_fields = {k: getattr(cp.osp, k) for k in PROMPT_STRING_FIELDS if getattr(cp.osp, k)}
+        summary: dict = {
+            "idx": i,
+            "changes_description": cp.osp.lineage.changes_description or "",
+        }
+        if cp.pipeline_params_override:
+            summary["pipeline_params_override"] = cp.pipeline_params_override
+        if prompt_fields:
+            summary["prompt_fields"] = prompt_fields
+        summaries.append(summary)
+    return summaries
 
 
 # ---------------------------------------------------------------------------

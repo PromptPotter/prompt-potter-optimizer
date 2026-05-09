@@ -27,10 +27,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field
 
 from promptpotter import connectors
-from promptpotter.application.bootstrap.pipeline_view import compute_pipeline_view
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
+from promptpotter.domain.pipeline_parsing import parse_pipeline_response
+from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
 from promptpotter.infrastructure.backend import BackendClient
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -217,14 +218,22 @@ async def get_pipeline(backend_id: str, store: StoreDep):
         auth_token=settings.TERMNORM_TOKEN or None,
     )
 
-    view = await compute_pipeline_view(client)
+    try:
+        raw: dict[str, Any] | None = await client.fetch_pipeline()
+        source = "live"
+    except Exception:
+        logger.warning("Backend unreachable at %s; returning empty schema", client.base_url)
+        raw = None
+        source = "default"
+
+    schema = parse_pipeline_response(raw) if raw is not None else PipelineSchema()
 
     return PipelineViewResponse(
         backend_id=backend_id,
-        backend_pipeline=view["backend_pipeline"],
-        computed_nodes=view["computed_nodes"],
-        fetched_at=view["fetched_at"],
-        source=view["source"],
+        backend_pipeline=schema.model_dump(),
+        computed_nodes=[s.model_dump() for s in schema.nodes],
+        fetched_at=datetime.now(UTC).isoformat(),
+        source=source,
     )
 
 

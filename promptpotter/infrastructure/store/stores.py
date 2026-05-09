@@ -1,15 +1,28 @@
-"""Composite ``Stores`` bundle — frozen dataclass + builder."""
+"""Composite ``Stores`` bundle — frozen dataclass + builder.
+
+Also owns :class:`OptimizerCallCache` and :func:`hash_call` — content-addressed
+cache for optimizer LLM responses, keyed by SHA-256 of byte-identical inputs.
+Cross-cycle / cross-fork by construction; mirrors :class:`MeasurementArchive`'s
+file-per-record pattern at ``<base_dir>/archive/optimizer_calls/{hash}.json``.
+"""
 
 from __future__ import annotations
 
+import hashlib
+import json
+import logging
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 from promptpotter.infrastructure.store.backend_store import BackendStore
-from promptpotter.infrastructure.store.base import validate_path_component
+from promptpotter.infrastructure.store.base import (
+    read_json_optional,
+    validate_path_component,
+    write_json,
+)
 from promptpotter.infrastructure.store.campaign_store import CampaignStore
 from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
-from promptpotter.infrastructure.store.optimizer_call_cache import OptimizerCallCache
 from promptpotter.infrastructure.store.paths import (
     DEFAULT_DATASETS_ROOT,
     DEFAULT_PROJECTS_ROOT,
@@ -17,6 +30,58 @@ from promptpotter.infrastructure.store.paths import (
 )
 from promptpotter.infrastructure.store.session_store import SessionStore
 from promptpotter.infrastructure.store.sweep_store import SweepStore
+from promptpotter.shared.hashing import HASH_TRUNCATE
+
+logger = logging.getLogger(__name__)
+
+
+def hash_call(
+    *,
+    messages: list[dict[str, str]],
+    model: str | None,
+    provider: str,
+    temperature: float,
+    json_schema: dict | None,
+) -> str:
+    """SHA-256 (truncated to 24 hex) of the byte-identical LLM-call inputs."""
+    blob = json.dumps(
+        {
+            "messages": messages,
+            "model": model,
+            "provider": provider,
+            "temperature": temperature,
+            "json_schema": json_schema,
+        },
+        sort_keys=True,
+    )
+    return hashlib.sha256(blob.encode()).hexdigest()[:HASH_TRUNCATE]
+
+
+class OptimizerCallCache:
+    """File-backed cache for optimizer LLM responses keyed by input hash.
+
+    Consumed by :func:`promptpotter.application.optimization.llm_call.llm_call`
+    — if a hash hits, the stored ``LLMResponse.model_dump()`` is replayed and
+    the real LLM call is skipped.
+    """
+
+    def __init__(self, base_dir: Path):
+        self._base_dir = base_dir
+
+    def _dir(self) -> Path:
+        return self._base_dir / "archive" / "optimizer_calls"
+
+    def _path(self, key: str) -> Path:
+        return self._dir() / f"{key}.json"
+
+    def load(self, key: str) -> dict[str, Any] | None:
+        """Return the cached ``LLMResponse.model_dump()`` dict, or ``None``."""
+        return read_json_optional(self._path(key))
+
+    def save(self, key: str, value: dict[str, Any]) -> None:
+        """Persist ``value`` under ``key``. ``value`` is ``LLMResponse.model_dump()``."""
+        write_json(self._path(key), value)
+        logger.debug("OptimizerCallCache: saved %s", key)
 
 
 @dataclass(frozen=True)

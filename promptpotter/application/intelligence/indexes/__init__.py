@@ -43,7 +43,6 @@ from promptpotter.application.intelligence.indexes.axis import (
 from promptpotter.application.intelligence.indexes.config import ConfigIndex
 from promptpotter.application.intelligence.indexes.sample import (
     FailureCluster,
-    HardnessRecord,
     SampleIndex,
     SampleRecord,
 )
@@ -54,7 +53,6 @@ __all__ = [
     "AxisIndex",
     "ConfigIndex",
     "FailureCluster",
-    "HardnessRecord",
     "SampleIndex",
     "SampleRecord",
     "ValueRecord",

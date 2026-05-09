@@ -12,8 +12,7 @@ Four named invariants:
      ``measurements_for_config`` full scan.
   3. Cross-cycle aggregators — ``StopReason.DIAG_COMPLETE`` is a named
      wire-shape member; ``build_archive_observations`` keys candidates by
-     ``content_hash[:12]`` and drops error/missing-id rows;
-     ``build_individuals_rows`` aggregates per-sample score across runs.
+     ``content_hash[:12]`` and drops error/missing-id rows.
   4. Zero-signal filter — ``SampleIndex.dead`` respects ``min_observations``
      and ``include_always_hit``; ``BackendStore.exclude_dataset_items`` /
      ``restore_dataset_items`` round-trip; ``apply_zero_signal_exclusions``
@@ -32,7 +31,6 @@ from promptpotter.application.intelligence.hard_sample_archive import (
     build_archive_observations,
 )
 from promptpotter.application.intelligence.indexes import AxisIndex, SampleIndex
-from promptpotter.application.leaderboard import build_individuals_rows
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.sample import Sample
 from promptpotter.infrastructure.store import build_stores
@@ -366,42 +364,6 @@ def test_archive_observations_use_content_hash_prefix(
     assert len(obs) == 2
     assert all(o.candidate_id == long_hash[:12] for o in obs)
     assert {o.sample_id for o in obs} == {1, 2}
-
-
-def test_individuals_rows_aggregate_and_filter_errors(
-    aggregator_archive: MeasurementArchive,
-) -> None:
-    """One row per ``content_hash``; ``mean_score`` computed from non-error
-    items only. The numerical contract behind ``individuals.md``."""
-    _seed_cross_cycle(
-        aggregator_archive,
-        run_id="run_a",
-        content_hash="hash_aaaaaaaaaaaaa",
-        items=[
-            _cross_cycle_item(1, hit=True, fitness=1.0),
-            _cross_cycle_item(2, hit=True, fitness=0.5),
-            _cross_cycle_item(3, hit=False, fitness=0.0),
-            _cross_cycle_item(4, hit=False, error=True),  # dropped
-        ],
-    )
-    _seed_cross_cycle(
-        aggregator_archive,
-        run_id="run_b",
-        content_hash="hash_bbbbbbbbbbbbb",
-        items=[
-            _cross_cycle_item(10, hit=False, fitness=0.0),
-            _cross_cycle_item(11, hit=False, fitness=0.0),
-        ],
-    )
-    stores = SimpleNamespace(archive=aggregator_archive)
-    rows = build_individuals_rows(stores, "bk")
-    by_hash = {r.jsp_hash: r for r in rows}
-    a = by_hash["hash_aaa"]
-    b = by_hash["hash_bbb"]
-    assert a.n_samples == 3
-    assert a.mean_score == pytest.approx((1.0 + 0.5 + 0.0) / 3)
-    assert b.n_samples == 2
-    assert b.mean_score == 0.0
 
 
 # ===========================================================================

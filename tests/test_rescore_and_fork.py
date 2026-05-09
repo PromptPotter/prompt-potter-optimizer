@@ -146,9 +146,7 @@ def testfork_at_divergence_drops_round_R_and_sets_parent_pointer(
     old_cycle = "cycle_abc123"
     rounds = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=4)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     new_cycle = fork_at_divergence(
@@ -189,9 +187,7 @@ def testfork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mon
     old_cycle = "cycle_fork_cut_test"
     rounds = _seed_cycle(tmp_path, tenant, old_cycle, n_rounds=3)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(old_cycle)
@@ -305,9 +301,7 @@ def test_fork_for_diag_sibling_mints_counted_id_and_clears_rounds(
     parent_index_path.write_text(json.dumps(parent_index), encoding="utf-8")
 
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     sib1 = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
@@ -346,9 +340,7 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     parent = "cycle_diagparent2"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(parent)
@@ -388,9 +380,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
         '[{"osp": {"persona": "stale parent population"}}]', encoding="utf-8"
     )
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     payload = SweepPayload(reason="probe")
@@ -441,9 +431,7 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     parent = "cycle_sweepparent2"
     _seed_cycle(tmp_path, tenant, parent, n_rounds=1)
     ptr = tmp_path / ".promptpotter" / "active_session.json"
-    monkeypatch.setattr(
-        "promptpotter.infrastructure.store.active_pointer._ACTIVE_SESSION_PATH", ptr
-    )
+    monkeypatch.setattr("promptpotter.infrastructure.store._ACTIVE_SESSION_PATH", ptr)
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(parent)

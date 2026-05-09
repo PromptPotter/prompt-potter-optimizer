@@ -28,10 +28,6 @@ intelligence; intelligence does not depend on either.
 - `config.py` — `CampaignConfig` model + LLM factory.
 - `baseline.py` — campaign baseline scoring + dataset loading.
 - `resume.py` — campaign config diffing + resume logic.
-- `leaderboard.py` — read-only **data-hub projection** over a tenant's
-  campaigns + archive: per-cycle `LeaderboardRow` + per-individual `JSPRow`.
-  Pure derivation from disk artifacts; renders `archive/runs.md` +
-  `archive/individuals.md`.
 - `review.py` — per-cycle markdown renderer (post-cycle log).
 
 ## Conventions

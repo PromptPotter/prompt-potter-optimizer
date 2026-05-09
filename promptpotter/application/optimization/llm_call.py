@@ -28,10 +28,7 @@ from promptpotter.infrastructure.llm import (
     parse_retry_after,
     wait_with_countdown,
 )
-from promptpotter.infrastructure.store.optimizer_call_cache import (
-    OptimizerCallCache,
-    hash_call,
-)
+from promptpotter.infrastructure.store.stores import OptimizerCallCache, hash_call
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.ledger import CycleEventLog
@@ -455,7 +452,7 @@ def compute_optimizer_prompt_hashes() -> dict[str, str]:
     Hashes the deterministic ``model_dump_json()`` of the loaded
     ``PromptTemplate`` (so the hash reflects what was actually used,
     Langfuse-overridden or local). Persisted to ``index.json::final.prompt_hashes``
-    so M10's cross-cycle leaderboard can join cycles by ``l1_generate_hash`` etc.
+    so cross-cycle audits can join cycles by ``l1_generate_hash`` etc.
     """
     out: dict[str, str] = {}
     for name in list_optimizer_prompts():

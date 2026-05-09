@@ -146,7 +146,6 @@ class LiveDashboardView(DerivedView):
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
         recorder: AuditTrailView | None = None,
-        evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
         # Forks share one continuous dashboard.json; per-fork audit
@@ -194,9 +193,6 @@ class LiveDashboardView(DerivedView):
             "wallclock_serialized_at": None,
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
-            # Read by the webapp What-If panel for direction-aware
-            # (↑/↓ better) ablation squares.
-            "evaluators_meta": evaluators_meta or r.get("evaluators_meta") or [],
             # Spend rollup — split into ``backend`` (per-sample wire LLM
             # calls) and ``loop`` (optimizer L1/L2/L3/critique meta-prompt
             # calls) so the operator reads "Backend $X • Loop $Y" rather
@@ -242,7 +238,6 @@ class LiveDashboardView(DerivedView):
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
         recorder: AuditTrailView | None = None,
-        evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> LiveDashboardView | None:
         """Build projection, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
@@ -282,7 +277,6 @@ class LiveDashboardView(DerivedView):
             resume_from=resume_from,
             cycle_id=cycle_id,
             recorder=recorder,
-            evaluators_meta=evaluators_meta,
         )
 
     # -- State transitions ----------------------------------------------------
@@ -707,8 +701,6 @@ class LiveDashboardView(DerivedView):
                 "composite_fitness_formula_short": inline_short_formula_values(
                     self.short_formula_template, cand_evaluators
                 ),
-                # Resolved evaluator values that fed the formula.
-                "evaluators": cand_evaluators,
                 "hits": scores.get("hits"),
                 "total": scores.get("total"),
                 "invalid": scores.get("invalid", False),

@@ -61,12 +61,12 @@ The primitive passes all three for sweep, scoring-divergence, and the planned op
 
 The roadmap calls full self-optimization "L4" — a layer above L3 proposing the next round of candidate L1 prompts. In the absence of the auto-policy:
 
-1. Operator (or Claude via `/potter-review`) reads the leaderboard + `review.md` for the last sweep batch.
+1. Operator (or Claude via `/potter-review`) reads `review.md` for the last sweep batch.
 2. Operator authors the next batch of `SweepPayload` JSONs.
 3. `optimize --sweep` runs the next generation.
 4. Library cache means baseline measurements don't repeat — each generation only pays for actual L1 variants.
 
-This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus `proxy_lift_corr` math in `leaderboard.py` is the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, applies the same `SweepPayload` shape, runs the same primitive.
+This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus the on-demand `MeasurementArchive` views are the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, applies the same `SweepPayload` shape, runs the same primitive.
 
 ## See also
 

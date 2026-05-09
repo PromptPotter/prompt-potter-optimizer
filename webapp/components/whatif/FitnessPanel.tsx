@@ -73,9 +73,7 @@ export function FitnessPanel({ dash, themeKey }: Props) {
     setFitnessState({ showWhatIf: typeof v === "function" ? v(showWhatIf) : v });
   const setSelected = (s: Set<string>) => setFitnessState({ selected: s });
 
-  const dashMeta = (dash && Array.isArray((dash as { evaluators_meta?: unknown }).evaluators_meta) && ((dash as { evaluators_meta?: unknown[] }).evaluators_meta?.length ?? 0) > 0)
-    ? ((dash as { evaluators_meta: typeof WHATIF_INLINE_META }).evaluators_meta) : null;
-  const meta = dashMeta ?? WHATIF_INLINE_META;
+  const meta = WHATIF_INLINE_META;
 
   const cr = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: Candidate[] } }> | undefined)?.l1_score ?? null;
   const candidates: Candidate[] = cr?.output?.candidates ?? [];

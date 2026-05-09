@@ -1,8 +1,6 @@
 // Mirror of promptpotter/application/scoring/evaluators.py::evaluators_meta().
-// Inline copy so the panel renders before — and even without — the API fetch.
-// The dashboard.json snapshot still wins when present (it reflects the registry
-// the *current cycle* was scored under).
-// Lifted verbatim from webapp/index.html:1711.
+// Inline copy so the panel renders without an API fetch. For the
+// current-cycle live registry, hit `/api/v1/active/evaluators_meta`.
 
 export interface EvaluatorMeta {
   name: string;

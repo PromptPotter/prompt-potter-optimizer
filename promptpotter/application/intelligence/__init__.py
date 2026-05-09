@@ -11,8 +11,8 @@ Directionality: this package must NOT import from ``scan`` or ``optimization``.
 Two index types — :class:`AxisIndex` and :class:`SampleIndex` — are the
 dominant entry points; both are re-exported here from the ``indexes/``
 subpackage which carries the full curated surface (also includes
-``ConfigIndex``, ``AxisImpact``, ``ValueRecord``, ``HardnessRecord``,
-``SampleRecord``, ``FailureCluster``, ``NOISE_THRESHOLD``).
+``ConfigIndex``, ``AxisImpact``, ``ValueRecord``, ``SampleRecord``,
+``FailureCluster``, ``NOISE_THRESHOLD``).
 
 Other entry surfaces — Rasch exploration (``exploration``), hard-sample
 sorter (``hard_sample_sorter``), hard-sample archive

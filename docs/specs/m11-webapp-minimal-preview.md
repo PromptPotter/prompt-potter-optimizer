@@ -81,7 +81,7 @@ class ActiveSessionResponse(BaseModel):
     cycle_id: str
 ```
 
-Reads via `promptpotter.infrastructure.store.active_pointer.read_active_pointer()` (already imported across the codebase). 404 when pointer is missing/empty (`tenant_id == ""`). Use a new `_active_router = APIRouter(tags=["Active"])`, register in `main.py` at `/api/v1`.
+Reads via `promptpotter.infrastructure.store.read_active_pointer()` (re-exported from the package; already imported across the codebase). 404 when pointer is missing/empty (`tenant_id == ""`). Use a new `_active_router = APIRouter(tags=["Active"])`, register in `main.py` at `/api/v1`.
 
 ### 2. `GET /campaigns/{cycle_id}/files` — recursive file listing
 
@@ -207,7 +207,7 @@ For forks, family-root files appear under a sibling top-level node `▾ family (
 
 - The HTML stub: `C:\Users\dsacc\Downloads\curator_dashboard_with_workflow.html`
 - Existing API: `promptpotter/presentation/api.py` (read end-to-end; new endpoints sit at the bottom alongside the existing per-cycle ones).
-- Active pointer: `promptpotter/infrastructure/store/active_pointer.py` (use `read_active_pointer`, don't reach into the file directly).
+- Active pointer: `promptpotter/infrastructure/store/__init__.py` (use `read_active_pointer`, don't reach into the file directly).
 - Path helpers: `promptpotter/infrastructure/store/paths.py` (`campaign_dir_for`, `root_dir_for`, `validate_path_component`).
 - Fixture cycle for testing: `.promptpotter/projects/default/campaigns/cycle_0a7a7c410aa7/` has the full layout (dashboard.json, index.json, log.md, review.md, rounds/, prompts/, langfuse/).
 - `dashboard.json` shape — top-level keys to render:
