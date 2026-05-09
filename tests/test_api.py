@@ -280,3 +280,121 @@ def test_ui_mount_serves_index_when_present() -> None:
         assert "<html" in resp.text.lower()
     else:
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Connector protocol — wire payload + session lifecycle pluggability
+# (merged from test_connector_protocol.py — same external-wire bucket)
+# ---------------------------------------------------------------------------
+
+from typing import Any  # noqa: E402
+
+from promptpotter.connectors.termnorm import TermNormSession, termnorm_wire_adapter  # noqa: E402
+from promptpotter.infrastructure.backend import BackendClient  # noqa: E402
+
+
+def test_termnorm_wire_adapter_default_shape() -> None:
+    """TermNorm adapter projects pipeline_params to {query, steps, node_config}."""
+    payload = termnorm_wire_adapter(
+        "what is X?",
+        {
+            "steps": ["fuzzy_matching", "entity_profiling"],
+            "entity_profiling": {"prompt": "rank by relevance"},
+            "fuzzy_matching": {"max_results": 10},
+        },
+    )
+    assert payload["query"] == "what is X?"
+    assert payload["steps"] == ["fuzzy_matching", "entity_profiling"]
+    assert payload["node_config"] == {
+        "entity_profiling": {"prompt": "rank by relevance"},
+        "fuzzy_matching": {"max_results": 10},
+    }
+
+
+def test_termnorm_wire_adapter_drops_non_dict_pipeline_params() -> None:
+    """Non-dict per-node values are dropped — backend contract is per-node config dict."""
+    payload = termnorm_wire_adapter(
+        "q",
+        {"steps": ["x"], "x": {"k": "v"}, "garbage": "string-not-dict"},
+    )
+    assert payload["node_config"] == {"x": {"k": "v"}}
+
+
+def test_pipeline_schema_to_params_is_sparse() -> None:
+    """``to_pipeline_params`` emits ``{steps}`` only — no per-node defaults seeded."""
+    from promptpotter.domain.pipeline_schema import (
+        NodeOutputSchema,
+        PipelineNode,
+        PipelineSchema,
+    )
+
+    schema = PipelineSchema(
+        name="t",
+        version="v",
+        nodes=[
+            PipelineNode(
+                name="llm_only",
+                runtime="backend",
+                node_role="ranker",
+                param_keys=("provider", "model", "temperature"),
+                output_schema=NodeOutputSchema(),
+                current_config={"provider": "groq", "model": "x", "temperature": 0.0},
+            )
+        ],
+    )
+    pp = schema.to_pipeline_params()
+    assert pp == {"steps": ["llm_only"]}, (
+        f"to_pipeline_params must be sparse; per-node defaults are backend-owned. Got {pp!r}"
+    )
+
+    pp_with_override = {**pp, "llm_only": {"temperature": 0.7}}
+    payload = termnorm_wire_adapter("q", pp_with_override)
+    assert payload["node_config"] == {"llm_only": {"temperature": 0.7}}, (
+        "Wire payload must carry only operator/optimizer overrides — not the "
+        f"backend's defaults. Got {payload['node_config']!r}"
+    )
+
+
+def test_backend_client_uses_custom_wire_adapter() -> None:
+    """BackendClient accepts a custom WireAdapter and uses it on run_query."""
+    captured: dict[str, Any] = {}
+
+    def alt_wire(query: str, pipeline_params: dict[str, Any] | None) -> dict[str, Any]:
+        captured["query"] = query
+        captured["pp"] = pipeline_params
+        return {"prompt": query, "options": pipeline_params or {}}
+
+    client = BackendClient(
+        "http://example.invalid",
+        wire_adapter=alt_wire,
+        session=TermNormSession(),
+    )
+    payload = client._wire_adapter("hello", {"k": "v"})
+    assert payload == {"prompt": "hello", "options": {"k": "v"}}
+    assert captured == {"query": "hello", "pp": {"k": "v"}}
+
+
+@pytest.mark.asyncio
+async def test_termnorm_session_idempotent_set_terms() -> None:
+    """Identical terms shouldn't re-POST /sessions — idempotency contract."""
+
+    class _StubResponse:
+        def raise_for_status(self) -> None:
+            return None
+
+        def json(self) -> dict[str, Any]:
+            return {"status": "ok"}
+
+    posted: list[Any] = []
+
+    class _StubHttp:
+        async def post(self, *args: Any, **kwargs: Any) -> _StubResponse:
+            posted.append((args, kwargs))
+            return _StubResponse()
+
+    sess = TermNormSession()
+    await sess.set_terms(_StubHttp(), "http://x", ["a", "b"])  # type: ignore[arg-type]
+    assert len(posted) == 1
+    result = await sess.set_terms(_StubHttp(), "http://x", ["a", "b"])  # type: ignore[arg-type]
+    assert result["status"] == "already_initialized"
+    assert len(posted) == 1

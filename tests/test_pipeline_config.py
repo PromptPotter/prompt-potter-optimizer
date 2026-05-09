@@ -239,3 +239,148 @@ def test_required_optimization_fields_must_be_explicit() -> None:
     defaults — they are not per-dataset knobs."""
     with pytest.raises(ValidationError):
         CampaignConfig.model_validate({"optimization": {"l1_patience": 3}})
+
+
+# ---------------------------------------------------------------------------
+# Allowed-value enums + JSON-schema constraint emission
+# (merged from test_allowed_values.py — same pipeline-config-contract bucket)
+# ---------------------------------------------------------------------------
+
+from promptpotter.application.optimization.l1_validators import (  # noqa: E402
+    build_l1_output_schema,
+    validate_overrides,
+)
+
+
+def _bbeh_schema() -> PipelineSchema:
+    return PipelineSchema(
+        name="bbeh",
+        available_models=["openai/gpt-oss-120b"],
+        nodes=[
+            PipelineNode(
+                name="llm_only",
+                param_keys={"model", "reasoning_effort", "response_format", "temperature"},
+                param_allowed_values={
+                    "reasoning_effort": ["none", "default", "low", "medium", "high"],
+                    "response_format": ["text", "json"],
+                },
+            ),
+        ],
+    )
+
+
+def test_parse_pipeline_response_threads_param_allowed_values():
+    data = {
+        "config": {
+            "name": "bbeh",
+            "available_models": ["openai/gpt-oss-120b"],
+            "nodes": {
+                "llm_only": {
+                    "type": "generation",
+                    "config": {"reasoning_effort": "medium"},
+                    "optimizer": {
+                        "param_keys": ["reasoning_effort", "response_format"],
+                        "param_allowed_values": {
+                            "reasoning_effort": ["none", "low", "medium", "high"],
+                            "response_format": ["text", "json"],
+                        },
+                    },
+                }
+            },
+            "pipelines": {"default": ["llm_only"]},
+        }
+    }
+    schema = parse_pipeline_response(data)
+    node = schema.get_node("llm_only")
+    assert node is not None
+    assert node.param_allowed_values["reasoning_effort"] == [
+        "none",
+        "low",
+        "medium",
+        "high",
+    ]
+    assert node.param_allowed_values["response_format"] == ["text", "json"]
+
+
+def test_validate_overrides_rejects_out_of_enum_reasoning_effort():
+    schema = _bbeh_schema()
+    failures = validate_overrides(
+        {"llm_only": {"reasoning_effort": "minimal"}},
+        schema,
+    )
+    assert len(failures) == 1
+    assert failures[0].axis == "llm_only.reasoning_effort"
+    assert failures[0].value == "minimal"
+    assert failures[0].reason == "not_in_param_allowed_values"
+    assert "medium" in failures[0].allowed
+
+
+def test_validate_overrides_still_rejects_bad_model():
+    schema = _bbeh_schema()
+    failures = validate_overrides(
+        {"llm_only": {"model": "gpt-5-turbo-xxl"}},
+        schema,
+    )
+    assert len(failures) == 1
+    assert failures[0].axis == "llm_only.model"
+    assert failures[0].reason == "not_in_available_models"
+
+
+def test_build_l1_output_schema_emits_enum_for_constrained_params():
+    schema = _bbeh_schema()
+    out = build_l1_output_schema(schema)
+    variant_props = out["schema"]["properties"]["variants"]["items"]["properties"]
+    override_props = variant_props["pipeline_params_override"]["properties"]
+    llm_props = override_props["llm_only"]["properties"]
+    assert llm_props["reasoning_effort"] == {
+        "type": "string",
+        "enum": ["none", "default", "low", "medium", "high"],
+    }
+    assert llm_props["response_format"] == {"type": "string", "enum": ["text", "json"]}
+    assert "enum" not in llm_props["temperature"]
+    assert variant_props["variant_name"] == {"type": "string"}
+    assert out["strict"] is False
+
+
+# ---------------------------------------------------------------------------
+# optimizer_pipeline.json shape parity with backend pipeline.json
+# (merged from test_optimizer_pipeline_parity.py — §3.5 deliverable)
+# ---------------------------------------------------------------------------
+
+REPO = Path(__file__).resolve().parent.parent
+OPTIMIZER_PIPELINE = REPO / "promptpotter/application/optimization/optimizer_pipeline.json"
+BACKEND_PIPELINES = sorted((REPO / "datasets").glob("*/pipeline.json"))
+
+
+def _required_top_level_fields(data: dict) -> set[str]:
+    return {"name", "nodes", "pipelines"} - set(data.keys())
+
+
+def test_optimizer_and_backend_pipelines_share_parser_and_shape() -> None:
+    """Same parser, same top-level shape, same per-node optimizer sub-object."""
+    assert OPTIMIZER_PIPELINE.exists(), OPTIMIZER_PIPELINE
+    assert BACKEND_PIPELINES, "no backend pipeline.json files under datasets/"
+
+    files = [OPTIMIZER_PIPELINE, *BACKEND_PIPELINES]
+
+    for path in files:
+        data = json.loads(path.read_text(encoding="utf-8"))
+
+        missing = _required_top_level_fields(data)
+        assert not missing, f"{path}: missing required top-level fields: {sorted(missing)}"
+        assert "default" in data["pipelines"], f"{path}: pipelines.default is required"
+
+        schema = parse_pipeline_response(data)
+        assert schema.name, f"{path}: parsed schema has empty name"
+        assert schema.nodes, f"{path}: parsed schema has zero nodes"
+
+        active = data["pipelines"]["default"]
+        active_in_manifest = [n for n in active if n in data["nodes"]]
+        assert [n.name for n in schema.nodes] == active_in_manifest, (
+            f"{path}: parser walked a different node order than pipelines.default"
+        )
+
+        for node in schema.nodes:
+            assert node.name, f"{path}: node has empty name"
+            assert node.wire_type, f"{path}::{node.name} has empty wire_type"
+            assert node.langfuse_type, f"{path}::{node.name} has empty langfuse_type"

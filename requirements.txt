@@ -12,8 +12,8 @@ pydantic>=2.5.3
 pydantic-settings>=2.1.0
 
 # LLM Providers (core). Anthropic is optional — see [anthropic] extras.
+# Groq + OpenRouter route through the OpenAI-compatible client (no SDK).
 openai>=1.10.0
-groq>=0.4.0
 
 # Utilities
 python-dotenv>=1.0.0

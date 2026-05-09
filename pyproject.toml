@@ -23,7 +23,6 @@ dependencies = [
     "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
     "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
     "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
-    "groq>=0.4.0",             # why kept: provider-registration symmetry — calls flow through the OpenAI-compatible client
     "python-dotenv>=1.0.0",    # why kept: .env loading at bootstrap
     "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
     "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
@@ -170,13 +169,10 @@ extend_exclude = [
 
 [tool.deptry.per_rule_ignores]
 # CLI/tool deps — invoked by command, not imported.
-# groq is retained for provider-registration symmetry even though calls
-# route through the OpenAI-compatible client.
 DEP002 = [
     "ipython",
     "uvicorn",
     "jupyterlab",
-    "groq",
     "pytest",
     "pytest-asyncio",
     "pytest-cov",

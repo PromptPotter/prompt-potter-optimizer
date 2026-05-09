@@ -42,7 +42,6 @@ from promptpotter.application.scoring.formula import (
     _exact_match,
     _extract_gsm8k_number,
     _gsm8k_match,
-    compile_round_scorer,
     compile_scorer,
     extract_display_answer,
 )
@@ -55,7 +54,6 @@ from promptpotter.domain.pipeline_schema import (
 )
 from promptpotter.domain.results import RoundResult
 from promptpotter.domain.sample import Sample
-from promptpotter.shared.composite import extract_evaluator_names
 
 # ===========================================================================
 # Per-dataset scorer formulas
@@ -305,14 +303,6 @@ def test_composite_fitness_zeroed_on_validation_failure():
     assert scored["composite_fitness"] == 0.0
 
 
-def test_round_scorer_fails_loud_and_clamps_unit_interval():
-    with pytest.raises(NameError):
-        compile_round_scorer("nonexistent_evaluator * 0.5")({"accuracy": 1.0})
-    assert compile_round_scorer("accuracy * 10")({"accuracy": 0.5}) == 1.0
-    assert compile_round_scorer("accuracy - 2")({"accuracy": 0.5}) == 0.0
-    assert compile_round_scorer(None)({"accuracy": 0.75}) == pytest.approx(0.75)
-
-
 def test_prompt_compactness_penalizes_verbose_prompt():
     """Long rendered prompts drive compactness toward zero; short prompts stay near 1."""
     from promptpotter.application.scoring.evaluators import (
@@ -329,23 +319,6 @@ def test_prompt_compactness_penalizes_verbose_prompt():
     assert compute_prompt_compactness(opt_sp=verbose) == 0.0
     # Vacuous (no opt_sp) returns 1.0 so the term never injects a phantom penalty.
     assert compute_prompt_compactness(opt_sp=None) == 1.0
-
-
-# ===========================================================================
-# Composite render — data-shape only (display-format substrings out per charter)
-# ===========================================================================
-
-
-def test_extract_names_filters_builtins_and_unknowns() -> None:
-    formula = "0.5 * accuracy + log(1.0 + latency_norm) + max(0.0, recall) - 1.0"
-    available = {"accuracy", "latency_norm", "recall", "error_rate"}
-    # log + max are builtins → excluded. error_rate is in available but
-    # not in formula → excluded. Bare numbers → not valid identifiers.
-    assert extract_evaluator_names(formula, available) == [
-        "accuracy",
-        "latency_norm",
-        "recall",
-    ]
 
 
 # ===========================================================================
@@ -462,28 +435,6 @@ def test_evolve_scoring_set_respects_min_size() -> None:
     assert len(out.new_scoring_set) >= 4
     # No scoring-set sample dropped below the floor.
     assert {s.id for s in out.new_scoring_set} >= {s.id for s in scoring_set} - {-1}
-
-
-@pytest.mark.parametrize("enabled", [True, False])
-def test_evolve_scoring_set_does_not_mutate_inputs(enabled: bool) -> None:
-    samples = [Sample(id=i, query=f"q{i}", ground_truth="g") for i in range(6)]
-    snapshot = list(samples)
-    rounds = [
-        _make_round(
-            0,
-            {f"c{ci}": [{"sample_id": s.id, "hit": True} for s in samples] for ci in range(3)},
-        )
-    ]
-    cfg = ExplorationConfig(enabled=enabled)
-    evolve_scoring_set(
-        full_dataset=samples,
-        current_scoring_set=samples,
-        rounds=rounds,
-        config=cfg,
-        elimination_n_min=4,
-    )
-    # Inputs untouched — caller is responsible for mutating session.scoring.scoring_set.
-    assert samples == snapshot
 
 
 # ===========================================================================

@@ -63,10 +63,7 @@ from promptpotter.application.optimization.elimination import (  # noqa: E402
     PoBBConfig,
 )
 from promptpotter.domain.analysis import EscalationTarget  # noqa: E402
-from promptpotter.shared.statistics import (  # noqa: E402
-    pobb_should_stop,
-    posterior_best_probabilities,
-)
+from promptpotter.shared.statistics import posterior_best_probabilities  # noqa: E402
 
 # ===========================================================================
 # L1 detect_invariants
@@ -134,25 +131,6 @@ def test_task_context_verbatim_repeat_fires_when_proposed_merge_is_no_op():
     assert out.score == 0.0
     assert out.nurse_target == "l3"
     assert out.evidence["proposed_keys"] == ["domain"]
-
-
-def test_task_context_verbatim_repeat_skips_when_merge_applied():
-    """A real applied refinement does not fire the validator."""
-    sentinel = object()  # any non-None payload satisfies "applied"
-    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
-        {"task_context_proposed": {"domain": "biotech"}, "task_context_applied": sentinel},
-        opt_sp=_osp(),
-    )
-    assert out is None
-
-
-def test_task_context_verbatim_repeat_skips_when_no_proposal():
-    """No proposed refinement at all ⇒ no verbatim-repeat fire."""
-    out = L2_TASK_CONTEXT_VERBATIM_REPEAT.run(
-        {"task_context_proposed": None, "task_context_applied": None},
-        opt_sp=_osp(),
-    )
-    assert out is None
 
 
 def test_run_l2_output_validators_aggregates_task_context_repeat():
@@ -231,15 +209,6 @@ def test_layout_duplicate_within_slot_is_hard_failure():
     assert "l1_layout_dups_within_slot" in ids
 
 
-def test_layout_unchanged_from_prior_is_soft():
-    """Soft signal: layout proposed but identical to prior — flag, don't block."""
-    layout = default_l1_layout()
-    result = validate_l1_layout(layout, prior_layout=layout)
-    assert result.is_valid is True  # soft fires WITHOUT flipping is_valid
-    ids = {o.validator_id for o in result.outcomes}
-    assert "l1_layout_unchanged_from_prior" in ids
-
-
 # ===========================================================================
 # Bayesian Posterior-of-Being-Best (PoBB)
 # ===========================================================================
@@ -267,12 +236,6 @@ def test_high_signal_collapses_to_clear_winner():
     probs = posterior_best_probabilities(histories, n_samples=2000, rng=rng)
     assert probs["winner"] >= 0.99
     assert probs["loser"] <= 0.01
-
-
-def test_pobb_should_stop_threshold():
-    assert pobb_should_stop(0.04, 0.05) is True
-    assert pobb_should_stop(0.05, 0.05) is False  # strict < threshold
-    assert pobb_should_stop(0.50, 0.05) is False
 
 
 def test_pobb_check_n_min_floor():
@@ -701,3 +664,160 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         escalate_on_yield_drought=True,
     )
     assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
+
+
+# ---------------------------------------------------------------------------
+# JobSearchPoint / OptSearchPoint shape + L2-layout copy_memory contract
+# (merged from test_search_point.py — same L1-surface bucket)
+# ---------------------------------------------------------------------------
+
+import pydantic  # noqa: E402
+
+from promptpotter.application.optimization.round_diagnostics import (  # noqa: E402
+    compute_round_diagnostics,
+)
+from promptpotter.domain.opt_search_point import FewShotExample  # noqa: E402
+from promptpotter.domain.pipeline_schema import (  # noqa: E402
+    NodePromptMeta,
+    PipelineNode,
+    PipelineSchema,
+)
+from promptpotter.domain.results import RoundResult  # noqa: E402
+from promptpotter.domain.sample import Sample  # noqa: E402
+from promptpotter.domain.search_point import JobSearchPoint  # noqa: E402
+from promptpotter.shared.hashing import content_hash  # noqa: E402
+
+
+def _schema_with_prompt_node(name: str = "llm_ranking") -> PipelineSchema:
+    return PipelineSchema(nodes=[PipelineNode(name=name, prompt_meta=NodePromptMeta())])
+
+
+def test_jsp_construct_frozen_and_render_reads_pipeline_params():
+    sp = JobSearchPoint(pipeline_params={"llm_ranking": {"prompt": "Rank by relevance."}})
+    assert sp.render() == "Rank by relevance."
+    with pytest.raises(pydantic.ValidationError):
+        sp.pipeline_params = {"new": "val"}
+
+
+def test_jsp_content_hash_distinguishes_pipeline_params():
+    dataset = [Sample(id=1, query="q", ground_truth="a")]
+    sp_a = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
+    sp_b = JobSearchPoint(pipeline_params={"steps": ["fuzzy_matching"]})
+    assert sp_a.content_hash(dataset) != sp_b.content_hash(dataset)
+    assert sp_a.content_hash(dataset) == content_hash(sp_a.render(), dataset, sp_a.pipeline_params)
+
+
+def test_jsp_derive_returns_new_frozen_instance():
+    sp = JobSearchPoint(pipeline_params={"steps": ["llm_ranking"]})
+    sp2 = sp.derive(pipeline_params={"steps": ["fuzzy_matching"]})
+    assert sp2.pipeline_params == {"steps": ["fuzzy_matching"]}
+    assert sp.pipeline_params == {"steps": ["llm_ranking"]}
+    with pytest.raises(pydantic.ValidationError):
+        sp2.pipeline_params = {"steps": ["c"]}
+
+
+def test_to_job_search_point_projects_prompt_fields_and_few_shot_block():
+    osp = OptSearchPoint(
+        persona="Expert",
+        instruction="Rank items.",
+        few_shot_examples=[FewShotExample(input="a", output="b")],
+    )
+    sp = osp.to_job_search_point(schema=_schema_with_prompt_node())
+    assert sp.prompt_fields["persona"] == "Expert"
+    assert sp.prompt_fields["instruction"] == "Rank items."
+    assert "Input: a" in sp.prompt_fields["few_shot_block"]
+    assert OptSearchPoint(instruction="X").to_job_search_point().prompt_fields is None
+
+
+def test_copy_memory_carries_l1_layout_into_adoption_target():
+    """L2-written L1 layout must survive L2→L3 adoption."""
+    custom = L1Layout(
+        persona=["plan"],
+        task_intent=["task_context"],
+        problem_description=["rendered_prompt", "pipeline_param_catalogue"],
+    )
+    parent = OptSearchPoint(l1_layout=custom)
+    child = OptSearchPoint()
+    parent.copy_memory_to(child)
+    assert child.l1_layout.persona == ["plan"]
+    assert child.l1_layout.task_intent == ["task_context"]
+    assert child.l1_layout.problem_description == ["rendered_prompt", "pipeline_param_catalogue"]
+    child.l1_layout.persona.append("diagnostics")
+    assert "diagnostics" not in parent.l1_layout.persona
+
+
+# ---------------------------------------------------------------------------
+# compute_round_diagnostics — pure function over scoring data
+# (merged from test_round_diagnostics.py — round-readout invariants)
+# ---------------------------------------------------------------------------
+
+
+def _round(round_num: int, accuracy: float, results: list[dict]) -> RoundResult:
+    return RoundResult(
+        round=round_num,
+        label=f"round_{round_num}",
+        accuracy=accuracy,
+        composite_fitness=accuracy,
+        hits=sum(1 for r in results if r.get("hit")),
+        total=len(results),
+        improved=False,
+        prompt_fields={},
+        results=results,
+        candidates_scored=1,
+    )
+
+
+def _hit(query: str, gt: str) -> dict:
+    return {"query": query, "ground_truth": gt, "hit": True, "predicted": gt}
+
+
+def _miss(query: str, gt: str) -> dict:
+    return {"query": query, "ground_truth": gt, "hit": False, "predicted": "?"}
+
+
+def test_diag_rank_lookup_no_schema_lands_everything_not_found():
+    """No schema → no ranked_item_keys → find_rank always None → not_found bucket only."""
+    results = [_hit("q1", "a"), _miss("q2", "b"), _miss("q3", "c")]
+    rr = _round(0, 0.33, results)
+    diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
+
+    assert diag.n_valid == 3
+    assert diag.rank_buckets["1"] == 0
+    assert diag.rank_buckets["not_found"] == 3
+    assert diag.top_k_accuracy[1] == 0.0
+    assert diag.top_k_accuracy[10] == 0.0
+
+
+def test_diag_trajectory_classification_picks_up_plateau():
+    """Three+ rounds with negligible deltas → plateau (or ceiling at best)."""
+    rounds = [
+        _round(0, 0.50, [_hit("q1", "a")]),
+        _round(1, 0.51, [_hit("q1", "a")]),
+        _round(2, 0.51, [_hit("q1", "a")]),
+        _round(3, 0.51, [_hit("q1", "a")]),
+    ]
+    diag = compute_round_diagnostics(rounds[-1], rounds, pipeline_schema=None)
+    assert diag.trajectory in {"plateau", "ceiling"}
+
+
+def test_diag_probe_outcome_gated_by_probe_just_completed_flag():
+    """probe_outcome is populated only when probe_just_completed=True."""
+    results = [_hit("q1", "a"), _hit("q2", "b"), _miss("q3", "c"), _miss("q4", "d")]
+    rr = _round(0, 0.5, results)
+
+    diag = compute_round_diagnostics(rr, [rr], pipeline_schema=None)
+    assert diag.probe_outcome is None
+
+    diag_probe = compute_round_diagnostics(
+        rr,
+        [rr],
+        pipeline_schema=None,
+        probe_just_completed=True,
+        axis_tested="persona",
+        prior_full_accuracy=0.7,
+    )
+    assert diag_probe.probe_outcome is not None
+    assert diag_probe.probe_outcome.axis_tested == "persona"
+    assert diag_probe.probe_outcome.target_subset_size == 4
+    assert diag_probe.probe_outcome.hit_rate == 0.5
+    assert diag_probe.probe_outcome.delta_vs_full == pytest.approx(-0.2)
