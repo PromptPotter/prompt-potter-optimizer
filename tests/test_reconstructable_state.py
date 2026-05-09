@@ -17,9 +17,9 @@ reconstruction — fail this test. Each failure becomes either:
 * (c) an allowlist entry — wiring/identity that's bootstrap-sourced
   and can't be recovered from events.
 
-Incremental coverage: the test starts with what works today
-(``EscalationState`` + ``AuditTrailView``); follow-up PRs
-expand to ``Cycle.tracking``, ``opt_sp.round_history``, etc.
+Incremental coverage: the test asserts ``EscalationState`` +
+``AuditTrailView`` round-trip cleanly today; ``Cycle.tracking`` and
+the rest of ``Session`` join as their projections land.
 """
 
 from __future__ import annotations
@@ -158,19 +158,13 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     fresh_written = fresh_dir / ".runtime" / "cache" / "rounds" / "round_0002.json"
     assert fresh_written.exists(), "ledger replay must reconstruct the same round file"
 
-    # Structural equivalence — strip the wall-clock ``started_at`` /
-    # ``finished_at`` slots which are set at observation time
-    # (``datetime.now()``), not from event timestamps. They land on the
-    # ``_ALLOWLIST`` below as projection-only fields; the §3.8 follow-up
-    # is to source them from the round-enter / round-complete
-    # ``PhaseRecord.timestamp`` instead.
+    # Strict equivalence — both ``started_at`` / ``finished_at`` source
+    # from the corresponding PhaseRecord.timestamp, so the live-bind and
+    # replay-from-ledger payloads are byte-identical.
     import json as _json
 
     live_payload = _json.loads(written.read_text(encoding="utf-8"))
     fresh_payload = _json.loads(fresh_written.read_text(encoding="utf-8"))
-    for k in ("started_at", "finished_at"):
-        live_payload.pop(k, None)
-        fresh_payload.pop(k, None)
     assert fresh_payload == live_payload, (
         "AuditTrailView drift: live-bind vs replay-from-ledger produced different content"
     )
@@ -189,13 +183,6 @@ _ALLOWLIST: dict[str, str] = {
     # obs: the observability bridge (Langfuse + MLflow + audit trail).
     # Re-wired on each session boot.
     "obs": "observability bridge; re-wired at boot",
-    # AuditTrailView.started_at / finished_at — wall-clock stamps
-    # captured at begin_round/flush (datetime.now()) rather than the
-    # corresponding PhaseRecord.timestamp. §3.8 follow-up: source from
-    # the ledger event's timestamp so the round file becomes a pure
-    # derived view.
-    "AuditTrailView.started_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
-    "AuditTrailView.finished_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
 }
 
 

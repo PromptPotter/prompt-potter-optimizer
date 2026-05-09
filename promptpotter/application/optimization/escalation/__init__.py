@@ -1,10 +1,10 @@
 """Escalation FSM + L2/L3 firing driver + post-round routing.
 
 - :mod:`.state` — :class:`EscalationState` (cause-driven L1/L2/L3 stall
-  counters), :class:`EscalationEvent`, :class:`NextAction`,
-  :func:`build_escalation_entry`. Counters mutate only via observation
-  methods; ``signals from measurement, not the calendar`` is structural
-  (no public setter to assign a ``round_num >= N`` literal to).
+  counters), :class:`EscalationEvent`, :class:`NextAction`. Counters
+  mutate only via observation methods; ``signals from measurement, not
+  the calendar`` is structural (no public setter to assign a
+  ``round_num >= N`` literal to).
 - :mod:`.decide` — :func:`decide_escalation` is the single
   post-round routing entry point;
   :class:`EscalationInputs` is the frozen snapshot it reads.
@@ -31,7 +31,6 @@ from promptpotter.application.optimization.escalation.state import (
     EscalationEvent,
     EscalationState,
     NextAction,
-    build_escalation_entry,
 )
 
 __all__ = [
@@ -42,7 +41,6 @@ __all__ = [
     "EscalationState",
     "NextAction",
     "apply_sweep_payload_to_osp",
-    "build_escalation_entry",
     "decide_escalation",
     "escalate_l2",
 ]

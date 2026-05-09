@@ -29,7 +29,6 @@ from promptpotter.application.optimization.dispatch_hub import (
     build_bundle,
 )
 from promptpotter.application.optimization.escalation.state import NextAction
-from promptpotter.application.optimization.formatting import warning_summary
 from promptpotter.application.optimization.l2_validators import (
     run_l2_output_validators,
     run_l3_output_validators,
@@ -256,7 +255,6 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
 
 
 def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
-    warned, top = warning_summary(cycle.opt_sp.warning_inventory)
     # ``l2_*_at_entry`` fields are read by ``EscalationState.fold`` on resume —
     # they're the canonical post-fire L2 state captured by ``record_l2_fired``.
     return {
@@ -270,8 +268,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "changes_description": result.opt_search_point.lineage.changes_description or "",
         "action": result.action,
         "axis_targeted": result.axis_targeted,
-        "warned_samples": warned,
-        "top_warning": top,
+        "warned_samples": len(cycle.warned_queries),
         "l2_prompt": result.debug_prompt,
         "l2_response": result.debug_response,
     }

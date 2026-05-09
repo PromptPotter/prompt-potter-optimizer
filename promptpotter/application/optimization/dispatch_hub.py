@@ -420,15 +420,9 @@ def _r_validation_failures(b: InjectionBundle) -> str:
 
 
 def _r_runtime_failures(b: InjectionBundle) -> str:
-    """Wound 2 — DegradationCheck mid-eval evidence + escalation + warnings.
-
-    Bundles ``runtime_failures`` (per-candidate elimination from
-    ``DegradationCheck``) with ``escalation_log`` (cross-round
-    pipeline-step degradation rates) and ``warning_inventory`` (recurring
-    per-sample warnings). All three are L1_SCORE-derived "the pipeline
-    misbehaved at runtime" evidence with the same lifecycle (cross-round
-    on OSP) — keeping them in one renderer is honest aggregation, not a
-    grab-bag. Fenced because it echoes pipeline warning strings.
+    """Wound 2 — DegradationCheck mid-eval evidence (per-candidate runtime
+    failures from ``DegradationCheck``). Fenced because it echoes pipeline
+    warning strings.
     """
     osp = b.opt_sp
     parts: list[str] = []
@@ -458,23 +452,6 @@ def _r_runtime_failures(b: InjectionBundle) -> str:
                 f"(first-seen >{_RUNTIME_FAILURE_RECENCY_WINDOW} rounds ago)."
             )
         parts.append("\n".join(sec))
-
-    if osp.escalation_log:
-        latest = osp.escalation_log[-1]
-        sec = [
-            f"PIPELINE ESCALATION: {float(latest.get('degraded_rate', 0)):.0%} of "
-            f"queries degrade at {latest.get('problem_step', 'unknown')}."
-        ]
-        if len(osp.escalation_log) > 1:
-            sec.append(f"  {len(osp.escalation_log)} prior attempts unresolved.")
-        if wt := latest.get("warning_types"):
-            sec.append(f"  Warnings: {wt}")
-        parts.append("\n".join(sec))
-
-    if osp.warning_inventory:
-        warned = sum(1 for e in osp.warning_inventory.values() if e.get("warnings"))
-        if warned:
-            parts.append(f"WARNING INVENTORY: {warned} queries with recurring pipeline warnings.")
 
     if not parts:
         return ""
@@ -670,7 +647,7 @@ INJECTIONS: dict[str, _Injection] = {
         "runtime_failures",
         InjectionKind.MEASUREMENT,
         _r_runtime_failures,
-        "Wound 2: DegradationCheck mid-eval evidence + escalation_log + warning inventory.",
+        "Wound 2: DegradationCheck mid-eval evidence — per-candidate runtime failures.",
     ),
     "l2_guard_breaches": _Injection(
         "l2_guard_breaches",

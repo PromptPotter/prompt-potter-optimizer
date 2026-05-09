@@ -10,8 +10,7 @@
         "prompt_family": "l1_generate",
         "context_sources": [
           "l1_critique",
-          "task_context",
-          "escalation_log"
+          "task_context"
         ],
         "response_parser": "candidate_list",
         "prompt_version": 1,
@@ -77,8 +76,7 @@
         "context_sources": [
           "l1_critique",
           "task_context",
-          "plan",
-          "escalation_log"
+          "plan"
         ],
         "response_parser": "transition_result",
         "prompt_version": 1

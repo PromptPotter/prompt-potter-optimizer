@@ -24,7 +24,7 @@ from typing import TYPE_CHECKING, Any, ClassVar, Self
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
-from promptpotter.domain.analysis import FailureAnalysis, RuntimeFailure, ValidationFailure
+from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout
 from promptpotter.domain.search_point import SearchPoint, TaskDecomposition
 from promptpotter.domain.validators import ValidatorOutcome
@@ -40,26 +40,6 @@ class FewShotExample(BaseModel):
     input: str
     output: str
     explanation: str | None = None
-
-
-class RoundSummary(BaseModel):
-    """Compact per-round record persisted on ``OptSearchPoint.round_history``.
-
-    Mirrors the trajectory-relevant fields of ``RoundResult`` — enough for
-    ``build_trajectory_report`` (needs ``.accuracy``). Drops raw per-sample
-    results and per-candidate results, which remain on the transient
-    ``Cycle.rounds`` list.
-    """
-
-    model_config = ConfigDict(arbitrary_types_allowed=True)
-
-    round: int
-    accuracy: float
-    composite_fitness: float = 0.0
-    improved: bool = False
-    degraded_samples: int = 0
-    pipeline_params: dict | None = None
-    candidate_scores: list[dict] = Field(default_factory=list)
 
 
 class PromptTemplate(SearchPoint):
@@ -204,7 +184,9 @@ class OptSearchPoint(PromptTemplate):
       transitions via :meth:`copy_memory_to`).
 
     Persisted in round_data checkpoints. Enables L4 to correlate optimizer
-    configuration with target-pipeline scoring outcomes.
+    configuration with target-pipeline scoring outcomes. Per-round
+    trajectory and pipeline-step escalation events live on the ledger
+    (``CycleEventLog``) — projections derive on demand.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -226,8 +208,6 @@ class OptSearchPoint(PromptTemplate):
         return TaskDecomposition()
 
     # -- Optimization memory (flat; bundled by MEMORY_FIELDS for copy_memory_to) --
-    escalation_log: list[dict[str, Any]] = Field(default_factory=list)
-    warning_inventory: dict[str, dict[str, Any]] = Field(default_factory=dict)
     # Sticky L3→L2 channel: L3 writes, L2 reads via the ``l3_to_l2_note``
     # signal; never surfaced to L1 (absent from ``L1_POSSIBLE``). Persists
     # across L2 fires via :data:`MEMORY_FIELDS`; replaced wholesale on each
@@ -237,8 +217,6 @@ class OptSearchPoint(PromptTemplate):
     runtime_failures: list[RuntimeFailure] = Field(default_factory=list)
     l2_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
     l3_guard_breaches: list[ValidatorOutcome] = Field(default_factory=list)
-    failure_analysis: FailureAnalysis | None = None
-    round_history: list[RoundSummary] = Field(default_factory=list)
 
     # -- L1-generate surface state (owned by L2 mutations) ----------------
     # Per-slot list of placeholder names L2 picks from `L1_POSSIBLE`. The
@@ -252,25 +230,14 @@ class OptSearchPoint(PromptTemplate):
     # children inherit in-flight L2 surface edits instead of being
     # silently merged from a stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
-        "escalation_log",
-        "warning_inventory",
         "l3_note",
         "validation_failures",
         "runtime_failures",
         "l2_guard_breaches",
         "l3_guard_breaches",
-        "failure_analysis",
-        "round_history",
         "l1_layout",
         "l1_overrides",
     )
-
-    def append_escalation(self, entry: dict[str, Any]) -> None:
-        """Append a log entry; fill the previous entry's pending outcome."""
-        log = self.escalation_log
-        if log and log[-1]["outcome_degraded_rate"] is None:
-            log[-1]["outcome_degraded_rate"] = entry.get("degraded_rate", 0)
-        log.append(entry)
 
     def copy_memory_to(self, target: OptSearchPoint) -> None:
         """Deep-copy MEMORY_FIELDS onto *target* (in place) for L2/L3 adopt."""

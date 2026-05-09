@@ -24,7 +24,7 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any
+from typing import TYPE_CHECKING
 
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
@@ -318,22 +318,3 @@ class EscalationState:
         for rec in ledger.iter():
             s.fold(rec)
         return s
-
-
-def build_escalation_entry(
-    round_num: int,
-    check_result: dict[str, Any],
-    current_pipeline_params: dict | None,
-) -> dict[str, Any]:
-    """Shape a journal entry from a DegradationCheck result + live pipeline params."""
-    dominant = check_result.get("dominant_warning", "unknown:unknown")
-    problem_step = dominant.split(":")[0] if ":" in dominant else "unknown"
-    step_cfg = (current_pipeline_params or {}).get(problem_step, {})
-    return {
-        "round": round_num,
-        "degraded_rate": check_result.get("degraded_rate", 0),
-        "problem_step": problem_step,
-        "step_config": dict(step_cfg) if isinstance(step_cfg, dict) else {},
-        "warning_types": check_result.get("warning_types", {}),
-        "outcome_degraded_rate": None,
-    }

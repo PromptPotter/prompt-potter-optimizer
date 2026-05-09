@@ -4,7 +4,7 @@ Resume-checkpoint records, the divergence walker, and the fork-mint
 helpers live in :mod:`promptpotter.application.optimization.resume_and_fork`
 — this file only owns the in-memory ``Cycle`` dataclass + per-round
 mutation. Escalation FSM (``EscalationState``, ``NextAction``,
-``EscalationEvent``, ``build_escalation_entry``) lives in
+``EscalationEvent``) lives in
 :mod:`promptpotter.application.optimization.escalation.state`; the L2/L3
 firing driver lives in :mod:`.escalation.firing`. One-way arrow: this
 module imports from ``escalation.state``; the reverse is forbidden —
@@ -18,15 +18,12 @@ import logging
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, cast
 
-from promptpotter.application.optimization.elimination import update_sample_tracker
+from promptpotter.application.optimization.elimination import extract_warning_types
 from promptpotter.application.optimization.escalation.state import EscalationState
-from promptpotter.application.scoring.metrics import (
-    compile_failure_analysis,
-    compute_composite_fitness,
-)
+from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint, RoundSummary
+from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import RoundBaseline, RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
@@ -125,6 +122,10 @@ class Cycle:
     # and probe outcomes are L2/L3 telemetry rather than control-flow signals.
     probe_next_round: bool = False
     last_l2_axis: str = ""
+    # Cumulative set of queries with at least one warning in any prior
+    # round — drives probe-round subset selection. Rebuilt from results
+    # in ``absorb_round``; not persisted to OSP.
+    warned_queries: set[str] = field(default_factory=set)
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
     # Flushed into the next round_data's `decisions` before campaign_store.save_round_file.
@@ -208,16 +209,11 @@ class Cycle:
         schema = self.session.pipeline_schema
         tr = self.tracking
 
-        # 1. opt_sp memory — failure analysis, warning inventory, runtime failures.
-        if rr.results and schema is not None:
-            self.opt_sp.failure_analysis = compile_failure_analysis(
-                cast("list[QueryMeasurement]", rr.results), schema
-            )
-        else:
-            self.opt_sp.failure_analysis = None
+        # 1. opt_sp memory — runtime failures + cumulative warned-query set.
         all_results: list = [r for rs in rr.all_candidate_results.values() for r in rs]
-        if all_results:
-            update_sample_tracker(self.opt_sp.warning_inventory, all_results)
+        for r in all_results:
+            if extract_warning_types(r) and (q := r.get("query")):
+                self.warned_queries.add(q)
         existing_keys = {_rf_dedup_key(rf.to_dict()) for rf in self.opt_sp.runtime_failures}
         for cs in rr.candidate_scores:
             for rf_dict in cs.get("runtime_failures") or []:
@@ -227,19 +223,9 @@ class Cycle:
                 existing_keys.add(k)
                 self.opt_sp.runtime_failures.append(RuntimeFailure(**rf_dict))
 
-        # 2. round + history + tracking.
+        # 2. round + tracking. Per-round trajectory lives on ``self.rounds``
+        # (transient); persistent trajectory derives from ledger events.
         self.rounds.append(rr)
-        self.opt_sp.round_history.append(
-            RoundSummary(
-                round=rr.round,
-                accuracy=rr.accuracy,
-                composite_fitness=rr.composite_fitness,
-                improved=rr.improved,
-                degraded_samples=rr.degraded_samples,
-                pipeline_params=rr.pipeline_params,
-                candidate_scores=list(rr.candidate_scores),
-            )
-        )
         for f in PROMPT_STRING_FIELDS:
             setattr(self.opt_sp, f, rr.prompt_fields.get(f, ""))
         assert tr.current_sp is not None

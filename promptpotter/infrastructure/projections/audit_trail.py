@@ -21,7 +21,6 @@ from __future__ import annotations
 import json
 import logging
 import re
-from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -124,15 +123,24 @@ class AuditTrailView(DerivedView):
         # ``"round"`` tag so the reader can tell which round produced it.
         self._sticky_nodes: dict[str, dict[str, Any]] = {}
         self._l1_score: dict[str, Any] | None = None
+        # Round-boundary timestamps sourced from PhaseRecord.timestamp on
+        # the round-enter / round-complete events — pure derived view, no
+        # wall-clock observation in this projection.
         self._started_at: str = ""
+        self._finished_at: str = ""
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
         """Build a projection rooted at ``{cycle_dir}/.runtime/cache/rounds``."""
         return cls(Path(cycle_dir).joinpath(*_ROUNDS_SUBPATH))
 
-    def begin_round(self, round_num: int) -> None:
-        """Start recording a new round. Discards any pending node data."""
+    def begin_round(self, round_num: int, started_at: str = "") -> None:
+        """Start recording a new round. Discards any pending node data.
+
+        ``started_at`` should be the ``PhaseRecord.timestamp`` of the
+        round-enter event. The headless fallback (no ledger) leaves
+        the field empty; downstream readers tolerate that.
+        """
         if self._nodes or self._l1_score:
             logger.warning(
                 "AuditTrailView: unflushed state from round %d discarded",
@@ -141,7 +149,8 @@ class AuditTrailView(DerivedView):
         self._current_round = round_num
         self._nodes = {}
         self._l1_score = None
-        self._started_at = datetime.now(UTC).isoformat()
+        self._started_at = started_at
+        self._finished_at = ""
 
     def rehydrate_sticky(self) -> None:
         """Pre-populate ``_sticky_nodes`` from the highest existing round file so resumed-cycle dashboards show prior history before the first new write."""
@@ -198,13 +207,15 @@ class AuditTrailView(DerivedView):
     def _handle_phase(self, record: PhaseRecord) -> None:
         if record.phase == "round":
             if record.event == "enter" and record.round is not None:
-                self.begin_round(record.round)
+                self.begin_round(record.round, started_at=record.timestamp)
             elif record.event == "complete":
+                self._finished_at = record.timestamp
                 self.flush()
         elif record.phase == "baseline":
             if record.event == "enter":
-                self.begin_round(_BASELINE_ROUND_SENTINEL)
+                self.begin_round(_BASELINE_ROUND_SENTINEL, started_at=record.timestamp)
             elif record.event == "exit":
+                self._finished_at = record.timestamp
                 self.flush()
 
     def _handle_llm_call(self, record: LLMCallRecord) -> None:
@@ -256,7 +267,7 @@ class AuditTrailView(DerivedView):
         payload: dict[str, Any] = {
             "round": self._current_round,
             "started_at": self._started_at,
-            "finished_at": datetime.now(UTC).isoformat(),
+            "finished_at": self._finished_at,
             "nodes": nodes_ordered,
         }
 

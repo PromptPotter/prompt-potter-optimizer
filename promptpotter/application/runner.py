@@ -19,7 +19,6 @@ from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import (
     NextAction,
     apply_sweep_payload_to_osp,
-    build_escalation_entry,
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
@@ -305,8 +304,7 @@ async def _run_round_loop(
         while clean_rounds < max_rounds and round_num < hard_cap:
             is_probe = cycle.probe_next_round
             if is_probe:
-                warned = {q for q, e in cycle.opt_sp.warning_inventory.items() if e.get("warnings")}
-                round_eval_data = [s for s in dataset if s.query in warned]
+                round_eval_data = [s for s in dataset if s.query in cycle.warned_queries]
                 round_checks = None
             else:
                 round_eval_data = session.scoring.scoring_set
@@ -365,15 +363,6 @@ async def _run_round_loop(
                     warning_types=signal.check_result.get("warning_types"),
                 )
                 if signal.routes_to_optimizer and opt.enable_l2:
-                    cycle.opt_sp.append_escalation(
-                        build_escalation_entry(
-                            round_num,
-                            signal.check_result,
-                            cycle.tracking.current_sp.pipeline_params
-                            if cycle.tracking.current_sp
-                            else None,
-                        )
-                    )
                     await _escalate_or_stop(cycle, config, session, round_num, cb)
                 elif signal.is_abort:
                     raise StopLoop(StopReason.ABORT)

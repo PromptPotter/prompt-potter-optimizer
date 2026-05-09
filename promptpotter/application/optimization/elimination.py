@@ -40,7 +40,6 @@ __all__ = [
     "get_ranked_items",
     "is_deprecated",
     "ranked_item_keys_from_schema",
-    "update_sample_tracker",
 ]
 
 
@@ -153,38 +152,6 @@ def extract_warning_types(result: Mapping[str, Any]) -> list[str]:
 def is_deprecated(result: Mapping[str, Any]) -> bool:
     """True iff the classifier marked any fatal code — a deprecated data point."""
     return classify_result(result).is_fatal
-
-
-def update_sample_tracker(
-    tracker: dict[str, dict],
-    results: list[QueryMeasurement],
-) -> None:
-    """Merge results into the per-sample warning inventory (mutates tracker)."""
-    for r in results:
-        query = r.get("query", "")
-        if not query:
-            continue
-        entry = tracker.setdefault(
-            query,
-            {
-                "rounds_seen": 0,
-                "hits": 0,
-                "misses": 0,
-                "warnings": {},
-                "last_terminated_at": "",
-            },
-        )
-        entry["rounds_seen"] += 1
-        if r.get("hit"):
-            entry["hits"] += 1
-        else:
-            entry["misses"] += 1
-        pd = r.get("pipeline_data") or {}
-        terminated = pd.get("terminated_at", "")
-        if terminated:
-            entry["last_terminated_at"] = terminated
-        for wtype in extract_warning_types(r):
-            entry["warnings"][wtype] = entry["warnings"].get(wtype, 0) + 1
 
 
 # ---------------------------------------------------------------------------

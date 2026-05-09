@@ -21,12 +21,7 @@ from promptpotter.application.scoring.evaluators import (
     materialize_round_values,
 )
 from promptpotter.application.scoring.formula import compile_round_scorer, extract_item_label
-from promptpotter.domain.analysis import (
-    FailureAnalysis,
-    FailurePattern,
-    SampleDifficulty,
-    SampleProfile,
-)
+from promptpotter.domain.analysis import SampleDifficulty, SampleProfile
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import is_degraded, is_error_result
@@ -43,7 +38,6 @@ if TYPE_CHECKING:
 __all__ = [
     "Evaluator",
     "all_evaluators",
-    "compile_failure_analysis",
     "compile_sample_difficulty",
     "compute_composite_fitness",
     "count_degraded_samples",
@@ -285,8 +279,7 @@ def compute_composite_fitness(
 
 
 # ---------------------------------------------------------------------------
-# Failure analysis + query difficulty — unchanged semantics, kept here so
-# consumers don't need to import from a new module.
+# Sample difficulty — historical hit-rate classification.
 # ---------------------------------------------------------------------------
 
 
@@ -298,85 +291,6 @@ def _classify_difficulty(hit_rate: float) -> DifficultyClass:
     if hit_rate >= 0.1:
         return "discriminating"
     return "hard"
-
-
-def _failure_pattern_key(diag: dict) -> tuple[str, ...]:
-    """Build a grouping key from the most discriminative diagnostic signals."""
-    parts: list[str] = []
-    for field in ("gt_in_source", "gt_in_ranked", "terminated_at"):
-        if field in diag:
-            parts.append(f"{field}={diag[field]}")
-    return tuple(parts) if parts else ("unknown",)
-
-
-def _auto_name(key: tuple[str, ...]) -> str:
-    """Generate a human-readable pattern name from a diagnostic key."""
-    if key == ("unknown",):
-        return "unknown"
-    names: list[str] = []
-    for part in key:
-        field, _, val = part.partition("=")
-        if field == "gt_in_source" and val == "False":
-            names.append("source_miss")
-        elif field == "gt_in_ranked" and val == "False":
-            names.append("rank_miss")
-        elif field == "terminated_at":
-            names.append(f"stopped_at_{val}")
-    return "_".join(names) if names else "pattern"
-
-
-def compile_failure_analysis(
-    results: list[QueryMeasurement],
-    pipeline_schema: PipelineSchema,
-    *,
-    max_patterns: int = 5,
-    max_examples: int = 3,
-) -> FailureAnalysis:
-    """Group query failures by diagnostic pattern.
-
-    Calls ``extract_sample_diagnostics()`` on each failing result, groups by
-    ``(gt_in_source, gt_in_ranked, terminated_at)`` key, and returns the top
-    patterns ranked by failure count. Deprecated samples (fatal warnings)
-    are excluded so they don't pollute pattern groupings.
-    """
-    from promptpotter.application.optimization.elimination import is_deprecated
-
-    failures = [
-        r for r in results if not r.get("hit") and not is_error_result(r) and not is_deprecated(r)
-    ]
-    if not failures:
-        return FailureAnalysis(total_failures=0, total_results=len(results))
-
-    groups: dict[tuple[str, ...], list[QueryMeasurement]] = defaultdict(list)
-    diag_cache: dict[tuple[str, ...], dict] = {}
-    for r in failures:
-        diag = extract_sample_diagnostics(r, pipeline_schema)
-        key = _failure_pattern_key(diag)
-        groups[key].append(r)
-        if key not in diag_cache:
-            diag_cache[key] = diag
-
-    total_failures = len(failures)
-    patterns: list[FailurePattern] = []
-    for key, group in sorted(groups.items(), key=lambda x: -len(x[1])):
-        patterns.append(
-            FailurePattern(
-                name=_auto_name(key),
-                sample_count=len(group),
-                fraction=len(group) / total_failures,
-                diagnostic_key=key,
-                example_queries=[r.get("query", "") for r in group[:max_examples]],
-                signals=diag_cache.get(key, {}),
-            )
-        )
-        if len(patterns) >= max_patterns:
-            break
-
-    return FailureAnalysis(
-        patterns=patterns,
-        total_failures=total_failures,
-        total_results=len(results),
-    )
 
 
 def compile_sample_difficulty(
