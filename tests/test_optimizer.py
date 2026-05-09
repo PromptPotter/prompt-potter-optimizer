@@ -739,3 +739,42 @@ def test_decision_trace_shape_and_json_roundtrip():
     # JSON round-trip: equal after dump+reload.
     reloaded = DecisionTrace.model_validate_json(trace.model_dump_json())
     assert reloaded == trace
+
+
+def test_build_decision_trace_writer_contract():
+    """build_decision_trace dumps the wire shape; leaderboard is sorted desc + top-K."""
+    from promptpotter.application.optimization.l1_population import build_decision_trace
+    from promptpotter.domain.decision_trace import DecisionTrace
+
+    snapshot = {"a": 0.10, "b": 0.55, "c": 0.20, "d": 0.05, "e": 0.05, "f": 0.05}
+    trace_dict = build_decision_trace(
+        decision_kind="eliminate",
+        candidate_id="a",
+        at_sample_index=4,
+        p_best_at_decision=0.10,
+        snapshot=snapshot,
+        sample_outcomes=[True, False, False, True],
+    )
+
+    leaderboard = trace_dict["leaderboard_at_decision"]
+    assert [cid for cid, _ in leaderboard] == ["b", "c", "a", "d", "e"]
+    assert all(leaderboard[i][1] >= leaderboard[i + 1][1] for i in range(len(leaderboard) - 1))
+
+    # Wire shape must round-trip back into the frozen model.
+    reloaded = DecisionTrace.model_validate(trace_dict)
+    assert reloaded.decision_kind == "eliminate"
+    assert reloaded.candidate_id == "a"
+    assert reloaded.sample_outcomes_so_far == [True, False, False, True]
+
+    # All three kinds accepted.
+    for kind in ("eliminate", "complete", "promote"):
+        DecisionTrace.model_validate(
+            build_decision_trace(
+                decision_kind=kind,
+                candidate_id="x",
+                at_sample_index=0,
+                p_best_at_decision=None,
+                snapshot=None,
+                sample_outcomes=[],
+            )
+        )

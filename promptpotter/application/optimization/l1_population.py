@@ -23,6 +23,7 @@ from typing import Any
 
 from promptpotter.application.optimization.l1_validators import L1_SCHEMA_COMPLIANCE
 from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
+from promptpotter.domain.decision_trace import DecisionTrace
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.domain.results import (
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 
 __all__ = [
     "INVALID_SCORES",
+    "build_decision_trace",
     "build_score_report",
     "merge_pipeline_params",
     "parse_population",
@@ -138,6 +140,40 @@ def pobb_decision_data(candidate_score: dict) -> dict[str, Any]:
         "leader_id": str(candidate_score.get("leader_id", "")),
         "p_best_snapshot": dict(candidate_score.get("p_best_snapshot") or {}),
     }
+
+
+def _topk_leaderboard(snapshot: dict[str, float], k: int = 5) -> list[tuple[str, float]]:
+    return [(cid, float(p)) for cid, p in sorted(snapshot.items(), key=lambda kv: -kv[1])[:k]]
+
+
+def build_decision_trace(
+    *,
+    decision_kind: str,
+    candidate_id: str,
+    at_sample_index: int,
+    p_best_at_decision: float | None,
+    snapshot: dict[str, float] | None,
+    sample_outcomes: list[bool],
+    target_axis: str = "",
+) -> dict[str, Any]:
+    """Build + dump a :class:`DecisionTrace` to the wire dict shape.
+
+    Used at the four decision sites in ``l1.py`` (PoBB elim, leader lock,
+    full completion, round winner). Round winners pass an
+    ``(candidate_id, accuracy)`` snapshot keyed by candidate; PoBB sites
+    pass the posterior P(best) snapshot. Both fit the ``snapshot`` shape
+    after sorting + top-K trim by :func:`_topk_leaderboard`.
+    """
+    trace = DecisionTrace(
+        decision_kind=decision_kind,  # type: ignore[arg-type]
+        candidate_id=candidate_id,
+        at_sample_index=at_sample_index,
+        p_best_at_decision=p_best_at_decision,
+        leaderboard_at_decision=_topk_leaderboard(snapshot or {}),
+        sample_outcomes_so_far=list(sample_outcomes),
+        target_axis=target_axis,
+    )
+    return trace.model_dump()
 
 
 INVALID_SCORES: dict[str, Any] = {
