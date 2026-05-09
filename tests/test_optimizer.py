@@ -557,7 +557,7 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
         opt_sp=OptSearchPoint(),
         pipeline_schema=None,
         cycle_slice=_empty_cycle_slice(),
-        digest=RoundDigest(diagnostics=None, critique=None),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
         axes=fake_axes,
     )
     out = DispatchHub.render("axis_memory", bundle)
@@ -578,7 +578,7 @@ def test_axis_memory_empty_when_axes_or_digest_absent():
         "opt_sp": OptSearchPoint(),
         "pipeline_schema": None,
         "cycle_slice": _empty_cycle_slice(),
-        "digest": RoundDigest(diagnostics=None, critique=None),
+        "digest": RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
     }
 
     no_axes = Bundle(**base_kwargs, axes=None)
@@ -597,6 +597,59 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 
     assert "axis_memory" in L1_POSSIBLE
     assert "axis_memory" in default_l1_layout().problem_description
+
+
+def test_decision_trace_summary_signal():
+    """Phase 3.3: decision_trace_summary renders the latest round's traces compactly."""
+    from promptpotter.application.optimization.dispatch_hub import (
+        Bundle,
+        DispatchHub,
+        RoundDigest,
+    )
+    from promptpotter.application.optimization.l1_population import build_decision_trace
+
+    traces = [
+        build_decision_trace(
+            decision_kind="eliminate",
+            candidate_id="cand_aaa",
+            at_sample_index=4,
+            p_best_at_decision=0.03,
+            snapshot={"cand_bbb": 0.78, "cand_aaa": 0.03},
+            sample_outcomes=[True, False, False, True],
+        ),
+        build_decision_trace(
+            decision_kind="promote",
+            candidate_id="cand_bbb",
+            at_sample_index=8,
+            p_best_at_decision=None,
+            snapshot={"cand_bbb": 0.62, "cand_aaa": 0.05},
+            sample_outcomes=[True] * 6 + [False] * 2,
+        ),
+    ]
+    bundle = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=traces),
+        axes=None,
+    )
+
+    out = DispatchHub.render("decision_trace_summary", bundle)
+    assert out.startswith("DECISION TRACES")
+    assert "eliminate c=cand_aaa@s4" in out
+    assert "promote c=cand_bbb@s8" in out
+    assert "P(best)=0.03" in out
+    assert "hits=6 misses=2" in out
+
+    # Empty digest path renders nothing.
+    empty = Bundle(
+        opt_sp=OptSearchPoint(),
+        pipeline_schema=None,
+        cycle_slice=_empty_cycle_slice(),
+        digest=RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
+        axes=None,
+    )
+    assert DispatchHub.render("decision_trace_summary", empty) == ""
 
 
 # ===========================================================================

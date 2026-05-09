@@ -158,12 +158,16 @@ class CycleSlice:
 class RoundDigest:
     """One round's post-scoring readouts — the compression chain in one place.
 
-    Two streams the optimizer compresses each round into something every
+    Three streams the optimizer compresses each round into something every
     layer can reason about:
 
     * ``diagnostics`` — deterministic post-scoring readout
       (:func:`compute_round_diagnostics`).
     * ``critique`` — the L1_CRITIQUE LLM's compact dict.
+    * ``decision_traces`` — per-candidate eliminate / promote / complete
+      records produced by PoBB writers (Phase 3.2). Empty when no PoBB
+      decisions fired this round; consumed by the
+      ``decision_trace_summary`` signal.
 
     Built once in :func:`build_bundle` from the just-completed
     ``RoundResult`` and read identically by every signal renderer that
@@ -177,6 +181,7 @@ class RoundDigest:
 
     diagnostics: RoundDiagnostics | None
     critique: dict | None
+    decision_traces: list[dict]
 
 
 @dataclass(frozen=True)
@@ -594,6 +599,40 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 )
 
 
+_DECISION_TRACE_RENDER_CAP = 10
+
+
+def _r_decision_trace_summary(b: Bundle) -> str:
+    """Compact view of the latest round's per-candidate decision traces.
+
+    Reads ``b.digest.decision_traces`` (Phase 3.2 writer output). Emits
+    the most recent ``_DECISION_TRACE_RENDER_CAP`` entries — eliminate /
+    promote / complete kinds with sample-outcome trails and leaderboard
+    at decision time. Empty when no traces this round.
+    """
+    traces = b.digest.decision_traces
+    if not traces:
+        return ""
+    lines = ["DECISION TRACES (last round, per-candidate):"]
+    for t in traces[-_DECISION_TRACE_RENDER_CAP:]:
+        kind = t.get("decision_kind", "?")
+        cid = (t.get("candidate_id") or "")[:8]
+        n = t.get("at_sample_index", 0)
+        outcomes = t.get("sample_outcomes_so_far") or []
+        hits = sum(1 for o in outcomes if o)
+        misses = len(outcomes) - hits
+        lb = t.get("leaderboard_at_decision") or []
+        head_bits = [f"{kind} c={cid}@s{n}"]
+        if (p := t.get("p_best_at_decision")) is not None:
+            head_bits.append(f"P(best)={float(p):.2f}")
+        if lb:
+            top = ", ".join(f"{cid_[:6]}:{score:.2f}" for cid_, score in lb[:3])
+            head_bits.append(f"top: {top}")
+        head_bits.append(f"trail: hits={hits} misses={misses}")
+        lines.append("  " + " | ".join(head_bits))
+    return "\n".join(lines)
+
+
 def _r_axis_memory(b: Bundle) -> str:
     """Cross-cycle axis & sample memory derived from the MeasurementArchive.
 
@@ -710,6 +749,12 @@ SIGNALS: dict[str, _Signal] = {
         _r_axis_memory,
         "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
         "failure clusters, value trends, exhausted axes.",
+    ),
+    "decision_trace_summary": _Signal(
+        "decision_trace_summary",
+        SignalKind.MEASUREMENT,
+        _r_decision_trace_summary,
+        "Per-candidate eliminate/promote/complete trail with leaderboard at decision time.",
     ),
 }
 
@@ -844,6 +889,7 @@ def build_bundle(
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
+    latest_traces = list(latest_round.decision_traces) if latest_round else []
     round_num = latest_round.round + 1 if latest_round else 0
 
     cs = CycleSlice(
@@ -862,6 +908,10 @@ def build_bundle(
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,
-        digest=RoundDigest(diagnostics=latest_diag, critique=latest_crit),
+        digest=RoundDigest(
+            diagnostics=latest_diag,
+            critique=latest_crit,
+            decision_traces=latest_traces,
+        ),
         axes=cycle.axes,
     )
