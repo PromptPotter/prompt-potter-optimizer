@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from functools import partial
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -250,14 +251,10 @@ async def prepare_scoring_context(
             session,
             label="Baseline",
             on_sample_starting=(
-                (lambda q, qi, qt: listener.on_sample_started(0, 1, qi, qt, q))
-                if listener is not None
-                else None
+                partial(listener.on_sample_started, 0, 1) if listener is not None else None
             ),
             on_sample_scored=(
-                (lambda r, qi, qt: listener.on_sample_scored(0, 1, qi, qt, r))
-                if listener is not None
-                else None
+                partial(listener.on_sample_scored, 0, 1) if listener is not None else None
             ),
         )
     finally:

@@ -133,12 +133,12 @@ class RunCallbacks:
             {"scores": scores, "phase_ctx": dict(self._phase_ctx)},
         )
 
-    def on_sample_started(self, ci: int, ct: int, qi: int, qt: int, query_text: str) -> None:
+    def on_sample_started(self, ci: int, ct: int, query_text: str, qi: int, qt: int) -> None:
         self._snapshot(
             "sample_started", ci, ct, {"query_text": query_text}, sample_idx=qi, sample_total=qt
         )
 
-    def on_sample_scored(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
+    def on_sample_scored(self, ci: int, ct: int, result: dict, qi: int, qt: int) -> None:
         self._snapshot("sample_scored", ci, ct, {"result": result}, sample_idx=qi, sample_total=qt)
 
     def on_p_best_update(self, round_num: int, ci: int, ct: int, snapshot: Any) -> None:

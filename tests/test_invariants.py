@@ -902,7 +902,7 @@ def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
 
     cb.on_phase(PhaseEvent(phase="l1_generate", event="enter", round=3, data={"k": "v"}))
     cb.on_sample_scored(
-        0, 1, 4, 5, {"hit": True, "fitness": 1.0, "pipeline_data": {"terminated_at": "llm_only"}}
+        0, 1, {"hit": True, "fitness": 1.0, "pipeline_data": {"terminated_at": "llm_only"}}, 4, 5
     )
     cb.on_candidate_scored(
         0, 1, {"accuracy": 0.6, "hits": 6, "total": 10, "composite_fitness": 0.55}

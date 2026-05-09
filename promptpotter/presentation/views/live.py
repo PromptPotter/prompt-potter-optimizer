@@ -713,9 +713,9 @@ class LiveDisplay(DerivedView):
         qt = int(record.sample_total or 0)
         ev = record.event
         if ev == "sample_started":
-            self.on_sample_started(ci, ct, qi, qt, payload.get("query_text") or "")
+            self.on_sample_started(ci, ct, payload.get("query_text") or "", qi, qt)
         elif ev == "sample_scored":
-            self.on_sample_scored(ci, ct, qi, qt, payload.get("result") or {})
+            self.on_sample_scored(ci, ct, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
                 ci, ct, payload.get("changes_description") or "", payload.get("pp_override")
@@ -791,7 +791,7 @@ class LiveDisplay(DerivedView):
                 self._phase_ctx["composite_fitness_formula"] = new_formula
 
     def on_sample_started(
-        self, cand_idx: int, n_cands: int, sample_idx: int, n_samples: int, query_text: str
+        self, cand_idx: int, n_cands: int, query_text: str, sample_idx: int, n_samples: int
     ) -> None:
         # Per-sample output renders after the result lands; the emitter's
         # dashboard.json surfaces the in-flight state.
@@ -819,7 +819,7 @@ class LiveDisplay(DerivedView):
             )
 
     def on_sample_scored(
-        self, cand_idx: int, n_cands: int, sample_idx: int, n_samples: int, result: dict
+        self, cand_idx: int, n_cands: int, result: dict, sample_idx: int, n_samples: int
     ) -> None:
         self.sample_counter += 1
         prefix = f"  [{self.sample_counter:>3d}] "

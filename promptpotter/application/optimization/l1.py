@@ -194,38 +194,6 @@ async def l1_generate(
 # ---------------------------------------------------------------------------
 
 
-def _on_sample_scored(
-    callbacks: RunCallbacks,
-    idx: int,
-    n_total: int,
-    result,
-    sample_idx: int,
-    query_total: int,
-) -> None:
-    callbacks.on_sample_scored(idx, n_total, sample_idx, query_total, result)
-
-
-def _on_sample_starting(
-    callbacks: RunCallbacks,
-    idx: int,
-    n_total: int,
-    query_text,
-    sample_idx: int,
-    query_total: int,
-) -> None:
-    callbacks.on_sample_started(idx, n_total, sample_idx, query_total, query_text)
-
-
-def _emit_p_best(
-    callbacks: RunCallbacks,
-    round_num: int,
-    idx: int,
-    n: int,
-    snap,
-) -> None:
-    callbacks.on_p_best_update(round_num, idx, n, snap)
-
-
 class CandidateOutcome(StrEnum):
     """How ``score_one_candidate`` exited. Caller fires the report unconditionally
     and uses the tag to decide whether to break the loop or continue.
@@ -436,8 +404,8 @@ async def score_one_candidate(
         dataset,
         cycle.session,
         label=f"candidate_{idx}",
-        on_sample_scored=partial(_on_sample_scored, callbacks, idx, n_total),
-        on_sample_starting=partial(_on_sample_starting, callbacks, idx, n_total),
+        on_sample_scored=partial(callbacks.on_sample_scored, idx, n_total),
+        on_sample_starting=partial(callbacks.on_sample_started, idx, n_total),
         degradation_checks=[*(degradation_checks or []), elim_check],
         candidate_idx=idx,
         n_total_candidates=n_total,
@@ -590,7 +558,7 @@ async def score_population(
         # lands on the live telemetry stream tagged with the right id.
         elim_check.set_current(
             osp_c.lineage.id,
-            on_snapshot=partial(_emit_p_best, callbacks, round_num, idx, n),
+            on_snapshot=partial(callbacks.on_p_best_update, round_num, idx, n),
         )
 
         cr_result = await score_one_candidate(
