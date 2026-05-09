@@ -8,7 +8,7 @@ decision; the dispatch hub renders the slice via the
 ``decision_trace_summary`` signal into ``L1_CRITIQUE``'s prompt body.
 
 The frozen model is decoupled from :class:`Decision` /
-:class:`DecisionKind` (``domain/run_records.py``) on purpose: those
+:class:`ResumeCheckpointKind` (``domain/run_records.py``) on purpose: those
 records gate replay-vs-archival semantics for a small fixed set of
 divergence-relevant decisions, while :class:`DecisionTrace` is
 narrative — produced for every elimination/promotion regardless of

@@ -12,7 +12,7 @@ imports and the ``StoreDep`` dependency:
 
 3. **Per-cycle live reads** (also on ``campaigns_router``) — dashboard
    passthrough, log.md, ledger reads + filtered views (decisions,
-   forks). The first real consumer of the per-cycle ``CycleLedger``;
+   forks). The first real consumer of the per-cycle ``CycleEventLog``;
    validates the record types carry what a webapp needs.
 """
 
@@ -31,9 +31,9 @@ from promptpotter.application.bootstrap.pipeline_view import compute_pipeline_vi
 from promptpotter.config.settings import settings
 from promptpotter.domain.backend import BackendConnection
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import DecisionKind, DecisionRecord
+from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
 from promptpotter.infrastructure.backend import BackendClient
-from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import (
     Stores,
     build_stores,
@@ -341,7 +341,7 @@ def _read_text_or_404(path: Path, label: str) -> str:
 class DashboardSnapshot(BaseModel):
     """Pass-through envelope for ``dashboard.json``.
 
-    Shape matches whatever ``LiveDashboardProjection`` writes — kept as
+    Shape matches whatever ``LiveDashboardView`` writes — kept as
     a free-form ``data`` dict so dashboard schema changes don't break
     the API contract.
     """
@@ -353,10 +353,10 @@ class DashboardSnapshot(BaseModel):
 class CycleRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
-    ``record_type`` discriminates DecisionRecord / PhaseRecord / SnapshotRecord;
+    ``record_type`` discriminates ResumeCheckpointRecord / PhaseRecord / SnapshotRecord;
     ``payload`` carries the model's fields verbatim (Pydantic
     model_dump). Consumers either route by record_type or filter on
-    DecisionRecord.kind for gating events.
+    ResumeCheckpointRecord.kind for gating events.
     """
 
     offset: int = Field(description="Position in events.jsonl, monotonic per cycle")
@@ -372,7 +372,7 @@ class LedgerSliceResponse(BaseModel):
 
 class DecisionEnvelope(BaseModel):
     offset: int = Field(description="Position in the cycle's ledger")
-    kind: str = Field(description="DecisionKind value (round_winner, fork_cut, ...)")
+    kind: str = Field(description="ResumeCheckpointKind value (round_winner, fork_cut, ...)")
     round: int | None = Field(default=None, description="Round the decision was made in")
     inputs_ref: dict[str, Any] = Field(description="Inputs the decision was derived from")
     outcome: Any = Field(description="The decision's outcome")
@@ -383,7 +383,7 @@ class DecisionEnvelope(BaseModel):
 class DecisionsResponse(BaseModel):
     cycle_id: str = Field(description="Cycle the decisions belong to")
     decisions: list[DecisionEnvelope] = Field(
-        description="All DecisionRecord records in append order"
+        description="All ResumeCheckpointRecord records in append order"
     )
 
 
@@ -398,12 +398,12 @@ class ForksResponse(BaseModel):
     forks: list[ForkRef] = Field(description="Children minted from this parent")
 
 
-def _open_cycle_ledger_or_404(cycle_id: str, store: Stores) -> CycleLedger:
+def _open_cycle_ledger_or_404(cycle_id: str, store: Stores) -> CycleEventLog:
     """Open the per-cycle ledger; 404 if the cycle dir doesn't exist."""
     cycle_dir = campaign_dir_for(store.base_dir, cycle_id)
     if not cycle_dir.exists():
         raise HTTPException(404, f"Cycle '{cycle_id}' not found")
-    return CycleLedger.open(CycleDir(cycle_dir))
+    return CycleEventLog.open(CycleDir(cycle_dir))
 
 
 def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
@@ -484,7 +484,7 @@ async def get_cycle_ledger(
     response_model=DecisionsResponse,
 )
 async def get_cycle_decisions(store: StoreDep, cycle_id: str):
-    """All DecisionRecord records from the cycle's ledger, in append order.
+    """All ResumeCheckpointRecord records from the cycle's ledger, in append order.
 
     Filtered view over ``GET /ledger`` for the common gating-event use
     case. Includes archival kinds (probe, fork_cut) — consumers filter
@@ -493,7 +493,7 @@ async def get_cycle_decisions(store: StoreDep, cycle_id: str):
     ledger = _open_cycle_ledger_or_404(cycle_id, store)
     out: list[DecisionEnvelope] = []
     for offset, rec in enumerate(ledger.iter()):
-        if isinstance(rec, DecisionRecord):
+        if isinstance(rec, ResumeCheckpointRecord):
             out.append(
                 DecisionEnvelope(
                     offset=offset,
@@ -515,7 +515,7 @@ async def get_cycle_decisions(store: StoreDep, cycle_id: str):
 async def get_cycle_forks(store: StoreDep, cycle_id: str):
     """Sibling forks minted from this cycle, derived from FORK_CUT records.
 
-    Each fork's metadata comes from a single ``DecisionRecord(kind=FORK_CUT)``
+    Each fork's metadata comes from a single ``ResumeCheckpointRecord(kind=FORK_CUT)``
     in the parent's ledger — ``outcome`` is the child cycle_id,
     ``inputs_ref.from_round`` is the cut point, ``data.forked_at`` is
     the wall-clock fork time.
@@ -523,7 +523,7 @@ async def get_cycle_forks(store: StoreDep, cycle_id: str):
     ledger = _open_cycle_ledger_or_404(cycle_id, store)
     forks: list[ForkRef] = []
     for rec in ledger.iter():
-        if isinstance(rec, DecisionRecord) and rec.kind is DecisionKind.FORK_CUT:
+        if isinstance(rec, ResumeCheckpointRecord) and rec.kind is ResumeCheckpointKind.FORK_CUT:
             forks.append(
                 ForkRef(
                     fork_cycle_id=str(rec.outcome),

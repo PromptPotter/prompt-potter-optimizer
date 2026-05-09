@@ -40,8 +40,8 @@ from promptpotter.application.optimization.llm_call import (
     run_optimizer_node,
 )
 from promptpotter.application.optimization.resume_and_fork import (
-    DecisionKind,
-    DecisionRecord,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
     record_decision,
 )
 from promptpotter.application.optimization.round_diagnostics import (
@@ -263,7 +263,7 @@ class SignalEffect:
     LEADER_LOCK_IN decision payload) into a single pass. The caller still
     owns leader-label decoration (needs prior-rank lookup over already-scored
     candidates) and decision emission gating. Decision payloads are kept as
-    ``(inputs_ref, data)`` tuples — the ``DecisionKind`` literal stays at
+    ``(inputs_ref, data)`` tuples — the ``ResumeCheckpointKind`` literal stays at
     the ``record_decision`` callsite (static check in
     ``test_no_bare_string_decision_kinds``).
     """
@@ -398,7 +398,7 @@ async def score_one_candidate(
     elim_check: PoBBCheck,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None,
-    decisions: list[DecisionRecord] | None,
+    decisions: list[ResumeCheckpointRecord] | None,
     candidate_scores: list[CandidateScore],
     round_num: int,
     l1_diversity: float,
@@ -526,7 +526,7 @@ async def score_one_candidate(
         inputs_ref, data = effect.elimination_decision
         record_decision(
             decisions,
-            DecisionKind.ELIMINATION_CUT,
+            ResumeCheckpointKind.ELIMINATION_CUT,
             inputs_ref,
             True,
             data=data,
@@ -536,7 +536,7 @@ async def score_one_candidate(
         inputs_ref, data = effect.leader_lock_decision
         record_decision(
             decisions,
-            DecisionKind.LEADER_LOCK_IN,
+            ResumeCheckpointKind.LEADER_LOCK_IN,
             inputs_ref,
             True,
             data=data,
@@ -615,7 +615,7 @@ async def score_population(
     callbacks: RunCallbacks,
     pobb_config: PoBBConfig,
     round_num: int = 0,
-    decisions: list[DecisionRecord] | None = None,
+    decisions: list[ResumeCheckpointRecord] | None = None,
     decision_traces: list[dict] | None = None,
     l1_diversity: float = 1.0,
 ) -> tuple[dict[str, list[QueryMeasurement]], list[CandidateScore], EscalationSignal | None]:
@@ -718,7 +718,7 @@ async def l1_score(
     assert schema is not None, "l1_score requires pipeline_schema"
 
     osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
-    decisions: list[DecisionRecord] = []
+    decisions: list[ResumeCheckpointRecord] = []
     decision_traces: list[dict] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,
@@ -772,7 +772,7 @@ async def l1_score(
     winner_id = scored[winner_idx].lineage.id if winner_idx is not None and scored else ""
     record_decision(
         decisions,
-        DecisionKind.ROUND_WINNER,
+        ResumeCheckpointKind.ROUND_WINNER,
         {
             "candidate_ids": [ind.lineage.id for ind in scored],
             "round_num": round_num,
@@ -856,7 +856,7 @@ async def generate_or_load_candidates(
     # Cap n_variants at 3× config so L2 can't blow up the round budget.
     opt = config.optimization
     model = config.optimizer_llm.model
-    opt_params = cycle.opt_sp.l1_config
+    opt_params = cycle.opt_sp.l1_overrides
     _n_variants = min(opt_params.get("n_variants", opt.n_variants), opt.n_variants * 3)
     _creativity = opt_params.get("creativity", opt.creativity)
     prompt_preview = cycle.opt_sp.render()[:120]

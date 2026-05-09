@@ -165,7 +165,7 @@ class RoundPayload(BaseModel):
     all_candidate_results: dict[str, list[dict]] = Field(default_factory=dict)
     candidates_scored: int
     candidate_scores: list[dict] = Field(default_factory=list)
-    # DecisionRecord records produced this round (round_winner, elimination_cut,
+    # ResumeCheckpointRecord records produced this round (round_winner, elimination_cut,
     # escalate_l2, …). Consumed by the divergence replay walker in
     # ``application/optimization/cycle.py``.
     decisions: list[dict] = Field(default_factory=list)

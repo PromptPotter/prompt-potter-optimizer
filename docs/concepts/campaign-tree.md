@@ -4,7 +4,7 @@ A campaign is a tree. The root cycle ran first. Every fork branches from a speci
 
 ## The primitive
 
-A cycle is a directory under `campaigns/`. A fork is a new cycle whose `index.json` carries `parent_cycle_id`. The parent's ledger gets a `DecisionRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round; the fork's ledger inherits from the parent's history up to the cut. That's it.
+A cycle is a directory under `campaigns/`. A fork is a new cycle whose `index.json` carries `parent_cycle_id`. The parent's ledger gets a `ResumeCheckpointRecord(kind=FORK_CUT)` naming the child's `cycle_id` and the cut round; the fork's ledger inherits from the parent's history up to the cut. That's it.
 
 ```
 campaigns/
@@ -26,7 +26,7 @@ The mechanism is trigger-agnostic:
 | Caller | Trigger | Stored in |
 |--------|---------|-----------|
 | **Scoring divergence** | `optimize --fork-on-divergence` detects a recorded decision no longer holds under the current scorer | (no payload) |
-| **Operator sweep** | `optimize --sweep` with payloads under `datasets/{name}/sweep/` | `DecisionRecord.data.fork.sweep_payload` |
+| **Operator sweep** | `optimize --sweep` with payloads under `datasets/{name}/sweep/` | `ResumeCheckpointRecord.data.fork.sweep_payload` |
 | **Manual rewind** (M11, planned) | operator labels a fork from any round | (TBD) |
 
 The primitive does not know which caller fired. The caller passes a small `extra_data` blob into the FORK_CUT decision's archival `data` field. New callers add new `data.*` keys; the primitive stays small.
@@ -39,7 +39,7 @@ The primitive does not know which caller fired. The caller passes a small `extra
 | OSP state (`rounds/round_NNNN.json`) | branch dir | — | ✓ | — |
 | Ledger records (Decision / Phase / Snapshot) | branch dir | — | ✓ | — |
 | Sweep payload (operator input) | `datasets/{name}/sweep/*.json` | — | — | git-tracked |
-| Sweep payload (recorded fact) | parent's ledger, `DecisionRecord.data.fork.sweep_payload` | — | ✓ on parent | — |
+| Sweep payload (recorded fact) | parent's ledger, `ResumeCheckpointRecord.data.fork.sweep_payload` | — | ✓ on parent | — |
 
 A branch's ledger inherits from its parent up to the cut, so reading a fork's history walks parent's records, then fork's own.
 

@@ -43,8 +43,8 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.run_records import (
-    DecisionRecord,
     PhaseRecord,
+    ResumeCheckpointRecord,
     SweepPayload,
 )
 from promptpotter.domain.sample import Sample
@@ -59,7 +59,7 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.projections import LiveDashboardProjection
+    from promptpotter.infrastructure.projections import LiveDashboardView
 
 logger = logging.getLogger(__name__)
 
@@ -121,7 +121,7 @@ def _persist_round(
     session: Session,
 ) -> None:
     """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder."""
-    flushed: list[DecisionRecord] = []
+    flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
         cycle.pending_decisions.clear()
@@ -302,11 +302,11 @@ async def _post_round(
         axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
     )
-    # Phase 4 — emit the matched rule + signal snapshot so the SignalsProjection
+    # Emit the matched rule + signal snapshot so the SignalsProjection
     # writes ``.runtime/signals.jsonl`` and the dashboard mirrors recent_rules.
     emit_phase(
         cb.on_phase,
-        "cadence",
+        "escalation",
         "rule_fired",
         round=round_num,
         layer="post_round",
@@ -453,7 +453,7 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            # Ledger drives AuditTrailProjection.begin_round; direct call is
+            # Ledger drives AuditTrailView.begin_round; direct call is
             # kept as no-ledger fallback (test fixtures, headless tools).
             cb.set_round(round_num)
             if (ledger := session.state.ledger) is not None:
@@ -670,7 +670,7 @@ async def run_optimization(
 def _finalize_run(
     cycle: Cycle,
     session: Session,
-    emitter: LiveDashboardProjection | None,
+    emitter: LiveDashboardView | None,
     cycle_result: CycleResult,
     campaign_config: CampaignConfig,
     *,

@@ -1,14 +1,14 @@
-"""SignalsProjection — appends cadence rule firings to ``.runtime/signals.jsonl``.
+"""SignalsProjection — appends escalation rule firings to ``.runtime/signals.jsonl``.
 
-Sister to :class:`PoBBStreamProjection`. Subscribed to the same
-``CycleLedger`` as the other projections; filters on ``PhaseRecord.phase
+Sister to :class:`PoBBStreamView`. Subscribed to the same
+``CycleEventLog`` as the other projections; filters on ``PhaseRecord.phase
 == "cadence" AND event == "rule_fired"`` and writes one JSONL line per
 fire under the cycle's ``.runtime/`` umbrella.
 
 This is the operator-side surface for "why is the loop in the state it's
 in." The webapp's ``StuckDiagnosis`` widget reads the same firings
 (mirrored as ``dashboard.json::recent_rules`` by
-:class:`LiveDashboardProjection`); the on-disk JSONL keeps the full
+:class:`LiveDashboardView`); the on-disk JSONL keeps the full
 trail past the dashboard's rolling window for post-hoc trajectory
 plots.
 
@@ -27,7 +27,7 @@ from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord
-from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.base import DerivedView
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ _RUNTIME_SUBDIR = ".runtime"
 _SIGNALS_FILENAME = "signals.jsonl"
 
 
-class SignalsProjection(ProjectionBase):
-    """Appends cadence rule firings to ``.runtime/signals.jsonl``.
+class SignalsProjection(DerivedView):
+    """Appends escalation rule firings to ``.runtime/signals.jsonl``.
 
     Each line is a JSON object with ``round``, ``timestamp``, ``layer``
     (``post_round``), ``rule_name``, ``rule_priority``, ``next_action``,
@@ -60,7 +60,7 @@ class SignalsProjection(ProjectionBase):
         return cls(Path(cycle_dir) / _RUNTIME_SUBDIR)
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase != "cadence" or record.event != "rule_fired":
+        if record.phase != "escalation" or record.event != "rule_fired":
             return
         payload: dict[str, Any] = dict(record.payload or {})
         line = {

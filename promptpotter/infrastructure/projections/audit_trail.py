@@ -1,4 +1,4 @@
-"""AuditTrailProjection — per-cycle round-recorder, flushes to ``.runtime/cache/rounds/round_NNNN.json``.
+"""AuditTrailView — per-cycle round-recorder, flushes to ``.runtime/cache/rounds/round_NNNN.json``.
 
 Per-cycle scope: a fork's recorder MUST point at the fork's own
 ``.runtime/cache/rounds/`` directory, never at the parent's. The constructor
@@ -27,12 +27,12 @@ from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
-from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.store.base import write_json
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["AuditTrailProjection", "audit_rounds_dir", "load_round_audits"]
+__all__ = ["AuditTrailView", "audit_rounds_dir", "load_round_audits"]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
@@ -98,7 +98,7 @@ def _action_to_node_block(action: dict[str, Any]) -> dict[str, Any]:
     return block
 
 
-class AuditTrailProjection(ProjectionBase):
+class AuditTrailView(DerivedView):
     """Accumulates node I/O within a round, writes ``round_NNNN.json`` on flush.
 
     Construct via :meth:`from_cycle_dir` so the ``rounds_dir`` is derived
@@ -112,7 +112,7 @@ class AuditTrailProjection(ProjectionBase):
     def __init__(self, rounds_dir: Path) -> None:
         if rounds_dir.parts[-len(_ROUNDS_SUBPATH) :] != _ROUNDS_SUBPATH:
             raise ValueError(
-                f"AuditTrailProjection rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
+                f"AuditTrailView rounds_dir must end in {'/'.join(_ROUNDS_SUBPATH)}; "
                 f"got {rounds_dir}"
             )
         self.rounds_dir = rounds_dir
@@ -127,7 +127,7 @@ class AuditTrailProjection(ProjectionBase):
         self._started_at: str = ""
 
     @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailProjection:
+    def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
         """Build a projection rooted at ``{cycle_dir}/.runtime/cache/rounds``."""
         return cls(Path(cycle_dir).joinpath(*_ROUNDS_SUBPATH))
 
@@ -135,7 +135,7 @@ class AuditTrailProjection(ProjectionBase):
         """Start recording a new round. Discards any pending node data."""
         if self._nodes or self._l1_score:
             logger.warning(
-                "AuditTrailProjection: unflushed state from round %d discarded",
+                "AuditTrailView: unflushed state from round %d discarded",
                 self._current_round,
             )
         self._current_round = round_num
@@ -161,7 +161,7 @@ class AuditTrailProjection(ProjectionBase):
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            logger.warning("AuditTrailProjection: failed to rehydrate from %s: %s", path.name, exc)
+            logger.warning("AuditTrailView: failed to rehydrate from %s: %s", path.name, exc)
             return
         nodes = payload.get("nodes") or {}
         for key, block in nodes.items():
@@ -191,7 +191,7 @@ class AuditTrailProjection(ProjectionBase):
     # ``begin_round`` and ``flush``. The baseline phase emits its own
     # ``PhaseRecord("baseline", "enter"|"exit")`` pair before the first round; treated
     # as a pseudo-round so its node I/O lands in ``round_baseline.json`` instead
-    # of being silently discarded when round 0 begins. DecisionRecord and SnapshotRecord
+    # of being silently discarded when round 0 begins. ResumeCheckpointRecord and SnapshotRecord
     # records bypass this projection — decisions are archived in round_data JSON and
     # snapshots are display-only.
 

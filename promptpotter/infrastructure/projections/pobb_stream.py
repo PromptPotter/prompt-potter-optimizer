@@ -1,7 +1,7 @@
-"""PoBBStreamProjection — appends per-sample Posterior-of-Being-Best snapshots
+"""PoBBStreamView — appends per-sample Posterior-of-Being-Best snapshots
 to ``campaigns/{cycle_id}/.runtime/streams/round_NNNN_p_best.jsonl``.
 
-Subscribed to the same ``CycleLedger`` as the other projections. Filters on
+Subscribed to the same ``CycleEventLog`` as the other projections. Filters on
 ``SnapshotRecord.event == "p_best_update"`` and writes one JSONL record per
 PoBBCheck snapshot — operator-tailable in real time, replayable after the
 fact for trajectory plots and post-hoc analysis.
@@ -20,16 +20,16 @@ from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SnapshotRecord
-from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.base import DerivedView
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["PoBBStreamProjection"]
+__all__ = ["PoBBStreamView"]
 
 _STREAMS_SUBPATH = (".runtime", "streams")
 
 
-class PoBBStreamProjection(ProjectionBase):
+class PoBBStreamView(DerivedView):
     """Appends per-sample P(best) snapshots to one JSONL file per round.
 
     File path: ``.runtime/streams/round_NNNN_p_best.jsonl`` under the cycle's
@@ -43,7 +43,7 @@ class PoBBStreamProjection(ProjectionBase):
     def __init__(self, streams_dir: Path) -> None:
         if streams_dir.parts[-len(_STREAMS_SUBPATH) :] != _STREAMS_SUBPATH:
             raise ValueError(
-                f"PoBBStreamProjection streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
+                f"PoBBStreamView streams_dir must end in /{'/'.join(_STREAMS_SUBPATH)}; "
                 f"got {streams_dir}"
             )
         self.streams_dir = streams_dir
@@ -52,7 +52,7 @@ class PoBBStreamProjection(ProjectionBase):
         self._last_round: int | None = None
 
     @classmethod
-    def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamProjection:
+    def from_cycle_dir(cls, cycle_dir: CycleDir) -> PoBBStreamView:
         """Build a projection rooted at ``{cycle_dir}/.runtime/streams``."""
         return cls(Path(cycle_dir).joinpath(*_STREAMS_SUBPATH))
 
@@ -97,4 +97,4 @@ class PoBBStreamProjection(ProjectionBase):
             with path.open("a", encoding="utf-8") as f:
                 f.write(json.dumps(line, default=str) + "\n")
         except OSError as exc:
-            logger.warning("PoBBStreamProjection: append failed for round %d: %s", round_num, exc)
+            logger.warning("PoBBStreamView: append failed for round %d: %s", round_num, exc)

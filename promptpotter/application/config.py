@@ -111,7 +111,7 @@ class OptimizationConfig(BaseModel):
     escalate_on_yield_drought: bool = Field(
         False,
         description=(
-            "Cadence rule l2_axis_yield_drought: when AxisIndex shows zero axes "
+            "Escalation rule l2_axis_yield_drought: when AxisIndex shows zero axes "
             "with effect_size > NOISE_THRESHOLD AND L1 has stalled at least one "
             "round, fire L2 immediately (preempts l1_patience). Closes the "
             "calendar-driven escalation gap (Routed Dispatch flaw 3); off by "

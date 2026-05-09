@@ -21,8 +21,12 @@ import pytest
 from fastapi.testclient import TestClient
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import DecisionKind, DecisionRecord, PhaseRecord
-from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.domain.run_records import (
+    PhaseRecord,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
+)
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import build_stores, campaign_dir_for, root_dir_for
 from promptpotter.main import WEBAPP_DIR, app
 
@@ -56,11 +60,11 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
         encoding="utf-8",
     )
 
-    ledger = CycleLedger.open(CycleDir(cycle_dir))
+    ledger = CycleEventLog.open(CycleDir(cycle_dir))
     ledger.append(PhaseRecord(phase="round", event="enter", round=0))
     ledger.append(
-        DecisionRecord(
-            kind=DecisionKind.ROUND_WINNER,
+        ResumeCheckpointRecord(
+            kind=ResumeCheckpointKind.ROUND_WINNER,
             inputs_ref={"candidate_ids": ["c1"], "round_num": 0},
             outcome="c1",
             round=0,
@@ -68,8 +72,8 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
     )
     ledger.append(PhaseRecord(phase="round", event="complete", round=0, payload={"acc": 0.6}))
     ledger.append(
-        DecisionRecord(
-            kind=DecisionKind.FORK_CUT,
+        ResumeCheckpointRecord(
+            kind=ResumeCheckpointKind.FORK_CUT,
             inputs_ref={"from_round": 1},
             outcome="cycle_apitest_001_fork_abc",
             data={"forked_at": "2026-04-30T12:00:00+00:00"},

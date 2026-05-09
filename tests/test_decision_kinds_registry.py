@@ -1,18 +1,18 @@
-"""DecisionRecord-kind registry — single seam for divergence gating.
+"""ResumeCheckpointRecord-kind registry — single seam for divergence gating.
 
 These tests enforce the contract documented in
 ``promptpotter/domain/run_records.py``:
 
-1. Every ``DecisionKind`` member is paired with a ``GatingMode`` in
-   ``DECISION_GATING`` (no orphans).
+1. Every ``ResumeCheckpointKind`` member is paired with a ``GatingMode`` in
+   ``RESUME_CHECKPOINT_GATING`` (no orphans).
 2. Every ``REPLAYED`` kind has a registered replayer; every ``ARCHIVAL``
    kind has none. The pairing is symmetric — a kind cannot be both gated
    and unreplayable, nor archival yet replayable.
-3. The runtime ledger primitive (``CycleLedger``) round-trips records
+3. The runtime ledger primitive (``CycleEventLog``) round-trips records
    through ``events.jsonl`` so projection writers see the same shape on
    replay as on live append.
 4. No call site passes a bare string for ``record_decision(kind=...)`` —
-   the only valid argument is a ``DecisionKind`` member. This catches
+   the only valid argument is a ``ResumeCheckpointKind`` member. This catches
    regressions before mypy in code paths mypy hasn't yet covered.
 """
 
@@ -22,28 +22,30 @@ import re
 from pathlib import Path
 
 from promptpotter.application.optimization.resume_and_fork import (
-    DECISION_GATING,
     REPLAYERS,
-    DecisionKind,
-    DecisionRecord,
+    RESUME_CHECKPOINT_GATING,
     GatingMode,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
-from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.infrastructure.ledger import CycleEventLog
 
 _SRC_ROOT = Path(__file__).resolve().parent.parent / "promptpotter"
 
 
 def test_every_decision_kind_has_a_gating_entry() -> None:
-    missing = [k for k in DecisionKind if k not in DECISION_GATING]
-    extra = [k for k in DECISION_GATING if k not in set(DecisionKind)]
-    assert not missing, f"DecisionKind members missing from DECISION_GATING: {missing}"
-    assert not extra, f"DECISION_GATING contains unknown kinds: {extra}"
+    missing = [k for k in ResumeCheckpointKind if k not in RESUME_CHECKPOINT_GATING]
+    extra = [k for k in RESUME_CHECKPOINT_GATING if k not in set(ResumeCheckpointKind)]
+    assert not missing, (
+        f"ResumeCheckpointKind members missing from RESUME_CHECKPOINT_GATING: {missing}"
+    )
+    assert not extra, f"RESUME_CHECKPOINT_GATING contains unknown kinds: {extra}"
 
 
 def test_replayed_kinds_have_a_replayer() -> None:
-    expected = {k for k, mode in DECISION_GATING.items() if mode is GatingMode.REPLAYED}
+    expected = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.REPLAYED}
     missing = expected - set(REPLAYERS)
     assert not missing, (
         f"REPLAYED kinds without a registered replayer: {sorted(k.value for k in missing)}"
@@ -51,7 +53,7 @@ def test_replayed_kinds_have_a_replayer() -> None:
 
 
 def test_archival_kinds_have_no_replayer() -> None:
-    archival = {k for k, mode in DECISION_GATING.items() if mode is GatingMode.ARCHIVAL}
+    archival = {k for k, mode in RESUME_CHECKPOINT_GATING.items() if mode is GatingMode.ARCHIVAL}
     leaked = archival & set(REPLAYERS)
     assert not leaked, (
         f"ARCHIVAL kinds must not register a replayer: {sorted(k.value for k in leaked)}"
@@ -61,7 +63,7 @@ def test_archival_kinds_have_no_replayer() -> None:
 # Match calls only — ``(?<!def )`` skips the ``def record_decision(...)``
 # helper definition in ``domain/run_records.py``. Then greedily skip the first
 # argument (the decisions list / ledger sink) up to the first comma not nested
-# in brackets/parens, and require the next token to start with ``DecisionKind.``.
+# in brackets/parens, and require the next token to start with ``ResumeCheckpointKind.``.
 # Bare-string second args ("round_winner") fail the match — exactly what we
 # want to catch.
 _RECORD_DECISION = re.compile(
@@ -74,7 +76,7 @@ _RECORD_DECISION = re.compile(
 
 
 def test_no_bare_string_decision_kinds() -> None:
-    """Every record_decision call passes a DecisionKind, not a bare string."""
+    """Every record_decision call passes a ResumeCheckpointKind, not a bare string."""
     offenders: list[str] = []
     for py in _SRC_ROOT.rglob("*.py"):
         text = py.read_text(encoding="utf-8")
@@ -82,17 +84,17 @@ def test_no_bare_string_decision_kinds() -> None:
             continue
         for match in _RECORD_DECISION.finditer(text):
             kind_expr = match.group("kind").strip()
-            if not kind_expr.startswith("DecisionKind."):
+            if not kind_expr.startswith("ResumeCheckpointKind."):
                 offenders.append(f"{py.relative_to(_SRC_ROOT.parent)}: {kind_expr!r}")
     assert not offenders, "bare-string decision kinds found:\n  " + "\n  ".join(offenders)
 
 
 def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
     """Append decision/phase/snapshot, read back via iter() — types preserved."""
-    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))
 
-    d = DecisionRecord(
-        kind=DecisionKind.ROUND_WINNER,
+    d = ResumeCheckpointRecord(
+        kind=ResumeCheckpointKind.ROUND_WINNER,
         inputs_ref={"candidate_ids": ["c1"], "round_num": 0},
         outcome="c1",
     )
@@ -111,7 +113,7 @@ def test_runledger_roundtrips_typed_records(tmp_path: Path) -> None:
 
     records = list(ledger.iter())
     assert len(records) == 3
-    assert isinstance(records[0], DecisionRecord) and records[0].outcome == "c1"
+    assert isinstance(records[0], ResumeCheckpointRecord) and records[0].outcome == "c1"
     assert isinstance(records[1], PhaseRecord) and records[1].phase == "l1_generate"
     assert isinstance(records[2], SnapshotRecord) and records[2].sample_idx == 4
 
@@ -151,7 +153,7 @@ def test_runcallbacks_emits_records_to_ledger(tmp_path: Path) -> None:
     from promptpotter.application.optimization.observers import RunCallbacks
     from promptpotter.domain.phases import PhaseEvent
 
-    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc1"))
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc1"))
     cb = RunCallbacks(ledger=ledger)
     cb.set_round(3)
 
@@ -186,33 +188,37 @@ def test_runledger_inherit_from_replays_parent_records_first(tmp_path: Path) -> 
     happened) — but a downstream replay (e.g. a webapp opening the
     fork) walks the combined stream.
     """
-    parent = CycleLedger.open(CycleDir(tmp_path / "parent"))
+    parent = CycleEventLog.open(CycleDir(tmp_path / "parent"))
     parent.append(PhaseRecord(phase="round", event="complete", round=0))
-    parent.append(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=0))
+    parent.append(
+        ResumeCheckpointRecord(kind=ResumeCheckpointKind.ROUND_WINNER, outcome="c1", round=0)
+    )
     parent.append(PhaseRecord(phase="round", event="complete", round=1))  # past the cut
 
-    fork = CycleLedger.open(CycleDir(tmp_path / "fork"))
+    fork = CycleEventLog.open(CycleDir(tmp_path / "fork"))
     fork.inherit_from(parent, offset=2)  # parent's first 2 records
-    fork.append(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c2", round=1))
+    fork.append(
+        ResumeCheckpointRecord(kind=ResumeCheckpointKind.ROUND_WINNER, outcome="c2", round=1)
+    )
 
     history = list(fork.iter())
     assert len(history) == 3
     assert isinstance(history[0], PhaseRecord) and history[0].round == 0
-    assert isinstance(history[1], DecisionRecord) and history[1].outcome == "c1"
-    assert isinstance(history[2], DecisionRecord) and history[2].outcome == "c2"
+    assert isinstance(history[1], ResumeCheckpointRecord) and history[1].outcome == "c1"
+    assert isinstance(history[2], ResumeCheckpointRecord) and history[2].outcome == "c2"
 
 
 def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     """EscalationState is a projection of the ledger — fold == live mutation.
 
     Named invariant from root CLAUDE.md: persistence has one ingress
-    (``CycleLedger``). EscalationState used to checkpoint a parallel state dict
+    (``CycleEventLog``). EscalationState used to checkpoint a parallel state dict
     into every round_data JSON; resume now rebuilds from the ledger. This test
     drives both paths over an identical sequence and asserts they agree.
     """
     from promptpotter.application.optimization.escalation.state import EscalationState
 
-    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc"))
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
 
     # Round 1: not improved → l1 stall = 1.
     ledger.append(
@@ -286,7 +292,7 @@ def test_escalation_state_reconstructs_from_ledger(tmp_path: Path) -> None:
     # Display-side PhaseRecord("round","display") is no-op for fold — only the
     # audit-side ``event="complete"`` emit drives EscalationState. Distinct
     # event tags eliminate the previous payload-shape demultiplex.
-    ledger2 = CycleLedger.open(CycleDir(tmp_path / "cyc2"))
+    ledger2 = CycleEventLog.open(CycleDir(tmp_path / "cyc2"))
     ledger2.append(
         PhaseRecord(phase="round", event="display", round=1, payload={"l1_stall_count": 999})
     )
@@ -305,12 +311,12 @@ def test_divergence_hint_lists_every_decision_kind() -> None:
     """The CLI hint shown on resume-divergence enumerates every kind by gating mode.
 
     Was hardcoded — silently rotted when a kind was added or moved between
-    REPLAYED/ARCHIVAL. Now derived from ``DECISION_GATING`` so adding a
+    REPLAYED/ARCHIVAL. Now derived from ``RESUME_CHECKPOINT_GATING`` so adding a
     kind updates the operator message automatically.
     """
     from promptpotter.presentation.cli.campaign_runner import _DIVERGENCE_HINT
 
-    for kind, mode in DECISION_GATING.items():
+    for kind, mode in RESUME_CHECKPOINT_GATING.items():
         assert kind.value in _DIVERGENCE_HINT, (
             f"_DIVERGENCE_HINT must mention {kind.value} ({mode.value})"
         )

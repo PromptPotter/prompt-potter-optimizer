@@ -11,7 +11,7 @@ L2 is one entry in the unified dispatch hub — same `LayerStrategy` shape as L3
 1. Improved best fitness → escalation counters reset.
 2. Otherwise `l1_stall_count++`. When it hits `l1_patience`, L2 fires.
 
-Trigger gate: `escalation.escalate_l2`; the decision is recorded as `DecisionKind.L2_ESCALATION_TRIGGER` so resume can replay it.
+Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheckpointKind.L2_ESCALATION_TRIGGER` so resume can replay it.
 
 ## Inputs — via the hub
 
@@ -64,7 +64,7 @@ osp.l2_guard_breaches = list(result.l2_guard_breaches)
 cycle.escalation.record_l2_fired(...)
 if result.axis_targeted:
     cycle.last_l2_axis = result.axis_targeted
-record_decision(DecisionKind.PROBE_ROUND_COMMITMENT, ...)
+record_decision(ResumeCheckpointKind.PROBE_ROUND_COMMITMENT, ...)
 if action == "probe_round":
     cycle.probe_next_round = True
 ```

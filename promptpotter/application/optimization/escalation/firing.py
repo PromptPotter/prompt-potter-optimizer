@@ -10,7 +10,7 @@ into the ``L2`` and ``L3`` instances.
 V1 contract:
 * L2 writes ``task_context`` (broadcast framing refinement, the L2→all
   channel) + ``action`` (``normal_round`` or ``probe_round``) + optional
-  ``axis_targeted`` / ``l1_layout`` / ``l1_config``. No
+  ``axis_targeted`` / ``l1_layout`` / ``l1_overrides``. No
   L1-surface scheme/text/template overrides.
 * L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2
   pointer; survives L2 fires, replaced wholesale on each L3 fire). No
@@ -36,7 +36,7 @@ from promptpotter.application.optimization.l2_validators import (
 )
 from promptpotter.application.optimization.llm_call import load_optimizer_prompt
 from promptpotter.application.optimization.resume_and_fork import (
-    DecisionKind,
+    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.application.optimization.transitions import (
@@ -161,8 +161,8 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
     changes: dict[str, Any] = {
         "changes_description": f"L2: {raw.get('rationale', 'L2 refine_strategy transition')[:80]}"
     }
-    if isinstance(raw.get("l1_config"), dict) and raw["l1_config"]:
-        changes["l1_config"] = {**opt_sp.l1_config, **raw["l1_config"]}
+    if isinstance(raw.get("l1_overrides"), dict) and raw["l1_overrides"]:
+        changes["l1_overrides"] = {**opt_sp.l1_overrides, **raw["l1_overrides"]}
 
     new_task_context = None
     proposed_tc = raw.get("task_context") if isinstance(raw.get("task_context"), dict) else None
@@ -230,7 +230,7 @@ def _apply_l2(cycle: Cycle, result: TransitionResult, round_num: int) -> None:
     is_probe = result.action == "probe_round"
     record_decision(
         cycle.pending_decisions,
-        DecisionKind.PROBE_ROUND_COMMITMENT,
+        ResumeCheckpointKind.PROBE_ROUND_COMMITMENT,
         {"round_num": round_num, "l2_round": cycle.escalation.l2_round},
         is_probe,
         data={
@@ -249,7 +249,7 @@ def _l2_enter(cycle: Cycle) -> dict[str, Any]:
     return {
         "l2_round": cycle.escalation.l2_round,
         "l1_stall_count": cycle.escalation.l1_stall_count,
-        "l1_config": cycle.opt_sp.l1_config,
+        "l1_overrides": cycle.opt_sp.l1_overrides,
         "current_accuracy": cycle.tracking.current_accuracy,
         "best_accuracy": cycle.tracking.best_accuracy,
     }
@@ -264,7 +264,7 @@ def _l2_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
         "l2_stall_count": cycle.escalation.l2_stall_count,
         "l2_best_accuracy_at_entry": cycle.escalation.l2_best_accuracy_at_entry,
         "l2_best_composite_fitness_at_entry": cycle.escalation.l2_best_composite_fitness_at_entry,
-        "param_changes_count": len(result.opt_search_point.l1_config),
+        "param_changes_count": len(result.opt_search_point.l1_overrides),
         "task_context_changed": result.task_context is not None,
         "l1_layout_changed": result.l1_layout is not None,
         "changes_description": result.opt_search_point.lineage.changes_description or "",
@@ -498,7 +498,7 @@ async def escalate_l2(
     )
     record_decision(
         cycle.pending_decisions,
-        DecisionKind.L2_ESCALATION_TRIGGER,
+        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
         l2_inputs,
         event.next_action == NextAction.FIRE_L2,
         data=l2_data,
@@ -544,7 +544,7 @@ async def escalate_l2(
     l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")
     record_decision(
         cycle.pending_decisions,
-        DecisionKind.L3_ESCALATION_TRIGGER,
+        ResumeCheckpointKind.L3_ESCALATION_TRIGGER,
         l3_inputs,
         event.next_action == NextAction.FIRE_L3,
         data=l3_data,

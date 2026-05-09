@@ -1,7 +1,7 @@
 """Structural invariants — artifact parity + hexagonal layer-import rules.
 
 Two named invariants:
-  1. ``LiveDashboardProjection`` lifecycle produces every per-cycle and
+  1. ``LiveDashboardView`` lifecycle produces every per-cycle and
      per-session artifact in ``CAMPAIGN_ARTIFACTS`` / ``SESSION_ARTIFACTS``.
      Campaign artifacts split into ``ROOT_TELEMETRY_ARTIFACTS`` (shared
      across forks) and ``PER_CYCLE_OPERATOR_ARTIFACTS`` (per-cycle frozen
@@ -137,7 +137,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
-    from promptpotter.infrastructure.projections import LiveDashboardProjection
+    from promptpotter.infrastructure.projections import LiveDashboardView
     from promptpotter.presentation.views.view_factories import (
         from_phase_event,
         view_to_wire_dict,
@@ -153,7 +153,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
             "degradation_threshold": 0.4,
         }
     )
-    emitter = LiveDashboardProjection(
+    emitter = LiveDashboardView(
         RootCycleDir(campaign_dir),
         session_dir,
         l1_patience=3,
@@ -344,7 +344,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     assert not missing_session, f"Session-tree parity violated — missing: {missing_session}"
 
     # Internals: ``.runtime/`` umbrella with ``cache/rounds/`` is created
-    # by ``AuditTrailProjection.flush`` whenever a round records node
+    # by ``AuditTrailView.flush`` whenever a round records node
     # I/O. The legacy top-level ``ledger.jsonl`` / ``streams/`` /
     # ``.cache/`` paths must NOT exist next to operator files.
     assert not (campaign_dir / "ledger.jsonl").exists(), "ledger.jsonl moved under .runtime/"
@@ -359,11 +359,11 @@ def test_campaign_records_parent_session(session_and_campaign_dirs: tuple[Path, 
     assert data["parent_session_id"], "index.json must carry parent_session_id"
 
 
-def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
-    """Phase 4 — a ``cadence/rule_fired`` PhaseRecord lands in two places.
+def test_escalation_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
+    """An ``escalation/rule_fired`` PhaseRecord lands in two places.
 
     SignalsProjection appends one line to ``.runtime/signals.jsonl`` (the
-    on-disk trail past the dashboard's rolling window). LiveDashboardProjection
+    on-disk trail past the dashboard's rolling window). LiveDashboardView
     mirrors the same fire into ``dashboard.json::recent_rules`` so the
     webapp's StuckDiagnosis widget reads it without a second file fetch.
 
@@ -374,7 +374,7 @@ def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
     from promptpotter.domain.cycle_paths import CycleDir, RootCycleDir
     from promptpotter.domain.run_records import PhaseRecord
     from promptpotter.infrastructure.projections import (
-        LiveDashboardProjection,
+        LiveDashboardView,
         SignalsProjection,
     )
 
@@ -383,7 +383,7 @@ def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
     session_dir = tmp_path / "sessions" / "s_test"
     session_dir.mkdir(parents=True)
 
-    dashboard = LiveDashboardProjection(
+    dashboard = LiveDashboardView(
         RootCycleDir(campaign_dir),
         session_dir,
         l1_patience=3,
@@ -393,7 +393,7 @@ def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
     signals = SignalsProjection.from_cycle_dir(CycleDir(campaign_dir))
 
     record = PhaseRecord(
-        phase="cadence",
+        phase="escalation",
         event="rule_fired",
         round=2,
         payload={
@@ -437,8 +437,8 @@ def test_cadence_rule_fired_lands_in_both_writers(tmp_path: Path) -> None:
 def test_observers_built_via_shared_helper() -> None:
     """Entry points MUST construct projections + callbacks via ``build_run_observers``.
 
-    Direct ``RunCallbacks()``, ``AuditTrailProjection()``, ``LiveDashboardProjection()``,
-    or ``PoBBStreamProjection()`` construction in ``presentation/`` is forbidden —
+    Direct ``RunCallbacks()``, ``AuditTrailView()``, ``LiveDashboardView()``,
+    or ``PoBBStreamView()`` construction in ``presentation/`` is forbidden —
     a new entry point that bypasses the helper would create a divergent observer
     wiring (different bind order, missing subscribers, two-phase init regression).
 
@@ -448,9 +448,9 @@ def test_observers_built_via_shared_helper() -> None:
     """
     BANNED = {
         "RunCallbacks",
-        "AuditTrailProjection",
-        "LiveDashboardProjection",
-        "PoBBStreamProjection",
+        "AuditTrailView",
+        "LiveDashboardView",
+        "PoBBStreamView",
         "SignalsProjection",
     }
     repo_root = Path(__file__).resolve().parents[1]
@@ -810,7 +810,7 @@ def test_no_direct_archive_access_outside_facade() -> None:
     gateway. Direct method calls (``store.archive.X(...)``) and aliasing
     (``archive = session.store.archive``) outside the facade are drift —
     multiple readers + writers of the database core without a gated entry
-    is the same problem ``CycleLedger`` solved for events. Same-layer
+    is the same problem ``CycleEventLog`` solved for events. Same-layer
     archive internals (``measurement_archive.py``, ``stores.py``,
     ``__init__.py``) are exempt.
     """

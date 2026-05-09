@@ -1,6 +1,6 @@
 """Fork-mint helpers — divergence forks + diag/sweep siblings.
 
-Three sibling kinds, all minted by appending a ``DecisionKind.FORK_CUT``
+Three sibling kinds, all minted by appending a ``ResumeCheckpointKind.FORK_CUT``
 to the *parent's* ledger (so resume can read the fork's identity from
 the parent's history) and writing a fresh dir under the family root:
 
@@ -27,12 +27,12 @@ from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, NamedTuple
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    DecisionKind,
+    ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import SweepPayload
-from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.store import root_cycle_id, save_active_pointer
 from promptpotter.shared.errors import graceful
 
@@ -81,8 +81,8 @@ def _fork_sibling_setup(
     now = datetime.now(UTC).isoformat()
     with graceful("FORK_CUT decision append failed"):
         record_decision(
-            CycleLedger.open(CycleDir(parent_dir)),
-            DecisionKind.FORK_CUT,
+            CycleEventLog.open(CycleDir(parent_dir)),
+            ResumeCheckpointKind.FORK_CUT,
             {"from_round": from_round},
             new_cycle_id,
             data={"forked_at": now, **(fork_data or {})},

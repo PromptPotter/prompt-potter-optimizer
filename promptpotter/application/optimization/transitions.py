@@ -40,7 +40,7 @@ class TransitionResult:
 
     L2 may write any combination of ``task_context`` (broadcast framing
     refinement — the L2→all channel), ``l1_layout`` and
-    ``l1_config``, plus an ``action`` selecting
+    ``l1_overrides``, plus an ``action`` selecting
     ``normal_round`` (default) or ``probe_round`` (re-run only the
     warned-query subset under the same OSP). L3 writes ``plan`` and
     optionally ``l3_note`` — a sticky pointer to the L2-layer that

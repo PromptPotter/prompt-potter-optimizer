@@ -17,9 +17,9 @@ A test earns its place only if it guards one of these:
    (`CAMPAIGN_ARTIFACTS` / `SESSION_ARTIFACTS`), rescore-on-load +
    decision-replay + fork, `score_search_point` as the single scoring gateway,
    nested-only `pipeline_params`, round-boundary dataset mutation, cadence
-   rules engine (`evaluate_round` over `DEFAULT_ROUND_RULES`), and the
-   `cadence/rule_fired` two-writer parity (`SignalsProjection` →
-   `.runtime/signals.jsonl` and `LiveDashboardProjection` →
+   rules engine (`decide_escalation` over `DEFAULT_ESCALATION_RULES`), and the
+   `escalation/rule_fired` two-writer parity (`SignalsProjection` →
+   `.runtime/signals.jsonl` and `LiveDashboardView` →
    `dashboard.json::recent_rules`).
 2. **Statistical / numerical correctness.** Bayesian Posterior-of-Being-Best
    (joint Normal-CLT posterior, Monte Carlo argmax), composite scoring,

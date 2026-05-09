@@ -28,7 +28,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint, RoundSummary
 from promptpotter.domain.results import RoundBaseline, RoundResult
-from promptpotter.domain.run_records import DecisionRecord
+from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
 if TYPE_CHECKING:
@@ -128,7 +128,7 @@ class Cycle:
     axes: AxisIndex | None = None
     escalation: EscalationState = field(default_factory=EscalationState)
     # Flushed into the next round_data's `decisions` before campaign_store.save_round_file.
-    pending_decisions: list[DecisionRecord] = field(default_factory=list)
+    pending_decisions: list[ResumeCheckpointRecord] = field(default_factory=list)
     state_version: int = 1
     # Round-end Rasch posterior; one fit per round, reused by finalize.
     last_rasch_posterior: Any = None
@@ -159,7 +159,7 @@ class Cycle:
         opt_sp = baseline_osp.model_copy(
             update={
                 "task_context": task_context,
-                "l1_config": dict(baseline_osp.l1_config),
+                "l1_overrides": dict(baseline_osp.l1_overrides),
             }
         )
         sp = opt_sp.to_job_search_point(

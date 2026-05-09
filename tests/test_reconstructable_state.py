@@ -2,7 +2,7 @@
 
 Per ``docs/architecture.md`` §0 and ``docs/specs/m10-cleanup.md`` §3.8:
 :class:`Session` (and its bundled :class:`EscalationState` /
-:class:`AuditTrailProjection` projections) MUST be reconstructable from
+:class:`AuditTrailView` projections) MUST be reconstructable from
 ``events.jsonl`` alone, modulo a small allowlist of wiring/identity
 fields whose values come from bootstrap config, not the ledger.
 
@@ -18,7 +18,7 @@ reconstruction — fail this test. Each failure becomes either:
   and can't be recovered from events.
 
 Incremental coverage: the test starts with what works today
-(``EscalationState`` + ``AuditTrailProjection``); follow-up PRs
+(``EscalationState`` + ``AuditTrailView``); follow-up PRs
 expand to ``Cycle.tracking``, ``opt_sp.round_history``, etc.
 """
 
@@ -29,13 +29,13 @@ from pathlib import Path
 from promptpotter.application.optimization.escalation.state import EscalationState
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
-from promptpotter.infrastructure.ledger import CycleLedger
-from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
+from promptpotter.infrastructure.ledger import CycleEventLog
+from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 
-def _scripted_ledger(tmp_path: Path) -> CycleLedger:
+def _scripted_ledger(tmp_path: Path) -> CycleEventLog:
     """Two-round + L2-fire scripted ledger; no LLM calls fired."""
-    ledger = CycleLedger.open(CycleDir(tmp_path / "cyc"))
+    ledger = CycleEventLog.open(CycleDir(tmp_path / "cyc"))
     # Round 1: did not improve.
     ledger.append(
         PhaseRecord(
@@ -121,7 +121,7 @@ def test_escalation_state_round_trips_through_ledger(tmp_path: Path) -> None:
 
 
 def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
-    """``AuditTrailProjection``'s sticky/round node state is fully ledger-driven.
+    """``AuditTrailView``'s sticky/round node state is fully ledger-driven.
 
     With ``LLMCallRecord`` + ``PhaseRecord('round', 'enter'|'complete')``
     as the only inputs, the audit-trail projection must produce the
@@ -130,8 +130,8 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     """
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
-    ledger = CycleLedger.open(CycleDir(cycle_dir))
-    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
+    ledger = CycleEventLog.open(CycleDir(cycle_dir))
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
     ledger.bind(proj)
 
     ledger.append(PhaseRecord(phase="round", event="enter", round=2))
@@ -151,7 +151,7 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
     # iterates the existing events.jsonl produces identical content.
     fresh_dir = tmp_path / "fresh" / "cyc1"
     fresh_dir.mkdir(parents=True)
-    fresh = AuditTrailProjection(fresh_dir / ".runtime" / "cache" / "rounds")
+    fresh = AuditTrailView(fresh_dir / ".runtime" / "cache" / "rounds")
     for offset, record in enumerate(ledger.iter()):
         fresh.on_record(record, offset)
 
@@ -172,7 +172,7 @@ def test_audit_trail_round_trips_llm_call_records(tmp_path: Path) -> None:
         live_payload.pop(k, None)
         fresh_payload.pop(k, None)
     assert fresh_payload == live_payload, (
-        "AuditTrailProjection drift: live-bind vs replay-from-ledger produced different content"
+        "AuditTrailView drift: live-bind vs replay-from-ledger produced different content"
     )
 
 
@@ -189,13 +189,13 @@ _ALLOWLIST: dict[str, str] = {
     # obs: the observability bridge (Langfuse + MLflow + audit trail).
     # Re-wired on each session boot.
     "obs": "observability bridge; re-wired at boot",
-    # AuditTrailProjection.started_at / finished_at — wall-clock stamps
+    # AuditTrailView.started_at / finished_at — wall-clock stamps
     # captured at begin_round/flush (datetime.now()) rather than the
     # corresponding PhaseRecord.timestamp. §3.8 follow-up: source from
     # the ledger event's timestamp so the round file becomes a pure
     # derived view.
-    "AuditTrailProjection.started_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
-    "AuditTrailProjection.finished_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
+    "AuditTrailView.started_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
+    "AuditTrailView.finished_at": "wall-clock observation; §3.8 follow-up to source from PhaseRecord.timestamp",
 }
 
 

@@ -18,7 +18,7 @@ points MUST NOT write campaign artifacts directly — they call into
 ## Out-of-bounds
 
 - **No campaign-artifact writes from entry-point code.** Disk writes go
-  through `CycleLedger.append` (orchestration) or a declared projection
+  through `CycleEventLog.append` (orchestration) or a declared projection
   (display); the `archive/*.md` writers in `writers.py` are the
   documented exception, audited in §1.
 - **No business logic in CLI commands or API handlers.** `cli/` and

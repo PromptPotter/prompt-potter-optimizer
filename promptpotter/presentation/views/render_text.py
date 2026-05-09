@@ -328,14 +328,14 @@ def _render_escalation_exit(v: EscalationExitView) -> str:
 
 
 def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
-    if v.l1_config:
-        items = list(v.l1_config.items())
+    if v.l1_overrides:
+        items = list(v.l1_overrides.items())
         parts = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
         extra = len(items) - 5
         body = ", ".join(parts) + (f", +{extra} more" if extra > 0 else "")
-        params_line = f"l1_config: {body}"
+        params_line = f"l1_overrides: {body}"
     else:
-        params_line = "l1_config: (none)"
+        params_line = "l1_overrides: (none)"
     return "\n" + _node_block(
         "L2 REFINE CONTEXT",
         f"L1 stalled {v.l1_stall_count} rounds  |  acc={v.current_acc:.1%}  best={v.best_acc:.1%}",

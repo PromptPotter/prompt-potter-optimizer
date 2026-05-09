@@ -5,14 +5,14 @@ Two named invariants:
      on ``RoundCompleteView`` — the named correctness guarantee of the
      two-factories-onto-one-View unification. Holds for the improvement
      case AND the no-improvement case (delta=0, p_value=None).
-  2. Projection routing: ``LiveDashboardProjection`` accepts only a
+  2. Projection routing: ``LiveDashboardView`` accepts only a
      ``RootCycleDir`` (sibling dirs under ``forks/`` / ``diag/`` /
-     ``sweeps/`` are rejected at ``__init__``); ``AuditTrailProjection``
+     ``sweeps/`` are rejected at ``__init__``); ``AuditTrailView``
      accepts only a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or
      a CycleDir via ``from_cycle_dir`` that derives the subpath); the
      ``on_record`` ledger hook drives ``begin_round`` / ``flush`` on
      PhaseRecord('round', enter|complete), persists the baseline phase to
-     ``round_baseline.json``, and ignores DecisionRecord records.
+     ``round_baseline.json``, and ignores ResumeCheckpointRecord records.
 """
 
 from __future__ import annotations
@@ -25,8 +25,8 @@ import pytest
 from promptpotter.domain.cycle_paths import CycleDir, RootCycleDir
 from promptpotter.domain.phases import PhaseEvent
 from promptpotter.infrastructure.projections import (
-    AuditTrailProjection,
-    LiveDashboardProjection,
+    AuditTrailView,
+    LiveDashboardView,
 )
 from promptpotter.presentation.views.view_factories import (
     from_disk_round,
@@ -253,7 +253,7 @@ def test_live_dashboard_rejects_sibling_path(tmp_path: Path, kind: str) -> None:
     session_dir.mkdir(parents=True)
 
     with pytest.raises(ValueError, match="family root"):
-        LiveDashboardProjection(
+        LiveDashboardView(
             RootCycleDir(fork_dir),  # newtype-cast at the wrong site
             session_dir,
             l1_patience=3,
@@ -268,7 +268,7 @@ def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
     root_dir.mkdir(parents=True)
     session_dir = tmp_path / "sessions" / "s_test"
 
-    proj = LiveDashboardProjection(
+    proj = LiveDashboardView(
         RootCycleDir(root_dir),
         session_dir,
         l1_patience=3,
@@ -283,14 +283,14 @@ def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:
     bad = tmp_path / "campaigns" / "cyc1"
     bad.mkdir(parents=True)
     with pytest.raises(ValueError, match=r"\.runtime/cache/rounds"):
-        AuditTrailProjection(bad)
+        AuditTrailView(bad)
 
 
 def test_audit_trail_from_cycle_dir_derives_subpath(tmp_path: Path) -> None:
     """The standard factory derives ``.runtime/cache/rounds`` from a cycle dir."""
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
-    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
     assert proj.rounds_dir == cycle_dir / ".runtime" / "cache" / "rounds"
 
 
@@ -299,7 +299,7 @@ def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
     root_dir = tmp_path / "campaigns" / "root_xyz"
     fork_dir = root_dir / "forks" / "root_xyz_fork_abc"
     fork_dir.mkdir(parents=True)
-    proj = AuditTrailProjection.from_cycle_dir(CycleDir(fork_dir))
+    proj = AuditTrailView.from_cycle_dir(CycleDir(fork_dir))
     assert proj.rounds_dir == fork_dir / ".runtime" / "cache" / "rounds"
     assert root_dir not in proj.rounds_dir.parents or "forks" in proj.rounds_dir.parts
 
@@ -307,21 +307,21 @@ def test_audit_trail_fork_dir_lands_under_fork(tmp_path: Path) -> None:
 def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     """PhaseRecord('round', 'enter')/'complete' from a ledger drives the recorder lifecycle.
 
-    PhaseRecord 3 contract: an AuditTrailProjection bound to the ledger MUST
+    PhaseRecord 3 contract: an AuditTrailView bound to the ledger MUST
     react to round-boundary phase records — ``enter`` opens a fresh
     round, ``complete`` flushes ``round_NNNN.json`` to disk. Other
     record types are ignored at this projection's scope.
     """
     from promptpotter.domain.run_records import (
-        DecisionKind,
-        DecisionRecord,
         LLMCallRecord,
         PhaseRecord,
+        ResumeCheckpointKind,
+        ResumeCheckpointRecord,
     )
 
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
-    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
 
     # Record an LLMCallRecord so flush has state to write.
     proj.on_record(PhaseRecord(phase="round", event="enter", round=4), 0)
@@ -331,8 +331,10 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
         ),
         1,
     )
-    # An unrelated DecisionRecord must not crash or trigger a flush.
-    proj.on_record(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 2)
+    # An unrelated ResumeCheckpointRecord must not crash or trigger a flush.
+    proj.on_record(
+        ResumeCheckpointRecord(kind=ResumeCheckpointKind.ROUND_WINNER, outcome="c1", round=4), 2
+    )
     # Round-complete triggers the disk write.
     proj.on_record(PhaseRecord(phase="round", event="complete", round=4), 3)
 
@@ -351,7 +353,7 @@ def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
 
     cycle_dir = tmp_path / "campaigns" / "cyc_baseline"
     cycle_dir.mkdir(parents=True)
-    proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
 
     proj.on_record(PhaseRecord(phase="baseline", event="enter", round=0), 0)
     proj.on_record(

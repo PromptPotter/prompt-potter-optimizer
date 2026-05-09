@@ -301,20 +301,24 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
 
 
 def _build_divergence_hint() -> str:
-    """Derive the divergence-checked-kinds list from the DECISION_GATING table.
+    """Derive the divergence-checked-kinds list from the RESUME_CHECKPOINT_GATING table.
 
     The hint used to hardcode the gated kinds, which silently rotted
-    every time a new ``DecisionKind`` member landed. Now it walks the
+    every time a new ``ResumeCheckpointKind`` member landed. Now it walks the
     enum so adding a kind (with its gating choice) updates the operator
     message automatically.
     """
     from promptpotter.application.optimization.resume_and_fork import (
-        DECISION_GATING,
+        RESUME_CHECKPOINT_GATING,
         GatingMode,
     )
 
-    replayed = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.REPLAYED)
-    archival = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.ARCHIVAL)
+    replayed = sorted(
+        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.REPLAYED
+    )
+    archival = sorted(
+        k.value for k, m in RESUME_CHECKPOINT_GATING.items() if m is GatingMode.ARCHIVAL
+    )
     return (
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"

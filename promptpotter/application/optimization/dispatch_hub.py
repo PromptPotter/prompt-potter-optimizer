@@ -1,7 +1,8 @@
 """Dispatch hub — single ingress for every optimizer prompt's substituted text.
 
-Owns the signal registry (:data:`SIGNALS`), the :class:`Layer` enum, the
-typed :class:`Bundle` per-call state, and the two rendering paths:
+Owns the injection registry (:data:`INJECTIONS`), the :class:`InjectionKind`
+classification, the typed :class:`InjectionBundle` per-call state, and the
+two rendering paths:
 
 * :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.l1_layout``
   for L1_GENERATE. Returns a modified ``PromptTemplate`` whose slots have
@@ -11,9 +12,20 @@ typed :class:`Bundle` per-call state, and the two rendering paths:
   L1_CRITIQUE / L2 / L3 and produces a ``{name → rendered}`` dict suitable
   for ``compile_prompt(**hub_dict, **extras)``.
 
-Every signal renderer is layer-agnostic — same render for every layer that
-subscribes. Per-layer specialisation is the kind of complexity this module
-exists to remove.
+To add an input to any prompt, add an injection here. Anything else
+is drift. Every renderer is layer-agnostic — same render for every
+layer that subscribes; per-layer specialisation is the kind of
+complexity this module exists to remove. The four
+:class:`InjectionKind` values split along *origin*, not consumer:
+
+* ``MEASUREMENT`` — raw evidence from L1 candidate runs (validation +
+  runtime failures, plus the deterministic round-end diagnostics).
+* ``DERIVED`` — computed from measurements (rankings, distributions,
+  pipeline-health summaries, the param catalogue).
+* ``TRACE`` — narrative state from prior LLM calls (critique, plan,
+  task_context, the rendered current prompt).
+* ``DIRECTIVE`` — active instructions to a downstream layer (the
+  sticky L3→L2 note; the L1 placeholder menu L2 picks from).
 """
 
 from __future__ import annotations
@@ -41,33 +53,19 @@ if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
 
 __all__ = [
-    "Bundle",
     "CycleSlice",
     "DispatchHub",
+    "InjectionBundle",
+    "InjectionKind",
     "RoundDigest",
-    "SignalKind",
     "build_bundle",
     "format_l1_critique_for_prompt",
     "validate_template",
 ]
 
 
-class SignalKind(enum.StrEnum):
-    """Kind tag for each :data:`SIGNALS` entry.
-
-    Lightweight classification — no schema, no enforcement, just a hint for
-    readers and the future cadence-rules engine that wants to fan signals
-    by category. The four kinds split along *origin*, not consumer:
-
-    * ``MEASUREMENT`` — raw evidence from L1 candidate runs (validation +
-      runtime failures, plus the deterministic round-end diagnostics).
-    * ``DERIVED`` — computed from measurements (rankings, distributions,
-      pipeline-health summaries, the param catalogue).
-    * ``TRACE`` — narrative state from prior LLM calls (critique, plan,
-      task_context, the rendered current prompt).
-    * ``DIRECTIVE`` — active instructions to a downstream layer (the
-      sticky L3→L2 note; the L1 placeholder menu L2 picks from).
-    """
+class InjectionKind(enum.StrEnum):
+    """Kind tag for each :data:`INJECTIONS` entry. See module docstring."""
 
     MEASUREMENT = "measurement"
     DERIVED = "derived"
@@ -76,18 +74,18 @@ class SignalKind(enum.StrEnum):
 
 
 @dataclass(frozen=True)
-class _Signal:
-    """One :data:`SIGNALS` entry — kind tag + Bundle-shaped renderer + doc.
+class _Injection:
+    """One :data:`INJECTIONS` entry — kind tag + InjectionBundle-shaped renderer + doc.
 
-    Renderers stay plain ``Callable[[Bundle], str]`` — no Pydantic schema,
+    Renderers stay plain ``Callable[[InjectionBundle], str]`` — no Pydantic schema,
     no freshness budget, no producer indirection. This wrapper exists to
     carry the kind tag and a one-line description; everything else stays
     as it is on main.
     """
 
     name: str
-    kind: SignalKind
-    render: Callable[[Bundle], str]
+    kind: InjectionKind
+    render: Callable[[InjectionBundle], str]
     description: str
 
 
@@ -129,7 +127,7 @@ def _fence_untrusted(rendered: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Bundle — single per-call state container; every renderer reads from this.
+# InjectionBundle — single per-call state container; every renderer reads from this.
 # ---------------------------------------------------------------------------
 
 
@@ -185,7 +183,7 @@ class RoundDigest:
 
 
 @dataclass(frozen=True)
-class Bundle:
+class InjectionBundle:
     """One state container per optimizer LLM call.
 
     Every signal renderer reads fields off this — nothing else. Built via
@@ -201,21 +199,21 @@ class Bundle:
 
 
 # ---------------------------------------------------------------------------
-# Signal renderers — uniform ``(Bundle) -> str`` signature, layer-agnostic.
+# Signal renderers — uniform ``(InjectionBundle) -> str`` signature, layer-agnostic.
 # ---------------------------------------------------------------------------
 
 
-def _r_plan(b: Bundle) -> str:
+def _r_plan(b: InjectionBundle) -> str:
     return f"PLAN:\n{b.opt_sp.plan}" if b.opt_sp.plan else ""
 
 
-def _r_l3_to_l2_note(b: Bundle) -> str:
+def _r_l3_to_l2_note(b: InjectionBundle) -> str:
     """Sticky L3→L2 pointer. Mounted only in L2's template; absent from
     ``L1_POSSIBLE`` so L1 never sees it."""
     return f"L3 NOTE TO L2:\n{b.opt_sp.l3_note}" if b.opt_sp.l3_note else ""
 
 
-def _r_rendered_prompt(b: Bundle) -> str:
+def _r_rendered_prompt(b: InjectionBundle) -> str:
     rendered = b.opt_sp.render()
     return f"CURRENT PROMPT:\n---\n{rendered}\n---" if rendered else ""
 
@@ -229,7 +227,7 @@ def _r_rendered_prompt(b: Bundle) -> str:
 _pipeline_param_catalogue_last: tuple[int, str] | None = None
 
 
-def _r_pipeline_param_catalogue(b: Bundle) -> str:
+def _r_pipeline_param_catalogue(b: InjectionBundle) -> str:
     """Pipeline-param search-space menu — name + ≤4-value enum hint, no full dump.
 
     Carries the *available* options (allowed enums + models) the LLM picks
@@ -280,7 +278,7 @@ def _r_pipeline_param_catalogue(b: Bundle) -> str:
     return result
 
 
-def _r_diagnostics(b: Bundle) -> str:
+def _r_diagnostics(b: InjectionBundle) -> str:
     """Layer-agnostic round readout: STATUS header (cycle counters, plain) +
     fenced body (RoundDiagnostics dataset content).
 
@@ -401,7 +399,7 @@ def _r_diagnostics(b: Bundle) -> str:
     return "\n\n".join(sections)
 
 
-def _r_validation_failures(b: Bundle) -> str:
+def _r_validation_failures(b: InjectionBundle) -> str:
     """Wound 1 — L1 parse-time deterministic validator.
 
     Fenced because it echoes LLM-proposed values (``vf.value``), which
@@ -420,7 +418,7 @@ def _r_validation_failures(b: Bundle) -> str:
     return _fence_untrusted("\n".join(sec))
 
 
-def _r_runtime_failures(b: Bundle) -> str:
+def _r_runtime_failures(b: InjectionBundle) -> str:
     """Wound 2 — DegradationCheck mid-eval evidence + escalation + warnings.
 
     Bundles ``runtime_failures`` (per-candidate elimination from
@@ -482,7 +480,7 @@ def _r_runtime_failures(b: Bundle) -> str:
     return _fence_untrusted("\n\n".join(parts))
 
 
-def _r_l2_guard_breaches(b: Bundle) -> str:
+def _r_l2_guard_breaches(b: InjectionBundle) -> str:
     """Wound 4 — L2_CONTEXT post-parse guard outcomes.
 
     Set by ``run_l2_output_validators`` after parsing L2's LLM output;
@@ -500,7 +498,7 @@ def _r_l2_guard_breaches(b: Bundle) -> str:
     return "\n".join(lines)
 
 
-def _r_l3_guard_breaches(b: Bundle) -> str:
+def _r_l3_guard_breaches(b: InjectionBundle) -> str:
     """L3_PLAN post-parse guard outcomes — L3's self-healing evidence.
 
     L3 sees its own past breaches to avoid repeating them. Plain (only
@@ -528,7 +526,7 @@ def _format_runtime_failure_lines(rf: Any) -> list[str]:
     return [head, f"      observed_config: {cfg_str}"]
 
 
-def _r_task_context(b: Bundle) -> str:
+def _r_task_context(b: InjectionBundle) -> str:
     tc = b.opt_sp.task_context
     if not tc:
         return ""
@@ -562,16 +560,16 @@ def format_l1_critique_for_prompt(critique: dict) -> str:
     return "\n".join(parts)
 
 
-def _r_critique(b: Bundle) -> str:
+def _r_critique(b: InjectionBundle) -> str:
     """Compact view of the most recent L1_CRITIQUE output dict."""
     return format_l1_critique_for_prompt(b.digest.critique or {})
 
 
-def _r_l1_config(b: Bundle) -> str:
-    return f"CURRENT L1 CONFIG: {json.dumps(b.opt_sp.l1_config)}"
+def _r_l1_overrides(b: InjectionBundle) -> str:
+    return f"CURRENT L1 CONFIG: {json.dumps(b.opt_sp.l1_overrides)}"
 
 
-def _r_l1_signal_catalogue(b: Bundle) -> str:
+def _r_l1_signal_catalogue(b: InjectionBundle) -> str:
     """Names only — sorted ``L1_POSSIBLE``. L2 may pick from this menu."""
     return "L1 SIGNAL MENU (placeholders L2 may use in l1_layout):\n  " + "\n  ".join(
         sorted(L1_POSSIBLE)
@@ -602,7 +600,7 @@ _AXIS_MEMORY_LABEL_ORDER: tuple[str, ...] = (
 _DECISION_TRACE_RENDER_CAP = 10
 
 
-def _r_decision_trace_summary(b: Bundle) -> str:
+def _r_decision_trace_summary(b: InjectionBundle) -> str:
     """Compact view of the latest round's per-candidate decision traces.
 
     Reads ``b.digest.decision_traces`` (Phase 3.2 writer output). Emits
@@ -633,7 +631,7 @@ def _r_decision_trace_summary(b: Bundle) -> str:
     return "\n".join(lines)
 
 
-def _r_axis_memory(b: Bundle) -> str:
+def _r_axis_memory(b: InjectionBundle) -> str:
     """Cross-cycle axis & sample memory derived from the MeasurementArchive.
 
     Wraps :meth:`AxisIndex.digest` — the axis-keyed view that aggregates
@@ -664,95 +662,95 @@ def _r_axis_memory(b: Bundle) -> str:
 # ---------------------------------------------------------------------------
 
 
-SIGNALS: dict[str, _Signal] = {
-    "plan": _Signal(
+INJECTIONS: dict[str, _Injection] = {
+    "plan": _Injection(
         "plan",
-        SignalKind.TRACE,
+        InjectionKind.TRACE,
         _r_plan,
         "L3's strategic plan text. Persistent until next L3 fire.",
     ),
-    "l3_to_l2_note": _Signal(
+    "l3_to_l2_note": _Injection(
         "l3_to_l2_note",
-        SignalKind.DIRECTIVE,
+        InjectionKind.DIRECTIVE,
         _r_l3_to_l2_note,
         "Sticky L3→L2 pointer. Mounted only in L2's template; absent from L1.",
     ),
-    "rendered_prompt": _Signal(
+    "rendered_prompt": _Injection(
         "rendered_prompt",
-        SignalKind.TRACE,
+        InjectionKind.TRACE,
         _r_rendered_prompt,
         "Current best searchpoint's compiled prompt body.",
     ),
-    "pipeline_param_catalogue": _Signal(
+    "pipeline_param_catalogue": _Injection(
         "pipeline_param_catalogue",
-        SignalKind.DERIVED,
+        InjectionKind.DERIVED,
         _r_pipeline_param_catalogue,
         "Pipeline-param menu: name + ≤4-value enum hint per node, plus available models.",
     ),
-    "diagnostics": _Signal(
+    "diagnostics": _Injection(
         "diagnostics",
-        SignalKind.DERIVED,
+        InjectionKind.DERIVED,
         _r_diagnostics,
         "Layer-agnostic round readout: STATUS header + RoundDiagnostics body.",
     ),
-    "validation_failures": _Signal(
+    "validation_failures": _Injection(
         "validation_failures",
-        SignalKind.MEASUREMENT,
+        InjectionKind.MEASUREMENT,
         _r_validation_failures,
         "Wound 1: L1 parse-time validator failures (per-axis, per-value).",
     ),
-    "runtime_failures": _Signal(
+    "runtime_failures": _Injection(
         "runtime_failures",
-        SignalKind.MEASUREMENT,
+        InjectionKind.MEASUREMENT,
         _r_runtime_failures,
         "Wound 2: DegradationCheck mid-eval evidence + escalation_log + warning inventory.",
     ),
-    "l2_guard_breaches": _Signal(
+    "l2_guard_breaches": _Injection(
         "l2_guard_breaches",
-        SignalKind.MEASUREMENT,
+        InjectionKind.MEASUREMENT,
         _r_l2_guard_breaches,
         "Wound 4: L2_CONTEXT post-parse guard outcomes; non-empty force-triggers L3 heal.",
     ),
-    "l3_guard_breaches": _Signal(
+    "l3_guard_breaches": _Injection(
         "l3_guard_breaches",
-        SignalKind.MEASUREMENT,
+        InjectionKind.MEASUREMENT,
         _r_l3_guard_breaches,
         "L3_PLAN post-parse guard outcomes. L3 reads its own past breaches.",
     ),
-    "task_context": _Signal(
+    "task_context": _Injection(
         "task_context",
-        SignalKind.TRACE,
+        InjectionKind.TRACE,
         _r_task_context,
         "Persistent task framing dict refined by L2; broadcast to all four prompts.",
     ),
-    "critique": _Signal(
+    "critique": _Injection(
         "critique",
-        SignalKind.TRACE,
+        InjectionKind.TRACE,
         _r_critique,
         "Compact view of the most recent L1_CRITIQUE LLM output dict.",
     ),
-    "l1_config": _Signal(
-        "l1_config",
-        SignalKind.TRACE,
-        _r_l1_config,
+    "l1_overrides": _Injection(
+        "l1_overrides",
+        InjectionKind.TRACE,
+        _r_l1_overrides,
         "Current L1 runtime knobs (creativity, n_variants, etc.) as JSON.",
     ),
-    "l1_signal_catalogue": _Signal(
+    "l1_signal_catalogue": _Injection(
         "l1_signal_catalogue",
-        SignalKind.DERIVED,
+        InjectionKind.DERIVED,
         _r_l1_signal_catalogue,
         "L1 SIGNAL MENU: sorted L1_POSSIBLE placeholder names L2 may use in l1_layout.",
     ),
-    "axis_memory": _Signal(
+    "axis_memory": _Injection(
         "axis_memory",
-        SignalKind.DERIVED,
+        InjectionKind.DERIVED,
         _r_axis_memory,
         "Cross-cycle axis-keyed digest from AxisIndex: rankings, persistent failures, "
         "failure clusters, value trends, exhausted axes.",
     ),
-    "decision_trace_summary": _Signal(
+    "decision_trace_summary": _Injection(
         "decision_trace_summary",
-        SignalKind.MEASUREMENT,
+        InjectionKind.MEASUREMENT,
         _r_decision_trace_summary,
         "Per-candidate eliminate/promote/complete trail with leaderboard at decision time.",
     ),
@@ -768,7 +766,7 @@ _PLACEHOLDER_RE = re.compile(r"\{\{(\w+)\}\}")
 
 
 # Per-template names that arrive as caller-supplied ``compile_prompt`` extras
-# rather than dispatch-hub signals. Anything outside ``SIGNALS ∪ extras`` in
+# rather than dispatch-hub signals. Anything outside ``INJECTIONS ∪ extras`` in
 # a template body is a typo — :func:`validate_template` raises rather than
 # letting :meth:`DispatchHub.fill_fixed` silently drop the placeholder.
 _TEMPLATE_EXTRAS: dict[str, set[str]] = {
@@ -784,7 +782,7 @@ def validate_template(name: str, template: PromptTemplate) -> None:
     """Raise :class:`KeyError` if any ``{{slot}}`` isn't a signal or known extra.
 
     Closes the silent-drop bug: :meth:`DispatchHub.fill_fixed` only
-    populates ``out[name]`` when ``name in SIGNALS``, so a typo in a
+    populates ``out[name]`` when ``name in INJECTIONS``, so a typo in a
     template body would render to empty and never surface. Called from
     :func:`promptpotter.application.optimization.llm_call.load_optimizer_prompt`
     after every load (Langfuse or local manifest).
@@ -792,11 +790,11 @@ def validate_template(name: str, template: PromptTemplate) -> None:
     extras = _TEMPLATE_EXTRAS.get(name, set())
     text = template.render()
     referenced = set(_PLACEHOLDER_RE.findall(text))
-    unknown = referenced - SIGNALS.keys() - extras
+    unknown = referenced - INJECTIONS.keys() - extras
     if unknown:
         raise KeyError(
             f"Template {name!r} references unknown slot(s): {sorted(unknown)}. "
-            f"Add to dispatch_hub.SIGNALS or to _TEMPLATE_EXTRAS[{name!r}] if "
+            f"Add to dispatch_hub.INJECTIONS or to _TEMPLATE_EXTRAS[{name!r}] if "
             "the slot is a caller-supplied extra."
         )
 
@@ -807,15 +805,15 @@ def validate_template(name: str, template: PromptTemplate) -> None:
 
 
 class DispatchHub:
-    """Static façade around :data:`SIGNALS`.
+    """Static façade around :data:`INJECTIONS`.
 
     All three entry points are pure: they read the registry and the
     bundle, produce text or a kwargs dict. The hub itself has no state.
     """
 
     @staticmethod
-    def render(name: str, bundle: Bundle) -> str:
-        sig = SIGNALS.get(name)
+    def render(name: str, bundle: InjectionBundle) -> str:
+        sig = INJECTIONS.get(name)
         if sig is None:
             raise KeyError(f"Unknown signal: {name}")
         return sig.render(bundle)
@@ -824,7 +822,7 @@ class DispatchHub:
     def fill_l1(
         template: PromptTemplate,
         layout: L1Layout,
-        bundle: Bundle,
+        bundle: InjectionBundle,
     ) -> PromptTemplate:
         """Append layout-driven content to L1's per-slot static text.
 
@@ -848,24 +846,24 @@ class DispatchHub:
         return template.model_copy(update=update)
 
     @staticmethod
-    def fill_fixed(template: PromptTemplate, bundle: Bundle) -> dict[str, str]:
+    def fill_fixed(template: PromptTemplate, bundle: InjectionBundle) -> dict[str, str]:
         """Resolve every ``{{name}}`` in the template body via the hub.
 
         Returns a kwargs dict ready for ``compile_prompt(**hub_dict, **extras)``.
-        Names not in :data:`SIGNALS` are skipped — caller-supplied extras
+        Names not in :data:`INJECTIONS` are skipped — caller-supplied extras
         fill them, or ``compile_prompt`` will raise on unsubstituted vars.
         """
         text = template.render()
         expected = set(_PLACEHOLDER_RE.findall(text))
         out: dict[str, str] = {}
         for name in expected:
-            if name in SIGNALS:
+            if name in INJECTIONS:
                 out[name] = DispatchHub.render(name, bundle)
         return out
 
 
 # ---------------------------------------------------------------------------
-# Bundle builder — wires live Cycle state into a frozen Bundle.
+# InjectionBundle builder — wires live Cycle state into a frozen InjectionBundle.
 # ---------------------------------------------------------------------------
 
 
@@ -873,8 +871,8 @@ def build_bundle(
     cycle: Cycle,
     *,
     latest_round: RoundResult | None = None,
-) -> Bundle:
-    """Snapshot live cycle state into a Bundle for one optimizer LLM call.
+) -> InjectionBundle:
+    """Snapshot live cycle state into a InjectionBundle for one optimizer LLM call.
 
     Reads the most recent round (if any) for diagnostics + critique, and
     the escalation/tracking counters for the ``diagnostics`` STATUS prefix.
@@ -904,7 +902,7 @@ def build_bundle(
         l3_stall_count=cycle.escalation.l3_stall_count,
     )
 
-    return Bundle(
+    return InjectionBundle(
         opt_sp=cycle.opt_sp,
         pipeline_schema=cycle.session.pipeline_schema,
         cycle_slice=cs,

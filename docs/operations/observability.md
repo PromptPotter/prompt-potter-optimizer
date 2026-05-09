@@ -17,7 +17,7 @@ Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_p
 | L2 Refine | LLM call | meta-prompt (from `L2Surface` incl. `l1_generate_field_catalogue`), parsed `TransitionResult` |
 | L3 Plan | LLM call | plan template (axes_digest + L2 history + pipeline + runtime failures), new plan text |
 | Backend match | Span | query, params, result, `diagnostics.warnings` |
-| Cadence rule firing | `phase` event (`cadence/rule_fired`) | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
+| Escalation rule firing | `phase` event (`escalation/rule_fired`) | `{layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
 | Escalation check | Event | check type, fired/not, reason |
 | Stale-data protocol | Event | ladder step taken, resolution |
 
@@ -41,7 +41,7 @@ tail -f .promptpotter/projects/default/campaigns/<cycle_id>/.runtime/streams/rou
 
 ## Cadence-rule signal stream (`signals.jsonl`)
 
-Every cadence-rule firing — `evaluate_round` over `DEFAULT_ROUND_RULES` — emits a `cadence/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). One ledger event, two subscribers:
+Every cadence-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). One ledger event, two subscribers:
 
 | Channel | Path | Cadence | Format |
 |---|---|---|---|

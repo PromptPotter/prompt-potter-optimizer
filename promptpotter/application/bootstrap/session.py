@@ -29,8 +29,8 @@ if TYPE_CHECKING:
     from promptpotter.application.intelligence.indexes import SampleIndex
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.validators import StopRule
-    from promptpotter.infrastructure.ledger import CycleLedger
-    from promptpotter.infrastructure.projections import AuditTrailProjection
+    from promptpotter.infrastructure.ledger import CycleEventLog
+    from promptpotter.infrastructure.projections import AuditTrailView
     from promptpotter.infrastructure.tracing import LangfuseLogger, ObservabilityBridge
 
 
@@ -72,8 +72,8 @@ class CampaignBundle:
     tracing_campaign_id: str = ""
     resumed_from_round: int = 0
     obs: ObservabilityBridge | None = None
-    audit_projection: AuditTrailProjection | None = None
-    ledger: CycleLedger | None = None
+    audit_projection: AuditTrailView | None = None
+    ledger: CycleEventLog | None = None
 
 
 @dataclass
@@ -206,12 +206,12 @@ def auto_mint_session(
     return session_id, cycle_id
 
 
-def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleLedger | None:
-    """Open per-cycle CycleLedger; None when no store; idempotent (offsets cumulate)."""
+def _open_cycle_ledger(session: Session, cycle_id: str) -> CycleEventLog | None:
+    """Open per-cycle CycleEventLog; None when no store; idempotent (offsets cumulate)."""
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     if session.store is None:
         return None
     cycle_dir = CycleDir(session.store.campaigns.campaign_dir(cycle_id))
-    return CycleLedger.open(cycle_dir)
+    return CycleEventLog.open(cycle_dir)

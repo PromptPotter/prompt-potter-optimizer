@@ -2,7 +2,7 @@
 
 Each check is a pure ``(round_dict, ctx) -> CheckResult`` function with no
 I/O. ``round_dict`` is one ``.runtime/cache/rounds/round_NNNN.json`` payload as
-written by ``AuditTrailProjection.flush``; ``ctx`` carries the per-round
+written by ``AuditTrailView.flush``; ``ctx`` carries the per-round
 context the check needs (prior rounds, OSP at round-start, the three
 ``context_object`` items, the ``param_unlock_round`` knob).
 

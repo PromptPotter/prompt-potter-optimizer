@@ -34,7 +34,7 @@ from promptpotter.infrastructure.store.optimizer_call_cache import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 logger = logging.getLogger(__name__)
 
@@ -118,7 +118,7 @@ async def llm_call(
     config: dict | None = None,
     trace_meta: dict | None = None,
     json_schema: dict | None = None,
-    ledger: CycleLedger | None = None,
+    ledger: CycleEventLog | None = None,
     round_num: int | None = None,
     candidate_idx: int | None = None,
     cache: OptimizerCallCache | None = None,
@@ -280,7 +280,7 @@ async def run_optimizer_node(
     temperature: float = 0.0,
     json_schema: dict | None = None,
     user_content: str | None = None,
-    ledger: CycleLedger | None = None,
+    ledger: CycleEventLog | None = None,
     round_num: int | None = None,
     candidate_idx: int | None = None,
     template: PromptTemplate | None = None,
@@ -398,7 +398,7 @@ def load_optimizer_prompt(name: str) -> PromptTemplate:
 
     Every load runs through :func:`dispatch_hub.validate_template`, so a
     template that references a slot not in
-    :data:`dispatch_hub.SIGNALS` (and not in the per-template extras list)
+    :data:`dispatch_hub.INJECTIONS` (and not in the per-template extras list)
     raises at load time rather than silently rendering empty.
     """
     from promptpotter.application.optimization.dispatch_hub import validate_template

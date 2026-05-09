@@ -6,7 +6,7 @@ outcome). Replayers are pure functions over a :class:`ReplayContext`
 snapshot — they MUST NOT touch the live ``Cycle`` or write to the
 ledger; resume policy lives in :func:`resume_with_divergence_check`.
 
-``REPLAYERS`` is the single registry; ``DECISION_GATING`` (in
+``REPLAYERS`` is the single registry; ``RESUME_CHECKPOINT_GATING`` (in
 :mod:`.decisions`) declares which kinds are ``REPLAYED`` and an
 import-time check fails if any ``REPLAYED`` kind has no replayer here.
 """
@@ -17,9 +17,9 @@ from collections.abc import Callable
 from typing import Any, NamedTuple
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    DECISION_GATING,
-    DecisionKind,
+    RESUME_CHECKPOINT_GATING,
     GatingMode,
+    ResumeCheckpointKind,
 )
 from promptpotter.shared.statistics import (
     pobb_should_stop,
@@ -204,24 +204,26 @@ _replay_l2_trigger = _replay_layer_trigger("l2_patience")
 _replay_l3_trigger = _replay_layer_trigger("l3_patience")
 
 
-# Explicit decision-replayer registry. ``DECISION_GATING`` is the source of
+# Explicit decision-replayer registry. ``RESUME_CHECKPOINT_GATING`` is the source of
 # truth for which kinds exist; the assertion below enforces that every
 # REPLAYED kind has a replayer here, so resume can never silently treat an
 # unhandled kind as non-divergence.
-REPLAYERS: dict[DecisionKind, Replayer] = {
-    DecisionKind.ROUND_WINNER: _replay_round_winner,
-    DecisionKind.ELIMINATION_CUT: _replay_elimination_cut,
-    DecisionKind.LEADER_LOCK_IN: _replay_leader_lock_in,
-    DecisionKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
-    DecisionKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
+REPLAYERS: dict[ResumeCheckpointKind, Replayer] = {
+    ResumeCheckpointKind.ROUND_WINNER: _replay_round_winner,
+    ResumeCheckpointKind.ELIMINATION_CUT: _replay_elimination_cut,
+    ResumeCheckpointKind.LEADER_LOCK_IN: _replay_leader_lock_in,
+    ResumeCheckpointKind.L2_ESCALATION_TRIGGER: _replay_l2_trigger,
+    ResumeCheckpointKind.L3_ESCALATION_TRIGGER: _replay_l3_trigger,
 }
 
 _missing_replayers = {
-    k for k, mode in DECISION_GATING.items() if mode is GatingMode.REPLAYED and k not in REPLAYERS
+    k
+    for k, mode in RESUME_CHECKPOINT_GATING.items()
+    if mode is GatingMode.REPLAYED and k not in REPLAYERS
 }
 if _missing_replayers:
     raise RuntimeError(
-        f"DECISION_GATING declares {sorted(_missing_replayers)} as REPLAYED, "
+        f"RESUME_CHECKPOINT_GATING declares {sorted(_missing_replayers)} as REPLAYED, "
         "but no replayer is registered in resume_and_fork/replayers.py::REPLAYERS."
     )
 del _missing_replayers

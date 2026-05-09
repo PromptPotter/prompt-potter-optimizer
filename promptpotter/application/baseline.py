@@ -43,10 +43,10 @@ def build_campaign_emitter(
 ) -> Any:
     """Build the live dashboard projection from session + config. Single factory shared by CLI and runner."""
     from promptpotter.application.scoring.evaluators import evaluators_meta
-    from promptpotter.infrastructure.projections import LiveDashboardProjection
+    from promptpotter.infrastructure.projections import LiveDashboardView
 
     opt = campaign_config.optimization
-    return LiveDashboardProjection.for_session(
+    return LiveDashboardView.for_session(
         baseline_accuracy,
         session.state.cycle_id,
         project_root=session.project_root,

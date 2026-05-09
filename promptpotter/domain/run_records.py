@@ -5,10 +5,10 @@ union and fans out to projection writers. Each record subtype is a frozen
 Pydantic model with a ``record_type`` discriminator so JSON round-trips
 through the spine without ambiguity.
 
-Resume-checkpoint policy (``DECISION_GATING``, ``GatingMode``,
+Resume-checkpoint policy (``RESUME_CHECKPOINT_GATING``, ``GatingMode``,
 ``record_decision`` helper, the import-time exhaustiveness check) lives
 in :mod:`promptpotter.application.optimization.resume_and_fork.decisions`
-— the data shape (``DecisionKind`` + ``DecisionRecord``) stays here so
+— the data shape (``ResumeCheckpointKind`` + ``ResumeCheckpointRecord``) stays here so
 the ``CycleRecord`` discriminated union owns it.
 """
 
@@ -22,20 +22,20 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "CycleRecord",
-    "DecisionKind",
-    "DecisionRecord",
     "LLMCallRecord",
     "PhaseRecord",
+    "ResumeCheckpointKind",
+    "ResumeCheckpointRecord",
     "SnapshotRecord",
     "SweepPayload",
     "TokenUsageRecord",
 ]
 
 
-class DecisionKind(enum.StrEnum):
+class ResumeCheckpointKind(enum.StrEnum):
     """Kinds of decisions written to the ledger.
 
-    Adding a member: append here AND extend ``DECISION_GATING`` in
+    Adding a member: append here AND extend ``RESUME_CHECKPOINT_GATING`` in
     ``resume_and_fork.decisions`` in the same commit. The registry test
     fails otherwise.
     """
@@ -53,13 +53,13 @@ def _utcnow_iso() -> str:
     return datetime.now(UTC).isoformat()
 
 
-class DecisionRecord(BaseModel):
+class ResumeCheckpointRecord(BaseModel):
     """One recorded decision: ``inputs_ref`` + ``outcome`` drive divergence; ``data`` is archival."""
 
     model_config = ConfigDict(frozen=True)
 
     record_type: Literal["decision"] = "decision"
-    kind: DecisionKind
+    kind: ResumeCheckpointKind
     inputs_ref: dict[str, Any] = Field(default_factory=dict)
     outcome: Any = None
     data: dict[str, Any] = Field(default_factory=dict)
@@ -148,7 +148,7 @@ class LLMCallRecord(BaseModel):
     ``l3_plan`` LLM call into the ledger so the round audit trail
     (``.runtime/cache/rounds/round_NNNN.json::nodes.<node>``) is a
     derived view, not a sidecar persistence channel. Call shape mirrors
-    today's audit-trail action dict so :class:`AuditTrailProjection`
+    today's audit-trail action dict so :class:`AuditTrailView`
     can shape it into the ``nodes`` block without semantic loss.
 
     ``payload_kind`` distinguishes a real LLM call (carries
@@ -164,7 +164,7 @@ class LLMCallRecord(BaseModel):
     round: int | None = None
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
-    # The action-dict shape that AuditTrailProjection currently consumes;
+    # The action-dict shape that AuditTrailView currently consumes;
     # carries every field _action_to_node_block reads (template_fields,
     # variables, template_name, messages, response, usage, model, config,
     # duration_s, cached, …). Stored as an opaque mapping so adding a
@@ -178,7 +178,7 @@ class LLMCallRecord(BaseModel):
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 CycleRecord = Annotated[
-    DecisionRecord | LLMCallRecord | PhaseRecord | SnapshotRecord | TokenUsageRecord,
+    ResumeCheckpointRecord | LLMCallRecord | PhaseRecord | SnapshotRecord | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]
 

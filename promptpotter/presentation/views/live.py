@@ -4,7 +4,7 @@ Surface differentiation via constructor flag, not subclasses:
 ``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel).
 
 Single ingress: the display consumes ``CycleRecord``s from the per-cycle
-``CycleLedger`` via ``on_record``. Per-sample / per-candidate formatters
+``CycleEventLog`` via ``on_record``. Per-sample / per-candidate formatters
 live in ``round_render``; the three round-summary renderers
 (``_render_progress_table`` / ``_render_round_stats`` /
 ``_render_patience_status``) are private to this file because nothing
@@ -20,7 +20,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
-from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
@@ -224,14 +224,14 @@ def _render_patience_status(improved: bool, l1_stall_count: int, l1_patience: in
 # ===========================================================================
 
 
-class LiveDisplay(ProjectionBase):
+class LiveDisplay(DerivedView):
     """Live ``RunCallbacks`` adapter — CLI + notebook share this one class.
 
     When ``sp_budget_ttest`` is provided, tqdm progress bars are rendered
     inline (CLI feel). The bar lifecycle is fused into ``LiveDisplay``
     state — no separate inner class.
 
-    Subclasses ``ProjectionBase`` so the ``isinstance`` dispatch over
+    Subclasses ``DerivedView`` so the ``isinstance`` dispatch over
     ledger ``CycleRecord`` subtypes lives in one place; this class only
     overrides ``_handle_phase`` / ``_handle_snapshot``. The ``on_*``
     public methods stay because pre-cycle paths (``baseline.py``) call
@@ -313,7 +313,7 @@ class LiveDisplay(ProjectionBase):
         if fresh > self._core.best_acc:
             self._core.best_acc = fresh
 
-    # --- Ledger subscription (via ProjectionBase) ---------------------
+    # --- Ledger subscription (via DerivedView) ---------------------
 
     def _handle_phase(self, record: PhaseRecord) -> None:
         payload = record.payload or {}

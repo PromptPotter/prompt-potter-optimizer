@@ -195,7 +195,7 @@ class OptSearchPoint(PromptTemplate):
     flat optimizer-memory fields enumerated in :data:`MEMORY_FIELDS`:
 
     - ``lineage``        — identity + provenance (id, parent_id, ...)
-    - ``l1_config`` — L1 runtime knobs (``n_variants``, ``creativity``)
+    - ``l1_overrides`` — L1 runtime knobs (``n_variants``, ``creativity``)
       set by L2; ``n_variants`` flows into L1's prompt as the
       ``{{n_variants}}`` caller extra, ``creativity`` sets L1's LLM-call
       temperature outside the prompt
@@ -213,7 +213,7 @@ class OptSearchPoint(PromptTemplate):
     lineage: IndividualLineage = Field(default_factory=IndividualLineage)
 
     # -- L2 state ----------------------------------------------------------
-    l1_config: dict[str, Any] = Field(default_factory=dict)
+    l1_overrides: dict[str, Any] = Field(default_factory=dict)
     task_context: TaskDecomposition = Field(default_factory=TaskDecomposition)
 
     @field_validator("task_context", mode="before")
@@ -248,9 +248,9 @@ class OptSearchPoint(PromptTemplate):
     l1_layout: L1Layout = Field(default_factory=default_l1_layout)
 
     # Fields preserved across L2/L3 transitions via copy_memory_to.
-    # L1's layout MUST be in here so L3-spawned children inherit
-    # in-flight L2 layout edits instead of being silently merged from a
-    # stale OSP.
+    # L1's layout + L1 runtime overrides MUST be in here so L3-spawned
+    # children inherit in-flight L2 surface edits instead of being
+    # silently merged from a stale OSP.
     MEMORY_FIELDS: ClassVar[tuple[str, ...]] = (
         "escalation_log",
         "warning_inventory",
@@ -262,6 +262,7 @@ class OptSearchPoint(PromptTemplate):
         "failure_analysis",
         "round_history",
         "l1_layout",
+        "l1_overrides",
     )
 
     def append_escalation(self, entry: dict[str, Any]) -> None:
@@ -350,7 +351,7 @@ class OptSearchPoint(PromptTemplate):
         else:
             data["few_shot_examples"] = [ex.model_copy() for ex in self.few_shot_examples]
         # L2/L3 state
-        data["l1_config"] = changes.pop("l1_config", dict(self.l1_config))
+        data["l1_overrides"] = changes.pop("l1_overrides", dict(self.l1_overrides))
         data["task_context"] = changes.pop("task_context", self.task_context.to_dict())
         data["plan"] = changes.pop("plan", self.plan)
         # Lineage

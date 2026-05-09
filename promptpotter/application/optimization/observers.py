@@ -2,7 +2,7 @@
 
 Two halves of one lifecycle live here:
 
-* ``RunCallbacks`` — typed event constructor over ``CycleLedger.append``;
+* ``RunCallbacks`` — typed event constructor over ``CycleEventLog.append``;
   the writer-side API the optimization loop calls into. Subscribers consume
   via ``on_record`` on the bound ledger.
 * ``build_run_observers`` — wires every projection (audit trail, live
@@ -23,12 +23,12 @@ from promptpotter.application.baseline import (
 from promptpotter.application.bootstrap.session import auto_mint_session
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
-from promptpotter.infrastructure.ledger import CycleLedger
+from promptpotter.infrastructure.ledger import CycleEventLog
 from promptpotter.infrastructure.llm import TokenUsage
 from promptpotter.infrastructure.projections import (
-    AuditTrailProjection,
-    LiveDashboardProjection,
-    PoBBStreamProjection,
+    AuditTrailView,
+    LiveDashboardView,
+    PoBBStreamView,
     SignalsProjection,
 )
 from promptpotter.presentation.views.view_factories import (
@@ -48,7 +48,7 @@ __all__ = ["ForkInfo", "RunCallbacks", "RunObservers", "build_run_observers"]
 
 @dataclass
 class RunCallbacks:
-    """Single ingress: callbacks → typed CycleRecord → ``CycleLedger.append``.
+    """Single ingress: callbacks → typed CycleRecord → ``CycleEventLog.append``.
 
     Subscribers consume via ``on_record`` on the bound ledger. PhaseRecord-view
     ctx is owned here (``from_phase_event`` is stateful) and serialised onto
@@ -56,7 +56,7 @@ class RunCallbacks:
     deferred binding, no buffer.
     """
 
-    ledger: CycleLedger
+    ledger: CycleEventLog
     _phase_ctx: dict[str, Any] = field(default_factory=dict)
     _current_round: int = 0
 
@@ -187,9 +187,9 @@ class RunObservers:
     """Frozen bundle: callbacks + projections + display, all bound to one ledger."""
 
     callbacks: RunCallbacks
-    audit: AuditTrailProjection
-    dashboard: LiveDashboardProjection
-    pobb: PoBBStreamProjection
+    audit: AuditTrailView
+    dashboard: LiveDashboardView
+    pobb: PoBBStreamView
     signals: SignalsProjection
     display: LiveDisplay | None
 
@@ -199,7 +199,7 @@ class ForkInfo:
     """Forked-cycle wiring: parent cycle id + family-root dashboard."""
 
     parent_cycle_id: str
-    parent_dashboard: LiveDashboardProjection
+    parent_dashboard: LiveDashboardView
 
 
 def _ensure_session_minted(
@@ -267,13 +267,13 @@ def build_run_observers(
         raise RuntimeError("build_run_observers: session must have cycle_id and store")
 
     cycle_dir = CycleDir(session.store.campaigns.campaign_dir(session.state.cycle_id))
-    audit = AuditTrailProjection.from_cycle_dir(cycle_dir)
+    audit = AuditTrailView.from_cycle_dir(cycle_dir)
     audit.rehydrate_sticky()
     session.state.audit_projection = audit
-    pobb = PoBBStreamProjection.from_cycle_dir(cycle_dir)
+    pobb = PoBBStreamView.from_cycle_dir(cycle_dir)
     signals = SignalsProjection.from_cycle_dir(cycle_dir)
 
-    ledger = CycleLedger.open(cycle_dir)
+    ledger = CycleEventLog.open(cycle_dir)
     if fork is None:
         dashboard = build_campaign_emitter(
             session,
@@ -291,7 +291,7 @@ def build_run_observers(
             from_round=resumed_from_round or 0,
         )
         parent_dir = CycleDir(session.store.campaigns.campaign_dir(fork.parent_cycle_id))
-        fresh_parent = CycleLedger.open(parent_dir)
+        fresh_parent = CycleEventLog.open(parent_dir)
         ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
 
     ledger.bind(dashboard)

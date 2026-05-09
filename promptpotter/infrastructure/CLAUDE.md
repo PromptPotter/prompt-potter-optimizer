@@ -6,10 +6,10 @@ or talks to a network without going through one of these seams.
 
 ## Persistence — one ingress, two projections
 
-**Sole ingress:** per-cycle `CycleLedger` (`ledger.py`, `events.jsonl`).
-Forks via `CycleLedger.inherit_from(parent, offset)`. The writer-side API
+**Sole ingress:** per-cycle `CycleEventLog` (`ledger.py`, `events.jsonl`).
+Forks via `CycleEventLog.inherit_from(parent, offset)`. The writer-side API
 above the ledger is `RunCallbacks` (`application/run_callbacks.py`) — a
-typed event constructor over `CycleLedger.append`. Orchestration uses
+typed event constructor over `CycleEventLog.append`. Orchestration uses
 `RunCallbacks`; the ledger is the only thing that touches disk for the
 campaign event stream.
 
@@ -17,12 +17,12 @@ campaign event stream.
 
 | Projection | Scope | Writes |
 |---|---|---|
-| `LiveDashboardProjection` | root cycle only | `dashboard.json`, `output.log` |
-| `AuditTrailProjection` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` |
+| `LiveDashboardView` | root cycle only | `dashboard.json`, `output.log` |
+| `AuditTrailView` | per cycle / fork | `.runtime/cache/rounds/round_NNNN.json` |
 | `LiveStateProjection` | per cycle | derived live state snapshot |
-| `PoBBStreamProjection` | per cycle | PoBB elimination event stream |
+| `PoBBStreamView` | per cycle | PoBB elimination event stream |
 
-`ProjectionBase.on_record` (`projections/base.py`) owns the
+`DerivedView.on_record` (`projections/base.py`) owns the
 `isinstance(record, …)` dispatch; subclasses override hooks. There's no
 second dispatch path because the base class is the only one. Subscribers
 MUST NOT write campaign artifacts beyond their declared allowlist (guarded

@@ -1,4 +1,4 @@
-"""LiveDashboardProjection — operator-facing ``dashboard.json`` writer.
+"""LiveDashboardView — operator-facing ``dashboard.json`` writer.
 
 Family-root-bound: one ``dashboard.json`` per cycle family, shared across
 all forks (the active fork is identified by ``dashboard.json::cycle_id``).
@@ -10,8 +10,8 @@ assertion in ``__init__`` rejects any path that contains a ``forks/``
 segment.
 
 Single ingress: the projection consumes only via ``on_record`` from the
-per-cycle ``CycleLedger``. The runner emits typed ``PhaseRecord`` /
-``SnapshotRecord`` / ``DecisionRecord`` records; this class is one flat
+per-cycle ``CycleEventLog``. The runner emits typed ``PhaseRecord`` /
+``SnapshotRecord`` / ``ResumeCheckpointRecord`` records; this class is one flat
 router that mutates the ``state`` scalars + the ``_round`` candidate dict
 in place, then merges both into one ``dashboard.json`` write through
 ``_persist``.
@@ -28,7 +28,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
-from promptpotter.infrastructure.projections.base import ProjectionBase
+from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
     apply_p_best_update,
@@ -43,11 +43,11 @@ from promptpotter.shared.spend import compute_usd
 if TYPE_CHECKING:
     from promptpotter.domain.phases import PhaseEvent
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.projections.audit_trail import AuditTrailProjection
+    from promptpotter.infrastructure.projections.audit_trail import AuditTrailView
 
 logger = logging.getLogger(__name__)
 
-__all__ = ["LiveDashboardProjection"]
+__all__ = ["LiveDashboardView"]
 
 
 # Phase enter → ``state`` value. The L1_SCORE phase has no entry in this
@@ -134,7 +134,7 @@ def fmt_sample_line(s: dict[str, Any]) -> str:
     )
 
 
-class LiveDashboardProjection(ProjectionBase):
+class LiveDashboardView(DerivedView):
     """Per-cycle dashboard writer. Routes ledger records to scalar +
     per-round mutations and persists the merged view to ``dashboard.json``.
     Not an optimizer checkpoint — resume reads ``rounds/round_NNNN.json``,
@@ -151,7 +151,7 @@ class LiveDashboardProjection(ProjectionBase):
         sp_budget_ttest: int,
         resume_from: dict[str, Any] | None = None,
         cycle_id: str | None = None,
-        recorder: AuditTrailProjection | None = None,
+        recorder: AuditTrailView | None = None,
         evaluators_meta: list[dict[str, Any]] | None = None,
     ) -> None:
         # Telemetry binds to the family root (the cycle with no parent_cycle_id).
@@ -162,7 +162,7 @@ class LiveDashboardProjection(ProjectionBase):
         sibling_kinds = {"forks", "diag", "sweeps"}
         if sibling_kinds & set(root_path.parts):
             raise ValueError(
-                f"LiveDashboardProjection root_dir must be a family root, not a sibling dir; "
+                f"LiveDashboardView root_dir must be a family root, not a sibling dir; "
                 f"got {root_path}"
             )
         self.root_dir = root_path
@@ -212,7 +212,7 @@ class LiveDashboardProjection(ProjectionBase):
             # rate-tabled via ``shared/spend.py``. budget_usd is set from
             # campaign.optimization.spend_budget_usd at INIT:exit.
             "spend": r.get("spend") or _empty_spend(),
-            # Phase 4 — last N cadence-rule firings + latest signal_inputs
+            # Last N escalation-rule firings + latest signal_inputs
             # snapshot per layer. Webapp's StuckDiagnosis reads these to
             # name *which* signal is at floor/ceiling without opening
             # ``.runtime/signals.jsonl``.
@@ -253,9 +253,9 @@ class LiveDashboardProjection(ProjectionBase):
         n_variants: int,
         sp_budget_ttest: int,
         resumed_from_round: int | None = None,
-        recorder: AuditTrailProjection | None = None,
+        recorder: AuditTrailView | None = None,
         evaluators_meta: list[dict[str, Any]] | None = None,
-    ) -> LiveDashboardProjection | None:
+    ) -> LiveDashboardView | None:
         """Build projection, or ``None`` if ids missing. Carries prior UI counters
         across resumes; optimizer resume is separate (``Cycle.restore_from_trial``).
         On ``--from N`` rewind, the ``best`` counter past the surviving rounds
@@ -329,14 +329,14 @@ class LiveDashboardProjection(ProjectionBase):
 
     # -- Ledger subscription (sole ingress) -----------------------------------
     #
-    # DecisionRecord records are persisted to ``ledger.jsonl`` by the
+    # ResumeCheckpointRecord records are persisted to ``ledger.jsonl`` by the
     # runner; this projection only mirrors the live state to
     # ``dashboard.json``. Phases drive scalar updates; snapshots drive
     # per-round candidate structures. Both fan-outs are explicit here —
     # no second dispatch path elsewhere.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase == "cadence" and record.event == "rule_fired":
+        if record.phase == "escalation" and record.event == "rule_fired":
             self._absorb_rule_fired(record)
             self._persist()
             return
@@ -591,7 +591,7 @@ class LiveDashboardProjection(ProjectionBase):
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
 
     def _absorb_rule_fired(self, record: PhaseRecord) -> None:
-        """Fold a ``cadence/rule_fired`` event into ``dashboard.json``.
+        """Fold an ``escalation/rule_fired`` event into ``dashboard.json``.
 
         Appends to ``state["recent_rules"]`` (rolling, capped) and overwrites
         ``state["current_signals"][layer]`` with the latest snapshot. The

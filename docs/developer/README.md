@@ -77,21 +77,21 @@ L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`
 
 ## 2. Dispatch (which layer fires when)
 
-The runner asks the cadence engine after every round. `EscalationState.observe_round` builds a frozen `SignalInputs` snapshot and delegates to `cadence.evaluate_round` (`application/optimization/cadence/evaluator.py`), which sort-by-priority first-match-wins over `DEFAULT_ROUND_RULES`:
+The runner asks the escalation rules engine after every round. `EscalationState.observe_round` builds a frozen `EscalationInputs` snapshot and delegates to `decide_escalation` (`application/optimization/escalation/evaluator.py`), which sort-by-priority first-match-wins over `DEFAULT_ESCALATION_RULES`:
 
 ```
-round runs L1 → SignalInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
+round runs L1 → EscalationInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
                   ↓
-        evaluate_round(inputs) → CadenceRule
+        decide_escalation(inputs) → EscalationRule
                   ↓
    {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE, STOP_L1_PATIENCE}
 ```
 
-Default rules in `cadence/rules.py` reproduce the prior FSM exactly (`perfect_accuracy`, `l1_continue`, `l1_stop_no_l2`, `l1_to_l2`); plus opt-in `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Gated by `campaign.json::optimization.escalate_on_yield_drought`.
+Default rules in `escalation/rules.py` reproduce the prior FSM exactly (`perfect_accuracy`, `l1_continue`, `l1_stop_no_l2`, `l1_to_l2`); plus opt-in `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Gated by `campaign.json::optimization.escalate_on_yield_drought`.
 
 Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
 
-Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the cadence ladder. See [`self-healing-internals.md`](self-healing-internals.md).
+Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the escalation ladder. See [`self-healing-internals.md`](self-healing-internals.md).
 
 ---
 

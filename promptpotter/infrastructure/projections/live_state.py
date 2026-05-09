@@ -1,7 +1,7 @@
 """LiveStateCore — per-cycle scalars shared by terminal + dashboard projections.
 
-Both ``LiveDisplay`` (terminal) and ``LiveDashboardProjection`` (``dashboard.json``)
-subscribe the same ``CycleLedger``. They maintain divergent surface-specific
+Both ``LiveDisplay`` (terminal) and ``LiveDashboardView`` (``dashboard.json``)
+subscribe the same ``CycleEventLog``. They maintain divergent surface-specific
 state (tqdm bars on one side, JSON spend rollup on the other), but a small
 core overlaps:
 

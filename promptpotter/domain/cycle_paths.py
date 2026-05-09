@@ -12,7 +12,7 @@ audit data — its constructor refuses the wrong newtype (mypy) and
 asserts at construction time (runtime).
 
 These types live in :mod:`promptpotter.domain` so both ``application``
-(``CycleLedger``-side) and ``infrastructure`` (projection-side) can import
+(``CycleEventLog``-side) and ``infrastructure`` (projection-side) can import
 them without crossing hexagonal layers.
 """
 

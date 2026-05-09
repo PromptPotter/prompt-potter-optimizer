@@ -54,7 +54,7 @@ from promptpotter.application.optimization.l2_validators import (
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
-from promptpotter.domain.run_records import DecisionKind, SweepPayload
+from promptpotter.domain.run_records import ResumeCheckpointKind, SweepPayload
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
@@ -404,7 +404,7 @@ def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
     assert cycle.probe_next_round is True
     assert cycle.last_l2_axis == "persona"
     last = cycle.pending_decisions[-1]
-    assert last.kind == DecisionKind.PROBE_ROUND_COMMITMENT
+    assert last.kind == ResumeCheckpointKind.PROBE_ROUND_COMMITMENT
     assert last.outcome is True
     assert last.data["action"] == "probe_round"
     assert last.data["axis_targeted"] == "persona"
@@ -418,7 +418,7 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
 
     assert cycle.probe_next_round is False
     last = cycle.pending_decisions[-1]
-    assert last.kind == DecisionKind.PROBE_ROUND_COMMITMENT
+    assert last.kind == ResumeCheckpointKind.PROBE_ROUND_COMMITMENT
     assert last.outcome is False
     assert last.data["action"] == "normal_round"
     assert last.data["task_context_changed"] is False
@@ -432,10 +432,10 @@ def test_apply_l2_normal_action_records_commitment_without_probe_state():
 def test_l3_to_l2_note_is_in_signals_but_not_l1_possible():
     """Hard structural guard: the note channel is L2-only. Adding it to
     ``L1_POSSIBLE`` would let L2 leak L3's L2-private guidance to L1."""
-    from promptpotter.application.optimization.dispatch_hub import SIGNALS
+    from promptpotter.application.optimization.dispatch_hub import INJECTIONS
     from promptpotter.domain.l1_layout import L1_POSSIBLE
 
-    assert "l3_to_l2_note" in SIGNALS
+    assert "l3_to_l2_note" in INJECTIONS
     assert "l3_to_l2_note" not in L1_POSSIBLE
 
 
@@ -481,11 +481,11 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
 
 
 # ===========================================================================
-# Phase 0 — typed SIGNALS + load-time template validation
+# Typed INJECTIONS + load-time template validation
 # ===========================================================================
 #
 # Closes the silent-drop bug: ``DispatchHub.fill_fixed`` skips template names
-# not in ``SIGNALS``, so a typo would render to empty and never surface.
+# not in ``INJECTIONS``, so a typo would render to empty and never surface.
 # ``validate_template`` raises at load time. Two tiny invariants:
 #   1. every shipping optimizer prompt loads without raising (positive case);
 #   2. a deliberate unknown slot raises ``KeyError`` (validator actually works).
@@ -505,7 +505,7 @@ def test_optimizer_prompts_load_with_no_unresolvable_slots():
 
 
 def test_validate_template_raises_on_unknown_slot():
-    """Typo guard: a slot not in SIGNALS and not in _TEMPLATE_EXTRAS raises."""
+    """Typo guard: a slot not in INJECTIONS and not in _TEMPLATE_EXTRAS raises."""
     from promptpotter.application.optimization.dispatch_hub import validate_template
     from promptpotter.domain.opt_search_point import PromptTemplate
 
@@ -518,7 +518,7 @@ def test_validate_template_raises_on_unknown_slot():
 # Phase 1 — axis_memory signal wires AxisIndex.digest() into prompts
 # ===========================================================================
 #
-# Closes flaw 5: MeasurementArchive is rich, dispatch_hub.SIGNALS doesn't
+# Closes flaw 5: MeasurementArchive is rich, dispatch_hub.INJECTIONS doesn't
 # surface it. The format helpers already exist in
 # intelligence/indexes/format.py; this signal is wiring, not new computation.
 
@@ -542,8 +542,8 @@ def _empty_cycle_slice():
 def test_axis_memory_renders_when_axes_digest_yields_content():
     """``axis_memory`` wraps :meth:`AxisIndex.digest` into a labeled block."""
     from promptpotter.application.optimization.dispatch_hub import (
-        Bundle,
         DispatchHub,
+        InjectionBundle,
         RoundDigest,
     )
 
@@ -553,7 +553,7 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
             "persistent_failures": "3 chronic failures",
         }
     )
-    bundle = Bundle(
+    bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
         pipeline_schema=None,
         cycle_slice=_empty_cycle_slice(),
@@ -569,8 +569,8 @@ def test_axis_memory_renders_when_axes_digest_yields_content():
 def test_axis_memory_empty_when_axes_or_digest_absent():
     """Pre-first-round and empty-digest paths render to empty string."""
     from promptpotter.application.optimization.dispatch_hub import (
-        Bundle,
         DispatchHub,
+        InjectionBundle,
         RoundDigest,
     )
 
@@ -581,10 +581,10 @@ def test_axis_memory_empty_when_axes_or_digest_absent():
         "digest": RoundDigest(diagnostics=None, critique=None, decision_traces=[]),
     }
 
-    no_axes = Bundle(**base_kwargs, axes=None)
+    no_axes = InjectionBundle(**base_kwargs, axes=None)
     assert DispatchHub.render("axis_memory", no_axes) == ""
 
-    empty_digest = Bundle(
+    empty_digest = InjectionBundle(
         **base_kwargs,
         axes=types.SimpleNamespace(digest=lambda: None),
     )
@@ -602,8 +602,8 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 def test_decision_trace_summary_signal():
     """Phase 3.3: decision_trace_summary renders the latest round's traces compactly."""
     from promptpotter.application.optimization.dispatch_hub import (
-        Bundle,
         DispatchHub,
+        InjectionBundle,
         RoundDigest,
     )
     from promptpotter.application.optimization.l1_population import build_decision_trace
@@ -626,7 +626,7 @@ def test_decision_trace_summary_signal():
             sample_outcomes=[True] * 6 + [False] * 2,
         ),
     ]
-    bundle = Bundle(
+    bundle = InjectionBundle(
         opt_sp=OptSearchPoint(),
         pipeline_schema=None,
         cycle_slice=_empty_cycle_slice(),
@@ -642,7 +642,7 @@ def test_decision_trace_summary_signal():
     assert "hits=6 misses=2" in out
 
     # Empty digest path renders nothing.
-    empty = Bundle(
+    empty = InjectionBundle(
         opt_sp=OptSearchPoint(),
         pipeline_schema=None,
         cycle_slice=_empty_cycle_slice(),
@@ -653,7 +653,7 @@ def test_decision_trace_summary_signal():
 
 
 # ===========================================================================
-# Phase 2a — cadence rules engine reproduces prior observe_round FSM
+# Escalation rules engine reproduces prior observe_round FSM
 # ===========================================================================
 #
 # Closes flaw 3 (calendar-driven escalation) by lifting observe_round's FSM
@@ -664,63 +664,63 @@ def test_decision_trace_summary_signal():
 
 def test_default_round_rules_reproduce_observe_round_fsm():
     """Phase 2a parity: DEFAULT_ROUND_RULES matches observe_round's branches."""
-    from promptpotter.application.optimization.cadence import (
-        SignalInputs,
-        evaluate_round,
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
     # Branch 1 — perfect accuracy → STOP_PERFECT (priority 100)
-    perfect = SignalInputs(
+    perfect = EscalationInputs(
         improved=True,
         current_accuracy=1.0,
         l1_stall_count=0,
         l1_patience=3,
         enable_l2=True,
     )
-    assert evaluate_round(perfect).next_action == NextAction.STOP_PERFECT
+    assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
     # Branch 2 — stall < patience → CONTINUE (priority 50)
-    continuing = SignalInputs(
+    continuing = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
         enable_l2=True,
     )
-    assert evaluate_round(continuing).next_action == NextAction.CONTINUE
+    assert decide_escalation(continuing).next_action == NextAction.CONTINUE
 
     # Branch 3 — patience exhausted, L2 disabled → STOP_L1_PATIENCE (priority 30)
-    no_l2 = SignalInputs(
+    no_l2 = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=3,
         l1_patience=3,
         enable_l2=False,
     )
-    assert evaluate_round(no_l2).next_action == NextAction.STOP_L1_PATIENCE
+    assert decide_escalation(no_l2).next_action == NextAction.STOP_L1_PATIENCE
 
     # Branch 4 — patience exhausted, L2 enabled → FIRE_L2 (priority 10)
-    fire = SignalInputs(
+    fire = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=3,
         l1_patience=3,
         enable_l2=True,
     )
-    assert evaluate_round(fire).next_action == NextAction.FIRE_L2
+    assert decide_escalation(fire).next_action == NextAction.FIRE_L2
 
 
 def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
     """Phase 2b: yield-drought rule preempts l1_continue when on; quiet when off."""
-    from promptpotter.application.optimization.cadence import (
-        SignalInputs,
-        evaluate_round,
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
     # Drought + opt-in + L1 has stalled at least one round → FIRE_L2 (priority 60)
-    drought_on = SignalInputs(
+    drought_on = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
@@ -729,10 +729,10 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         axes_with_positive_yield=0,
         escalate_on_yield_drought=True,
     )
-    assert evaluate_round(drought_on).next_action == NextAction.FIRE_L2
+    assert decide_escalation(drought_on).next_action == NextAction.FIRE_L2
 
     # Same drought + flag off → CONTINUE (l1_continue at priority 50 wins)
-    drought_off = SignalInputs(
+    drought_off = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
@@ -741,10 +741,10 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         axes_with_positive_yield=0,
         escalate_on_yield_drought=False,
     )
-    assert evaluate_round(drought_off).next_action == NextAction.CONTINUE
+    assert decide_escalation(drought_off).next_action == NextAction.CONTINUE
 
     # Pre-first-round (axes not initialised) → CONTINUE even with flag on
-    no_evidence = SignalInputs(
+    no_evidence = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
@@ -753,7 +753,7 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
         axes_with_positive_yield=None,
         escalate_on_yield_drought=True,
     )
-    assert evaluate_round(no_evidence).next_action == NextAction.CONTINUE
+    assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
 
 
 # ===========================================================================

@@ -58,7 +58,7 @@ class InitEnterView:
     """Pre-baseline init banner — only warnings render to text.
 
     ``composite_fitness_formula`` (and the short form) are propagated here so
-    ``LiveDashboardProjection`` can stamp them onto ``dashboard.json`` before
+    ``LiveDashboardView`` can stamp them onto ``dashboard.json`` before
     baseline scoring begins. Without this, the formula would only land at
     ``INIT.exit`` (after baseline), leaving the live preview's What-If panel
     without a formula reference for the entire baseline phase.
@@ -194,7 +194,7 @@ class L2RefineEnterView:
     l1_stall_count: Any
     current_acc: float
     best_acc: float
-    l1_config: dict[str, str]
+    l1_overrides: dict[str, str]
     n_params: int
 
 

@@ -10,7 +10,7 @@ so the "signals from measurement, not the calendar" rule (per
 ``promptpotter/CLAUDE.md``) is structural: there is no field to assign
 a ``round_num >= N`` literal to.
 
-State is a fold over ``CycleLedger`` records; :meth:`EscalationState.fold`
+State is a fold over ``CycleEventLog`` records; :meth:`EscalationState.fold`
 advances one step, :meth:`EscalationState.from_ledger` rebuilds on resume.
 """
 
@@ -24,7 +24,7 @@ from promptpotter.domain.phases import StopReason
 from promptpotter.domain.run_records import CycleRecord, PhaseRecord
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
 
 class NextAction(enum.StrEnum):
@@ -62,9 +62,10 @@ class EscalationEvent:
     ``next_action`` and read ``stop_reason`` for the StopLoop projection.
 
     ``rule_name`` / ``rule_priority`` are populated by
-    :func:`cadence.evaluate_round` (post-round path goes through the rule
-    engine). The L2/L3 cascade in :meth:`EscalationState.observe_l2_escalation`
-    is still imperative — those paths leave both fields ``None``.
+    :func:`escalation.decide.decide_escalation` (post-round path goes
+    through the rule engine). The L2/L3 cascade in
+    :meth:`EscalationState.observe_l2_escalation` is still imperative —
+    those paths leave both fields ``None``.
     """
 
     next_action: NextAction
@@ -159,24 +160,25 @@ class EscalationState:
         """L1 round outcome. Bumps the stall counter; returns CONTINUE /
         FIRE_L2 / STOP_PERFECT / STOP_L1_PATIENCE.
 
-        Counter mutation stays here (state ownership). The decision lifts
-        into :func:`cadence.evaluate_round` — this method delegates with a
-        :class:`cadence.SignalInputs` snapshot. Default rules reproduce
-        the prior FSM exactly; ``axes_with_positive_yield`` and
-        ``escalate_on_yield_drought`` enable the Phase 2b yield-driven rule
-        when the cycle has AxisIndex evidence and the campaign opts in.
+        Counter mutation stays here (state ownership). The decision
+        lifts into :func:`escalation.decide.decide_escalation` — this
+        method delegates with a :class:`EscalationInputs` snapshot.
+        Default rules reproduce the prior FSM exactly;
+        ``axes_with_positive_yield`` and ``escalate_on_yield_drought``
+        enable the yield-driven rule when the cycle has AxisIndex
+        evidence and the campaign opts in.
 
         L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
         the mid-round signal path (DegradationCheck) shares the same cascade.
         """
-        from promptpotter.application.optimization.cadence import SignalInputs
         from promptpotter.application.optimization.escalation.decide import (
+            EscalationInputs,
             decide_escalation,
         )
 
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
 
-        inputs = SignalInputs(
+        inputs = EscalationInputs(
             improved=improved,
             current_accuracy=current_accuracy,
             l1_stall_count=self._l1_stall_count,
@@ -302,7 +304,7 @@ class EscalationState:
             self._l2_best_composite_fitness_at_entry = best_comp
 
     @classmethod
-    def from_ledger(cls, ledger: CycleLedger | None) -> EscalationState:
+    def from_ledger(cls, ledger: CycleEventLog | None) -> EscalationState:
         """Rebuild state by folding every record in ``ledger``. ``None`` ⇒ fresh state."""
         s = cls()
         if ledger is None:

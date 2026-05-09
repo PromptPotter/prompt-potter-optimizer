@@ -1,8 +1,8 @@
 """Resume + fork-on-divergence machinery — one module, one public surface.
 
 Bundles every piece of the ``--from N`` and ``--fork-on-divergence``
-mechanism: the per-round resume-checkpoint records (``DecisionRecord`` /
-``DecisionKind`` / ``DECISION_GATING``), the post-resume rescore-and-replay
+mechanism: the per-round resume-checkpoint records (``ResumeCheckpointRecord`` /
+``ResumeCheckpointKind`` / ``RESUME_CHECKPOINT_GATING``), the post-resume rescore-and-replay
 walker (``replay_decisions``, ``REPLAYERS``), the divergence-or-fork
 entry point (``resume_with_divergence_check``), and the sibling-mint
 helpers (``fork_for_diag_sibling``, ``fork_for_sweep_sibling``).
@@ -14,10 +14,10 @@ sidecar dispatch path; no replayer registered outside ``REPLAYERS``.
 from __future__ import annotations
 
 from promptpotter.application.optimization.resume_and_fork.decisions import (
-    DECISION_GATING,
-    DecisionKind,
-    DecisionRecord,
+    RESUME_CHECKPOINT_GATING,
     GatingMode,
+    ResumeCheckpointKind,
+    ResumeCheckpointRecord,
     record_decision,
 )
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
@@ -38,15 +38,15 @@ from promptpotter.application.optimization.resume_and_fork.resume import (
 )
 
 __all__ = [
-    "DECISION_GATING",
     "REPLAYERS",
-    "DecisionKind",
-    "DecisionRecord",
+    "RESUME_CHECKPOINT_GATING",
     "Divergence",
     "ForkResult",
     "GatingMode",
     "ReplayContext",
     "Replayer",
+    "ResumeCheckpointKind",
+    "ResumeCheckpointRecord",
     "fork_at_divergence",
     "fork_for_diag_sibling",
     "fork_for_sweep_sibling",

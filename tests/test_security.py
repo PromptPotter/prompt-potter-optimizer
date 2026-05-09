@@ -81,9 +81,9 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     bare — they are operator-authored, fully-bounded optimizer state.
     """
     from promptpotter.application.optimization.dispatch_hub import (
-        Bundle,
         CycleSlice,
         DispatchHub,
+        InjectionBundle,
         RoundDigest,
     )
     from promptpotter.domain.analysis import RuntimeFailure, ValidationFailure
@@ -164,7 +164,7 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
             )
         ],
     )
-    bundle = Bundle(
+    bundle = InjectionBundle(
         opt_sp=opt_sp,
         pipeline_schema=None,
         cycle_slice=cycle_slice,

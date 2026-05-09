@@ -182,8 +182,8 @@ def testfork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mon
     cross-file polling needed to discover that a fork was minted.
     """
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     tenant = "default"
     old_cycle = "cycle_fork_cut_test"
@@ -204,12 +204,12 @@ def testfork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mon
         surviving_rounds=rounds[:1],
     )
 
-    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleEventLog.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
     assert records, "parent ledger must contain the FORK_CUT record"
     cut = records[-1]
-    assert isinstance(cut, DecisionRecord)
-    assert cut.kind is DecisionKind.FORK_CUT
+    assert isinstance(cut, ResumeCheckpointRecord)
+    assert cut.kind is ResumeCheckpointKind.FORK_CUT
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 1}
 
@@ -217,12 +217,14 @@ def testfork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mon
     # see the FORK_CUT marker — i.e. the runner's "re-open parent before
     # inherit" pattern is what downstream readers depend on.
     fork_dir = stores.campaigns.campaign_dir(new_cycle)
-    fork_ledger = CycleLedger.open(CycleDir(fork_dir))
-    fresh_parent = CycleLedger.open(CycleDir(parent_dir))
+    fork_ledger = CycleEventLog.open(CycleDir(fork_dir))
+    fresh_parent = CycleEventLog.open(CycleDir(parent_dir))
     fork_ledger.inherit_from(fresh_parent, fresh_parent.next_offset)
     fork_history = list(fork_ledger.iter())
     assert any(
-        isinstance(r, DecisionRecord) and r.kind is DecisionKind.FORK_CUT and r.outcome == new_cycle
+        isinstance(r, ResumeCheckpointRecord)
+        and r.kind is ResumeCheckpointKind.FORK_CUT
+        and r.outcome == new_cycle
         for r in fork_history
     ), "fork inheriting from re-opened parent must see the FORK_CUT marker"
 
@@ -337,8 +339,8 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     sibling and ``from_round=0``, with ``data.kind="diag_sibling"`` so a tail
     of the parent distinguishes diag-BFS branches from divergence forks."""
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     tenant = "default"
     parent = "cycle_diagparent2"
@@ -352,11 +354,11 @@ def test_fork_for_diag_sibling_appends_fork_cut_to_parent_ledger(
     parent_dir = stores.campaigns.campaign_dir(parent)
     new_cycle = fork_for_diag_sibling(stores.campaigns, tenant, "s_test", parent)
 
-    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleEventLog.open(CycleDir(parent_dir))
     records = list(parent_ledger.iter())
     cut = records[-1]
-    assert isinstance(cut, DecisionRecord)
-    assert cut.kind is DecisionKind.FORK_CUT
+    assert isinstance(cut, ResumeCheckpointRecord)
+    assert cut.kind is ResumeCheckpointKind.FORK_CUT
     assert cut.outcome == new_cycle
     assert cut.inputs_ref == {"from_round": 0}
     assert (cut.data or {}).get("kind") == "diag_sibling"
@@ -432,8 +434,8 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
     downstream review can attribute the fork to the operator's hypothesis.
     """
     from promptpotter.domain.cycle_paths import CycleDir
-    from promptpotter.domain.run_records import DecisionKind, DecisionRecord
-    from promptpotter.infrastructure.ledger import CycleLedger
+    from promptpotter.domain.run_records import ResumeCheckpointKind, ResumeCheckpointRecord
+    from promptpotter.infrastructure.ledger import CycleEventLog
 
     tenant = "default"
     parent = "cycle_sweepparent2"
@@ -456,10 +458,10 @@ def test_fork_for_sweep_sibling_archives_payload_in_fork_cut(tmp_path: Path, mon
         payload=payload,
     )
 
-    parent_ledger = CycleLedger.open(CycleDir(parent_dir))
+    parent_ledger = CycleEventLog.open(CycleDir(parent_dir))
     cut = list(parent_ledger.iter())[-1]
-    assert isinstance(cut, DecisionRecord)
-    assert cut.kind is DecisionKind.FORK_CUT
+    assert isinstance(cut, ResumeCheckpointRecord)
+    assert cut.kind is ResumeCheckpointKind.FORK_CUT
     assert cut.outcome == new_cycle
     data = cut.data or {}
     assert data.get("kind") == "sweep_fork"

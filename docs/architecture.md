@@ -49,9 +49,9 @@ different symbols, the cross-walk is:
 | §0 vocabulary (target / long-term) | Today's symbol (pre-cleanup) | Lands in |
 |---|---|---|
 | `INJECTIONS` registry, `_Injection`, `InjectionKind` | `SIGNALS`, `_Signal`, `SignalKind` | m10-cleanup §2 |
-| `decide_escalation(EscalationInputs)` | split across `evaluate_round` + `firing.py` + `transitions.py`; type is `SignalInputs` | m10-cleanup §3 step 0 + §3 |
+| `decide_escalation(EscalationInputs)` | split across `decide_escalation` + `firing.py` + `transitions.py`; type is `EscalationInputs` | m10-cleanup §3 step 0 + §3 |
 | `ResumeCheckpoint*` records | `Decision*` records | m10-cleanup §4.5 |
-| `CycleEventLog`, `DerivedView` (subscriber base) | `CycleLedger`, `ProjectionBase` | m10-cleanup §4.5 |
+| `CycleEventLog`, `DerivedView` (subscriber base) | `CycleEventLog`, `DerivedView` | m10-cleanup §4.5 |
 | `compile_l*_field_catalogue` | `compile_l*_surface` | m10-cleanup §4.5 |
 | `InjectionBundle` (bundle of state every prompt-fill receives) | `Bundle` | m10-cleanup §4.5 |
 
@@ -92,7 +92,7 @@ Two architectural commitments shape every bucket on this page:
   (`application/scoring/search_point_scorer.py:397`). PromptPotter
   has three single-place-to-extend mechanisms — exactly one entry
   for each shape: **scoring** goes through `score_search_point()`,
-  **persistence** through `CycleLedger.append`, **prompt-fill**
+  **persistence** through `CycleEventLog.append`, **prompt-fill**
   through the `INJECTIONS` registry. Two efficiency mechanisms
   operate inside `l1_score`, both first-class:
   - **Candidate budget allocation (PoBB).** A candidate keeps
@@ -166,7 +166,7 @@ a backend client along. SearchPoint types are
 their content hash a trustworthy identity, which is what lets
 `--from N` resume a campaign with different hyperparameters and
 `--fork-on-divergence` cleanly mint a sibling at the first hash
-mismatch. One per-cycle `CycleLedger.append` is the sole persistence
+mismatch. One per-cycle `CycleEventLog.append` is the sole persistence
 ingress; resume + fork ride dedicated checkpoint records on the
 ledger. Display and observability subscribe to the ledger as
 read-only views — never write campaign artifacts of their own.
@@ -291,15 +291,15 @@ the PR description.
   (`tests/test_invariants.py::test_no_unexpected_runtime_layer_violations` + `test_cycle_does_not_import_prompt_surface`) — without it, the three entry points drift.
 - **Resume + fork-on-divergence mechanism** — load-bearing for
   `--from N` and `--fork-on-divergence`. Today's symbols
-  (`Decision`/`DecisionKind`) and the post-cleanup symbols
+  (`Decision`/`ResumeCheckpointKind`) and the post-cleanup symbols
   (`ResumeCheckpoint*`) appear in §0's vocabulary table; mechanism
   stays through the rename.
-- **Per-cycle `CycleLedger` + `ProjectionBase` dispatch** — the
+- **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
 - **Hard-sample sorter (Rasch)**
   (`application/intelligence/hard_sample_sorter.py`) + the dashboard
   it powers — first-class per §0.
-- **`compile_l1_surface` / `compile_l2_surface` field catalogues**
+- **`compile_l1_field_catalogue` / `compile_l2_field_catalogue` field catalogues**
   (`application/optimization/pipeline.py`) — the discoverability
   scaffolding for m10-cleanup §6 pre-flight question 1. Don't drop
   "because nobody calls it from production code today."
@@ -331,7 +331,7 @@ the PR description.
   don't delete the underlying scripts without operator confirmation.
 - **`score_search_point()` gateway**
   (`application/scoring/search_point_scorer.py:397`) — sole scoring
-  ingress. Sibling to `CycleLedger.append` and `INJECTIONS`. Don't
+  ingress. Sibling to `CycleEventLog.append` and `INJECTIONS`. Don't
   add a second scoring entry path "for convenience."
 - **`observed_node()` context manager** — the trace-emission seam
   every optimizer LLM call wraps. Cutting it removes Langfuse-shape
