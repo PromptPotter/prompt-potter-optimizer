@@ -17,40 +17,40 @@ classifiers = [
 ]
 requires-python = ">=3.13"
 dependencies = [
-    "fastapi>=0.109.0",
-    "scalar-fastapi>=1.0.0",
-    "uvicorn[standard]>=0.27.0",
-    "pydantic>=2.5.3",
-    "pydantic-settings>=2.1.0",
-    "openai>=1.10.0",
-    "groq>=0.4.0",
-    "python-dotenv>=1.0.0",
-    "httpx>=0.26.0",
-    "filelock>=3.12.0",
-    "numpy>=1.26",
+    "fastapi>=0.109.0",        # why kept: read-only operator API + /ui webapp mount
+    "scalar-fastapi>=1.0.0",   # why kept: API doc UI on the FastAPI app
+    "uvicorn[standard]>=0.27.0",  # why kept: ASGI server for the read-only API
+    "pydantic>=2.5.3",         # why kept: every domain frozen-model + ledger record
+    "pydantic-settings>=2.1.0",  # why kept: env-driven settings for connectors + LLM
+    "openai>=1.10.0",          # why kept: OpenAI-compatible client (Groq, OpenRouter, OpenAI all route through)
+    "groq>=0.4.0",             # why kept: provider-registration symmetry — calls flow through the OpenAI-compatible client
+    "python-dotenv>=1.0.0",    # why kept: .env loading at bootstrap
+    "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
+    "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
+    "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
 ]
 
 [project.optional-dependencies]
 jupyter = [
-    "jupyterlab>=4.0",
-    "ipython>=8.0",
-    "tqdm>=4.66",
+    "jupyterlab>=4.0",  # why kept: notebook UI for `notebooks/optimization_campaign.ipynb`
+    "ipython>=8.0",     # why kept: in-notebook HTML rendering (presentation/views/notebook_run.py)
+    "tqdm>=4.66",       # why kept: per-sample progress bar in notebook entry-point
 ]
 stats = [
-    "scipy>=1.12.0",
+    "scipy>=1.12.0",    # why kept: Rasch fit + statistical proportion test
 ]
 excel = [
-    "openpyxl>=3.1.0",
+    "openpyxl>=3.1.0",  # why kept: ground-truth Excel ingest (datasets/dataset_builder.py)
 ]
 benchmarks = [
-    "datasets>=2.14.0",
+    "datasets>=2.14.0", # why kept: HuggingFace BBEH loader (M11 benchmark track)
 ]
 observability = [
-    "langfuse>=2.0.0",
-    "mlflow>=2.12.0",
+    "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
+    "mlflow>=2.12.0",   # why kept: alternate sink alongside Langfuse, gated on MLFLOW_ENABLED
 ]
 anthropic = [
-    "anthropic>=0.18.0",
+    "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client
 ]
 all = [
     "jupyterlab>=4.0",
@@ -64,12 +64,12 @@ all = [
     "anthropic>=0.18.0",
 ]
 dev = [
-    "pytest>=8.0.0",
-    "pytest-asyncio>=0.24.0",
-    "pytest-cov>=6.0",
-    "ruff>=0.3.0",
-    "mypy>=1.10.0",
-    "deptry>=0.20.0",
+    "pytest>=8.0.0",          # why kept: test runner
+    "pytest-asyncio>=0.24.0", # why kept: async fixtures for LLM call tests
+    "pytest-cov>=6.0",        # why kept: coverage instrumentation
+    "ruff>=0.3.0",            # why kept: lint + format
+    "mypy>=1.10.0",           # why kept: static type-check (CI gate)
+    "deptry>=0.20.0",         # why kept: dependency audit (CI gate)
 ]
 
 [project.urls]

@@ -124,3 +124,44 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 **Per-layer contracts** (progressive disclosure — load only the layer you're touching): [`promptpotter/CLAUDE.md`](promptpotter/CLAUDE.md) (L1/L2/L3 agent contracts) · [`promptpotter/application/CLAUDE.md`](promptpotter/application/CLAUDE.md) (orchestration shape) · [`promptpotter/domain/CLAUDE.md`](promptpotter/domain/CLAUDE.md) (frozen models) · [`promptpotter/infrastructure/CLAUDE.md`](promptpotter/infrastructure/CLAUDE.md) (ledger + projections + stores) · [`promptpotter/presentation/CLAUDE.md`](promptpotter/presentation/CLAUDE.md) (CLI + API + views).
 
 **Topical docs:** `docs/manual/` install→first run→reading→troubleshooting · `docs/concepts/` how it works · `docs/operations/` CLI/env/persistence/rewind-and-fork/observability · `docs/developer/README.md` architecture brief (prompt structure, dispatch, scoring node, cross-run memory) · [`docs/developer/conventions.md`](docs/developer/conventions.md) full style + code-shape rules · `tests/CLAUDE.md` test charter.
+
+## Pre-flight gate
+
+Before adding any new concept (class, projection, injection, prompt,
+field, dict, file), the PR description answers these eight questions.
+"I don't know" or "kind of" on any answer is a hard block.
+
+1. **Which §0 bucket does this belong to?** (central loop /
+   escalation / errors-heal / dispatch / state+persistence / on-disk
+   / tracing / archive). If "none of them," stop — either §0 is
+   incomplete (update it deliberately) or this is the wrong PR.
+2. **Does an existing channel already do this?** Default answer:
+   yes. Search before adding.
+3. **Is the name distinct from every existing concept in the
+   codebase?** Grep first. Two `signals` was avoidable; the next
+   collision is too.
+4. **Is the name self-describing without opening another file?** Read
+   the name in isolation. If it could mean three different things
+   (`Decision`, `Bundle`, `Signal`), rename now — naming is cheap, the
+   alternative is every future reader paying for it.
+   - **Sub-rule: are you adding a new I/O kind?** §0 names three:
+     Persistence (`CycleEventLog.append`), Display (ledger
+     subscribers), Control-local (`stop_check`). M12's orchestrator
+     daemon will add a fourth (Control-remote). If your code
+     introduces a NEW I/O kind beyond those, that's an
+     architecture-spec change, not a feature change — **stop and
+     amend §0 first**, then write the code.
+5. **Can this ride existing infrastructure (ledger, INJECTIONS,
+   `OptSearchPoint`, dispatch hub) without adding a sidecar?**
+   Default: yes.
+6. **Can the AI/operator read this fact from a file without running
+   the CLI?** If the new code surfaces something material only via
+   stdout, only via in-memory state, or only via "ask me to re-run
+   with --verbose," it violates the AI-accessibility principle.
+   Material facts land on disk in human-readable form.
+7. **Does §0 (`docs/architecture.md`) need updating to mention
+   this?** If yes, that's a separate PR landing first. Code that
+   requires §0 to drift cannot land before §0 has been updated.
+8. **Does this code emit a Langfuse-shape trace event for any new
+   LLM call or backend match?** If yes, wrap the call site with
+   `observed_node()`. New unwrapped LLM calls are an automatic block.

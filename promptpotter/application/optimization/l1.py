@@ -1,8 +1,14 @@
 """L1 phase: generate → measure → score → execute round.
 
-The round-loop spine. Validators + invariant detection live in
+This file participates in the **central loop** as the round-loop
+orchestrator. Validators + invariant detection live in
 ``l1_validators``; population-shape helpers (``parse_population``,
 ``build_score_report``, ``pobb_decision_data``) live in ``l1_population``.
+
+Out-of-bounds: this file MUST NOT write campaign artifacts directly
+(persistence routes through ``CycleEventLog.append``); MUST NOT call
+LLMs outside ``l1_generate`` / ``l1_critique`` paths; MUST NOT
+bypass the dispatch hub for prompt fills.
 """
 
 from __future__ import annotations

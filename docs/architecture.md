@@ -219,18 +219,21 @@ silent additions.
 **Tracing, Langfuse-shaped, lightweight by default.** Optimizer LLM
 calls and backend matches emit structured events in
 **Langfuse-compatible shape** (spans / traces / metadata) — wrapped
-via the `observed_node()` context manager. **Coverage is "every"
-modulo one current gap:** `l1_critique` is unwrapped today;
-m10-cleanup §1 audit + §6 question 8 close it. Once that lands,
-"every optimizer LLM call" is literally true. Events serialize to
-local JSONL under `langfuse/events.jsonl` (verified path:
+via the `observed_node()` context manager. Every optimizer LLM call
+site (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) is
+wrapped. Events serialize to local JSONL under
+`langfuse/events.jsonl` (verified path:
 `infrastructure/tracing/file_sink.py:67`) — no Langfuse instance, no
-MLflow server, no external dependency required. When Langfuse credentials are present
-in `.env`, the same events also stream to Langfuse cloud. The
-Langfuse schema is the **orientation point**: even with no external
-sink wired, events conform to it, so importing later (or swapping in a
-different backend) is configuration, not refactoring. Tracing is
-fan-out only — the optimizer never reads it, so it can never become
+MLflow server, no external dependency required. When Langfuse
+credentials are present in `.env`, the same events also stream to
+Langfuse cloud. **MLflow** is a peer optional sink alongside
+Langfuse — wired via `infrastructure/tracing/mlflow_sink.py`, gated
+on `MLFLOW_ENABLED`; same Langfuse-shape events fan into it without
+re-wrapping the call sites. The Langfuse schema is the
+**orientation point**: even with no external sink wired, events
+conform to it, so importing later (or swapping in a different
+backend) is configuration, not refactoring. Tracing is fan-out
+only — the optimizer never reads it, so it can never become
 load-bearing for the loop.
 
 **Measurement archive (the actual database).** Beyond the per-cycle

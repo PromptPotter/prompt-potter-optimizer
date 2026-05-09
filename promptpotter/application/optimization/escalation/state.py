@@ -1,7 +1,8 @@
 """Escalation FSM — cause-driven L1/L2/L3 stall counters + observation methods.
 
-Counters are private; the only mutation surface is the observation
-methods (:meth:`EscalationState.observe_round`,
+This file participates in **escalation** as the decision-state
+authority. Counters are private; the only mutation surface is the
+observation methods (:meth:`EscalationState.observe_round`,
 :meth:`EscalationState.observe_l2_escalation`) and the post-fire
 bookkeepers (:meth:`EscalationState.record_l2_fired`,
 :meth:`EscalationState.record_l3_fired`). Read access is via flat
@@ -12,6 +13,11 @@ a ``round_num >= N`` literal to.
 
 State is a fold over ``CycleEventLog`` records; :meth:`EscalationState.fold`
 advances one step, :meth:`EscalationState.from_ledger` rebuilds on resume.
+
+Out-of-bounds: this file MUST NOT mutate ``OptSearchPoint`` fields
+outside the documented escalation surface; MUST NOT decide
+post-round routing (that's :func:`.decide.decide_escalation`); MUST
+NOT fire LLM calls (that's :func:`.firing.escalate_l2`).
 """
 
 from __future__ import annotations

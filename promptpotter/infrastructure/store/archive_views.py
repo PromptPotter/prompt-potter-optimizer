@@ -1,5 +1,6 @@
 """MeasurementArchive facade — sole gateway to the cross-cycle archive.
 
+This file participates in **archive** as the sole access facade.
 The archive is "the database core" (per ``docs/architecture.md``):
 cross-cycle, cross-session, content-addressed measurements indexed by
 sample and by node-config. Every read or write of the archive lives
@@ -20,6 +21,10 @@ Layer placement: facade lives in ``infrastructure/store/`` (next to
 the archive itself) rather than ``application/scoring/`` because
 ``infrastructure/tracing/replay.py`` is one of the consumers and
 ``infrastructure → application`` is a forbidden hexagonal direction.
+
+Out-of-bounds: no caller may access ``stores.archive`` member methods
+directly outside this module. ``record_measurement_run`` is the sole
+write; any new write means a new function here, not a sidecar.
 """
 
 from __future__ import annotations

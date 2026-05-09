@@ -1,8 +1,9 @@
 """Dispatch hub — single ingress for every optimizer prompt's substituted text.
 
-Owns the injection registry (:data:`INJECTIONS`), the :class:`InjectionKind`
-classification, the typed :class:`InjectionBundle` per-call state, and the
-two rendering paths:
+This file participates in **dispatch** as the single info-ingress to
+prompts. Owns the injection registry (:data:`INJECTIONS`), the
+:class:`InjectionKind` classification, the typed
+:class:`InjectionBundle` per-call state, and the two rendering paths:
 
 * :meth:`DispatchHub.fill_l1` — resolves L2-authored ``opt_sp.l1_layout``
   for L1_GENERATE. Returns a modified ``PromptTemplate`` whose slots have
@@ -26,6 +27,11 @@ complexity this module exists to remove. The four
   task_context, the rendered current prompt).
 * ``DIRECTIVE`` — active instructions to a downstream layer (the
   sticky L3→L2 note; the L1 placeholder menu L2 picks from).
+
+Out-of-bounds: no prompt site may read state directly without going
+through :func:`build_bundle` + :class:`DispatchHub`. Adding a sidecar
+fill path or a per-template renderer is drift; extend the registry
+in place instead.
 """
 
 from __future__ import annotations
