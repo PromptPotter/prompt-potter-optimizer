@@ -161,6 +161,21 @@ def _persist_round(
         _rr.flush()
 
 
+def _count_positive_yield_axes(cycle: Cycle) -> int | None:
+    """Count axes with effect_size above the AxisIndex noise floor.
+
+    Returns ``None`` when AxisIndex isn't initialised (pre-first-round); a
+    rule consulting this signal must treat ``None`` as "no evidence yet."
+    The threshold mirrors :data:`promptpotter.application.intelligence.indexes.axis.NOISE_THRESHOLD`
+    (= 0.02) — same definition the digest formatter uses.
+    """
+    if cycle.axes is None:
+        return None
+    from promptpotter.application.intelligence.indexes.axis import NOISE_THRESHOLD
+
+    return sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
+
+
 def _refresh_axes_and_filter(
     cycle: Cycle,
     config: CampaignConfig,
@@ -283,6 +298,8 @@ async def _post_round(
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         enable_l2=config.optimization.enable_l2,
+        axes_with_positive_yield=_count_positive_yield_axes(cycle),
+        escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 

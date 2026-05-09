@@ -597,3 +597,107 @@ def test_axis_memory_listed_in_l1_possible_and_default_layout():
 
     assert "axis_memory" in L1_POSSIBLE
     assert "axis_memory" in default_l1_layout().problem_description
+
+
+# ===========================================================================
+# Phase 2a — cadence rules engine reproduces prior observe_round FSM
+# ===========================================================================
+#
+# Closes flaw 3 (calendar-driven escalation) by lifting observe_round's FSM
+# into a typed, declarative rule evaluator. Phase 2a is behaviour-preserving:
+# the default rule set must reproduce the prior FSM exactly. One test, four
+# assertions — one per branch of the original if/elif chain.
+
+
+def test_default_round_rules_reproduce_observe_round_fsm():
+    """Phase 2a parity: DEFAULT_ROUND_RULES matches observe_round's branches."""
+    from promptpotter.application.optimization.cadence import (
+        SignalInputs,
+        evaluate_round,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    # Branch 1 — perfect accuracy → STOP_PERFECT (priority 100)
+    perfect = SignalInputs(
+        improved=True,
+        current_accuracy=1.0,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(perfect).next_action == NextAction.STOP_PERFECT
+
+    # Branch 2 — stall < patience → CONTINUE (priority 50)
+    continuing = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(continuing).next_action == NextAction.CONTINUE
+
+    # Branch 3 — patience exhausted, L2 disabled → STOP_L1_PATIENCE (priority 30)
+    no_l2 = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=3,
+        l1_patience=3,
+        enable_l2=False,
+    )
+    assert evaluate_round(no_l2).next_action == NextAction.STOP_L1_PATIENCE
+
+    # Branch 4 — patience exhausted, L2 enabled → FIRE_L2 (priority 10)
+    fire = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=3,
+        l1_patience=3,
+        enable_l2=True,
+    )
+    assert evaluate_round(fire).next_action == NextAction.FIRE_L2
+
+
+def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
+    """Phase 2b: yield-drought rule preempts l1_continue when on; quiet when off."""
+    from promptpotter.application.optimization.cadence import (
+        SignalInputs,
+        evaluate_round,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    # Drought + opt-in + L1 has stalled at least one round → FIRE_L2 (priority 60)
+    drought_on = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=0,
+        escalate_on_yield_drought=True,
+    )
+    assert evaluate_round(drought_on).next_action == NextAction.FIRE_L2
+
+    # Same drought + flag off → CONTINUE (l1_continue at priority 50 wins)
+    drought_off = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=0,
+        escalate_on_yield_drought=False,
+    )
+    assert evaluate_round(drought_off).next_action == NextAction.CONTINUE
+
+    # Pre-first-round (axes not initialised) → CONTINUE even with flag on
+    no_evidence = SignalInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=3,
+        enable_l2=True,
+        axes_with_positive_yield=None,
+        escalate_on_yield_drought=True,
+    )
+    assert evaluate_round(no_evidence).next_action == NextAction.CONTINUE

@@ -146,38 +146,39 @@ class EscalationState:
         current_accuracy: float,
         l1_patience: int,
         enable_l2: bool,
+        axes_with_positive_yield: int | None = None,
+        escalate_on_yield_drought: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome. Bumps the stall counter; returns CONTINUE /
         FIRE_L2 / STOP_PERFECT / STOP_L1_PATIENCE.
 
+        Counter mutation stays here (state ownership). The decision lifts
+        into :func:`cadence.evaluate_round` — this method delegates with a
+        :class:`cadence.SignalInputs` snapshot. Default rules reproduce
+        the prior FSM exactly; ``axes_with_positive_yield`` and
+        ``escalate_on_yield_drought`` enable the Phase 2b yield-driven rule
+        when the cycle has AxisIndex evidence and the campaign opts in.
+
         L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
         the mid-round signal path (DegradationCheck) shares the same cascade.
         """
+        from promptpotter.application.optimization.cadence import (
+            SignalInputs,
+            evaluate_round,
+        )
+
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
 
-        if current_accuracy >= 1.0:
-            return EscalationEvent(
-                next_action=NextAction.STOP_PERFECT,
-                stall_depth=self._l1_stall_count,
-                reason="composite_fitness >= 1.0",
-            )
-        if self._l1_stall_count < l1_patience:
-            return EscalationEvent(
-                next_action=NextAction.CONTINUE,
-                stall_depth=self._l1_stall_count,
-                reason=f"L1 stall {self._l1_stall_count}/{l1_patience}",
-            )
-        if not enable_l2:
-            return EscalationEvent(
-                next_action=NextAction.STOP_L1_PATIENCE,
-                stall_depth=self._l1_stall_count,
-                reason="L1 patience exhausted; L2 disabled",
-            )
-        return EscalationEvent(
-            next_action=NextAction.FIRE_L2,
-            stall_depth=self._l1_stall_count,
-            reason="L1 patience exhausted -> L2",
+        inputs = SignalInputs(
+            improved=improved,
+            current_accuracy=current_accuracy,
+            l1_stall_count=self._l1_stall_count,
+            l1_patience=l1_patience,
+            enable_l2=enable_l2,
+            axes_with_positive_yield=axes_with_positive_yield,
+            escalate_on_yield_drought=escalate_on_yield_drought,
         )
+        return evaluate_round(inputs)
 
     def observe_l2_escalation(
         self,
