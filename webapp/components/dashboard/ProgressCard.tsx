@@ -58,6 +58,13 @@ export function ProgressCard({ dash }: Props) {
 
   const qPct = qm && qm.tot ? Math.min(100, Math.round((qm.cur / qm.tot) * 100)) : 0;
   const cPct = cm && cm.tot ? Math.min(100, Math.round((cm.cur / cm.tot) * 100)) : 0;
+  const pobb = dash?.current_round?.pobb;
+  const leader = pobb?.leader_prob ?? null;
+  const width = pobb?.posterior_width ?? null;
+  // Confidence bar tracks leader probability (0..1) — fills as posterior tightens.
+  const confPct = leader != null ? Math.min(100, Math.round(leader * 100)) : 0;
+  const widthTxt = width != null ? width.toFixed(3) : "—";
+  const nSamp = pobb?.n_samples ?? 0;
   const qps = qpsRef.current.qps;
   const qpsTxt = qps != null ? ` · ${qps.toFixed(qps < 10 ? 2 : 1)} q/s` : "";
   const inflight = phase === "scoring" ? " ⟳" : "";
@@ -90,6 +97,18 @@ export function ProgressCard({ dash }: Props) {
         </div>
         <div className="progress-stats">
           {cm ? `${cm.cur}/${cm.tot} candidates · ${cPct}%` : "cand —"}
+        </div>
+      </div>
+      <div className="progress-row" title="P(best) leader probability — bar fills as the round's PoBB posterior tightens around one candidate">
+        <div className="progress-label">P(best)</div>
+        <div className="progress-bar-wrap">
+          <div
+            className={`progress-bar-fill${confPct >= 95 ? " complete" : ""}${pobb ? "" : " empty"}`}
+            style={{ width: `${confPct}%` }}
+          />
+        </div>
+        <div className="progress-stats">
+          {pobb ? `width ${widthTxt} @ q${nSamp}` : "P(best) —"}
         </div>
       </div>
     </div>

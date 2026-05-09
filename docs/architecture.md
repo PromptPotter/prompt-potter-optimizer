@@ -157,7 +157,20 @@ renderer, period.** No sidecar paths, no out-of-band state mounting.
 
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. Hexagonal layer separation is enforced by
+per-entry-point copies. **Four I/O kinds** the orchestrator reads or
+writes through, each with its own ingress: (1) **Persistence** — the
+sole writer is per-cycle `CycleEventLog.append`. (2) **Display** —
+ledger subscribers (`LiveDisplay`, `LiveDashboardView`,
+`AuditTrailView`); read-only, never write campaign artifacts. (3)
+**Control-local** — `stop_check` on `Session`; signals the loop to
+exit, writes nothing. (4) **Human-input** — operator-supplied review
+events written to `CycleEventLog.append` from a watched file path
+when `Session.hitl_mode` is enabled, carrying typed `HumanReviewRecord`
+payloads. M12's orchestrator daemon will add a fifth (Control-remote)
+on the same persistence ingress. Adding a new I/O kind requires
+amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
+blocks code that introduces one without §0 backing. Hexagonal layer
+separation is enforced by
 `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations`
 (plus `test_cycle_does_not_import_prompt_surface`) so data types
 stay free of I/O and the orchestrator can be reused without dragging

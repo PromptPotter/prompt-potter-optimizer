@@ -18,7 +18,17 @@ export interface DashboardSnapshot {
   total_queries_scored?: number;
   last_query_elapsed_s?: number;
   wallclock_serialized_at?: string;
-  current_round?: { nodes?: Record<string, unknown> };
+  current_round?: {
+    round?: number;
+    nodes?: Record<string, unknown>;
+    pobb?: {
+      current_id?: string;
+      n_samples?: number;
+      leader_prob?: number;
+      posterior_width?: number;
+      top?: { id: string; p_best: number }[];
+    };
+  };
   baseline_accuracy?: number;
   evaluators?: unknown[];
   scoring?: unknown;

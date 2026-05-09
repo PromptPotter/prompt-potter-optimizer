@@ -1,0 +1,29 @@
+{
+  "campaign_config": {
+    "dataset_name": "promptpotter-self",
+    "scoring": "0.4 * first_round_delta + 0.4 * after_N_rounds_delta + 0.2 * (1.0 / max(rounds_to_N, 1))",
+    "sp_budget_ttest": 4,
+    "exclude_nodes": [],
+    "pipeline_overrides": {},
+    "optimization": {
+      "l1_patience": 2,
+      "max_rounds": 5,
+      "n_variants": 3,
+      "creativity": 0.7,
+      "improvement_threshold": 0.02,
+      "max_failures": 8,
+      "degradation_threshold": 0.4,
+      "l2_patience": 2,
+      "l3_patience": 1,
+      "l2_temperature": 0.3,
+      "l3_temperature": 0.5,
+      "elimination_n_min": 6
+    },
+    "optimizer_llm": {
+      "model": "openai/gpt-oss-120b",
+      "provider": "groq",
+      "temperature": 0.4,
+      "max_tokens": 2000
+    }
+  }
+}

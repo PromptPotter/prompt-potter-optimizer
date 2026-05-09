@@ -256,7 +256,7 @@ class PoBBSnapshot:
 class PoBBConfig:
     """Bundled PoBB tuning knobs — passed through l1_score → score_population → PoBBCheck."""
 
-    n_min: int = 4
+    n_min: int = 6
     epsilon: float = 0.05
     lock_in: float = 0.95
     lock_in_n_min: int = 8

@@ -518,6 +518,33 @@ class LiveDashboardView(DerivedView):
         # Round-wide leaderboard (top-5 by P(best)).
         self._round["p_best_top"] = [{"id": cid, "p_best": p} for cid, p in top_n_p_best(p_best)]
 
+    def _build_pobb_block(self) -> dict[str, Any]:
+        """Round-wide PoBB telemetry: leader probability, posterior-width, top-5.
+
+        ``posterior_width = 1 - max(p_best)`` — distance the leader has
+        from certainty. Width near 0 = leader confirmed; width near 1 =
+        flat posterior, more samples needed before elimination is safe.
+        Operators read this to judge whether ``elimination_n_min`` is set
+        appropriately for the dataset's per-sample variance.
+        """
+        p_best = self._core.current_p_best
+        if not p_best:
+            return {
+                "current_id": "",
+                "n_samples": 0,
+                "leader_prob": 0.0,
+                "posterior_width": 1.0,
+                "top": [],
+            }
+        leader_prob = max(p_best.values())
+        return {
+            "current_id": self._core.current_p_best_id,
+            "n_samples": self._core.current_p_best_n,
+            "leader_prob": float(leader_prob),
+            "posterior_width": float(1.0 - leader_prob),
+            "top": list(self._round.get("p_best_top") or []),
+        }
+
     def _build_l1_score_block(
         self,
         round_result: RoundResult | None = None,
@@ -594,7 +621,11 @@ class LiveDashboardView(DerivedView):
         }
         ordered.update(nodes)
         s = self.state
-        s["current_round"] = {"round": self._round.get("round", 0), "nodes": ordered}
+        s["current_round"] = {
+            "round": self._round.get("round", 0),
+            "nodes": ordered,
+            "pobb": self._build_pobb_block(),
+        }
 
         s["wallclock_serialized_at"] = datetime.now(UTC).isoformat()
         self.state_path.write_text(

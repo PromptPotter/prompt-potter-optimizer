@@ -133,7 +133,7 @@ class OptimizationConfig(BaseModel):
     degradation_threshold: float = Field(...)
 
     elimination_n_min: int = Field(
-        4,
+        6,
         description="Minimum queries before PoBB starts firing (floor on n for "
         "the Normal-CLT posterior to be meaningful).",
     )
