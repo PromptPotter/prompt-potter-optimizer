@@ -20,9 +20,9 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. `SIGNALS` is a typed `dict[str, _Signal]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
-**Invariant:** no prompt site summarizes its own data. If a name isn't in `SIGNALS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `SIGNALS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `SIGNALS` — typos fail loud, not silent.
 
 ### Per-layer composition
 
@@ -33,7 +33,7 @@ persona → task_intent → problem_description → instruction
 | L2 context | `fill_fixed(template, bundle)` | (none) |
 | L3 plan | `fill_fixed(template, bundle)` | (none) |
 
-L1 is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `SIGNALS`. Same hub, same registry, same `Bundle` for every call.
+L1 generate is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `SIGNALS`. Same hub, same registry, same `Bundle` for every call.
 
 ### Field channels between layers
 
@@ -68,6 +68,8 @@ Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` 
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
 | `l1_config` | `opt_sp.l1_config` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
+| `axis_memory` | `cycle.axes.digest()` (DERIVED) | L1, L2, L3 |
+| `decision_trace_summary` | `RoundResult.decision_traces` slice (DERIVED) | L1 critique |
 
 L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
@@ -75,21 +77,21 @@ L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`
 
 ## 2. Dispatch (which layer fires when)
 
-The runner walks a stall-and-escalate ladder between rounds:
+The runner asks the cadence engine after every round. `EscalationState.observe_round` builds a frozen `SignalInputs` snapshot and delegates to `cadence.evaluate_round` (`application/optimization/cadence/evaluator.py`), which sort-by-priority first-match-wins over `DEFAULT_ROUND_RULES`:
 
 ```
-round runs L1 → improved?
-                  yes: reset l1_stall_count → next round
-                  no:  l1_stall_count++;
-                       if stall ≥ l1_patience: fire L2 → reset → continue L1
-                       (same ladder L2 → L3 with l2_patience)
+round runs L1 → SignalInputs(improved, l1_stall_count, l1_patience, axes_with_positive_yield, …)
+                  ↓
+        evaluate_round(inputs) → CadenceRule
+                  ↓
+   {STOP_PERFECT, FIRE_L2 (yield-drought rule | patience-exhausted rule), CONTINUE, STOP_L1_PATIENCE}
 ```
 
-State lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …). In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Dispatch state is part of the in-memory state subset, but never *only* in memory — every transition is checkpointed.
+Default rules in `cadence/rules.py` reproduce the prior FSM exactly (`perfect_accuracy`, `l1_continue`, `l1_stop_no_l2`, `l1_to_l2`); plus opt-in `l2_axis_yield_drought` (priority 60) — fires L2 early when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor. Gated by `campaign.json::optimization.escalate_on_yield_drought`.
 
-Decision logic: `_check_stop_or_escalate()` (`application/runner.py:439`). Stop conditions live here too (`accuracy ≥ 1.0 → PERFECT`, exhausted patience → `PATIENCE_EXHAUSTED`).
+Counter state lives at `Cycle.escalation` (`l1_stall_count`, `l2_stall_count`, …) — the only mutation surface is observation methods. In-memory during a cycle, persisted to `rounds/round_NNNN.json` after every round, replayed on resume by `resume_with_divergence_check()`. Every transition is checkpointed.
 
-Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the patience ladder. See [`self-healing-internals.md`](self-healing-internals.md).
+Self-healing fires through a different door: failures route directly to the layer *above* the failing one (validation → L2, runtime → L2, L2-output validators → L3), bypassing the cadence ladder. See [`self-healing-internals.md`](self-healing-internals.md).
 
 ---
 

@@ -119,6 +119,8 @@ Spec: [`m9-stable-config-and-scaffolding.md`](m9-stable-config-and-scaffolding.m
 
 **Goal:** ≥95% training-set accuracy in ≤5 rounds on at least two pipelines (`llm_only` and TermNorm) under the same prompt revision. When this holds, optimizer prompts are "configured" and M11 picks up to validate on the test set + run the benchmark numbers. Timeline target: ~1 week of manual iteration once the framework lands.
 
+**Routed Dispatch infrastructure shipped on `feat/routed-dispatch-v2`** — typed `dispatch_hub.SIGNALS` with load-time `validate_template`, `axis_memory` cross-round signal, cadence rules engine (`application/optimization/cadence/`) with opt-in `l2_axis_yield_drought`, `DecisionTrace` surfaced into `l1_critique` via `decision_trace_summary`, `SignalsProjection` writing `.runtime/signals.jsonl` with `dashboard.json::recent_rules` mirror. M10's prompt-iteration goal now runs on top of these. The five tracks below remain the spec; the loop that executes them is now signal-driven rather than patience-only.
+
 The 3-layer LLM-driven program-evolution loop is plumbed end-to-end through M8 + M9 backbone work. The loop runs; it does not yet **converge well**. `l1_generate` is the principal bottleneck since the whole loop only descends gradient when L1 produces useful variants. Auto-tuning the prompts is too expensive in the small-N regime, so M10 builds the framework for a manual ping-pong between running and prompt-editing — with auto-checks that flag known-bad L1 behaviors so each iteration produces a clear "did the fix land" verdict.
 
 Five tracks:
@@ -142,6 +144,8 @@ Full spec: [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.
 **Primary benchmark: BBEH** (Big-Bench Extra Hard, 23 diverse reasoning tasks). GSM8K and AIME are effectively saturated at `gpt-oss-120b` and are deprioritized; they may still appear as secondary numbers if headroom is found. HotPotQA runs second as a multi-hop QA data point — pending a saturation check, it may also be deprioritized. Head-to-head infrastructure for BBEH already exists at [`docs/research/bbeh-comparison/`](../research/bbeh-comparison/) with CAPO, GEPA, MIPROv2, and BootstrapFewShot notebooks against the same model and split.
 
 Execute the ablation studies that feed the paper (L1-only vs L1+L2 vs full, scan vs no-scan, SearchMemory on/off, l1_critique on/off) on BBEH. Build the first real webapp pass: read-only views (dashboard, campaign detail, trial inspector) consuming the M9 file-directory view model via the FastAPI API. Publication figures designed per `docs/publication-figures.md`.
+
+The Routed Dispatch arc shipped `SignalsPanel` (rolling list of recent cadence-rule firings) and `StuckDiagnosis` (per-layer verdict from the latest `signal_inputs` snapshot) — read from `dashboard.json::recent_rules` + `dashboard.json::current_signals`. These are the precondition for M12 streaming (live signal stream via SSE/WebSocket).
 
 **Entry criteria:** M10 exit gate passed (optimizer prompts configured).
 

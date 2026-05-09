@@ -1,14 +1,11 @@
-"""DecisionTrace — per-candidate elimination/promotion record for diagnosis.
+"""DecisionTrace — per-candidate elimination/promotion record for postmortem critique.
 
-Phase 3 of the Routed Dispatch plan introduces mid-round critique
-(``L1_DIAGNOSE``) and richer postmortem critique (``L1_CRITIQUE``). Both
-need to reason about the *story* of each candidate — when it was
-eliminated, what its leaderboard position looked like at decision time,
-which samples it had hit so far — not just round-end aggregate scores.
-
-This module ships only the data scaffold (Phase 3.1). The writer (PoBB
-elimination), the persistence to ledger / round_data, the replay
-adoption, and the consumer prompts arrive in Phase 3.2-3.4.
+``L1_CRITIQUE`` reasons about the *story* of each candidate — when it
+was eliminated, what its leaderboard position looked like at decision
+time, which samples it had hit so far — not just round-end aggregate
+scores. PoBB writes one ``DecisionTrace`` per promote/eliminate/complete
+decision; the dispatch hub renders the slice via the
+``decision_trace_summary`` signal into ``L1_CRITIQUE``'s prompt body.
 
 The frozen model is decoupled from :class:`Decision` /
 :class:`DecisionKind` (``domain/run_records.py``) on purpose: those
@@ -29,8 +26,8 @@ class DecisionTrace(BaseModel):
     """One per-candidate decision context, captured at the moment PoBB
     decided to eliminate, promote, or complete the candidate's scoring.
 
-    Aggregates the evidence a future :class:`L1_DIAGNOSE` or
-    :class:`L1_CRITIQUE` prompt needs to write a grounded directive:
+    Aggregates the evidence ``L1_CRITIQUE`` needs to ground its
+    post-round narrative:
 
     * ``decision_kind`` — what happened (eliminate / promote / complete).
     * ``candidate_id`` — stable handle used by the dispatch hub when
@@ -45,7 +42,7 @@ class DecisionTrace(BaseModel):
     * ``sample_outcomes_so_far`` — boolean hit/miss trail in score order;
       lets a prompt see which sample patterns broke the candidate.
     * ``target_axis`` — the axis the L1_GENERATE LLM said this candidate
-      mutated; lets diagnosis tie outcomes to mutation strategy.
+      mutated; lets the critique tie outcomes to mutation strategy.
     """
 
     model_config = ConfigDict(extra="forbid", frozen=True)

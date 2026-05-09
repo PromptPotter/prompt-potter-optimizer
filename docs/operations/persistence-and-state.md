@@ -49,6 +49,7 @@ Sessions and campaigns are separate. Today the relation is 1:1; the layout suppo
       # ── Root cycle's internals ──
       .runtime/
         ledger.jsonl                   # CycleLedger spine — typed Decision/Phase/Snapshot
+        signals.jsonl                  # cadence/rule_fired stream — one line per cadence-rule firing (post_round)
         streams/round_NNNN_p_best.jsonl  # PoBB telemetry (rendered as sparkline in log.md)
         cache/
           rounds/round_NNNN.json       # per-round node I/O
@@ -91,6 +92,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 | `langfuse/` | per cycle | during optimization | Trace shadow + `events.jsonl` mirror. Not read for state reconstruction. |
 | `prompts/` | per cycle | when prompts render | Rendered optimizer prompts. |
 | `.runtime/ledger.jsonl` | per cycle | every fact | Append-only `Decision` / `Phase` / `Snapshot` stream. |
+| `.runtime/signals.jsonl` | per cycle | per cadence-rule firing | One JSONL line per fire: `{round, timestamp, layer, rule_name, rule_priority, next_action, reason, signal_inputs}`. Layer is `post_round` (cadence engine after `observe_round`). Written by `SignalsProjection`. |
 | `.runtime/streams/round_NNNN_p_best.jsonl` | per cycle | per-sample | PoBB Posterior-of-Being-Best snapshots. |
 | `.runtime/cache/rounds/round_NNNN.json` | per cycle | each round | Per-node I/O: l1_generate, l1_critique, l1_score, l2/l3 (when escalated). |
 | `.runtime/cache/candidates/round_NNNN.json` | per cycle | each round's pre-scoring | Generated candidate checkpoint — overwritten next round. |
@@ -100,6 +102,11 @@ Prior evaluation results replay without backend calls when a new config shares a
 ### `dashboard.json`
 
 Scalar-only live dashboard. Atomically rewritten on every event. Carries display counters across cycles via `resume_from`. Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
+
+Two cadence-signal blocks are mirrored from `.runtime/signals.jsonl` for the webapp's StuckDiagnosis widget:
+
+- `recent_rules` — rolling buffer of the last 8 cadence-rule firings. Each entry: `{round, timestamp, layer, rule_name, rule_priority, next_action, reason, signal_inputs}`.
+- `current_signals` — latest snapshot per layer (currently `post_round`); `{round, rule_name, next_action, signal_inputs}`. The webapp diagnoses floor/ceiling state from the latest `signal_inputs` numbers (e.g., `axes_with_positive_yield == 0` → "axis drought").
 
 ### `.runtime/cache/rounds/round_NNNN.json`
 
