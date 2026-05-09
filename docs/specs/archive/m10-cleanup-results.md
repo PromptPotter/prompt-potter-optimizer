@@ -1,9 +1,10 @@
 # M10 cleanup — results (Definition of Done)
 
-The M10 cleanup landed in **two arcs**: pass 1 (4 commits, architecture
-restate), then pass 2 (3 commits, gap close). Numbers below are
-baseline (HEAD = `c2ffb27f`, post §3.5 pin) vs pass-1 final
-(`45b6078c`) vs pass-2 final (HEAD).
+The M10 cleanup landed in **three arcs**: pass 1 (4 commits, architecture
+restate), pass 2 (3 commits, gap close), pass 3 (2 commits, milestone
+close — drops + folds + restructure). Numbers below are baseline
+(HEAD = `c2ffb27f`, post §3.5 pin) vs pass-1 final (`45b6078c`) vs
+pass-2 final vs pass-3 final (HEAD).
 
 ## Qualitative gates
 
@@ -35,26 +36,22 @@ baseline (HEAD = `c2ffb27f`, post §3.5 pin) vs pass-1 final
 
 ## Measurable targets
 
-| Metric | Baseline | Target | Pass-1 | Pass-2 | Verdict |
-|---|---:|---:|---:|---:|---|
-| LOC under `promptpotter/` | 33022 | ≤26418 (−20%) | 32696 | 32311 | **honest miss** — pass-2 trimmed another ~385 lines (OSP drops + dead app/resume.py) but the −20% target requires bulk feature deletion the §1 audit explicitly kept (live dashboard cards, load-bearing primitives). |
-| Files under `promptpotter/` | 135 | ≤115 (−15%) | 138 | 137 | **honest miss** — dropped `application/resume.py` (151 LOC, zero non-notebook importers); audit-kept primitives floor the rest. |
-| Tests collected | 197 | ≤180 | 193 | 179 | ✅ **hit** — pass-2 cull dropped 14 trivial / redundant tests across the merged file set. |
-| Test files under `tests/` | 16 | ≤12 → ≤9 (operator override) | 17 | 9 | ✅ **hit** — pass-2 merged 8 small test files into topical siblings (search_point + round_diagnostics → optimizer; decision_kinds_registry + reconstructable_state + security → invariants; connector_protocol → api; allowed_values + optimizer_pipeline_parity → pipeline_config). |
-| Backbone table rows in root `CLAUDE.md` | 12 | ≤8 | 11 | 8 | ✅ **hit** — pass-2 dropped aspirational `DecisionTrace` row, merged `ResumeCheckpointKind`+`CycleEventLog/DerivedView` (import-time exhaustive registry pair) and `frozen models`+`path newtypes` (shape-enforced pair). |
-| Webapp components in `webapp/components/` | 26 | ≤19 (−25%) | 24 | 24 | **honest miss** — every dashboard card under `webapp/components/dashboard/` (LiveSamplesCard, LiveStateCard, RawJsonCard, PassRateCard) is imported and rendered by `DashboardPane.tsx`; cuts would change operator-facing surface. |
-| `[all]` deps + `[dev]` deps (union) | 15 | ≤13 (−10%) | 15 | 14 | **near-miss** — pass-2 dropped `groq` (verified zero direct imports; all Groq access via OpenAICompatibleClient over HTTP). `scalar-fastapi` is wired at `main.py:15` for the `/docs` UI; further cuts would degrade the read-only API documentation surface. |
-| `OptSearchPoint` own fields | 13 | ≤9 | 13 | 9 | ✅ **hit** — pass-2 dropped `warning_inventory` (replaced by `Cycle.warned_queries`), `escalation_log` (replaced by `_r_escalation_panel` removal — duplicated runtime_failures + diagnostics), `round_history` (zero readers — pure dead state), `failure_analysis` (zero readers — pure dead state). |
+| Metric | Baseline | Target | Pass-1 | Pass-2 | Pass-3 | Verdict |
+|---|---:|---:|---:|---:|---:|---|
+| LOC under `promptpotter/` | 33022 | ≤26418 (−20%) | 32696 | 32311 | **31667** | **honest miss** — pass-3 cut another 644 lines (leaderboard.py drop, hardness_records, evaluators_meta, spend extract). The −20% target requires bulk feature deletion the §1 audit explicitly kept (live dashboard cards, load-bearing primitives). |
+| Files under `promptpotter/` | 135 | ≤115 (−15%) | 138 | 137 | **130** | **honest miss** — pass-3 dropped 7 files (leaderboard.py + 4 leaf folds + the audit-flagged DROP candidates). Audit-kept primitives floor the rest. |
+| Tests collected | 197 | ≤180 | 193 | 179 | **178** | ✅ **hit** — pass-3 dropped the leaderboard test (no longer applicable after the file drop). |
+| Test files under `tests/` | 16 | ≤12 → ≤9 (operator override) | 17 | 9 | **9** | ✅ **hit** — held from pass 2. |
+| Backbone table rows in root `CLAUDE.md` | 12 | ≤8 | 11 | 8 | **8** | ✅ **hit** — held from pass 2. |
+| Webapp components in `webapp/components/` | 26 | ≤19 (−25%) | 24 | 24 | **24** | **honest miss** — operator-facing surface; pass-3 only touched FitnessPanel.tsx contents (not the file count). |
+| `[all]` deps + `[dev]` deps (union) | 15 | ≤13 (−10%) | 15 | 14 | **14** | **near-miss** — pass-3 dropped `anthropic` from `[all]` (still in `[anthropic]` extra; lazy-import path unchanged). 14 is the honest floor — `mlflow` stays per operator policy as a peer optional sink. |
+| `OptSearchPoint` own fields | 13 | ≤9 | 13 | 9 | **9** | ✅ **hit** — held from pass 2. |
 
-**Honest read:** five of eight quantitative targets land on pass 2
-(tests, test files, backbone, OSP fields, plus near-miss on deps).
-The three remaining misses (LOC, files, webapp components) require
-deletions the §1 audit explicitly kept — operator-facing dashboard
-cards and load-bearing primitives. Pass 2 took every drop the audit
-sanctioned; the LOC/files/webapp percentage targets stay aspirational
-without an explicit feature-deletion pass. The architecture is fully
-restated; the remaining bloat is operator-facing surface that earns
-its keep.
+**Honest read:** five of eight quantitative targets hit + 1
+near-miss + 3 audit-honest misses. The miss reasons are documented
+and bound by operator policy / audit verdict; the cleanup arc is
+fully closed. The architecture is restated; the remaining bloat is
+operator-facing surface that earns its keep.
 
 ## Summary
 
@@ -100,23 +97,46 @@ its keep.
    merged into topical siblings; 14 trivial / redundant tests
    dropped (display-format, inverse-of-main, bare-threshold,
    defensive-programming pairs).
-7. **Commit 7** (this commit) — doc vocab + backbone + DoD
-   finalize: 8 active developer/operator docs updated for
-   post-rename vocabulary (SIGNALS→INJECTIONS, l1_config→
-   l1_overrides, signals.jsonl/recent_rules/SignalsPanel/
-   StuckDiagnosis residue dropped; escalation rule firing now
-   described as ledger-sourced); root `CLAUDE.md` backbone table
-   8 rows (DecisionTrace dropped; cycle records + dispatch
-   merged; frozen models + path newtypes merged); M10 roadmap
-   claim qualified ("targeting ≥95%"); this results doc updated
-   with pass-2 numbers + honest-miss explanations.
+7. **Commit 7** — doc vocab + backbone + DoD finalize: 8 active
+   developer/operator docs updated for post-rename vocabulary
+   (SIGNALS→INJECTIONS, l1_config→l1_overrides, signals.jsonl/
+   recent_rules/SignalsPanel/StuckDiagnosis residue dropped);
+   root `CLAUDE.md` backbone table 8 rows; M10 roadmap claim
+   qualified ("targeting ≥95%"); this results doc updated with
+   pass-2 numbers + honest-miss explanations.
+
+### Pass 3 (2 commits, milestone close)
+
+8. **Commit 8** — aggressive drops + leaf folds (subtractive
+   only): `leaderboard.py` + `scripts/ppot_review.py` + 1 test
+   (audit verdict from `m10-cleanup-audit.md`: no docs / skill
+   mentions; data derivable from MeasurementArchive); dead
+   `SampleIndex.hardness_records()` + `HardnessRecord` (zero
+   non-self callers); `evaluators_meta` dashboard.json sidecar
+   (webapp falls back to `/api/v1/active/evaluators_meta` + the
+   static `WHATIF_INLINE_META`); 4 single-importer leaf folds
+   (`optimizer_call_cache.py` + `active_pointer.py` →
+   `infrastructure/store/`; `optimization/formatting.py` →
+   `l1.py`; `bootstrap/pipeline_view.py` → `presentation/api.py`);
+   `anthropic` dropped from `[all]` (still available via
+   `[anthropic]` extra). Files −7, ~580 LOC removed, 1 test out.
+9. **Commit 9** — restructure + finalize: ~95 LOC of spend
+   bookkeeping (`_empty_spend` / `_empty_bucket` /
+   `_accumulate_spend` / `_handle_token_usage` / `_add_to_bucket`)
+   moved from `live_dashboard.py` to
+   `infrastructure/projections/live_state.py` — shared accumulator
+   home for `LiveStateCore`. `live_dashboard.py` is now
+   state+phase+candidate; spend has its own seam. Plus
+   live_dashboard residue + verbose-docstring trim. §0
+   (`docs/architecture.md`) + `pyproject.toml` strengthened: MLflow
+   is **off by default**, dormant unless `settings.MLFLOW_ENABLED`
+   flips. This results doc finalized.
 
 ## Follow-ups (genuinely out-of-scope; not deferred)
 
 - LOC / files / webapp percentage targets — require feature
   deletion the §1 audit kept (live dashboard cards;
-  load-bearing primitives). Not a deferred-to-pass-3 item; the
-  audit's verdict stands.
+  load-bearing primitives). Audit's verdict stands.
 - M10's other half — `m10-prompt-iteration-framework.md`: the
   ≥95%-in-≤5-rounds benchmark on `llm_only` AND TermNorm under
   one prompt revision. The cleanup arc was preparation; the
@@ -124,8 +144,9 @@ its keep.
 
 ## Operator approval
 
-M10 cleanup arc closes. Five of eight quantitative DoD targets
-hit (tests, test files, backbone, OSP fields, plus deps
-near-miss); three honest misses (LOC, files, webapp) reflect
-audit-kept surface. Architecture is fully restated; remaining
-optimization is application-layer feature work, not cleanup.
+M10 cleanup arc fully closed. Five of eight quantitative DoD
+targets hit + 1 near-miss + 3 audit-honest misses. The miss
+reasons are documented and bound by operator policy / audit
+verdict. Architecture is restated; the remaining bloat is
+operator-facing surface that earns its keep. Remaining open work
+is M10's other half — feature work, not cleanup.

@@ -2,8 +2,8 @@
 
 This is the **architecture reference** — the single page (plus the
 load-bearing surface list in §0.5) that every PR measures against.
-Extracted from `docs/specs/m10-cleanup.md` per its Execution order
-step 0.
+Extracted from `docs/specs/archive/m10-cleanup.md` (cleanup spec
+complete + archived) per its Execution order step 0.
 
 **AI assistant readers, start here.** §0 below is the **entry
 point**. Read it first to know the shape of the project. It fits on
@@ -226,10 +226,11 @@ wrapped. Events serialize to local JSONL under
 `infrastructure/tracing/file_sink.py:67`) — no Langfuse instance, no
 MLflow server, no external dependency required. When Langfuse
 credentials are present in `.env`, the same events also stream to
-Langfuse cloud. **MLflow** is a peer optional sink alongside
-Langfuse — wired via `infrastructure/tracing/mlflow_sink.py`, gated
-on `MLFLOW_ENABLED`; same Langfuse-shape events fan into it without
-re-wrapping the call sites. The Langfuse schema is the
+Langfuse cloud. **MLflow** is a peer optional sink, **off by
+default** — wired via `infrastructure/tracing/mlflow_sink.py`,
+gated on `settings.MLFLOW_ENABLED`. The integration is dormant
+unless an operator flips the flag; the import path stays alive so
+enabling it requires no code change. The Langfuse schema is the
 **orientation point**: even with no external sink wired, events
 conform to it, so importing later (or swapping in a different
 backend) is configuration, not refactoring. Tracing is fan-out

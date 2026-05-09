@@ -46,7 +46,10 @@ benchmarks = [
 ]
 observability = [
     "langfuse>=2.0.0",  # why kept: per-call trace mirror (events.jsonl + cloud)
-    "mlflow>=2.12.0",   # why kept: alternate sink alongside Langfuse, gated on MLFLOW_ENABLED
+    "mlflow>=2.12.0",   # why kept: peer optional sink alongside Langfuse,
+                        # gated on settings.MLFLOW_ENABLED (off by default).
+                        # Per §0 dormant-but-named — the import path stays
+                        # so flipping the flag works without a code change.
 ]
 anthropic = [
     "anthropic>=0.18.0",  # why kept: Anthropic SDK as a peer of the OpenAI-compatible client

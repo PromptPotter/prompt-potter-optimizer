@@ -31,14 +31,16 @@ from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUs
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
+    accumulate_backend_spend,
     apply_p_best_update,
     apply_phase,
+    apply_token_usage,
+    empty_spend,
     top_n_p_best,
 )
 from promptpotter.infrastructure.store import root_dir_for, session_dir_for
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
-from promptpotter.shared.spend import compute_usd
 
 if TYPE_CHECKING:
     from promptpotter.domain.phases import PhaseEvent
@@ -61,26 +63,6 @@ _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
     CampaignPhase.ESCALATION: "escalation",
 }
-
-
-def _empty_bucket() -> dict[str, Any]:
-    """One ``state["spend"]`` sub-bucket — backend or loop."""
-    return {
-        "used_usd": 0.0,
-        "input_tokens": 0,
-        "output_tokens": 0,
-        "rate_known": False,
-        "model": None,
-    }
-
-
-def _empty_spend() -> dict[str, Any]:
-    return {
-        "backend": _empty_bucket(),
-        "loop": _empty_bucket(),
-        "total_used_usd": 0.0,
-        "budget_usd": None,
-    }
 
 
 # Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
@@ -163,8 +145,6 @@ class LiveDashboardView(DerivedView):
         self.session_dir = session_dir
         self._recorder = recorder
         self.patience_max = l1_patience
-        # ``state`` is the single liveness/phase indicator (replaces the
-        # prior phase/state/layer trio); see ``_PHASE_TO_STATE``.
         r = resume_from or {}
         self.state: dict[str, Any] = {
             "state": r.get("state", "init"),
@@ -177,46 +157,25 @@ class LiveDashboardView(DerivedView):
             "baseline": r.get("baseline", 0.0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
-            # Active per-round composite_fitness formula — set on
-            # INIT:exit and on ``scoring_steer:applied``. Per-candidate
-            # value-inlined versions live under
-            # ``current_round.nodes.l1_score.output``.
             "composite_fitness_formula": r.get("composite_fitness_formula"),
             "cycle_id": cycle_id,
             "degraded_count": 0,
             "error_count": 0,
             "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
-            # Last-query liveness — orthogonal to ``state``.
             "current_query_payload": None,
             "last_query_elapsed_s": 0.0,
             "wallclock_serialized_at": None,
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
-            # Spend rollup — split into ``backend`` (per-sample wire LLM
-            # calls) and ``loop`` (optimizer L1/L2/L3/critique meta-prompt
-            # calls) so the operator reads "Backend $X • Loop $Y" rather
-            # than a fused number. ``total_used_usd`` is recomputed on
-            # every persist. Per-step USD is taken from the wire when the
-            # provider returned one (today only OpenRouter does), else
-            # rate-tabled via ``shared/spend.py``. budget_usd is set from
-            # campaign.optimization.spend_budget_usd at INIT:exit.
-            "spend": r.get("spend") or _empty_spend(),
+            "spend": r.get("spend") or empty_spend(),
         }
-        # Bare short-form formula template (set on INIT:exit). Used per-
-        # candidate in ``_build_l1_score_block`` to pair each candidate's
-        # composite_fitness number with a value-inlined formula. NOT
-        # mirrored as a top-level scalar — readers consume it from the
-        # per-candidate slots.
+        # Per-candidate value-inlined version of the active short formula;
+        # set on INIT:exit, consumed in _build_l1_score_block for each row.
         self.short_formula_template: str | None = None
-        # Per-round candidate dict — reset at L1_GENERATE/enter and at
-        # round-complete.
         self._round: dict[str, Any] = {"round": 0, "candidates": {}}
-        # Shared per-cycle scalars — round number, baseline + best anchors,
-        # P(best) round snapshot. The terminal renderer (LiveDisplay) holds
-        # the same shape so both subscribers maintain one accumulator
-        # surface, not two. The JSON dict above is the persisted shape;
-        # the core is the in-memory truth for those scalars.
+        # In-memory mirror of the round/baseline/best scalars; LiveDisplay
+        # holds the same shape so both subscribers share one accumulator.
         self._core = LiveStateCore(
             round_num=int(self.state.get("round") or 0),
             baseline_acc=float(self.state.get("baseline") or 0.0),
@@ -298,13 +257,9 @@ class LiveDashboardView(DerivedView):
         self._persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """Mark a fork-on-divergence cutover on the live dashboard.
-
-        Updates ``dashboard.json::cycle_id`` so the active fork is
-        identified to live readers. The structured fork-cut decision is
-        appended to ``ledger.jsonl`` by the runner; this method only
-        keeps the dashboard's identity field current.
-        """
+        """Update ``dashboard.json::cycle_id`` so live readers see the new fork
+        as the active cycle. The structured FORK_CUT decision is appended to
+        the ledger by the runner."""
         del old_cycle_id, from_round
         self.state["cycle_id"] = new_cycle_id
         self._persist()
@@ -324,9 +279,6 @@ class LiveDashboardView(DerivedView):
             l1_stall = int(payload.get("l1_stall_count") or 0)
             if round_result is not None:
                 self._absorb_round_complete(round_result.accuracy, l1_stall)
-                # Deposit l1_score block onto the active recorder before
-                # runner._finalize_run flush — produces one consolidated
-                # .runtime/cache/rounds/round_NNNN.json.
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._build_l1_score_block(round_result))
                 self._round = {"round": round_result.round + 1, "candidates": {}}
@@ -360,9 +312,6 @@ class LiveDashboardView(DerivedView):
             self._update_sample_markers(ci, ct, qi, qt)
             self.state["current_query_payload"] = (payload.get("query_text") or "")[:120]
             self._set_state("scoring")
-            # Flush so an operator tailing dashboard.json sees the new
-            # ``state="scoring"`` + payload during the in-flight call,
-            # not only after sample_scored persists.
             self._persist()
         elif ev == "sample_scored":
             result = payload.get("result") or {}
@@ -377,14 +326,12 @@ class LiveDashboardView(DerivedView):
                 payload.get("changes_description") or "",
                 payload.get("pp_override"),
             )
-            # No _persist() here — placeholder seed; the next sample_scored
-            # write picks it up live, and on_round_complete is the final flush.
+            # placeholder seed; next sample_scored / round_complete persists.
         elif ev == "candidate_scored":
             scores = payload.get("scores") or {}
             self._update_current_acc(scores)
             self._set_candidate_scores(ci, ct, scores)
-            # No _persist() here — flushed by next sample_scored
-            # (next candidate) or by round_complete.
+            # flushed by next sample_scored or by round_complete.
         elif ev == "p_best_update":
             self._update_p_best(
                 ci,
@@ -401,10 +348,8 @@ class LiveDashboardView(DerivedView):
         s = self.state
         if event.round is not None:
             s["round"] = event.round
-        # Drive ``state`` from the phase taxonomy. L1_SCORE is the
-        # exception — sample_started/scored own its transitions; on
-        # L1_SCORE:enter we leave the prior state alone until the first
-        # sample dispatches.
+        # L1_SCORE has no _PHASE_TO_STATE entry — sample_started/scored own
+        # its transitions; on L1_SCORE:enter the prior state stays.
         if event.event == "enter" and s.get("state") != "stopped":
             mapped = _PHASE_TO_STATE.get(event.phase)
             if mapped is not None:
@@ -412,10 +357,8 @@ class LiveDashboardView(DerivedView):
 
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "enter":
-            # Stamp the formula early so it's already on dashboard.json
-            # during baseline scoring (which runs before INIT.exit). Without
-            # this, the live preview's What-If panel has no formula reference
-            # for the entire baseline phase.
+            # Stamp the formula early so What-If has a reference during
+            # baseline scoring (which runs before INIT:exit).
             if view is not None:
                 formula = view.get("composite_fitness_formula")
                 if formula is not None:
@@ -431,29 +374,23 @@ class LiveDashboardView(DerivedView):
             s["baseline"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
-            # Spend ceiling is set once at INIT:exit; resume picks it up
-            # from the on-disk dashboard.json::spend block via _resume_from.
             budget = getattr(config.optimization, "spend_budget_usd", None)
             s["spend"]["budget_usd"] = float(budget) if budget is not None else None
             if view is not None:
                 s["composite_fitness_formula"] = view.get("composite_fitness_formula")
                 self.short_formula_template = view.get("composite_fitness_formula_short")
         elif phase == "scoring_steer" and event.event == "applied":
-            # Operator-driven hot-swap: mirror the new formula onto the
-            # top-level scalar so the next dashboard tail shows it.
+            # Operator-driven hot-swap; custom formulas render verbatim
+            # (no short form / value inlining).
             new_formula = data.get("formula")
             if new_formula:
                 s["composite_fitness_formula"] = new_formula
-                # Custom formulas render verbatim — no short form, no
-                # value inlining (operator authored it, they read it).
                 self.short_formula_template = None
         elif phase == CampaignPhase.L1_GENERATE and event.event == "enter":
             s["round"] = data.get("round", s["round"])
             s["degraded_count"] = 0
 
-        # Mirror baseline/best/round into the shared core so both renderers
-        # read the same accumulator. The JSON dict remains the persisted
-        # shape; the core is the in-memory truth.
+        # Mirror baseline/best/round into the shared core for LiveDisplay parity.
         apply_phase(self._core, event, view)
         if self._core.best_acc > float(s.get("best") or 0.0):
             s["best"] = self._core.best_acc
@@ -477,92 +414,16 @@ class LiveDashboardView(DerivedView):
         s["total_queries_scored"] += 1
         if not is_cached:
             s["total_backend_calls"] += 1
-            self._accumulate_spend(pd)
+            accumulate_backend_spend(s["spend"], pd)
 
         s["current_query_payload"] = None
         s["last_query_elapsed_s"] = round(query_time, 2)
         self._set_state("between_candidates" if last_in_candidate else "between_samples")
 
-    def _accumulate_spend(self, pipeline_data: dict) -> None:
-        """Sum per-sample backend tokens into ``state["spend"]["backend"]``.
-
-        Reads ``pipeline_data.step_tokens`` (per-LLM-node ``{input,
-        output, cost_usd?}``) and ``pipeline_data.llm_provider`` (model
-        string). When a step entry carries ``cost_usd`` (set by the
-        backend when the wire LLM is OpenRouter), it short-circuits the
-        rate-table lookup. Otherwise ``shared/spend.py`` resolves USD
-        from the model string; unknown models still bump token totals so
-        the chip falls back to a token-count display rather than a fake
-        zero. Cached samples skip this call (no fresh wire cost).
-        """
-        step_tokens = pipeline_data.get("step_tokens") or {}
-        if not isinstance(step_tokens, dict):
-            return
-        in_tok = 0
-        out_tok = 0
-        wire_cost: float | None = None
-        for entry in step_tokens.values():
-            if not isinstance(entry, dict):
-                continue
-            in_tok += int(entry.get("input", 0) or 0)
-            out_tok += int(entry.get("output", 0) or 0)
-            step_cost = entry.get("cost_usd")
-            if step_cost is not None:
-                wire_cost = (wire_cost or 0.0) + float(step_cost)
-        if in_tok == 0 and out_tok == 0:
-            return
-        model = pipeline_data.get("llm_provider")
-        self._add_to_bucket("backend", in_tok, out_tok, model, wire_cost)
-
     def _handle_token_usage(self, record: TokenUsageRecord) -> None:
-        """Route an optimizer LLM call into ``state["spend"]["loop"]``.
-
-        Backend-kind events arriving here (none today, but kept for
-        symmetry) are folded into the backend bucket. Per-call
-        ``cost_usd`` (set by ``llm_call.py`` when OpenRouter returned a
-        figure) wins over rate-table lookup; otherwise the rate table
-        is consulted via ``compute_usd``.
-        """
-        bucket = "loop" if record.kind == "optimizer" else "backend"
-        self._add_to_bucket(
-            bucket,
-            int(record.input_tokens),
-            int(record.output_tokens),
-            record.model,
-            record.cost_usd,
-        )
+        """Route an optimizer LLM call into the spend rollup, then persist."""
+        apply_token_usage(self.state["spend"], record)
         self._persist()
-
-    def _add_to_bucket(
-        self,
-        bucket: str,
-        in_tok: int,
-        out_tok: int,
-        model: str | None,
-        wire_cost_usd: float | None,
-    ) -> None:
-        """Single mutator for both spend buckets. Recomputes the running total.
-
-        ``wire_cost_usd`` is the provider-reported USD for this call, if
-        any (today only OpenRouter ships it). When provided, it
-        short-circuits the rate lookup; this is the path that matches
-        the operator's invoice. Otherwise the rate table is consulted.
-        """
-        spend = self.state["spend"]
-        b = spend.setdefault(bucket, _empty_bucket())
-        b["input_tokens"] += in_tok
-        b["output_tokens"] += out_tok
-        if model and not b.get("model"):
-            b["model"] = model
-        usd = compute_usd(model, in_tok, out_tok, override_usd=wire_cost_usd)
-        if usd is not None:
-            b["used_usd"] = round(b["used_usd"] + usd, 6)
-            b["rate_known"] = True
-        spend["total_used_usd"] = round(
-            spend.get("backend", {}).get("used_usd", 0.0)
-            + spend.get("loop", {}).get("used_usd", 0.0),
-            6,
-        )
 
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
@@ -576,11 +437,8 @@ class LiveDashboardView(DerivedView):
     # -- Per-round candidate mutations ---------------------------------------
 
     def _candidate(self, idx: int, total: int = 0) -> dict[str, Any]:
-        """Lazy-init candidate slot — single setdefault site for all mutators.
-
-        Sample/score/p_best callbacks may fire before ``candidate_started``
-        seeded the slot, so each mutator funnels through here.
-        """
+        """Lazy-init candidate slot. Sample/score/p_best callbacks may fire
+        before candidate_started seeds the slot, so all mutators funnel here."""
         return self._round.setdefault("candidates", {}).setdefault(
             idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
         )

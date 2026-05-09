@@ -1,5 +1,10 @@
 # M10 Cleanup — restate the architecture, cut the drift
 
+**Status: COMPLETE.** Gate-by-gate close-out in
+[`m10-cleanup-results.md`](m10-cleanup-results.md); arc closed at
+commit `93291910` ("M10 done"). Sister spec
+(`m10-prompt-iteration-framework.md`) carries the open M10 work.
+
 Sub-spec under M10. Sister to `m10-prompt-iteration-framework.md`.
 
 The goal of this work is **to make drift visible at the source**. The

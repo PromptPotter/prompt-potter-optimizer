@@ -127,7 +127,7 @@ Track 4 runs first or in parallel with Track 1a.
 **Problem:** M12's L4 self-optimization closure (running PromptPotter
 on its own meta-prompts) needs a `Connector` that wraps L1/L2/L3
 behind the same wire shape as TermNorm. The data shape and contract
-parity test land in M10 (`docs/specs/m10-cleanup.md` §3.5 +
+parity test land in M10 (`docs/specs/archive/m10-cleanup.md` §3.5 +
 self-optimization fixture under `datasets/promptpotter/`); M11 is
 the right milestone to land the connector itself, because:
 
@@ -169,7 +169,7 @@ the right milestone to land the connector itself, because:
 Track 5 ships the connector + smoke-tests it; the outer-loop
 optimization that improves L1/L2/L3 prompts is M12 work.
 
-**Cross-ref:** `docs/specs/m10-cleanup.md` §3.5 +
+**Cross-ref:** `docs/specs/archive/m10-cleanup.md` §3.5 +
 self-optimization fixture; `docs/specs/m12-multi-connector.md`
 Track 1 (now names this connector explicitly as the "second
 connector").

@@ -99,7 +99,7 @@ The launcher and control shapes are still being designed across M11–M12. Two c
 
 **Why M12 not M12+:** the M11 connector + M10 fixture/contract eliminate the residual blocker. What's left is "run the loop" — same orchestration code as any other campaign, just with the PromptPotter connector. The publication value (closing the L4 story) is significant enough to belong in the headline milestone.
 
-**Cross-ref:** `docs/specs/m10-cleanup.md` §3.5 + self-optimization fixture; `docs/specs/m11-publication-benchmarks.md` Track 5 (connector); `docs/specs/m12-plus-backlog.md` (L4-completion item removed since it's now in M12); `docs/specs/roadmap.md` updated L4 line.
+**Cross-ref:** `docs/specs/archive/m10-cleanup.md` §3.5 + self-optimization fixture; `docs/specs/m11-publication-benchmarks.md` Track 5 (connector); `docs/specs/m12-plus-backlog.md` (L4-completion item removed since it's now in M12); `docs/specs/roadmap.md` updated L4 line.
 
 ### Track 3.5: Orchestrator Daemon (control plane structural shape)
 

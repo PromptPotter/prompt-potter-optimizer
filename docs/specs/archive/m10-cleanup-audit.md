@@ -1,5 +1,8 @@
 # M10 Cleanup — Audit findings
 
+**Status: COMPLETE.** Arc-level DoD in
+[`m10-cleanup-results.md`](m10-cleanup-results.md).
+
 **Audit scope:** `docs/architecture.md` §0 vocabulary verification
 (per `m10-cleanup.md` Execution order step 1, narrow form).
 
@@ -261,11 +264,8 @@ The fixture deliberately omits `pipeline.json` / `campaign.json` /
 `prompts/` — those are M11 connector deliverables. The M10 ask is
 only the trace shape on disk before any consumer.
 
-## Next slices (per `m10-cleanup.md` §1, future PRs)
+## Next slices — closed
 
-- Notebook lint cleanup (pre-existing ruff drift in
-  `docs/research/bbeh-comparison/*.ipynb` +
-  `notebooks/optimization_campaign.ipynb`) — own commit.
-- Decision needed (flagged from ledger-vs-projections audit): is
-  the audit trail's projection-only LLM I/O capture sanctioned, or
-  should an `LLMCallRecord` ledger event back it?
+Both items resolved: `LLMCallRecord` ledger event in `d9f2ee33`
+closed the LLM-I/O-capture decision; notebook lint deferred to its
+own commit (orthogonal to audit closure).
