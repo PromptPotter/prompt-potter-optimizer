@@ -17,6 +17,7 @@ from typing import TYPE_CHECKING, Any, Literal, cast
 
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
+from promptpotter.domain.run_records import LLMCallRecord
 from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
@@ -33,7 +34,7 @@ from promptpotter.infrastructure.store.optimizer_call_cache import (
 )
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.projections import AuditTrailProjection
+    from promptpotter.infrastructure.ledger import CycleLedger
 
 logger = logging.getLogger(__name__)
 
@@ -117,7 +118,9 @@ async def llm_call(
     config: dict | None = None,
     trace_meta: dict | None = None,
     json_schema: dict | None = None,
-    recorder: AuditTrailProjection | None = None,
+    ledger: CycleLedger | None = None,
+    round_num: int | None = None,
+    candidate_idx: int | None = None,
     cache: OptimizerCallCache | None = None,
     **overrides,
 ) -> LLMResponse:
@@ -131,9 +134,15 @@ async def llm_call(
 
     When *cache* is provided, the resolved ``(messages, model, temperature,
     json_schema, provider)`` tuple is hashed and looked up before firing
-    the LLM. A hit replays the stored ``LLMResponse`` (and feeds the
-    recorder with ``cached: true``) instead of calling the provider —
-    cross-cycle and cross-fork by construction.
+    the LLM. A hit replays the stored ``LLMResponse`` (and emits an
+    ``LLMCallRecord`` with ``cached: true``) instead of calling the
+    provider — cross-cycle and cross-fork by construction.
+
+    When *ledger* is provided, an :class:`LLMCallRecord` is appended
+    after each successful call (or cache hit) — the audit-trail
+    projection picks it up via ``on_record`` and shapes it into the
+    round's ``nodes.<node>`` block. Callers MUST pass the ledger; the
+    direct ``recorder.add_action`` write path is gone.
     """
     if config is None:
         if node:
@@ -225,14 +234,14 @@ async def llm_call(
         if cache is not None and cache_key is not None:
             cache.save(cache_key, response.model_dump())
 
-    if recorder is not None:
+    if ledger is not None:
         response_data: dict | str
         try:
             response_data = json.loads(response.content)
         except (json.JSONDecodeError, TypeError):
             response_data = response.content
 
-        action: dict = {
+        payload: dict = {
             "type": node or "llm_call",
             "config": {
                 "model": merged.get("model"),
@@ -245,12 +254,19 @@ async def llm_call(
             "duration_s": duration_s,
         }
         if cached_payload is not None:
-            action["cached"] = True
+            payload["cached"] = True
         if trace_meta:
-            action.update(trace_meta)
+            payload.update(trace_meta)
         else:
-            action["messages"] = messages
-        recorder.add_action(action)
+            payload["messages"] = messages
+        ledger.append(
+            LLMCallRecord(
+                node=node or "llm_call",
+                round=round_num,
+                candidate_idx=candidate_idx,
+                payload=payload,
+            )
+        )
 
     return response
 
@@ -264,7 +280,9 @@ async def run_optimizer_node(
     temperature: float = 0.0,
     json_schema: dict | None = None,
     user_content: str | None = None,
-    recorder: AuditTrailProjection | None = None,
+    ledger: CycleLedger | None = None,
+    round_num: int | None = None,
+    candidate_idx: int | None = None,
     template: PromptTemplate | None = None,
     optimizer_call_cache: OptimizerCallCache | None = None,
 ) -> tuple[Any, str]:
@@ -295,7 +313,9 @@ async def run_optimizer_node(
         model=model,
         temperature=temperature,
         json_schema=json_schema,
-        recorder=recorder,
+        ledger=ledger,
+        round_num=round_num,
+        candidate_idx=candidate_idx,
         cache=optimizer_call_cache,
         trace_meta={
             "template_name": template_name,

@@ -312,19 +312,29 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     round, ``complete`` flushes ``round_NNNN.json`` to disk. Other
     record types are ignored at this projection's scope.
     """
-    from promptpotter.domain.run_records import DecisionKind, DecisionRecord, PhaseRecord
+    from promptpotter.domain.run_records import (
+        DecisionKind,
+        DecisionRecord,
+        LLMCallRecord,
+        PhaseRecord,
+    )
 
     cycle_dir = tmp_path / "campaigns" / "cyc1"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
 
-    # Record an action so flush has state to write.
+    # Record an LLMCallRecord so flush has state to write.
     proj.on_record(PhaseRecord(phase="round", event="enter", round=4), 0)
-    proj.add_action({"type": "l1_generate", "response": "ok"})
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=4, payload={"type": "l1_generate", "response": "ok"}
+        ),
+        1,
+    )
     # An unrelated DecisionRecord must not crash or trigger a flush.
-    proj.on_record(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 1)
+    proj.on_record(DecisionRecord(kind=DecisionKind.ROUND_WINNER, outcome="c1", round=4), 2)
     # Round-complete triggers the disk write.
-    proj.on_record(PhaseRecord(phase="round", event="complete", round=4), 2)
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=4), 3)
 
     written = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0004.json"
     assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
@@ -337,19 +347,27 @@ def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
     the first round's enter/complete. Pre-fix, baseline node accumulation
     leaked into round 0's ``begin_round`` slot and was warn-and-discarded.
     """
-    from promptpotter.domain.run_records import PhaseRecord
+    from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
 
     cycle_dir = tmp_path / "campaigns" / "cyc_baseline"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailProjection.from_cycle_dir(CycleDir(cycle_dir))
 
     proj.on_record(PhaseRecord(phase="baseline", event="enter", round=0), 0)
-    proj.add_action({"type": "llm_only", "response": "answer"})
-    proj.on_record(PhaseRecord(phase="baseline", event="exit", round=0), 1)
+    proj.on_record(
+        LLMCallRecord(node="llm_only", payload={"type": "llm_only", "response": "answer"}),
+        1,
+    )
+    proj.on_record(PhaseRecord(phase="baseline", event="exit", round=0), 2)
     # Round 0 begins fresh — no warn-and-discard, no leakage of baseline.
-    proj.on_record(PhaseRecord(phase="round", event="enter", round=0), 2)
-    proj.add_action({"type": "l1_generate", "response": "ok"})
-    proj.on_record(PhaseRecord(phase="round", event="complete", round=0), 3)
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=0), 3)
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=0, payload={"type": "l1_generate", "response": "ok"}
+        ),
+        4,
+    )
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=0), 5)
 
     baseline_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_baseline.json"
     round_0_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"

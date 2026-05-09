@@ -7,12 +7,13 @@ construction site, and ``from_cycle_dir`` derives the standard subpath.
 A runtime assertion in ``__init__`` rejects any path that doesn't end in
 ``/.runtime/cache/rounds`` to catch ad-hoc constructions.
 
-Round boundaries arrive via ``on_record``: ``PhaseRecord("round","enter")``
-triggers ``begin_round`` and ``PhaseRecord("round","complete")`` triggers
-``flush``. Per-node action data still arrives via direct calls
-(``add_action`` / ``set_node`` / ``set_l1_score``) from the LLM call
-sites and the live dashboard projection — that data isn't replayable
-and has no other consumer.
+Pure derived view of the ledger: round boundaries arrive via
+``PhaseRecord("round","enter"|"complete")``; per-node LLM I/O arrives
+via ``LLMCallRecord`` (single-writer invariant — the four optimizer
+LLM calls go through ``llm_call.py::run_optimizer_node`` which
+appends one record per call). The only direct in-process method is
+``set_l1_score`` from the live dashboard, which composes scoring
+phase data this projection wouldn't otherwise see.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.domain.cycle_paths import CycleDir
-from promptpotter.domain.run_records import PhaseRecord
+from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
 from promptpotter.infrastructure.projections.base import ProjectionBase
 from promptpotter.infrastructure.store.base import write_json
 
@@ -171,22 +172,14 @@ class AuditTrailProjection(ProjectionBase):
             if isinstance(block, dict):
                 self._sticky_nodes[key] = {**block, "round": round_num}
 
-    def add_action(self, action: dict[str, Any]) -> None:
-        """Record an LLM node call into the current round; same-type re-entry overwrites."""
-        action.setdefault("timestamp", datetime.now(UTC).isoformat())
-        node_type = str(action.get("type") or "llm_call")
-        block = _action_to_node_block(action)
-        self._nodes[node_type] = block
-        self._sticky_nodes[node_type] = {**block, "round": self._current_round}
-
-    def set_node(self, name: str, block: dict[str, Any]) -> None:
-        """Deposit a prebuilt node block — used when output didn't flow through ``llm_call()``."""
-        self._nodes[name] = block
-        self._sticky_nodes[name] = {**block, "round": self._current_round}
-
     def set_l1_score(self, block: dict[str, Any]) -> None:
         """Deposit the scoring-phase block built by the live dashboard projection."""
         self._l1_score = block
+
+    def _record_node(self, node_type: str, block: dict[str, Any]) -> None:
+        """Internal — store a node block keyed by phase, mirror to sticky cache."""
+        self._nodes[node_type] = block
+        self._sticky_nodes[node_type] = {**block, "round": self._current_round}
 
     def snapshot_nodes(self) -> dict[str, dict[str, Any]]:
         """PhaseRecord-keyed sticky snapshot for ``dashboard.json::current_round`` — slots overwritten only when the same phase re-fires (excludes ``l1_score``, composed by the live dashboard)."""
@@ -213,6 +206,29 @@ class AuditTrailProjection(ProjectionBase):
                 self.begin_round(_BASELINE_ROUND_SENTINEL)
             elif record.event == "exit":
                 self.flush()
+
+    def _handle_llm_call(self, record: LLMCallRecord) -> None:
+        """Project an :class:`LLMCallRecord` payload into the current round's nodes block.
+
+        Sole ingress for ``nodes.l1_generate`` / ``.l1_critique`` /
+        ``.l2_context`` / ``.l3_plan`` (and any synthesized
+        load-from-disk variants). For ``payload_kind == "llm_call"`` the
+        payload mirrors today's action-dict shape, so the projection
+        logic stays ``_action_to_node_block``. For
+        ``payload_kind == "synthesized"`` the payload already carries
+        ``input`` / ``output`` keys directly — pass through.
+        """
+        if record.payload_kind == "synthesized":
+            block: dict[str, Any] = {
+                "input": dict(record.payload.get("input") or {}),
+                "output": dict(
+                    record.payload.get("response") or record.payload.get("output") or {}
+                ),
+                "timestamp": record.timestamp,
+            }
+        else:
+            block = _action_to_node_block({**record.payload, "timestamp": record.timestamp})
+        self._record_node(record.node, block)
 
     def flush(self) -> Path | None:
         """Write ``round_NNNN.json`` and reset. Returns the written path."""

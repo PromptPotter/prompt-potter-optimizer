@@ -13,7 +13,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
-from promptpotter.infrastructure.store import root_cycle_id
+from promptpotter.infrastructure.store import archive_views, root_cycle_id
 from promptpotter.presentation.views.render_markdown import to_markdown
 from promptpotter.presentation.views.view_factories import from_disk_log
 from promptpotter.shared.errors import graceful
@@ -132,8 +132,8 @@ def refresh_tenant_leaderboards(session: Session) -> None:
         )
         (out_dir / "individuals.md").write_text(ind_body, encoding="utf-8")
 
-        artifact = build_archive_hard_samples_artifact(session.store.archive, backend_id)
-        sample_lookup = _build_sample_query_lookup(session.store.archive, backend_id)
+        artifact = build_archive_hard_samples_artifact(session.store, backend_id)
+        sample_lookup = _build_sample_query_lookup(session.store, backend_id)
         heatmap = render_hard_sample_heatmap(artifact, sample_query_lookup=sample_lookup)
         title = f"# Hard Samples — {dataset_label}" if dataset_label else "# Hard Samples"
         if heatmap:
@@ -162,14 +162,14 @@ def _pick_dataset_label(rows: list[Any]) -> str:
     return ", ".join(sorted(seen))
 
 
-def _build_sample_query_lookup(archive: Any, backend_id: str) -> dict[int, str]:
+def _build_sample_query_lookup(stores: Any, backend_id: str) -> dict[int, str]:
     """First-seen ``sample_id → query`` map across the archive."""
     out: dict[int, str] = {}
-    for entry in archive.list_all(backend_id):
+    for entry in archive_views.list_runs(stores, backend_id):
         run_id = entry.get("run_id")
         if not run_id:
             continue
-        detail = archive.load_by_id(backend_id, run_id)
+        detail = archive_views.load_run(stores, backend_id, run_id)
         if detail is None:
             continue
         for item in detail.get("measurements", []):

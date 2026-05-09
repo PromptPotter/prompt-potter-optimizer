@@ -16,7 +16,7 @@ from promptpotter.infrastructure.llm import LLMClientBase
 if TYPE_CHECKING:
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.domain.results import RoundResult
-    from promptpotter.infrastructure.projections import AuditTrailProjection
+    from promptpotter.infrastructure.ledger import CycleLedger
 
 logger = logging.getLogger(__name__)
 
@@ -33,7 +33,7 @@ async def run_l1_critique(
     *,
     round_num: int,
     model: str | None = None,
-    recorder: AuditTrailProjection | None = None,
+    ledger: CycleLedger | None = None,
 ) -> dict:
     """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict.
 
@@ -55,7 +55,8 @@ async def run_l1_critique(
         prompt_vars=prompt_vars,
         llm_client=llm_client,
         model=model,
-        recorder=recorder,
+        ledger=ledger,
+        round_num=round_num,
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     logger.info(

@@ -23,6 +23,7 @@ from typing import TYPE_CHECKING
 
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.infrastructure.store import archive_views
 
 if TYPE_CHECKING:
     from promptpotter.application.baseline import CampaignBaseline
@@ -280,7 +281,9 @@ def _apply_resume_fork(
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
     """Replay decisions; fork on divergence; register baseline alias. Returns possibly-rebound (id, round)."""
-    from promptpotter.application.optimization.cycle import resume_with_divergence_check
+    from promptpotter.application.optimization.resume_and_fork import (
+        resume_with_divergence_check,
+    )
 
     if resumed_from_round > 0 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
@@ -297,8 +300,8 @@ def _apply_resume_fork(
             resolved_cycle_id = fork_result.new_cycle_id
             resumed_from_round = fork_result.new_resumed_from_round
     if session.store:
-        session.store.archive.register_prompt_alias(
-            session.backend_id, baseline.instruction, baseline_osp.render()
+        archive_views.register_prompt_alias(
+            session.store, session.backend_id, baseline.instruction, baseline_osp.render()
         )
     return resolved_cycle_id, resumed_from_round
 

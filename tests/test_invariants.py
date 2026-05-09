@@ -23,6 +23,7 @@ from __future__ import annotations
 import ast
 import json
 import pathlib
+import re
 from pathlib import Path
 from typing import Any, cast
 
@@ -779,4 +780,67 @@ def test_no_unexpected_runtime_layer_violations() -> None:
         "KNOWN_VIOLATIONS contains entries that no longer occur in the source. "
         "Remove them to keep the allowlist accurate.\nStale entries:\n  "
         + "\n  ".join(f"{src}: {tgt}" for src, tgt in sorted(stale))
+    )
+
+
+# Sole permitted module for archive method-access — the §3.7 facade.
+_ARCHIVE_FACADE_MODULE = "infrastructure/store/archive_views.py"
+# Permitted same-layer access: the archive itself can call its own methods,
+# and ``stores.archive`` exposure inside ``stores.py`` is part of the surface.
+_ARCHIVE_INTERNAL_MODULES = frozenset(
+    {
+        "infrastructure/store/measurement_archive.py",
+        "infrastructure/store/stores.py",
+        "infrastructure/store/__init__.py",
+    }
+)
+# Pattern catches ``store.archive.method(``, ``self.archive.method(``,
+# ``cls.archive.method(``, plus the alias form ``= session.store.archive``
+# which then enables ``archive.method(`` calls.
+_ARCHIVE_DIRECT_PATTERNS = (
+    re.compile(r"\b(?:store|self|cls)\.archive\.[a-zA-Z_]"),
+    re.compile(r"=\s*\S+\.store\.archive\b"),
+)
+
+
+def test_no_direct_archive_access_outside_facade() -> None:
+    """Every read/write of MeasurementArchive routes through ``archive_views``.
+
+    The §3.7 facade (``infrastructure/store/archive_views.py``) is the sole
+    gateway. Direct method calls (``store.archive.X(...)``) and aliasing
+    (``archive = session.store.archive``) outside the facade are drift —
+    multiple readers + writers of the database core without a gated entry
+    is the same problem ``CycleLedger`` solved for events. Same-layer
+    archive internals (``measurement_archive.py``, ``stores.py``,
+    ``__init__.py``) are exempt.
+    """
+    offenders: list[str] = []
+    for path in ROOT.rglob("*.py"):
+        rel = path.relative_to(ROOT).as_posix()
+        if rel == _ARCHIVE_FACADE_MODULE.removeprefix("infrastructure/").replace(
+            "store/archive_views.py", ""
+        ):
+            pass  # narrowing handled below
+        if rel in _ARCHIVE_INTERNAL_MODULES:
+            continue
+        if rel == "infrastructure/store/archive_views.py":
+            continue
+        text = path.read_text(encoding="utf-8")
+        for pattern in _ARCHIVE_DIRECT_PATTERNS:
+            for match in pattern.finditer(text):
+                # Strip docstring matches (heuristic: the matching line begins
+                # with ``"`` or ``#`` after the line's leading whitespace).
+                line_start = text.rfind("\n", 0, match.start()) + 1
+                line_end = text.find("\n", match.start())
+                line = text[line_start : line_end if line_end != -1 else None]
+                stripped = line.lstrip()
+                if stripped.startswith(("#", '"', "'", "*")):
+                    continue
+                offenders.append(
+                    f"{rel}:{text[: match.start()].count(chr(10)) + 1}: {line.strip()}"
+                )
+    assert not offenders, (
+        "Direct MeasurementArchive access outside the facade detected. "
+        "Route through ``promptpotter.infrastructure.store.archive_views`` instead.\n"
+        "Offenders:\n  " + "\n  ".join(offenders)
     )

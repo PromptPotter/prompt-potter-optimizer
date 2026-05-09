@@ -20,7 +20,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.cycle import fork_for_sweep_sibling
+from promptpotter.application.optimization.resume_and_fork import fork_for_sweep_sibling
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
 from promptpotter.domain.run_records import SweepPayload

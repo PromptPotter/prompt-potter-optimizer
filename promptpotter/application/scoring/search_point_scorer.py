@@ -22,6 +22,7 @@ from promptpotter.application.scoring.sample_measurement import (
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.domain.scoring import QueryMeasurement, Scorer
 from promptpotter.domain.validators import StopRule
+from promptpotter.infrastructure.store import archive_views
 from promptpotter.shared.errors import (
     ErrorCategory,
     error_category,
@@ -427,7 +428,7 @@ async def score_search_point(
         node_configs = pipeline_schema.node_configs(search_point.pipeline_params or {})
         cached_sample_results = cast(
             "dict[str, QueryMeasurement]",
-            store.archive.load_reusable_results(backend_id, node_configs, is_fatal=is_deprecated),
+            archive_views.reusable_results(store, backend_id, node_configs, is_fatal=is_deprecated),
         )
 
     cached_sample_results, deprecated_samples = _split_off_deprecated_samples(cached_sample_results)
@@ -485,7 +486,7 @@ async def score_search_point(
             experiment_id=session.experiment_id,
             pipeline_schema=pipeline_schema,
         )
-        store.archive.save(backend_id, run_id, run_data)
+        archive_views.record_measurement_run(store, backend_id, run_id, run_data)
 
     def _persist_fresh(results: list[QueryMeasurement]) -> None:
         if not (store and backend_id):

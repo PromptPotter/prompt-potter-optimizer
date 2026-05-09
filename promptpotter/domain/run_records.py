@@ -1,44 +1,43 @@
 """Typed records for the run ledger — facts about a campaign cycle.
 
-The ledger spine in ``application/ledger.py`` accepts a ``CycleRecord`` union and
-fans out to projection writers. Each record subtype is a frozen Pydantic model
-with a ``record_type`` discriminator so JSON round-trips through the spine
-without ambiguity.
+The ledger spine in ``infrastructure/ledger.py`` accepts a ``CycleRecord``
+union and fans out to projection writers. Each record subtype is a frozen
+Pydantic model with a ``record_type`` discriminator so JSON round-trips
+through the spine without ambiguity.
 
-``DecisionKind`` is the enum that gates resume-divergence checking. Every
-member must appear in ``DECISION_GATING``: ``REPLAYED`` kinds drive the
-divergence walker, ``ARCHIVAL`` kinds are written for audit only. The pairing
-is enforced by ``tests/test_decision_kinds_registry.py`` so a new kind cannot
-land without an explicit gating choice.
+Resume-checkpoint policy (``DECISION_GATING``, ``GatingMode``,
+``record_decision`` helper, the import-time exhaustiveness check) lives
+in :mod:`promptpotter.application.optimization.resume_and_fork.decisions`
+— the data shape (``DecisionKind`` + ``DecisionRecord``) stays here so
+the ``CycleRecord`` discriminated union owns it.
 """
 
 from __future__ import annotations
 
 import enum
 from datetime import UTC, datetime
-from typing import Annotated, Any, Literal, Protocol
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
-    "DECISION_GATING",
     "CycleRecord",
     "DecisionKind",
     "DecisionRecord",
-    "GatingMode",
+    "LLMCallRecord",
     "PhaseRecord",
     "SnapshotRecord",
     "SweepPayload",
     "TokenUsageRecord",
-    "record_decision",
 ]
 
 
 class DecisionKind(enum.StrEnum):
     """Kinds of decisions written to the ledger.
 
-    Adding a member: append here AND extend ``DECISION_GATING`` in the same
-    commit. The registry test fails otherwise.
+    Adding a member: append here AND extend ``DECISION_GATING`` in
+    ``resume_and_fork.decisions`` in the same commit. The registry test
+    fails otherwise.
     """
 
     ROUND_WINNER = "round_winner"
@@ -48,45 +47,6 @@ class DecisionKind(enum.StrEnum):
     L3_ESCALATION_TRIGGER = "l3_escalation_trigger"
     PROBE_ROUND_COMMITMENT = "probe_round_commitment"
     FORK_CUT = "fork_cut"
-
-
-class GatingMode(enum.StrEnum):
-    """Whether a decision kind drives resume-divergence checking.
-
-    REPLAYED: re-derived under the active scorer on resume; mismatch halts
-    or forks. ARCHIVAL: archived only; never compared on resume.
-    """
-
-    REPLAYED = "replayed"
-    ARCHIVAL = "archival"
-
-
-# Single source of truth for which kinds are divergence-gated. Every
-# ``DecisionKind`` member MUST appear here exactly once. ``REPLAYED`` kinds
-# also need a registered replayer (see ``application/optimization/cycle.py``);
-# ``ARCHIVAL`` kinds must NOT have one.
-DECISION_GATING: dict[DecisionKind, GatingMode] = {
-    DecisionKind.ROUND_WINNER: GatingMode.REPLAYED,
-    DecisionKind.ELIMINATION_CUT: GatingMode.REPLAYED,
-    DecisionKind.LEADER_LOCK_IN: GatingMode.REPLAYED,
-    DecisionKind.L2_ESCALATION_TRIGGER: GatingMode.REPLAYED,
-    DecisionKind.L3_ESCALATION_TRIGGER: GatingMode.REPLAYED,
-    DecisionKind.PROBE_ROUND_COMMITMENT: GatingMode.ARCHIVAL,
-    # Fork is observable from the parent's history (the FORK_CUT record in
-    # the parent ledger names the new cycle id and the offset that the
-    # fork inherits from). It's archival because the fork's identity is
-    # downstream of the divergence-checked decisions, not part of the
-    # gating itself — replaying it can't re-derive a different fork.
-    DecisionKind.FORK_CUT: GatingMode.ARCHIVAL,
-}
-
-
-# Adding a kind without choosing REPLAYED/ARCHIVAL is a programming error;
-# fail at import rather than at first replay attempt.
-_unmapped = [k for k in DecisionKind if k not in DECISION_GATING]
-if _unmapped:
-    raise RuntimeError(f"DecisionKind members missing from DECISION_GATING: {_unmapped}")
-del _unmapped
 
 
 def _utcnow_iso() -> str:
@@ -181,42 +141,46 @@ class TokenUsageRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class LLMCallRecord(BaseModel):
+    """One optimizer LLM call's full I/O — rendered prompt + parsed output.
+
+    Persists every ``l1_generate`` / ``l1_critique`` / ``l2_context`` /
+    ``l3_plan`` LLM call into the ledger so the round audit trail
+    (``.runtime/cache/rounds/round_NNNN.json::nodes.<node>``) is a
+    derived view, not a sidecar persistence channel. Call shape mirrors
+    today's audit-trail action dict so :class:`AuditTrailProjection`
+    can shape it into the ``nodes`` block without semantic loss.
+
+    ``payload_kind`` distinguishes a real LLM call (carries
+    ``messages``/``response``/``usage``) from a synthesized event (e.g.
+    persisted-candidate replay where llm_call did not fire — carries
+    only ``input``/``output`` fields).
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["llm_call"] = "llm_call"
+    node: str
+    round: int | None = None
+    candidate_idx: int | None = None
+    payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
+    # The action-dict shape that AuditTrailProjection currently consumes;
+    # carries every field _action_to_node_block reads (template_fields,
+    # variables, template_name, messages, response, usage, model, config,
+    # duration_s, cached, …). Stored as an opaque mapping so adding a
+    # field doesn't churn the record schema.
+    payload: dict[str, Any] = Field(default_factory=dict)
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 # Discriminated union — Pydantic uses ``record_type`` to pick the right model
 # when parsing a dict back into a CycleRecord (e.g. when iterating a ledger
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 CycleRecord = Annotated[
-    DecisionRecord | PhaseRecord | SnapshotRecord | TokenUsageRecord,
+    DecisionRecord | LLMCallRecord | PhaseRecord | SnapshotRecord | TokenUsageRecord,
     Field(discriminator="record_type"),
 ]
-
-
-class _DecisionSink(Protocol):
-    """Anything with ``append(DecisionRecord) -> Any`` — list[DecisionRecord] or CycleLedger."""
-
-    def append(self, decision: DecisionRecord, /) -> Any: ...
-
-
-def record_decision(
-    sink: _DecisionSink,
-    kind: DecisionKind,
-    inputs_ref: dict[str, Any],
-    outcome: Any,
-    *,
-    data: dict[str, Any] | None = None,
-    round: int | None = None,
-) -> Any:
-    """Build a DecisionRecord and append to *sink*; return outcome for passthrough."""
-    sink.append(
-        DecisionRecord(
-            kind=kind,
-            inputs_ref=dict(inputs_ref),
-            outcome=outcome,
-            data=dict(data or {}),
-            round=round,
-        )
-    )
-    return outcome
 
 
 class SweepPayload(BaseModel):

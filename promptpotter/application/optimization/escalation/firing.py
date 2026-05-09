@@ -35,6 +35,10 @@ from promptpotter.application.optimization.l2_validators import (
     run_l3_output_validators,
 )
 from promptpotter.application.optimization.llm_call import load_optimizer_prompt
+from promptpotter.application.optimization.resume_and_fork import (
+    DecisionKind,
+    record_decision,
+)
 from promptpotter.application.optimization.transitions import (
     OptimizerAction,
     TransitionResult,
@@ -48,7 +52,7 @@ from promptpotter.domain.l1_layout import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
-from promptpotter.domain.run_records import DecisionKind, SweepPayload, record_decision
+from promptpotter.domain.run_records import SweepPayload
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared.errors import graceful

@@ -44,31 +44,23 @@ Four `CycleRecord` subtypes land in `events.jsonl`:
 |---|---|---|
 | `round` | `PhaseRecord(round/enter)` | CLEAN |
 | `started_at` / `finished_at` | direct timestamps on `begin_round()` / `flush()` | PROJECTION-ONLY |
-| `nodes.l1_generate` | direct `add_action()` from llm_call site | **PROJECTION-ONLY** (see Note 1) |
-| `nodes.l1_critique` | direct `add_action()` from llm_call site | **PROJECTION-ONLY** (see Note 1) |
-| `nodes.l2_context` | direct `add_action()` from llm_call site | **PROJECTION-ONLY** (see Note 1) |
-| `nodes.l3_plan` | direct `add_action()` from llm_call site | **PROJECTION-ONLY** (see Note 1) |
+| `nodes.l1_generate` | `LLMCallRecord` ledger event via `_handle_llm_call` | CLEAN (resolved per Note 1) |
+| `nodes.l1_critique` | `LLMCallRecord` ledger event via `_handle_llm_call` | CLEAN (resolved per Note 1) |
+| `nodes.l2_context` | `LLMCallRecord` ledger event via `_handle_llm_call` | CLEAN (resolved per Note 1) |
+| `nodes.l3_plan` | `LLMCallRecord` ledger event via `_handle_llm_call` | CLEAN (resolved per Note 1) |
 | `nodes.l1_score` | deposited by `LiveDashboardProjection.set_l1_score()` | CLEAN (via LiveDashboard) |
 
-**Note 1 — open question.** The four optimizer LLM calls' rendered
-inputs/outputs (`l1_generate`, `l1_critique`, `l2_context`,
-`l3_plan` blocks) are written directly to the audit trail file via
-`add_action()` — bypassing the ledger. This is the same shape as
-the `l1_critique_text` "trace-only carve-out" question in `m10-cleanup.md`
-§1 (entry point five), but generalized: ALL FOUR optimizer LLM
-call payloads are projection-only today, not ledger events.
-
-Per §0 "sole ingress is `CycleLedger.append`" + "everything material
-lives on disk in human-readable form": both invariants are
-satisfied (file IS on disk; the call goes through `observed_node()`
-which fans to Langfuse + audit trail). But the audit trail file is
-a sanctioned third write surface, not a derived view.
-
-**Decision needed (out of scope for this audit; flag for §0 update
-or §3.x decision):** is the audit trail (a) sanctioned alongside
-the ledger as a second persistence channel for LLM I/O, or (b)
-drift that should fire an `LLMCallRecord` ledger event with the
-audit trail deriving from it?
+**Note 1 — RESOLVED via M10 commit 1.** Operator picked the
+single-writer path: every optimizer LLM call now emits
+`LLMCallRecord` (a typed `CycleRecord` subtype) into the ledger.
+`AuditTrailProjection` consumes the record via
+`_handle_llm_call(LLMCallRecord)` and projects it into the round's
+`nodes.<node>` block — the audit trail file becomes a pure derived
+view. The `add_action` direct write entry point is gone;
+`run_optimizer_node` takes a `ledger: CycleLedger | None`
+parameter and emits one record per call (real LLM call, cached
+hit, or synthesized "loaded from disk" event with
+`payload_kind="synthesized"`).
 
 ### PoBBStreamProjection — `.runtime/streams/round_NNNN_p_best.jsonl`
 

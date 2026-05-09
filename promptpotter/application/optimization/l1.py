@@ -13,7 +13,7 @@ from enum import StrEnum
 from functools import partial
 from typing import TYPE_CHECKING
 
-from promptpotter.application.optimization.cycle import Cycle, DecisionRecord
+from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.dispatch_hub import (
     DispatchHub,
     build_bundle,
@@ -39,6 +39,11 @@ from promptpotter.application.optimization.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
 )
+from promptpotter.application.optimization.resume_and_fork import (
+    DecisionKind,
+    DecisionRecord,
+    record_decision,
+)
 from promptpotter.application.optimization.round_diagnostics import (
     compute_round_diagnostics,
 )
@@ -58,7 +63,6 @@ from promptpotter.domain.results import (
     RoundBaseline,
     RoundResult,
 )
-from promptpotter.domain.run_records import DecisionKind, record_decision
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
 
@@ -128,7 +132,8 @@ async def l1_generate(
         model=model,
         temperature=creativity,
         json_schema=output_schema,
-        recorder=cycle.session.state.audit_projection,
+        ledger=cycle.session.state.ledger,
+        round_num=round_num,
         template=template,
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
@@ -882,15 +887,24 @@ async def generate_or_load_candidates(
             persisted = [CandidateProposal.model_validate(d) for d in persisted_raw]
             logger.debug("Loaded %d persisted candidates for round %d", len(persisted), round_num)
             yield_stats = detect_invariants(persisted, cycle.opt_sp)
-            # llm_call never fires on this branch — synthesize l1_generate
-            # so dashboard.json + round_NNNN.json don't miss the node.
-            if _rr := session.state.audit_projection:
-                _rr.set_node(
-                    "l1_generate",
-                    {
-                        "input": {"source": "loaded_from_disk", "round": round_num},
-                        "output": {"candidates": candidate_summaries(persisted)},
-                    },
+            # llm_call never fires on this branch — synthesize an
+            # ``LLMCallRecord(payload_kind="synthesized")`` so the audit
+            # trail + dashboard see the node, without lying about a real
+            # LLM call having happened.
+            if (_ledger := session.state.ledger) is not None:
+                from promptpotter.domain.run_records import LLMCallRecord
+
+                _ledger.append(
+                    LLMCallRecord(
+                        node="l1_generate",
+                        round=round_num,
+                        payload_kind="synthesized",
+                        payload={
+                            "type": "l1_generate",
+                            "input": {"source": "loaded_from_disk", "round": round_num},
+                            "response": {"candidates": candidate_summaries(persisted)},
+                        },
+                    )
                 )
             emit_phase(
                 on_phase,
@@ -1085,7 +1099,7 @@ async def execute_round(
                     crit_llm,
                     round_num=round_num,
                     model=config.optimizer_llm.model,
-                    recorder=session.state.audit_projection,
+                    ledger=session.state.ledger,
                 )
             round_result.critique = critique_result
             critique_text = format_l1_critique_for_prompt(critique_result)

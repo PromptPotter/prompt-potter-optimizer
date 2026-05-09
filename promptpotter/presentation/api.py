@@ -872,7 +872,7 @@ async def get_dataset_preview(
 
     import math
 
-    artifact = build_archive_hard_samples_artifact(store.archive, backend_id, top_k_samples=None)
+    artifact = build_archive_hard_samples_artifact(store, backend_id, top_k_samples=None)
     rasch = artifact.get("rasch", {})
     delta_map: dict[int, float] = {int(k): float(v) for k, v in rasch.get("delta", {}).items()}
     n_obs_map: dict[int, int] = {

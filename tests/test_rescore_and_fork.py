@@ -5,7 +5,7 @@ Three named invariants:
      projects ``score`` / ``hit`` to the active scorer; ``replay_decisions``
      uses rescored baselines (never stale recorded ones); ``elimination_cut``
      replay flags divergence when scores flip; unknown decision kinds skip.
-  2. ``_fork_at_divergence`` / ``fork_for_diag_sibling`` /
+  2. ``fork_at_divergence`` / ``fork_for_diag_sibling`` /
      ``fork_for_sweep_sibling`` mint counted ids, retarget the active pointer,
      drop rounds beyond the fork point (or all rounds for diag/sweep),
      and append a FORK_CUT decision to the parent ledger that downstream
@@ -21,8 +21,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from promptpotter.application.optimization.cycle import (
-    _fork_at_divergence,
+from promptpotter.application.optimization.resume_and_fork import (
+    fork_at_divergence,
     fork_for_diag_sibling,
     fork_for_sweep_sibling,
     replay_decisions,
@@ -138,7 +138,7 @@ def _seed_cycle(projects_root: Path, tenant: str, cycle_id: str, n_rounds: int) 
     return rounds_index
 
 
-def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
+def testfork_at_divergence_drops_round_R_and_sets_parent_pointer(
     tmp_path: Path, monkeypatch
 ) -> None:
     """Forking inside resume must inherit rounds < R, drop R, and retarget the pointer."""
@@ -151,7 +151,7 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
     )
 
     stores = build_stores(tmp_path, tenant_id=tenant)
-    new_cycle = _fork_at_divergence(
+    new_cycle = fork_at_divergence(
         stores.campaigns,
         tenant_id=tenant,
         session_id="s_test",
@@ -175,7 +175,7 @@ def test_fork_at_divergence_drops_round_R_and_sets_parent_pointer(
     assert pointer == {"tenant_id": tenant, "session_id": "s_test", "cycle_id": new_cycle}
 
 
-def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, monkeypatch) -> None:
+def testfork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, monkeypatch) -> None:
     """The parent's events.jsonl must end with a FORK_CUT decision naming the new cycle.
 
     A reader tailing the parent's ledger sees the cutover inline — no
@@ -195,7 +195,7 @@ def test_fork_at_divergence_appends_fork_cut_to_parent_ledger(tmp_path: Path, mo
 
     stores = build_stores(tmp_path, tenant_id=tenant)
     parent_dir = stores.campaigns.campaign_dir(old_cycle)
-    new_cycle = _fork_at_divergence(
+    new_cycle = fork_at_divergence(
         stores.campaigns,
         tenant_id=tenant,
         session_id="s_test",
@@ -367,7 +367,7 @@ def test_fork_for_sweep_sibling_does_not_inherit_round_candidates(
 ) -> None:
     """Sweep forks must start with no candidate-cache files copied from the
     parent — round 0 has to regenerate via L1 to actually exercise the
-    payload's brief. ``_fork_at_divergence`` inherits prior rounds for
+    payload's brief. ``fork_at_divergence`` inherits prior rounds for
     resume semantics; ``fork_for_sweep_sibling`` deliberately doesn't, and
     a regression here silently makes every fork in a batch score the
     parent's pre-existing population.

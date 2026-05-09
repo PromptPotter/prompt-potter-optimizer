@@ -21,7 +21,7 @@ from typing import Any
 
 from promptpotter.config.settings import DATASET_NAME
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.infrastructure.store import Stores
+from promptpotter.infrastructure.store import Stores, archive_views
 from promptpotter.infrastructure.store.base import read_json_optional, write_json
 from promptpotter.infrastructure.tracing.bridge import ObservabilityBridge
 from promptpotter.infrastructure.tracing.events import (
@@ -128,7 +128,7 @@ def _collect_ground_truth(
     gt_map: dict[str, str] = {}
     for s in summaries:
         rid = s.get("run_id", "")
-        detail = store.archive.load_by_id(backend_id, rid)
+        detail = archive_views.load_run(store, backend_id, rid)
         if not detail:
             continue
         for item in detail.get("measurements", []):
@@ -149,7 +149,7 @@ def _replay_run(
     dataset_name: str,
 ) -> bool:
     """Replay one dataset_run's items as events. Returns ``True`` on success."""
-    detail = store.archive.load_by_id(backend_id, run_id)
+    detail = archive_views.load_run(store, backend_id, run_id)
     if not detail:
         logger.warning("replay: could not load detail for run %s", run_id)
         return False
@@ -237,7 +237,7 @@ def sync_langfuse_runs(
         _save_state(store, backend_id, _fresh_state())
         logger.info("Langfuse push state reset — will re-push all runs.")
 
-    n_runs = len(store.archive.list_all(backend_id))
+    n_runs = len(archive_views.list_runs(store, backend_id))
     if n_runs == 0:
         logger.info("No completed dataset runs — skipping Langfuse backfill.")
         return None
@@ -264,7 +264,7 @@ def push_all_runs(
     state = _load_state(store, backend_id)
     already_done = set(state["backfilled_run_ids"])
 
-    summaries = store.archive.list_all(backend_id)
+    summaries = archive_views.list_runs(store, backend_id)
     total_on_disk = len(summaries)
 
     def _emit(msg: str) -> None:
@@ -319,7 +319,7 @@ def push_all_runs(
                 dataset_name=dataset_name,
             )
             if ok:
-                detail = store.archive.load_by_id(backend_id, rid)
+                detail = archive_views.load_run(store, backend_id, rid)
                 if detail:
                     scores = detail.get("scores", {})
                     accuracies.append(scores.get("accuracy", 0.0))

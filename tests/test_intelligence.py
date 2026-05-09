@@ -362,7 +362,8 @@ def test_archive_observations_use_content_hash_prefix(
             {"hit": True},  # dropped: missing sample_id
         ],
     )
-    obs = build_archive_observations(aggregator_archive, "bk")
+    stores = SimpleNamespace(archive=aggregator_archive)
+    obs = build_archive_observations(stores, "bk")
     assert len(obs) == 2
     assert all(o.candidate_id == long_hash[:12] for o in obs)
     assert {o.sample_id for o in obs} == {1, 2}

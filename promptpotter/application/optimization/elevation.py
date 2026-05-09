@@ -25,14 +25,14 @@ import numpy as np
 
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.domain.search_point import JobSearchPoint
-from promptpotter.infrastructure.store import root_cycle_id
+from promptpotter.infrastructure.store import archive_views, root_cycle_id
 from promptpotter.shared.statistics import posterior_best_probabilities
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.sample import Sample
-    from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+    from promptpotter.infrastructure.store import Stores
 
 logger = logging.getLogger(__name__)
 
@@ -136,7 +136,7 @@ class ElevationResult:
 
 def _load_arm_history(
     jsp: JobSearchPoint,
-    archive: MeasurementArchive,
+    stores: Stores,
     backend_id: str,
     pipeline_schema: PipelineSchema,
 ) -> tuple[list[float], set[int]]:
@@ -150,10 +150,10 @@ def _load_arm_history(
     chain = pipeline_schema.node_configs(jsp.pipeline_params or {})
     chain_len = len(chain)
     seen: dict[int, float] = {}
-    for entry, match_len in archive.find_by_node_configs(backend_id, chain):
+    for entry, match_len in archive_views.find_by_prefix(stores, backend_id, chain):
         if match_len < chain_len:
             break
-        detail = archive.load_by_id(backend_id, entry["run_id"])
+        detail = archive_views.load_run(stores, backend_id, entry["run_id"])
         if detail is None:
             continue
         for item in detail.get("measurements", []):
@@ -231,13 +231,13 @@ async def elevate_to_decisive(
         rng = np.random.default_rng(0)
 
     schema = session.pipeline_schema
-    archive = session.store.archive
+    stores = session.store
     backend_id = session.backend_id
 
     histories: dict[str, list[float]] = {}
     measured: dict[str, set[int]] = {}
     for name, jsp in arms.items():
-        h, sids = _load_arm_history(jsp, archive, backend_id, schema)
+        h, sids = _load_arm_history(jsp, stores, backend_id, schema)
         histories[name] = h
         measured[name] = sids
     topups = dict.fromkeys(arms, 0)

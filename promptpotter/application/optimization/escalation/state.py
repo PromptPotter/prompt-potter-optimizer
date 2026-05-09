@@ -169,9 +169,9 @@ class EscalationState:
         L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
         the mid-round signal path (DegradationCheck) shares the same cascade.
         """
-        from promptpotter.application.optimization.cadence import (
-            SignalInputs,
-            evaluate_round,
+        from promptpotter.application.optimization.cadence import SignalInputs
+        from promptpotter.application.optimization.escalation.decide import (
+            decide_escalation,
         )
 
         self._l1_stall_count = 0 if improved else self._l1_stall_count + 1
@@ -185,7 +185,7 @@ class EscalationState:
             axes_with_positive_yield=axes_with_positive_yield,
             escalate_on_yield_drought=escalate_on_yield_drought,
         )
-        return evaluate_round(inputs)
+        return decide_escalation(inputs)
 
     def observe_l2_escalation(
         self,

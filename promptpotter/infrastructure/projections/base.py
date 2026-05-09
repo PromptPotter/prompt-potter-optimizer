@@ -2,11 +2,11 @@
 
 Every concrete projection in this package isinstance-dispatches the same
 ``CycleRecord`` subtypes (``PhaseRecord`` / ``SnapshotRecord`` /
-``DecisionRecord`` / ``TokenUsageRecord``). This base owns that dispatch
-in one place: subclasses override only the hooks they care about, and
-adding a new ``CycleRecord`` subtype touches one file instead of N.
-Default hooks are no-ops so writers that don't care about a kind stay
-silent without boilerplate.
+``DecisionRecord`` / ``TokenUsageRecord`` / ``LLMCallRecord``). This
+base owns that dispatch in one place: subclasses override only the
+hooks they care about, and adding a new ``CycleRecord`` subtype
+touches one file instead of N. Default hooks are no-ops so writers
+that don't care about a kind stay silent without boilerplate.
 """
 
 from __future__ import annotations
@@ -14,6 +14,7 @@ from __future__ import annotations
 from promptpotter.domain.run_records import (
     CycleRecord,
     DecisionRecord,
+    LLMCallRecord,
     PhaseRecord,
     SnapshotRecord,
     TokenUsageRecord,
@@ -33,8 +34,11 @@ class ProjectionBase:
             self._handle_decision(record)
         elif isinstance(record, TokenUsageRecord):
             self._handle_token_usage(record)
+        elif isinstance(record, LLMCallRecord):
+            self._handle_llm_call(record)
 
     def _handle_phase(self, record: PhaseRecord) -> None: ...
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
     def _handle_decision(self, record: DecisionRecord) -> None: ...
     def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...
+    def _handle_llm_call(self, record: LLMCallRecord) -> None: ...

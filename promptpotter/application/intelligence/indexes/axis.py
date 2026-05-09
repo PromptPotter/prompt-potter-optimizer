@@ -19,6 +19,7 @@ from promptpotter.application.intelligence.indexes.format import (
 from promptpotter.application.intelligence.indexes.sample import SampleIndex
 from promptpotter.application.scoring.formula import rescore_results
 from promptpotter.domain.scoring import Scorer
+from promptpotter.infrastructure.store import archive_views
 
 if TYPE_CHECKING:
     from promptpotter.infrastructure.store import Stores
@@ -302,7 +303,9 @@ class AxisIndex:
         full archive on first refresh.
         """
         added = 0
-        for run_id, detail in store.archive.load_since(backend_id, self.sample_index._seen_runs):
+        for run_id, detail in archive_views.runs_since(
+            store, backend_id, self.sample_index._seen_runs
+        ):
             if scorer is not None:
                 rescore_results(detail.get("measurements") or [], scorer, scorer_id, scorer_formula)
             self.sample_index.ingest_run(detail)
@@ -314,7 +317,7 @@ class AxisIndex:
         # ``_axis_values``, tracking which axes the delta touched so we
         # can invalidate exactly those impact-cache slots.
         touched_axes: set[str] = set()
-        for entry in store.archive.list_all(backend_id):
+        for entry in archive_views.list_runs(store, backend_id):
             run_id = entry.get("run_id", "")
             if not run_id or run_id in self._axis_seen_runs:
                 continue

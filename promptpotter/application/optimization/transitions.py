@@ -85,7 +85,8 @@ async def run_layer_transition(
         llm_client=llm_client,
         model=model,
         temperature=transition.default_temperature if temperature is None else temperature,
-        recorder=cycle.session.state.audit_projection,
+        ledger=cycle.session.state.ledger,
+        round_num=round_num,
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
     return transition.build_result(raw, cycle.opt_sp, prompt)

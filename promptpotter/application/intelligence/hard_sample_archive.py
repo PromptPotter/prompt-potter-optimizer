@@ -7,8 +7,8 @@ instead of a single cycle's ``rounds``. Candidate IDs are
 ``content_hash[:12]`` (cross-cycle stable) instead of round-local
 ``cand_NNN``.
 
-Pure read-only — no I/O of its own beyond what
-:meth:`MeasurementArchive.list_all` and :meth:`load_by_id` perform.
+Pure read-only — every archive access goes through
+:mod:`promptpotter.infrastructure.store.archive_views`.
 """
 
 from __future__ import annotations
@@ -19,9 +19,10 @@ from promptpotter.application.intelligence.exploration import Observation
 from promptpotter.application.intelligence.hard_sample_sorter import (
     build_hard_samples_artifact_from_observations,
 )
+from promptpotter.infrastructure.store import archive_views
 
 if TYPE_CHECKING:
-    from promptpotter.infrastructure.store.measurement_archive import MeasurementArchive
+    from promptpotter.infrastructure.store import Stores
 
 __all__ = [
     "build_archive_hard_samples_artifact",
@@ -32,7 +33,7 @@ CANDIDATE_HASH_LEN = 12
 
 
 def build_archive_observations(
-    archive: MeasurementArchive,
+    stores: Stores,
     backend_id: str,
 ) -> list[Observation]:
     """Walk every measurement detail in the archive, project triples.
@@ -42,7 +43,7 @@ def build_archive_observations(
     errors, and entries lacking a ``content_hash``.
     """
     obs: list[Observation] = []
-    for entry in archive.list_all(backend_id):
+    for entry in archive_views.list_runs(stores, backend_id):
         content_hash = (entry.get("content_hash") or "").strip()
         if not content_hash:
             continue
@@ -50,7 +51,7 @@ def build_archive_observations(
         run_id = entry.get("run_id")
         if not run_id:
             continue
-        detail = archive.load_by_id(backend_id, run_id)
+        detail = archive_views.load_run(stores, backend_id, run_id)
         if detail is None:
             continue
         for item in detail.get("measurements", []):
@@ -70,7 +71,7 @@ def build_archive_observations(
 
 
 def build_archive_hard_samples_artifact(
-    archive: MeasurementArchive,
+    stores: Stores,
     backend_id: str,
     *,
     top_k_candidates: int | None = 40,
@@ -83,7 +84,7 @@ def build_archive_hard_samples_artifact(
     Pass ``top_k_*=None`` for the full matrix.
     """
     return build_hard_samples_artifact_from_observations(
-        build_archive_observations(archive, backend_id),
+        build_archive_observations(stores, backend_id),
         cycle_id=None,
         top_k_candidates=top_k_candidates,
         top_k_samples=top_k_samples,

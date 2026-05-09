@@ -308,7 +308,10 @@ def _build_divergence_hint() -> str:
     enum so adding a kind (with its gating choice) updates the operator
     message automatically.
     """
-    from promptpotter.domain.run_records import DECISION_GATING, GatingMode
+    from promptpotter.application.optimization.resume_and_fork import (
+        DECISION_GATING,
+        GatingMode,
+    )
 
     replayed = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.REPLAYED)
     archival = sorted(k.value for k, m in DECISION_GATING.items() if m is GatingMode.ARCHIVAL)
@@ -488,7 +491,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
     existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
-    from promptpotter.application.optimization.cycle import fork_for_diag_sibling
+    from promptpotter.application.optimization.resume_and_fork import fork_for_diag_sibling
 
     new_cycle_id = fork_for_diag_sibling(
         session.store.campaigns,

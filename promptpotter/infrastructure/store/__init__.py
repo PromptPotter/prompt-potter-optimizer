@@ -1,5 +1,6 @@
 """Focused store modules for file-based persistence."""
 
+from promptpotter.infrastructure.store import archive_views
 from promptpotter.infrastructure.store.active_pointer import (
     active_pointer_exists,
     clear_active_pointer,
@@ -32,6 +33,7 @@ __all__ = [
     "Stores",
     "SweepStore",
     "active_pointer_exists",
+    "archive_views",
     "build_stores",
     "campaign_dir_for",
     "clear_active_pointer",
