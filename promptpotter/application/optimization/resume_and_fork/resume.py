@@ -7,8 +7,9 @@ either:
 
 * halts with :class:`ResumeDivergenceError` when ``fork_on_divergence``
   is False, or
-* mints a sibling via :func:`fork_at_divergence`, retargets the active
-  pointer, and returns the new cycle's id and resume offset.
+* mints a sibling via :func:`_mint_fork` with
+  ``ForkTrigger.SCORING_DIVERGENCE``, retargets the active pointer,
+  and returns the new cycle's id and resume offset.
 
 Behaviour-equivalent to the prior cycle.py implementation. The
 escalation FSM is rebuilt via ``EscalationState.from_ledger`` because
@@ -23,10 +24,11 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.optimization.escalation.state import EscalationState
 from promptpotter.application.optimization.resume_and_fork.fork_siblings import (
     ForkResult,
-    fork_at_divergence,
+    _mint_fork,
 )
 from promptpotter.application.optimization.resume_and_fork.replayers import replay_decisions
 from promptpotter.application.scoring.formula import rescore_results
+from promptpotter.domain.run_records import ForkPayload, ForkTrigger
 from promptpotter.shared.errors import ResumeDivergenceError
 
 if TYPE_CHECKING:
@@ -79,13 +81,18 @@ def resume_with_divergence_check(
                 continue
             if fork_on_divergence:
                 survivors = list(prior[:i])
-                new_cycle_id = fork_at_divergence(
+                new_cycle_id = _mint_fork(
                     campaign_store,
                     session.store.tenant_id,
                     session.session_id,
                     cycle_id,
                     div.round_num,
-                    survivors,
+                    ForkPayload(
+                        trigger=ForkTrigger.SCORING_DIVERGENCE,
+                        reason=f"scorer_mismatch:{div.kind}",
+                        issued_by="system",
+                    ),
+                    surviving_rounds=survivors,
                 )
                 if survivors:
                     cycle.restore_from_trial(survivors[-1])

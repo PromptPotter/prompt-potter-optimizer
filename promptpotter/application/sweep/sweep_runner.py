@@ -1,9 +1,12 @@
 """Sweep-batch orchestration.
 
-One fork per ``SweepPayload``. Persistence flows through ``SweepStore``;
-fork creation flows through ``CampaignStore`` (via ``fork_for_sweep_sibling``).
-The orchestrator owns batch identity, the per-fork session rebuild loop,
-interrupt handling, and active-pointer restoration.
+One fork per ``OperatorSweepFile``. Persistence flows through
+``SweepStore``; fork creation flows through ``CampaignStore`` via the
+unified :func:`_mint_fork` primitive (this module widens each operator
+file into a ``ForkPayload(trigger=OPERATOR_SWEEP, ...)`` before calling
+the primitive). The orchestrator owns batch identity, the per-fork
+session rebuild loop, interrupt handling, and active-pointer
+restoration.
 
 The CLI entry point in ``presentation/cli/campaign_runner.py`` is a thin
 shim: build an observer factory bound to its own ``args``, call
@@ -20,10 +23,10 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.optimization.resume_and_fork import fork_for_sweep_sibling
+from promptpotter.application.optimization.resume_and_fork import _mint_fork
 from promptpotter.domain.phases import StopReason
 from promptpotter.domain.results import PayloadOutcome, SweepBatchResult
-from promptpotter.domain.run_records import SweepPayload
+from promptpotter.domain.run_records import ForkPayload, ForkTrigger, OperatorSweepFile
 from promptpotter.infrastructure.store import (
     build_stores,
     root_cycle_id,
@@ -51,14 +54,18 @@ def resolve_sweep_dir(dataset_name: str | None) -> Path | None:
     return sweep_dir if sweep_dir.is_dir() else None
 
 
-def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, SweepPayload]]:
-    """Parse every ``*.json`` under ``sweep_dir`` into ``(path, SweepPayload)``.
+def load_sweep_payloads(sweep_dir: Path) -> list[tuple[Path, OperatorSweepFile]]:
+    """Parse every ``*.json`` under ``sweep_dir`` into ``(path, OperatorSweepFile)``.
 
     Pydantic ``extra='forbid'`` raises ``ValidationError`` on unknown keys,
-    so operator typos halt the batch before any fork mints.
+    so operator typos halt the batch before any fork mints. The
+    orchestrator widens each :class:`OperatorSweepFile` into a
+    :class:`ForkPayload` before calling :func:`_mint_fork`.
     """
     files = sorted(sweep_dir.glob("*.json"))
-    return [(p, SweepPayload.model_validate_json(p.read_text(encoding="utf-8"))) for p in files]
+    return [
+        (p, OperatorSweepFile.model_validate_json(p.read_text(encoding="utf-8"))) for p in files
+    ]
 
 
 def existing_fork_source_files(store: Any, parent_cycle_id: str) -> dict[str, str]:
@@ -102,12 +109,12 @@ async def run_sweep_batch(
     root_ctx: SessionCtx,
     campaign_config: CampaignConfig,
     train_data: list[Sample],
-    sweep_payloads: list[tuple[Path, SweepPayload]],
+    sweep_payloads: list[tuple[Path, OperatorSweepFile]],
     *,
     observer_factory: Callable[..., Any],
     verbose: bool,
 ) -> SweepBatchResult:
-    """Mint one fork per ``SweepPayload`` and run sweep mode on each.
+    """Mint one fork per ``OperatorSweepFile`` and run sweep mode on each.
 
     Forks branch off ``root_ctx.cycle_id`` — whatever the active
     pointer names. The first fork's baseline run populates the
@@ -167,16 +174,23 @@ async def run_sweep_batch(
                 existing[path.name],
             )
             continue
-        new_cycle_id = fork_for_sweep_sibling(
-            campaign_store=store.campaigns,
-            tenant_id=tenant_id,
-            session_id=root_ctx.session_id,
-            parent_cycle_id=parent_cycle_id,
-            sweep_batch_id=batch_id,
-            payload_source_file=path.name,
-            payload=payload,
+        fork_payload = ForkPayload(
+            trigger=ForkTrigger.OPERATOR_SWEEP,
+            reason=payload.reason,
+            issued_by=tenant_id,
+            l1_layout=payload.l1_layout,
         )
-        # fork_for_sweep_sibling retargeted the active pointer to new_cycle_id.
+        new_cycle_id = _mint_fork(
+            store.campaigns,
+            tenant_id,
+            root_ctx.session_id,
+            parent_cycle_id,
+            0,
+            fork_payload,
+            sweep_batch_id=batch_id,
+            sweep_source_file=path.name,
+        )
+        # _mint_fork retargeted the active pointer to new_cycle_id.
         # Re-load context for this fork and build a fresh session bound to it.
         fork_ctx = load_session(args)
         fork_session = await init_services(
@@ -211,7 +225,7 @@ async def run_sweep_batch(
             experiment_id=fork_ctx.state["experiment_id"],
             task_context=fork_ctx.task_context,
             sweep=True,
-            fork_payload=payload,
+            fork_payload=fork_payload,
         )
         new_cycle_ids.append(new_cycle_id)
         if fork_result.stop_reason == StopReason.INTERRUPTED:

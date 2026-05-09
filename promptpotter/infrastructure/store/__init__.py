@@ -86,6 +86,38 @@ def active_pointer_exists() -> bool:
     return _ACTIVE_SESSION_PATH.exists()
 
 
+def walk_cycle_lineage(tenant_root: Path, cycle_id: str) -> list[str]:
+    """Walk parent_cycle_id chain via index.json reads. Returns ``[root, …, cycle_id]``.
+
+    Each fork's ``index.json`` carries ``parent_cycle_id``; this walker
+    follows that chain until it hits a cycle with no parent (the family
+    root). The dashboard surfaces the result as ``cycle_id_path`` so live
+    readers + the webapp can render the branch tree without parsing the
+    cycle-id string encoding (which is fragile to future trigger
+    additions).
+
+    O(depth) reads. Idempotent on re-call. Stops on the first missing
+    ``index.json`` (treats it as the root) so an in-flight fork before
+    its index is written still produces a partial-but-stable path.
+    """
+    chain = [cycle_id]
+    current = cycle_id
+    while True:
+        idx_path = campaign_dir_for(tenant_root, current) / "index.json"
+        if not idx_path.exists():
+            break
+        try:
+            data = json.loads(idx_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            break
+        parent = data.get("parent_cycle_id")
+        if not parent:
+            break
+        chain.insert(0, str(parent))
+        current = str(parent)
+    return chain
+
+
 __all__ = [
     "BackendStore",
     "CampaignStore",
@@ -107,4 +139,5 @@ __all__ = [
     "session_dir_for",
     "sibling_kind",
     "sweep_batch_dir_for",
+    "walk_cycle_lineage",
 ]

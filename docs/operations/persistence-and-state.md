@@ -174,7 +174,7 @@ Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial c
 
 **Per-fork protocol:** baseline (cache-hit after the first fork) + 1 full scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`. The leaderboard pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
 
-**Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`SweepPayload`) — the L1-surface fields L2 already mutates, plus a `reason` label:
+**Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`OperatorSweepFile`) — the L1-surface fields L2 already mutates, plus a `reason` label. The dispatcher widens each parsed file into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)` before calling `_mint_fork`, so operators never write trigger/issued_by boilerplate by hand.
 
 ```json
 {
@@ -212,7 +212,7 @@ The runner: parses every `*.json` under `datasets/{name}/sweep/` (sorted by file
 
 Side-by-side: `python scripts/ppot_review.py --sweep`. Sweep view groups by parent root, sorts by `round_1_top_lift` desc, reports `proxy_lift_corr` once at least 4 paired (sweep, full) branches share an `l1_generate_hash`.
 
-**Sweep is screening, not validation.** Promote winners to a full `optimize` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from `SweepPayload`. Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
+**Sweep is screening, not validation.** Promote winners to a full `optimize` run. Sweep is for L1-surface overrides — pipeline / scoring changes are intentionally absent from the operator file shape (the unified `ForkPayload` reserves `pipeline_swap` / `scoring_swap` slots for M11/M12 LLM-rebase callers, but operators don't author those). Forks run sequentially (the active session pointer doesn't tolerate concurrent mints).
 
 ---
 

@@ -12,7 +12,7 @@
   :data:`DEFAULT_ESCALATION_RULES` list. Adding a rule means adding a
   row.
 - :mod:`.firing` — :func:`escalate_l2` (the L2/L3 firing driver) +
-  :class:`LayerStrategy` + :func:`apply_sweep_payload_to_osp`.
+  :class:`LayerStrategy` + :func:`apply_fork_payload_to_osp`.
 """
 
 from promptpotter.application.optimization.escalation.decide import (
@@ -20,7 +20,7 @@ from promptpotter.application.optimization.escalation.decide import (
     decide_escalation,
 )
 from promptpotter.application.optimization.escalation.firing import (
-    apply_sweep_payload_to_osp,
+    apply_fork_payload_to_osp,
     escalate_l2,
 )
 from promptpotter.application.optimization.escalation.rules import (
@@ -40,7 +40,7 @@ __all__ = [
     "EscalationRule",
     "EscalationState",
     "NextAction",
-    "apply_sweep_payload_to_osp",
+    "apply_fork_payload_to_osp",
     "decide_escalation",
     "escalate_l2",
 ]

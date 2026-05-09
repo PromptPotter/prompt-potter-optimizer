@@ -38,7 +38,11 @@ from promptpotter.infrastructure.projections.live_state import (
     empty_spend,
     top_n_p_best,
 )
-from promptpotter.infrastructure.store import root_dir_for, session_dir_for
+from promptpotter.infrastructure.store import (
+    root_dir_for,
+    session_dir_for,
+    walk_cycle_lineage,
+)
 from promptpotter.shared.composite import inline_short_formula_values
 from promptpotter.shared.errors import is_degraded
 
@@ -146,6 +150,13 @@ class LiveDashboardView(DerivedView):
         self._recorder = recorder
         self.patience_max = l1_patience
         r = resume_from or {}
+        # cycle_id_path: family-root → … → active fork. Walked from disk
+        # via parent_cycle_id chain so the webapp + branch-tree renderer
+        # don't reverse-engineer the cycle-id string encoding.
+        cycle_id_path: list[str] = []
+        if cycle_id:
+            tenant_root = root_path.parents[1]  # campaigns/<root>/.. → tenant root
+            cycle_id_path = walk_cycle_lineage(tenant_root, cycle_id)
         self.state: dict[str, Any] = {
             "state": r.get("state", "init"),
             "state_since": datetime.now(UTC).isoformat(),
@@ -159,6 +170,7 @@ class LiveDashboardView(DerivedView):
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
             "cycle_id": cycle_id,
+            "cycle_id_path": cycle_id_path,
             "degraded_count": 0,
             "error_count": 0,
             "total_queries_scored": r.get("total_queries_scored", 0),
@@ -257,11 +269,16 @@ class LiveDashboardView(DerivedView):
         self._persist()
 
     def log_fork(self, *, old_cycle_id: str, new_cycle_id: str, from_round: int) -> None:
-        """Update ``dashboard.json::cycle_id`` so live readers see the new fork
-        as the active cycle. The structured FORK_CUT decision is appended to
-        the ledger by the runner."""
+        """Update ``dashboard.json::cycle_id`` + ``cycle_id_path`` so live
+        readers see the new fork as the active cycle and can render the
+        branch tree. The structured FORK_CUT decision is appended to the
+        ledger by the runner."""
         del old_cycle_id, from_round
         self.state["cycle_id"] = new_cycle_id
+        path: list[str] = list(self.state.get("cycle_id_path") or [])
+        if not path or path[-1] != new_cycle_id:
+            path.append(new_cycle_id)
+        self.state["cycle_id_path"] = path
         self._persist()
 
     # -- Ledger subscription (sole ingress) -----------------------------------

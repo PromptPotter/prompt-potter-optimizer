@@ -495,13 +495,21 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
     existing_index = session.store.campaigns.load(session.backend_id, ctx.cycle_id) or {}
     if (existing_index.get("final") or {}).get("mode") != "diag":
         return
-    from promptpotter.application.optimization.resume_and_fork import fork_for_diag_sibling
+    from promptpotter.application.optimization.resume_and_fork import _mint_fork
+    from promptpotter.domain.run_records import ForkPayload, ForkTrigger
 
-    new_cycle_id = fork_for_diag_sibling(
+    tenant_id = session.tenant.tenant_id if session.tenant else "default"
+    new_cycle_id = _mint_fork(
         session.store.campaigns,
-        session.tenant.tenant_id if session.tenant else "default",
+        tenant_id,
         ctx.session_id,
         ctx.cycle_id,
+        0,
+        ForkPayload(
+            trigger=ForkTrigger.OPERATOR_DIAG,
+            reason="diag-sibling BFS exploration",
+            issued_by=tenant_id,
+        ),
     )
     ctx.cycle_id = new_cycle_id
     session.state.cycle_id = new_cycle_id
@@ -511,9 +519,11 @@ async def _maybe_dispatch_sweep_batch(
     args: argparse.Namespace, ctx, campaign_config, train_data
 ) -> CommandResult | None:
     """Multi-fork sweep dispatch: with --sweep AND a non-empty
-    ``datasets/{name}/sweep/*.json`` directory, mint one fork per candidate
-    ``SweepPayload`` and run sweep mode on each. Returns None to fall through
-    to the normal path (no --sweep flag, no sweep dir, or empty payloads)."""
+    ``datasets/{name}/sweep/*.json`` directory, mint one fork per
+    :class:`OperatorSweepFile` (widened to a ``ForkPayload`` by
+    :mod:`promptpotter.application.sweep.sweep_runner`) and run sweep mode
+    on each. Returns None to fall through to the normal path (no --sweep
+    flag, no sweep dir, or empty payloads)."""
     if not getattr(args, "sweep", False):
         return None
     from promptpotter.application.sweep import (

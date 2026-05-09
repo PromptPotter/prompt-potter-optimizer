@@ -31,6 +31,12 @@ __all__ = [
 ]
 
 
+# TODO M11 (Track 5b): when L2/L3 rebase emission lands, promote this to a
+# Pydantic ``OptimizerAction(BaseModel)`` with an optional ``rebase`` field
+# carrying ``target_round`` + ``ForkPayload``-shaped deltas. The runner
+# converts the rebase action to a ``ForkPayload(trigger=L2_REBASE|L3_REBASE,
+# ...)`` and calls ``_mint_fork``. See ``docs/specs/m10-prompt-iteration-framework.md``
+# Track 5b.
 OptimizerAction = Literal["normal_round", "probe_round"]
 
 

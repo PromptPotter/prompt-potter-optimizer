@@ -45,13 +45,13 @@ A branch's ledger inherits from its parent up to the cut, so reading a fork's hi
 
 **Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `archive/` row — that's why the second fork's "baseline" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
 
-OSP is the optimizer's working memory for one branch — not part of the tree structure. When sweep mints a fork with overrides, the override fields ride into the fork as payload (written into FORK_CUT's `data.fork.sweep_payload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). For what OSP carries: [`state-record.md`](state-record.md).
+OSP is the optimizer's working memory for one branch — not part of the tree structure. When sweep mints a fork with overrides, the override fields ride into the fork as payload (written into FORK_CUT's typed `data.fork: ForkPayload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). For what OSP carries: [`state-record.md`](state-record.md).
 
 ## The primitive's three checks
 
 When a new fork driver lands, run it through three checks. If any fail, the primitive has reached its scope and the new feature wants its own layer:
 
-1. **Trigger-agnostic.** New caller adds an entry under `data.fork.*` and a few lines in one orchestrator. No edits to `_fork_at_divergence`'s body, no new ledger record kind.
+1. **Trigger-agnostic.** New caller adds a `ForkTrigger` enum member and constructs a `ForkPayload` — no edits to `_mint_fork`'s body, no new ledger record kind.
 2. **Override is OSP-carriable.** Branch-differing fields are already (or trivially extensible to) `OptSearchPoint` fields. A different pipeline shape or scoring formula is a layer above.
 3. **No data fracture.** No parallel persistence directory; no duplicate of something already in `archive/`, `rounds/`, or the ledger.
 
@@ -62,11 +62,11 @@ The primitive passes all three for sweep, scoring-divergence, and the planned op
 The roadmap calls full self-optimization "L4" — a layer above L3 proposing the next round of candidate L1 prompts. In the absence of the auto-policy:
 
 1. Operator (or Claude via `/potter-review`) reads `review.md` for the last sweep batch.
-2. Operator authors the next batch of `SweepPayload` JSONs.
+2. Operator authors the next batch of `OperatorSweepFile` JSONs (one per candidate, narrow `reason` + `l1_layout` shape; the dispatcher widens each into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)`).
 3. `optimize --sweep` runs the next generation.
 4. Library cache means baseline measurements don't repeat — each generation only pays for actual L1 variants.
 
-This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus the on-demand `MeasurementArchive` views are the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, applies the same `SweepPayload` shape, runs the same primitive.
+This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus the on-demand `MeasurementArchive` views are the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, constructs the same `ForkPayload`, runs the same primitive.
 
 ## See also
 

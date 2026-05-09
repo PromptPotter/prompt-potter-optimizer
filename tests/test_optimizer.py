@@ -36,7 +36,7 @@ import types
 import numpy as np
 import pytest
 
-from promptpotter.application.optimization.escalation import apply_sweep_payload_to_osp
+from promptpotter.application.optimization.escalation import apply_fork_payload_to_osp
 from promptpotter.application.optimization.escalation.firing import (
     _apply_l2,
     _apply_l3,
@@ -54,7 +54,7 @@ from promptpotter.application.optimization.l2_validators import (
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.results import CandidateProposal
-from promptpotter.domain.run_records import ResumeCheckpointKind, SweepPayload
+from promptpotter.domain.run_records import ForkPayload, ForkTrigger, ResumeCheckpointKind
 
 scipy = pytest.importorskip("scipy")  # transitively required by other math helpers
 
@@ -282,7 +282,7 @@ def test_pobb_locks_in_dominant_leader():
 
 
 # ===========================================================================
-# SweepPayload → OSP round-trip
+# ForkPayload → OSP round-trip
 # ===========================================================================
 
 
@@ -291,12 +291,22 @@ def _full_layout_dict() -> dict[str, list[str]]:
     return default_l1_layout().model_dump()
 
 
-def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
+def _operator_sweep_payload(**kwargs: object) -> ForkPayload:
+    """Build the operator-sweep ForkPayload shape the runner constructs."""
+    return ForkPayload(
+        trigger=ForkTrigger.OPERATOR_SWEEP,
+        reason=str(kwargs.pop("reason", "canonical case")),
+        issued_by=str(kwargs.pop("issued_by", "test-operator")),
+        **kwargs,  # type: ignore[arg-type]
+    )
+
+
+def test_fork_payload_roundtrips_through_opt_search_point() -> None:
     layout_dict = _full_layout_dict()
-    payload = SweepPayload(reason="canonical case", l1_layout=layout_dict)
+    payload = _operator_sweep_payload(l1_layout=layout_dict)
 
     osp = OptSearchPoint.from_prompt_fields({"persona": "p", "task_intent": "t"})
-    apply_sweep_payload_to_osp(osp, payload)
+    apply_fork_payload_to_osp(osp, payload)
 
     assert osp.l1_layout.model_dump() == layout_dict
 
@@ -306,16 +316,16 @@ def test_sweep_payload_roundtrips_through_opt_search_point() -> None:
     assert reloaded.l1_layout.model_dump() == layout_dict
 
 
-def test_sweep_payload_rejects_layout_missing_mandatory_placeholder() -> None:
+def test_fork_payload_rejects_layout_missing_mandatory_placeholder() -> None:
     """Hard validator: every L1_MANDATORY placeholder must appear somewhere."""
     bad_layout = {
         "task_intent": ["task_context"],
         "problem_description": ["rendered_prompt"],  # missing pipeline_param_catalogue + plan
     }
-    payload = SweepPayload(l1_layout=bad_layout)
+    payload = _operator_sweep_payload(l1_layout=bad_layout)
     osp = OptSearchPoint.from_prompt_fields({"persona": "p"})
     with pytest.raises(ValueError, match="hard validators"):
-        apply_sweep_payload_to_osp(osp, payload)
+        apply_fork_payload_to_osp(osp, payload)
 
 
 # ===========================================================================

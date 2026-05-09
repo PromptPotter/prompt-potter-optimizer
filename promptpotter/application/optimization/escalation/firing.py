@@ -51,7 +51,7 @@ from promptpotter.domain.l1_layout import (
 )
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
-from promptpotter.domain.run_records import SweepPayload
+from promptpotter.domain.run_records import ForkPayload
 from promptpotter.infrastructure import llm as _llm_client
 from promptpotter.infrastructure.tracing import LayerApplied, observed_node
 from promptpotter.shared.errors import graceful
@@ -67,7 +67,7 @@ __all__ = [
     "L2",
     "L3",
     "LayerStrategy",
-    "apply_sweep_payload_to_osp",
+    "apply_fork_payload_to_osp",
     "escalate_l2",
 ]
 
@@ -94,20 +94,27 @@ def _coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
         return None
 
 
-def apply_sweep_payload_to_osp(opt_sp: OptSearchPoint, payload: SweepPayload) -> None:
-    """Stamp operator's L1-surface deltas on the OSP — same shape L2 writes."""
+def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
+    """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes.
+
+    Called by the runner when an operator-issued or LLM-issued fork carries
+    OSP deltas (today: ``OPERATOR_SWEEP``; M11: ``L2_REBASE`` /
+    ``L3_REBASE``). Triggers without OSP deltas (e.g. ``SCORING_DIVERGENCE``)
+    are filtered out at the call site by guarding on ``payload.l1_layout is
+    not None`` — this function assumes the layout is set.
+    """
     if payload.l1_layout is not None:
         layout = _coerce_l1_layout(payload.l1_layout)
         if layout is None:
             raise ValueError(
-                f"Sweep payload l1_layout is unparseable: {payload.l1_layout!r}. "
+                f"Fork payload l1_layout is unparseable: {payload.l1_layout!r}. "
                 "Expect a dict whose keys are L1 layout slots and values are lists of "
                 "placeholder names."
             )
         result = validate_l1_layout(layout, prior_layout=opt_sp.l1_layout)
         if not result.is_valid:
             ids = sorted({o.validator_id for o in result.outcomes if not o.passed})
-            raise ValueError(f"Sweep payload l1_layout failed hard validators: {ids}")
+            raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
         opt_sp.l1_layout = layout
 
 
@@ -368,7 +375,7 @@ L3 = LayerStrategy(
 _TEMP_ATTR: dict[str, str] = {"L2": "l2_temperature", "L3": "l3_temperature"}
 
 
-# Module-default L1 layout so apply_sweep_payload_to_osp can be invoked
+# Module-default L1 layout so apply_fork_payload_to_osp can be invoked
 # before L2 fires for the first time without importing default_l1_layout
 # at every callsite.
 _ = default_l1_layout  # keep import live for type-checker reachability

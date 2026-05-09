@@ -22,13 +22,15 @@ from pydantic import BaseModel, ConfigDict, Field
 
 __all__ = [
     "CycleRecord",
+    "ForkPayload",
+    "ForkTrigger",
     "HumanReviewRecord",
     "LLMCallRecord",
+    "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
     "ResumeCheckpointRecord",
     "SnapshotRecord",
-    "SweepPayload",
     "TokenUsageRecord",
 ]
 
@@ -223,16 +225,41 @@ CycleRecord = Annotated[
 ]
 
 
-class SweepPayload(BaseModel):
-    """Operator sweep candidate — L1-surface override applied at fork bootstrap.
+class ForkTrigger(enum.StrEnum):
+    """Why a fork was minted — one value per caller of :func:`_mint_fork`.
 
-    One JSON file per candidate under ``datasets/{name}/sweep/``. Parsed by
-    the sweep batch orchestrator; ``apply_sweep_payload_to_osp`` stamps the
-    deltas onto a fresh fork's ``OptSearchPoint`` before the round loop runs.
-    Field set is the same L1-surface owned by L2 (see
-    ``OptSearchPoint.l1_layout``); operator authors a payload by hand to
-    test a specific L1-prompt hypothesis without firing L2.
+    Three are wired today; the rest are M11 deliverables. Adding a trigger
+    is an enum addition; the mint mechanism does not change.
     """
+
+    OPERATOR_SWEEP = "operator_sweep"
+    OPERATOR_DIAG = "operator_diag"
+    OPERATOR_REWIND = "operator_rewind"
+    L2_REBASE = "l2_rebase"
+    L3_REBASE = "l3_rebase"
+    SCORING_DIVERGENCE = "scoring_divergence"
+
+
+class ForkPayload(BaseModel):
+    """Why + what-changed at a fork cut. Lands on ``FORK_CUT.data.fork``.
+
+    Optional delta fields (today: ``l1_layout``) are populated only by
+    triggers that carry that kind of change. M11 LLM-rebase emission adds
+    its delta fields here when wiring lands; M10 keeps the surface to
+    what's actually written.
+    """
+
+    model_config = ConfigDict(frozen=True, extra="forbid")
+
+    trigger: ForkTrigger
+    reason: str
+    issued_by: str
+    l1_layout: dict[str, list[str]] | None = None
+
+
+class OperatorSweepFile(BaseModel):
+    """Operator JSON shape under ``datasets/{name}/sweep/``. The dispatcher
+    widens this into a ``ForkPayload(trigger=OPERATOR_SWEEP, ...)``."""
 
     model_config = ConfigDict(frozen=True, extra="forbid")
 

@@ -28,9 +28,11 @@ def root_cycle_id(cycle_id: str) -> str:
     """Family-root cycle id — the prefix before the FIRST sibling separator.
 
     Three separators are recognized: ``_fork_`` (divergence forks, minted by
-    ``_fork_at_divergence``), ``_diag_`` (diagnostic-BFS siblings, minted by
-    ``fork_for_diag_sibling``), and ``_sweep_`` (sweep-batch forks, minted
-    by ``_run_sweep_batch``). All deterministic — no I/O, no parent walk.
+    ``_mint_fork`` with ``ForkTrigger.SCORING_DIVERGENCE``), ``_diag_``
+    (diagnostic-BFS siblings, minted by ``_mint_fork`` with
+    ``ForkTrigger.OPERATOR_DIAG``), and ``_sweep_`` (sweep-batch forks,
+    minted by ``_mint_fork`` with ``ForkTrigger.OPERATOR_SWEEP`` from the
+    sweep batch dispatcher). All deterministic — no I/O, no parent walk.
 
     Uses FIRST separator: a sweep-of-fork like ``cycle_X_fork_Y_sweep_b1_abc``
     still roots at ``cycle_X``, since the whole family shares one telemetry

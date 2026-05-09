@@ -18,7 +18,7 @@ from promptpotter.application.config import CampaignConfig
 from promptpotter.application.optimization.cycle import Cycle
 from promptpotter.application.optimization.escalation import (
     NextAction,
-    apply_sweep_payload_to_osp,
+    apply_fork_payload_to_osp,
     escalate_l2,
 )
 from promptpotter.application.optimization.l1 import execute_round, generate_or_load_candidates
@@ -38,9 +38,9 @@ from promptpotter.domain.phases import (
 )
 from promptpotter.domain.results import CycleResult, RoundResult
 from promptpotter.domain.run_records import (
+    ForkPayload,
     PhaseRecord,
     ResumeCheckpointRecord,
-    SweepPayload,
 )
 from promptpotter.domain.sample import Sample
 from promptpotter.domain.search_point import TaskDecomposition
@@ -419,7 +419,7 @@ async def run_optimization(
     fork_on_divergence: bool = False,
     sweep: bool = False,
     diag: bool = False,
-    fork_payload: SweepPayload | None = None,
+    fork_payload: ForkPayload | None = None,
 ) -> CycleResult:
     """Run optimization end-to-end. ``observers`` MUST be pre-built via
     ``build_run_observers`` so the ledger is bound before baseline ticks.
@@ -475,9 +475,12 @@ async def run_optimization(
         started_at=started_at,
     )
 
-    # Sweep-fork: stamp operator's L1-surface deltas onto the fresh OSP.
-    if fork_payload is not None:
-        apply_sweep_payload_to_osp(cycle.opt_sp, fork_payload)
+    # Operator-issued forks (sweep, future rebase): stamp the payload's
+    # L1-surface deltas onto the fresh OSP. Triggers without OSP deltas
+    # (SCORING_DIVERGENCE always; SCORING-bookkeeping for future triggers)
+    # have no l1_layout to apply — skip.
+    if fork_payload is not None and fork_payload.l1_layout is not None:
+        apply_fork_payload_to_osp(cycle.opt_sp, fork_payload)
 
     # Fork-on-divergence: rebuild observers around the fork's own ledger.
     forked = (
