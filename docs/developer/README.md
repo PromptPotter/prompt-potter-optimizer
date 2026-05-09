@@ -20,58 +20,57 @@ persona → task_intent → problem_description → instruction
 → thinking_style → answer_format → few_shot_examples → plan
 ```
 
-**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Signal renderers in `SIGNALS` (`dispatch_hub.py`) are pure `(Bundle) → str`; layer-agnostic. `SIGNALS` is a typed `dict[str, _Signal]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
+**Render chain:** `Cycle → build_bundle(layer) → DispatchHub.fill_{l1,fixed} → compile_prompt → LLM`. Injection renderers in `INJECTIONS` (`dispatch_hub.py`) are pure `(InjectionBundle) → str`; layer-agnostic. `INJECTIONS` is a typed `dict[str, _Injection]` carrying `name`, `kind`, `render`, and a docstring per entry. The hub has no state. Visual reference + per-placeholder source map: [`dispatch-hub.md`](dispatch-hub.md).
 
-**Invariant:** no prompt site summarizes its own data. If a name isn't in `SIGNALS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `SIGNALS` — typos fail loud, not silent.
+**Invariant:** no prompt site summarizes its own data. If a name isn't in `INJECTIONS`, it doesn't enter a prompt. The registry is code-derived; capabilities can't silently disappear. `validate_template()` (called from `load_optimizer_prompt`) raises at module load on any `{{slot}}` name not in `INJECTIONS` — typos fail loud, not silent.
 
 ### Per-layer composition
 
 | Layer | Composition path | What L2 controls |
 |-------|------------------|------------------|
-| L1 generate | `fill_l1(template, opt_sp.l1_layout, bundle)` — appends signals to slots | the layout (per-slot signal lists) |
+| L1 generate | `fill_l1(template, opt_sp.l1_layout, bundle)` — appends injections to slots | the layout (per-slot injection lists) |
 | L1 critique | `fill_fixed(template, bundle)` — resolves `{{name}}` placeholders | (none — internal) |
 | L2 context | `fill_fixed(template, bundle)` | (none) |
 | L3 plan | `fill_fixed(template, bundle)` | (none) |
 
-L1 generate is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `SIGNALS`. Same hub, same registry, same `Bundle` for every call.
+L1 generate is the only layer with an L2-mutable layout; the rest run on fixed templates whose placeholders are all in `INJECTIONS`. Same hub, same registry, same `InjectionBundle` for every call.
 
 ### Field channels between layers
 
 | Field | Writer | Reader(s) | Lifetime |
 |-------|--------|-----------|----------|
-| `RoundResult.critique` | L1 critique | L2, L3 (`critique` signal via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
-| `OSP.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` signal — broadcast) | persistent, accumulative |
+| `RoundResult.critique` | L1 critique | L2, L3 (`critique` injection via `cycle.latest_round.critique`) | per round (lives on the round audit, not OSP) |
+| `OSP.task_context` | L2 (refines via merge) | L1, L1 critique, L2, L3 (`task_context` injection — broadcast) | persistent, accumulative |
 | `OSP.l1_layout` | L2 | L1 generate (`fill_l1`) | persistent (in `MEMORY_FIELDS`) |
-| `OSP.plan` | L3 | every prompt (`plan` signal in all 4 templates) | persistent — never cleared |
-| `OSP.l3_note` | L3 | L2 (`l3_to_l2_note` signal — L2 template only) | persistent until L3 next fires |
-| `OSP.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` signal) | persistent until L3 fires |
-| `OSP.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` signal) | persistent |
+| `OSP.plan` | L3 | every prompt (`plan` injection in all 4 templates) | persistent — never cleared |
+| `OSP.l3_note` | L3 | L2 (`l3_to_l2_note` injection — L2 template only) | persistent until L3 next fires |
+| `OSP.l2_guard_breaches` | L2 parser + layout validator | L3 (`l2_guard_breaches` injection) | persistent until L3 fires |
+| `OSP.l3_guard_breaches` | L3 parser | L3 next fire (`l3_guard_breaches` injection) | persistent |
 
 **Symmetric broadcast:** L3 writes `plan`; every prompt reads it via the same `_r_plan` renderer. L2 writes `task_context`; every prompt reads it via the same `_r_task_context` renderer. L1 sees both as framing inputs; L2 reads them as the strategic + task context for the next refinement.
 
-### Signal registry — what's in `SIGNALS`
+### Injection registry — what's in `INJECTIONS`
 
-Layer-agnostic by contract. Every renderer reads off `Bundle` and returns `str` (empty when the source field is empty — empty signals are skipped by the fillers).
+Layer-agnostic by contract. Every renderer reads off `InjectionBundle` and returns `str` (empty when the source field is empty — empty injections are skipped by the fillers).
 
-| Signal | Reads from `Bundle` | Used by |
-|--------|---------------------|---------|
+| Injection | Reads from `InjectionBundle` | Used by |
+|-----------|------------------------------|---------|
 | `plan` | `opt_sp.plan` | L1, L1 critique, L2, L3 |
 | `task_context` | `opt_sp.task_context` | L1, L1 critique, L2, L3 (broadcast) |
 | `rendered_prompt` | `opt_sp.render()` | L1 (parent prompt) |
 | `pipeline_param_catalogue` | `pipeline_schema` | L1 (search-space menu) |
 | `diagnostics` | STATUS prefix from `cycle_slice` (round / stall / best counters) + `digest.diagnostics` (`RoundDiagnostics`) body | L1, L1 critique, L2, L3 |
 | `validation_failures` | `opt_sp.validation_failures` (Wound 1, fenced) | L1, L1 critique, L2, L3 |
-| `runtime_failures` | `opt_sp.runtime_failures` + `escalation_log` + `warning_inventory` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
+| `runtime_failures` | `opt_sp.runtime_failures` (Wound 2, fenced) | L1, L1 critique, L2, L3 |
 | `l2_guard_breaches` | `opt_sp.l2_guard_breaches` (Wound 4, plain) | L3 only |
 | `l3_guard_breaches` | `opt_sp.l3_guard_breaches` (L3 self-heal, plain) | L3 only |
 | `critique` | `digest.critique` | L1, L2, L3 |
 | `l3_to_l2_note` | `opt_sp.l3_note` | L2 only |
-| `l1_config` | `opt_sp.l1_config` | L1 (caller extras `n_variants`/`creativity`), L2 |
+| `l1_overrides` | `opt_sp.l1_overrides` | L1 (caller extras `n_variants`/`creativity`), L2 |
 | `l1_signal_catalogue` | `L1_POSSIBLE` | L2 (menu) |
 | `axis_memory` | `cycle.axes.digest()` (DERIVED) | L1, L2, L3 |
-| `decision_trace_summary` | `RoundResult.decision_traces` slice (DERIVED) | L1 critique |
 
-L2 owns the L1-only signal subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal signals (`l1_config`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a SIGNAL — `l1_config`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
+L2 owns the L1-only injection subset via `l1_layout`; see [`l1-generate-surface.md`](l1-generate-surface.md). L2-internal injections (`l1_overrides`, `l1_signal_catalogue`) are absent from `L1_POSSIBLE` so L2 cannot inject its own state into L1 as a layout entry — `l1_overrides`'s contents reach L1 only via the `n_variants`/`creativity` caller extras.
 
 ---
 
@@ -150,7 +149,7 @@ archive/                            MeasurementArchive
 | Page | Covers |
 |------|--------|
 | [L2 internals](l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
-| [L1 layout + dispatch hub](l1-generate-surface.md) | `SIGNALS` registry, `L1Layout`, `DispatchHub` |
+| [L1 layout + dispatch hub](l1-generate-surface.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub` |
 | [Dispatch hub visual + index](dispatch-hub.md) | Mermaid flow diagram + per-placeholder source map |
 | [Self-healing internals](self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](node-standard.md) | Node JSON declaration format |

@@ -49,15 +49,12 @@ These primitives are settled. Reorganizing them — adding a parallel ingress, a
 | Primitive | Where | Self-enforcing because |
 |---|---|---|
 | Three I/O kinds (Persistence / Display / Control) | per this file | Persistence has one ingress (`CycleEventLog.append`); `RunCallbacks` is a typed event constructor over that ingress and is the only writer-side API; display happens via ledger subscribers (`LiveDisplay`, `LiveDashboardView`); control-side `stop_check` writes no campaign artifacts |
-| `ResumeCheckpointKind` + `RESUME_CHECKPOINT_GATING` | `domain/run_records.py` | Import-time exhaustiveness — adding a kind without a gating mode raises before the module loads |
+| Cycle records + derived-view dispatch (import-time exhaustive) | `domain/run_records.py`, `infrastructure/ledger.py`, `projections/base.py` | Two registries enforced at import time: `ResumeCheckpointKind` member without a `RESUME_CHECKPOINT_GATING` entry raises before the module loads; `DerivedView.on_record` owns the `isinstance(record, …)` dispatch and there's no second dispatch path because the base class is the only one. Add a kind / record / projection: extend the registry, no sidecar |
 | Hexagonal layer separation | per this file | `tests/test_invariants.py::test_no_unexpected_runtime_layer_violations` + `test_cycle_does_not_import_prompt_surface` — and modules in different layers don't expose what the other side would need |
-| `CycleEventLog` + `DerivedView` dispatch | `infrastructure/ledger.py`, `projections/base.py` | `DerivedView.on_record` owns the `isinstance(record, …)` dispatch; subclasses override hooks. There's no second dispatch path because the base class is the only one |
 | `score_search_point()` gateway | `application/scoring/search_point_scorer.py` | Single function callers reach for; `measure_sample` is implementation detail. The gateway is the natural call |
-| Path helpers + `CycleDir` / `RootCycleDir` newtypes | `infrastructure/store/paths.py`, `domain/cycle_paths.py` | Projections and stores accept `CycleDir`/`RootCycleDir`, not `str`/`Path`. Callers get directories from helpers |
-| `JobSearchPoint` / `PromptTemplate` / `OptSearchPoint` | `domain/search_point.py`, `domain/opt_search_point.py` | Frozen Pydantic models. Mutation isn't a thing the type permits; lineage is encoded by `derive()` |
+| Frozen domain models + path newtypes | `domain/search_point.py`, `domain/opt_search_point.py`, `infrastructure/store/paths.py`, `domain/cycle_paths.py` | `JobSearchPoint` / `PromptTemplate` / `OptSearchPoint` are frozen Pydantic — mutation isn't a thing the type permits, lineage is encoded by `derive()`. `CycleDir` / `RootCycleDir` newtypes guard path construction — projections and stores accept the newtype, not `str`/`Path`. Wrong shapes rejected at the type level |
 | `EscalationState` cause-driven dynamics + escalation rules engine | `application/optimization/escalation/{state,decide,rules,firing}.py` | Counters are private; the only mutation surface is observation methods. `observe_round` delegates to `decide_escalation(EscalationInputs)` over `DEFAULT_ESCALATION_RULES` — sort-by-priority, first-match-wins. Adding a rule means adding an `EscalationRule` row; predicates read frozen `EscalationInputs` snapshots, no mutation surface to abuse |
 | `dispatch_hub.INJECTIONS` typed dict | `application/optimization/dispatch_hub.py` | Each entry is a `_Injection(name, kind, render, doc)`; `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry. A typo in a template fails at module load, not at first render |
-| `DecisionTrace` (frozen Pydantic) | `domain/decision_trace.py` | `extra="forbid"` + frozen + JSON-roundtrip-stable. PoBB writes traces at decision points into `RoundResult.decision_traces`; the `decision_trace_summary` injection renders them for `l1_critique`. (NB: scheduled for §4 drop in commit 3 alongside SignalsProjection.) |
 | Tracing-as-shadow | `infrastructure/tracing/` | Tracing exposes no read API. State reaches the optimizer only via the ledger; tracing is fan-out only |
 
 ## Commands
@@ -117,7 +114,7 @@ Non-negotiables only — full style, code-shape, tests, CLI, git rules in [`docs
 
 ## Roadmap
 
-**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; ≥95% in ≤5 rounds. **M11** — BBEH benchmarks, ablation, webapp read-only (Slice 1 vanilla shipped + cut over to Next.js port — see `docs/specs/m11-webapp-react-port.md`; vanilla preservation list at `docs/specs/m11-webapp-minimal-preview.md`). M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
+**M12 is the headline** — multi-connector, competitor head-to-head, webapp Phase 2. **M10 active** — prompt-iteration framework + L1-generate tuning; **targeting** ≥95% in ≤5 rounds (cleanup arc closed pass-2; framework + benchmark hit are the open M10 half). **M11** — BBEH benchmarks, ablation, webapp read-only (Slice 1 vanilla shipped + cut over to Next.js port — see `docs/specs/m11-webapp-react-port.md`; vanilla preservation list at `docs/specs/m11-webapp-minimal-preview.md`). M0–M9 complete. See [`docs/specs/roadmap.md`](docs/specs/roadmap.md).
 
 ## Pointers
 

@@ -2,7 +2,7 @@
 
 Visual + reference for `promptpotter/application/optimization/dispatch_hub.py` — the registry that fills `{{placeholders}}` in the four optimizer prompts. Pairs with [`l1-generate-surface.md`](l1-generate-surface.md) (L1_GENERATE's layout surface) and [`l2-internals.md`](l2-internals.md) (L2_CONTEXT firing).
 
-The hub is stateless. `SIGNALS` is a typed `dict[str, _Signal]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: Bundle → str`, and a docstring. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
+The hub is stateless. `INJECTIONS` is a typed `dict[str, _Injection]` — each entry carries `name`, `kind` (MEASUREMENT / DERIVED / TRACE / DIRECTIVE), `render: InjectionBundle → str`, and a docstring. `validate_template()` (called from `load_optimizer_prompt`) raises on `{{slot}}` names not in the registry: a typo in a template fails at module load, not at first render.
 
 ## Flow
 
@@ -19,7 +19,7 @@ flowchart LR
   classDef proc fill:#fff3d6,stroke:#f59e0b,stroke-width:4px,color:#000
 
   %% Standalone AI-generated inputs (not produced inside a single LLM stage)
-  CPAR["l1_config<br/>• n_variants<br/>• temp"]
+  CPAR["l1_overrides<br/>• n_variants<br/>• temp"]
 
   %% L1_SCORE readouts — distinct hub variables, same producer cluster.
   %% diagnostics is per-round on Bundle.digest; the failures variants
@@ -27,7 +27,7 @@ flowchart LR
   subgraph SR["L1_SCORE readouts"]
     DIAG["diagnostics⁴<br/>• STATUS: round, current, best, stalls<br/>• trajectory + evolution<br/>• rank dist, anomalies, near-misses<br/>• pipeline health, probe outcome"]:::det
     VFAIL["validation_failures⁵<br/>• Wound 1 (parse-time)<br/>• axis, value, allowed, reason"]:::det
-    RFAIL["runtime_failures¹¹<br/>• Wound 2 (mid-eval)<br/>• runtime_failures, escalation_log, warning_inventory"]:::det
+    RFAIL["runtime_failures¹¹<br/>• Wound 2 (mid-eval)<br/>• per-candidate DegradationCheck evidence"]:::det
   end
   style SR fill:none,stroke:#888,stroke-dasharray: 5 5
 
@@ -55,10 +55,7 @@ flowchart LR
   %% Cross-round AxisIndex digest
   AXM[axis_memory¹⁴]:::det
 
-  %% PoBB decision trail — surfaced to L1_CRITIQUE
-  DTS[decision_trace_summary¹⁶]:::det
-
-  %% L1_CRITIQUE + its produced signal
+  %% L1_CRITIQUE + its produced injection
   subgraph L1CG[" "]
     L1C([L1_CRITIQUE]):::proc
     CRIT[critique⁸]
@@ -86,16 +83,12 @@ flowchart LR
   LAYOUT --> L1G
   AXM --> L1G
 
-  %% PoBB decision trail — surfaced to L1_CRITIQUE
-  L1S --> DTS
-
   %% L1_CRITIQUE inputs
   PLAN --> L1C
   TC --> L1C
   DIAG --> L1C
   VFAIL --> L1C
   RFAIL --> L1C
-  DTS --> L1C
 
   %% L2_CONTEXT inputs — sees measurement-derived failures only.
   %% L2 doesn't see l2_guard_breaches because Wound 4 fires L3 immediately
@@ -143,12 +136,12 @@ flowchart LR
 
 ## Reference
 
-14 signals + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_config` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
+13 injections + 1 structural input + 1 caller extra, grouped by role. Numbered items map to the diagram superscripts. `[fenced]` = output wrapped in `<UNTRUSTED_DATASET_CONTENT>` (echoes raw query + GT text — the STATUS prefix on `diagnostics` is plain, only the dataset-content body is fenced). 🧩 follows every sub-member name — companion to the inline expansion the diagram does for `l1_overrides` (`n_variants`🧩, `creativity`🧩); lets you scan for atomic field names regardless of which placeholder owns them.
 
-Each entry in `SIGNALS` is a frozen `_Signal(name, kind, render, doc)`. `kind` is one of:
+Each entry in `INJECTIONS` is a frozen `_Injection(name, kind, render, doc)`. `kind` is one of:
 
 - **MEASUREMENT** — deterministic round-end output (e.g. `diagnostics`, `validation_failures`, `runtime_failures`).
-- **DERIVED** — view/digest over MeasurementArchive or AxisIndex (e.g. `axis_memory`, `decision_trace_summary`).
+- **DERIVED** — view/digest over MeasurementArchive or AxisIndex (e.g. `axis_memory`).
 - **TRACE** — narrative state from prior LLM calls (e.g. `critique`, `plan`, `task_context`).
 - **DIRECTIVE** — short-lived directive consumed by exactly one downstream layer (e.g. `l3_to_l2_note`).
 
@@ -162,8 +155,8 @@ This is where the reader's mental model of a round usually starts: candidates we
 - ⁵ **`validation_failures`** [fenced] ← `opt_sp.validation_failures` · Wound 1 evidence
   - Each entry: `axis`🧩, `value`🧩 (LLM-proposed), `allowed`🧩, `reason`🧩. Fenced because `value` is arbitrary LLM output.
   - L1 parse-time deterministic validator (`L1_SCHEMA_COMPLIANCE`). Accumulates on `OptSearchPoint` cross-round.
-- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` + `escalation_log`🧩 + `warning_inventory`🧩 · Wound 2 evidence
-  - Bundles three L1_SCORE-derived "the pipeline misbehaved at runtime" sub-fields: per-candidate `runtime_failures` (from `DegradationCheck`), cross-round `escalation_log` (pipeline-step degradation rates), `warning_inventory` (recurring per-sample warnings). Same producer cluster, same lifecycle — honest aggregation.
+- ¹¹ **`runtime_failures`** [fenced] ← `opt_sp.runtime_failures` · Wound 2 evidence
+  - Per-candidate runtime failures from `DegradationCheck`; accumulates on `OptSearchPoint` cross-round.
   - Fenced because it echoes pipeline warning strings.
 - ¹² **`l2_guard_breaches`** ← `opt_sp.l2_guard_breaches` · Wound 4 evidence
   - Plain (only `validator_id`🧩 from a controlled registry + `score`🧩 float — no untrusted content).
@@ -187,7 +180,6 @@ This is where the reader's mental model of a round usually starts: candidates we
 ### Cross-round derived
 
 - ¹⁴ **`axis_memory`** (DERIVED) ← `cycle.axes.digest()` — AxisIndex per-axis effect_size + sample-coverage; consumed by L1_GENERATE, L2_CONTEXT, L3_PLAN. Empty when AxisIndex isn't yet initialised (round 1).
-- ¹⁶ **`decision_trace_summary`** (DERIVED) ← `RoundResult.decision_traces` slice (PoBB writes traces at each promote/eliminate decision; `domain/decision_trace.py`). Consumed by L1_CRITIQUE; carries the per-candidate decision narrative (kind, p_best at decision, leaderboard) so critique can ground its post-mortem in the elimination trail.
 
 ### Current state
 
@@ -196,15 +188,15 @@ This is where the reader's mental model of a round usually starts: candidates we
   - Structurally L1_SCORE's output: each round's winner becomes next round's `opt_sp`, so its render is the next parent prompt. The cycle lives in orchestration, not the diagram.
 - ⁹ **`pipeline_param_catalogue`** ← attributes on `pipeline_schema`: `node_param_keys`🧩, `param_allowed_values`🧩, `param_descriptions`🧩, `available_models`🧩
   - ≤4 enum values per param, ≤40-char description fallback, ≤8 models
-- **`l1_config`** ← `opt_sp.l1_config`
+- **`l1_overrides`** ← `opt_sp.l1_overrides`
   - Bundles two L2_CONTEXT-set knobs that govern *how L1_GENERATE runs*, not what L1_GENERATE puts in candidates: `n_variants`🧩, `creativity`🧩
   - `n_variants`🧩 enters L1_GENERATE only via the `{{n_variants}}` caller extra (a directive — L1_GENERATE obeys)
   - `creativity`🧩 sets the L1_GENERATE LLM call's temperature; never reaches the prompt text
-  - Field, signal, and placeholder all share the name `l1_config`
-- ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · structural, not a SIGNAL
-  - L2_CONTEXT-only writer; consumed by `DispatchHub.fill_l1` as the per-slot signal-name list that drives the slot walk
-  - Decides *which* signal renderings land in each L1 addressable slot (`persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩) — content is rendered separately by the listed signals' `_r_*` functions
-  - Not registered in `SIGNALS`; never resolves a `{{l1_layout}}` placeholder. Shape-shifts L1's prompt rather than filling a slot in it
+  - Field, injection, and placeholder all share the name `l1_overrides`
+- ⁷ **`l1_layout`** ← `opt_sp.l1_layout` · structural, not an INJECTION
+  - L2_CONTEXT-only writer; consumed by `DispatchHub.fill_l1` as the per-slot injection-name list that drives the slot walk
+  - Decides *which* injection renderings land in each L1 addressable slot (`persona`🧩, `task_intent`🧩, `problem_description`🧩, `thinking_style`🧩) — content is rendered separately by the listed injections' `_r_*` functions
+  - Not registered in `INJECTIONS`; never resolves a `{{l1_layout}}` placeholder. Shape-shifts L1's prompt rather than filling a slot in it
 
 ### L2_CONTEXT / L3_PLAN-internal
 
@@ -214,12 +206,12 @@ This is where the reader's mental model of a round usually starts: candidates we
 
 Substituted directly by `compile_prompt`; not signals.
 
-- **`n_variants`** ← `min(opt_sp.l1_config["n_variants"], opt.n_variants × 3)` · directive — L1_GENERATE obeys.
+- **`n_variants`** ← `min(opt_sp.l1_overrides["n_variants"], opt.n_variants × 3)` · directive — L1_GENERATE obeys.
 
 ## Mechanics
 
-- **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot signal-name lists) and appends rendered signal text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any `{{slot}}` is not in the `SIGNALS` registry.
-- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other signals (`l3_to_l2_note`, `l1_config`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`, `decision_trace_summary`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
+- **Fill** — L1_GENERATE slot bodies are plain text; `fill_l1` walks `opt_sp.l1_layout` (per-slot injection-name lists) and appends rendered injection text to each slot. L1_CRITIQUE / L2_CONTEXT / L3_PLAN bodies carry literal `{{name}}` markers; `fill_fixed` regex-extracts and resolves them. `validate_template()` (called from `load_optimizer_prompt`) errors at module load if any `{{slot}}` is not in the `INJECTIONS` registry.
+- **L1_GENERATE visibility** — `L1_POSSIBLE = {plan, task_context, rendered_prompt, pipeline_param_catalogue, diagnostics, validation_failures, runtime_failures, critique, axis_memory}` 🧩; the other injections (`l3_to_l2_note`, `l1_overrides`, `l1_signal_catalogue`, `l2_guard_breaches`, `l3_guard_breaches`) are L1_CRITIQUE / L2_CONTEXT / L3_PLAN-internal.
 - **L1_GENERATE guard** — `L1_MANDATORY = {plan, task_context, rendered_prompt, pipeline_param_catalogue, critique}` 🧩 must appear across the 4 addressable slots; missing fires `l1_layout_missing_mandatory` with `nurse_target='l3'` — L3_PLAN replans rather than letting L2_CONTEXT starve L1_GENERATE of cross-layer state.
 
 ## Future — possible merge of L1_SCORE readouts

@@ -43,7 +43,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 ## Words we never use loosely
 
 - **`score`** — always qualified: per-sample *fitness*, round-level *composite fitness*, *accuracy* (% correct), *validator health*. Bare "score" is forbidden in prose.
-- **`config`** / **`params`** — always qualified: `pipeline_params`, `pipeline_params_override`, `l1_config`, `node_config` (wire-only).
+- **`config`** / **`params`** — always qualified: `pipeline_params`, `pipeline_params_override`, `l1_overrides`, `node_config` (wire-only).
 - **`run`** — operator-facing: prefer **campaign**. The word `run_id` survives only as the content-hash key in `archive/measurements/{run_id}.json`.
 - **`state`** — qualified: *escalation state* (the FSM), *campaign bundle* (the per-cycle wiring), or named explicitly.
 - **`validation`** — qualified: *schema-compliance check* (L1 output gate), *validator outcome* (mid-round escalation), *schema-violation audit* (persisted record).

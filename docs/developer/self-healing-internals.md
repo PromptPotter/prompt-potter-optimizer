@@ -45,7 +45,7 @@ End-of-round, `execute_round` mirrors new `RuntimeFailure`s onto `cycle.opt_sp.r
 
 L3's prompt (`optimizer_pipeline.json::resolved_prompts['l3_plan/1']`) reads:
 
-- `{{runtime_failures}}` — accumulated `RuntimeFailure` trail (plus `escalation_log` and `warning_inventory` adjuncts) rendered by `_r_runtime_failures()`.
+- `{{runtime_failures}}` — accumulated `RuntimeFailure` trail rendered by `_r_runtime_failures()`.
 - `{{l2_guard_breaches}}` — Wound 4 evidence rendered by `_r_l2_guard_breaches()`.
 - `{{l3_guard_breaches}}` — L3's own past validator failures rendered by `_r_l3_guard_breaches()`.
 - `{{plan}}`, `{{task_context}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{critique}}`.
@@ -94,16 +94,13 @@ Fields enumerated in `OptSearchPoint.MEMORY_FIELDS` (`domain/opt_search_point.py
 
 | Field | Lifecycle | Wound |
 |---|---|---|
-| `escalation_log` | cross-round, append-with-backfill | (prior entry's outcome filled when next entry arrives) |
-| `warning_inventory` | cross-round | (per-sample aggregation) |
 | `task_context` | persistent, accumulative; merged on each L2 fire | Wound 1, Wound 2 — L2 writeback |
 | `validation_failures` | per-candidate (set at L1 parse) | Wound 1 — L2 reads |
 | `runtime_failures` | per-candidate + cumulative outer-memory mirror | Wound 2 + 3 |
 | `l2_guard_breaches` | per-round, set by L2 post-parse | Wound 4 — L3 reads |
-| `failure_analysis` | per-round | (round-over-round feedback) |
+| `l3_guard_breaches` | per-round, set by L3 post-parse | L3 self-heal |
 
-The L1 critique itself lives on `RoundResult.critique` (a dict, not in `MEMORY_FIELDS`); the dispatch hub's `critique` signal reads it from `cycle.latest_round.critique`.
-| `round_history` | per-round, append-only | (trajectory display) |
+The L1 critique itself lives on `RoundResult.critique` (a dict, not in `MEMORY_FIELDS`); the dispatch hub's `critique` injection reads it from `cycle.latest_round.critique`. Per-round trajectory + cumulative warned-query subset (probe-round source) live on `Cycle` (`Cycle.rounds`, `Cycle.warned_queries`), not OSP.
 
 ## Mid-eval termination — what is and isn't healing
 

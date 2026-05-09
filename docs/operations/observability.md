@@ -6,7 +6,7 @@ Every optimizer LLM call, backend match, and escalation check emits a structured
 
 Events are appended to `campaigns/{cycle_id}/langfuse/events.jsonl`. Pure mirror — nothing reads it for state reconstruction; it's there for debugging and post-hoc inspection. Each line is a JSON object with phase, event type, round, and payload.
 
-Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`, `zero_signal_filter`, `scoring_set`) emit `enter` / `exit` pairs. The `cadence` phase emits a `rule_fired` event whenever the post-round rule engine matches a rule (see "Cadence-rule signal stream" below).
+Phase events (`init`, `l1_generate`, `l1_evaluate`, `refine_strategy`, `modify_plan`, `escalation`) emit `enter` / `exit` pairs. The `escalation` phase emits a `rule_fired` event whenever the post-round rule engine matches a rule (see "Escalation rule signal stream" below).
 
 ## What gets traced
 
@@ -39,22 +39,9 @@ The JSONL stream is canonical replay. Dashboard fields and `log.md` sparkline ar
 tail -f .promptpotter/projects/default/campaigns/<cycle_id>/.runtime/streams/round_0003_p_best.jsonl
 ```
 
-## Cadence-rule signal stream (`signals.jsonl`)
+## Escalation rule firing
 
-Every cadence-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). One ledger event, two subscribers:
-
-| Channel | Path | Cadence | Format |
-|---|---|---|---|
-| Append-only stream | `campaigns/{cycle_id}/.runtime/signals.jsonl` | per-firing append | `{round, timestamp, layer, rule_name, rule_priority, next_action, reason, signal_inputs}` |
-| Live dashboard fields | `dashboard.json::recent_rules` (rolling 8) + `dashboard.json::current_signals` (latest per layer) | per-firing overwrite | same per-firing dict; `current_signals` indexed by `layer` (currently `post_round`) |
-| Webapp readout | `SignalsPanel.tsx` (chronological list) + `StuckDiagnosis.tsx` (verdict from latest `signal_inputs`) | live poll | rendered |
-
-The JSONL stream is canonical; the dashboard mirror is a derived view, capped at 8 entries. The webapp's StuckDiagnosis widget interprets `signal_inputs` numbers — e.g. `axes_with_positive_yield == 0` with `l1_stall_count >= 1` → "axis drought," `l1_stall_count == l1_patience` → "L1 patience exhausted, escalating."
-
-```bash
-# Tail the live JSONL
-tail -f .promptpotter/projects/default/campaigns/<cycle_id>/.runtime/signals.jsonl
-```
+Every escalation-rule firing — `decide_escalation` over `DEFAULT_ESCALATION_RULES` — emits a `escalation/rule_fired` PhaseRecord through the writer-side ingress (`RunCallbacks.on_phase`). The ledger event lands in `events.jsonl` and is consumed by the audit projection. Operator-facing read: `events.jsonl` itself (the standalone `signals.jsonl` mirror + dashboard `recent_rules` were dropped in the M10 cleanup; the ledger is the canonical record).
 
 ## Langfuse cloud
 
@@ -127,7 +114,7 @@ The stale-data ladder's rescue step is **samplescan rescue** — "probe" is rese
 
 - `opt_search_point.task_context` — refined task framing (broadcast to all layers next round).
 - `opt_search_point.l1_layout` — per-slot signal-name layout L2 has stamped.
-- `opt_search_point.l1_config` — L1 runtime knobs (creativity, n_variants).
+- `opt_search_point.l1_overrides` — L1 runtime knobs (creativity, n_variants).
 - `decisions[]` with `kind: "probe_round_commitment"` — outcome `True` when L2 set `action = "probe_round"`.
 - `nodes.l2_context.input.prompt` — rendered L2 prompt (incl. the `L1-GENERATE FIELD CATALOGUE` block).
 - `nodes.l2_context.output` — raw LLM JSON dict.

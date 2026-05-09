@@ -15,9 +15,9 @@ Trigger gate: `escalation.escalate_l2`; the decision is recorded as `ResumeCheck
 
 ## Inputs — via the hub
 
-L2's prompt template (`l2_context/1` in `optimizer_pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_config}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `SIGNALS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
+L2's prompt template (`l2_context/1` in `optimizer_pipeline.json`) carries `{{plan}}`, `{{l3_to_l2_note}}`, `{{diagnostics}}`, `{{validation_failures}}`, `{{runtime_failures}}`, `{{critique}}`, `{{l1_overrides}}`, `{{task_context}}`, `{{l1_signal_catalogue}}`. `LayerStrategy.build_prompt_vars` calls `DispatchHub.fill_fixed(template, bundle)` to resolve all of them in one pass. No L2-only surface object exists — L2 is just one consumer of the global `INJECTIONS` registry. L2 does not see `l2_guard_breaches` / `l3_guard_breaches` — when those appear, Wound 4 fires L3 immediately, so by L2's next fire L3 has already replanned and L2 reads the new `plan`.
 
-One signal is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
+One injection is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in `l1_layout`. Absent from `L1_POSSIBLE` so L2 cannot accidentally inject its own catalogue into L1.
 
 ## Outputs
 
@@ -27,7 +27,7 @@ One signal is L2-only: `l1_signal_catalogue` — the menu of names L2 may put in
   "action": "normal_round" | "probe_round",
   "axis_targeted": "...",
   "l1_layout": {"persona": [...], "task_intent": [...], ...},
-  "l1_config": {...},
+  "l1_overrides": {...},
   "rationale": "..."
 }
 ```
@@ -40,7 +40,7 @@ All fields are optional. Missing fields leave the corresponding OSP state untouc
 - `action`: `"normal_round"` (default) or `"probe_round"`. Probe re-runs only the warned-query subset under the same OSP next round.
 - `axis_targeted`: the axis this fire tests. Required prose when `action="probe_round"`; otherwise stamped on the cycle for the next probe-outcome render.
 - `l1_layout`: coerced to `L1Layout`, validated against `validate_l1_layout(prior=opt_sp.l1_layout)`. HARD-failed layouts roll back to the prior; SOFT-flagged outcomes (e.g. unchanged from prior) ride along on `opt_sp.l2_guard_breaches`.
-- `l1_config`: merged onto a `mutate()`-derived child OSP. Two known knobs today: `n_variants` (in-prompt directive to L1 via `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt).
+- `l1_overrides`: merged onto a `mutate()`-derived child OSP. Two known knobs today: `n_variants` (in-prompt directive to L1 via `{{n_variants}}` caller extra) and `creativity` (L1 LLM-call temperature, out-of-prompt).
 
 ## How L2 steers L1
 
@@ -48,10 +48,10 @@ Two channels, both via OSP fields the dispatch hub reads:
 
 | Channel | OSP field | L1 effect |
 |---------|-----------|-----------|
-| Framing | `task_context` | The `task_context` signal renders the structured framing dict. Default layout puts it in `task_intent` — front of mind for the LLM. Persistent across L2 fires; merges accumulate. |
-| Layout | `l1_layout` | `DispatchHub.fill_l1` walks the layout and appends each named signal's rendering to its slot. Mutating the layout reshapes which signals L1 sees and where. |
+| Framing | `task_context` | The `task_context` injection renders the structured framing dict. Default layout puts it in `task_intent` — front of mind for the LLM. Persistent across L2 fires; merges accumulate. |
+| Layout | `l1_layout` | `DispatchHub.fill_l1` walks the layout and appends each named injection's rendering to its slot. Mutating the layout reshapes which injections L1 sees and where. |
 
-L2 cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered signal (from `L1_POSSIBLE`).
+L2 cannot edit L1's static template text and cannot toggle `answer_format` — those are code contracts. Anything L2 wants L1 to see must already be a registered injection (from `L1_POSSIBLE`).
 
 ## Side effects — `_apply_l2`
 
@@ -75,7 +75,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 
 ## Wound 4 — L2 self-healing via L3
 
-`run_l2_output_validators` (`l2_validators.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` signal on its next fire.
+`run_l2_output_validators` (`l2_validators.py`) runs `L2_TASK_CONTEXT_VERBATIM_REPEAT` against the proposed/applied task_context pair. Layout HARD failures from `validate_l1_layout` are appended to the same `l2_guard_breaches` list. When the list is non-empty after `_apply_l2`, the escalation driver force-triggers L3 to heal — L2's own thrashing is observable to L3 via the `l2_guard_breaches` injection on its next fire.
 
 ## File-line anchors
 
@@ -83,7 +83,7 @@ The single decision recorded per L2 fire is `PROBE_ROUND_COMMITMENT` — outcome
 - `LayerStrategy`, `_parse_l2`, `_apply_l2`, `L2`: `escalation.py`
 - `TransitionResult`: `promptpotter/application/optimization/transitions.py`
 - L2 prompt template: `optimizer_pipeline.json::resolved_prompts['l2_context/1']`
-- OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_config`, `l2_guard_breaches`
+- OSP mutation surface: `promptpotter/domain/opt_search_point.py` — `task_context`, `l1_layout`, `l1_overrides`, `l2_guard_breaches`
 - Layout validators: `promptpotter/domain/l1_layout.py::validate_l1_layout`
 - Task-context verbatim-repeat: `promptpotter/application/optimization/l2_validators.py::L2_TASK_CONTEXT_VERBATIM_REPEAT`
 

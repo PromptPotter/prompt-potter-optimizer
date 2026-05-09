@@ -84,7 +84,7 @@ The fence shape:
     {rendered}
     </UNTRUSTED_DATASET_CONTENT>
 
-Trusted slots (`plan`, `task_context`, `critique`, `l1_config`,
+Trusted slots (`plan`, `task_context`, `critique`, `l1_overrides`,
 `l2_guard_breaches`, `l3_guard_breaches`, `pipeline_param_catalogue`,
 `l1_signal_catalogue`, `rendered_prompt`, `l3_to_l2_note`) are
 NOT wrapped — they are operator-authored config, bounded LLM

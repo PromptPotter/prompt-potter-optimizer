@@ -29,7 +29,7 @@ You've run a campaign. Pointers below for the next layer.
 |------|--------|
 | [Developer README](../developer/README.md) | Prompt structure, request routing, the scoring step, learning from prior campaigns + per-field reference tables |
 | [L2 internals](../developer/l2-internals.md) | L2 firing, output, OSP mutations, layout edits |
-| [L1 layout + dispatch hub](../developer/l1-generate-surface.md) | `SIGNALS` registry, `L1Layout`, `DispatchHub` |
+| [L1 layout + dispatch hub](../developer/l1-generate-surface.md) | `INJECTIONS` registry, `L1Layout`, `DispatchHub` |
 | [Self-healing internals](../developer/self-healing-internals.md) | Failure classification, escalation wiring |
 | [Node standard](../developer/node-standard.md) | Wiring a new pipeline node |
 
@@ -48,7 +48,7 @@ You've run a campaign. Pointers below for the next layer.
 
 ## Iterating on prompts manually
 
-When you want to tune `l1_generate` (or another optimizer prompt) by hand instead of running the full L1/L2 loop. Five-step single-cycle cadence:
+When you want to tune `l1_generate` (or another optimizer prompt) by hand instead of running the full L1/L2 loop. Five-step single-cycle pass:
 
 ```
 1. python -m promptpotter optimize         # full mode
