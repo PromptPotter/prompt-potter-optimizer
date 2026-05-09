@@ -1,5 +1,16 @@
 # CLAUDE.md
 
+> **Architecture reference: [`docs/architecture.md`](docs/architecture.md).**
+> Read it first — it's the single-page §0 + load-bearing surface
+> (§0.5) every PR measures against. This file (root `CLAUDE.md`)
+> covers onboarding pointers, project conventions, and the per-layer
+> CLAUDE.md tree (`promptpotter/CLAUDE.md`,
+> `promptpotter/application/CLAUDE.md`,
+> `promptpotter/domain/CLAUDE.md`,
+> `promptpotter/infrastructure/CLAUDE.md`,
+> `promptpotter/presentation/CLAUDE.md`, `tests/CLAUDE.md`) for
+> progressive disclosure of layer detail.
+
 ## What this is
 
 PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. The backend declares tunable params via `GET /pipeline`; the optimizer runs critique-guided generate→score→critique with PoBB elimination (ε=0.05, n_min=4), cross-run memory, and self-healing rails. Python 3.13+, hexagonal. **Orchestration is the product — backends are pluggable.** TermNorm is the only registered connector today (`promptpotter/connectors/termnorm.py` — bundles wire adapter, session lifecycle, and experiment-data extraction under one `Connector` shape); BBEH is the headline benchmark.
