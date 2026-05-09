@@ -28,11 +28,9 @@ from promptpotter.infrastructure.projections import (
     AuditTrailView,
     LiveDashboardView,
 )
-from promptpotter.presentation.views.view_factories import (
-    from_disk_round,
-    from_phase_event,
-)
+from promptpotter.presentation.views.view_ingress import from_phase_event
 from promptpotter.presentation.views.view_models import RoundCompleteView
+from promptpotter.presentation.writers import from_disk_round
 from promptpotter.shared.statistics import wilson_ci
 
 # ===========================================================================

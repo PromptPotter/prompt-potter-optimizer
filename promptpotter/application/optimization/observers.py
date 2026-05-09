@@ -30,7 +30,7 @@ from promptpotter.infrastructure.projections import (
     LiveDashboardView,
     PoBBStreamView,
 )
-from promptpotter.presentation.views.view_factories import (
+from promptpotter.presentation.views.view_ingress import (
     from_phase_event,
     view_to_wire_dict,
 )

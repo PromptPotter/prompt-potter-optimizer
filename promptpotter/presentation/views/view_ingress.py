@@ -1,11 +1,10 @@
-"""View factories — single source: ``PhaseEvent + ctx → typed View``.
+"""Live PhaseEvent ingress — ``PhaseEvent + ctx → typed View → wire dict``.
 
-The previous ``phase_views.py`` dict-builder layer is gone. Each per-phase
-builder here constructs the typed view directly and applies its ``ctx``
-side effects (round-num tracking, baseline rolling, p-value, prompt-flat
-memo) in one pass.
+Each per-phase builder constructs a typed view directly and applies its
+``ctx`` side effects (round-num tracking, baseline rolling, p-value,
+prompt-flat memo) in one pass.
 
-Two live entry points:
+Two entry points:
 
 - ``from_phase_event(event, ctx)`` — used by ``RunCallbacks``; the typed
   view is the single source of truth, and the runner serialises it via
@@ -14,19 +13,16 @@ Two live entry points:
   the wire-format dict back. Identity-style projection that mirrors the
   builder shapes.
 
-Two disk entry points (``from_disk_round`` / ``from_disk_log``) rebuild
-typed views from on-disk artifacts. The named round-trip invariant
-(``tests/test_view_factories``) compares both paths on
-``RoundCompleteView``.
+The shared score-entry helpers (``pick_round_winner``,
+``score_entry_from_dict``) are also consumed by ``presentation/writers.py``
+when reconstructing typed views from disk for ``log.md`` rendering.
 """
 
 from __future__ import annotations
 
-import json
 from collections.abc import Callable
-from dataclasses import asdict, dataclass
-from pathlib import Path
-from typing import Any, Literal
+from dataclasses import asdict
+from typing import Any
 
 from promptpotter.application.optimization.dispatch_hub import (
     format_l1_critique_for_prompt,
@@ -36,186 +32,34 @@ from promptpotter.domain.opt_search_point import (
     flatten_sp_summary,
 )
 from promptpotter.domain.phases import PhaseEvent
-from promptpotter.presentation.views.display import (
-    CYAN,
-    GREEN,
-    RESET,
-    YELLOW,
-    _fmt_delta,
-    fmt_ci,
-    fmt_pvalue,
-)
-from promptpotter.presentation.views.round_render import fmt_pp_override
 from promptpotter.presentation.views.view_models import (
     AnyView,
     CandidatesGeneratedView,
-    DigestStatusView,
     EscalationEnterView,
     EscalationExitView,
-    FinalWinnerView,
-    ForkSummaryView,
-    HardSamplesView,
     InitEnterView,
     InitExitView,
     L2RefineEnterView,
     L2RefineExitView,
-    LogMdView,
     PlanEnterView,
     PlanExitView,
     ProbeEnterView,
     ProbeExitView,
     RoundCompleteView,
-    RoundDigestView,
     RoundStartView,
     ScoreEntry,
     SpDiffView,
     WarningEntry,
 )
-from promptpotter.shared.composite import render_composite_fitness_oneliner
 from promptpotter.shared.statistics import min_detectable_effect, proportion_test, wilson_ci
 
 __all__ = [
-    "IndividualSummary",
-    "from_disk_log",
-    "from_disk_round",
     "from_phase_event",
-    "individual_summary_from_dict",
+    "pick_round_winner",
+    "score_entry_from_dict",
     "view_from_record",
     "view_to_wire_dict",
 ]
-
-
-@dataclass(frozen=True)
-class IndividualSummary:
-    """Structured candidate render — displays pick plain vs box wrapping.
-
-    Pieces the two displays can compose independently:
-
-    - ``tag`` — compact status slot (``80.0% [77-82%]`` or ``INVALID``);
-      notebook puts it on the top-right of the box, CLI appends it to
-      ``cand k/N``.
-    - ``body_line`` — the mutations + hits + delta line; the notebook
-      renders it as an inner box line, the CLI as an indented second line.
-    - ``detail_lines`` — ordered extras (elimination summary, the 1-line
-      composite_fitness-with-Δ render, degraded-count tag, or validation-failure
-      entries); rendered inline by both displays, with the last entry
-      folded onto the bottom info rule by callers that support it.
-    """
-
-    status: Literal["ok", "invalid", "aborted", "eliminated"]
-    tag: str
-    body_line: str
-    detail_lines: tuple[str, ...]
-
-
-def individual_summary_from_dict(
-    scores: dict,
-    baseline_acc: float,
-    *,
-    baseline_composite_fitness: float | None = None,
-) -> IndividualSummary:
-    """Classify a candidate score report and pre-format all display pieces.
-
-    Single source of truth for what the CLI and notebook show per candidate.
-    Invalid > aborted > eliminated > ok precedence matches the report's
-    exclusive flag semantics (invalid never runs the backend; aborted and
-    eliminated are mutually exclusive by construction in
-    ``_handle_scored_candidate``).
-
-    Per-candidate composite_fitness render is intentionally 1 line —
-    ``composite_fitness=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
-    don't dump 60 lines of identical formula text into the terminal. The
-    formula + per-evaluator breakdown lands once per round in the round
-    summary block.
-
-    *baseline_composite_fitness* anchors the Δ against the campaign's first-round
-    composite_fitness — even at deep rounds the operator sees how far the run
-    has come from origin. ``None`` collapses to the no-Δ form.
-    """
-    mutations = fmt_pp_override(scores.get("pipeline_params_override"))
-    mutations_chunk = f"{CYAN}{mutations}{RESET}  " if mutations else ""
-
-    if scores.get("invalid"):
-        out: list[str] = []
-        for vf in scores["validation_failures"]:
-            allowed = vf.get("allowed") or []
-            allowed_str = ", ".join(allowed[:3]) + (
-                f" (+{len(allowed) - 3})" if len(allowed) > 3 else ""
-            )
-            out.append(
-                f"{YELLOW}⚠{RESET} {vf.get('axis', '?')} = {vf.get('value', '?')!r}  "
-                f"∉ [{allowed_str}]"
-            )
-            out.append("  ↳ scored 0 (no backend call); L2 brief will name this value")
-        return IndividualSummary(
-            status="invalid",
-            tag=f"{YELLOW}INVALID{RESET}",
-            body_line="",
-            detail_lines=tuple(out),
-        )
-
-    acc = scores["accuracy"]
-    hits = scores.get("hits", 0)
-    n = scores.get("total", 0)
-    ci_lo, ci_hi = wilson_ci(hits, n)
-    delta = acc - baseline_acc
-    tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
-
-    aborted = bool(scores.get("escalation_aborted"))
-    if aborted:
-        scored_q = scores.get("scored_samples", n)
-        expected_q = scores.get("expected_samples", n)
-        hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
-    else:
-        hit_str = f"{hits}/{n} hits"
-    body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
-
-    detail_lines: list[str] = []
-    elim = scores.get("elimination_context") or {}
-    if scores.get("elimination_stopped") or elim.get("leader_locked"):
-        eq = int(elim.get("queries_scored", 0))
-        eqt = int(elim.get("total_queries", 0))
-        n_priors = int(elim.get("n_priors", 0))
-        prior_s = "" if n_priors == 1 else "s"
-        if scores.get("elimination_stopped"):
-            label = elim.get("triggered_by_prior_label")
-            if label is None:
-                pi = elim.get("triggered_by_prior_idx", -1)
-                label = f"prior #{pi}" if isinstance(pi, int) and pi >= 0 else "prior"
-            detail_lines.append(
-                f"{YELLOW}✂ eliminated q{eq}/{eqt}{RESET}  "
-                f"{fmt_pvalue(float(elim.get('triggered_p', 1.0)))}  "
-                f"vs {label} (of {n_priors} prior{prior_s})"
-            )
-        else:
-            detail_lines.append(
-                f"{GREEN}✓ leader locked q{eq}/{eqt}{RESET}  "
-                f"p_best={float(elim.get('p_best', 0.0)):.1%} (of {n_priors} prior{prior_s})"
-            )
-
-    comp = scores.get("composite_fitness")
-    degraded = scores.get("degraded_samples", 0)
-
-    if comp is not None:
-        detail_lines.append(
-            render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness)
-        )
-    if degraded:
-        detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
-
-    status: Literal["ok", "aborted", "eliminated"]
-    if aborted:
-        status = "aborted"
-    elif scores.get("elimination_stopped"):
-        status = "eliminated"
-    else:
-        status = "ok"
-    return IndividualSummary(
-        status=status,
-        tag=tag,
-        body_line=body_line,
-        detail_lines=tuple(detail_lines),
-    )
 
 
 def _truncate(s: str, max_len: int) -> str:
@@ -406,11 +250,11 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
 
 def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     score_entries = [
-        _score_entry_from_dict(s, fallback_label=f"C{i + 1}")
+        score_entry_from_dict(s, fallback_label=f"C{i + 1}")
         for i, s in enumerate(d.get("candidate_scores") or [])
     ]
 
-    winner = _pick_round_winner(score_entries)
+    winner = pick_round_winner(score_entries)
     if winner is not None:
         winner_label, winner_hits, winner_total = winner.label, winner.hits, winner.total
     else:
@@ -571,7 +415,7 @@ def _sp_diff_from_dict(d: dict | None) -> SpDiffView:
     )
 
 
-def _pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
+def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
     """Round winner = max non-aborted ``ScoreEntry`` ranked by
     ``(composite_fitness or accuracy, accuracy)``. Single source of truth for
     the tiebreak rule shared between the live event ingress (``_l1_score_exit``)
@@ -589,7 +433,7 @@ def _pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
     )
 
 
-def _score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
+def score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
     """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
     into a ``ScoreEntry``. ``fallback_label`` covers in-memory call sites where
     the dict carries no ``"label"`` and the index-tag (e.g. ``C3``) is supplied
@@ -645,7 +489,7 @@ def _l1_generate_exit_from_dict(v: dict) -> CandidatesGeneratedView:
 def _l1_score_exit_from_dict(v: dict) -> RoundCompleteView:
     return RoundCompleteView(
         **{k: v[k] for k in v if k != "scores"},
-        scores=tuple(_score_entry_from_dict(s) for s in v.get("scores") or []),
+        scores=tuple(score_entry_from_dict(s) for s in v.get("scores") or []),
     )
 
 
@@ -690,206 +534,3 @@ def view_from_record(record: dict[str, Any]) -> AnyView | None:
     if fn := _CUSTOM_RECONSTRUCT.get(key):
         return fn(v)
     return None
-
-
-# --- from_disk -----------------------------------------------------------
-
-
-def from_disk_round(
-    round_data: dict[str, Any],
-    *,
-    composite_fitness_formula: str | None = None,
-    composite_fitness_formula_short: str | None = None,
-    baseline_composite_fitness: float | None = None,
-) -> RoundCompleteView:
-    """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
-    score_entries = [
-        _score_entry_from_dict(s, fallback_label=f"C{i + 1}")
-        for i, s in enumerate(round_data.get("candidate_scores") or [])
-    ]
-
-    winner = _pick_round_winner(score_entries)
-    winner_label = winner.label if winner is not None else ""
-
-    winner_acc = float(round_data.get("accuracy", 0.0))
-    baseline_acc = float(round_data.get("baseline_accuracy", 0.0))
-    improved = bool(round_data.get("improved", False))
-    return RoundCompleteView(
-        round=int(round_data.get("round", 0)),
-        baseline_acc=baseline_acc,
-        scores=tuple(score_entries),
-        winner_label=winner_label,
-        winner_accuracy=winner_acc,
-        winner_composite_fitness=round_data.get("composite_fitness"),
-        winner_evaluators=dict(round_data.get("evaluators") or {}),
-        winner_hits=int(round_data.get("hits", 0)),
-        winner_total=int(round_data.get("total", 0)),
-        improved=improved,
-        delta=(winner_acc - baseline_acc) if improved else 0.0,
-        p_value=round_data.get("p_value"),
-        next_action=str(round_data.get("next_action", "")),
-        l1_critique_text=format_l1_critique_for_prompt(round_data.get("critique") or {}),
-        composite_fitness_formula=composite_fitness_formula,
-        composite_fitness_formula_short=composite_fitness_formula_short,
-        baseline_composite_fitness=baseline_composite_fitness,
-    )
-
-
-def _load_p_best_trajectory(
-    streams_dir: Path | None, round_num: int
-) -> tuple[dict[str, list[float]], dict[str, int]]:
-    """Load per-sample P(best) snapshots from the JSONL stream for a single round.
-
-    Returns ``(trajectory, stopped_at)`` — trajectory is candidate_id →
-    list of P(best) values across queries; stopped_at is candidate_id →
-    last-query-idx-before-the-current-candidate-stopped, populated when a
-    candidate's value drops to / below ``ε`` (best-effort: the stream
-    doesn't carry ε, so we infer "stopped" as the query at which the
-    current candidate's snapshot disappears).
-    """
-    if streams_dir is None or not streams_dir.is_dir():
-        return {}, {}
-    path = streams_dir / f"round_{round_num:04d}_p_best.jsonl"
-    if not path.is_file():
-        return {}, {}
-    trajectory: dict[str, list[float]] = {}
-    last_seen: dict[str, int] = {}
-    try:
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if not line.strip():
-                continue
-            try:
-                rec = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            qi = int(rec.get("sample_idx", -1))
-            for cid, prob in (rec.get("p_best") or {}).items():
-                trajectory.setdefault(str(cid), []).append(float(prob))
-                last_seen[str(cid)] = qi
-    except OSError:
-        return {}, {}
-    return trajectory, last_seen
-
-
-def from_disk_log(
-    index: dict[str, Any],
-    rounds: list[dict[str, Any]],
-    *,
-    hard_samples_artifact: dict[str, Any] | None = None,
-    sample_query_lookup: dict[int, str] | None = None,
-    streams_dir: Path | None = None,
-    fork_indices: list[dict[str, Any]] | None = None,
-) -> LogMdView:
-    """Build the ``log.md`` view from ``index.json`` + a list of round_data dicts.
-
-    ``fork_indices`` is the list of fork ``index.json`` blobs (one per fork
-    of the family); rendered as the ``## Forks`` section on the family-root
-    log.md. Forks themselves pass ``None`` and get an empty tuple.
-    """
-    final = index.get("final") or {}
-    gen_only = sum(1 for t in rounds if str(t.get("status") or "") == "generation_only")
-    status = DigestStatusView(
-        campaign_id=str(index.get("campaign_id") or ""),
-        parent_session_id=index.get("parent_session_id"),
-        status=str(index.get("status", "active")),
-        stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
-        baseline_accuracy=float(index.get("baseline_accuracy", 0.0)),
-        best_accuracy=float(index.get("best_accuracy", 0.0)),
-        best_round=index.get("best_round"),
-        rounds_completed=int(index.get("n_rounds", 0)),
-        started_at=final.get("started_at"),
-        finished_at=final.get("finished_at"),
-        gen_only_rounds=gen_only,
-    )
-
-    round_views: list[RoundDigestView] = []
-    for t in rounds:
-        osp = t.get("opt_search_point") or {}
-        lineage = osp.get("lineage") or {}
-        rnd_raw = t.get("round")
-        rnd = rnd_raw if isinstance(rnd_raw, int) else 0
-        traj, stopped = _load_p_best_trajectory(streams_dir, rnd)
-        round_views.append(
-            RoundDigestView(
-                round=rnd,
-                label=str(t.get("label") or "").strip() or f"round_{rnd}",
-                accuracy=float(t.get("accuracy", 0.0)),
-                improved=bool(t.get("improved", False)),
-                hits=int(t.get("hits", 0)),
-                total=int(t.get("total", 0)),
-                composite_fitness=float(t.get("composite_fitness", 0.0)),
-                changes_description=(lineage.get("changes_description") or "").strip(),
-                l1_critique_text=format_l1_critique_for_prompt(t.get("critique") or {}),
-                l1_yield=float(t.get("l1_yield", 1.0)),
-                l1_n_no_op=int(t.get("l1_n_no_op", 0)),
-                l1_n_duplicate=int(t.get("l1_n_duplicate", 0)),
-                candidates_scored=int(t.get("candidates_scored", 0)),
-                evaluators=dict(t.get("evaluators") or {}),
-                p_best_trajectory=traj,
-                p_best_stopped=stopped,
-            )
-        )
-
-    final_view = (
-        FinalWinnerView(
-            winner_prompt_fields=dict(final.get("winner_prompt_fields") or {}),
-            winner_pipeline_params=dict(final.get("winner_pipeline_params") or {}),
-        )
-        if final
-        else None
-    )
-    hard = (
-        HardSamplesView(
-            artifact=dict(hard_samples_artifact),
-            sample_query_lookup=dict(sample_query_lookup or {}),
-        )
-        if hard_samples_artifact
-        else None
-    )
-    fork_views: tuple[ForkSummaryView, ...] = ()
-    family_best: tuple[float, str] | None = None
-    if fork_indices:
-        # Drop uninitialized forks (created but never ran a round) — their
-        # all-zeros row is noise. Sort survivors by best desc so the top
-        # contender surfaces first.
-        live = [fi for fi in fork_indices if int(fi.get("n_rounds") or 0) > 0]
-        fork_views = tuple(
-            sorted(
-                (_fork_summary_from_index(fi) for fi in live),
-                key=lambda v: v.best_accuracy,
-                reverse=True,
-            )
-        )
-        # Family-best across the root + all forks. Cycle id of the holder
-        # disambiguates which sibling carries the headline.
-        candidates: list[tuple[float, str]] = [
-            (float(index.get("best_accuracy", 0.0)), str(index.get("campaign_id") or ""))
-        ]
-        for fv in fork_views:
-            candidates.append((fv.best_accuracy, fv.cycle_id))
-        family_best = max(candidates, key=lambda c: c[0])
-
-    return LogMdView(
-        status=status,
-        rounds=tuple(round_views),
-        formula=final.get("scorer_round_formula"),
-        baseline_composite_fitness=final.get("baseline_composite_fitness"),
-        hard_samples=hard,
-        final=final_view,
-        forks=fork_views,
-        family_best=family_best,
-    )
-
-
-def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
-    final = fork_index.get("final") or {}
-    return ForkSummaryView(
-        cycle_id=str(fork_index.get("campaign_id") or ""),
-        mode=str(final.get("mode") or fork_index.get("fork_kind") or ""),
-        status=str(fork_index.get("status", "active")),
-        best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
-        baseline_accuracy=float(fork_index.get("baseline_accuracy", 0.0)),
-        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_rounds", 0) or 0),
-        stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
-        finished_at=final.get("finished_at") or fork_index.get("finished_at"),
-    )

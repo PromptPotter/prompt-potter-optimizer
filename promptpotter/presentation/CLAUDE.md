@@ -11,7 +11,7 @@ points MUST NOT write campaign artifacts directly — they call into
 | Module | Owns |
 |---|---|
 | `cli/` | `campaign_runner.py` (the `optimize` shell), `session.py` (`init` shell), `parsers.py` (argparse). Thin shells over `application/runner.py` and `application/bootstrap`. |
-| `views/` | Display formatters: `display.py`, `live.py` (terminal live state), `notebook_run.py`, `render_markdown.py`, `render_text.py`, `round_render.py`, `view_factories.py`, `view_models.py`. Pure data → text/markdown — no I/O outside the file-tree-readable surface. |
+| `views/` | Display formatters: `view_models.py` (frozen view dataclasses), `display.py` (ANSI primitives), `view_ingress.py` (live `PhaseEvent → typed View → wire dict` ingress + `view_from_record` reconstruction), `render.py` (`to_text` / `to_markdown` dispatchers + heatmap + sweep summary), `live.py` (`LiveDisplay` ledger subscriber + per-sample / per-candidate formatters), `notebook_run.py`. Pure data → text/markdown — no I/O outside the file-tree-readable surface. Disk-side reconstruction (`from_disk_round` / `from_disk_log`) lives in `presentation/writers.py` next to its single consumer. |
 | `api.py` | FastAPI read-only API: backend storage, campaign registry, per-cycle live reads (dashboard passthrough, log.md, ledger reads + filtered views). |
 | `writers.py` | Markdown writers (`refresh_tenant_leaderboards()` writes `archive/runs.md`, `archive/individuals.md`, etc.). Status load-bearing TBD by §1 audit. |
 

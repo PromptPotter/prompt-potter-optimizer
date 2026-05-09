@@ -2,6 +2,12 @@
 
 Called from runner orchestration milestones, NOT from RunCallbacks (which
 must stay display-only per CLAUDE.md).
+
+Owns the disk-side view reconstruction (``from_disk_round`` /
+``from_disk_log``): persisted ``trial_NNNN.json`` + ``index.json`` rebuild
+into the same ``RoundCompleteView`` / ``LogMdView`` shapes the live ingress
+emits, so ``to_markdown`` has one schema to render against. Shared
+score-entry helpers come from ``views.view_ingress``.
 """
 
 from __future__ import annotations
@@ -10,18 +16,233 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from promptpotter.application.optimization.dispatch_hub import (
+    format_l1_critique_for_prompt,
+)
 from promptpotter.application.review import render_review_md
 from promptpotter.infrastructure.projections.audit_trail import load_round_audits
 from promptpotter.infrastructure.store import root_cycle_id
-from promptpotter.presentation.views.render_markdown import to_markdown
-from promptpotter.presentation.views.view_factories import from_disk_log
+from promptpotter.presentation.views.render import to_markdown
+from promptpotter.presentation.views.view_ingress import (
+    pick_round_winner,
+    score_entry_from_dict,
+)
+from promptpotter.presentation.views.view_models import (
+    DigestStatusView,
+    FinalWinnerView,
+    ForkSummaryView,
+    HardSamplesView,
+    LogMdView,
+    RoundCompleteView,
+    RoundDigestView,
+)
 from promptpotter.shared.errors import graceful
 
 if TYPE_CHECKING:
     from promptpotter.application.bootstrap.session import Session
     from promptpotter.application.optimization.cycle import Cycle
 
-__all__ = ["write_log_md", "write_review_md"]
+__all__ = ["from_disk_log", "from_disk_round", "write_log_md", "write_review_md"]
+
+
+def from_disk_round(
+    round_data: dict[str, Any],
+    *,
+    composite_fitness_formula: str | None = None,
+    composite_fitness_formula_short: str | None = None,
+    baseline_composite_fitness: float | None = None,
+) -> RoundCompleteView:
+    """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
+    score_entries = [
+        score_entry_from_dict(s, fallback_label=f"C{i + 1}")
+        for i, s in enumerate(round_data.get("candidate_scores") or [])
+    ]
+
+    winner = pick_round_winner(score_entries)
+    winner_label = winner.label if winner is not None else ""
+
+    winner_acc = float(round_data.get("accuracy", 0.0))
+    baseline_acc = float(round_data.get("baseline_accuracy", 0.0))
+    improved = bool(round_data.get("improved", False))
+    return RoundCompleteView(
+        round=int(round_data.get("round", 0)),
+        baseline_acc=baseline_acc,
+        scores=tuple(score_entries),
+        winner_label=winner_label,
+        winner_accuracy=winner_acc,
+        winner_composite_fitness=round_data.get("composite_fitness"),
+        winner_evaluators=dict(round_data.get("evaluators") or {}),
+        winner_hits=int(round_data.get("hits", 0)),
+        winner_total=int(round_data.get("total", 0)),
+        improved=improved,
+        delta=(winner_acc - baseline_acc) if improved else 0.0,
+        p_value=round_data.get("p_value"),
+        next_action=str(round_data.get("next_action", "")),
+        l1_critique_text=format_l1_critique_for_prompt(round_data.get("critique") or {}),
+        composite_fitness_formula=composite_fitness_formula,
+        composite_fitness_formula_short=composite_fitness_formula_short,
+        baseline_composite_fitness=baseline_composite_fitness,
+    )
+
+
+def _load_p_best_trajectory(
+    streams_dir: Path | None, round_num: int
+) -> tuple[dict[str, list[float]], dict[str, int]]:
+    """Load per-sample P(best) snapshots from the JSONL stream for a single round.
+
+    Returns ``(trajectory, stopped_at)`` — trajectory is candidate_id →
+    list of P(best) values across queries; stopped_at is candidate_id →
+    last-query-idx-before-the-current-candidate-stopped, populated when a
+    candidate's value drops to / below ``ε`` (best-effort: the stream
+    doesn't carry ε, so we infer "stopped" as the query at which the
+    current candidate's snapshot disappears).
+    """
+    if streams_dir is None or not streams_dir.is_dir():
+        return {}, {}
+    path = streams_dir / f"round_{round_num:04d}_p_best.jsonl"
+    if not path.is_file():
+        return {}, {}
+    trajectory: dict[str, list[float]] = {}
+    last_seen: dict[str, int] = {}
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            try:
+                rec = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            qi = int(rec.get("sample_idx", -1))
+            for cid, prob in (rec.get("p_best") or {}).items():
+                trajectory.setdefault(str(cid), []).append(float(prob))
+                last_seen[str(cid)] = qi
+    except OSError:
+        return {}, {}
+    return trajectory, last_seen
+
+
+def from_disk_log(
+    index: dict[str, Any],
+    rounds: list[dict[str, Any]],
+    *,
+    hard_samples_artifact: dict[str, Any] | None = None,
+    sample_query_lookup: dict[int, str] | None = None,
+    streams_dir: Path | None = None,
+    fork_indices: list[dict[str, Any]] | None = None,
+) -> LogMdView:
+    """Build the ``log.md`` view from ``index.json`` + a list of round_data dicts.
+
+    ``fork_indices`` is the list of fork ``index.json`` blobs (one per fork
+    of the family); rendered as the ``## Forks`` section on the family-root
+    log.md. Forks themselves pass ``None`` and get an empty tuple.
+    """
+    final = index.get("final") or {}
+    gen_only = sum(1 for t in rounds if str(t.get("status") or "") == "generation_only")
+    status = DigestStatusView(
+        campaign_id=str(index.get("campaign_id") or ""),
+        parent_session_id=index.get("parent_session_id"),
+        status=str(index.get("status", "active")),
+        stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
+        baseline_accuracy=float(index.get("baseline_accuracy", 0.0)),
+        best_accuracy=float(index.get("best_accuracy", 0.0)),
+        best_round=index.get("best_round"),
+        rounds_completed=int(index.get("n_rounds", 0)),
+        started_at=final.get("started_at"),
+        finished_at=final.get("finished_at"),
+        gen_only_rounds=gen_only,
+    )
+
+    round_views: list[RoundDigestView] = []
+    for t in rounds:
+        osp = t.get("opt_search_point") or {}
+        lineage = osp.get("lineage") or {}
+        rnd_raw = t.get("round")
+        rnd = rnd_raw if isinstance(rnd_raw, int) else 0
+        traj, stopped = _load_p_best_trajectory(streams_dir, rnd)
+        round_views.append(
+            RoundDigestView(
+                round=rnd,
+                label=str(t.get("label") or "").strip() or f"round_{rnd}",
+                accuracy=float(t.get("accuracy", 0.0)),
+                improved=bool(t.get("improved", False)),
+                hits=int(t.get("hits", 0)),
+                total=int(t.get("total", 0)),
+                composite_fitness=float(t.get("composite_fitness", 0.0)),
+                changes_description=(lineage.get("changes_description") or "").strip(),
+                l1_critique_text=format_l1_critique_for_prompt(t.get("critique") or {}),
+                l1_yield=float(t.get("l1_yield", 1.0)),
+                l1_n_no_op=int(t.get("l1_n_no_op", 0)),
+                l1_n_duplicate=int(t.get("l1_n_duplicate", 0)),
+                candidates_scored=int(t.get("candidates_scored", 0)),
+                evaluators=dict(t.get("evaluators") or {}),
+                p_best_trajectory=traj,
+                p_best_stopped=stopped,
+            )
+        )
+
+    final_view = (
+        FinalWinnerView(
+            winner_prompt_fields=dict(final.get("winner_prompt_fields") or {}),
+            winner_pipeline_params=dict(final.get("winner_pipeline_params") or {}),
+        )
+        if final
+        else None
+    )
+    hard = (
+        HardSamplesView(
+            artifact=dict(hard_samples_artifact),
+            sample_query_lookup=dict(sample_query_lookup or {}),
+        )
+        if hard_samples_artifact
+        else None
+    )
+    fork_views: tuple[ForkSummaryView, ...] = ()
+    family_best: tuple[float, str] | None = None
+    if fork_indices:
+        # Drop uninitialized forks (created but never ran a round) — their
+        # all-zeros row is noise. Sort survivors by best desc so the top
+        # contender surfaces first.
+        live = [fi for fi in fork_indices if int(fi.get("n_rounds") or 0) > 0]
+        fork_views = tuple(
+            sorted(
+                (_fork_summary_from_index(fi) for fi in live),
+                key=lambda v: v.best_accuracy,
+                reverse=True,
+            )
+        )
+        # Family-best across the root + all forks. Cycle id of the holder
+        # disambiguates which sibling carries the headline.
+        candidates: list[tuple[float, str]] = [
+            (float(index.get("best_accuracy", 0.0)), str(index.get("campaign_id") or ""))
+        ]
+        for fv in fork_views:
+            candidates.append((fv.best_accuracy, fv.cycle_id))
+        family_best = max(candidates, key=lambda c: c[0])
+
+    return LogMdView(
+        status=status,
+        rounds=tuple(round_views),
+        formula=final.get("scorer_round_formula"),
+        baseline_composite_fitness=final.get("baseline_composite_fitness"),
+        hard_samples=hard,
+        final=final_view,
+        forks=fork_views,
+        family_best=family_best,
+    )
+
+
+def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
+    final = fork_index.get("final") or {}
+    return ForkSummaryView(
+        cycle_id=str(fork_index.get("campaign_id") or ""),
+        mode=str(final.get("mode") or fork_index.get("fork_kind") or ""),
+        status=str(fork_index.get("status", "active")),
+        best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
+        baseline_accuracy=float(fork_index.get("baseline_accuracy", 0.0)),
+        n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_rounds", 0) or 0),
+        stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
+        finished_at=final.get("finished_at") or fork_index.get("finished_at"),
+    )
 
 
 def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None) -> None:

@@ -138,7 +138,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     from promptpotter.domain.results import CycleResult, RoundResult
     from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
     from promptpotter.infrastructure.projections import LiveDashboardView
-    from promptpotter.presentation.views.view_factories import (
+    from promptpotter.presentation.views.view_ingress import (
         from_phase_event,
         view_to_wire_dict,
     )
@@ -312,8 +312,8 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
     # Mirror runner._finalize_run: fold the run summary into index.json::final
     # and render log.md + review.md from the index + round_data dump.
     from promptpotter.application.review import render_review_md
-    from promptpotter.presentation.views.render_markdown import to_markdown
-    from promptpotter.presentation.views.view_factories import from_disk_log
+    from promptpotter.presentation.views.render import to_markdown
+    from promptpotter.presentation.writers import from_disk_log
 
     final = CycleResult(
         rounds=[round_result],

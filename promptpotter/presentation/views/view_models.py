@@ -1,16 +1,17 @@
 """Frozen view-model dataclasses — the unified type set for all render targets.
 
-Two factories build these (``view_factories.py``): ``from_phase_event`` for
-live ``PhaseEvent`` payloads and ``from_disk`` for post-hoc round_data / index
-artifacts. Two render targets consume them (``render_text.py``,
-``render_markdown.py``); the notebook builds its final-winner HTML inline.
-Views are pure data: no methods that emit text, no I/O.
+Two builders produce these: ``views.view_ingress`` for live ``PhaseEvent``
+payloads (``from_phase_event``) and ``presentation.writers`` for post-hoc
+round_data / index artifacts (``from_disk_round`` / ``from_disk_log``). Two
+render targets consume them via ``render.py`` (``to_text`` / ``to_markdown``);
+the notebook builds its final-winner HTML inline. Views are pure data: no
+methods that emit text, no I/O.
 
-The named correctness invariant — exercised in ``tests/test_view_factories``
-— is ``from_phase_event(e) == from_disk(write_then_load(e))`` on
-``RoundCompleteView``, the one phase event that survives to disk in round_data
-JSON. Live-only events (refine, probe, plan, escalation) have only the
-phase-event factory and no disk counterpart.
+The named correctness invariant — exercised in ``tests/test_presentation``
+— is ``from_phase_event(e) == from_disk_round(write_then_load(e))`` on
+``RoundCompleteView``, the one phase event that survives to disk in
+round_data JSON. Live-only events (refine, probe, plan, escalation) have
+only the phase-event factory and no disk counterpart.
 """
 
 from __future__ import annotations

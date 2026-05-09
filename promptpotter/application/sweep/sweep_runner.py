@@ -29,7 +29,7 @@ from promptpotter.infrastructure.store import (
     root_cycle_id,
     save_active_pointer,
 )
-from promptpotter.presentation.views.render_markdown import render_sweep_summary
+from promptpotter.presentation.views.render import render_sweep_summary
 from promptpotter.presentation.views.view_models import (
     SweepPayloadRow,
     SweepSummaryView,
