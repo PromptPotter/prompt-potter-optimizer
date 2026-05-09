@@ -19,6 +19,8 @@ import { ChatPane } from "./ChatPane";
 import { ProgressCard } from "./ProgressCard";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
+import { SignalsPanel } from "./SignalsPanel";
+import { StuckDiagnosis } from "./StuckDiagnosis";
 import { FilesPane } from "@/components/tree/FilesPane";
 
 interface PipelineDoc {
@@ -180,8 +182,10 @@ export function DashboardPane() {
               <HeroSummary cycleId={cycleId} dash={dash} />
             </div>
             <ProgressCard dash={dash} />
+            <StuckDiagnosis dash={dash} />
             <WorkflowCanvas pipeline={pipeline} dash={dash} />
             <LiveStateCard dash={dash} />
+            <SignalsPanel dash={dash} />
             <div className="grid3">
               <PassRateCard round={latestRound} />
               <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />

@@ -293,13 +293,34 @@ async def _post_round(
     deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function persists
     the post-observe state and dispatches the chosen action.
     """
+    axes_with_positive_yield = _count_positive_yield_axes(cycle)
     event = cycle.escalation.observe_round(
         improved=round_result.improved,
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         enable_l2=config.optimization.enable_l2,
-        axes_with_positive_yield=_count_positive_yield_axes(cycle),
+        axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
+    )
+    # Phase 4 — emit the matched rule + signal snapshot so the SignalsProjection
+    # writes ``.runtime/signals.jsonl`` and the dashboard mirrors recent_rules.
+    emit_phase(
+        cb.on_phase,
+        "cadence",
+        "rule_fired",
+        round=round_num,
+        layer="post_round",
+        rule_name=event.rule_name,
+        rule_priority=event.rule_priority,
+        next_action=event.next_action.value,
+        reason=event.reason,
+        signal_inputs={
+            "improved": round_result.improved,
+            "current_accuracy": cycle.tracking.current_accuracy,
+            "l1_stall_count": cycle.escalation.l1_stall_count,
+            "l1_patience": config.optimization.l1_patience,
+            "axes_with_positive_yield": axes_with_positive_yield,
+        },
     )
     cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 

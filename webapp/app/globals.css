@@ -562,6 +562,24 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    keeps it transform-based so prefers-reduced-motion can fall through. */
 .shell.chat-mode > .sidebar{display:none}
 
+/* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */
+.signals-panel .signals-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}
+.signal-row{padding:8px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-surface-secondary)}
+.signal-row-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:13px}
+.signal-rule{font-weight:600;color:var(--color-text-primary)}
+.signal-layer{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);padding:1px 6px;border-radius:3px;background:var(--color-surface-tertiary)}
+.signal-action{color:var(--color-text-secondary)}
+.signal-meta{margin-left:auto;font-size:11px;color:var(--color-text-tertiary)}
+.signal-reason{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
+.signal-inputs{display:flex;flex-wrap:wrap;gap:6px;margin-top:6px}
+.signal-chip{font-size:11px;padding:2px 6px;border-radius:3px;background:var(--color-surface-tertiary);color:var(--color-text-secondary)}
+.signal-chip b{color:var(--color-text-primary);font-weight:600}
+.stuck-diagnosis .diagnosis-headline{font-size:14px;font-weight:600;color:var(--color-text-primary);margin-top:4px}
+.stuck-diagnosis .diagnosis-detail{font-size:12px;color:var(--color-text-secondary);margin-top:4px}
+.stuck-diagnosis.sev-warn{border-color:var(--color-warning,#c27500)}
+.stuck-diagnosis.sev-warn .diagnosis-headline{color:var(--color-warning,#c27500)}
+.stuck-diagnosis.sev-ok .diagnosis-headline{color:var(--color-success,#3a9d5d)}
+
 /* Honor user vestibular preference. The wizard mascot, sparkles,
    pulse-active border, and chevron rotations all stop being motion under
    this. transition: 0.01ms keeps state changes instant rather than abrupt. */

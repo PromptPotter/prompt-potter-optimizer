@@ -60,11 +60,18 @@ class EscalationEvent:
     for ``observe_round``; L2 or L3 stall for ``observe_l2_escalation``).
     ``reason`` is human-readable for telemetry; consumers branch on
     ``next_action`` and read ``stop_reason`` for the StopLoop projection.
+
+    ``rule_name`` / ``rule_priority`` are populated by
+    :func:`cadence.evaluate_round` (post-round path goes through the rule
+    engine). The L2/L3 cascade in :meth:`EscalationState.observe_l2_escalation`
+    is still imperative — those paths leave both fields ``None``.
     """
 
     next_action: NextAction
     stall_depth: int
     reason: str
+    rule_name: str | None = None
+    rule_priority: int | None = None
 
     @property
     def stop_reason(self) -> StopReason | None:

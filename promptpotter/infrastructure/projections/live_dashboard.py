@@ -85,6 +85,12 @@ def _empty_spend() -> dict[str, Any]:
 
 # Per-sample terminator badge for the compact ``fmt_sample_line`` rendering;
 # unmapped nodes render as the first two characters of the node name.
+# Cap on ``state["recent_rules"]`` — rolling buffer the StuckDiagnosis
+# webapp widget reads. 8 covers the last few rounds of post-round FSM
+# firings without bloating dashboard.json.
+_RECENT_RULES_CAP = 8
+
+
 _NODE_BADGES: dict[str, str] = {
     "llm_only": "ai",
     "llm_ranking": "ai",
@@ -206,6 +212,12 @@ class LiveDashboardProjection(ProjectionBase):
             # rate-tabled via ``shared/spend.py``. budget_usd is set from
             # campaign.optimization.spend_budget_usd at INIT:exit.
             "spend": r.get("spend") or _empty_spend(),
+            # Phase 4 — last N cadence-rule firings + latest signal_inputs
+            # snapshot per layer. Webapp's StuckDiagnosis reads these to
+            # name *which* signal is at floor/ceiling without opening
+            # ``.runtime/signals.jsonl``.
+            "recent_rules": list(r.get("recent_rules") or []),
+            "current_signals": dict(r.get("current_signals") or {}),
         }
         # Bare short-form formula template (set on INIT:exit). Used per-
         # candidate in ``_build_l1_score_block`` to pair each candidate's
@@ -324,6 +336,11 @@ class LiveDashboardProjection(ProjectionBase):
     # no second dispatch path elsewhere.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
+        if record.phase == "cadence" and record.event == "rule_fired":
+            self._absorb_rule_fired(record)
+            self._persist()
+            return
+
         if record.phase == "round" and record.event == "display":
             payload = record.payload or {}
             round_result = payload.get("round_result")
@@ -572,6 +589,42 @@ class LiveDashboardProjection(ProjectionBase):
 
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)
+
+    def _absorb_rule_fired(self, record: PhaseRecord) -> None:
+        """Fold a ``cadence/rule_fired`` event into ``dashboard.json``.
+
+        Appends to ``state["recent_rules"]`` (rolling, capped) and overwrites
+        ``state["current_signals"][layer]`` with the latest snapshot. The
+        webapp's ``StuckDiagnosis`` widget reads both — recent_rules names
+        the last N firings, current_signals exposes the predicate inputs.
+        """
+        payload = record.payload or {}
+        entry = {
+            "round": record.round,
+            "timestamp": record.timestamp,
+            "layer": payload.get("layer"),
+            "rule_name": payload.get("rule_name"),
+            "rule_priority": payload.get("rule_priority"),
+            "next_action": payload.get("next_action"),
+            "reason": payload.get("reason"),
+            "signal_inputs": payload.get("signal_inputs") or {},
+        }
+        recent: list[dict[str, Any]] = list(self.state.get("recent_rules") or [])
+        recent.append(entry)
+        if len(recent) > _RECENT_RULES_CAP:
+            recent = recent[-_RECENT_RULES_CAP:]
+        self.state["recent_rules"] = recent
+
+        layer = entry["layer"]
+        if isinstance(layer, str):
+            current: dict[str, Any] = dict(self.state.get("current_signals") or {})
+            current[layer] = {
+                "round": record.round,
+                "rule_name": entry["rule_name"],
+                "next_action": entry["next_action"],
+                "signal_inputs": entry["signal_inputs"],
+            }
+            self.state["current_signals"] = current
 
     def _absorb_round_complete(self, accuracy: float, l1_stall_count: int) -> None:
         s = self.state
