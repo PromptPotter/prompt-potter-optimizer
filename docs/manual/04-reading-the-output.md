@@ -5,7 +5,7 @@ While a campaign runs, three streams tell you what's happening: per-sample lines
 ## Lifecycle at a glance
 
 ```
-init       baseline       round 1..N            stop
+init       origin       round 1..N            stop
   │           │              │                    │
   ▼           ▼              ▼                    ▼
 prep      score start      generate → evaluate     winner
@@ -86,7 +86,7 @@ The optimizer has already handled it — these exist for audit, not to ask for i
 ## Where results land
 
 - `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
-- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`.
+- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`.
 
 ## Live state ([forks and the family root](../concepts/campaign-tree.md))
 

@@ -215,7 +215,7 @@ Full audit at [`m10-cleanup-osp-fields.md`](m10-cleanup-osp-fields.md).
 Findings:
 
 - **Count correction:** spec says 22 (14 own + 8 inherited);
-  reality is 21 (13 own + 8 inherited). Cut target re-baselined
+  reality is 21 (13 own + 8 inherited). Cut target re-origind
   to 13 - 4 = 9 own surviving fields.
 - **Clean drop (immediate, §4-eligible):** `warning_inventory` —
   duplicate of `validation_failures` + `runtime_failures`; no
@@ -255,7 +255,7 @@ Built `datasets/promptpotter/` per `m10-cleanup.md` §1 deliverable:
   L1/L1_CRITIQUE/L2/L3 meta-prompts.
 - `golden_traces.json` — two shape-faithful rows in the
   `load_potter_traces` output contract: one L1→L1 transition
-  (round 0 → 1, GSM8K-shaped baseline; `score_delta=+0.07`) and
+  (round 0 → 1, GSM8K-shaped origin; `score_delta=+0.07`) and
   one L1→L2 escalation transition (round 3 → 4; `score_delta=+0.05`).
   Both rows roundtrip cleanly through `OptSearchPoint.model_validate`
   + `render()`.

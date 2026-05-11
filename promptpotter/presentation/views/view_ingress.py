@@ -1,7 +1,7 @@
 """Live PhaseEvent ingress — ``PhaseEvent + ctx → typed View → wire dict``.
 
 Each per-phase builder constructs a typed view directly and applies its
-``ctx`` side effects (round-num tracking, baseline rolling, p-value,
+``ctx`` side effects (round-num tracking, origin rolling, p-value,
 prompt-flat memo) in one pass.
 
 Two entry points:
@@ -87,10 +87,10 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
     )
     ctx["round_num"] = 0
     ctx["l1_stall_count"] = 0
-    ctx["baseline_accuracy"] = 0.0
+    ctx["origin_accuracy"] = 0.0
 
     # Resolve the per-round composite formula at INIT.enter so the live
-    # dashboard can stamp it before baseline scoring fires (matches _init_exit
+    # dashboard can stamp it before origin scoring fires (matches _init_exit
     # priority: explicit campaign override > schema default > None).
     explicit = (
         session.scoring.scorer_round_formula
@@ -133,8 +133,8 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
 def _init_exit(d: dict, ctx: dict) -> InitExitView:
     cycle = d["state"]
     session = d["env"]
-    ctx["baseline_accuracy"] = cycle.tracking.current_accuracy
-    ctx["baseline_composite_fitness"] = cycle.tracking.current_composite_fitness
+    ctx["origin_accuracy"] = cycle.tracking.current_accuracy
+    ctx["origin_composite_fitness"] = cycle.tracking.current_composite_fitness
     schema = session.pipeline_schema
     explicit = session.scoring.scorer_round_formula
     if explicit:
@@ -159,7 +159,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
             ctx["original_sp_flat"][field_name] = str(value)
 
     return InitExitView(
-        baseline_acc=cycle.tracking.current_accuracy,
+        origin_acc=cycle.tracking.current_accuracy,
         cycle_id_short=(session.state.cycle_id or "?")[:12],
         samples=len(session.scoring.scoring_set),
         obs_on=session.state.obs is not None,
@@ -169,7 +169,7 @@ def _init_exit(d: dict, ctx: dict) -> InitExitView:
         prompt_field_overlays=overlays,
         composite_fitness_formula=full,
         composite_fitness_formula_short=short,
-        baseline_composite_fitness=ctx["baseline_composite_fitness"],
+        origin_composite_fitness=ctx["origin_composite_fitness"],
     )
 
 
@@ -262,18 +262,18 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
 
     w_acc = float(d.get("winner_accuracy", 0.0))
     improved = bool(d.get("improved", False))
-    baseline_acc = ctx.get("baseline_accuracy", 0.0)
-    delta = w_acc - baseline_acc if improved else 0.0
+    origin_acc = ctx.get("origin_accuracy", 0.0)
+    delta = w_acc - origin_acc if improved else 0.0
     p_value: float | None = None
     if improved and winner_total > 0:
         p_value = proportion_test(
-            winner_hits, winner_total, round(baseline_acc * winner_total), winner_total
+            winner_hits, winner_total, round(origin_acc * winner_total), winner_total
         )
-        ctx["baseline_accuracy"] = w_acc
+        ctx["origin_accuracy"] = w_acc
 
     return RoundCompleteView(
         round=int(ctx.get("round_num", 0)),
-        baseline_acc=baseline_acc,
+        origin_acc=origin_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_accuracy=w_acc,
@@ -288,7 +288,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         l1_critique_text=format_l1_critique_for_prompt(d.get("critique") or {}),
         composite_fitness_formula=ctx.get("composite_fitness_formula"),
         composite_fitness_formula_short=ctx.get("composite_fitness_formula_short"),
-        baseline_composite_fitness=ctx.get("baseline_composite_fitness"),
+        origin_composite_fitness=ctx.get("origin_composite_fitness"),
     )
 
 

@@ -18,7 +18,7 @@ export interface NodeBox {
 export const LAYOUT: Record<string, NodeBox> = {
   input:       { x:  10, y:  50, w:  80, h: 30 },
   restructure: { x:  10, y: 100, w:  80, h: 44 },
-  baseline:    { x:  10, y: 170, w:  80, h: 44 },
+  origin:    { x:  10, y: 170, w:  80, h: 44 },
   l3_plan:     { x: 265, y:  10, w: 110, h: 44 },
   l2_context:  { x: 265, y:  67, w: 110, h: 44 },
   l1_generate: { x: 160, y: 170, w: 110, h: 44 },
@@ -38,8 +38,8 @@ export interface EdgeGeometry {
 
 export const EDGES: Record<string, EdgeGeometry> = {
   "input>restructure":        { kind: "forward",   d: "M50,80 L50,100" },
-  "restructure>baseline":     { kind: "forward",   d: "M50,144 L50,170" },
-  "baseline>l1_generate":     { kind: "forward",   d: "M90,192 L160,192" },
+  "restructure>origin":     { kind: "forward",   d: "M50,144 L50,170" },
+  "origin>l1_generate":     { kind: "forward",   d: "M90,192 L160,192" },
   "l1_generate>l1_score":     { kind: "forward",   d: "M270,192 L290,192" },
   "l1_score>l1_critique":     { kind: "forward",   d: "M360,192 L380,192" },
   "l1_critique>output":       { kind: "forward",   d: "M430,214 L430,230",
@@ -65,7 +65,7 @@ export const EDGES: Record<string, EdgeGeometry> = {
 export function phaseToNodeId(state: string | null | undefined): string | null {
   if (!state) return null;
   const s = String(state).toLowerCase();
-  if (s === "baseline") return "baseline";
+  if (s === "origin") return "origin";
   if (s === "l1_generate") return "l1_generate";
   if (s === "l1_critique") return "l1_critique";
   if (s === "l2_refining") return "l2_context";

@@ -15,8 +15,8 @@ Litmus test: *"if OSP traces all correct, that's a good starting point."*
 
 Close OSP/persistence trace gaps. Order: 1a + 1b + 1c additive; 1d + 1e together (adds strictness).
 
-| 1a | `domain/opt_search_point.py` | Add `IndividualLineage.source: str = ""` (values: `l1_generate` / `l2_context` / `l3_plan` / `baseline`) | ~3 LOC |
-| 1b | `application/optimization/pipeline.py` | Populate `lineage.source` at the 3 mint sites + baseline | ~6 LOC |
+| 1a | `domain/opt_search_point.py` | Add `IndividualLineage.source: str = ""` (values: `l1_generate` / `l2_context` / `l3_plan` / `origin`) | ~3 LOC |
+| 1b | `application/optimization/pipeline.py` | Populate `lineage.source` at the 3 mint sites + origin | ~6 LOC |
 | 1c | `application/optimization/pipeline.py::load_optimizer_prompt` | Compute SHA-256 per template, stash `prompt_hashes: dict[str, str]` on `Session`, persist to `index.json::final.prompt_hashes` | ~10 LOC |
 | 1d | `domain/opt_search_point.py` | Set `model_config = ConfigDict(extra="forbid")` on `OptSearchPoint` | ~1 LOC |
 | 1e | `application/optimization/cycle.py::restore_from_trial` | Migration shim: detect legacy flat `id`/`parent_id`/`memory` keys, re-pack into `lineage` + memory fields before construct. Log warning per migrated trial | ~15 LOC |
@@ -125,7 +125,7 @@ This heatmap fires at finalize regardless of swap evolution — it's the indepen
 
 Same round file:
 
-- `opt_search_point.lineage.source` populated with one of `l1_generate` / `l2_context` / `l3_plan` / `baseline` — Step 1a/1b ✓.
+- `opt_search_point.lineage.source` populated with one of `l1_generate` / `l2_context` / `l3_plan` / `origin` — Step 1a/1b ✓.
 - All 9 `MEMORY_FIELDS` round-trip — reload produces no warning logs.
 - `index.json::final.prompt_hashes` has 4 entries (`l1_generate`, `l1_critique`, `l2_context`, `l3_plan`) — Step 1c ✓.
 - Reload of a pre-2026-03 cycle (e.g. `cycle_0cfa3a4f0136`) emits a migration warning instead of silently regenerating UUIDs — Step 1d/1e ✓.

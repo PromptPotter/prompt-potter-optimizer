@@ -11,8 +11,8 @@ Concept: [`docs/concepts/optimizer-of-the-optimizer.md`](../../docs/concepts/opt
 Each outer "sample" runs an inner PromptPotter campaign on a small GSM8K
 subset and reports three proxy metrics:
 
-- `first_round_delta` — score after inner round 1 minus inner baseline
-- `after_N_rounds_delta` — score after N inner rounds minus inner baseline
+- `first_round_delta` — score after inner round 1 minus inner origin
+- `after_N_rounds_delta` — score after N inner rounds minus inner origin
 - `rounds_to_N` — number of rounds to reach `inner_tasks.json::target_score`
 
 The outer scoring formula in `campaign.json::scoring` composes these.

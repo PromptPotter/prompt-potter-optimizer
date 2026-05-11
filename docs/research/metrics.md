@@ -14,7 +14,7 @@ When a paper reports a number on GSM8K, that number is almost always **absolute 
 | GSM8K | Cobbe et al., 2021 | Math reasoning |
 | MMLU | Hendrycks et al., 2020 | Knowledge breadth |
 
-Absolute accuracy is meaningful only when you know the base model and the baseline prompt. Without those, lifting 60 → 75 and 90 → 93 look comparable — but the first captured 75% of the available headroom and the second captured only 33%.
+Absolute accuracy is meaningful only when you know the base model and the origin prompt. Without those, lifting 60 → 75 and 90 → 93 look comparable — but the first captured 75% of the available headroom and the second captured only 33%.
 
 ---
 
@@ -22,7 +22,7 @@ Absolute accuracy is meaningful only when you know the base model and the baseli
 
 | # | Metric | Symbol | Formula | What it measures | Why it matters |
 |---|--------|--------|---------|------------------|----------------|
-| 1 | **Absolute Accuracy** | Acc | `correct / total` on test set | Raw performance of the best prompt found | Standard comparison point — but meaningless without knowing the base model and baseline prompt |
+| 1 | **Absolute Accuracy** | Acc | `correct / total` on test set | Raw performance of the best prompt found | Standard comparison point — but meaningless without knowing the base model and origin prompt |
 | 2 | **Headroom Captured** | HC | `(Acc_opt − Acc_base) / (Acc_ceil − Acc_base)` | Fraction of available improvement realized | Normalizes across models. Improving 60→75 with ceiling 80 (HC = 0.75) is more impressive than 90→93 with ceiling 99 (HC = 0.33) |
 | 3 | **Sample Efficiency** | SE | `HC / N_queries` | Headroom captured per optimization query spent | How economically the optimizer finds gains. High SE = fewer LLM calls to reach the same lift |
 | 4 | **Convergence Profile** | R₉₀ | Queries needed to reach 90% of final HC | Speed to near-saturation | Separates "finds good prompts" from "finds them fast". Critical for practical cost budgets |

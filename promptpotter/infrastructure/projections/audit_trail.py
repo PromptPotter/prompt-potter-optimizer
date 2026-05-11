@@ -35,7 +35,7 @@ __all__ = ["AuditTrailView", "audit_rounds_dir", "load_round_audits"]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
-_BASELINE_ROUND_SENTINEL = -1
+_ORIGIN_ROUND_SENTINEL = -1
 
 
 def audit_rounds_dir(cycle_dir: Path) -> Path:
@@ -197,9 +197,9 @@ class AuditTrailView(DerivedView):
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
     # Round boundaries (``PhaseRecord("round", "enter"|"complete")``) drive
-    # ``begin_round`` and ``flush``. The baseline phase emits its own
-    # ``PhaseRecord("baseline", "enter"|"exit")`` pair before the first round; treated
-    # as a pseudo-round so its node I/O lands in ``round_baseline.json`` instead
+    # ``begin_round`` and ``flush``. The origin phase emits its own
+    # ``PhaseRecord("origin", "enter"|"exit")`` pair before the first round; treated
+    # as a pseudo-round so its node I/O lands in ``round_origin.json`` instead
     # of being silently discarded when round 0 begins. ResumeCheckpointRecord and SnapshotRecord
     # records bypass this projection — decisions are archived in round_data JSON and
     # snapshots are display-only.
@@ -211,9 +211,9 @@ class AuditTrailView(DerivedView):
             elif record.event == "complete":
                 self._finished_at = record.timestamp
                 self.flush()
-        elif record.phase == "baseline":
+        elif record.phase == "origin":
             if record.event == "enter":
-                self.begin_round(_BASELINE_ROUND_SENTINEL, started_at=record.timestamp)
+                self.begin_round(_ORIGIN_ROUND_SENTINEL, started_at=record.timestamp)
             elif record.event == "exit":
                 self._finished_at = record.timestamp
                 self.flush()
@@ -260,8 +260,8 @@ class AuditTrailView(DerivedView):
             if key not in nodes_ordered:
                 nodes_ordered[key] = block
 
-        if self._current_round == _BASELINE_ROUND_SENTINEL:
-            path = self.rounds_dir / "round_baseline.json"
+        if self._current_round == _ORIGIN_ROUND_SENTINEL:
+            path = self.rounds_dir / "round_origin.json"
         else:
             path = self.rounds_dir / f"round_{self._current_round:04d}.json"
         payload: dict[str, Any] = {

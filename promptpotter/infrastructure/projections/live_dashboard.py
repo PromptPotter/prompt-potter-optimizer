@@ -61,7 +61,7 @@ __all__ = ["LiveDashboardView"]
 # transitions (``scoring`` / ``between_samples`` / ``between_candidates``).
 _PHASE_TO_STATE: dict[str, str] = {
     CampaignPhase.INIT: "init",
-    CampaignPhase.BASELINE: "baseline",
+    CampaignPhase.ORIGIN: "origin",
     CampaignPhase.L1_GENERATE: "l1_generate",
     CampaignPhase.REFINE_STRATEGY: "l2_refining",
     CampaignPhase.MODIFY_PLAN: "l3_replanning",
@@ -165,7 +165,7 @@ class LiveDashboardView(DerivedView):
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            "baseline": r.get("baseline", 0.0),
+            "origin": r.get("origin", 0.0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
@@ -186,11 +186,11 @@ class LiveDashboardView(DerivedView):
         # set on INIT:exit, consumed in _build_l1_score_block for each row.
         self.short_formula_template: str | None = None
         self._round: dict[str, Any] = {"round": 0, "candidates": {}}
-        # In-memory mirror of the round/baseline/best scalars; LiveDisplay
+        # In-memory mirror of the round/origin/best scalars; LiveDisplay
         # holds the same shape so both subscribers share one accumulator.
         self._core = LiveStateCore(
             round_num=int(self.state.get("round") or 0),
-            baseline_acc=float(self.state.get("baseline") or 0.0),
+            origin_acc=float(self.state.get("origin") or 0.0),
             best_acc=float(self.state.get("best") or 0.0),
         )
 
@@ -199,7 +199,7 @@ class LiveDashboardView(DerivedView):
     @classmethod
     def for_session(
         cls,
-        baseline_accuracy: float,
+        origin_accuracy: float,
         cycle_id: str | None,
         *,
         project_root: str,
@@ -230,7 +230,7 @@ class LiveDashboardView(DerivedView):
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
-                resume_from["baseline"] = baseline_accuracy
+                resume_from["origin"] = origin_accuracy
             except (json.JSONDecodeError, OSError):
                 resume_from = None
 
@@ -375,7 +375,7 @@ class LiveDashboardView(DerivedView):
         phase, data = event.phase, event.data
         if phase == CampaignPhase.INIT and event.event == "enter":
             # Stamp the formula early so What-If has a reference during
-            # baseline scoring (which runs before INIT:exit).
+            # origin scoring (which runs before INIT:exit).
             if view is not None:
                 formula = view.get("composite_fitness_formula")
                 if formula is not None:
@@ -388,7 +388,7 @@ class LiveDashboardView(DerivedView):
             loop_env = data["env"]
             config = data["config"]
             s["cycle_id"] = loop_env.state.cycle_id
-            s["baseline"] = cycle.tracking.current_accuracy
+            s["origin"] = cycle.tracking.current_accuracy
             self.patience_max = config.optimization.l1_patience
             s["patience"] = f"0/{self.patience_max}"
             budget = getattr(config.optimization, "spend_budget_usd", None)
@@ -407,7 +407,7 @@ class LiveDashboardView(DerivedView):
             s["round"] = data.get("round", s["round"])
             s["degraded_count"] = 0
 
-        # Mirror baseline/best/round into the shared core for LiveDisplay parity.
+        # Mirror origin/best/round into the shared core for LiveDisplay parity.
         apply_phase(self._core, event, view)
         if self._core.best_acc > float(s.get("best") or 0.0):
             s["best"] = self._core.best_acc

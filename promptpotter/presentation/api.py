@@ -251,7 +251,7 @@ class CampaignSummary(BaseModel):
     status: str = Field(description="Campaign status: active, completed, or stopped")
     n_rounds: int = Field(description="Total number of completed round_data rounds")
     best_accuracy: float = Field(description="Highest accuracy achieved across all rounds")
-    baseline_accuracy: float = Field(description="Initial accuracy before optimization")
+    origin_accuracy: float = Field(description="Initial accuracy before optimization")
     created_at: str = Field(description="ISO 8601 creation timestamp")
     updated_at: str = Field(description="ISO 8601 last-update timestamp")
 

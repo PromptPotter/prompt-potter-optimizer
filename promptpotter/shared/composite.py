@@ -168,19 +168,17 @@ def extract_evaluator_names(formula: str, available: set[str]) -> list[str]:
     return out
 
 
-def render_composite_fitness_oneliner(
-    composite_fitness: float, baseline: float | None = None
-) -> str:
+def render_composite_fitness_oneliner(composite_fitness: float, origin: float | None = None) -> str:
     """Per-candidate / per-row 1-line composite_fitness render.
 
-    Anchors against the campaign baseline so the operator sees how far
-    the run has come from origin even at round 50. ``baseline=None``
+    Anchors against the campaign origin so the operator sees how far
+    the run has come from origin even at round 50. ``origin=None``
     (e.g. before init has fired) collapses to ``composite_fitness=0.6042``.
     """
-    if baseline is None:
+    if origin is None:
         return f"composite_fitness={composite_fitness:.4f}"
-    delta = composite_fitness - baseline
-    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs baseline {baseline:.4f})"
+    delta = composite_fitness - origin
+    return f"composite_fitness={composite_fitness:.4f}  (Δ{delta:+.4f} vs origin {origin:.4f})"
 
 
 def _pairs_line(
@@ -200,7 +198,7 @@ def render_composite_fitness_block(
     evaluators: dict[str, float] | None,
     formula: str | None,
     *,
-    baseline: float | None = None,
+    origin: float | None = None,
     width: int = 70,
     use_short_names: bool = False,
     legend: str | None = None,
@@ -208,7 +206,7 @@ def render_composite_fitness_block(
     """3-line round-level composite_fitness block.
 
     Layout:
-        line 1: ``composite_fitness = X.XXXX   baseline=Y.YYYY  Δ+0.103``
+        line 1: ``composite_fitness = X.XXXX   origin=Y.YYYY  Δ+0.103``
         line 2: ``formula:  <formula>``
         line 3: ``name1=val  name2=val  ...``  (named evaluators present in
                  the formula, full names by default; short codes when
@@ -227,9 +225,9 @@ def render_composite_fitness_block(
     """
     # Line 1: composite_fitness + trajectory anchor
     line1 = f"composite_fitness = {composite_fitness:.4f}"
-    if baseline is not None:
-        delta = composite_fitness - baseline
-        line1 += f"   baseline={baseline:.4f}  Δ{delta:+.4f}"
+    if origin is not None:
+        delta = composite_fitness - origin
+        line1 += f"   origin={origin:.4f}  Δ{delta:+.4f}"
 
     if not formula:
         return [f"{line1}  (formula unavailable)"]

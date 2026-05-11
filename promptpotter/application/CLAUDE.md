@@ -26,7 +26,7 @@ intelligence; intelligence does not depend on either.
 
 - `runner.py` — master orchestrator; the optimize-loop entry point.
 - `config.py` — `CampaignConfig` model + LLM factory.
-- `baseline.py` — campaign baseline scoring + dataset loading.
+- `origin.py` — campaign origin scoring + dataset loading.
 - `resume.py` — campaign config diffing + resume logic.
 - `review.py` — per-cycle markdown renderer (post-cycle log).
 

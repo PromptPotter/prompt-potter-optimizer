@@ -29,9 +29,9 @@ CLI errors follow the pattern `[CATEGORY] message`. Categories help classify roo
 
 The primary diagnostic surfaces (all under `campaigns/{cycle_id}/`):
 
-- **`dashboard.json`** — live scalar state (phase, round, candidate, baseline / best / current accuracy, in-flight query, current_round node I/O).
+- **`dashboard.json`** — live scalar state (phase, round, candidate, origin / best / current accuracy, in-flight query, current_round node I/O).
 - **`log.md`** — rendered narrative digest, regenerated at each round-complete and at finalize. Contains status, per-round critique / changes / task_context refinements, hard-samples heatmap, and final winner.
-- **`index.json`** — campaign metadata + trial index + `final` block (winner, baseline, stop_reason).
+- **`index.json`** — campaign metadata + trial index + `final` block (winner, origin, stop_reason).
 - **`rounds/round_NNNN.json`** — per-round optimizer checkpoint with the L1 critique text, task_context, escalation state.
 - **`output.log`** — append-only HIT/MISS history (raw, ungrouped, fast to tail).
 - **`.cache/rounds/round_NNNN.json`** — per-round leaderboard with scores, eliminations, change descriptions, and node I/O (internal — developer artifact).

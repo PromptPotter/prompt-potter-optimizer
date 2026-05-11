@@ -8,7 +8,7 @@ Sections:
 
 2. **Per-dataset starting-point prompt store** — ``load_node_prompt`` /
    ``load_dataset_prompt`` / ``dataset_prompt_dir`` etc. The single source
-   for baseline ``PromptTemplate`` JSON files under
+   for origin ``PromptTemplate`` JSON files under
    ``datasets/{name}/prompts/``. Resolution is per-node first, then
    dataset-wide ``{variant}.json`` fallback.
 
@@ -386,7 +386,7 @@ def build_dataset_run_data(
 # Each dataset ships datasets/{name}/prompts/ with PromptTemplate JSON files
 # (6-field canonical decomposition). Resolution: per-node {node_name}.json
 # first, then dataset-wide {variant}.json, then FileNotFoundError citing
-# both expected paths. This is the one true source for baseline prompts.
+# both expected paths. This is the one true source for origin prompts.
 # ===========================================================================
 
 __all__ = [

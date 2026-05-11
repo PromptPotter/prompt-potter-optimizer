@@ -46,11 +46,11 @@ class Divergence(NamedTuple):
 
 
 class ReplayContext(NamedTuple):
-    """Context passed to replayers — round_data + prior_rounds + baseline_results all rescored."""
+    """Context passed to replayers — round_data + prior_rounds + origin_results all rescored."""
 
     round_data: dict[str, Any]
     prior_rounds: list[dict[str, Any]]
-    baseline_results: list[dict[str, Any]]
+    origin_results: list[dict[str, Any]]
 
 
 Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
@@ -59,13 +59,13 @@ Replayer = Callable[[ReplayContext, dict[str, Any]], Any]
 def replay_decisions(
     round_data: dict[str, Any],
     prior_rounds: list[dict[str, Any]] | None = None,
-    baseline_results: list[dict[str, Any]] | None = None,
+    origin_results: list[dict[str, Any]] | None = None,
 ) -> Divergence | None:
     """Walk ``round_data['decisions']`` in order; return the first mismatch."""
     ctx = ReplayContext(
         round_data=round_data,
         prior_rounds=list(prior_rounds or []),
-        baseline_results=list(baseline_results or []),
+        origin_results=list(origin_results or []),
     )
     for rec in round_data.get("decisions") or []:
         kind = rec.get("kind", "")
@@ -102,7 +102,7 @@ def _replay_round_winner(ctx: ReplayContext, inputs_ref: dict[str, Any]) -> str:
     if ctx.prior_rounds:
         best_acc = _mean_score(list(ctx.prior_rounds[-1].get("results") or []))
     else:
-        best_acc = _mean_score(list(ctx.baseline_results))
+        best_acc = _mean_score(list(ctx.origin_results))
     winner_id = ""
     for cid in inputs_ref.get("candidate_ids") or []:
         acc = _mean_score(all_results.get(cid) or [])
@@ -164,7 +164,7 @@ def _derive_stall_count(
         return 0
     sorted_trials = sorted(prior_rounds, key=lambda t: int(t.get("round", -1)))
     running_max = 0.0
-    baseline: float | None = None
+    origin: float | None = None
     rounds_after = 0
     for t in sorted_trials:
         r = int(t.get("round", -1))
@@ -175,12 +175,12 @@ def _derive_stall_count(
         running_max = max(running_max, comp)
         if r <= entry_round:
             if r == entry_round:
-                baseline = running_max
+                origin = running_max
             continue
         rounds_after += 1
-        if baseline is not None and running_max > baseline:
+        if origin is not None and running_max > origin:
             return 0
-    return rounds_after if baseline is not None else 0
+    return rounds_after if origin is not None else 0
 
 
 def _replay_layer_trigger(patience_key: str) -> Replayer:

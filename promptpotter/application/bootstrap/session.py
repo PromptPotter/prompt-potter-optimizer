@@ -126,9 +126,9 @@ def new_session_state(
         "campaign_config": campaign_config,
         "pipeline_params": pipeline_params,
         "active_steps": active_steps,
-        "baseline_prompt_fields": {},
+        "origin_prompt_fields": {},
         "dataset_count": 0,
-        "baseline_accuracy": 0.0,
+        "origin_accuracy": 0.0,
         "task_context": None,
         "experiment_id": None,
     }
@@ -157,8 +157,8 @@ def auto_mint_session(
     campaign_config: Any,
     *,
     cycle_id: str,
-    baseline_acc: float = 0.0,
-    baseline_prompt_fields: dict | None = None,
+    origin_acc: float = 0.0,
+    origin_prompt_fields: dict | None = None,
     dataset_size: int = 0,
     experiment_id: str | None = None,
     pipeline_params: dict | None = None,
@@ -181,9 +181,9 @@ def auto_mint_session(
         pipeline_params=pipeline_params or {},
         active_steps=list(active_steps or []),
     )
-    state["baseline_accuracy"] = baseline_acc
+    state["origin_accuracy"] = origin_acc
     state["dataset_count"] = dataset_size
-    state["baseline_prompt_fields"] = baseline_prompt_fields or {}
+    state["origin_prompt_fields"] = origin_prompt_fields or {}
 
     sessions = session.store.sessions
     sessions.create(session_id, state)

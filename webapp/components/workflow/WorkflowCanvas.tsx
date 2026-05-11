@@ -239,10 +239,10 @@ function NodePanel({ id, view, currentNodes, pipeline, phase, round, onClose }: 
       ["phase", String(phase ?? "—")],
     ];
   } else if (meta?.kind === "phase") {
-    const isCurrent = phase === id || (id === "baseline" && phase === "baseline");
+    const isCurrent = phase === id || (id === "origin" && phase === "origin");
     rows = [
       ["kind",   "phase / system step"],
-      ["role",   id === "baseline" ? "measure seed candidate (round 0 only)" : "—"],
+      ["role",   id === "origin" ? "measure seed candidate (round 0 only)" : "—"],
       ["status", isCurrent ? `active · ${phase}` : `idle (currently ${phase ?? "—"})`],
     ];
   } else if (meta?.kind === "io") {
@@ -253,7 +253,7 @@ function NodePanel({ id, view, currentNodes, pipeline, phase, round, onClose }: 
   } else if (cfg) {
     const c = (cfg.config ?? {}) as Record<string, unknown>;
     rows = [
-      ["status",          phase === "baseline" ? "idle · baseline phase only fires l1_score" : `idle · has not fired in round ${round ?? "—"}`],
+      ["status",          phase === "origin" ? "idle · origin phase only fires l1_score" : `idle · has not fired in round ${round ?? "—"}`],
       ["type",            (cfg.type as string) ?? "—"],
       ["temperature",     String(c.temperature ?? "—")],
       ["output_format",   String(c.output_format ?? "—")],

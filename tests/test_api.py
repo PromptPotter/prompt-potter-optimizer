@@ -50,7 +50,7 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
         encoding="utf-8",
     )
     (cycle_dir / "log.md").write_text(
-        "# Campaign log\n\n## Round 0\nbaseline=0.5\n",
+        "# Campaign log\n\n## Round 0\norigin=0.5\n",
         encoding="utf-8",
     )
     rounds_dir = cycle_dir / "rounds"

@@ -23,7 +23,7 @@ The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a ca
 
 - **Dataset overrides.** Check `reference/{dataset}-notes.md` first — if present it supersedes this flow.
 - **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. Every command except `init` reads it; if the pointer matches the target, skip `init` and jump to the phase the session needs. Only `init` overwrites the pointer. `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
-- **Init is pure prep.** No backend scoring; baseline runs as phase 0 of `optimize`. There is no `--skip-baseline` flag.
+- **Init is pure prep.** No backend scoring; origin runs as phase 0 of `optimize`. There is no `--skip-origin` flag.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop when bounded retries exhaust.** `BackendClient.run_query()` auto-retries 429 (RFC 7231 Retry-After) and 5xx/transport errors with countdown backoff (5 attempts max). If a campaign still propagates 5xx after retries, halt and tell the user "Backend returning persistent 5xx — likely Groq upstream rate-limiting or outage. Check and restart." Don't loop on top of the client's loop.
 - **Never wipe project data without asking.** Spell out the full path first.
@@ -74,7 +74,7 @@ Default shape: one sentence, one compact box, or 3–5 bullets — or a combinat
 
 **No active session** — one sentence: which entry point the dataset uses (per `dataset.md`) and what to run. No box, no ask.
 
-**Active session** — compact 4–6 line box mirroring `dashboard.json` (`cycle_id · dataset · phase · round/max · best vs baseline`) + one sentence: resume command or next phase.
+**Active session** — compact 4–6 line box mirroring `dashboard.json` (`cycle_id · dataset · phase · round/max · best vs origin`) + one sentence: resume command or next phase.
 
 If the user's intent is genuinely ambiguous ("should I resume or start over?"), ask once — one question, no `(a)/(b)` stacking.
 
@@ -122,7 +122,7 @@ Escalation model: `reference/optimization-layers.md`, `docs/concepts/the-loop.md
 
 ## Phase 5: Results
 
-Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `baseline_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
+Open `campaigns/<cycle_id>/log.md` (rendered digest with status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner) and `index.json::final` (structured: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`). `index.json::final.stop_reason` → recovery path in `reference/troubleshooting.md`.
 
 ---
 

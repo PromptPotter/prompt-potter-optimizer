@@ -29,7 +29,7 @@ interface PipelineDoc {
 interface RoundData {
   round?: number;
   scoreboard?: { candidate_id?: string; label?: string; composite_fitness?: number; accuracy?: number; is_winner?: boolean }[];
-  baseline_accuracy?: number;
+  origin_accuracy?: number;
   results?: { id?: string | number; query?: string; predicted?: string; ground_truth?: string; score?: number; error?: unknown }[];
   composite_fitness?: number;
   accuracy?: number;

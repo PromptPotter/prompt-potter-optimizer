@@ -207,7 +207,7 @@ def _render_init_enter(v: InitEnterView) -> str:
 def _render_init_exit(v: InitExitView) -> str:
     obs = "ON" if v.obs_on else "OFF"
     out = [
-        f"  {GREEN}✓{RESET} Initialized  baseline={v.baseline_acc:.1%}  "
+        f"  {GREEN}✓{RESET} Initialized  origin={v.origin_acc:.1%}  "
         f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
     ]
     if v.resumed_from_round:
@@ -272,7 +272,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         for s in v.scores
     ]
     if len(score_dicts) > 3:
-        if board := _scoreboard(score_dicts, v.winner_label, v.baseline_acc):
+        if board := _scoreboard(score_dicts, v.winner_label, v.origin_acc):
             out.append(board)
     elif score_dicts:
         parts = [
@@ -299,7 +299,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
         sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
         out.append(
             f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {v.winner_accuracy:.1%}"
-            f" (was {v.baseline_acc:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
+            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
     else:
@@ -313,7 +313,7 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             v.winner_composite_fitness,
             v.winner_evaluators,
             formula,
-            baseline=v.baseline_composite_fitness,
+            origin=v.origin_composite_fitness,
             use_short_names=bool(v.composite_fitness_formula_short),
         ):
             out.append(f"  {line}")
@@ -636,7 +636,7 @@ def _render_round(
     rd: RoundDigestView,
     *,
     formula: str | None,
-    baseline_composite_fitness: float | None,
+    origin_composite_fitness: float | None,
 ) -> list[str]:
     parts: list[str] = [
         f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
@@ -660,7 +660,7 @@ def _render_round(
         rd.composite_fitness,
         rd.evaluators,
         formula,
-        baseline=baseline_composite_fitness,
+        origin=origin_composite_fitness,
         use_short_names=False,
     )
     if composite_fitness_block:
@@ -694,7 +694,7 @@ def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
         line = (
             f"- `{short}` — {f.mode or '(unknown)'} · "
             f"best {_fmt_pct(f.best_accuracy)} "
-            f"(baseline {_fmt_pct(f.baseline_accuracy)}, {f.n_rounds} {rounds_word})"
+            f"(origin {_fmt_pct(f.origin_accuracy)}, {f.n_rounds} {rounds_word})"
         )
         if f.stop_reason:
             line += f" · {f.stop_reason}"
@@ -718,7 +718,7 @@ def to_markdown(view: LogMdView) -> str:
         "",
         f"- status: **{status.status}**",
         f"- stop reason: `{status.stop_reason}`",
-        f"- baseline: {_fmt_pct(status.baseline_accuracy)}",
+        f"- origin: {_fmt_pct(status.origin_accuracy)}",
         (
             f"- best: {_fmt_pct(status.best_accuracy)}"
             + (f" (round {status.best_round})" if status.best_round is not None else "")
@@ -748,7 +748,7 @@ def to_markdown(view: LogMdView) -> str:
         parts += _render_round(
             rd,
             formula=view.formula,
-            baseline_composite_fitness=view.baseline_composite_fitness,
+            origin_composite_fitness=view.origin_composite_fitness,
         )
 
     parts += _render_hard_samples(view.hard_samples)

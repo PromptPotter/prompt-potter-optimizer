@@ -16,8 +16,8 @@ __all__ = [
     "CandidateScore",
     "CycleResult",
     "PayloadOutcome",
-    "RoundBaseline",
     "RoundMetadata",
+    "RoundOrigin",
     "RoundPayload",
     "RoundResult",
     "SweepBatchResult",
@@ -94,11 +94,11 @@ class CandidateProposal(BaseModel):
     pipeline_params_override: dict[str, dict] = Field(default_factory=dict)
 
 
-class RoundBaseline(BaseModel):
+class RoundOrigin(BaseModel):
     """The challenger candidates compete against — built once per round.
 
     Carries the OSP directly (no dict→OSP roundtrip). On probe rounds the
-    accuracy/composite_fitness/results reflect the baseline's score *over the probe
+    accuracy/composite_fitness/results reflect the origin's score *over the probe
     subset*, not the full prior dataset.
     """
 
@@ -130,7 +130,7 @@ class RoundMetadata(BaseModel):
     hits: int
     total: int
     improved: bool
-    # Wilcoxon-paired p-value vs prior round's baseline; populated only when
+    # Wilcoxon-paired p-value vs prior round's origin; populated only when
     # ``improved`` is True (else None — no test run). Stored so log.md / a
     # webapp can render significance without re-running the test.
     p_value: float | None = None
@@ -155,9 +155,9 @@ class RoundPayload(BaseModel):
     prompt_fields: dict
     pipeline_params: dict | None = None
     # Comparison anchor for this round: prior round's accuracy (or campaign
-    # baseline for round 0). Persisted so the scoreboard can render
-    # delta-vs-baseline without resolving the prior round_data.
-    baseline_accuracy: float = 0.0
+    # origin for round 0). Persisted so the scoreboard can render
+    # delta-vs-origin without resolving the prior round_data.
+    origin_accuracy: float = 0.0
     results: list[dict] = Field(default_factory=list)
     # Per-candidate scored results — persisted so resume can rescore
     # them under a changed scorer and replay decisions without needing
@@ -211,7 +211,7 @@ class CycleResult(BaseModel):
     n_rounds: int
     best_accuracy: float
     best_round: int
-    baseline_accuracy: float
+    origin_accuracy: float
     winner_prompt_fields: dict
     winner_pipeline_params: dict | None = None
     stop_reason: str

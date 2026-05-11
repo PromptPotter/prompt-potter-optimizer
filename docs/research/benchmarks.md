@@ -49,7 +49,7 @@ The 23 BBEH tasks are **not strictly ordered by difficulty**. They are categoriz
 
 Task clusters:
 
-1. **Linguistic & Semantic** — synonyms, antonyms, word analogies. Baseline difficulty; modern models usually handle these with high accuracy.
+1. **Linguistic & Semantic** — synonyms, antonyms, word analogies. Origin difficulty; modern models usually handle these with high accuracy.
 2. **Logical & Mathematical Reasoning** — boolean logic, arithmetic, sequence completion. Moderate; difficulty spikes with larger numbers or longer logic chains.
 3. **Commonsense & World Knowledge** — physical trajectories, social situations. High for small models — requires world modeling, not just text prediction.
 4. **Algorithmic & Symbolic** — shuffled-object tracking (the "shell game"), complex grid navigation. Highest difficulty; biggest gap between standard and reasoning-specialized models.
@@ -97,7 +97,7 @@ Used in: MIPROv2, GEPA, adv-CoT. **Saturation status at `gpt-oss-120b`: unknown 
 
 Source: HotpotQA homepage leaderboard.
 
-**`gpt-oss-120b` expectations.** No published HotpotQA-specific score found. Model-card general-reasoning signals — GPQA Diamond 80.1, MMLU 90.0, SWE-Bench Verified 62.4, Codeforces Elo 2463 (high reasoning) — suggest a strong baseline. HotPotQA is retrieval-heavy and multi-hop, so actual performance depends on whether supporting documents are provided and what retrieval stack is used. Headroom under `gpt-oss-120b` almost certainly exists in the fullwiki / retrieval-coupled setting; in the distractor setting headroom will be tighter because the hard work (retrieval) is already done.
+**`gpt-oss-120b` expectations.** No published HotpotQA-specific score found. Model-card general-reasoning signals — GPQA Diamond 80.1, MMLU 90.0, SWE-Bench Verified 62.4, Codeforces Elo 2463 (high reasoning) — suggest a strong origin. HotPotQA is retrieval-heavy and multi-hop, so actual performance depends on whether supporting documents are provided and what retrieval stack is used. Headroom under `gpt-oss-120b` almost certainly exists in the fullwiki / retrieval-coupled setting; in the distractor setting headroom will be tighter because the hard work (retrieval) is already done.
 
 ### GSM8K, AIME 2025 — Saturated, cited only
 
@@ -139,7 +139,7 @@ All methods evaluated under identical conditions:
 | GSM8K (deprioritized) | Exact Match | — | `gsm8k_match` |
 | AIME 2025 (deprioritized) | Exact Match | — | `aime_match` |
 
-## Baselines
+## Origins
 
 The bbeh-comparison harness is deliberately scoped to **prompt-optimization peers in the algorithm-configuration umbrella** (CAPO, GEPA, MIPROv2, BootstrapFewShot vs. PromptPotter). AlphaEvolve and OpenEvolve target source-code algorithms rather than prompts on a fixed pipeline. See [`related-work.md`](related-work.md)
 

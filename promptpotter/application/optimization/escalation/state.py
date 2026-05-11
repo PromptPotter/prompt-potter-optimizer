@@ -249,7 +249,7 @@ class EscalationState:
     # ---- Post-fire bookkeepers ----
 
     def record_l2_fired(self, *, best_accuracy: float, best_composite_fitness: float) -> None:
-        """L2 LLM completed. Bumps L2 round, captures entry baseline; resets L1 stall."""
+        """L2 LLM completed. Bumps L2 round, captures entry origin; resets L1 stall."""
         self._l1_stall_count = 0
         self._l2_round += 1
         self._l2_best_accuracy_at_entry = best_accuracy

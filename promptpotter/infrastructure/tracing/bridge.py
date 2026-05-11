@@ -201,7 +201,7 @@ class ObservabilityBridge:
         backend_id: str | None,
         *,
         config_snapshot: dict[str, Any],
-        baseline_accuracy: float,
+        origin_accuracy: float,
         dataset: list,
         tracing_campaign_id: str,
         langfuse_session_id: str | None,
@@ -223,7 +223,7 @@ class ObservabilityBridge:
                 CampaignStart(
                     campaign_id=tracing_campaign_id,
                     config=config_snapshot,
-                    baseline_accuracy=baseline_accuracy,
+                    origin_accuracy=origin_accuracy,
                     session_id=langfuse_session_id,
                 )
             )

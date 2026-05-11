@@ -52,9 +52,9 @@ def _r(score: float) -> dict:
     return {"query": "q", "predicted": "p", "ground_truth": "g", "fitness": score, "hit": False}
 
 
-def test_round_winner_replay_uses_rescored_baseline() -> None:
+def test_round_winner_replay_uses_rescored_origin() -> None:
     """Uniform rescaling preserves the recorded winner — the replayer must
-    derive its threshold from the rescored baseline, not the stale one."""
+    derive its threshold from the rescored origin, not the stale one."""
     round_data = {
         "round": 0,
         "all_candidate_results": {
@@ -70,7 +70,7 @@ def test_round_winner_replay_uses_rescored_baseline() -> None:
             }
         ],
     }
-    assert replay_decisions(round_data, baseline_results=[_r(0.4), _r(0.4)]) is None
+    assert replay_decisions(round_data, origin_results=[_r(0.4), _r(0.4)]) is None
 
 
 def test_elimination_cut_replay_flags_divergence_when_scores_flip() -> None:
@@ -376,7 +376,7 @@ def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> No
     store.create(
         backend_id,
         cycle_id,
-        {"type": "optimization_loop", "config": {}, "baseline_accuracy": 0.0},
+        {"type": "optimization_loop", "config": {}, "origin_accuracy": 0.0},
     )
     for r in range(rounds):
         store.save_round_file(backend_id, cycle_id, _make_round_data(r, 0.1 * (r + 1)))

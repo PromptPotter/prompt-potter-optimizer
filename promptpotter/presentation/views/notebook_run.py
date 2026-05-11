@@ -7,18 +7,18 @@ import json
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from promptpotter.application.baseline import (
-    CampaignBaseline,
-    extract_campaign_baseline,
-)
-from promptpotter.application.baseline import (
-    prepare_scoring_context as _prepare_scoring_context,
-)
 from promptpotter.application.bootstrap import (
     init_services as _init_services,
 )
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.optimization.observers import RunObservers, build_run_observers
+from promptpotter.application.origin import (
+    CampaignOrigin,
+    extract_campaign_origin,
+)
+from promptpotter.application.origin import (
+    prepare_scoring_context as _prepare_scoring_context,
+)
 from promptpotter.application.runner import (
     run_optimization as _run_optimization,
 )
@@ -48,7 +48,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "init_notebook_session",
-    "prepare_baseline_notebook",
+    "prepare_origin_notebook",
     "render_completion",
     "render_completion_html",
     "run_optimization_notebook",
@@ -177,24 +177,24 @@ async def init_notebook_session(
     return session
 
 
-async def prepare_baseline_notebook(
+async def prepare_origin_notebook(
     session: Session,
     train_data: list[Sample],
     campaign_config: CampaignConfig,
     *,
     pipeline_params: dict | None = None,
     experiment_id: str | None = None,
-) -> tuple[RunObservers, list[Sample], CampaignBaseline]:
-    """Build observers + score baseline as a separate notebook cell.
+) -> tuple[RunObservers, list[Sample], CampaignOrigin]:
+    """Build observers + score origin as a separate notebook cell.
 
     Auto-mints session+cycle, opens the ledger, binds the LiveDisplay so the
-    baseline phase ticks live (same path the CLI uses). Returns observers +
-    dataset + baseline for the next cell to feed into ``run_optimization_notebook``.
+    origin phase ticks live (same path the CLI uses). Returns observers +
+    dataset + origin for the next cell to feed into ``run_optimization_notebook``.
     """
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
     n_samples = len(train_data) or 1
     display = LiveDisplay(
-        baseline_acc=0.0,
+        origin_acc=0.0,
         l1_patience=campaign_config.optimization.l1_patience,
         pipeline_schema=session.pipeline_schema,
         scoring_formula=scoring_formula,
@@ -209,7 +209,7 @@ async def prepare_baseline_notebook(
         experiment_id=experiment_id,
     )
 
-    _baseline_osp, dataset, campaign_rounds, _results = await _prepare_scoring_context(
+    _origin_osp, dataset, campaign_rounds, _results = await _prepare_scoring_context(
         session.experiment_extract,
         train_data,
         campaign_config,
@@ -218,18 +218,18 @@ async def prepare_baseline_notebook(
         svc=session,
         listener=observers.callbacks,
     )
-    baseline = extract_campaign_baseline(campaign_rounds)
-    if hasattr(display, "set_baseline"):
-        display.set_baseline(baseline.baseline_acc)
+    origin = extract_campaign_origin(campaign_rounds)
+    if hasattr(display, "set_origin"):
+        display.set_origin(origin.origin_acc)
 
-    print(f"\nEvaluation data: {len(dataset)} queries  |  Baseline: {baseline.baseline_acc:.1%}")
-    return observers, dataset, baseline
+    print(f"\nEvaluation data: {len(dataset)} queries  |  Origin: {origin.origin_acc:.1%}")
+    return observers, dataset, origin
 
 
 async def run_optimization_notebook(
     observers: RunObservers,
     dataset: list[Sample],
-    baseline: CampaignBaseline,
+    origin: CampaignOrigin,
     campaign_config: CampaignConfig,
     *,
     session: Session,
@@ -246,7 +246,7 @@ async def run_optimization_notebook(
         campaign_config,
         session=session,
         observers=observers,
-        baseline=baseline,
+        origin=origin,
         experiment_id=experiment_id,
         task_context=task_context,
         langfuse_session_id=langfuse_session_id,

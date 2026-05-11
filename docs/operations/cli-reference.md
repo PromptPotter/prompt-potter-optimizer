@@ -33,7 +33,7 @@ python -m promptpotter init \
     --config datasets/lca-termnorm/campaign.json
 ```
 
-Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Pure prep — no backend scoring. Baseline runs automatically as phase 0 of `optimize` on the same seeded `sp_budget_ttest` slice L1 uses, so its results cache-hit every L1 round-1 candidate.
+Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Pure prep — no backend scoring. Origin runs automatically as phase 0 of `optimize` on the same seeded `sp_budget_ttest` slice L1 uses, so its results cache-hit every L1 round-1 candidate.
 
 If `datasets/<name>/task_description.md` exists, `init` decomposes it once into `task_context` and stores it on the session. Disk-cached, so re-`init` on the same dataset is free.
 

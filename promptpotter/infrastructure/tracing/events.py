@@ -57,7 +57,7 @@ class DatasetRegistered:
 class CampaignStart:
     campaign_id: str
     config: dict[str, Any]
-    baseline_accuracy: float
+    origin_accuracy: float
     session_id: str | None = None
 
 

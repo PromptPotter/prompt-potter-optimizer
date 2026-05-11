@@ -40,7 +40,7 @@ You've run a campaign. Pointers below for the next layer.
 
 ## Research — benchmarks and the paper
 
-- [Benchmarks](../research/benchmarks.md) — datasets, methodology, baselines.
+- [Benchmarks](../research/benchmarks.md) — datasets, methodology, origins.
 - [Metrics](../research/metrics.md) — beyond absolute accuracy (HC, SE, R₉₀).
 - [Related work](../research/related-work.md) — competitor positioning.
 
@@ -67,7 +67,7 @@ Source: `application/optimization/l1_stats.py::compute_round_1_verdict`. `HEALTH
 | Condition | Verdict | Next |
 |---|---|---|
 | 0 ✗ AND `yield_rate ≥ 0.20` AND `top_lift > 0` | **healthy** | continue rounds 2–5 |
-| ≥ 2 ✗ OR baseline regression at round 1 | **broken** | halt; full prompt revisit |
+| ≥ 2 ✗ OR origin regression at round 1 | **broken** | halt; full prompt revisit |
 | anything else | **degraded** | halt; one-knob fix; restart |
 
 ### Diagnosis tree
@@ -88,7 +88,7 @@ When comparing N candidate L1 prompts, run each as 1 scored round + 1 generation
 ```
 1. Edit l1_generate.json (or another optimizer prompt) — candidate A.
 2. python -m promptpotter optimize --sweep
-   → cycle_A: baseline + 1 full round + 1 gen-only round.
+   → cycle_A: origin + 1 full round + 1 gen-only round.
 3. Repeat for candidates B, C, D, ...
 4. /potter-review --sweep → ranked by round_1_top_lift.
 5. Promote top 2-3 to full optimize runs.

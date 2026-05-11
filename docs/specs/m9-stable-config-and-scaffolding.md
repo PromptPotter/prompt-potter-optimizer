@@ -37,7 +37,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 1. `dataset_name` lives on `Session` (`application/bootstrap.py`) and `CampaignConfig` (`application/config.py`). `pipeline_name` is **not** a separate field — pipeline identity is carried by `pipeline_schema.name` + `JobSearchPoint.content_hash(dataset)` (truncated, `cycle_` prefix).
 2. Store layout is `{tenant_id}/campaigns/{cycle_id}/` flat — datasets and pipelines became identity inputs to `cycle_id` instead of path components. Cleaner outcome than the originally-planned `{backend_id}/{dataset}/{pipeline}/...` nesting.
-3. `active_session.json` carries `{tenant_id, session_id, cycle_id}` (`infrastructure/store/stores.py:312`). Backend, dataset, and pipeline identity are reconstructed from `session.json` state and the live `pipeline.json`. `cmd_optimize` recomputes the cycle hash on every run; if it differs, a fresh session+cycle auto-mints before baseline runs.
+3. `active_session.json` carries `{tenant_id, session_id, cycle_id}` (`infrastructure/store/stores.py:312`). Backend, dataset, and pipeline identity are reconstructed from `session.json` state and the live `pipeline.json`. `cmd_optimize` recomputes the cycle hash on every run; if it differs, a fresh session+cycle auto-mints before origin runs.
 4. CLI: `--dataset-name` exists on `init` (`presentation/cli/campaign_runner.py`). `--pipeline` was not built — pipeline selected by editing `datasets/{name}/pipeline.json`; revisit in M12 when the connector swap motivates it.
 5. Multi-dataset coexistence demonstrated across five datasets including TermNorm + BBEH.
 
@@ -61,7 +61,7 @@ Shape `promptpotter/` into `domain / application / infrastructure / presentation
 
 ### Track 5: CLI Unification — Unified Seed Sources — **SUPERSEDED**
 
-**Status:** Superseded by Track 7's recon archival. The typed three-value vocabulary (`fresh` / `resume` / `recon`) collapsed to two real seed sources after recon was deleted from `main`: fresh-default (no flag = load baseline from `datasets/{name}/prompts/`) and `--from <int>` resume (`presentation/cli/campaign_runner.py`). With only two values, a typed `--from` vocabulary buys nothing. Cross-cycle lineage shipped separately as `--fork-on-divergence` (see `docs/operations/rewind-and-fork.md`).
+**Status:** Superseded by Track 7's recon archival. The typed three-value vocabulary (`fresh` / `resume` / `recon`) collapsed to two real seed sources after recon was deleted from `main`: fresh-default (no flag = load origin from `datasets/{name}/prompts/`) and `--from <int>` resume (`presentation/cli/campaign_runner.py`). With only two values, a typed `--from` vocabulary buys nothing. Cross-cycle lineage shipped separately as `--fork-on-divergence` (see `docs/operations/rewind-and-fork.md`).
 
 **What replaced it:** The CLI is two write verbs (`init` + `optimize`) with `--from <ROUND>` for in-cycle rewind and `--fork-on-divergence` for sibling cycles. Notebook reaches parity through the shared `run_optimization` orchestration in `presentation/views/notebook_run.py`. FastAPI parity is deferred to M11/M12 webapp work.
 

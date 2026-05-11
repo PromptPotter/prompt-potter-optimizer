@@ -344,7 +344,7 @@ def _l3_enter(cycle: Cycle) -> dict[str, Any]:
 
 def _l3_exit(cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
     # ``l3_*_at_entry`` are read by ``EscalationState.fold`` on resume —
-    # ``record_l3_fired`` also resets L2 state to these same baselines.
+    # ``record_l3_fired`` also resets L2 state to these same origins.
     return {
         "l3_round": cycle.escalation.l3_round,
         "l3_stall_count": cycle.escalation.l3_stall_count,

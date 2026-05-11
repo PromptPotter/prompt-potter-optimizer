@@ -10,7 +10,7 @@
       "type": "meta_prompt",
       "runtime": "in_process",
       "node_role": "candidate_source",
-      "description": "Inner cycle's L1-generate meta-prompt — produces inner candidate variants from inner panels (parent_baseline, sibling_yield, escalation_panel, axis_memory).",
+      "description": "Inner cycle's L1-generate meta-prompt — produces inner candidate variants from inner panels (parent_origin, sibling_yield, escalation_panel, axis_memory).",
       "config": {},
       "prompt_meta": {
         "family": "l1_generate",

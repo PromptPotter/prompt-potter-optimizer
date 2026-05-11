@@ -112,21 +112,21 @@ async def init_services_cli(
 
 
 def _prepare_cycle(session: Session, campaign_config: CampaignConfig, dataset: list):
-    """Apply pipeline → load baseline → compute cycle_id. Returns (pipeline_params, baseline, cycle_id)."""
-    from promptpotter.application.baseline import load_baseline_prompt
+    """Apply pipeline → load origin → compute cycle_id. Returns (pipeline_params, origin, cycle_id)."""
     from promptpotter.application.config import configure_and_apply_pipeline
-    from promptpotter.application.runner import build_baseline_cycle_id
+    from promptpotter.application.origin import load_origin_prompt
+    from promptpotter.application.runner import build_origin_cycle_id
 
     schema = session.pipeline_schema
     pipeline_params = configure_and_apply_pipeline(
         session, campaign_config, log=logger.info if _VERBOSE else (lambda *_a, **_k: None)
     )
-    baseline = load_baseline_prompt(
+    origin = load_origin_prompt(
         session.experiment_extract,
         prompt_node_names=schema.prompt_node_names() if schema else [],
         dataset_name=session.dataset_name,
     )
-    return pipeline_params, baseline, build_baseline_cycle_id(baseline, schema, dataset)
+    return pipeline_params, origin, build_origin_cycle_id(origin, schema, dataset)
 
 
 def _mint_session_and_cycle(
@@ -136,7 +136,7 @@ def _mint_session_and_cycle(
     cycle_id: str,
     init_params: dict,
     pipeline_params: dict,
-    baseline,
+    origin,
     dataset_count: int,
 ) -> str:
     """Mint session+cycle with the CLI's pipeline-snapshot extras."""
@@ -146,7 +146,7 @@ def _mint_session_and_cycle(
         session,
         campaign_config,
         cycle_id=cycle_id,
-        baseline_prompt_fields=baseline.prompt_field_dict(),
+        origin_prompt_fields=origin.prompt_field_dict(),
         dataset_size=dataset_count,
         experiment_id=init_params.get("experiment_id"),
         pipeline_params=pipeline_params,
@@ -206,7 +206,7 @@ async def _maybe_decompose_task(
 async def cmd_init(args: argparse.Namespace) -> CommandResult:
     """Initialize services, load datasets, configure pipeline, create session.
 
-    No scoring calls — the baseline runs as phase 0 of ``optimize`` on the
+    No scoring calls — the origin runs as phase 0 of ``optimize`` on the
     ``sp_budget_ttest`` slice. The one LLM cost paid here is the
     ``restructure`` template call (via ``_maybe_decompose_task``) the first
     time a dataset's ``task_description.md`` (or ``--task-file`` /
@@ -214,8 +214,8 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     ``restructure_cache.json`` so subsequent runs are free. ``optimize``
     reads the decomposition off the session.
     """
-    from promptpotter.application.baseline import prepare_datasets
     from promptpotter.application.config import load_campaign_config as _load_cfg
+    from promptpotter.application.origin import prepare_datasets
 
     file_config = load_campaign_config(args.config)
     dataset_name = args.dataset_name or file_config.get("dataset_name")
@@ -255,7 +255,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
     else:
         train_data = session.samples or []
 
-    pipeline_params, baseline, cycle_id = _prepare_cycle(session, campaign_config, train_data)
+    pipeline_params, origin, cycle_id = _prepare_cycle(session, campaign_config, train_data)
     active = list(pipeline_params.get("steps", [])) if pipeline_params else []
     init_params = {
         "backend_url": args.backend_url,
@@ -269,7 +269,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         cycle_id=cycle_id,
         init_params=init_params,
         pipeline_params=pipeline_params,
-        baseline=baseline,
+        origin=origin,
         dataset_count=len(train_data),
     )
 
@@ -295,7 +295,7 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         human=(
             f"\nSession created: {session_id}\n"
             f"Cycle: {cycle_id}\n"
-            f"Dataset: {len(train_data)} queries (baseline runs in optimize phase 0)"
+            f"Dataset: {len(train_data)} queries (origin runs in optimize phase 0)"
         ),
     )
 
@@ -342,15 +342,15 @@ def _prepare_cycle_for_optimize(
     """Resolve cycle context: drift-detect + auto-mint + ``--from`` validation.
 
     Pipeline divergence-detect: if pipeline.json (model, temperature, …),
-    baseline prompt, or dataset changed since the active session was
+    origin prompt, or dataset changed since the active session was
     init'd, the recomputed cycle hash no longer matches the pointer's
     cycle_id. Auto-mint a fresh session+cycle so a model swap starts a
     new campaign root instead of silently mixing measurements from the
     old model. Mutates ``ctx`` (cycle_id / session_id / state) in place.
-    Returns ``(pipeline_params, baseline)`` for the emitter.
+    Returns ``(pipeline_params, origin)`` for the emitter.
     """
     resume_from_round: int | None = getattr(args, "resume_from_round", None)
-    pipeline_params, baseline_now, expected_cycle_id = _prepare_cycle(
+    pipeline_params, origin_now, expected_cycle_id = _prepare_cycle(
         session, campaign_config, train_data
     )
 
@@ -363,7 +363,7 @@ def _prepare_cycle_for_optimize(
             cycle_id=expected_cycle_id,
             init_params=ctx.init_params,
             pipeline_params=pipeline_params,
-            baseline=baseline_now,
+            origin=origin_now,
             dataset_count=len(train_data),
         )
         ctx.cycle_id = expected_cycle_id
@@ -386,7 +386,7 @@ def _prepare_cycle_for_optimize(
     elif ctx.cycle_id and not minted_fresh:
         logger.info("Resuming cycle %s", ctx.cycle_id)
 
-    return pipeline_params, baseline_now
+    return pipeline_params, origin_now
 
 
 def _build_live_display(
@@ -394,7 +394,7 @@ def _build_live_display(
     *,
     session: Session,
     campaign_config: CampaignConfig,
-    baseline_acc: float,
+    origin_acc: float,
 ) -> LiveDisplay:
     """Build the CLI's LiveDisplay — verbose ($-v$) gets full notebook parity, else concise."""
     from promptpotter.application.scoring.formula import split_scoring_block
@@ -408,13 +408,13 @@ def _build_live_display(
     if getattr(args, "verbose", False):
         return _LiveDisplay(
             campaign_rounds=[],
-            baseline_acc=baseline_acc,
+            origin_acc=origin_acc,
             l1_patience=opt.l1_patience,
             pipeline_schema=session.pipeline_schema,
             scoring_formula=scoring_formula,
         )
     return _LiveDisplay(
-        baseline_acc=baseline_acc,
+        origin_acc=origin_acc,
         l1_patience=opt.l1_patience,
         sp_budget_ttest=campaign_config.sp_budget_ttest,
         scoring_formula=scoring_formula,
@@ -427,13 +427,13 @@ def _build_observers(
     session: Session,
     campaign_config: CampaignConfig,
     train_data: list,
-    baseline_acc: float,
+    origin_acc: float,
 ) -> RunObservers:
     """CLI thin shim around ``build_run_observers`` — passes ``args``-derived display."""
     from promptpotter.application.optimization.observers import build_run_observers
 
     display = _build_live_display(
-        args, session=session, campaign_config=campaign_config, baseline_acc=baseline_acc
+        args, session=session, campaign_config=campaign_config, origin_acc=origin_acc
     )
     return build_run_observers(
         session=session,
@@ -441,7 +441,7 @@ def _build_observers(
         dataset=train_data,
         display=display,
         resumed_from_round=getattr(args, "resume_from_round", None),
-        baseline_accuracy=baseline_acc,
+        origin_accuracy=origin_acc,
     )
 
 
@@ -460,8 +460,8 @@ async def _run_sweep_batch(
     """
     from promptpotter.application.sweep import run_sweep_batch
 
-    def observer_factory(session: Session, baseline_acc: float) -> RunObservers:
-        return _build_observers(args, session, campaign_config, train_data, baseline_acc)
+    def observer_factory(session: Session, origin_acc: float) -> RunObservers:
+        return _build_observers(args, session, campaign_config, train_data, origin_acc)
 
     result = await run_sweep_batch(
         args,
@@ -485,7 +485,7 @@ def _maybe_fork_diag_sibling(args: argparse.Namespace, ctx, session) -> None:
     """Diag-BFS: re-running ``--diag`` against a finalized diag cycle branches
     off a counted sibling (``{root}_diag_NNN``) instead of overwriting the
     parent's archive. Each probe is its own cycle with ``parent_cycle_id`` set;
-    baseline measurements stay shared via the JSP-keyed archive."""
+    origin measurements stay shared via the JSP-keyed archive."""
     if not (
         getattr(args, "diag", False)
         and ctx.cycle_id
@@ -550,8 +550,8 @@ async def _run_normal_optimize(
     )
     from promptpotter.shared.errors import ResumeDivergenceError
 
-    pre_baseline_acc = ctx.state.get("baseline_accuracy", 0.0)
-    observers = _build_observers(args, session, campaign_config, train_data, pre_baseline_acc)
+    pre_origin_acc = ctx.state.get("origin_accuracy", 0.0)
+    observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
     try:
@@ -617,7 +617,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
         )
 
     train_data = session.samples or []
-    pipeline_params, _baseline = _prepare_cycle_for_optimize(
+    pipeline_params, _origin = _prepare_cycle_for_optimize(
         args, ctx, session, campaign_config, train_data
     )
     # ctx may have been re-minted; bind the now-resolved ids onto session.

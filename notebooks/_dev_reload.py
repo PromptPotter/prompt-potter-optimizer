@@ -9,7 +9,7 @@ _RELOAD_MODULES = (
     # Service layer — safe to reload (no Pydantic model classes)
     "promptpotter.shared.hashing",
     "promptpotter.application.config",
-    "promptpotter.application.baseline",
+    "promptpotter.application.origin",
     "promptpotter.application.runner",
     "promptpotter.application.bootstrap",
     "promptpotter.infrastructure.tracing",

@@ -7,7 +7,7 @@ testable as a transformation.
 Inputs
 ------
 - ``index`` — ``campaigns/{cycle_id}/index.json`` payload (carries
-  baseline / best / final block with ``baseline_composite_fitness``,
+  origin / best / final block with ``origin_composite_fitness``,
   ``prompt_hashes``, ``mode``).
 - ``rounds`` — per-round optimizer state from ``rounds/trial_NNNN.json``,
   in round order. Carries ``opt_search_point`` (lineage, task_context,
@@ -55,10 +55,10 @@ def render_review_md(
 
     behavior_per_round = _compute_behavior_per_round(rounds, audits, ctx_items, param_unlock_round)
     final = index.get("final") or {}
-    baseline_composite_fitness = float(final.get("baseline_composite_fitness") or 0.0)
+    origin_composite_fitness = float(final.get("origin_composite_fitness") or 0.0)
     stats = compute_l1_stats(
         list(rounds),
-        baseline_composite_fitness=baseline_composite_fitness,
+        origin_composite_fitness=origin_composite_fitness,
         behavior_results=behavior_per_round,
     )
 
@@ -233,9 +233,7 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        parts.append(
-            "| variant | composite_fitness | acc | Δ_parent | Δ_baseline | beat | changes |"
-        )
+        parts.append("| variant | composite_fitness | acc | Δ_parent | Δ_origin | beat | changes |")
         parts.append("|---|---|---|---|---|---|---|")
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the

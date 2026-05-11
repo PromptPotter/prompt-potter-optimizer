@@ -10,7 +10,7 @@ writer and a reader, are drift. Drop the orphans in §4."
 
 Spec (`m10-cleanup.md` §0 measurable targets) cites **22 (14 own +
 8 inherited)**. Actual today: **21 (13 own + 8 inherited)** — spec
-count is stale by one. Drop target should be re-baselined in the
+count is stale by one. Drop target should be re-origind in the
 results doc; "cut at least 4 own" → 13 - 4 = 9 own fields surviving.
 
 ## Inherited from `PromptTemplate` (8 fields — STAY per spec)

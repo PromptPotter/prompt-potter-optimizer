@@ -43,7 +43,7 @@ The primitive does not know which caller fired. The caller passes a small `extra
 
 A branch's ledger inherits from its parent up to the cut, so reading a fork's history walks parent's records, then fork's own.
 
-**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same baseline see identical content hashes and read the same `archive/` row — that's why the second fork's "baseline" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
+**Library measurements are deliberately not on the tree.** A measurement is a fact about *one (JobSearchPoint, sample) pair*, content-addressed by the rendered prompt's hash. Two forks running the same origin see identical content hashes and read the same `archive/` row — that's why the second fork's "origin" costs zero LLM calls. See [`scoring-and-memory.md`](scoring-and-memory.md).
 
 OSP is the optimizer's working memory for one branch — not part of the tree structure. When sweep mints a fork with overrides, the override fields ride into the fork as payload (written into FORK_CUT's typed `data.fork: ForkPayload`, stamped onto the fork's `cycle.opt_sp` after bootstrap). For what OSP carries: [`state-record.md`](state-record.md).
 
@@ -64,7 +64,7 @@ The roadmap calls full self-optimization "L4" — a layer above L3 proposing the
 1. Operator (or Claude via `/potter-review`) reads `review.md` for the last sweep batch.
 2. Operator authors the next batch of `OperatorSweepFile` JSONs (one per candidate, narrow `reason` + `l1_layout` shape; the dispatcher widens each into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)`).
 3. `optimize --sweep` runs the next generation.
-4. Library cache means baseline measurements don't repeat — each generation only pays for actual L1 variants.
+4. Library cache means origin measurements don't repeat — each generation only pays for actual L1 variants.
 
 This is L4 with the operator as the policy. The data accumulating in `campaigns/{root}/forks/` plus the on-demand `MeasurementArchive` views are the substrate an automated policy would consume. Replacing the human policy with code reads the same trees, constructs the same `ForkPayload`, runs the same primitive.
 

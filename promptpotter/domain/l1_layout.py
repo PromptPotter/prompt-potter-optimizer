@@ -95,7 +95,7 @@ class L1Layout(BaseModel):
 
 
 def default_l1_layout() -> L1Layout:
-    """Return the baseline L1 layout used before any L2 fire mutates it.
+    """Return the origin L1 layout used before any L2 fire mutates it.
 
     Mandatory placeholders are spread across ``task_intent`` (the
     persistent task framing L2 refines — front of mind for the LLM) and

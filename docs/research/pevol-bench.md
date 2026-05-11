@@ -30,7 +30,7 @@ What you actually want:
 - **MATH** — clean train/test baked in, 7,500 test instances, well-understood difficulty distribution.
 - **LiveBench** — contamination-resistant by design (monthly updates); harder to pin a fixed test set.
 
-**Recommendation:** MMLU-Pro for breadth + MATH for depth. Both HuggingFace-native, both with published baselines — no assembly required.
+**Recommendation:** MMLU-Pro for breadth + MATH for depth. Both HuggingFace-native, both with published origins — no assembly required.
 
 ## Long-term node-type coverage
 

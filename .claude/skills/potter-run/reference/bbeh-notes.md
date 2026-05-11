@@ -49,7 +49,7 @@ Single-node `llm_only` (`datasets/bbeh/pipeline.json`): `openai/gpt-oss-120b` vi
 
 `docs/research/bbeh-comparison/results_potter.json` matches `results_capo.json` / `results_dspy.json`:
 - `per_task[task_name] = {accuracy, n_test}`
-- `config` = `{optimizer, max_rounds, n_variants, sp_budget_ttest, model_id, n_train, train_accuracy, baseline_train_accuracy, rounds, methodology, note}`
+- `config` = `{optimizer, max_rounds, n_variants, sp_budget_ttest, model_id, n_train, train_accuracy, origin_train_accuracy, rounds, methodology, note}`
 - `optimized_prompts = {"__global__": winner}`
 
 `note` is conventionally `"unmeasured starting hyperparameters — pre-sweep"` so comparison tooling flags the number as a floor.

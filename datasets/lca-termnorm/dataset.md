@@ -17,7 +17,7 @@
 --config datasets/lca-termnorm/campaign.json
 ```
 
-Init is pure prep — no scoring. The optimizer evaluates baseline as phase 0 on the `sp_budget_ttest` slice before round 1.
+Init is pure prep — no scoring. The optimizer evaluates origin as phase 0 on the `sp_budget_ttest` slice before round 1.
 
 `dataset_name` is set in `campaign.json` (`"train"` — 984 items). The `--dataset-name` CLI flag is optional; if provided it overrides the config value.
 

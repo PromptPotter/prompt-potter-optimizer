@@ -2,7 +2,7 @@
 
 The M10 cleanup landed in **three arcs**: pass 1 (4 commits, architecture
 restate), pass 2 (3 commits, gap close), pass 3 (2 commits, milestone
-close — drops + folds + restructure). Numbers below are baseline
+close — drops + folds + restructure). Numbers below are origin
 (HEAD = `c2ffb27f`, post §3.5 pin) vs pass-1 final (`45b6078c`) vs
 pass-2 final vs pass-3 final (HEAD).
 
@@ -36,7 +36,7 @@ pass-2 final vs pass-3 final (HEAD).
 
 ## Measurable targets
 
-| Metric | Baseline | Target | Pass-1 | Pass-2 | Pass-3 | Verdict |
+| Metric | Origin | Target | Pass-1 | Pass-2 | Pass-3 | Verdict |
 |---|---:|---:|---:|---:|---:|---|
 | LOC under `promptpotter/` | 33022 | ≤26418 (−20%) | 32696 | 32311 | **31667** | **honest miss** — pass-3 cut another 644 lines (leaderboard.py drop, hardness_records, evaluators_meta, spend extract). The −20% target requires bulk feature deletion the §1 audit explicitly kept (live dashboard cards, load-bearing primitives). |
 | Files under `promptpotter/` | 135 | ≤115 (−15%) | 138 | 137 | **130** | **honest miss** — pass-3 dropped 7 files (leaderboard.py + 4 leaf folds + the audit-flagged DROP candidates). Audit-kept primitives floor the rest. |

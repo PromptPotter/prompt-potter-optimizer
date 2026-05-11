@@ -15,7 +15,7 @@
 
 ## Goal
 
-Port `webapp/index.html` to Next.js + React + plain CSS without losing the **9 patterns hardened in vanilla** (see § *Lift verbatim*). Land a clean foundation for M11 monitoring slices and M12's control plane. Visual rework that vanilla deferred (hero stat trio, h1 weight, sidebar slide-out, monospace stack) happens **in the port baseline**, not as follow-up.
+Port `webapp/index.html` to Next.js + React + plain CSS without losing the **9 patterns hardened in vanilla** (see § *Lift verbatim*). Land a clean foundation for M11 monitoring slices and M12's control plane. Visual rework that vanilla deferred (hero stat trio, h1 weight, sidebar slide-out, monospace stack) happens **in the port origin**, not as follow-up.
 
 Glassmorphism (5 sites) is **operator-vetoed off-limits** — preserved verbatim.
 
@@ -124,9 +124,9 @@ These 9 patterns are *production-tested* in vanilla as of `f1dab82`. The port co
 
 ## Redesign in the port (visual deferred from vanilla)
 
-Per the operator's 2026-05-07 directive: vanilla's hero stat trio, h1 weight, sidebar slide-out, and monospace stack are deferred to the React port baseline so vanilla stays a stable preservation list. The port should ship with these *already redone*, not as follow-up.
+Per the operator's 2026-05-07 directive: vanilla's hero stat trio, h1 weight, sidebar slide-out, and monospace stack are deferred to the React port origin so vanilla stays a stable preservation list. The port should ship with these *already redone*, not as follow-up.
 
-| Item | Vanilla state | Port baseline |
+| Item | Vanilla state | Port origin |
 |---|---|---|
 | Hero stat trio (BEST / QUERIES / LAST QUERY) | 3 centered cards under the page title — generic AI-dashboard opener | One large primary stat (likely BEST + sparkline) + 2 inline secondary stats. Or: kill the trio, let workflow canvas anchor the page. Decide in implementation; do not replicate the centered-3-card pattern. |
 | h1 weight | 500 (reads as subhead) | 600 + larger leading. The page title should clearly anchor. |
@@ -170,7 +170,7 @@ CORS: same-origin under `/ui` in production. Dev-mode the rewrite avoids preflig
 4. Implement `useDashboardPoll(cycleId)` hook with AbortController + visibility pause. Implement `useActiveSession` for `/api/v1/active`.
 5. Build `<StatusBar>`, `<WorkflowCanvas>`, `<WhatIfPanel>`, `<PassRateCard>`, `<FreqChart>`, `<TrendChart>`, `<EvalTable>` — direct ports of vanilla render functions. Use `react-chartjs-2`.
 6. Theme toggle: no-reload swap, destroys + re-creates Chart.js refs.
-7. **Visual baseline**: redo hero stat trio, h1 weight, monospace stack, sidebar slide-out per § *Redesign*.
+7. **Visual origin**: redo hero stat trio, h1 weight, monospace stack, sidebar slide-out per § *Redesign*.
 8. Tests: one Playwright spec per critical path (load Dashboard, click File pane, click workflow node, toggle what-if tile, switch theme without reload). No DOM-rendering unit tests for chart internals — Chart.js is third-party.
 
 **Wave 2 — Files pane + chat scaffold (separate PR)**
@@ -198,7 +198,7 @@ If a bug is found in vanilla that *also* matters for the port, fix it in the por
 ## Verification
 
 - **Functional parity**: same dashboard data renders; same theme toggle behavior; same polling cadence; same files-pane navigation; same workflow-node selection. Every panel that worked in vanilla works in port.
-- **A11y parity (must improve)**: vanilla scored ~16-17/20 post-`/harden`. Port should hit 19-20/20 — touch targets ≥ 44px (charter previously deferred mobile; the port baseline includes it), keyboard navigation already-equivalent via the lifted patterns, focus-visible already styled.
+- **A11y parity (must improve)**: vanilla scored ~16-17/20 post-`/harden`. Port should hit 19-20/20 — touch targets ≥ 44px (charter previously deferred mobile; the port origin includes it), keyboard navigation already-equivalent via the lifted patterns, focus-visible already styled.
 - **Bundle size**: `out/` total < 500 KB gzipped excluding wizard PNG. Chart.js is ~70 KB gzipped; marked is ~15 KB. Plain CSS keeps the rest small.
 - **No regressions**: `pytest tests/test_api.py` still green (FastAPI surface unchanged). `tests/test_invariants.py` still green (no new campaign artifacts written).
 - **Operator smoke**: `npm run dev` on :3000, `uvicorn promptpotter.main:app --port 8001`, run `python -m promptpotter optimize` in a third terminal — dashboard live-updates, file tree works, theme toggle does not reload, keyboard tab order reaches every interactive element.
@@ -210,7 +210,7 @@ If a bug is found in vanilla that *also* matters for the port, fix it in the por
 - `webapp/index.html` (vanilla — the source of truth for behavior post-`f1dab82`).
 - `docs/specs/m11-webapp-minimal-preview.md` (charter for the read-only surface; API contracts).
 - `docs/specs/m11-publication-benchmarks.md` line 84 (stack constraint: plain CSS + CSS Modules, no Tailwind).
-- `docs/specs/m12-multi-connector.md` § Track 3 (what M12 layers on top of this baseline).
+- `docs/specs/m12-multi-connector.md` § Track 3 (what M12 layers on top of this origin).
 - `promptpotter/presentation/api.py` (the API surface — read end-to-end; the port is a pure consumer).
 - `promptpotter/main.py` static mount block.
 - Active pointer + path helpers — read-only consumers, no changes.
@@ -220,6 +220,6 @@ If a bug is found in vanilla that *also* matters for the port, fix it in the por
 ## Open questions (decide during Wave 1)
 
 1. **Hero replacement shape** — kill the trio entirely, or one-big-stat + sparkline? Decide based on workflow canvas's standalone strength as a page anchor.
-2. **Chat pane in baseline or Wave 2** — currently Wave 2. Could pull into Wave 1 as inert UI to reduce churn before M12 wires it.
-3. **Wand toggle on /ui in Wave 1** — purely visual in vanilla; could ship in Wave 1 baseline or stay deferred to M12 alongside the chat pane wiring. Default: defer (don't ship the wand outside the chat surface).
-4. **Mobile breakpoint commitment** — vanilla deferred mobile entirely. Port baseline should commit to ≥ 768 px tablet at minimum; full mobile (< 600 px) is M12 alongside whitelabel work. Confirm with operator before Wave 1 lands.
+2. **Chat pane in origin or Wave 2** — currently Wave 2. Could pull into Wave 1 as inert UI to reduce churn before M12 wires it.
+3. **Wand toggle on /ui in Wave 1** — purely visual in vanilla; could ship in Wave 1 origin or stay deferred to M12 alongside the chat pane wiring. Default: defer (don't ship the wand outside the chat surface).
+4. **Mobile breakpoint commitment** — vanilla deferred mobile entirely. Port origin should commit to ≥ 768 px tablet at minimum; full mobile (< 600 px) is M12 alongside whitelabel work. Confirm with operator before Wave 1 lands.

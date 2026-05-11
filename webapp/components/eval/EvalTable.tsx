@@ -12,7 +12,7 @@ interface ResultRow {
 
 interface RoundData {
   results?: ResultRow[];
-  baseline_accuracy?: number;
+  origin_accuracy?: number;
 }
 
 interface Props {

@@ -13,7 +13,7 @@ Four `CycleRecord` subtypes land in `events.jsonl`:
 | Type | Emitted for | Key fields |
 |---|---|---|
 | `DecisionRecord` | Resume checkpoints (round_winner, elimination_cut, leader_lock_in, l2/l3 escalation triggers, probe_round_commitment, fork_cut) | `kind`, `inputs_ref`, `outcome`, `data`, `round`, `timestamp` |
-| `PhaseRecord` | Campaign phase boundaries: `round`, `baseline`, `init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan`, `cadence`, `escalation`, `scoring_steer` | `phase`, `event`, `round`, `payload`, `timestamp` |
+| `PhaseRecord` | Campaign phase boundaries: `round`, `origin`, `init`, `l1_generate`, `l1_score`, `refine_strategy`, `modify_plan`, `cadence`, `escalation`, `scoring_steer` | `phase`, `event`, `round`, `payload`, `timestamp` |
 | `SnapshotRecord` | In-flight live state: `sample_started`, `sample_scored`, `candidate_started`, `candidate_scored`, `p_best_update` | `event`, `round`, `candidate_idx`, `sample_idx`, `payload`, `timestamp` |
 | `TokenUsageRecord` | LLM call telemetry | `kind`, `node`, `model`, `input_tokens`, `output_tokens`, `duration_s`, `cost_usd`, `round`, `timestamp` |
 
@@ -25,7 +25,7 @@ Four `CycleRecord` subtypes land in `events.jsonl`:
 |---|---|---|
 | `state` (phase name) | `PhaseRecord` via `_handle_phase` | CLEAN |
 | `round` | `SnapshotRecord` + `PhaseRecord` | CLEAN |
-| `baseline` | `PhaseRecord(INIT:exit)` payload | CLEAN |
+| `origin` | `PhaseRecord(INIT:exit)` payload | CLEAN |
 | `best` | derived from `SnapshotRecord(sample_scored)` | CLEAN |
 | `current_round.nodes.l1_generate` / `.l1_critique` / `.l2_context` / `.l3_plan` | populated by `AuditTrailProjection.snapshot_nodes()` direct call | PROJECTION-ONLY |
 | `current_round.nodes.l1_score` | built from `SnapshotRecord(sample_scored)` payloads | CLEAN |

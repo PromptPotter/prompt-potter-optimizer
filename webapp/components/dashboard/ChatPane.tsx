@@ -48,9 +48,9 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
   const bestPctOnly = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—";
-  const baseline = typeof dash?.baseline === "number" ? dash.baseline : null;
-  const baselinePct =
-    baseline != null && Number.isFinite(baseline) ? `${(baseline * 100).toFixed(0)}%` : null;
+  const origin = typeof dash?.origin === "number" ? dash.origin : null;
+  const originPct =
+    origin != null && Number.isFinite(origin) ? `${(origin * 100).toFixed(0)}%` : null;
 
   // Spend block — written by LiveDashboardProjection from per-sample
   // step_tokens (backend bucket) + ledger TokenUsageRecord (loop bucket).
@@ -107,8 +107,8 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
       : TERMS.newjob_bar_spend;
   const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
   const deltaPerSpend =
-    best != null && baseline != null && usedUsd != null && usedUsd > 0
-      ? (best - baseline) / usedUsd
+    best != null && origin != null && usedUsd != null && usedUsd > 0
+      ? (best - origin) / usedUsd
       : null;
   const effChip =
     deltaPerSpend != null ? `${(deltaPerSpend * 100).toFixed(2)} pp/$` : "—";
@@ -152,7 +152,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
           <span className="chip-row">
             <span className="chip" title={TERMS.newjob_bar_best}>
               <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
-              {baselinePct && <span className="chip-baseline"> / {baselinePct}</span>}
+              {originPct && <span className="chip-origin"> / {originPct}</span>}
             </span>
             <span className="chip" title={spendTooltip}>
               <span className="chip-lbl">Spend</span> <strong>{spendChip}</strong>

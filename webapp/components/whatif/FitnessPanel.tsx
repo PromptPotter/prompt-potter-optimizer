@@ -87,7 +87,7 @@ export function FitnessPanel({ dash, themeKey }: Props) {
     return set;
   }, [candidates]);
 
-  // Pre-staging: when no candidate has evaluator data yet (baseline /
+  // Pre-staging: when no candidate has evaluator data yet (origin /
   // pre-round-1), short-circuit buildRows and emit one row per registry
   // entry with applicable=true. Going through buildRows with bare registry
   // names as `applicable` triggers its `endsWith("_" + m.name)` suffix-match
@@ -112,7 +112,7 @@ export function FitnessPanel({ dash, themeKey }: Props) {
   //   3. Union of every candidate's stats.evaluators keys — these are the
   //      evaluators being computed this round to feed the active formula
   //      (broader than literal tokens, but a faithful proxy when the formula
-  //      string itself isn't on disk yet — which is common during baseline /
+  //      string itself isn't on disk yet — which is common during origin /
   //      round 0 where the projection hasn't propagated it).
   const inActive = useMemo(() => {
     const top = (dash as { composite_fitness_formula?: string | null } | null)?.composite_fitness_formula;

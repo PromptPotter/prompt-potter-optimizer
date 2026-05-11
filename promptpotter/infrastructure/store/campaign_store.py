@@ -67,7 +67,7 @@ class CampaignStore(EntityStore):
 
         When the file doesn't exist yet, writes a fresh blob with defaults.
         When it does, merges the new keys over existing values without
-        clobbering round_data/best/baseline accumulators — defaults only fill
+        clobbering round_data/best/origin accumulators — defaults only fill
         gaps. ``parent_session_id`` flows through ``metadata``.
         """
         path = self._entity_path(backend_id, cycle_id)
@@ -84,7 +84,7 @@ class CampaignStore(EntityStore):
             "n_rounds": 0,
             "best_accuracy": 0.0,
             "best_round_id": None,
-            "baseline_accuracy": 0.0,
+            "origin_accuracy": 0.0,
             "rounds": [],
         }
         # Merge order: defaults for missing keys → existing accumulators →
@@ -349,7 +349,7 @@ class CampaignStore(EntityStore):
                     "status": data["status"],
                     "n_rounds": data["n_rounds"],
                     "best_accuracy": data["best_accuracy"],
-                    "baseline_accuracy": data["baseline_accuracy"],
+                    "origin_accuracy": data["origin_accuracy"],
                     "created_at": data["created_at"],
                     "updated_at": data["updated_at"],
                     "parent_session_id": data.get("parent_session_id", ""),
@@ -384,7 +384,7 @@ class CampaignStore(EntityStore):
             "n_rounds": 0,
             "best_accuracy": 0.0,
             "best_round_id": None,
-            "baseline_accuracy": parent_index.get("baseline_accuracy", 0.0),
+            "origin_accuracy": parent_index.get("origin_accuracy", 0.0),
             "status": "active",
             "created_at": forked_at,
             "updated_at": forked_at,

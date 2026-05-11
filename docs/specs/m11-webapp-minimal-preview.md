@@ -47,7 +47,7 @@ Visual target: hand-supplied stub at `C:\Users\dsacc\Downloads\curator_dashboard
 | Stat card 3 — `DURATION` | Repurpose | `LAST QUERY` → `dashboard.last_query_elapsed_s` (formatted `s`) | `dashboard.json` |
 | Workflow canvas | Real, dynamic | Pipeline node graph: `l1_generate → l1_critique → l2_context → l3_plan → restructure`, current node highlighted from `dashboard.phase` / `dashboard.layer`. Drop the diamond/circle sub-nodes from the stub — replace with the real 5-node optimizer pipeline. | `dashboard.json` (`current_round.nodes`) |
 | Workflow selection panel | Real | When a node is clicked: show `input.template_name`, `usage.total_tokens`, `duration_s`, `model`, `timestamp`. | `dashboard.json` (`current_round.nodes.{node_id}`) |
-| Pass Rate card (3 horizontal bars) | Real | Top-N candidates this round: `composite_fitness` per candidate, label = candidate name. Color stub keeps `#185FA5 / #BA7517` for above/below baseline. | `dashboard.json` (`current_round.candidates[]`) — fall back to log.md parse if not on dashboard |
+| Pass Rate card (3 horizontal bars) | Real | Top-N candidates this round: `composite_fitness` per candidate, label = candidate name. Color stub keeps `#185FA5 / #BA7517` for above/below origin. | `dashboard.json` (`current_round.candidates[]`) — fall back to log.md parse if not on dashboard |
 | Score Frequency density chart | Real | Per-sample composite score histogram for the current best candidate. | `rounds/round_NNNN.json` (most recent) |
 | Prompt Score Trends line chart | Real | Per-round `best` and `current_acc` lines across all rounds. | Iterate `rounds/round_*.json` |
 | Prompt Variables card (editable text) | Real, read-only | Show `current_round.nodes.l1_generate.input.template_fields.problem_description` truncated. Disable `contenteditable`. | `dashboard.json` |
@@ -212,7 +212,7 @@ For forks, family-root files appear under a sibling top-level node `▾ family (
 - Fixture cycle for testing: `.promptpotter/projects/default/campaigns/cycle_0a7a7c410aa7/` has the full layout (dashboard.json, index.json, log.md, review.md, rounds/, prompts/, langfuse/).
 - `dashboard.json` shape — top-level keys to render:
   - `phase`, `round`, `candidate`, `query`, `patience`, `layer`
-  - `baseline`, `best`, `current_acc`, `composite_fitness_formula_short`
+  - `origin`, `best`, `current_acc`, `composite_fitness_formula_short`
   - `cycle_id`, `total_queries_scored`, `total_backend_calls`, `last_query_elapsed_s`, `wallclock_serialized_at`
   - `n_variants`, `sp_budget_ttest`
   - `current_round.nodes.{l1_generate|l1_critique|l2_context|l3_plan|restructure}` with `input`, `output`, `usage`, `model`, `config`, `duration_s`, `timestamp`, `round`

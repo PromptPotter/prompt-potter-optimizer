@@ -7,11 +7,6 @@ import logging
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
-from promptpotter.application.baseline import (
-    CampaignBaseline,
-    extract_campaign_baseline,
-    prepare_scoring_context,
-)
 from promptpotter.application.bootstrap import init_optimization_loop
 from promptpotter.application.bootstrap.session import Session
 from promptpotter.application.config import CampaignConfig
@@ -27,6 +22,11 @@ from promptpotter.application.optimization.observers import (
     RunCallbacks,
     RunObservers,
     build_run_observers,
+)
+from promptpotter.application.origin import (
+    CampaignOrigin,
+    extract_campaign_origin,
+    prepare_scoring_context,
 )
 from promptpotter.application.scoring.formula import split_scoring_block
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -55,14 +55,14 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "build_baseline_cycle_id",
+    "build_origin_cycle_id",
     "cycle_config_identity",
     "run_optimization",
 ]
 
 
 def cycle_config_identity(jsp: JobSearchPoint, dataset: list) -> str:
-    """Stable identity hash for a feedback cycle's baseline ``JobSearchPoint``.
+    """Stable identity hash for a feedback cycle's origin ``JobSearchPoint``.
 
     Covers the rendered prompt, dataset, and full ``pipeline_params`` (active
     steps + per-node target-layer config). Loop-control / strategy knobs on
@@ -72,12 +72,12 @@ def cycle_config_identity(jsp: JobSearchPoint, dataset: list) -> str:
     return f"cycle_{jsp.content_hash(dataset)[:12]}"
 
 
-def build_baseline_cycle_id(
+def build_origin_cycle_id(
     osp: OptSearchPoint,
     schema: PipelineSchema | None,
     dataset: list,
 ) -> str:
-    """Cycle ID for a baseline ``OptSearchPoint`` — the OSP → JSP projection ceremony."""
+    """Cycle ID for an origin ``OptSearchPoint`` — the OSP → JSP projection ceremony."""
     base_pp = schema.to_pipeline_params() if schema else {}
     jsp = osp.to_job_search_point(base_pipeline_params=base_pp, schema=schema)
     return cycle_config_identity(jsp, dataset)
@@ -410,7 +410,7 @@ async def run_optimization(
     *,
     session: Session,
     observers: RunObservers,
-    baseline: CampaignBaseline | None = None,
+    origin: CampaignOrigin | None = None,
     experiment_id: str | None = None,
     task_context: TaskDecomposition | dict | None = None,
     langfuse_session_id: str | None = None,
@@ -422,16 +422,16 @@ async def run_optimization(
     fork_payload: ForkPayload | None = None,
 ) -> CycleResult:
     """Run optimization end-to-end. ``observers`` MUST be pre-built via
-    ``build_run_observers`` so the ledger is bound before baseline ticks.
+    ``build_run_observers`` so the ledger is bound before origin ticks.
 
-    ``baseline`` is optional: when omitted, the runner scores baseline as
+    ``origin`` is optional: when omitted, the runner scores origin as
     phase 0 (CLI path); when provided, it's reused as-is (notebook path,
-    where baseline ran in an earlier cell against the same observers).
+    where origin ran in an earlier cell against the same observers).
     """
     started_at = datetime.now(UTC).isoformat()
     cb = observers.callbacks
 
-    if baseline is None:
+    if origin is None:
         _, _, campaign_rounds, _ = await prepare_scoring_context(
             session.experiment_extract,
             dataset,
@@ -441,9 +441,9 @@ async def run_optimization(
             svc=session,
             listener=cb,
         )
-        baseline = extract_campaign_baseline(campaign_rounds)
-        if observers.display is not None and hasattr(observers.display, "set_baseline"):
-            observers.display.set_baseline(baseline.baseline_acc)
+        origin = extract_campaign_origin(campaign_rounds)
+        if observers.display is not None and hasattr(observers.display, "set_origin"):
+            observers.display.set_origin(origin.origin_acc)
 
     scoring_spec = split_scoring_block(campaign_config.scoring)
 
@@ -457,7 +457,7 @@ async def run_optimization(
     pre_loop_cycle_id = session.state.cycle_id
 
     cycle = await init_optimization_loop(
-        baseline,
+        origin,
         dataset,
         campaign_config,
         cb=cb,
@@ -493,7 +493,7 @@ async def run_optimization(
             dataset=dataset,
             display=observers.display,
             resumed_from_round=session.state.resumed_from_round,
-            baseline_accuracy=baseline.baseline_acc,
+            origin_accuracy=origin.origin_acc,
             fork=ForkInfo(
                 parent_cycle_id=pre_loop_cycle_id,
                 parent_dashboard=observers.dashboard,
@@ -511,7 +511,7 @@ async def run_optimization(
         n_rounds=len(cycle.rounds),
         best_accuracy=cycle.tracking.best_accuracy,
         best_round=cycle.tracking.best_round,
-        baseline_accuracy=baseline.baseline_acc,
+        origin_accuracy=origin.origin_acc,
         winner_prompt_fields=cycle.opt_sp.prompt_field_dict() if cycle.tracking.best_sp else {},
         winner_pipeline_params=cycle.tracking.best_sp.pipeline_params
         if cycle.tracking.best_sp
@@ -591,11 +591,11 @@ def _finalize_run(
             else:
                 formula_full = None
                 formula_short = None
-            baseline_composite_fitness = cycle.tracking.baseline_composite_fitness
+            origin_composite_fitness = cycle.tracking.origin_composite_fitness
             final_block = cycle_result.model_dump(exclude={"rounds"}, mode="json")
             final_block["scorer_round_formula"] = formula_full
             final_block["scorer_round_formula_short"] = formula_short
-            final_block["baseline_composite_fitness"] = baseline_composite_fitness
+            final_block["origin_composite_fitness"] = origin_composite_fitness
             from promptpotter.application.optimization.llm_call import (
                 compute_optimizer_prompt_hashes,
             )
@@ -614,11 +614,11 @@ def _finalize_run(
                 final_block["diag"] = {
                     "l1_layout": osp.l1_layout.model_dump(),
                 }
-            # Seal top-level baseline against final.baseline_accuracy drift.
+            # Seal top-level origin against final.origin_accuracy drift.
             session.store.campaigns.update(
                 session.backend_id,
                 session.state.cycle_id,
-                {"final": final_block, "baseline_accuracy": cycle_result.baseline_accuracy},
+                {"final": final_block, "origin_accuracy": cycle_result.origin_accuracy},
             )
 
     if emitter:

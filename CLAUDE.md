@@ -87,7 +87,7 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 **Scoring — traces are facts, scores are policy.** `score_search_point()` is the single gateway. Each trace carries `{scorer_id: {score, hit, formula}}`; every load rescores under the active scorer. Resume replays decisions against rescored inputs — first mismatch halts; `--fork-on-divergence` mints a sibling rooted there. Hot-swap composite via `campaigns/{cycle_id}/scoring_steer.json` → `{"per_round": "..."}`; next round-end recompiles `session.round_scorer` after validation.
 
-**Cycle identity.** Cycle hash = baseline `JobSearchPoint.content_hash(dataset)` (folds in pipeline_params + rendered prompt + dataset; excludes loop-control knobs). `cmd_optimize` recomputes per run; mismatch with active session → fresh session+cycle auto-minted.
+**Cycle identity.** Cycle hash = origin `JobSearchPoint.content_hash(dataset)` (folds in pipeline_params + rendered prompt + dataset; excludes loop-control knobs). `cmd_optimize` recomputes per run; mismatch with active session → fresh session+cycle auto-minted.
 
 **Round-boundary scoring-set mutations — two sanctioned writers, in order:** (1) zero-signal filter (off by default; mutates `datasets/{name}.json::excluded`); (2) scoring-set evolution (off by default; in-memory `session.scoring.scoring_set` only). No third writer is sanctioned.
 

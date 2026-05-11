@@ -320,7 +320,7 @@ def test_emitter_produces_all_artifacts(session_and_campaign_dirs: tuple[Path, P
         n_rounds=1,
         best_accuracy=0.6,
         best_round=0,
-        baseline_accuracy=0.5,
+        origin_accuracy=0.5,
         winner_prompt_fields={"instruction": "test"},
         stop_reason="max_rounds",
         started_at="2026-04-19T00:00:00+00:00",
@@ -481,7 +481,7 @@ def test_file_sink_wire_format_parity(tmp_path: Path) -> None:
         CampaignStart(
             campaign_id=campaign_id,
             config={"max_rounds": 1},
-            baseline_accuracy=0.5,
+            origin_accuracy=0.5,
             session_id=cycle_id,
         )
     )

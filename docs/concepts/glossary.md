@@ -6,7 +6,7 @@ One canonical name per concept. Code names live in the right column for cross-re
 |------|-------|-----------|------------|
 | **Active session** | Pointer at `.promptpotter/active_session.json` telling every command which campaign is current. | — | [`../operations/persistence-and-state.md`](../operations/persistence-and-state.md) |
 | **Backend** | The service PromptPotter sends queries to. Must expose `/matches`, `/pipeline`, `/status`. | `BackendClient` | [`../operations/backend-integration.md`](../operations/backend-integration.md) |
-| **Baseline** | Fitness of the starting prompt on the scoring set; phase 0 of `optimize`. | `RoundBaseline` | [`../operations/cli-reference.md`](../operations/cli-reference.md) |
+| **Origin** | Fitness of the starting prompt on the scoring set; phase 0 of `optimize`. | `RoundOrigin` | [`../operations/cli-reference.md`](../operations/cli-reference.md) |
 | **Campaign** | One complete optimization run as the operator sees it. | filesystem `campaigns/{root_cycle_id}/` | [`campaign-tree.md`](campaign-tree.md) |
 | **Candidate** | One member of a round's population. Prompt fields + pipeline parameters. | `OptSearchPoint` (`OSP`) | [`state-record.md`](state-record.md) |
 | **Catalogue** | Code-derived menu of signal names (`L1_POSSIBLE`) L2 may put in `l1_layout`; rendered into L2's prompt as the `l1_signal_catalogue` signal. | `L1_POSSIBLE` | [`../developer/l1-generate-surface.md`](../developer/l1-generate-surface.md) |

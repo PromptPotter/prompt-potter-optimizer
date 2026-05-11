@@ -8,8 +8,8 @@ cycles converge faster / further on GSM8K-small as proxy benchmark.
 
 Composite formula in ``campaign.json::scoring`` — three proxies:
 
-- ``first_round_delta`` — inner-round-1 score minus inner baseline (cheap signal)
-- ``after_N_rounds_delta`` — inner-round-N score minus baseline (workhorse)
+- ``first_round_delta`` — inner-round-1 score minus inner origin (cheap signal)
+- ``after_N_rounds_delta`` — inner-round-N score minus origin (workhorse)
 - ``rounds_to_N`` — rounds to hit ``inner_tasks.json::target_score``, capped at ``max_inner_rounds``
 
 Better = higher delta after N AND/OR fewer rounds to target.

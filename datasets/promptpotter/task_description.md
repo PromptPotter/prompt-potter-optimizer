@@ -15,7 +15,7 @@ PromptPotter itself.
   `plan` rewrite)
 - Challenge: predict an evidence-anchored improvement to the
   meta-prompt that produces a positive `score_delta`. Random or
-  unjustified mutations score below the no-op baseline.
+  unjustified mutations score below the no-op origin.
 
 ## Success criteria
 

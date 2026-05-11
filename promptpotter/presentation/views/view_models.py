@@ -56,13 +56,13 @@ class WarningEntry:
 
 @dataclass(frozen=True)
 class InitEnterView:
-    """Pre-baseline init banner — only warnings render to text.
+    """Pre-origin init banner — only warnings render to text.
 
     ``composite_fitness_formula`` (and the short form) are propagated here so
     ``LiveDashboardView`` can stamp them onto ``dashboard.json`` before
-    baseline scoring begins. Without this, the formula would only land at
-    ``INIT.exit`` (after baseline), leaving the live preview's What-If panel
-    without a formula reference for the entire baseline phase.
+    origin scoring begins. Without this, the formula would only land at
+    ``INIT.exit`` (after origin), leaving the live preview's What-If panel
+    without a formula reference for the entire origin phase.
     """
 
     warnings: tuple[WarningEntry, ...] = ()
@@ -81,9 +81,9 @@ class InitEnterView:
 
 @dataclass(frozen=True)
 class InitExitView:
-    """Post-baseline init exit — baseline accuracy + cycle identity."""
+    """Post-origin init exit — origin accuracy + cycle identity."""
 
-    baseline_acc: float
+    origin_acc: float
     cycle_id_short: str
     samples: int
     obs_on: bool
@@ -93,7 +93,7 @@ class InitExitView:
     prompt_field_overlays: dict[str, str] = field(default_factory=dict)
     composite_fitness_formula: str | None = None
     composite_fitness_formula_short: str | None = None
-    baseline_composite_fitness: float = 0.0
+    origin_composite_fitness: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -158,7 +158,7 @@ class RoundCompleteView:
     target."""
 
     round: int
-    baseline_acc: float
+    origin_acc: float
     scores: tuple[ScoreEntry, ...]
     winner_label: str
     winner_accuracy: float
@@ -173,7 +173,7 @@ class RoundCompleteView:
     l1_critique_text: str
     composite_fitness_formula: str | None
     composite_fitness_formula_short: str | None
-    baseline_composite_fitness: float | None
+    origin_composite_fitness: float | None
 
 
 @dataclass(frozen=True)
@@ -247,7 +247,7 @@ class DigestStatusView:
     parent_session_id: str | None
     status: str
     stop_reason: str
-    baseline_accuracy: float
+    origin_accuracy: float
     best_accuracy: float
     best_round: int | None
     rounds_completed: int
@@ -313,7 +313,7 @@ class ForkSummaryView:
     mode: str
     status: str
     best_accuracy: float
-    baseline_accuracy: float
+    origin_accuracy: float
     n_rounds: int
     stop_reason: str
     finished_at: str | None
@@ -326,7 +326,7 @@ class LogMdView:
     status: DigestStatusView
     rounds: tuple[RoundDigestView, ...]
     formula: str | None
-    baseline_composite_fitness: float | None
+    origin_composite_fitness: float | None
     hard_samples: HardSamplesView | None
     final: FinalWinnerView | None
     forks: tuple[ForkSummaryView, ...] = ()

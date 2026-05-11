@@ -18,7 +18,7 @@ No data justifying a choice ⇒ do not gamble. Random exploration is reserved fo
 
 `l1_generate`'s evidence base lives on its surface:
 
-- `parent_baseline` — parent composite + per-sample tally + delta to beat.
+- `parent_panel` — parent composite + per-sample tally + delta to beat.
 - `sibling_yield` — prior round per-axis yield: `axis | n_tried | n_beat_parent | mean_delta`.
 - `escalation_panel` — `stall_rounds`, `last_winner_axis`, `params_unlocked`, `exploration_budget ∈ {tight, normal, wide}`.
 - `axis_memory` — cross-round AxisIndex digest (`cycle.axes.digest()`); per-axis effect_size vs noise floor.

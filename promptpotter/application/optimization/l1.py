@@ -64,7 +64,7 @@ from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import (
     CandidateProposal,
     CandidateScore,
-    RoundBaseline,
+    RoundOrigin,
     RoundResult,
 )
 from promptpotter.domain.scoring import QueryMeasurement
@@ -626,7 +626,7 @@ async def l1_score(
     cycle: Cycle,
     candidates: list[CandidateProposal],
     dataset: list,
-    baseline: RoundBaseline,
+    origin: RoundOrigin,
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
@@ -672,12 +672,12 @@ async def l1_score(
         for ind in osp_population
         if ind.lineage.id in all_candidate_results and ind.lineage.id not in aborted_ids
     ]
-    best_acc = baseline.accuracy
-    best_comp = baseline.composite_fitness
-    best_osp: OptSearchPoint = baseline.osp
-    best_results: list = list(baseline.results)
-    best_label = baseline.label
-    best_scores: dict[str, float] = dict(baseline.evaluators)
+    best_acc = origin.accuracy
+    best_comp = origin.composite_fitness
+    best_osp: OptSearchPoint = origin.osp
+    best_results: list = list(origin.results)
+    best_label = origin.label
+    best_scores: dict[str, float] = dict(origin.evaluators)
     winner_idx: int | None = None
     for idx, ind in enumerate(scored):
         s = compute_composite_fitness(
@@ -705,15 +705,15 @@ async def l1_score(
             "round_num": round_num,
         },
         winner_id,
-        data={"current_best_accuracy_at_record": baseline.accuracy},
+        data={"current_best_accuracy_at_record": origin.accuracy},
         round=round_num,
     )
 
     base = _compute_accuracy(best_results)
-    improved = best_acc > baseline.accuracy + improvement_threshold
+    improved = best_acc > origin.accuracy + improvement_threshold
     p_value: float | None = None
     if improved and base["total"] > 0:
-        bl_hits = round(baseline.accuracy * base["total"])
+        bl_hits = round(origin.accuracy * base["total"])
         p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
     round_result = RoundResult(
         round=round_num,
@@ -724,7 +724,7 @@ async def l1_score(
         total=base["total"],
         improved=improved,
         p_value=p_value,
-        baseline_accuracy=baseline.accuracy,
+        origin_accuracy=origin.accuracy,
         prompt_fields={
             **best_osp.prompt_field_dict(),
             "lineage": best_osp.lineage.model_dump(),
@@ -920,7 +920,7 @@ async def execute_round(
         improvement_threshold=opt.improvement_threshold,
         current_pipeline_params=cycle.tracking.current_sp.pipeline_params,
     )
-    baseline = cycle.baseline_for_round(scoring_set, round_num)
+    origin = cycle.origin_for_round(scoring_set, round_num)
     async with observed_node(
         f"l1_score_r{round_num}",
         "scoring",
@@ -933,7 +933,7 @@ async def execute_round(
             cycle,
             candidates,
             scoring_set,
-            baseline,
+            origin,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
             callbacks=callbacks,

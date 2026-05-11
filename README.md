@@ -58,14 +58,14 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > 
 > ```
 > round 3/10 · 5 candidates · sp_budget_ttest=40
-> ├─ c0  seed                             acc=0.62  [baseline]
+> ├─ c0  seed                             acc=0.62  [origin]
 > ├─ c1  +thinking_style:step-by-step     acc=0.74  ✓
 > ├─ c2  +thinking_style:socratic          acc=0.71
 > ├─ c3  +persona:domain expert           acc=0.68  ✗ eliminated @ q18 (t-test)
 > └─ c4  model:gpt-oss-120b→… ⚠ invalid   acc=0.00  ↳ validation_failure
 >                                                      → L2 brief next round
 > 
-> winner: c1  (+12pp over baseline, p=0.003)
+> winner: c1  (+12pp over origin, p=0.003)
 > L1 critique: "Step-by-step improves multi-hop reasoning. Socratic overlaps
 >               but adds no marginal gain. Persona drift hurt format compliance."
 > ```

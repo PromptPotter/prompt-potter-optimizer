@@ -162,7 +162,7 @@ class IndividualLineage(BaseModel):
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     source: str = Field(
         default="",
-        description="Origin of this individual: 'baseline' / 'l1_generate' / "
+        description="Origin of this individual: 'origin' / 'l1_generate' / "
         "'l2_context' / 'l3_plan'.",
     )
 

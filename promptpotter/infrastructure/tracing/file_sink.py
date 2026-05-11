@@ -237,19 +237,19 @@ class FileSink:
             name="optimization_loop",
             input_data={
                 "campaign_id": event.campaign_id,
-                "baseline_accuracy": event.baseline_accuracy,
+                "origin_accuracy": event.origin_accuracy,
                 "config": event.config,
             },
             tags=["campaign", "optimization_loop"],
         )
         self._campaign_traces[event.campaign_id] = trace_id
-        self._write_score(trace_id, "baseline_accuracy", event.baseline_accuracy)
+        self._write_score(trace_id, "origin_accuracy", event.origin_accuracy)
         self._log_event(
             {
                 "event": "campaign_start",
                 "trace_id": trace_id,
                 "campaign_id": event.campaign_id,
-                "baseline_accuracy": event.baseline_accuracy,
+                "origin_accuracy": event.origin_accuracy,
             }
         )
 

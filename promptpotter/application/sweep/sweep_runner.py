@@ -117,16 +117,16 @@ async def run_sweep_batch(
     """Mint one fork per ``OperatorSweepFile`` and run sweep mode on each.
 
     Forks branch off ``root_ctx.cycle_id`` — whatever the active
-    pointer names. The first fork's baseline run populates the
+    pointer names. The first fork's origin run populates the
     ``archive/`` cache; subsequent forks cache-hit on identical
-    baseline ``JobSearchPoint`` measurements. Active pointer is
+    origin ``JobSearchPoint`` measurements. Active pointer is
     restored to the branch point at the end. Re-invocation from the
     same branch point dedupes via ``data.source_file`` in the parent's
     FORK_CUT records.
 
     ``observer_factory`` is bound by the CLI shim to its own ``args``
     + ``campaign_config`` so this orchestrator does not import from
-    ``presentation/cli/``. Signature: ``(session, baseline_acc) -> RunObservers``.
+    ``presentation/cli/``. Signature: ``(session, origin_acc) -> RunObservers``.
     """
     from promptpotter.application.bootstrap import init_services
     from promptpotter.application.config import configure_and_apply_pipeline

@@ -30,7 +30,7 @@ Out of scope: composite-score verbosity penalty (lives in `m12-composite-fitness
 
 L1 produces variants with no obligation to cite the panel field justifying the mutation. The contract says it must; nothing enforces it.
 
-**Schema change.** `l1_generate.json` output schema gains a required `evidence_grounding` field per variant: `{field: "parent_baseline" | "sibling_yield" | "axis_memory" | "escalation_panel" | "task_context" | "plan" | "stall_exploration", citation: str}`. `stall_exploration` is the explicit-stall escape hatch (the contract's *"random exploration is reserved for explicit stall"* clause) — only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`.
+**Schema change.** `l1_generate.json` output schema gains a required `evidence_grounding` field per variant: `{field: "parent_panel" | "sibling_yield" | "axis_memory" | "escalation_panel" | "task_context" | "plan" | "stall_exploration", citation: str}`. `stall_exploration` is the explicit-stall escape hatch (the contract's *"random exploration is reserved for explicit stall"* clause) — only valid when `escalation_panel.exploration_budget ∈ {normal, wide}`.
 
 **Validator.** New check in `promptpotter/application/optimization/l1_behavior_checks.py`:
 
@@ -46,13 +46,13 @@ L1 produces variants with no obligation to cite the panel field justifying the m
 
 ### Track 2 — L2 self-diagnosis panel additions
 
-L2 today reads (via `INJECTIONS`): `parent_baseline`, `sibling_yield`, `axis_memory`, `escalation_panel`, `task_context`, `l1_critique`, `prev_l2_directive`, `l1_signal_catalogue`. To diagnose L1, it needs four more:
+L2 today reads (via `INJECTIONS`): `parent_panel`, `sibling_yield`, `axis_memory`, `escalation_panel`, `task_context`, `l1_critique`, `prev_l2_directive`, `l1_signal_catalogue`. To diagnose L1, it needs four more:
 
 #### 2.1 `l1_considered_mutations`
 
 Per-round trace of what L1 *proposed*, not just what won. Sourced from `CandidateScore` already in `RoundResult.candidate_scores`. Renderer: `cand_id | mutation | evidence_field | composite | beat_parent`.
 
-Today L2 reads only the winner via `parent_baseline` + `sibling_yield`. Adding the loser pool lets L2 separate "bad candidate pool" (all candidates regressed) from "bad selection" (one candidate beat parent but wasn't picked — bug).
+Today L2 reads only the winner via `parent_panel` + `sibling_yield`. Adding the loser pool lets L2 separate "bad candidate pool" (all candidates regressed) from "bad selection" (one candidate beat parent but wasn't picked — bug).
 
 #### 2.2 `axis_exhaustion`
 

@@ -17,7 +17,7 @@ const SHOWN_ELSEWHERE = new Set([
 
 const KNOWN_ORDER = [
   "patience",
-  "baseline", "current_acc", "n_variants", "sp_budget_ttest",
+  "origin", "current_acc", "n_variants", "sp_budget_ttest",
   "total_backend_calls", "error_count", "degraded_count",
   "state_since", "stop_reason",
 ];
@@ -36,7 +36,7 @@ function fmtTime(s: unknown): string {
 }
 
 const FORMATTERS: Record<string, (v: unknown) => string> = {
-  baseline: (v) => fmtNum(v),
+  origin: (v) => fmtNum(v),
   current_acc: (v) => fmtNum(v),
   state_since: fmtTime,
 };

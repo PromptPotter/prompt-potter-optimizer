@@ -24,7 +24,7 @@ from promptpotter.application.scoring.metrics import compute_composite_fitness
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import RuntimeFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
-from promptpotter.domain.results import RoundBaseline, RoundResult
+from promptpotter.domain.results import RoundOrigin, RoundResult
 from promptpotter.domain.run_records import ResumeCheckpointRecord
 from promptpotter.domain.search_point import JobSearchPoint
 
@@ -88,7 +88,7 @@ def _rf_dedup_key(rf_dict: dict) -> tuple:
 
 @dataclass
 class TrackingState:
-    """Current/best searchpoint trajectory + frozen baseline composite_fitness."""
+    """Current/best searchpoint trajectory + frozen origin composite_fitness."""
 
     current_sp: JobSearchPoint | None = None
     current_accuracy: float = 0.0
@@ -98,7 +98,7 @@ class TrackingState:
     best_composite_fitness: float = 0.0
     best_round: int = -1
     best_sp: JobSearchPoint | None = None
-    baseline_composite_fitness: float = 0.0
+    origin_composite_fitness: float = 0.0
 
 
 @dataclass
@@ -137,30 +137,30 @@ class Cycle:
     @classmethod
     def start(
         cls,
-        baseline_osp: OptSearchPoint,
-        baseline_accuracy: float,
+        origin_osp: OptSearchPoint,
+        origin_accuracy: float,
         *,
         task_context: TaskDecomposition,
         schema: PipelineSchema | None,
-        baseline_results: list[dict] | None = None,
+        origin_results: list[dict] | None = None,
         round_scorer: Any = None,
         session: Session,
         config: CampaignConfig,
     ) -> Cycle:
-        """Construct a fresh Cycle from a scored baseline."""
+        """Construct a fresh Cycle from a scored origin."""
         composite_fitness = (
             compute_composite_fitness(
-                baseline_results,  # type: ignore[arg-type]
+                origin_results,  # type: ignore[arg-type]
                 schema,
                 round_scorer=round_scorer,
             )["composite_fitness"]
-            if baseline_results and schema is not None
-            else baseline_accuracy
+            if origin_results and schema is not None
+            else origin_accuracy
         )
-        opt_sp = baseline_osp.model_copy(
+        opt_sp = origin_osp.model_copy(
             update={
                 "task_context": task_context,
-                "l1_overrides": dict(baseline_osp.l1_overrides),
+                "l1_overrides": dict(origin_osp.l1_overrides),
             }
         )
         sp = opt_sp.to_job_search_point(
@@ -172,13 +172,13 @@ class Cycle:
             config=config,
             tracking=TrackingState(
                 current_sp=sp,
-                current_accuracy=baseline_accuracy,
+                current_accuracy=origin_accuracy,
                 current_composite_fitness=composite_fitness,
-                current_results=baseline_results or [],
-                best_accuracy=baseline_accuracy,
+                current_results=origin_results or [],
+                best_accuracy=origin_accuracy,
                 best_composite_fitness=composite_fitness,
                 best_sp=sp,
-                baseline_composite_fitness=composite_fitness,
+                origin_composite_fitness=composite_fitness,
             ),
             opt_sp=opt_sp,
         )
@@ -253,7 +253,7 @@ class Cycle:
             "total": rr.total,
             "improved": rr.improved,
             "p_value": rr.p_value,
-            "baseline_accuracy": rr.baseline_accuracy,
+            "origin_accuracy": rr.origin_accuracy,
             "scoreboard": _build_scoreboard(rr.candidate_scores, rr.label),
             "prompt_fields": rr.prompt_fields,
             "results": rr.results,
@@ -266,8 +266,8 @@ class Cycle:
             "opt_search_point": self.opt_sp.model_dump(),
         }
 
-    def baseline_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundBaseline:
-        """Build round baseline; on probe rounds, rescore over the probe subset."""
+    def origin_for_round(self, scoring_set: list[Sample], round_num: int) -> RoundOrigin:
+        """Build round origin; on probe rounds, rescore over the probe subset."""
         schema = self.session.pipeline_schema
         tr = self.tracking
         accuracy = tr.current_accuracy
@@ -285,10 +285,10 @@ class Cycle:
                 accuracy = subset_scores["accuracy"]
                 composite_fitness = subset_scores.get("composite_fitness", accuracy)
                 results = subset
-        return RoundBaseline(
+        return RoundOrigin(
             accuracy=accuracy,
             composite_fitness=composite_fitness,
             osp=self.opt_sp,
             results=results,
-            label=f"round_{round_num}" if round_num > 0 else "baseline",
+            label=f"round_{round_num}" if round_num > 0 else "origin",
         )

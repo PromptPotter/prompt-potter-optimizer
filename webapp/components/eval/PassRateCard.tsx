@@ -11,7 +11,7 @@ interface Candidate {
 
 interface RoundData {
   scoreboard?: Candidate[];
-  baseline_accuracy?: number;
+  origin_accuracy?: number;
   composite_fitness?: number;
   accuracy?: number;
 }
@@ -22,7 +22,7 @@ interface Props {
 
 export function PassRateCard({ round }: Props) {
   const sb = round?.scoreboard ?? [];
-  const baseline = round?.baseline_accuracy ?? 0;
+  const origin = round?.origin_accuracy ?? 0;
   const top = sb.slice(0, 3);
   const max = Math.max(...top.map((c) => c.composite_fitness ?? c.accuracy ?? 0), 0.001);
 
@@ -42,7 +42,7 @@ export function PassRateCard({ round }: Props) {
         top.map((c, i) => {
           const v = c.composite_fitness ?? c.accuracy ?? 0;
           const pct = (v / max) * 100;
-          const color = (c.accuracy ?? 0) >= baseline ? "var(--color-accent)" : "var(--color-accent-strong)";
+          const color = (c.accuracy ?? 0) >= origin ? "var(--color-accent)" : "var(--color-accent-strong)";
           const label = (c.label || c.candidate_id || "").slice(0, 80);
           return (
             <div key={c.candidate_id || i} className="bar-row">

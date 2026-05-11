@@ -108,7 +108,7 @@ async def run_bbeh_campaign(
     optimizer_model: str | None = None,
     optimizer_provider: str | None = None,
 ) -> dict[str, Any] | None:
-    """End-to-end BBEH run: baseline -> optimize -> per-task test eval -> export.
+    """End-to-end BBEH run: origin -> optimize -> per-task test eval -> export.
 
     Returns ``None`` when interrupted (Ctrl+C) — optimization artifacts are
     already saved to disk by the loop's finalizer; the test-eval / export
@@ -141,7 +141,7 @@ async def run_bbeh_campaign(
             campaign_config,
             pipeline_params=pipeline_params,
         )
-        baseline_train_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else 0.0
+        origin_train_acc = campaign_rounds[0]["accuracy"] if campaign_rounds else 0.0
 
         campaign_rounds, cycle_result = await run_optimization_notebook(
             campaign_rounds,
@@ -197,7 +197,7 @@ async def run_bbeh_campaign(
                 "model_id": MODEL_ID,
                 "n_train": len(train_pool),
                 "train_accuracy": round(train_acc, 4),
-                "baseline_train_accuracy": round(baseline_train_acc, 4),
+                "origin_train_accuracy": round(origin_train_acc, 4),
                 "rounds": len(campaign_rounds),
                 "methodology": (
                     "Single global prompt optimized on 460 mini-BBEH examples pooled "

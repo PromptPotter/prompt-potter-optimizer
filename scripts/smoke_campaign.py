@@ -180,7 +180,7 @@ async def _run(args: argparse.Namespace) -> int:
         print("[smoke] ERROR: dataset loader returned no items", file=sys.stderr)
         return 3
 
-    _baseline_sp, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
+    _origin_sp, dataset_obj, campaign_rounds, _ = await prepare_scoring_context_notebook(
         session,
         train_slice,
         campaign_config,

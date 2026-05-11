@@ -478,9 +478,9 @@ class IndividualSummary:
 
 def individual_summary_from_dict(
     scores: dict,
-    baseline_acc: float,
+    origin_acc: float,
     *,
-    baseline_composite_fitness: float | None = None,
+    origin_composite_fitness: float | None = None,
 ) -> IndividualSummary:
     """Classify a candidate score report and pre-format all display pieces.
 
@@ -491,12 +491,12 @@ def individual_summary_from_dict(
     ``_handle_scored_candidate``).
 
     Per-candidate composite_fitness render is intentionally 1 line —
-    ``composite_fitness=0.6042  (Δ+0.103 vs baseline 0.5012)`` — so 5 candidates
+    ``composite_fitness=0.6042  (Δ+0.103 vs origin 0.5012)`` — so 5 candidates
     don't dump 60 lines of identical formula text into the terminal. The
     formula + per-evaluator breakdown lands once per round in the round
     summary block.
 
-    *baseline_composite_fitness* anchors the Δ against the campaign's first-round
+    *origin_composite_fitness* anchors the Δ against the campaign's first-round
     composite_fitness — even at deep rounds the operator sees how far the run
     has come from origin. ``None`` collapses to the no-Δ form.
     """
@@ -526,7 +526,7 @@ def individual_summary_from_dict(
     hits = scores.get("hits", 0)
     n = scores.get("total", 0)
     ci_lo, ci_hi = wilson_ci(hits, n)
-    delta = acc - baseline_acc
+    delta = acc - origin_acc
     tag = f"{acc:.1%} {fmt_ci(ci_lo, ci_hi)}"
 
     aborted = bool(scores.get("escalation_aborted"))
@@ -536,7 +536,7 @@ def individual_summary_from_dict(
         hit_str = f"{hits}/{scored_q} hits {YELLOW}⚠ aborted {scored_q}/{expected_q}{RESET}"
     else:
         hit_str = f"{hits}/{n} hits"
-    body_line = f"{mutations_chunk}{hit_str}  vs baseline: {_fmt_delta(delta)}"
+    body_line = f"{mutations_chunk}{hit_str}  vs origin: {_fmt_delta(delta)}"
 
     detail_lines: list[str] = []
     elim = scores.get("elimination_context") or {}
@@ -566,7 +566,7 @@ def individual_summary_from_dict(
 
     if comp is not None:
         detail_lines.append(
-            render_composite_fitness_oneliner(comp, baseline=baseline_composite_fitness)
+            render_composite_fitness_oneliner(comp, origin=origin_composite_fitness)
         )
     if degraded:
         detail_lines.append(f"{YELLOW}⚠ {degraded}/{n} degraded{RESET}")
@@ -601,14 +601,14 @@ class LiveDisplay(DerivedView):
     Subclasses ``DerivedView`` so the ``isinstance`` dispatch over
     ledger ``CycleRecord`` subtypes lives in one place; this class only
     overrides ``_handle_phase`` / ``_handle_snapshot``. The ``on_*``
-    public methods stay because pre-cycle paths (``baseline.py``) call
+    public methods stay because pre-cycle paths (``origin.py``) call
     them directly without a ledger.
     """
 
     def __init__(
         self,
         *,
-        baseline_acc: float,
+        origin_acc: float,
         l1_patience: int,
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
@@ -616,9 +616,9 @@ class LiveDisplay(DerivedView):
         sp_budget_ttest: int | None = None,
     ) -> None:
         # Per-cycle scalars live on a shared ``LiveStateCore`` (round number,
-        # baseline + best anchors, P(best) round snapshot) so the dashboard
+        # origin + best anchors, P(best) round snapshot) so the dashboard
         # projection and this terminal renderer maintain one shape, not two.
-        self._core = LiveStateCore(baseline_acc=baseline_acc)
+        self._core = LiveStateCore(origin_acc=origin_acc)
         self.l1_patience = l1_patience
         self.pipeline_schema = pipeline_schema
         self.scoring_formula = scoring_formula
@@ -626,7 +626,7 @@ class LiveDisplay(DerivedView):
         self.initial_len = len(self.campaign_rounds)
         self.sample_counter = 0
         # Composite-render context — read by ``on_candidate_scored`` for
-        # the per-candidate baseline anchor and by ``on_round_complete``
+        # the per-candidate origin anchor and by ``on_round_complete``
         # for the 3-line composite_fitness block. Populated from
         # L1_SCORE:exit views and mutated on ``scoring_steer:applied``.
         # ``RunCallbacks`` wires its shared ctx onto ``self._phase_ctx``
@@ -642,7 +642,7 @@ class LiveDisplay(DerivedView):
         self._round_best_label: str | None = None
         # Wall-clock anchor — set on ``L1_GENERATE:enter`` so the
         # round-summary block can report elapsed seconds. ``None`` means
-        # "no measurement yet" (resume points, pre-baseline) — render
+        # "no measurement yet" (resume points, pre-origin) — render
         # falls back to omitting the elapsed field.
         self._round_started_at: float | None = None
         # tqdm bar lifecycle (CLI surface). When ``sp_budget_ttest`` is
@@ -651,7 +651,7 @@ class LiveDisplay(DerivedView):
         self._bar_budget = sp_budget_ttest
         self._bar: Any = None
         self._bar_cand_idx: int = -1
-        self._in_baseline: bool = False
+        self._in_origin: bool = False
 
     # --- tqdm bar helpers (active only when ``_bar_budget`` is set) -----
 
@@ -670,13 +670,13 @@ class LiveDisplay(DerivedView):
             print(line, flush=True)
 
     @property
-    def baseline_acc(self) -> float:
-        """Running baseline anchor — read-only mirror of the shared core."""
-        return self._core.baseline_acc
+    def origin_acc(self) -> float:
+        """Running origin anchor — read-only mirror of the shared core."""
+        return self._core.origin_acc
 
-    def set_baseline(self, fresh: float) -> None:
-        """Post-baseline rewire — replace pre-baseline placeholder."""
-        self._core.baseline_acc = fresh
+    def set_origin(self, fresh: float) -> None:
+        """Post-origin rewire — replace pre-origin placeholder."""
+        self._core.origin_acc = fresh
         if fresh > self._core.best_acc:
             self._core.best_acc = fresh
 
@@ -688,7 +688,7 @@ class LiveDisplay(DerivedView):
             round_result = payload.get("round_result")
             if round_result is not None:
                 # Re-sync phase ctx from listener-side snapshot so the
-                # composite_fitness block reads the same baseline anchors
+                # composite_fitness block reads the same origin anchors
                 # the listener saw at emit time.
                 ctx = payload.get("phase_ctx")
                 if isinstance(ctx, dict):
@@ -735,22 +735,22 @@ class LiveDisplay(DerivedView):
     # --- Public callback API ------------------------------------------
     #
     # These methods are the direct entry point for callers that don't
-    # route through a ledger (notably ``baseline.py``, which fires before
+    # route through a ledger (notably ``origin.py``, which fires before
     # the per-cycle ledger exists). The ``on_record`` dispatcher above
     # forwards ledger-driven events into the same handlers.
 
     def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
         # Bar lifecycle inline — close on phase-exit boundaries; mark
-        # baseline phase so ``on_sample_started`` opens the right bar.
+        # origin phase so ``on_sample_started`` opens the right bar.
         if self._bar_budget is not None:
             if event.event == "exit":
-                if event.phase == CampaignPhase.BASELINE:
+                if event.phase == CampaignPhase.ORIGIN:
                     self._bars_close()
-                    self._in_baseline = False
+                    self._in_origin = False
                 elif event.phase == CampaignPhase.L1_SCORE:
                     self._bars_close()
-            elif event.event == "enter" and event.phase == CampaignPhase.BASELINE:
-                self._in_baseline = True
+            elif event.event == "enter" and event.phase == CampaignPhase.ORIGIN:
+                self._in_origin = True
 
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
@@ -766,8 +766,8 @@ class LiveDisplay(DerivedView):
             typed = view_from_record(record)
             if typed is not None and (rendered := to_text(typed)):
                 self._write(rendered)
-        # Round number + baseline/best anchors flow through the shared core
-        # (INIT:exit carries the post-baseline accuracy; L1_SCORE:exit on
+        # Round number + origin/best anchors flow through the shared core
+        # (INIT:exit carries the post-origin accuracy; L1_SCORE:exit on
         # ``improved`` promotes the new winner). ``view=None`` still tracks
         # the round number.
         apply_phase(self._core, event, view)
@@ -799,10 +799,10 @@ class LiveDisplay(DerivedView):
             return
         from tqdm.auto import tqdm
 
-        if self._in_baseline:
+        if self._in_origin:
             if self._bar is None:
                 self._bar = tqdm(
-                    total=n_samples or 1, desc="  baseline", unit="q", leave=False, ncols=60
+                    total=n_samples or 1, desc="  origin", unit="q", leave=False, ncols=60
                 )
             return
         if cand_idx != self._bar_cand_idx:
@@ -882,10 +882,10 @@ class LiveDisplay(DerivedView):
         self._bars_close()
         w = 66
         label = f"C{idx + 1}"
-        baseline_acc = self._phase_ctx.get("baseline_accuracy", self.baseline_acc)
-        baseline_comp = self._phase_ctx.get("baseline_composite_fitness")
+        origin_acc = self._phase_ctx.get("origin_accuracy", self.origin_acc)
+        origin_comp = self._phase_ctx.get("origin_composite_fitness")
         summary = individual_summary_from_dict(
-            scores, baseline_acc, baseline_composite_fitness=baseline_comp
+            scores, origin_acc, origin_composite_fitness=origin_comp
         )
 
         self._write(f"  {_box_top(f'{label}/{total}', summary.tag, width=w)}")
@@ -899,17 +899,17 @@ class LiveDisplay(DerivedView):
             self._write(f"  {_box_bottom(width=w)}")
 
         # Mid-round leader scoreboard — one tight line so the operator can read
-        # "is anything beating baseline yet" without scrolling through 100+
+        # "is anything beating origin yet" without scrolling through 100+
         # query lines to find the round-summary box. Skip invalid candidates
         # (no comparable accuracy).
         if summary.status != "invalid":
             acc = scores.get("accuracy")
             if isinstance(acc, int | float):
-                self._write(self._fmt_round_leader(label, float(acc), baseline_acc))
+                self._write(self._fmt_round_leader(label, float(acc), origin_acc))
 
-    def _fmt_round_leader(self, label: str, acc: float, baseline_acc: float) -> str:
+    def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
         """One-liner scoreboard: ``★ leader`` on a new best, ``→`` else."""
-        delta_base = acc - baseline_acc
+        delta_base = acc - origin_acc
         if self._round_best_acc is None or acc > self._round_best_acc:
             self._round_best_acc = acc
             self._round_best_label = label
@@ -953,13 +953,13 @@ class LiveDisplay(DerivedView):
             self._write(line)
         if (p_best_line := self._render_p_best_line()) is not None:
             self._write(_node_line(p_best_line))
-        # Roll p_best snapshot into the cross-round baseline so next
+        # Roll p_best snapshot into the cross-round origin so next
         # round's arrows compare against this round's final.
         roll_p_best_at_round_complete(self._core)
         # Composite block — full mode only. 3-line render: composite_fitness +
-        # baseline anchor (line 1), abbreviated formula (line 2), short-
+        # origin anchor (line 1), abbreviated formula (line 2), short-
         # name evaluator values (line 3). Anchored to the campaign
-        # baseline so operators see how far the run came from origin.
+        # origin so operators see how far the run came from origin.
         # Short formula is None for custom user formulas — fall back to
         # full text and accept the wrap.
         formula_short = self._phase_ctx.get("composite_fitness_formula_short")
@@ -969,7 +969,7 @@ class LiveDisplay(DerivedView):
                 round_result.composite_fitness,
                 dict(round_result.evaluators),
                 formula_short or formula_full,
-                baseline=self._phase_ctx.get("baseline_composite_fitness"),
+                origin=self._phase_ctx.get("origin_composite_fitness"),
                 use_short_names=bool(formula_short),
             ):
                 self._write(_node_line(line))

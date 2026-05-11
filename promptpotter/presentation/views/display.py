@@ -206,7 +206,7 @@ def _pp_val(v: object) -> str:
 def _scoreboard(
     candidate_scores: list[dict],
     winner_label: str,
-    baseline_accuracy: float,
+    origin_accuracy: float,
 ) -> str:
     """Format ranked candidate scoreboard as a box with 95% CI.
 
@@ -232,7 +232,7 @@ def _scoreboard(
         label = s.get("label", f"C{i}")[:8]
         acc = s["accuracy"]
         ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
-        delta = acc - baseline_accuracy
+        delta = acc - origin_accuracy
         delta_str = f"{delta:+.1%}" if abs(delta) >= 0.001 else "---"
         aborted = s.get("escalation_aborted", False)
         if aborted:

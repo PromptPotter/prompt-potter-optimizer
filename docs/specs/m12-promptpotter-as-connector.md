@@ -55,8 +55,8 @@ The operator composes inner-cycle scoring from three independently meaningful me
 
 | Metric | Definition | Cost | Signal quality |
 |---|---|---|---|
-| `first_round_delta` | Inner-cycle score after round 1 minus baseline | Cheapest — one round per outer sample | Weak alone; useful for fast iteration on outer hyperparameters |
-| `after_N_rounds_delta` | Inner-cycle score after `N` rounds (configurable, default `3`) minus baseline | Bounded — `N` rounds per outer sample | Captures improvement rate; the workhorse |
+| `first_round_delta` | Inner-cycle score after round 1 minus origin | Cheapest — one round per outer sample | Weak alone; useful for fast iteration on outer hyperparameters |
+| `after_N_rounds_delta` | Inner-cycle score after `N` rounds (configurable, default `3`) minus origin | Bounded — `N` rounds per outer sample | Captures improvement rate; the workhorse |
 | `rounds_to_N` | Number of rounds to reach a target score (e.g. `0.80`); times out at `max_rounds` | Variable — fast on easy mutations, expensive on hard | Most truthful; closest to "did this meta-prompt actually help" |
 
 Operators compose via `compile_scorer` (`promptpotter/shared/scoring.py`) — example formula in `campaign.json::scoring`:
@@ -73,7 +73,7 @@ The three names are scoped to the PromptPotter connector. When scoring a TermNor
 
 ### Inner-cycle isolation
 
-Per-outer-sample sub-tree at `.runtime/inner/<outer_round>/<sample_idx>/`. Contains the inner cycle's full `.promptpotter/` tree (sessions, campaigns, archive). Inner cycles share no state across outer samples by default — each starts from the inner-baseline.
+Per-outer-sample sub-tree at `.runtime/inner/<outer_round>/<sample_idx>/`. Contains the inner cycle's full `.promptpotter/` tree (sessions, campaigns, archive). Inner cycles share no state across outer samples by default — each starts from the inner-origin.
 
 Cleanup policy: inner sub-trees retained for the outer cycle's lifetime (debugging), pruned at outer cycle finalize. Operator can opt out via `campaign.json::optimization.retain_inner_cycles: true`.
 

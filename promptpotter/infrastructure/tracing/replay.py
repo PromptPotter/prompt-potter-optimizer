@@ -35,7 +35,7 @@ logger = logging.getLogger(__name__)
 
 
 ORIGIN_ORDER = [
-    "baseline",
+    "origin",
     "feedback_cycle",
     "optimization_loop",
     "other",

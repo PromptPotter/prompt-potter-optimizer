@@ -83,7 +83,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 
 | File | Lives at | Updated | Content |
 |------|----------|---------|---------|
-| `dashboard.json` | family root | every event | Live state: round, baseline, best, candidates, counters. `cycle_id` field names the active fork. |
+| `dashboard.json` | family root | every event | Live state: round, origin, best, candidates, counters. `cycle_id` field names the active fork. |
 | `index.json` | per cycle | phase / finalize | Config, `pipeline_params`, `cycle_id`, `parent_cycle_id` (forks), `best_accuracy`, `trials[]`, `final` block (winner + stop_reason on completion). |
 | `log.md` | per cycle | round-complete + finalize | Narrative digest. Pure derived view — safe to delete and recompute. |
 | `review.md` | per cycle | round-complete + finalize | Per-cycle review (M10). |
@@ -100,7 +100,7 @@ Prior evaluation results replay without backend calls when a new config shares a
 
 ### `dashboard.json`
 
-Scalar-only live dashboard. Atomically rewritten on every event. Carries display counters across cycles via `resume_from`. Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `baseline`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
+Scalar-only live dashboard. Atomically rewritten on every event. Carries display counters across cycles via `resume_from`. Key fields: `phase`, `round`, `layer`, `candidate`, `query`, `patience`, `origin`, `best`, `current_acc`, `cycle_id`, `total_queries_scored`, `total_backend_calls`, `n_variants`, `sp_budget_ttest`. Post-mortem `stop_reason` is in `index.json::final::stop_reason`, not the live dashboard.
 
 ### `.runtime/cache/rounds/round_NNNN.json`
 
@@ -172,7 +172,7 @@ To monitor a forked run: tail the **root**, not the fork. To inspect a specific 
 
 Breadth-first comparison of N L1-prompt hypotheses. Instead of one cheap-trial cycle on the active OSP, mints N cheap-trial siblings under one parent, each starting from a different operator-authored override.
 
-**Per-fork protocol:** baseline (cache-hit after the first fork) + 1 full scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`. The leaderboard pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
+**Per-fork protocol:** origin (cache-hit after the first fork) + 1 full scored round + 1 generation-only round + halt with `SWEEP_COMPLETE`. The leaderboard pairs sweep cycles with their full counterparts via `proxy_lift_corr` once at least 4 paired branches exist.
 
 **Authoring a payload.** One JSON file per candidate under `datasets/{name}/sweep/`. Schema (`OperatorSweepFile`) — the L1-surface fields L2 already mutates, plus a `reason` label. The dispatcher widens each parsed file into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)` before calling `_mint_fork`, so operators never write trigger/issued_by boilerplate by hand.
 
@@ -259,12 +259,12 @@ Per-sample steering is intentionally not supported by file-drop. Changing `compi
 
 ### Composite block in operator surfaces
 
-**Per-candidate (1 line):** `composite=0.6042  (Δ+0.1030 vs baseline 0.5012)`.
+**Per-candidate (1 line):** `composite=0.6042  (Δ+0.1030 vs origin 0.5012)`.
 
 **Round summary (3 lines, log.md):**
 
 ```
-composite = 0.6042   baseline=0.5012  Δ+0.1030
+composite = 0.6042   origin=0.5012  Δ+0.1030
 formula:  0.65*acc + 0.15*H + 0.10*lat + 0.05*R + 0.05*pc
   acc=0.667  err=0.000  degr=0.083  rf=0.000  lat=0.965  pc=0.812
 ```

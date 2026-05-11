@@ -16,7 +16,7 @@ Trigger: after each full `optimize` run. **Mandatory after round 1** (the round-
 
 1. Resolve `cycle_id` from `.promptpotter/active_session.json`. Read in this order:
    - `campaigns/<cycle_id>/review.md` — start here. Header has the round-1 verdict; per-round sections have the behaviour-check ✓/✗ lines.
-   - `campaigns/<cycle_id>/dashboard.json` — live phase + best vs baseline.
+   - `campaigns/<cycle_id>/dashboard.json` — live phase + best vs origin.
    - `campaigns/<cycle_id>/rounds/round_0000.json` — round 1 detail.
    - `campaigns/<cycle_id>/.cache/rounds/round_0000.json` — L1 variant payload (only if `review.md` flags a behaviour ✗ that needs the raw evidence).
 2. Apply the round-1 rule table:
@@ -52,7 +52,7 @@ Source: `application/optimization/l1_stats.py::compute_round_1_verdict`. Keep th
 
 | condition | verdict |
 |---|---|
-| ≥ 2 behaviour ✗ OR baseline regression at round 1 | **broken** |
+| ≥ 2 behaviour ✗ OR origin regression at round 1 | **broken** |
 | 0 ✗ AND `yield_rate ≥ 0.20` AND `top_lift > 0` | **healthy** |
 | else | **degraded** |
 
@@ -81,7 +81,7 @@ Match `/potter-run`'s style: one compact box, then one sentence with the proposa
 ```
 ROUND 1 — healthy
   yield: 0.34   top_lift: +0.082   behaviour: 4/4 ✓
-  baseline 0.612 → round 1 0.694 (+8.2pt)
+  origin 0.612 → round 1 0.694 (+8.2pt)
 ```
 Then: "Continue. Run `python -m promptpotter optimize` to score round 2."
 

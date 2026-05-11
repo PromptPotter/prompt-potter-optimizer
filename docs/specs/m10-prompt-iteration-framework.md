@@ -66,7 +66,7 @@ def render_review_md(
 **Per-round section:**
 - L1 inputs: `task_context` (broadcast L2-refined framing), critique fed in, three `context_object` items.
 - Behavior-check checklist (✓/✗ + evidence string).
-- Variants table: `variant | composite | accuracy | Δ_parent | Δ_baseline | beat_parent | changes`.
+- Variants table: `variant | composite | accuracy | Δ_parent | Δ_origin | beat_parent | changes`.
 - This round's critique (output of `l1_critique`).
 - **Next-generation peek** (sweep mode only, when round was halted post-generation/pre-scoring): the `OptSearchPoint` traces L1 produced for the next round. Rendered as a compact `cand_id | changes | derived_axes` table. No fitness columns — it wasn't measured.
 
@@ -76,7 +76,7 @@ Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the 
 
 ### 3. L1Stats
 
-`compute_l1_stats(rounds, *, baseline_composite, behavior_results) -> L1Stats`. Frozen dataclass.
+`compute_l1_stats(rounds, *, origin_composite, behavior_results) -> L1Stats`. Frozen dataclass.
 
 | metric | formula | role |
 |---|---|---|
@@ -89,13 +89,13 @@ Wired into `runner.py::finalize` AND emitted incrementally after round 1 so the 
 | `l2_fires` | rounds with `lineage.source == l2_context` | diagnostic |
 | `proxy_lift_corr` (cross-cycle, computed by leaderboard) | Spearman rank correlation between round-1 `top_lift` and `rounds_to_95`-or-final-acc across qualifying cycles | **proxy validity** |
 
-Parent composite: `baseline_composite` for round 1, `trials[r-1].composite` thereafter.
+Parent composite: `origin_composite` for round 1, `trials[r-1].composite` thereafter.
 
 ### 4. Cross-cycle / cross-branch leaderboard
 
 `promptpotter/application/leaderboard.py` (planned — landing site after V10 hoist). Read-only shim `scripts/ppot_review.py`.
 
-Row: `branch_path | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | fork_trigger | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | baseline_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
+Row: `branch_path | dataset | pipeline | l1_generate_hash[:8] | l1_critique_hash[:8] | mode | fork_trigger | rounds_to_95 | round_1_verdict | round_1_top_lift | round_1_yield | best_acc | origin_acc | Δacc | behavior_pass_rate | rounds_completed | l2_fires | stop_reason`.
 
 `branch_path` = `root_cycle_id → ... → leaf_cycle_id` (renders the branch's lineage in one column). `fork_trigger` ∈ `{none, operator_sweep, operator_rewind, l2_rebase, l3_rebase, scoring_divergence}` (none = root cycle of a family).
 
@@ -164,7 +164,7 @@ L2 and L3 emit `rebase` through their existing JSON-output channel — no new op
 3. Round-2 round file written with `status: "generation_only"`, no `composite`/`accuracy`.
 4. `index.json::final.mode = "sweep"` and `index.json::fork.trigger = "operator_sweep"` distinguish the branch.
 
-All sweep branches share their parent's baseline measurements via the `archive/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
+All sweep branches share their parent's origin measurements via the `archive/` cache — `(JobSearchPoint, sample) → hit` reuse is automatic across branches of the same family.
 
 **LLM-rebase callers (M11 deliverable, scoped here for forward compat).** Out of M10 implementation, but the primitive must support:
 
@@ -187,7 +187,7 @@ The skill is the L4 substitute. Mandatory after round 1 in full mode; required a
 2. Compute `round_1_verdict`:
    - `healthy` — all behavior checks ✓, `yield_rate ≥ 0.20`, `top_lift > 0`. → operator may continue rounds 2-5.
    - `degraded` — exactly one check ✗, OR `yield_rate < 0.20`, OR `top_lift ≤ 0`. → halt, fix one knob, restart.
-   - `broken` — ≥2 checks ✗, OR baseline regression. → halt, full prompt revisit.
+   - `broken` — ≥2 checks ✗, OR origin regression. → halt, full prompt revisit.
 3. Identify the top issue (rank: failed seeded check > failed scaffolding check > low yield > flat lift > L2-source-of-lineage in round 1).
 4. Propose one specific edit to one specific prompt file, with diff.
 5. Operator confirms / redirects. Claude applies the edit. Operator re-runs.
@@ -209,7 +209,7 @@ The skill never triggers `optimize` itself — the operator owns runs. The skill
 
 - Goal restatement.
 - Operating principles (above).
-- **Sweep workflow:** run N candidate L1 prompts via `optimize --sweep` (each = baseline + round 1 + round-2 gen peek). Trigger `/potter-review --sweep` → side-by-side comparison on round-1 stats + next-gen peek → narrow to top 2-3 → promote those to full `optimize` runs → measure `proxy_lift_corr` after ≥ 4 paired (sweep, full) cycles.
+- **Sweep workflow:** run N candidate L1 prompts via `optimize --sweep` (each = origin + round 1 + round-2 gen peek). Trigger `/potter-review --sweep` → side-by-side comparison on round-1 stats + next-gen peek → narrow to top 2-3 → promote those to full `optimize` runs → measure `proxy_lift_corr` after ≥ 4 paired (sweep, full) cycles.
 - The five-step cadence (single-cycle): run round 1 → trigger `/potter-review` → confirm fix → apply → re-run.
 - Round-1 verdict rule table.
 - Diagnosis tree: behavior ✗ → fix the rule generally; all ✓ + low yield → broaden L1 creativity; all ✓ + flat lift → scoring/sample-set issue; early `l2_fires` → likely `l1_critique` weak.

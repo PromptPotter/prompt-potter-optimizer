@@ -33,8 +33,8 @@ exposed simultaneously to the outer scoring formula:
 
 | Proxy | Definition | When to use |
 |---|---|---|
-| `first_round_delta` | inner score after round 1 minus inner baseline | development — fast iteration on outer hyperparameters |
-| `after_N_rounds_delta` | inner score after N rounds minus inner baseline | calibration — captures improvement rate |
+| `first_round_delta` | inner score after round 1 minus inner origin | development — fast iteration on outer hyperparameters |
+| `after_N_rounds_delta` | inner score after N rounds minus inner origin | calibration — captures improvement rate |
 | `rounds_to_N` | rounds to reach an inner target score (times out at `max_inner_rounds`) | publication — closest to "did this meta-prompt actually help" |
 
 The outer `campaign.json::scoring` composes these. Example:

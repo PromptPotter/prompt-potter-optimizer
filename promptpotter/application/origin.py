@@ -1,4 +1,4 @@
-"""Campaign data loading and baseline scoring."""
+"""Campaign data loading and origin scoring."""
 
 from __future__ import annotations
 
@@ -22,12 +22,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 __all__ = [
-    "CampaignBaseline",
+    "CampaignOrigin",
     "DatasetRunSummary",
     "DatasetSummary",
     "build_campaign_emitter",
-    "extract_campaign_baseline",
-    "load_baseline_prompt",
+    "extract_campaign_origin",
+    "load_origin_prompt",
     "prepare_datasets",
     "prepare_scoring_context",
     "summarize_archive_runs",
@@ -38,7 +38,7 @@ def build_campaign_emitter(
     session: Session,
     campaign_config: CampaignConfig,
     *,
-    baseline_accuracy: float,
+    origin_accuracy: float,
     resumed_from_round: int | None = None,
     recorder: Any | None = None,
 ) -> Any:
@@ -47,7 +47,7 @@ def build_campaign_emitter(
 
     opt = campaign_config.optimization
     return LiveDashboardView.for_session(
-        baseline_accuracy,
+        origin_accuracy,
         session.state.cycle_id,
         project_root=session.project_root,
         session_id=session.session_id,
@@ -59,26 +59,26 @@ def build_campaign_emitter(
     )
 
 
-class CampaignBaseline(NamedTuple):
-    """Extracted baseline state from campaign_rounds."""
+class CampaignOrigin(NamedTuple):
+    """Extracted origin state from campaign_rounds."""
 
-    baseline_ps: dict | None
-    baseline_acc: float
-    baseline_results: list | None
+    origin_ps: dict | None
+    origin_acc: float
+    origin_results: list | None
     instruction: str
 
 
-def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
-    """Extract baseline prompt state, accuracy, and results from campaign rounds.
+def extract_campaign_origin(campaign_rounds: list[dict]) -> CampaignOrigin:
+    """Extract origin prompt state, accuracy, and results from campaign rounds.
 
     Searches reversed rounds for the last with actual scoring ``results``,
     then overrides the prompt_fields with the tip (most recent round).
     """
     if not campaign_rounds:
-        return CampaignBaseline(
-            baseline_ps={},
-            baseline_acc=0.0,
-            baseline_results=None,
+        return CampaignOrigin(
+            origin_ps={},
+            origin_acc=0.0,
+            origin_results=None,
             instruction="",
         )
 
@@ -86,30 +86,30 @@ def extract_campaign_baseline(campaign_rounds: list[dict]) -> CampaignBaseline:
 
     # Prefer accuracy from the last round with scoring results; fall back to
     # the tip's accuracy (e.g. scan winner carries accuracy but no results).
-    baseline_acc = tip.get("accuracy", 0.0)
-    baseline_results: list = []
+    origin_acc = tip.get("accuracy", 0.0)
+    origin_results: list = []
     for rd in reversed(campaign_rounds):
         if rd.get("results"):
-            baseline_acc = rd.get("accuracy", baseline_acc)
-            baseline_results = rd["results"]
+            origin_acc = rd.get("accuracy", origin_acc)
+            origin_results = rd["results"]
             break
 
     tip_ps = tip["prompt_fields"]
 
-    return CampaignBaseline(
-        baseline_ps=tip_ps,
-        baseline_acc=baseline_acc,
-        baseline_results=baseline_results,
+    return CampaignOrigin(
+        origin_ps=tip_ps,
+        origin_acc=origin_acc,
+        origin_results=origin_results,
         instruction=tip_ps.instruction,
     )
 
 
-def load_baseline_prompt(
+def load_origin_prompt(
     experiment_extract: dict,
     prompt_node_names: list[str] | None = None,
     dataset_name: str | None = None,
 ) -> OptSearchPoint:
-    """Resolve baseline OptSearchPoint: experiment prompts → datasets/{name}/prompts → empty."""
+    """Resolve origin OptSearchPoint: experiment prompts → datasets/{name}/prompts → empty."""
     dependencies = experiment_extract.get("dependencies", {})
     prompts = dependencies.get("prompts", {})
     names = prompt_node_names or []
@@ -133,8 +133,8 @@ def load_baseline_prompt(
         return OptSearchPoint(
             instruction=matched_prompt["template"],
             lineage=IndividualLineage(
-                changes_description=f"Baseline prompt from {label} registry",
-                source="baseline",
+                changes_description=f"Origin prompt from {label} registry",
+                source="origin",
             ),
         )
 
@@ -154,17 +154,17 @@ def load_baseline_prompt(
                     template.prompt_field_dict(),
                     lineage=IndividualLineage(
                         changes_description=(
-                            f"Baseline from datasets/{dataset_name}/prompts/ ({node_name})"
+                            f"Origin from datasets/{dataset_name}/prompts/ ({node_name})"
                         ),
-                        source="baseline",
+                        source="origin",
                     ),
                 )
 
     return OptSearchPoint(
         instruction="",
         lineage=IndividualLineage(
-            changes_description="Baseline (no prompt node active — param-only optimization)",
-            source="baseline",
+            changes_description="Origin (no prompt node active — param-only optimization)",
+            source="origin",
         ),
     )
 
@@ -180,12 +180,12 @@ async def prepare_scoring_context(
     listener: Any | None = None,
     obs: Any | None = None,
 ) -> tuple[OptSearchPoint, list[Sample], list, list]:
-    """Load baseline prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
+    """Load origin prompt, set dataset, and produce a populated ``campaign_rounds[0]``."""
     from promptpotter.application.datasets.datasets import sample_dataset
 
     prompt_nodes = pipeline_schema.prompt_node_names() if pipeline_schema else []
     dataset_name = campaign_config.dataset_name if campaign_config else None
-    baseline = load_baseline_prompt(
+    origin = load_origin_prompt(
         experiment_extract or {},
         prompt_node_names=prompt_nodes,
         dataset_name=dataset_name,
@@ -193,11 +193,11 @@ async def prepare_scoring_context(
     dataset = train_data or []
 
     campaign_rounds: list = []
-    baseline_results: list = []
+    origin_results: list = []
     if not (
-        campaign_config is not None and svc is not None and dataset and baseline.render().strip()
+        campaign_config is not None and svc is not None and dataset and origin.render().strip()
     ):
-        return baseline, dataset, campaign_rounds, baseline_results
+        return origin, dataset, campaign_rounds, origin_results
 
     from promptpotter.application.scoring.formula import split_scoring_block
     from promptpotter.application.scoring.search_point_scorer import score_search_point
@@ -218,10 +218,10 @@ async def prepare_scoring_context(
         )
 
     if obs:
-        with graceful("Dataset registration in baseline scoring failed"):
+        with graceful("Dataset registration in origin scoring failed"):
             obs.register_dataset(DATASET_NAME, scoring_set)
 
-    sp = baseline.to_job_search_point(
+    sp = origin.to_job_search_point(
         base_pipeline_params=pipeline_params,
         schema=pipeline_schema,
     )
@@ -235,19 +235,19 @@ async def prepare_scoring_context(
         scoring_formula=spec.per_sample,
         scoring_round_formula=spec.per_round,
         scorer_id=spec.scorer_id,
-        source="baseline",
+        source="origin",
     )
 
-    # ci=0/ct=1 makes the dashboard emitter tick per-sample during baseline like L1.
+    # ci=0/ct=1 makes the dashboard emitter tick per-sample during origin like L1.
     if listener is not None:
-        emit_phase(listener.on_phase, CampaignPhase.BASELINE, "enter", round=0)
+        emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "enter", round=0)
 
     try:
-        baseline_results, scores, _cached, _ = await score_search_point(
+        origin_results, scores, _cached, _ = await score_search_point(
             sp,
             scoring_set,
             session,
-            label="Baseline",
+            label="Origin",
             on_sample_starting=(
                 partial(listener.on_sample_started, 0, 1) if listener is not None else None
             ),
@@ -257,22 +257,22 @@ async def prepare_scoring_context(
         )
     finally:
         if listener is not None:
-            emit_phase(listener.on_phase, CampaignPhase.BASELINE, "exit", round=0)
+            emit_phase(listener.on_phase, CampaignPhase.ORIGIN, "exit", round=0)
         session.pipeline_schema = prior_schema
 
     campaign_rounds = [
         {
             "round": 0,
-            "label": "baseline",
-            "prompt_fields": baseline,
+            "label": "origin",
+            "prompt_fields": origin,
             "accuracy": scores["accuracy"],
             "hits": scores["hits"],
             "total": scores["total"],
-            "results": baseline_results,
+            "results": origin_results,
         }
     ]
 
-    return baseline, dataset, campaign_rounds, baseline_results
+    return origin, dataset, campaign_rounds, origin_results
 
 
 class DatasetSummary(NamedTuple):

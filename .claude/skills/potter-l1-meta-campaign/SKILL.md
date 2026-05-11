@@ -33,7 +33,7 @@ Mode change since last tick ⇒ surface loudly with the triggering cycle IDs. Mo
 
 For each `cycle_id` in `pending_screen` ∪ `pending_full` whose `index.json::status == "complete"` and which has **no `review` entry yet** in `log.jsonl`:
 
-Read L1Stats from `campaigns/{cycle_id}/review.md` header (Track 3 fields): `behavior_pass_rate`, `yield_rate`, `top_lift_mean`, `stagnation_max`, `l2_fires`, and the baseline-regression flag (round 0 best accuracy vs parent baseline).
+Read L1Stats from `campaigns/{cycle_id}/review.md` header (Track 3 fields): `behavior_pass_rate`, `yield_rate`, `top_lift_mean`, `stagnation_max`, `l2_fires`, and the origin-regression flag (round 0 best accuracy vs parent origin).
 
 Compute `round_1_verdict`:
 
@@ -41,7 +41,7 @@ Compute `round_1_verdict`:
 |---|---|
 | `healthy` | `behavior_pass_rate == 1.0` AND `yield_rate ≥ 0.20` AND `top_lift_mean > 0` |
 | `degraded` | exactly one ✗ behavior check OR `yield_rate < 0.20` OR `top_lift_mean ≤ 0` (and not broken) |
-| `broken` | ≥ 2 ✗ behavior checks OR baseline regression on round 0 |
+| `broken` | ≥ 2 ✗ behavior checks OR origin regression on round 0 |
 
 Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on the verdict:
 
@@ -89,7 +89,7 @@ Two sources, in order:
 
 Slate quality rules (reject silently if violated):
 
-- Same baseline `from_cycle_id` + `from_round = 1` across the slate.
+- Same origin `from_cycle_id` + `from_round = 1` across the slate.
 - Each candidate touches **only** this campaign's `prompt_id` (not l1+l2 simultaneously).
 - No two candidates share `sha256(rendered template)`; deduplicate.
 
@@ -106,7 +106,7 @@ Otherwise (review verdict was `healthy`), compute:
 | Rung | Read | Compute |
 |---|---|---|
 | 0 — Behavior (sanity) | `review.md` behavior table | Pass = all ✓ on the four seeded checks. Healthy-gated cycles always pass; if not, log a defect and `reject_behavior`. |
-| 2 — R1 lift | `rounds/round_0000.json::candidate_scores[*].composite_fitness` + `baseline.composite_fitness` | `top_lift_r1 = max(candidate.composite) − baseline.composite`. |
+| 2 — R1 lift | `rounds/round_0000.json::candidate_scores[*].composite_fitness` + `origin.composite_fitness` | `top_lift_r1 = max(candidate.composite) − origin.composite`. |
 | 3 — R1+R2 (only when `screen_floor == "rung_3"`) | `rounds/round_0001.json::accuracy` | Reject if round-1 accuracy regresses below round-0 (proxy floor raised by Phase 6). |
 
 Verdict (first match wins):
@@ -182,8 +182,8 @@ Accept ⇒ append `promote_accept`; set `state.json::parent_hash = active_hash`,
 `log.jsonl` (append-only, one event per line, never mutate past lines):
 
 ```jsonl
-{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"sweep","round_1_verdict":"healthy","behavior_pass_rate":1.0,"yield_rate":0.33,"top_lift_mean":0.05,"stagnation_max":0,"l2_fires":0,"baseline_regression":false,"top_issue":null,"proposed_edit_path":null}
-{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"full","round_1_verdict":"degraded","behavior_pass_rate":0.75,"yield_rate":0.10,"top_lift_mean":0.02,"stagnation_max":1,"l2_fires":0,"baseline_regression":false,"top_issue":"low_yield","proposed_edit_path":".promptpotter/meta_campaigns/l1_generate/proposed_edits/cycle_abc_2026-05-11T19-12.diff"}
+{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"sweep","round_1_verdict":"healthy","behavior_pass_rate":1.0,"yield_rate":0.33,"top_lift_mean":0.05,"stagnation_max":0,"l2_fires":0,"origin_regression":false,"top_issue":null,"proposed_edit_path":null}
+{"ts":"…","kind":"review","cycle_id":"…","dataset":"termnorm","cycle_kind":"full","round_1_verdict":"degraded","behavior_pass_rate":0.75,"yield_rate":0.10,"top_lift_mean":0.02,"stagnation_max":1,"l2_fires":0,"origin_regression":false,"top_issue":"low_yield","proposed_edit_path":".promptpotter/meta_campaigns/l1_generate/proposed_edits/cycle_abc_2026-05-11T19-12.diff"}
 {"ts":"…","kind":"screen","candidate":"01_…","prompt_hash":"…","cycle_id":"…","dataset":"termnorm","verdict":"winner","top_lift_r1":0.12,"parent_top_lift_r1":0.05,"behavior_pass":true}
 {"ts":"…","kind":"promote_accept","candidate":"…","prompt_hash":"…","cycle_id":"…","dataset":"…","rounds_to_95":4,"parent_rounds_to_95":5,"final_accuracy":0.97,"parent_final_accuracy":0.94,"secondary_dataset":null}
 {"ts":"…","kind":"promote_reject","candidate":"…","prompt_hash":"…","cycle_id":"…","dataset":"…","reason":"final_accuracy regressed by 0.03"}
@@ -217,7 +217,7 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 |---|---|
 | Per-cycle review (header: behavior table, `round_1_verdict`, L1Stats block) | `campaigns/{cycle_id}/review.md` |
 | L1Stats fields (`rounds_to_95`, `round_1_verdict`, `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`) | `campaigns/{cycle_id}/review.md` header |
-| Round trace (`accuracy`, `candidate_scores`, `baseline`, `critique`, `lineage.source`) | `campaigns/{cycle_id}/rounds/round_NNNN.json` |
+| Round trace (`accuracy`, `candidate_scores`, `origin`, `critique`, `lineage.source`) | `campaigns/{cycle_id}/rounds/round_NNNN.json` |
 | Cycle index (`status`, `final.{rounds_to_95, final_accuracy, *_hash}`, `fork.trigger`) | `campaigns/{cycle_id}/index.json` |
 | Sweep payloads | `datasets/{name}/sweep/NN_*.json` (skill-authored drafts in `sweep/proposed/`) |
 | Meta-campaign state + log | `.promptpotter/meta_campaigns/{prompt_id}/{state.json,log.jsonl}` |

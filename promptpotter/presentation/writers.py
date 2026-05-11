@@ -50,7 +50,7 @@ def from_disk_round(
     *,
     composite_fitness_formula: str | None = None,
     composite_fitness_formula_short: str | None = None,
-    baseline_composite_fitness: float | None = None,
+    origin_composite_fitness: float | None = None,
 ) -> RoundCompleteView:
     """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
     score_entries = [
@@ -62,11 +62,11 @@ def from_disk_round(
     winner_label = winner.label if winner is not None else ""
 
     winner_acc = float(round_data.get("accuracy", 0.0))
-    baseline_acc = float(round_data.get("baseline_accuracy", 0.0))
+    origin_acc = float(round_data.get("origin_accuracy", 0.0))
     improved = bool(round_data.get("improved", False))
     return RoundCompleteView(
         round=int(round_data.get("round", 0)),
-        baseline_acc=baseline_acc,
+        origin_acc=origin_acc,
         scores=tuple(score_entries),
         winner_label=winner_label,
         winner_accuracy=winner_acc,
@@ -75,13 +75,13 @@ def from_disk_round(
         winner_hits=int(round_data.get("hits", 0)),
         winner_total=int(round_data.get("total", 0)),
         improved=improved,
-        delta=(winner_acc - baseline_acc) if improved else 0.0,
+        delta=(winner_acc - origin_acc) if improved else 0.0,
         p_value=round_data.get("p_value"),
         next_action=str(round_data.get("next_action", "")),
         l1_critique_text=format_l1_critique_for_prompt(round_data.get("critique") or {}),
         composite_fitness_formula=composite_fitness_formula,
         composite_fitness_formula_short=composite_fitness_formula_short,
-        baseline_composite_fitness=baseline_composite_fitness,
+        origin_composite_fitness=origin_composite_fitness,
     )
 
 
@@ -143,7 +143,7 @@ def from_disk_log(
         parent_session_id=index.get("parent_session_id"),
         status=str(index.get("status", "active")),
         stop_reason=str(final.get("stop_reason") or index.get("stop_reason") or "(running)"),
-        baseline_accuracy=float(index.get("baseline_accuracy", 0.0)),
+        origin_accuracy=float(index.get("origin_accuracy", 0.0)),
         best_accuracy=float(index.get("best_accuracy", 0.0)),
         best_round=index.get("best_round"),
         rounds_completed=int(index.get("n_rounds", 0)),
@@ -223,7 +223,7 @@ def from_disk_log(
         status=status,
         rounds=tuple(round_views),
         formula=final.get("scorer_round_formula"),
-        baseline_composite_fitness=final.get("baseline_composite_fitness"),
+        origin_composite_fitness=final.get("origin_composite_fitness"),
         hard_samples=hard,
         final=final_view,
         forks=fork_views,
@@ -238,7 +238,7 @@ def _fork_summary_from_index(fork_index: dict[str, Any]) -> ForkSummaryView:
         mode=str(final.get("mode") or fork_index.get("fork_kind") or ""),
         status=str(fork_index.get("status", "active")),
         best_accuracy=float(fork_index.get("best_accuracy", 0.0)),
-        baseline_accuracy=float(fork_index.get("baseline_accuracy", 0.0)),
+        origin_accuracy=float(fork_index.get("origin_accuracy", 0.0)),
         n_rounds=int(fork_index.get("n_rounds") or fork_index.get("n_rounds", 0) or 0),
         stop_reason=str(final.get("stop_reason") or fork_index.get("stop_reason") or ""),
         finished_at=final.get("finished_at") or fork_index.get("finished_at"),
@@ -256,7 +256,7 @@ def write_log_md(session: Session, *, hard_samples_artifact: dict | None = None)
         root_id = root_cycle_id(cycle_id)
         if root_id != cycle_id:
             # Fork finished — refresh the family root's log.md so its Forks
-            # section picks up this fork's latest best/baseline/stop_reason.
+            # section picks up this fork's latest best/origin/stop_reason.
             _render_log_md_for(store, session.backend_id, root_id, None)
 
 

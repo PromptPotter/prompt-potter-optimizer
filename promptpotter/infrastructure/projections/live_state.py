@@ -6,7 +6,7 @@ state (tqdm bars on one side, JSON spend rollup on the other), but a small
 core overlaps:
 
 * the active round number,
-* the running baseline + best anchors (updated on ``INIT:exit`` and on an
+* the running origin + best anchors (updated on ``INIT:exit`` and on an
   improved ``L1_SCORE:exit``),
 * the round-wide Posterior-of-Being-Best snapshot used to render cross-round
   ▲/▼ arrows, and
@@ -139,7 +139,7 @@ class LiveStateCore:
     """Shared per-cycle scalars for live ledger subscribers."""
 
     round_num: int = 0
-    baseline_acc: float = 0.0
+    origin_acc: float = 0.0
     best_acc: float = 0.0
     last_p_best: dict[str, float] = field(default_factory=dict)
     current_p_best: dict[str, float] = field(default_factory=dict)
@@ -150,8 +150,8 @@ class LiveStateCore:
 def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict | None = None) -> None:
     """Update *core* from a ``PhaseEvent``.
 
-    Round number tracks ``event.round`` directly. Baseline + best anchors
-    pick up the post-baseline accuracy on ``INIT:exit`` and the new winner
+    Round number tracks ``event.round`` directly. Origin + best anchors
+    pick up the post-origin accuracy on ``INIT:exit`` and the new winner
     on an improved ``L1_SCORE:exit``, so cross-round arrows and per-candidate
     deltas always read against the freshest anchor.
     """
@@ -160,13 +160,13 @@ def apply_phase(core: LiveStateCore, event: PhaseEvent, view: dict | None = None
     if view is None:
         return
     if event.phase == CampaignPhase.INIT and event.event == "exit":
-        new_baseline = view.get("baseline_acc", core.baseline_acc)
-        core.baseline_acc = new_baseline
-        if new_baseline > core.best_acc:
-            core.best_acc = new_baseline
+        new_origin = view.get("origin_acc", core.origin_acc)
+        core.origin_acc = new_origin
+        if new_origin > core.best_acc:
+            core.best_acc = new_origin
     elif event.phase == CampaignPhase.L1_SCORE and event.event == "exit" and view.get("improved"):
-        winner = view.get("winner_accuracy", core.baseline_acc)
-        core.baseline_acc = winner
+        winner = view.get("winner_accuracy", core.origin_acc)
+        core.origin_acc = winner
         if winner > core.best_acc:
             core.best_acc = winner
 

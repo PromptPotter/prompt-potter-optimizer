@@ -129,7 +129,7 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .page-header-text{display:flex;flex-direction:column;gap:4px;min-width:0}
 .breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
 /* h1 weight 600 — vanilla used 500 which read as a subhead. Bumped per the
-   visual-baseline-redo carried into the React port. */
+   visual-origin-redo carried into the React port. */
 h1{font-size:26px;font-weight:600;line-height:1.2}
 .meta{font-size:13px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px}
 .avatar{width:18px;height:18px;border-radius:50%;background:var(--color-background-tint-icon);display:inline-flex;align-items:center;justify-content:center;font-size:11px;color:var(--color-accent);font-weight:500}
@@ -219,7 +219,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Live samples */
 .samples-card{margin-bottom:14px}
 .samples-list{font-family:var(--font-mono);font-size:12px;line-height:1.45;max-height:240px;overflow-y:auto;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:6px 10px;border:0.5px solid var(--color-border-tertiary)}
-.samples-list .row{display:flex;gap:8px;align-items:baseline;border-bottom:0.5px dotted var(--color-border-tertiary);padding:2px 0}
+.samples-list .row{display:flex;gap:8px;align-items:origin;border-bottom:0.5px dotted var(--color-border-tertiary);padding:2px 0}
 .samples-list .row:last-child{border-bottom:none}
 .samples-list .tag-hit{color:var(--color-success);font-weight:600}
 .samples-list .tag-miss{color:var(--color-danger);font-weight:600}
@@ -363,7 +363,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-job-toggle .chip{display:inline-flex;align-items:center;gap:7px;padding:5px 14px;border:1px solid var(--color-border-tertiary);border-radius:999px;font-size:14px;font-weight:500;color:var(--color-text-secondary);background:var(--color-background-secondary);flex-shrink:0;font-family:var(--font-mono);line-height:1.3}
 .chat-job-toggle .chip-lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;font-family:inherit}
 .chat-job-toggle .chip strong{color:var(--color-text-primary);font-weight:600;font-size:14px}
-.chat-job-toggle .chip-baseline{color:var(--color-text-tertiary);font-weight:500}
+.chat-job-toggle .chip-origin{color:var(--color-text-tertiary);font-weight:500}
 .chat-job-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-border-tertiary)}
 .chat-job-toggle .chev{transition:transform .15s;flex-shrink:0;margin-left:auto}
 .chat-job-toggle[aria-expanded="true"]{background:var(--color-background-primary);color:var(--color-text-primary);border-color:var(--color-border-tertiary)}
@@ -373,7 +373,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .chat-job-dropdown .job-whatif{padding:8px 0 4px;border-left:1px solid var(--color-border-tertiary);padding-left:18px;min-width:0}
 @media (max-width:760px){.chat-job-dropdown{grid-template-columns:1fr}.chat-job-dropdown .job-whatif{border-left:none;padding-left:0;border-top:1px solid var(--color-border-tertiary);padding-top:12px}}
 .chat-job-dropdown .section-title{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.08em;font-size:10px;font-weight:700;padding:4px 0 6px;border-bottom:1px solid var(--color-border-tertiary);margin-bottom:4px}
-.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:baseline;gap:14px;padding:6px 0;border-bottom:1px solid var(--color-border-tertiary)}
+.chat-job-dropdown .row{display:flex;justify-content:space-between;align-items:origin;gap:14px;padding:6px 0;border-bottom:1px solid var(--color-border-tertiary)}
 .chat-job-dropdown .row:last-child{border-bottom:none}
 .chat-job-dropdown .lbl{color:var(--color-text-tertiary);text-transform:uppercase;letter-spacing:.06em;font-size:11px;font-weight:600;flex-shrink:0}
 .chat-job-dropdown .val{color:var(--color-text-primary);font-family:var(--font-mono);font-size:12px;text-align:right;word-break:break-all}
@@ -565,7 +565,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */
 .signals-panel .signals-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}
 .signal-row{padding:8px 10px;border:1px solid var(--color-border-tertiary);border-radius:6px;background:var(--color-surface-secondary)}
-.signal-row-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:8px;font-size:13px}
+.signal-row-head{display:flex;flex-wrap:wrap;align-items:origin;gap:8px;font-size:13px}
 .signal-rule{font-weight:600;color:var(--color-text-primary)}
 .signal-layer{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--color-text-tertiary);padding:1px 6px;border-radius:3px;background:var(--color-surface-tertiary)}
 .signal-action{color:var(--color-text-secondary)}

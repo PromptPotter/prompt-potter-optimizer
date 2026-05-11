@@ -29,7 +29,7 @@ export interface DashboardSnapshot {
       top?: { id: string; p_best: number }[];
     };
   };
-  baseline_accuracy?: number;
+  origin_accuracy?: number;
   evaluators?: unknown[];
   scoring?: unknown;
   [key: string]: unknown;

@@ -16,11 +16,11 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any
 
-from promptpotter.application.baseline import (
-    build_campaign_emitter,
-    load_baseline_prompt,
-)
 from promptpotter.application.bootstrap.session import auto_mint_session
+from promptpotter.application.origin import (
+    build_campaign_emitter,
+    load_origin_prompt,
+)
 from promptpotter.domain.cycle_paths import CycleDir
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
 from promptpotter.infrastructure.ledger import CycleEventLog
@@ -206,16 +206,16 @@ def _ensure_session_minted(
     dataset: list[Sample],
     *,
     experiment_id: str | None,
-    baseline_accuracy: float,
+    origin_accuracy: float,
 ) -> None:
-    """Auto-mint session+cycle from baseline OSP if missing (idempotent)."""
-    from promptpotter.application.runner import build_baseline_cycle_id
+    """Auto-mint session+cycle from origin OSP if missing (idempotent)."""
+    from promptpotter.application.runner import build_origin_cycle_id
 
     if session.session_id:
         return
 
     prompt_nodes = session.pipeline_schema.prompt_node_names() if session.pipeline_schema else []
-    baseline_osp = load_baseline_prompt(
+    origin_osp = load_origin_prompt(
         session.experiment_extract or {},
         prompt_node_names=prompt_nodes,
         dataset_name=campaign_config.dataset_name,
@@ -223,9 +223,9 @@ def _ensure_session_minted(
     auto_mint_session(
         session,
         campaign_config,
-        cycle_id=build_baseline_cycle_id(baseline_osp, session.pipeline_schema, dataset),
-        baseline_acc=baseline_accuracy,
-        baseline_prompt_fields=baseline_osp.prompt_field_dict(),
+        cycle_id=build_origin_cycle_id(origin_osp, session.pipeline_schema, dataset),
+        origin_acc=origin_accuracy,
+        origin_prompt_fields=origin_osp.prompt_field_dict(),
         dataset_size=len(dataset),
         experiment_id=experiment_id,
     )
@@ -239,7 +239,7 @@ def build_run_observers(
     display: LiveDisplay | None = None,
     experiment_id: str | None = None,
     resumed_from_round: int | None = None,
-    baseline_accuracy: float = 0.0,
+    origin_accuracy: float = 0.0,
     fork: ForkInfo | None = None,
 ) -> RunObservers:
     """Mint session if needed; open ledger; build + bind every observer.
@@ -248,9 +248,9 @@ def build_run_observers(
     the family root). Pass ``fork=ForkInfo(...)`` when a fork-on-divergence
     has just minted a sibling cycle — the parent's dashboard is reattached
     to the fork's audit projection and the ledger inherits from the parent
-    at its current offset. ``baseline_accuracy`` is a seed for
+    at its current offset. ``origin_accuracy`` is a seed for
     ``dashboard.json``; the real value lands on the next ``INIT/exit``
-    phase event after baseline runs.
+    phase event after origin runs.
     """
     if fork is None:
         _ensure_session_minted(
@@ -258,7 +258,7 @@ def build_run_observers(
             campaign_config,
             dataset,
             experiment_id=experiment_id,
-            baseline_accuracy=baseline_accuracy,
+            origin_accuracy=origin_accuracy,
         )
 
     if session.state.cycle_id is None or session.store is None:
@@ -275,7 +275,7 @@ def build_run_observers(
         dashboard = build_campaign_emitter(
             session,
             campaign_config,
-            baseline_accuracy=baseline_accuracy,
+            origin_accuracy=origin_accuracy,
             resumed_from_round=resumed_from_round,
             recorder=audit,
         )

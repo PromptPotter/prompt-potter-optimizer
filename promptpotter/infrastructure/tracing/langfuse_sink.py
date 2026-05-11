@@ -106,7 +106,7 @@ class LangfuseSink:
             name="optimization_loop",
             input={
                 "campaign_id": event.campaign_id,
-                "baseline_accuracy": event.baseline_accuracy,
+                "origin_accuracy": event.origin_accuracy,
                 "config": event.config,
             },
             session_id=event.session_id,
@@ -118,8 +118,8 @@ class LangfuseSink:
                 self._session_ids[event.campaign_id] = event.session_id
             self._lf.create_score(
                 trace_id=cloud_id,
-                name="baseline_accuracy",
-                value=event.baseline_accuracy,
+                name="origin_accuracy",
+                value=event.origin_accuracy,
             )
             self._persist()
 

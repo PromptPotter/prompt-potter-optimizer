@@ -68,14 +68,14 @@ def resume_with_divergence_check(
         for items in (t.get("all_candidate_results") or {}).values():
             _rescore(items)
 
-    baseline_results_rescored = _rescore(cycle.tracking.current_results)
+    origin_results_rescored = _rescore(cycle.tracking.current_results)
 
     if not skip_divergence_check:
         for i, t in enumerate(prior):
             div = replay_decisions(
                 t,
                 prior_rounds=prior[:i],
-                baseline_results=baseline_results_rescored,
+                origin_results=origin_results_rescored,
             )
             if div is None:
                 continue

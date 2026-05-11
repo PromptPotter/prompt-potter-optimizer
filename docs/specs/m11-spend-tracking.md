@@ -30,7 +30,7 @@ warn-on-oversize check (`emit_token_usage`).
     resolves rates.
 - Stdlib-only fetcher (`urllib`+`json`); no PyPI cost lib (March 2026
   LiteLLM incident). Payload capped at 8 MB; SHA pinning skipped — the
-  bundled floor is the audited baseline.
+  bundled floor is the audited origin.
 - Write `dashboard.json::spend = {used_usd, budget_usd, by_kind, calls}`.
   No second file.
 - New `OptimizationConfig.spend_budget_usd: float | None`. Halt with a
@@ -54,4 +54,4 @@ each consumer guarantees drift.
 - `promptpotter/infrastructure/llm.py:113` — `TokenUsage`.
 - `promptpotter/application/optimization/llm_call.py:209` — emit site.
 - `promptpotter/infrastructure/projections/live_dashboard.py` — projection.
-- `promptpotter/application/baseline.py::build_campaign_emitter` — wiring.
+- `promptpotter/application/origin.py::build_campaign_emitter` — wiring.

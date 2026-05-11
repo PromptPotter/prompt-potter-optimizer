@@ -125,7 +125,7 @@
     "nodes": [
       {"id": "input",       "label": "Dataset",     "kind": "io"},
       {"id": "restructure", "label": "restructure", "kind": "llm"},
-      {"id": "baseline",    "label": "baseline",    "kind": "phase"},
+      {"id": "origin",    "label": "origin",    "kind": "phase"},
       {"id": "l3_plan",     "label": "l3_plan",     "kind": "llm"},
       {"id": "l2_context",  "label": "l2_context",  "kind": "llm"},
       {"id": "l1_generate", "label": "l1_generate", "kind": "llm"},
@@ -135,8 +135,8 @@
     ],
     "edges": [
       {"from": "input",       "to": "restructure", "kind": "forward"},
-      {"from": "restructure", "to": "baseline",    "kind": "forward"},
-      {"from": "baseline",    "to": "l1_generate", "kind": "forward"},
+      {"from": "restructure", "to": "origin",    "kind": "forward"},
+      {"from": "origin",    "to": "l1_generate", "kind": "forward"},
       {"from": "l1_generate", "to": "l1_score",    "kind": "forward"},
       {"from": "l1_score",    "to": "l1_critique", "kind": "forward"},
       {"from": "l1_critique", "to": "output",      "kind": "forward",   "label": "converged"},

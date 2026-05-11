@@ -70,7 +70,7 @@ class PoBBStreamView(DerivedView):
             return
 
         if self._last_round != record.round:
-            # New round → reset the delta baseline.
+            # New round → reset the delta origin.
             self._last_p_best = {}
             self._last_round = record.round
 

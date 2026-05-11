@@ -71,7 +71,7 @@ PromptPotter and AlphaEvolve are functionally equivalent across the existing cap
 
 | Method | HotPotQA | HoVer | PUPA |
 |--------|----------|-------|------|
-| Baseline | 42.33 | — | — |
+| Origin | 42.33 | — | — |
 | GRPO | 43.33 | — | 86.66 |
 | MIPROv2 | 55.33 | 47.33 | 81.55 |
 | **GEPA** | **62.33** | **52.33** | **91.85** |
@@ -131,7 +131,7 @@ AFlow enables GPT-4o-mini + optimized workflow to outperform GPT-4o + manual wor
 | Target | Prior best | AlphaEvolve | Note |
 |--------|-----------|-------------|------|
 | 4×4 complex matrix multiplication | 49 scalar mults (Strassen, 1969) | **48 scalar mults** | First improvement in 56 years |
-| Google data-center scheduling heuristic | (proprietary baseline) | **+0.7% compute recovered** | Continuously deployed |
+| Google data-center scheduling heuristic | (proprietary origin) | **+0.7% compute recovered** | Continuously deployed |
 | Various open math problems | various | improved or matched on a spectrum | Detailed in paper |
 
 

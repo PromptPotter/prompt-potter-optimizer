@@ -11,7 +11,7 @@ export const TERMS: Record<string, string> = {
   status_nowall:      "Dashboard has no wallclock yet — optimizer probably has not started.",
 
   // Phase tag (dash.state) → one-sentence definition
-  phase_baseline:           "Baseline scoring of the unmodified starting prompt — the floor the optimizer beats.",
+  phase_origin:           "Origin scoring of the unmodified starting prompt — the floor the optimizer beats.",
   phase_l1_generate:        "L1 Generate — produces candidate prompt mutations from current framing + critique.",
   phase_l1_critique:        "L1 Critique — reads round results, writes the critique L1 Generate consumes next round.",
   phase_scoring:            "Scoring — running candidates against the dataset to compute composite_fitness.",
@@ -21,7 +21,7 @@ export const TERMS: Record<string, string> = {
   phase_between_candidates: "Between candidates — short pause between candidate evaluations.",
 
   // Workflow nodes
-  node_baseline:    "Baseline: the unmodified starting prompt, scored as the floor.",
+  node_origin:    "Origin: the unmodified starting prompt, scored as the floor.",
   node_l1_generate: "L1 Generate: produces N candidate prompts from current framing + critique.",
   node_l1_score:    "L1 Score: runs each candidate over the dataset, computes composite_fitness.",
   node_l1_critique: "L1 Critique: reads round results, writes the critique L1 Generate reads next round.",
@@ -50,12 +50,12 @@ export const TERMS: Record<string, string> = {
   brand_live_preview: "This page polls dashboard.json every 2s. Read-only — no control plane in this slice.",
 
   // New Job status / spend bar — collapsed chips + expand-down panel
-  newjob_bar_best:   "Best composite-fitness accuracy / baseline. '62% / 50%' reads as 'best 62%, baseline 50%' — the gain is the spend's return.",
+  newjob_bar_best:   "Best composite-fitness accuracy / origin. '62% / 50%' reads as 'best 62%, origin 50%' — the gain is the spend's return.",
   newjob_bar_round:  "Current round number. The campaign's progress through its round budget.",
   newjob_bar_spend:  "Total LLM cost on this cycle: backend (per-sample wire calls) + loop (optimizer L1/L2/L3/critique). USD when the provider returns it (OpenRouter) or the model resolves in the bundled rate table; falls back to a token count otherwise. Tooltip splits Backend vs Loop. Source: dashboard.json::spend.",
   newjob_bar_budget: "Operator-set spend ceiling in USD (campaign.json::optimization.spend_budget_usd). Empty = uncapped.",
   newjob_bar_eta:    "Estimated time until spend hits the budget at the current burn rate. Renders '—' until spend tracking is wired or the budget is uncapped.",
-  newjob_bar_eff:    "Improvement-per-spend overall: (best − baseline) / spend_used, in percentage points per dollar. The headline efficiency number.",
+  newjob_bar_eff:    "Improvement-per-spend overall: (best − origin) / spend_used, in percentage points per dollar. The headline efficiency number.",
   newjob_bar_adjust: "Adjusting spend or finishing criteria from the UI is wired in M12. For now, edit campaign.json and resume `python -m promptpotter optimize`.",
 };
 

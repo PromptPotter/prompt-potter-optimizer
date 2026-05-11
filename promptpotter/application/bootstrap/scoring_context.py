@@ -8,7 +8,7 @@ Three concerns live here:
 * ``bootstrap_cycle`` — resume an existing cycle or create one, refreshing
   the ``HOT_UPDATEABLE_KEYS`` config keys against the active snapshot.
 * ``init_optimization_loop`` — the optimization-loop entry point used by
-  :mod:`runner`: preflight, baseline OSP build, ``Cycle.start``, fork on
+  :mod:`runner`: preflight, origin OSP build, ``Cycle.start``, fork on
   divergence, observability + scoring + axes, ``INIT.exit`` emit.
 
 ``Session`` itself, ``ScoringContext`` (the dataclass), and the per-cycle
@@ -26,10 +26,10 @@ from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.infrastructure.store import archive_views
 
 if TYPE_CHECKING:
-    from promptpotter.application.baseline import CampaignBaseline
     from promptpotter.application.config import CampaignConfig
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.optimization.observers import RunCallbacks
+    from promptpotter.application.origin import CampaignOrigin
     from promptpotter.domain.sample import Sample
     from promptpotter.domain.search_point import JobSearchPoint, TaskDecomposition
     from promptpotter.infrastructure.tracing import ObservabilityBridge
@@ -58,8 +58,8 @@ HOT_UPDATEABLE_KEYS: frozenset[str] = frozenset(
 def bootstrap_cycle(
     config: CampaignConfig,
     session: Session,
-    baseline_jsp: JobSearchPoint,
-    baseline_accuracy: float,
+    origin_jsp: JobSearchPoint,
+    origin_accuracy: float,
     dataset: list,
     cycle_id_override: str | None,
     *,
@@ -77,7 +77,7 @@ def bootstrap_cycle(
         return None, 0
     try:
         store = session.store.campaigns
-        resolved = cycle_id_override or cycle_config_identity(baseline_jsp, dataset)
+        resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
         if resume_from_round_override is not None:
             store.rewind_to_round(session.backend_id, resolved, resume_from_round_override)
         config_snapshot = config.model_dump(mode="json")
@@ -94,10 +94,10 @@ def bootstrap_cycle(
                     stored_cfg.update(changed)
                     store.update(session.backend_id, resolved, {"config": stored_cfg})
                     logger.info("Updated loop-control config for %s", resolved)
-            # Diag forks inherit parent's baseline_accuracy but re-measure
+            # Diag forks inherit parent's origin_accuracy but re-measure
             # against their own JSP — refresh top-level field if drift.
-            if existing.get("baseline_accuracy") != baseline_accuracy:
-                store.update(session.backend_id, resolved, {"baseline_accuracy": baseline_accuracy})
+            if existing.get("origin_accuracy") != origin_accuracy:
+                store.update(session.backend_id, resolved, {"origin_accuracy": origin_accuracy})
             return resolved, len(existing.get("rounds", []))
         store.create(
             session.backend_id,
@@ -105,7 +105,7 @@ def bootstrap_cycle(
             {
                 "type": "optimization_loop",
                 "config": config_snapshot,
-                "baseline_accuracy": baseline_accuracy,
+                "origin_accuracy": origin_accuracy,
                 "parent_session_id": parent_session_id,
             },
         )
@@ -179,7 +179,7 @@ async def _emit_preflight_and_init_session(
 
 
 def _build_cycle_and_bootstrap(
-    baseline: CampaignBaseline,
+    origin: CampaignOrigin,
     task_context: TaskDecomposition,
     scoring_round_formula: str | None,
     session: Session,
@@ -188,48 +188,48 @@ def _build_cycle_and_bootstrap(
     cycle_id: str | None,
     resume_from_round_override: int | None,
 ) -> tuple[Cycle, OptSearchPoint, str | None, int]:
-    """Build baseline OSP + Cycle.start + bootstrap storage; raise on missing baseline_ps."""
+    """Build origin OSP + Cycle.start + bootstrap storage; raise on missing origin_ps."""
     from promptpotter.application.optimization.cycle import Cycle
     from promptpotter.application.scoring.formula import compile_round_scorer
 
-    if baseline.baseline_ps is None:
-        raise ValueError("baseline.baseline_ps is required; run baseline scoring first.")
-    baseline_osp = OptSearchPoint.from_prompt_fields(baseline.baseline_ps)
-    baseline_round_scorer = (
+    if origin.origin_ps is None:
+        raise ValueError("origin.origin_ps is required; run origin scoring first.")
+    origin_osp = OptSearchPoint.from_prompt_fields(origin.origin_ps)
+    origin_round_scorer = (
         compile_round_scorer(scoring_round_formula) if scoring_round_formula else None
     )
     cycle = Cycle.start(
-        baseline_osp,
-        baseline.baseline_acc,
+        origin_osp,
+        origin.origin_acc,
         task_context=task_context,
         schema=session.pipeline_schema,
-        baseline_results=baseline.baseline_results,
-        round_scorer=baseline_round_scorer,
+        origin_results=origin.origin_results,
+        round_scorer=origin_round_scorer,
         session=session,
         config=config,
     )
 
     base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
-    baseline_jsp = baseline_osp.to_job_search_point(
+    origin_jsp = origin_osp.to_job_search_point(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )
     resolved_cycle_id, resumed_from_round = bootstrap_cycle(
         config,
         session,
-        baseline_jsp,
-        baseline.baseline_acc,
+        origin_jsp,
+        origin.origin_acc,
         dataset,
         cycle_id,
         parent_session_id=session.session_id,
         resume_from_round_override=resume_from_round_override,
     )
-    return cycle, baseline_osp, resolved_cycle_id, resumed_from_round
+    return cycle, origin_osp, resolved_cycle_id, resumed_from_round
 
 
 def _start_observability_and_scoring(
     session: Session,
     config: CampaignConfig,
-    baseline: CampaignBaseline,
+    origin: CampaignOrigin,
     dataset: list[Sample],
     *,
     resolved_cycle_id: str | None,
@@ -249,7 +249,7 @@ def _start_observability_and_scoring(
         session.project_root,
         session.backend_id,
         config_snapshot=config.model_dump(mode="json"),
-        baseline_accuracy=baseline.baseline_acc,
+        origin_accuracy=origin.origin_acc,
         dataset=dataset,
         tracing_campaign_id=tracing_campaign_id,
         langfuse_session_id=langfuse_session_id or resolved_cycle_id,
@@ -272,15 +272,15 @@ def _start_observability_and_scoring(
 def _apply_resume_fork(
     session: Session,
     cycle: Cycle,
-    baseline: CampaignBaseline,
-    baseline_osp: OptSearchPoint,
+    origin: CampaignOrigin,
+    origin_osp: OptSearchPoint,
     resolved_cycle_id: str | None,
     resumed_from_round: int,
     *,
     no_divergence_check: bool,
     fork_on_divergence: bool,
 ) -> tuple[str | None, int]:
-    """Replay decisions; fork on divergence; register baseline alias. Returns possibly-rebound (id, round)."""
+    """Replay decisions; fork on divergence; register origin alias. Returns possibly-rebound (id, round)."""
     from promptpotter.application.optimization.resume_and_fork import (
         resume_with_divergence_check,
     )
@@ -301,7 +301,7 @@ def _apply_resume_fork(
             resumed_from_round = fork_result.new_resumed_from_round
     if session.store:
         archive_views.register_prompt_alias(
-            session.store, session.backend_id, baseline.instruction, baseline_osp.render()
+            session.store, session.backend_id, origin.instruction, origin_osp.render()
         )
     return resolved_cycle_id, resumed_from_round
 
@@ -354,7 +354,7 @@ def _finalize_loop_state(
 
 
 async def init_optimization_loop(
-    baseline: CampaignBaseline,
+    origin: CampaignOrigin,
     dataset: list[Sample],
     config: CampaignConfig,
     *,
@@ -372,11 +372,11 @@ async def init_optimization_loop(
     session: Session,
     started_at: str,
 ) -> Cycle:
-    """Build Cycle + attach loop infra: baseline, resume/fork, obs, scoring, axes."""
+    """Build Cycle + attach loop infra: origin, resume/fork, obs, scoring, axes."""
     await _emit_preflight_and_init_session(config, dataset, cb, session)
 
-    cycle, baseline_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
-        baseline,
+    cycle, origin_osp, resolved_cycle_id, resumed_from_round = _build_cycle_and_bootstrap(
+        origin,
         task_context,
         scoring_round_formula,
         session,
@@ -389,7 +389,7 @@ async def init_optimization_loop(
     tracing_campaign_id, _obs = _start_observability_and_scoring(
         session,
         config,
-        baseline,
+        origin,
         dataset,
         resolved_cycle_id=resolved_cycle_id,
         started_at=started_at,
@@ -403,8 +403,8 @@ async def init_optimization_loop(
     resolved_cycle_id, resumed_from_round = _apply_resume_fork(
         session,
         cycle,
-        baseline,
-        baseline_osp,
+        origin,
+        origin_osp,
         resolved_cycle_id,
         resumed_from_round,
         no_divergence_check=no_divergence_check,

@@ -11,8 +11,8 @@ Two named invariants:
      accepts only a ``rounds_dir`` ending in ``.runtime/cache/rounds`` (or
      a CycleDir via ``from_cycle_dir`` that derives the subpath); the
      ``on_record`` ledger hook drives ``begin_round`` / ``flush`` on
-     PhaseRecord('round', enter|complete), persists the baseline phase to
-     ``round_baseline.json``, and ignores ResumeCheckpointRecord records.
+     PhaseRecord('round', enter|complete), persists the origin phase to
+     ``round_origin.json``, and ignores ResumeCheckpointRecord records.
 """
 
 from __future__ import annotations
@@ -75,7 +75,7 @@ def _candidate_score_dict(
 def test_round_complete_view_roundtrip() -> None:
     """``from_phase_event(e) == from_disk(write_then_load(e))`` on
     ``RoundCompleteView`` — the named correctness invariant of the unification."""
-    baseline_acc = 0.30
+    origin_acc = 0.30
     winner_acc = 0.55
     winner_hits = 11
     winner_total = 20
@@ -113,8 +113,8 @@ def test_round_complete_view_roundtrip() -> None:
     # L1_SCORE:exit, run from_phase_event with a fresh ctx.
     ctx = {
         "round_num": 0,
-        "baseline_accuracy": baseline_acc,
-        "baseline_composite_fitness": 0.40,
+        "origin_accuracy": origin_acc,
+        "origin_composite_fitness": 0.40,
         "composite_fitness_formula": "0.7*acc + 0.3*recall",
         "composite_fitness_formula_short": "0.7*A + 0.3*R",
     }
@@ -146,7 +146,7 @@ def test_round_complete_view_roundtrip() -> None:
         "total": winner_total,
         "improved": True,
         "p_value": live_view.p_value,
-        "baseline_accuracy": baseline_acc,
+        "origin_accuracy": origin_acc,
         "evaluators": {"accuracy": winner_acc},
         "candidate_scores": [
             _candidate_score_dict(
@@ -164,7 +164,7 @@ def test_round_complete_view_roundtrip() -> None:
         round_data,
         composite_fitness_formula=ctx["composite_fitness_formula"],
         composite_fitness_formula_short=ctx["composite_fitness_formula_short"],
-        baseline_composite_fitness=ctx["baseline_composite_fitness"],
+        origin_composite_fitness=ctx["origin_composite_fitness"],
     )
 
     # The live view carries an in-memory ``next_action`` flag that the
@@ -176,8 +176,8 @@ def test_round_complete_view_roundtrip() -> None:
 
 
 def test_round_complete_view_no_improvement() -> None:
-    """Round trip stays consistent when no candidate beats baseline."""
-    baseline_acc = 0.50
+    """Round trip stays consistent when no candidate beats origin."""
+    origin_acc = 0.50
     candidate_scores = [
         {
             "label": "C1",
@@ -188,7 +188,7 @@ def test_round_complete_view_no_improvement() -> None:
             "escalation_aborted": False,
         },
     ]
-    ctx = {"round_num": 0, "baseline_accuracy": baseline_acc}
+    ctx = {"round_num": 0, "origin_accuracy": origin_acc}
     event = PhaseEvent(
         phase="l1_score",
         event="exit",
@@ -213,7 +213,7 @@ def test_round_complete_view_no_improvement() -> None:
         "total": 20,
         "improved": False,
         "p_value": None,
-        "baseline_accuracy": baseline_acc,
+        "origin_accuracy": origin_acc,
         "evaluators": {},
         "candidate_scores": [
             _candidate_score_dict(
@@ -340,26 +340,26 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
 
 
-def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
-    """Baseline LLM-call metadata must persist to ``round_baseline.json`` instead of being discarded.
+def test_audit_trail_persists_origin_phase(tmp_path: Path) -> None:
+    """Origin LLM-call metadata must persist to ``round_origin.json`` instead of being discarded.
 
-    The baseline phase emits ``PhaseRecord('baseline', 'enter'|'exit')`` before
-    the first round's enter/complete. Pre-fix, baseline node accumulation
+    The origin phase emits ``PhaseRecord('origin', 'enter'|'exit')`` before
+    the first round's enter/complete. Pre-fix, origin node accumulation
     leaked into round 0's ``begin_round`` slot and was warn-and-discarded.
     """
     from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
 
-    cycle_dir = tmp_path / "campaigns" / "cyc_baseline"
+    cycle_dir = tmp_path / "campaigns" / "cyc_origin"
     cycle_dir.mkdir(parents=True)
     proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
 
-    proj.on_record(PhaseRecord(phase="baseline", event="enter", round=0), 0)
+    proj.on_record(PhaseRecord(phase="origin", event="enter", round=0), 0)
     proj.on_record(
         LLMCallRecord(node="llm_only", payload={"type": "llm_only", "response": "answer"}),
         1,
     )
-    proj.on_record(PhaseRecord(phase="baseline", event="exit", round=0), 2)
-    # Round 0 begins fresh — no warn-and-discard, no leakage of baseline.
+    proj.on_record(PhaseRecord(phase="origin", event="exit", round=0), 2)
+    # Round 0 begins fresh — no warn-and-discard, no leakage of origin.
     proj.on_record(PhaseRecord(phase="round", event="enter", round=0), 3)
     proj.on_record(
         LLMCallRecord(
@@ -369,7 +369,7 @@ def test_audit_trail_persists_baseline_phase(tmp_path: Path) -> None:
     )
     proj.on_record(PhaseRecord(phase="round", event="complete", round=0), 5)
 
-    baseline_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_baseline.json"
+    origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_origin.json"
     round_0_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"
-    assert baseline_path.exists(), "baseline phase must flush to round_baseline.json"
-    assert round_0_path.exists(), "round 0 must flush independently of baseline"
+    assert origin_path.exists(), "origin phase must flush to round_origin.json"
+    assert round_0_path.exists(), "round 0 must flush independently of origin"

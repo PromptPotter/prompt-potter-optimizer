@@ -80,7 +80,7 @@ class ResumeCheckpointRecord(BaseModel):
 
 
 class PhaseRecord(BaseModel):
-    """A campaign-phase boundary event (round-start, l2-fired, baseline-complete, …)."""
+    """A campaign-phase boundary event (round-start, l2-fired, origin-complete, …)."""
 
     model_config = ConfigDict(frozen=True)
 

@@ -1023,11 +1023,11 @@ Each step is a small, reviewable PR. No mega-merge.
 
 ### Measurable targets (numbers)
 
-Record baseline before §1 lands; record final after §4.7. Both go in
+Record origin before §1 lands; record final after §4.7. Both go in
 a results doc (`docs/specs/m10-cleanup-results.md`) so "are we done"
 has a number.
 
-| Metric | Baseline (date / value) | Target | Final |
+| Metric | Origin (date / value) | Target | Final |
 |---|---|---|---|
 | LOC under `promptpotter/` | TBD | −20% | TBD |
 | Files under `promptpotter/` | TBD | −15% | TBD |

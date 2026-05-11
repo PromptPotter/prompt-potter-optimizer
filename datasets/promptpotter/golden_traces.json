@@ -5,11 +5,11 @@
     "round_context": {
       "opt_search_point": {
         "lineage": {
-          "id": "ind_round0_baseline",
+          "id": "ind_round0_origin",
           "parent_id": null,
-          "changes_description": "baseline",
+          "changes_description": "origin",
           "created_at": "2026-04-01T12:00:00+00:00",
-          "source": "baseline"
+          "source": "origin"
         },
         "persona": "You are solving a grade-school math word problem.",
         "task_intent": "Read the problem carefully and produce one exact numeric answer.",
