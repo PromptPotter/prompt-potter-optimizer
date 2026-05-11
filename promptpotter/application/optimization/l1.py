@@ -713,8 +713,8 @@ async def l1_score(
     improved = best_acc > origin.accuracy + improvement_threshold
     p_value: float | None = None
     if improved and base["total"] > 0:
-        bl_hits = round(origin.accuracy * base["total"])
-        p_value = proportion_test(base["hits"], base["total"], bl_hits, base["total"])
+        origin_hits = round(origin.accuracy * base["total"])
+        p_value = proportion_test(base["hits"], base["total"], origin_hits, base["total"])
     round_result = RoundResult(
         round=round_num,
         label=best_label,

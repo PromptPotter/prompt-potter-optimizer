@@ -909,13 +909,13 @@ class LiveDisplay(DerivedView):
 
     def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
         """One-liner scoreboard: ``★ leader`` on a new best, ``→`` else."""
-        delta_base = acc - origin_acc
+        delta_origin = acc - origin_acc
         if self._round_best_acc is None or acc > self._round_best_acc:
             self._round_best_acc = acc
             self._round_best_label = label
-            sign = "+" if delta_base >= 0 else ""
+            sign = "+" if delta_origin >= 0 else ""
             return (
-                f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_base:.1%} vs base){RESET}"
+                f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_origin:.1%} vs origin){RESET}"
             )
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"

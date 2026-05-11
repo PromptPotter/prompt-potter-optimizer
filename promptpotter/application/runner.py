@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import TYPE_CHECKING
 
@@ -292,8 +293,19 @@ async def _run_round_loop(
     *,
     sweep: bool = False,
     diag: bool = False,
+    halt_at_accuracy: float | None = None,
+    max_spend_usd: float | None = None,
+    spend_probe: Callable[[], float] | None = None,
 ) -> StopReason:
-    """Round loop: generate → score → escalate → stop. sweep/diag halt after round 2."""
+    """Round loop: generate → score → escalate → stop. sweep/diag halt after round 2.
+
+    ``halt_at_accuracy`` / ``max_spend_usd`` are M10 sweep-toolkit
+    halts checked after every clean round: best_accuracy ≥ target halts
+    with ``TARGET_HIT``; cumulative cycle spend ≥ ceiling halts with
+    ``MAX_SPEND``. ``spend_probe`` returns the current cycle USD spend
+    (typically bound to the LiveDashboardView's in-memory state); when
+    omitted, ``max_spend_usd`` has no effect.
+    """
     opt = config.optimization
     hard_cap = opt.hard_cap
     round_num = session.state.resumed_from_round
@@ -382,6 +394,18 @@ async def _run_round_loop(
             round_num += 1
             clean_rounds += 1
 
+            if (
+                halt_at_accuracy is not None
+                and cycle.tracking.best_accuracy >= halt_at_accuracy
+            ):
+                return StopReason.TARGET_HIT
+            if (
+                max_spend_usd is not None
+                and spend_probe is not None
+                and spend_probe() >= max_spend_usd
+            ):
+                return StopReason.MAX_SPEND
+
             if sweep and clean_rounds >= 1:
                 await _run_sweep_generation_only(cycle, session, cb, round_num)
                 return StopReason.SWEEP_COMPLETE
@@ -420,6 +444,8 @@ async def run_optimization(
     sweep: bool = False,
     diag: bool = False,
     fork_payload: ForkPayload | None = None,
+    halt_at_accuracy: float | None = None,
+    max_spend_usd: float | None = None,
 ) -> CycleResult:
     """Run optimization end-to-end. ``observers`` MUST be pre-built via
     ``build_run_observers`` so the ledger is bound before origin ticks.
@@ -501,8 +527,23 @@ async def run_optimization(
         )
         cb = observers.callbacks
 
+    def _probe_cycle_spend() -> float:
+        if observers.dashboard is None:
+            return 0.0
+        spend = observers.dashboard.state.get("spend") or {}
+        return float(spend.get("total_used_usd") or 0.0)
+
     stop_reason = await _run_round_loop(
-        cycle, dataset, campaign_config, session, cb, sweep=sweep, diag=diag
+        cycle,
+        dataset,
+        campaign_config,
+        session,
+        cb,
+        sweep=sweep,
+        diag=diag,
+        halt_at_accuracy=halt_at_accuracy,
+        max_spend_usd=max_spend_usd,
+        spend_probe=_probe_cycle_spend if max_spend_usd is not None else None,
     )
 
     finished_at = datetime.now(UTC).isoformat()

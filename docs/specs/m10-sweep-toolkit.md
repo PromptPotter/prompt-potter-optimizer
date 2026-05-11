@@ -124,7 +124,7 @@ python -m promptpotter sweep rank --dataset aime --by cost_per_lift --last 10
 python -m promptpotter sweep rank --dataset aime --by rounds_to_66
 ```
 
-Reads the last N sweep JSON files for a dataset, prints a sorted table. Columns include every field the verbs emit + derived `cost_per_lift` (lift over baseline / spend).
+Reads the last N sweep JSON files for a dataset, prints a sorted table. Columns include every field the verbs emit + derived `cost_per_lift` (lift over origin / spend).
 
 Pure read-side. No persistence of its own. Operator's "what should I try next" lookup.
 

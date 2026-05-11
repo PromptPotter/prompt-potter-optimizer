@@ -7,7 +7,7 @@
     "pipeline_overrides": {},
     "optimization": {
       "l1_patience": 3,
-      "max_rounds": 15,
+      "max_rounds": 4,
       "n_variants": 6,
       "creativity": 0.7,
       "improvement_threshold": 0.01,
@@ -16,7 +16,8 @@
       "l2_patience": 2,
       "l3_patience": 1,
       "l2_temperature": 0.3,
-      "l3_temperature": 0.5
+      "l3_temperature": 0.5,
+      "zero_signal_filter_enabled": true
     },
     "optimizer_llm": {
       "model": "openai/gpt-oss-120b",

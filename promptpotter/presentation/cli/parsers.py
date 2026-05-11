@@ -107,6 +107,194 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
     )
 
 
+def _add_sweep_slice_args(p: argparse.ArgumentParser) -> None:
+    """Shared ``--slice`` modifier — restricts the sample population."""
+    p.add_argument(
+        "--slice",
+        dest="slice_spec",
+        default="all",
+        help="Sample-population filter: 'all' (default), 'easy' (top hit-rate "
+        "quartile), 'hard' (bottom quartile), or 'samples=ID1,ID2,...' for an "
+        "explicit list. Easy/hard read the cross-cycle archive; fall back to "
+        "'all' when no measurements exist yet.",
+    )
+
+
+def _add_sweep_l1_prompt_args(p: argparse.ArgumentParser, *, allow_multi: bool = True) -> None:
+    """Shared L1-prompt selector + label.
+
+    ``allow_multi=True`` lets round1/round2 take a comma-list of variants;
+    each variant runs in its own fork. ``time-to`` keeps singular semantics
+    (only one halt-on-accuracy run makes sense per invocation).
+    """
+    if allow_multi:
+        p.add_argument(
+            "--l1-prompts",
+            dest="l1_prompts",
+            default=None,
+            help="Comma-separated paths to PromptTemplate JSON files to A/B "
+            "in one invocation. Each variant runs in its own OPERATOR_SWEEP "
+            "fork; results share a sweep_id. Omit to use the currently "
+            "loaded l1_generate template.",
+        )
+    else:
+        p.add_argument(
+            "--l1-prompt",
+            dest="l1_prompt",
+            default=None,
+            help="Path to a PromptTemplate JSON to swap in for l1_generate. "
+            "Omit to use the currently loaded template.",
+        )
+    p.add_argument(
+        "--l1-prompt-label",
+        dest="l1_prompt_label",
+        default=None,
+        help="Operator label for the L1 meta-prompt revision (e.g. 'l1_v3'). "
+        "Recorded on the result; the hash is always derived from the loaded prompt.",
+    )
+
+
+def _add_sweep_args(p_sweep: argparse.ArgumentParser) -> None:
+    """M10 sweep-toolkit verbs. Wraps ``optimize`` with halt gates +
+    per-round panel stats and persists one result JSON per run under
+    ``archive/sweeps/{l1_meta_prompt_hash}/{dataset}/``. See
+    ``docs/specs/m10-sweep-toolkit.md``.
+    """
+    sweep_sub = p_sweep.add_subparsers(dest="sweep_verb", required=True)
+
+    # time-to ----------------------------------------------------------------
+    p_time_to = sweep_sub.add_parser(
+        "time-to",
+        help="Run optimize, halt on target accuracy / max-rounds / max-spend; write one result JSON.",
+    )
+    p_time_to.add_argument(
+        "target",
+        type=int,
+        metavar="N",
+        help="Target accuracy as a percent (e.g. 66 = halt when best ≥ 0.66).",
+    )
+    p_time_to.add_argument(
+        "--max-rounds",
+        dest="max_rounds",
+        type=int,
+        default=10,
+        help="Round ceiling (overrides campaign.json::optimization.max_rounds for this sweep).",
+    )
+    p_time_to.add_argument(
+        "--max-spend",
+        dest="max_spend",
+        type=float,
+        default=None,
+        help="Halt when cumulative cycle spend (USD, optimizer + backend) ≥ this value.",
+    )
+    _add_sweep_l1_prompt_args(p_time_to, allow_multi=False)
+    _add_sweep_slice_args(p_time_to)
+    p_time_to.add_argument(
+        "--refresh-rates",
+        dest="refresh_rates",
+        action="store_true",
+        help="Force-refetch the LLM provider rate table (same semantics as ``optimize --refresh-rates``).",
+    )
+
+    # round1 -----------------------------------------------------------------
+    p_round1 = sweep_sub.add_parser(
+        "round1",
+        help="Run one scored round on a panel of `--panel-size` candidates; "
+        "record accuracy + parse-fail + entropy + cost.",
+    )
+    p_round1.add_argument(
+        "--panel-size",
+        dest="panel_size",
+        type=int,
+        default=6,
+        help="Number of candidates to generate (overrides campaign.json::optimization.n_variants).",
+    )
+    _add_sweep_l1_prompt_args(p_round1)
+    _add_sweep_slice_args(p_round1)
+    p_round1.add_argument(
+        "--refresh-rates",
+        dest="refresh_rates",
+        action="store_true",
+        help="Force-refetch the LLM provider rate table.",
+    )
+
+    # round2 -----------------------------------------------------------------
+    p_round2 = sweep_sub.add_parser(
+        "round2",
+        help="Run two scored rounds — round1 + one more. Records round1/round2 "
+        "accuracy and round2_lift.",
+    )
+    p_round2.add_argument(
+        "--panel-size",
+        dest="panel_size",
+        type=int,
+        default=6,
+        help="Candidates per round (overrides campaign.json::optimization.n_variants).",
+    )
+    p_round2.add_argument(
+        "--from-sweep",
+        dest="from_sweep",
+        default=None,
+        help="Sweep id of a prior round1 sweep. Reads its top-K variants by "
+        "round1_accuracy, re-runs each with 2 rounds (round1 + one more), "
+        "and anchors round2_lift against each variant's prior round1.",
+    )
+    p_round2.add_argument(
+        "--top",
+        dest="top_k",
+        type=int,
+        default=3,
+        help="With --from-sweep: number of top-K variants to re-run (default 3).",
+    )
+    _add_sweep_l1_prompt_args(p_round2)
+    _add_sweep_slice_args(p_round2)
+    p_round2.add_argument(
+        "--refresh-rates",
+        dest="refresh_rates",
+        action="store_true",
+        help="Force-refetch the LLM provider rate table.",
+    )
+
+    # rank -------------------------------------------------------------------
+    p_rank = sweep_sub.add_parser(
+        "rank",
+        help="Read sweep results from archive/sweeps/ and print a sorted table. "
+        "Pure read — does not run optimize.",
+    )
+    p_rank.add_argument(
+        "--by",
+        dest="rank_by",
+        default="final_accuracy",
+        help="Column to sort by: any field in the result JSON shape, or the "
+        "derived 'cost_per_lift'. Default: final_accuracy.",
+    )
+    p_rank.add_argument(
+        "--dataset",
+        dest="dataset",
+        default=None,
+        help="Filter to one dataset (matches result.dataset). Omit for all datasets.",
+    )
+    p_rank.add_argument(
+        "--verb",
+        dest="filter_verb",
+        default=None,
+        help="Filter to one verb (time-to, round1, round2). Omit for all.",
+    )
+    p_rank.add_argument(
+        "--last",
+        dest="last",
+        type=int,
+        default=10,
+        help="Show the most recent N rows after sort (default 10).",
+    )
+    p_rank.add_argument(
+        "--ascending",
+        dest="ascending",
+        action="store_true",
+        help="Sort ascending (default: descending — best first).",
+    )
+
+
 def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
     """Cycle list + PoBB knobs for ``compare``."""
     p_cmp.add_argument(
@@ -162,6 +350,14 @@ def build_parser() -> argparse.ArgumentParser:
             "Each cycle's index.json::final.winner_pipeline_params is one arm; "
             "under-measured arms get one extra score per round until a decisive "
             "P(best) emerges or the topup budget is exhausted.",
+        )
+    )
+    _add_sweep_args(
+        sub.add_parser(
+            "sweep",
+            help="M10 sweep-toolkit verbs — cheap-grade L1 meta-prompt edits. "
+            "Each verb wraps optimize with halt gates and persists one result "
+            "JSON; see docs/specs/m10-sweep-toolkit.md.",
         )
     )
 

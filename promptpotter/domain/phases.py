@@ -43,6 +43,8 @@ class StopReason(enum.StrEnum):
     HARD_CAP = "hard_cap_reached"
     SWEEP_COMPLETE = "sweep_complete"
     DIAG_COMPLETE = "diag_complete"
+    TARGET_HIT = "target_hit"
+    MAX_SPEND = "max_spend"
 
 
 class StopLoop(Exception):  # noqa: N818 — control-flow signal, not an error
