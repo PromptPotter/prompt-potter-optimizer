@@ -28,7 +28,7 @@ Symptom-first reference. Each entry: what you see → why it happens → what to
 - Each dataset's `reasoning_effort` default is tuned to keep both models clear of Groq's per-model output ceiling — `bbeh` ships `reasoning_effort: low` so `20b` doesn't burn its reasoning budget.
 - `max_tokens` is **never** set as a numeric default in any dataset's `pipeline.json` — provider ceiling applies. Raise it per-cycle via `campaign.json::pipeline_overrides`.
 - Target-layer model lives in `datasets/<name>/pipeline.json::llm_only.config` (and needs `provider` if not Groq); optimizer-layer model lives in `datasets/<name>/campaign.json::optimizer_llm`. They're independent.
-- Full per-dataset matrix: [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md).
+- Full per-dataset matrix: [`docs/operations/dataset-reasoning-matrix.md`](../operations/dataset-reasoning-matrix.md).
 
 ---
 

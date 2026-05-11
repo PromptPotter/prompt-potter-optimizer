@@ -42,7 +42,7 @@ Persistent configs decide behavior — the skill does not carry a parallel defau
 - BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
 - Active session: `.promptpotter/active_session.json` → `campaigns/{cycle_id}/index.json` + `dashboard.json`
 
-Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live in [`reference/dataset-reasoning-matrix.md`](reference/dataset-reasoning-matrix.md). **Groq daily-volume swap:** `openai/gpt-oss-120b` is the canonical model; during dev the operator may flip the `pipeline.json` `model` field to `openai/gpt-oss-20b` when 120b daily volume is exhausted. Treat the field as a live operator knob, not a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies; operators override per-cycle via `campaign.json::pipeline_overrides`.
+Per-dataset reasoning defaults (model + `reasoning_effort` + `max_tokens`) live in [`docs/operations/dataset-reasoning-matrix.md`](../../../docs/operations/dataset-reasoning-matrix.md). **Groq daily-volume swap:** `openai/gpt-oss-120b` is the canonical model; during dev the operator may flip the `pipeline.json` `model` field to `openai/gpt-oss-20b` when 120b daily volume is exhausted. Treat the field as a live operator knob, not a fixed default. `max_tokens` is never set numerically in node configs — provider ceiling applies; operators override per-cycle via `campaign.json::pipeline_overrides`.
 
 Read these. Don't recommend parameter tweaks unless the user asks. Don't classify data volume ("minimal"/"substantial") or propose leaderboard picks unbidden.
 

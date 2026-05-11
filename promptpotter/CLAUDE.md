@@ -4,6 +4,8 @@ This file covers the L1/L2/L3 **agent contracts** — what each layer reads, wri
 
 The optimizer is three nested generation loops. Each layer mutates with cause, never at random.
 
+**Origin = conservative baseline.** The dataset's per-node overlay (`datasets/{name}/pipeline.json::nodes.{name}.config`) must start at the floor of each tunable, not the centre — `reasoning_effort: "low"`, low `temperature`, minimal `thinking_budget`, no expensive system-prompt scaffolding. L1 expands upward from there when sibling-yield or stall evidence supports it. Starting with expanded-thinking / high-temperature defaults burns budget on round 0 and steals the headroom L1 is supposed to discover. Canonical per-dataset starting points + cost/stability observations live in [`docs/operations/dataset-reasoning-matrix.md`](../docs/operations/dataset-reasoning-matrix.md).
+
 The cycle has hardcoded stop conditions (e.g. `max_rounds`). On top of those, **the L2-layer and L3-layer may decide on their own to terminate the loop** — see below.
 
 ## L1-layer — l1_generate

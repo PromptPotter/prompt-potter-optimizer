@@ -21,8 +21,14 @@ export interface FileResponse {
   content: string;
 }
 
+// All reads are live (poll-driven). Pair with the server-side
+// ``Cache-Control: no-store`` header on ``/api/v1/*`` so neither layer
+// can serve a stale response — the webapp is a real-time view of disk,
+// not a cached copy.
 async function jget<T>(url: string, signal?: AbortSignal): Promise<T> {
-  const r = await fetch(url, signal ? { signal } : undefined);
+  const init: RequestInit = { cache: "no-store" };
+  if (signal) init.signal = signal;
+  const r = await fetch(url, init);
   if (!r.ok) throw new Error(`${r.status} ${url}`);
   return (await r.json()) as T;
 }

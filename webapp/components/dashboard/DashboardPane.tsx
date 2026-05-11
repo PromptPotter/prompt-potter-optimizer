@@ -108,6 +108,20 @@ export function DashboardPane() {
     };
   }, [cycleId]);
 
+  // Cycle change ⇒ clear per-cycle derived state. Without this, the
+  // ``lastRoundFetched`` guard below silently skips the new cycle's round
+  // file when its round number happens to match the prior cycle's, and the
+  // ``latestRound`` snapshot from the prior cycle stays on screen until a
+  // larger round number lands. The prev-prop pattern (React's documented
+  // "adjusting state when a prop changes" recipe) avoids a cascading
+  // render that ``setState`` in ``useEffect`` would cost.
+  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
+  if (cycleId !== prevCycleId) {
+    setPrevCycleId(cycleId);
+    setLatestRound(null);
+    setLastRoundFetched(-1);
+  }
+
   // Round-based panels: fetch the most recent round JSON when dash.round bumps.
   // `dash.round` is the canonical round number (0 = origin, 1..N = L1) —
   // matches `rounds/round_NNNN.json` directly. No arithmetic.

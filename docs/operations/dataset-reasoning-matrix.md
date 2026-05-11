@@ -4,7 +4,7 @@ Single canonical view of the model + reasoning_effort + max_tokens defaults ship
 
 | Dataset | model (default) | `reasoning_effort` | `max_tokens` | Notes |
 |---|---|---|---|---|
-| `aime_2025` | `openai/gpt-oss-120b` | `high` | absent | Competition math; needs deep reasoning. High effort is load-bearing. |
+| `aime_2025` | `google/gemini-2.5-flash` (OpenRouter) | `low` | absent | Competition math. Was `openai/gpt-oss-120b` @ `high` on Groq; swapped after Groq daily quota hit, then mistral-small-3.2-24b proved unstable, settled on Gemini Flash. **Per-call cost ran high even at `reasoning_effort: low`** (measured 2026-05-11) — watch and consider a cheaper alternative if the pattern persists across rounds. |
 | `gsm8k` | `openai/gpt-oss-120b` | `medium` | absent | Grade-school math word problems. Medium reasoning is enough. |
 | `hotpotqa` | `openai/gpt-oss-120b` | `medium` | absent | Multi-hop QA. Medium reasoning. |
 | `bbeh` | `openai/gpt-oss-20b` *(prod: 120b — see below)* | `low` | absent | "Big-Bench Extra Hard" puzzles. `low` is intentional — see Groq ceiling note below. |

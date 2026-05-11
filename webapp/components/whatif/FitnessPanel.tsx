@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useMemo, useState } from "react";
 import { TERMS } from "@/lib/terms";
-import { WHATIF_INLINE_META, buildRows, whatifIdentifiersInFormula, type Row } from "./meta";
+import { WHATIF_INLINE_META, buildRows, setsEqual, whatifIdentifiersInFormula, type Row } from "./meta";
 import { whatifIconFor } from "./icons";
 import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
@@ -118,11 +118,19 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
 
   // ── 2. Historical rounds — round_NNNN.json files on disk
   const [history, setHistory] = useState<HistoricalRound[]>([]);
+  // Cycle change ⇒ clear bars immediately so the prior cycle's history
+  // can't linger on-screen during the new fetch. Without this, switching
+  // cycles (or resume divergence minting a sibling) shows ghost bars
+  // until the new listing resolves. The prev-prop pattern is React's
+  // documented recipe for resetting state on a prop change without the
+  // cascading-render cost of ``setState`` in ``useEffect``.
+  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
+  if (cycleId !== prevCycleId) {
+    setPrevCycleId(cycleId);
+    setHistory([]);
+  }
   useEffect(() => {
-    if (!cycleId) {
-      setHistory([]);
-      return;
-    }
+    if (!cycleId) return;
     let cancelled = false;
     (async () => {
       try {
@@ -179,18 +187,27 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
   }, [isPrestaging, realApplicable, meta]);
 
   const inActive = useMemo(() => {
+    let parsed: Set<string> | null = null;
     const top = (dash as { composite_fitness_formula?: string | null } | null)?.composite_fitness_formula;
-    if (top) return whatifIdentifiersInFormula(top);
-    for (const c of inflightCandidates) {
-      const f = (c.stats as { composite_fitness_formula?: string | null } | undefined)?.composite_fitness_formula;
-      if (f) return whatifIdentifiersInFormula(f);
+    if (top) {
+      parsed = whatifIdentifiersInFormula(top);
+    } else {
+      for (const c of inflightCandidates) {
+        const f = (c.stats as { composite_fitness_formula?: string | null } | undefined)?.composite_fitness_formula;
+        if (f) { parsed = whatifIdentifiersInFormula(f); break; }
+      }
     }
-    const evalKeys = new Set<string>();
-    for (const c of inflightCandidates) {
-      for (const k of Object.keys(c.stats?.evaluators ?? {})) evalKeys.add(k);
+    if (parsed == null) {
+      parsed = new Set<string>();
+      for (const c of inflightCandidates) {
+        for (const k of Object.keys(c.stats?.evaluators ?? {})) parsed.add(k);
+      }
     }
-    return evalKeys;
-  }, [dash, inflightCandidates]);
+    // Drop phantom tokens (`min`, `weight`, …) parsed from formula arithmetic so the bars-memo equality short-circuit is honest.
+    const out = new Set<string>();
+    for (const k of parsed) if (viewApplicable.has(k)) out.add(k);
+    return out;
+  }, [dash, inflightCandidates, viewApplicable]);
 
   const rows = useMemo(() => {
     const built = isPrestaging
@@ -256,6 +273,8 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
   //   [origin] + [historical round candidates...] + [in-flight current round]
   const bars: BarSlot[] = useMemo(() => {
     const out: BarSlot[] = [];
+    // When selected matches the formula's evaluators, reuse the backend's composite byte-for-byte — recomputing as a mean drifts by float ε and can't represent non-mean formulas.
+    const useComposite = setsEqual(selected, inActive);
 
     // Origin — take from any round file (they all carry origin_accuracy)
     // or fall back to the dash field. No evaluator breakdown for origin.
@@ -291,7 +310,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
           label: c.label || candidateLabel(roundNum, i),
           accuracy: acc,
           composite: comp,
-          whatif: correctedFromEvaluators(ev, selected, rows),
+          whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
           started: acc != null || comp != null || Object.keys(ev).length > 0,
         });
       });
@@ -317,7 +336,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
           label: c.label || candidateLabel(currentRound, i),
           accuracy: acc,
           composite: comp,
-          whatif: correctedFromEvaluators(ev, selected, rows),
+          whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
           started:
             (c.samples?.length ?? 0) > 0 ||
             typeof c.stats?.accuracy === "number" ||
@@ -328,7 +347,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
     }
 
     return out;
-  }, [dash, history, inflightCandidates, selected, rows, currentRound]);
+  }, [dash, history, inflightCandidates, selected, rows, currentRound, inActive]);
 
   // Rank summary (only rendered when What-If is open) — now spans every bar
   // including origin and historical rounds.

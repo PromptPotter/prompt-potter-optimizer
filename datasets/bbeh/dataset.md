@@ -42,7 +42,7 @@ string equality. Registered in
   is intentional: it keeps Groq's per-model output ceiling (~2048 on `gpt-oss-20b`)
   from being consumed by the hidden reasoning trace before any visible token emerges.
   See `task_description.md` for the trap and
-  [`.claude/skills/potter-run/reference/dataset-reasoning-matrix.md`](../../.claude/skills/potter-run/reference/dataset-reasoning-matrix.md)
+  [`docs/operations/dataset-reasoning-matrix.md`](../../docs/operations/dataset-reasoning-matrix.md)
   for the per-dataset matrix.
 - Optimization target: prompt template, `reasoning_effort`, `temperature`,
   `max_tokens`. The optimizer can re-discover higher reasoning settings if they pay.

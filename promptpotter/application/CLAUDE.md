@@ -37,3 +37,7 @@ intelligence; intelligence does not depend on either.
 - Escalation flows via return value (`QueryLoopResult.escalation_signal`),
   not exception.
 - New optimizer state MUST flow through `OptSearchPoint` — no sidecar state.
+- Backend tunables ride the per-dataset overlay
+  (`datasets/{name}/pipeline.json::nodes.{name}.config`) merged by
+  `configure_pipeline()` (`config.py:301`). Never reconfigure a backend
+  repo to switch model/provider — see root `CLAUDE.md`.

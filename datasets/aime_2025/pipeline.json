@@ -12,8 +12,8 @@
       "node_role": "ranker",
       "description": "Direct LLM generation on the TermNorm backend. No dataset-side max_tokens cap — provider ceiling applies; self-healing spots real truncations.",
       "config": {
-        "provider": "groq",
-        "model": "openai/gpt-oss-120b",
+        "provider": "openrouter",
+        "model": "google/gemini-2.5-flash",
         "temperature": 0.0,
         "reasoning_effort": "low"
       },

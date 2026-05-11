@@ -13,7 +13,7 @@
 
 ## What this is
 
-PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. The backend declares tunable params via `GET /pipeline`; the optimizer runs critique-guided generate→score→critique with PoBB elimination (ε=0.05, n_min=4), cross-run memory, and self-healing rails. Python 3.13+, hexagonal. **Orchestration is the product — backends are pluggable.** TermNorm is the only registered connector today (`promptpotter/connectors/termnorm.py` — bundles wire adapter, session lifecycle, and experiment-data extraction under one `Connector` shape); BBEH is the headline benchmark.
+PromptPotter is **LLM-driven program evolution** for prompts and pipeline params. The backend declares tunable params via `GET /pipeline`; the optimizer runs critique-guided generate→score→critique with PoBB elimination (ε=0.05, n_min=4), cross-run memory, and self-healing rails. Python 3.13+, hexagonal. **Orchestration is the product — backends are pluggable and read-only.** Node tunables ride a per-call overlay (`datasets/{name}/pipeline.json::nodes.{name}.config`); we never edit a backend's static config, even one we own. TermNorm is the only registered connector today (`promptpotter/connectors/termnorm.py` — bundles wire adapter, session lifecycle, and experiment-data extraction under one `Connector` shape); BBEH is the headline benchmark.
 
 The user is the operator. The project file tree IS the dashboard, plus a **read-only operator dashboard** at `/ui` (Next.js project at `webapp/`, static export at `webapp/out/`) that polls the active cycle's `dashboard.json` every 2 s — used in concert with the file tree, not in place of it. Full M12 webapp (control plane, monitoring, multi-cycle) is the headline milestone. Onboarding: install → restart VS Code → `/potter-run` (downloads TermNorm, starts its `.bat`, converts datasets, prompts for API keys).
 
@@ -97,7 +97,9 @@ Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **W
 
 ## Per-dataset configuration
 
-`datasets/{name}/`: `pipeline.json` (full pipeline + backend metadata), `campaign.json` (knobs, scoring formula, optimizer LLM), `task_description.md` (decomposed at `init` into `task_context`), `prompts/{node}.json`, `dataset.md`. **Configs are the source of truth.** No parallel default ladders elsewhere.
+`datasets/{name}/`: `pipeline.json` (full pipeline + backend metadata + per-dataset overlay), `campaign.json` (knobs, scoring formula, optimizer LLM), `task_description.md` (decomposed at `init` into `task_context`), `prompts/{node}.json`, `dataset.md`. **Configs are the source of truth.** No parallel default ladders elsewhere.
+
+**Backend overlay.** `nodes.{name}.config` in the dataset's `pipeline.json` is a sparse overlay merged onto each wire payload (`load_dataset_node_overlay` → `configure_pipeline` at `application/config.py:301`). It's the sole route for changing a backend tunable — model, provider, temperature, anything in the node's `optimizer.param_keys`. AIME's overlay routes through OpenRouter+Mistral while the backend default stays Groq+gpt-oss. The sibling `llm_defaults` is the `GET /pipeline` snapshot — keep it accurate, don't repurpose it. **Never edit the backend repo to achieve a switch** (even co-owned ones like TermNorm at `C:\Users\dsacc\OfficeAddinApps\TermNorm-excel\backend-api`); if a needed key isn't in the dataset's `param_keys`, extend the snapshot, not the backend.
 
 ## Conventions (non-derivable)
 
