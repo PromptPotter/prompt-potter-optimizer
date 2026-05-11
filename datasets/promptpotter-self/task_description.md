@@ -1,43 +1,45 @@
-# Task: optimize PromptPotter's meta-prompts
+# Task: evolve PromptPotter's own meta-prompts
 
-## What the outer cycle does
+Goal: outer cycle mutates inner cycle's L1 / L1_CRITIQUE / L2 / L3
+meta-prompt template fields (6 per node × 4 nodes = 24 fields) so inner
+cycles converge faster / further on GSM8K-small as proxy benchmark.
 
-Mutate the inner PromptPotter cycle's L1 / L1_CRITIQUE / L2 / L3 meta-prompt
-template fields (six-field PromptTemplate scheme) to improve inner-cycle
-optimization performance on the GSM8K-small proxy benchmark.
+## Fitness
 
-## What "good" looks like
+Composite formula in ``campaign.json::scoring`` — three proxies:
 
-A candidate meta-prompt set is better than baseline when its inner cycle
-shows higher delta-from-baseline accuracy after N rounds, hits the target
-score in fewer rounds, or both. The composite scoring formula in
-``campaign.json::scoring`` weights these three proxies in concert:
+- ``first_round_delta`` — inner-round-1 score minus inner baseline (cheap signal)
+- ``after_N_rounds_delta`` — inner-round-N score minus baseline (workhorse)
+- ``rounds_to_N`` — rounds to hit ``inner_tasks.json::target_score``, capped at ``max_inner_rounds``
 
-- ``first_round_delta`` — score after inner round 1 minus inner baseline.
-  Cheapest signal, useful for quick iteration on outer hyperparameters.
-- ``after_N_rounds_delta`` — score after N inner rounds minus inner
-  baseline. The workhorse metric; captures improvement rate.
-- ``rounds_to_N`` — number of rounds to reach the inner target score
-  (``inner_tasks.json::target_score``); times out at ``max_inner_rounds``.
+Better = higher delta after N AND/OR fewer rounds to target.
 
-## Constraints
+## Mutation surface
 
-- The mutation surface is per-meta-prompt template fields (``persona``,
-  ``task_intent``, ``problem_description``, ``instruction``,
-  ``thinking_style``, ``answer_format``) — these are the keys exposed in
-  ``pipeline.json::nodes.{node}.optimizer.param_keys``.
-- The four meta-prompt nodes (``l1_generate``, ``l1_critique``,
-  ``l2_context``, ``l3_plan``) share the six-field scheme; outer L1 may
-  mutate any subset per round.
-- The inner cycle's ``pipeline_params`` and inner ``optimizer_llm``
-  config are **not** the outer's mutation surface — those belong to the
-  inner cycle. Outer mutations stay at the meta-prompt template-field
-  level.
+- Per-node six-field PromptTemplate scheme: ``persona``, ``task_intent``,
+  ``problem_description``, ``instruction``, ``thinking_style``, ``answer_format``
+- Exposed at ``pipeline.json::nodes.{node}.optimizer.param_keys``
+- Four nodes: ``l1_generate``, ``l1_critique``, ``l2_context``, ``l3_plan``.
+  Outer L1 may mutate any subset per round
+- Out of scope (belongs to inner cycle): inner ``pipeline_params``,
+  inner ``optimizer_llm``
 
-## Why this dataset is "small"
+## Intuition (don't bake in — algo should rediscover)
 
-The GSM8K subset is tiny (``n_samples_per_inner_round: 10``,
-``max_inner_rounds: 3``) so each outer "sample" runs an inner cycle in
-order-of-minutes rather than order-of-hours. The trade-off is signal
-quality — calibration runs should expand sample count before publication
-runs. See ``docs/specs/m12-promptpotter-as-connector.md`` § Cost realism.
+- Dimensionality is non-uniform across the 24 fields:
+  - bool / categorical slot → doubles state space
+  - free-prose slot (``instruction``, ``thinking_style``, ...) →
+    explodes it → more signal AND more noise per round
+- TermNorm-side analogy: structured-output schema slots tend to be both
+  highest-leverage AND easiest-to-break (cf. ``entity_profile`` JSON
+  schema there). Expect similar shape on this surface
+- Corollary: L2 / L3 shouldn't read early variance on a high-dim slot
+  as "axis unstable, avoid" — that's the slot doing what high-dim
+  slots do
+
+## Proxy realism
+
+GSM8K-small (``n_samples_per_inner_round: 10``, ``max_inner_rounds: 3``)
+keeps each outer "sample" at order-of-minutes rather than -hours. Trade-off
+is signal quality — bump sample count before publication runs. See
+``docs/specs/m12-promptpotter-as-connector.md`` § Cost realism.

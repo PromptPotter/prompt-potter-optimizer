@@ -85,6 +85,7 @@ data/
 !.claude/skills/
 .claude/skills/*
 !.claude/skills/potter-run/
+!.claude/skills/potter-l1-meta-campaign/
 !.claude/skills/potter-review/
 tools
 
