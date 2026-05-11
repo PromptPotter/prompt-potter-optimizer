@@ -111,8 +111,17 @@ def _persist_round(
     trial_dict: dict,
     round_num: int,
     session: Session,
+    *,
+    is_probe: bool = False,
 ) -> None:
-    """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder."""
+    """Flush decisions, mirror to ledger, write round_data + log.md/review.md, flush recorder.
+
+    ``is_probe`` rides the ``round:complete`` payload so the reducer side
+    (``EscalationState.fold``) can ignore probe rounds without the writer
+    omitting the emit. The emit itself is unconditional — every round that
+    runs to completion lands on the ledger, per §0's "ledger is the sole
+    persistence ingress; display subscribes to the ledger".
+    """
     flushed: list[ResumeCheckpointRecord] = []
     if cycle.pending_decisions:
         flushed = list(cycle.pending_decisions)
@@ -133,6 +142,7 @@ def _persist_round(
                     "composite_fitness": round_result.composite_fitness,
                     "improved": round_result.improved,
                     "label": round_result.label,
+                    "is_probe": is_probe,
                 },
             )
         )
@@ -166,6 +176,38 @@ def _count_positive_yield_axes(cycle: Cycle) -> int | None:
     return sum(1 for r in cycle.axes.axis_rankings() if r.effect_size > NOISE_THRESHOLD)
 
 
+async def _close_round(
+    cycle: Cycle,
+    round_result: RoundResult,
+    trial_dict: dict,
+    round_num: int,
+    session: Session,
+    cb: RunCallbacks,
+    *,
+    is_probe: bool = False,
+) -> None:
+    """Round-completion bookkeeping that EVERY completed round runs.
+
+    Emits the ledger event trio's tail (``round:display`` via
+    ``cb.on_round_complete`` and ``round:complete`` via ``_persist_round``),
+    writes ``round_NNNN.json``, refreshes axis memory. Independent of
+    whether the round feeds escalation — that decision is the caller's.
+    Per §0 of ``docs/architecture.md``: the ledger is the sole persistence
+    ingress and display projections subscribe to it; bypassing this seam
+    collapses display + audit for the round.
+    """
+    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
+    _persist_round(cycle, round_result, trial_dict, round_num, session, is_probe=is_probe)
+    if cycle.axes and session.store and session.backend_id:
+        cycle.axes.refresh(
+            session.store,
+            session.backend_id,
+            scorer=session.scoring.scorer,
+            scorer_id=session.scoring.scorer_id,
+            scorer_formula=session.scoring.scorer_formula,
+        )
+
+
 async def _post_round(
     cycle: Cycle,
     round_result: RoundResult,
@@ -176,11 +218,12 @@ async def _post_round(
     dataset: list[Sample],
     cb: RunCallbacks,
 ) -> None:
-    """Normal-path bookkeeping after a non-escalation round. Raises StopLoop on stop condition.
+    """Clean-round escalation observation. Raises StopLoop on stop condition.
 
     The state machine observes the round outcome up front (bumping L1 stall,
-    deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function persists
-    the post-observe state and dispatches the chosen action.
+    deciding CONTINUE / FIRE_L2 / STOP_*); the rest of this function closes
+    the round (via ``_close_round``) and dispatches the chosen action. Probe
+    rounds bypass observation and call ``_close_round`` directly.
     """
     axes_with_positive_yield = _count_positive_yield_axes(cycle)
     event = cycle.escalation.observe_round(
@@ -191,18 +234,8 @@ async def _post_round(
         axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
     )
-    cb.on_round_complete(round_result, cycle.escalation.l1_stall_count)
 
-    _persist_round(cycle, round_result, trial_dict, round_num, session)
-
-    if cycle.axes and session.store and session.backend_id:
-        cycle.axes.refresh(
-            session.store,
-            session.backend_id,
-            scorer=session.scoring.scorer,
-            scorer_id=session.scoring.scorer_id,
-            scorer_formula=session.scoring.scorer_formula,
-        )
+    await _close_round(cycle, round_result, trial_dict, round_num, session, cb)
 
     if event.stop_reason is not None:
         raise StopLoop(event.stop_reason)
@@ -358,6 +391,9 @@ async def _run_round_loop(
 
             if is_probe:
                 cycle.probe_next_round = False
+                await _close_round(
+                    cycle, round_result, trial_dict, round_num, session, cb, is_probe=True
+                )
                 if opt.enable_l2:
                     await _escalate_or_stop(cycle, config, session, round_num, cb)
                 round_num += 1
@@ -376,6 +412,7 @@ async def _run_round_loop(
                     degraded_rate=signal.check_result.get("degraded_rate"),
                     warning_types=signal.check_result.get("warning_types"),
                 )
+                await _close_round(cycle, round_result, trial_dict, round_num, session, cb)
                 if signal.routes_to_optimizer and opt.enable_l2:
                     await _escalate_or_stop(cycle, config, session, round_num, cb)
                 elif signal.is_abort:

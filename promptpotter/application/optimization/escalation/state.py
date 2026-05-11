@@ -282,6 +282,10 @@ class EscalationState:
         if record.phase == "round" and record.event == "complete":
             # Audit emit only: display fires under event="display" and is
             # never folded. The lean scalar payload is the SoT for resume.
+            # ``is_probe`` rounds emit ``complete`` so display + audit see
+            # them, but they are not L1 progress evidence — skip.
+            if record.payload.get("is_probe"):
+                return
             self._l1_stall_count = (
                 0 if bool(record.payload["improved"]) else self._l1_stall_count + 1
             )

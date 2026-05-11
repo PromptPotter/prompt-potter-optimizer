@@ -1241,3 +1241,71 @@ def test_untrusted_signals_are_fenced_trusted_signals_are_not() -> None:
     assert "UNTRUSTED" not in plan_text
     tc_text = DispatchHub.render("task_context", bundle)
     assert "UNTRUSTED" not in tc_text
+
+
+# ===========================================================================
+# Round-event trio — every completed round emits enter + complete + display
+# ===========================================================================
+#
+# §0 of docs/architecture.md pins: "Display — ledger subscribers; ledger is
+# the sole persistence ingress." If a code path inside ``_run_round_loop``
+# bypasses the round-completion seam, the round becomes invisible to all
+# display projections (LiveDisplay, LiveDashboardView) and the audit trail
+# at the same time. The probe-round + escalation-signal branches were the
+# specific bug; the seam ``_close_round`` is the structural fence.
+
+
+def test_run_round_loop_continue_paths_route_through_close_round() -> None:
+    """Every ``continue`` inside the round-loop ``while`` calls ``_close_round``.
+
+    ``_close_round`` emits the trio's tail (``round:display`` via
+    ``cb.on_round_complete`` and ``round:complete`` via ``_persist_round``)
+    and is the sole seam where rounds become visible to display + audit.
+    A branch that issues ``round:enter`` (via ``cb.set_round`` /
+    ``ledger.append(PhaseRecord(...event="enter"...))``) and then
+    ``continue``s without first calling ``_close_round`` collapses §0's
+    "display is a ledger subscriber" invariant for that round.
+    ``_post_round`` is sanctioned because it calls ``_close_round`` itself.
+    """
+    runner_src = (ROOT / "application" / "runner.py").read_text(encoding="utf-8")
+    tree = ast.parse(runner_src)
+
+    fn = next(
+        n
+        for n in ast.walk(tree)
+        if isinstance(n, ast.AsyncFunctionDef) and n.name == "_run_round_loop"
+    )
+
+    # The round-loop is the only ``while`` directly inside the try/while
+    # nesting at function-body scope.
+    while_nodes = [n for n in ast.walk(fn) if isinstance(n, ast.While)]
+    assert len(while_nodes) == 1, "expected one while-loop in _run_round_loop"
+    round_loop = while_nodes[0]
+
+    sanctioned = {"_close_round", "_post_round"}
+
+    def _calls_sanctioned(stmt: ast.AST) -> bool:
+        for node in ast.walk(stmt):
+            if isinstance(node, ast.Call):
+                func = node.func
+                if isinstance(func, ast.Name) and func.id in sanctioned:
+                    return True
+        return False
+
+    # Walk top-level statements in the while body; each ``if`` whose body
+    # ends with ``continue`` is a round-loop branch that closes the round.
+    offenders: list[str] = []
+    for stmt in round_loop.body:
+        if not isinstance(stmt, ast.If):
+            continue
+        if not any(isinstance(s, ast.Continue) for s in stmt.body):
+            continue
+        if not _calls_sanctioned(stmt):
+            offenders.append(
+                f"line {stmt.lineno}: ``continue`` without _close_round/_post_round call"
+            )
+
+    assert not offenders, (
+        "round-loop branches must route through _close_round before continuing:\n  "
+        + "\n  ".join(offenders)
+    )
