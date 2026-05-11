@@ -44,7 +44,18 @@ __all__ = [
 
 
 def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Static l1_generate envelope + per-node param_allowed_values grafted as enums."""
+    """Static l1_generate envelope + per-node param_allowed_values grafted as enums.
+
+    For each ``param_key``:
+    - if ``param_allowed_values`` carries an enum → ``{"type": "string", "enum": [...]}``
+    - else if ``param_types`` declares a type → ``{"type": <json-type>}``
+    - else → ``{}`` (unconstrained — dataset overlay gap)
+
+    The type emission is load-bearing: without it, the L1 LLM is free to
+    emit ``"0.2"`` for ``temperature`` (string instead of number), which
+    propagates through the wire payload to the upstream provider and
+    triggers a 4xx that PromptPotter has to skip.
+    """
     base_node = get_optimizer_schema().get_node("l1_generate")
     if base_node is None or base_node.output_schema is None:
         raise RuntimeError(
@@ -62,8 +73,11 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
         param_props: dict[str, dict] = {}
         for param in sorted(node.param_keys):
             allowed = node.param_allowed_values.get(param)
+            declared_type = node.param_types.get(param)
             if allowed:
                 param_props[param] = {"type": "string", "enum": list(allowed)}
+            elif declared_type:
+                param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
         override_properties[node.name] = {
@@ -75,13 +89,33 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
     return schema
 
 
+_JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {
+    "string": (str,),
+    "integer": (int,),
+    "number": (int, float),
+    "boolean": (bool,),
+}
+
+
+def _matches_declared_type(value: Any, declared: str) -> bool:
+    """JSON-Schema-flavoured isinstance: booleans are not numbers."""
+    py_types = _JSON_TYPE_TO_PY.get(declared)
+    if py_types is None:
+        return True  # unknown declared type → no check (forward-compat)
+    # JSON Schema: booleans are NOT integers/numbers, even though Python
+    # says `isinstance(True, int)`. Treat bool as exclusive to "boolean".
+    if isinstance(value, bool):
+        return declared == "boolean"
+    return isinstance(value, py_types)
+
+
 def validate_overrides(
     pipeline_params_override: dict[str, dict],
     pipeline_schema: PipelineSchema,
     *,
     forbidden_axes_strict: bool = True,
 ) -> list[ValidationFailure]:
-    """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0.
+    """Validate overrides vs available_models + param_allowed_values + param_types; failures drive synthetic-0.
 
     When ``forbidden_axes_strict`` is on, any touch of
     ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``) is rejected outright,
@@ -89,6 +123,12 @@ def validate_overrides(
     — these axes are operator-fixed at the dataset overlay and not on L1's
     surface at all. Off-by-flag enables ablation runs that intentionally
     sweep model identity.
+
+    Type mismatch (``"0.2"`` proposed for a ``number``-declared param) is
+    rejected with ``reason="type_mismatch"``. This catches the case the
+    JSON-schema ``type`` constraint in :func:`build_l1_output_schema` is
+    meant to prevent — both layers run because not every provider/SDK
+    enforces structured-output schemas with full fidelity.
     """
     from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
 
@@ -99,6 +139,7 @@ def validate_overrides(
             continue
         node = pipeline_schema.get_node(node_name)
         node_allowed = (node.param_allowed_values if node else None) or {}
+        node_types = (node.param_types if node else None) or {}
         for param, value in node_params.items():
             if forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS:
                 failures.append(
@@ -107,6 +148,21 @@ def validate_overrides(
                         value=str(value),
                         allowed=[],
                         reason="forbidden_axis",
+                    )
+                )
+                continue
+            declared_type = node_types.get(param)
+            if (
+                declared_type
+                and value is not None
+                and not _matches_declared_type(value, declared_type)
+            ):
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{node_name}.{param}",
+                        value=f"{value!r} ({type(value).__name__})",
+                        allowed=[declared_type],
+                        reason="type_mismatch",
                     )
                 )
                 continue

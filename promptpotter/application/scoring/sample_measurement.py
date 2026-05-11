@@ -184,19 +184,59 @@ def _error_result(
     )
 
 
+def _extract_upstream_detail(exc: httpx.HTTPStatusError) -> str:
+    """Pull the structured upstream summary out of a backend error response.
+
+    Backends that propagate provider 4xx errors send a JSON body of shape::
+
+        {"detail": {"upstream_status": 400, "upstream_provider": "openrouter",
+                    "upstream_model": "...", "upstream_message": "...",
+                    "error_code": "..."}}
+
+    (FastAPI's ``HTTPException(detail=dict)`` serializes as ``detail`` key.)
+    When that shape is present, return a compact one-liner — the operator
+    needs to see what the upstream provider actually complained about (e.g.
+    ``"temperature: Invalid input: expected number, received string"``)
+    instead of a bare ``'502 Bad Gateway'``. Falls back to a truncated body
+    when the response isn't structured.
+    """
+    body_text = (exc.response.text or "").strip()
+    if not body_text:
+        return ""
+    try:
+        body = exc.response.json()
+    except Exception:
+        return body_text[:300]
+    detail = body.get("detail") if isinstance(body, dict) else None
+    if isinstance(detail, dict):
+        provider = detail.get("upstream_provider") or "?"
+        model = detail.get("upstream_model") or "?"
+        msg = detail.get("upstream_message") or detail.get("error_code") or "?"
+        ustatus = detail.get("upstream_status")
+        prefix = f"upstream={provider}:{model}"
+        if ustatus is not None:
+            prefix = f"{prefix} {ustatus}"
+        return f"{prefix} :: {msg}"
+    if isinstance(detail, str):
+        return detail[:300]
+    return body_text[:300]
+
+
 def _classify_http_error(exc: httpx.HTTPStatusError) -> str:
     """Classify an HTTP error into a tagged message."""
     code = exc.response.status_code
+    upstream = _extract_upstream_detail(exc)
     if code == 429:
         retry_after = exc.response.headers.get("Retry-After", "?")
-        body = (exc.response.text or "").strip()[:300]
         return (
             f"[{ErrorCategory.CLIENT}] HTTP 429 rate-limited "
-            f"(Retry-After={retry_after}s, attempts exhausted): {body!r}"
+            f"(Retry-After={retry_after}s, attempts exhausted): {upstream!r}"
         )
     if 400 <= code < 500:
-        return f"[{ErrorCategory.CLIENT}] HTTP {code}: {exc} — Check pipeline configuration and request parameters."
-    return f"[{ErrorCategory.SERVER}] HTTP {code}: {exc} — Backend may be experiencing issues."
+        tail = f" :: {upstream}" if upstream else ""
+        return f"[{ErrorCategory.CLIENT}] HTTP {code} — caller config rejected by backend{tail}"
+    tail = f" :: {upstream}" if upstream else ""
+    return f"[{ErrorCategory.SERVER}] HTTP {code} — backend transient error{tail}"
 
 
 async def measure_sample(

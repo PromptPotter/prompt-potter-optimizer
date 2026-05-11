@@ -27,7 +27,7 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.application.scoring.metrics import count_degraded_samples
 from promptpotter.domain.analysis import EscalationSignal, EscalationTarget
 from promptpotter.domain.validators import StopRule
-from promptpotter.shared.errors import is_error_result
+from promptpotter.shared.errors import ErrorCategory, error_category, is_error_result
 from promptpotter.shared.statistics import pobb_should_stop, posterior_best_probabilities
 
 if TYPE_CHECKING:
@@ -123,6 +123,13 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     and rate-based elimination, but does not fast-path eliminate a
     candidate at n=1. Truncation is provider-ceiling-driven and tends to
     recur on the same sample independent of the prompt.
+
+    Backend HTTP 4xx errors (``[CLIENT]``-tagged) are deterministic
+    candidate-config failures — the caller sent a wire payload the
+    upstream provider rejected (wrong type, unknown enum, missing
+    required field). These route to ``fatal_codes`` so DegradationCheck's
+    one-sighting fast-path eliminates the candidate immediately instead
+    of retrying every remaining sample with the same poisonous config.
     """
     advisories = _collect_advisories(result)
     infra: set[str] = set()
@@ -140,6 +147,9 @@ def classify_result(result: Mapping[str, Any]) -> ResultClassification:
     for adv in advisories:
         if adv.endswith(":content_filtered"):
             fatals.add(adv)
+
+    if is_error_result(result) and error_category(result.get("error")) == ErrorCategory.CLIENT:
+        fatals.add("backend:client_error")
 
     return ResultClassification(
         advisory_codes=frozenset(advisories),

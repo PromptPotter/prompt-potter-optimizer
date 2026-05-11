@@ -13,6 +13,7 @@ from __future__ import annotations
 import logging
 from typing import Any
 
+from promptpotter.config.settings import WELL_KNOWN_PARAM_TYPES
 from promptpotter.domain.pipeline_schema import (
     NodeOutputSchema,
     NodePromptMeta,
@@ -89,6 +90,48 @@ def _extract_resolved_metadata(
     return metadata
 
 
+_PY_TO_JSON_TYPE: dict[type, str] = {
+    bool: "boolean",
+    int: "integer",
+    float: "number",
+    str: "string",
+}
+
+
+def _infer_param_types(opt: dict[str, Any], node_config: dict[str, Any]) -> dict[str, str]:
+    """Resolve JSON-schema ``param_types`` for an optimizer node.
+
+    Three-tier resolution, highest-precedence first:
+
+    1. Explicit ``optimizer.param_types`` on the dataset overlay (rare; only
+       needed for backend-specific params with no project-wide convention).
+    2. ``WELL_KNOWN_PARAM_TYPES`` registry — universal LLM-call params
+       (``temperature``, ``max_tokens``, ``model``, ``provider``,
+       ``reasoning_effort``, ...) plus the six-field PromptTemplate scheme.
+       This is where every common param resolves; dataset overlays do not
+       re-declare these.
+    3. Inference from the Python type of the param's default in
+       ``node.config`` (e.g. ``threshold: 70`` → ``"integer"``). Last-resort
+       for backend-specific params where the default carries the type.
+       Booleans are matched before ints because ``isinstance(True, int)`` is
+       True in Python — dict-iteration order in ``_PY_TO_JSON_TYPE`` matters.
+    """
+    declared: dict[str, str] = dict(opt.get("param_types", {}) or {})
+    for param in opt.get("param_keys", []) or []:
+        if param in declared:
+            continue
+        if param in WELL_KNOWN_PARAM_TYPES:
+            declared[param] = WELL_KNOWN_PARAM_TYPES[param]
+            continue
+        if param in node_config:
+            val = node_config[param]
+            for py_type, json_type in _PY_TO_JSON_TYPE.items():
+                if isinstance(val, py_type):
+                    declared[param] = json_type
+                    break
+    return declared
+
+
 def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
     """Parse a ``GET /pipeline`` JSON response into a PipelineSchema.
 
@@ -128,6 +171,7 @@ def parse_pipeline_response(data: dict[str, Any]) -> PipelineSchema:
             "param_keys": pk,
             "param_descriptions": opt.get("param_descriptions", {}),
             "param_allowed_values": opt.get("param_allowed_values", {}),
+            "param_types": _infer_param_types(opt, nc),
             "langfuse_type": opt.get("langfuse_type", "span"),
             "current_config": dict(nc),
         }

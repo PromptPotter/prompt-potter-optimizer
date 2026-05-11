@@ -78,6 +78,15 @@ class PipelineNode(BaseModel):
     # on structured-output generation, plus post-hoc ValidationFailure
     # attachment in ``validate_overrides`` (same path as ``model``).
     param_allowed_values: dict[str, list[str]] = Field(default_factory=dict)
+    # JSON-schema type per param ("number" | "integer" | "boolean" | "string").
+    # Drives the JSON-schema ``type`` constraint on L1-generate structured
+    # output AND post-hoc ``validate_overrides`` type checks. Without this,
+    # the L1 LLM is free to emit stringified numbers (``"0.2"`` for
+    # ``temperature``) which break downstream wire payloads. Enum-constrained
+    # params (in ``param_allowed_values``) override this — their type is
+    # always "string". A param missing from both maps gets an unconstrained
+    # schema slot, but that should be treated as a dataset-config gap.
+    param_types: dict[str, str] = Field(default_factory=dict)
     observation_name: str | None = None
     observation_mappings: list[ObservationMapping] = Field(default_factory=list)
     langfuse_type: str = "span"  # "generation" | "tool" | "retriever" | "span"

@@ -35,6 +35,33 @@ PROMPT_STRING_FIELDS: list[str] = [
 # task_context sub-fields that L1 may emit alongside prompt/node overrides.
 TASK_CONTEXT_OVERRIDES: frozenset[str] = frozenset({"upstream_context", "downstream_context"})
 
+# JSON-schema types for universal LLM-call params + the PromptTemplate scheme.
+# Used by the pipeline parser to populate ``PipelineNode.param_types`` without
+# requiring every dataset overlay to spell them out. Dataset overlays may add
+# backend-specific param types (e.g. ``threshold: integer`` on TermNorm's
+# fuzzy_matching node) via the node's ``optimizer.param_types`` block; those
+# override these defaults. Inference from ``node.config`` Python types is the
+# last-resort fallback after both.
+WELL_KNOWN_PARAM_TYPES: dict[str, str] = {
+    # Universal LLM-call params — same shape across every provider.
+    "temperature": "number",
+    "top_p": "number",
+    "max_tokens": "integer",
+    "max_completion_tokens": "integer",
+    "thinking_budget": "integer",
+    "seed": "integer",
+    "model": "string",
+    "provider": "string",
+    "reasoning_effort": "string",
+    # PromptTemplate scheme — six string fields render() assembles.
+    "persona": "string",
+    "task_intent": "string",
+    "problem_description": "string",
+    "instruction": "string",
+    "thinking_style": "string",
+    "answer_format": "string",
+}
+
 
 # Persistence versioning
 MEASUREMENTS_SCHEMA_VERSION = 1

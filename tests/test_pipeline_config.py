@@ -264,6 +264,7 @@ def _bbeh_schema() -> PipelineSchema:
                     "reasoning_effort": ["none", "default", "low", "medium", "high"],
                     "response_format": ["text", "json"],
                 },
+                param_types={"temperature": "number", "model": "string"},
             ),
         ],
     )
@@ -277,9 +278,15 @@ def test_parse_pipeline_response_threads_param_allowed_values():
             "nodes": {
                 "llm_only": {
                     "type": "generation",
-                    "config": {"reasoning_effort": "medium"},
+                    "config": {"reasoning_effort": "medium", "threshold": 70},
                     "optimizer": {
-                        "param_keys": ["reasoning_effort", "response_format"],
+                        "param_keys": [
+                            "reasoning_effort",
+                            "response_format",
+                            "temperature",
+                            "max_tokens",
+                            "threshold",
+                        ],
                         "param_allowed_values": {
                             "reasoning_effort": ["none", "low", "medium", "high"],
                             "response_format": ["text", "json"],
@@ -300,6 +307,14 @@ def test_parse_pipeline_response_threads_param_allowed_values():
         "high",
     ]
     assert node.param_allowed_values["response_format"] == ["text", "json"]
+    # WELL_KNOWN_PARAM_TYPES registry resolves universal LLM params
+    # without per-dataset declaration.
+    assert node.param_types["temperature"] == "number"
+    assert node.param_types["max_tokens"] == "integer"
+    assert node.param_types["reasoning_effort"] == "string"
+    # Backend-specific params (no registry entry) fall back to inference
+    # from the node.config default's Python type.
+    assert node.param_types["threshold"] == "integer"
 
 
 def test_validate_overrides_rejects_out_of_enum_reasoning_effort():
@@ -313,6 +328,27 @@ def test_validate_overrides_rejects_out_of_enum_reasoning_effort():
     assert failures[0].value == "minimal"
     assert failures[0].reason == "not_in_param_allowed_values"
     assert "medium" in failures[0].allowed
+
+
+def test_validate_overrides_rejects_stringified_number_for_typed_param():
+    """L1 emits temperature as JSON string "0.2" → catch before wire payload.
+
+    The bug this guards against: the L1 LLM emits ``{"temperature": "0.2"}``
+    (string instead of number), the value reaches the backend's LLM-call
+    layer as a string, the upstream provider rejects it with a 4xx, and the
+    candidate burns its scoring budget on a poisonous config. Type check
+    fires before the wire payload is built — synthetic-0 + L2 heal handle
+    the rest via the existing ValidationFailure path.
+    """
+    schema = _bbeh_schema()
+    failures = validate_overrides(
+        {"llm_only": {"temperature": "0.2"}},
+        schema,
+    )
+    assert len(failures) == 1
+    assert failures[0].axis == "llm_only.temperature"
+    assert failures[0].reason == "type_mismatch"
+    assert failures[0].allowed == ["number"]
 
 
 def test_validate_overrides_rejects_model_as_forbidden_axis_by_default():
@@ -351,6 +387,9 @@ def test_build_l1_output_schema_emits_enum_for_constrained_params():
         "enum": ["none", "default", "low", "medium", "high"],
     }
     assert llm_props["response_format"] == {"type": "string", "enum": ["text", "json"]}
+    # Unconstrained numeric param still carries a type so the L1 LLM cannot
+    # emit a stringified number ("0.2" instead of 0.2).
+    assert llm_props["temperature"] == {"type": "number"}
     assert "enum" not in llm_props["temperature"]
     assert variant_props["variant_name"] == {"type": "string"}
     assert out["strict"] is False
