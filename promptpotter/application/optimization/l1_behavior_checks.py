@@ -8,7 +8,7 @@ context the check needs (prior rounds, OSP at round-start, the three
 
 Adding a new check is one function plus one entry in ``CHECK_REGISTRY``.
 The registry is the single source of truth so ``review.md`` and the
-``potter-review`` skill enumerate the same check set.
+``potter-l1-meta-campaign`` skill enumerate the same check set.
 """
 
 from __future__ import annotations

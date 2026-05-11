@@ -7,6 +7,8 @@
 
 **0.2.0 amendment:** Track 5 replaces the original `optimize --sweep` halt-flag with a **unified fork primitive** (typed `ForkPayload`, trigger-agnostic `_mint_fork()`). Sweep becomes the first caller; future L2/L3 rebase, L4 auto-rebase, M12 pipeline-switch, and M11 webapp-replay are additional callers built on the same mechanism. See Track 5.
 
+**Gating dependency:** the ≥95%-in-5 exit goal depends on the **sweep toolkit** ([`m10-sweep-toolkit.md`](m10-sweep-toolkit.md)) — four small CLI verbs (`time-to`, `round1`, `round2`, `slice`) + a `rank` view that make L1 meta-prompt edits cheap-gradable using existing `optimize --sweep` plumbing. No new infrastructure layer; results land as JSON under `archive/sweeps/`. Built before the next live campaign.
+
 ---
 
 ## Goal
@@ -29,7 +31,7 @@ Lifted from M9 Track 1: infrastructure + prompt-tuning don't share work-units. T
 2. **Round-1 sweep, round-2 promote.** When comparing N candidate L1 prompts, run each for **1 scored round + 1 unscored generation peek** (round 2's L1 generates variants but does not score them — their proposals are persisted as `OptSearchPoint` traces only). Compare side-by-side cheaply. Promote winners to a full round 2 scoring. Spin up new candidates from learnings; same protocol.
 3. **Proxy validation is a first-class question.** The above protocol assumes round-1 stats predict full-cycle outcome. **Validate or refute that hypothesis as the data accumulates.** If the proxy holds, cost drops ~80%; if it doesn't, the framework gets modified on the go (sweep-mode rules update, not the whole stack).
 4. **Build the framework before and while running.** The framework lands first (Tracks 1-4). Subsequent `optimize` runs feed it. Each new "unknown unknown" surfaced in a run becomes a new behavior check — the registry grows with the iteration, not before it.
-5. **Skill-collaborative analysis, not solo runs.** Operator runs `optimize`, then triggers a skill that reads the cycle's artifacts, surfaces the top issue, and proposes one fix. Operator confirms or redirects; Claude edits. The skill *is* the L4 substitute.
+5. **Skill-collaborative analysis, not solo runs.** Operator runs `optimize`, then [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md) reads the cycle's artifacts, surfaces the top issue, and writes one proposed edit to disk. Operator confirms or redirects; Claude edits. That skill *is* the L4 substitute — per-cycle gate + sweep-batch ranking + multi-tick state all live there.
 6. **One change at a time, by default.** Bundled edits (e.g. prompt + threshold together) cloud attribution: when the next run improves, you can't tell which change helped. The default is one change per iteration. Bundling is fine when the operator explicitly accepts the attribution loss — usually because both edits target the same observed failure, or the interaction is already well-understood. Treat the default as a tiebreaker, not a rule.
 7. **General fix, not specific.** When L1 misbehaves on round 3 with input X, the prompt edit must guard against the *class* of mistake. Re-run to verify.
 
@@ -176,41 +178,14 @@ All sweep branches share their parent's origin measurements via the `archive/` c
 
 **Forward compat (≥M13).** New trigger types are enum additions. New payload deltas are optional fields. The mechanism (parent FORK_CUT + ledger inherit + dir copy + active-pointer retarget) does not change. Webapp-driven replay, multi-pipeline parallel evaluation, L4 auto-rebase, and competitor harnesses all ship as new callers + new enum members, never as schema or code-path changes.
 
-### 6. Round-1 gate + analysis skill
-
-The skill is the L4 substitute. Mandatory after round 1 in full mode; required as the comparison harness in sweep mode.
-
-**`.claude/skills/potter-review/SKILL.md`** — new skill (or extension of `/potter-run`). Two modes:
-
-**Single-cycle mode (default):** triggered after each full `optimize` run.
-1. Read `campaigns/{cycle_id}/review.md` + `dashboard.json` + the round JSONs.
-2. Compute `round_1_verdict`:
-   - `healthy` — all behavior checks ✓, `yield_rate ≥ 0.20`, `top_lift > 0`. → operator may continue rounds 2-5.
-   - `degraded` — exactly one check ✗, OR `yield_rate < 0.20`, OR `top_lift ≤ 0`. → halt, fix one knob, restart.
-   - `broken` — ≥2 checks ✗, OR origin regression. → halt, full prompt revisit.
-3. Identify the top issue (rank: failed seeded check > failed scaffolding check > low yield > flat lift > L2-source-of-lineage in round 1).
-4. Propose one specific edit to one specific prompt file, with diff.
-5. Operator confirms / redirects. Claude applies the edit. Operator re-runs.
-
-**Sweep mode (`/potter-review --sweep`):** triggered after a batch of `optimize --sweep` runs.
-1. Collect all branches where `index.json::fork.trigger == "operator_sweep"` and parent `root_cycle_id` matches the active sweep batch.
-2. Render side-by-side comparison under one root: round-1 metrics + round-2 next-generation peek per branch.
-3. Rank by `round_1_top_lift` desc, tiebreak by `behavior_pass_rate`.
-4. Highlight the top 2-3 to promote to full `optimize` runs; flag any branch with `round_1_verdict == broken` for prompt revisit.
-5. Once paired (sweep, full) branches exist for ≥ 4 candidates, report `proxy_lift_corr` and recommend whether to keep using sweep mode per the proxy validation procedure (Track 7).
-
-The skill never triggers `optimize` itself — the operator owns runs. The skill's only side effect on approval is editing prompt files.
-
-**Round-1 gate is mandatory in full mode.** A full-mode run that proceeds past round 1 with `round_1_verdict ≠ healthy` is an operator override; the skill warns but does not block.
-
-### 7. Methodology doc
+### 6. Methodology doc
 
 `docs/methods/manual-prompt-tuning.md`:
 
 - Goal restatement.
 - Operating principles (above).
-- **Sweep workflow:** run N candidate L1 prompts via `optimize --sweep` (each = origin + round 1 + round-2 gen peek). Trigger `/potter-review --sweep` → side-by-side comparison on round-1 stats + next-gen peek → narrow to top 2-3 → promote those to full `optimize` runs → measure `proxy_lift_corr` after ≥ 4 paired (sweep, full) cycles.
-- The five-step cadence (single-cycle): run round 1 → trigger `/potter-review` → confirm fix → apply → re-run.
+- **Sweep workflow:** run N candidate L1 prompts via `optimize --sweep` (each = origin + round 1 + round-2 gen peek). The next `/potter-l1-meta-campaign` tick ranks them on round-1 stats + next-gen peek → narrow to top 2-3 → promote those to full `optimize` runs → `proxy_lift_corr` is recomputed every tick after ≥ 4 paired (sweep, full) cycles.
+- Single-cycle cadence: run round 1 → next `/potter-l1-meta-campaign` tick writes the proposed edit (or halts on a non-healthy cycle) → confirm fix → apply → clear `paused` → re-run.
 - Round-1 verdict rule table.
 - Diagnosis tree: behavior ✗ → fix the rule generally; all ✓ + low yield → broaden L1 creativity; all ✓ + flat lift → scoring/sample-set issue; early `l2_fires` → likely `l1_critique` weak.
 - **Bundling carve-out:** the one-change default is a tiebreaker, not a mandate. Document the operator's bundling decision in the cycle note when it happens (e.g. "prompt + `param_unlock_round` together — both target the early-temperature-mutation failure").
@@ -227,10 +202,9 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 2. **Tracks 1 + 3 (parallel).** L1 behavior checks + `L1Stats`. Pure-Python over loaded dicts; run against sweep round-1 data as it accumulates. Manual reading of round JSONs covers the analysis gap until these land.
 3. **Track 4 — branch-tree leaderboard.** Consumes 5a fork metadata + Track 3 stats. First cross-branch comparison view; sweep candidates ranked side-by-side.
 4. **Track 2 — `review.md` renderer.** Consumes 1 + 3 output; per-fork view. `runner.py::finalize` wiring + parity test + incremental round-1 emission + next-generation peek.
-5. **Track 6 — `/potter-review` skill** (single-cycle + sweep modes). Consumes 2 + 4.
-6. **Track 7 — methodology doc** + `l1_generate.json` revision.
-7. **Track 5b — LLM-rebase callers (M11).** L2/L3 rebase emission + patience gating + `--allow-llm-rebase` opt-in + `optimizer_rewind_guard` behavior check. `optimize --rewind --label X` second operator caller. Out of M10; lands once 5a + sweep workflow have produced calibration data.
-8. **Iterate.** Each new "unknown unknown" → new behavior check + skill rule update; each batch of sweep branches updates `proxy_lift_corr`.
+5. **Track 6 — methodology doc** + `l1_generate.json` revision.
+6. **Track 5b — LLM-rebase callers (M11).** L2/L3 rebase emission + patience gating + `--allow-llm-rebase` opt-in + `optimizer_rewind_guard` behavior check. `optimize --rewind --label X` second operator caller. Out of M10; lands once 5a + sweep workflow have produced calibration data.
+7. **Iterate.** Each new "unknown unknown" → new behavior check + skill rule update; each batch of sweep branches updates `proxy_lift_corr`.
 
 ## Entry / exit
 
@@ -240,7 +214,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 - All seven deliverables shipped, tests green.
 - `rounds_to_95 ≤ 5` on `llm_only` AND TermNorm under the same `l1_generate_hash`.
 - `behavior_pass_rate = 1.0` for both seeded checks across the qualifying cycles.
-- `/potter-review` skill demonstrably catches at least one prompt regression on a re-run before round 2 fires.
+- `/potter-l1-meta-campaign` demonstrably catches at least one prompt regression on a re-run before round 2 fires.
 - **Proxy hypothesis decision recorded** — either `proxy_lift_corr ≥ 0.6` over ≥ 4 paired branches (sweep validated as primary screening tool), or sweep-mode rules modified per the proxy validation procedure with the rationale documented in the methodology doc.
 - Methodology doc maps section-by-section to actual `review.md` output.
 - **Unified `_mint_fork()` covers both scoring-divergence and operator-sweep callers under one code path.** `Decision(kind=FORK_CUT).data.fork: ForkPayload` populated for both. `OptimizerAction.rebase` schema field present (unwired in M10; M11 wires L2/L3 emission).
@@ -259,7 +233,6 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 - `round_1_verdict` thresholds: `yield_rate ≥ 0.20` for healthy, `< 0.20` for degraded. Calibrate after first 3 cycles.
 - Evidence strictness: substring match. Upgrade to semantic if false-pass rate misleads iteration.
 - Leaderboard persistence: stdout only.
-- New skill vs extension of `/potter-run`: new skill (cleaner separation). Confirm.
 - **Sweep-payload source**: `datasets/{name}/sweep/*.json` (one ForkPayload per file) vs stdin vs CLI-flag-array. Default to filesystem layout for git-tracked reproducibility; revisit if operator friction shows up.
 - **L2/L3 rebase patience defaults** (5b): proposed `l2_rebase_patience = l2_patience × 2`, `l3_rebase_patience = l3_patience × 2`. Calibrate during M11 once first L2/L3 rebase events ship.
 - **`cycle_id_path` exposure**: add to `dashboard.json` only, or also to `index.json::final` for offline branch-tree reconstruction. Default to both — cheap, makes webapp wiring trivial later.
@@ -278,7 +251,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 | Reusable formatters | `presentation/views/display.py` |
 | Surface compile path | `application/optimization/pipeline.py::compile_l1_surface`, `compile_l2_surface`, `compile_l1_critique_blob` |
 | Cycle finalize / round emission | `application/runner.py` |
-| Existing operator skill | `.claude/skills/potter-run/SKILL.md` (extend or peer) |
+| Operator skills | `.claude/skills/potter-run/SKILL.md` (campaign launcher), `.claude/skills/potter-l1-meta-campaign/SKILL.md` (L4 substitute — round-1 gate, sweep-batch ranking, one-edit-per-cycle) |
 | Parity test | `tests/test_invariants.py::PER_CYCLE_OPERATOR_ARTIFACTS` |
 | **Fork primitive (Track 5 substrate)** | `domain/run_records.py::DecisionKind.FORK_CUT` + `DECISION_GATING`; `infrastructure/ledger.py::CycleLedger.inherit_from`; `application/optimization/cycle.py::_fork_at_divergence` (rename → `_mint_fork`); `application/runner.py::fork_on_divergence` plumbing; `presentation/cli/campaign_runner.py::--fork-on-divergence` CLI; `presentation/api.py` ForksResponse |
 | **Active-pointer + family-root binding** | `infrastructure/store/stores.py::save_active_pointer`; `infrastructure/projections/live_dashboard.py` (telemetry binds to root with no `parent_cycle_id`) |
@@ -287,7 +260,7 @@ Reordered for **biggest-blocker first**: Track 5a unblocks the breadth-first swe
 
 | Risk | Mitigation |
 |------|------------|
-| Proxy hypothesis fails (round-1 doesn't predict full-cycle) | Detected by `proxy_lift_corr`; framework modifies on the go (revisit rule table or accept 2-round screening) — that's what Track 7's proxy validation procedure is for |
+| Proxy hypothesis fails (round-1 doesn't predict full-cycle) | Detected by `proxy_lift_corr`; framework modifies on the go (revisit rule table or accept 2-round screening) — that's what Track 6's proxy validation procedure is for |
 | Sweep mode hides regressions that only surface in round 2-3 | Pair every promoted candidate with a full-cycle confirmation run; never publish a prompt that only has sweep-mode evidence |
 | Round-1 gate triggers on noise, halts a run that would have recovered | Operator can override; skill warns but doesn't block. Calibrate thresholds after first 3 cycles. |
 | Substring match too coarse (L1 superficially echoes a token) | Upgrade to semantic only if false-pass rate misleads iteration |

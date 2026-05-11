@@ -7,7 +7,7 @@ behaviour-check results from ``l1_behavior_checks.run_all_checks``.
 Headline metric is ``rounds_to_95`` — first round where best accuracy
 ≥ 0.95. The diagnostics flank it: yield, lift, behaviour pass rate,
 stagnation streak, L2 fire count. ``round_1_verdict`` is the gate signal
-the ``potter-review`` skill keys off after the round-1 halt.
+the ``potter-l1-meta-campaign`` skill keys off after the round-1 halt.
 """
 
 from __future__ import annotations

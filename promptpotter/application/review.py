@@ -20,7 +20,7 @@ Inputs
   key_challenges by default).
 
 Output is a self-contained markdown document the operator and the
-``potter-review`` skill consume after each round.
+``potter-l1-meta-campaign`` skill consume after each round.
 """
 
 from __future__ import annotations

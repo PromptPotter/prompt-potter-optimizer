@@ -61,7 +61,7 @@ The primitive passes all three for sweep, scoring-divergence, and the planned op
 
 The roadmap calls full self-optimization "L4" — a layer above L3 proposing the next round of candidate L1 prompts. In the absence of the auto-policy:
 
-1. Operator (or Claude via `/potter-review`) reads `review.md` for the last sweep batch.
+1. Operator (or Claude via [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md)) reads `review.md` for the last sweep batch.
 2. Operator authors the next batch of `OperatorSweepFile` JSONs (one per candidate, narrow `reason` + `l1_layout` shape; the dispatcher widens each into a `ForkPayload(trigger=OPERATOR_SWEEP, ...)`).
 3. `optimize --sweep` runs the next generation.
 4. Library cache means origin measurements don't repeat — each generation only pays for actual L1 variants.

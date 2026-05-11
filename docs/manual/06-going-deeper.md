@@ -48,57 +48,6 @@ You've run a campaign. Pointers below for the next layer.
 
 ## Iterating on prompts manually
 
-When you want to tune `l1_generate` (or another optimizer prompt) by hand instead of running the full L1/L2 loop. Five-step single-cycle pass:
-
-```
-1. python -m promptpotter optimize         # full mode
-2. /potter-review                          # round-1 gate
-3. Operator confirms or redirects the proposed fix.
-4. Claude applies the edit (Edit tool, prompt file).
-5. Operator re-runs optimize.
-```
-
-The skill is mandatory after round 1. Proceeding past round 1 with `round_1_verdict ≠ healthy` is an operator override.
-
-### Round-1 verdict rule
-
-Source: `application/optimization/l1_stats.py::compute_round_1_verdict`. `HEALTHY_YIELD_RATE = 0.20`, `HEADLINE_ACC = 0.95`.
-
-| Condition | Verdict | Next |
-|---|---|---|
-| 0 ✗ AND `yield_rate ≥ 0.20` AND `top_lift > 0` | **healthy** | continue rounds 2–5 |
-| ≥ 2 ✗ OR origin regression at round 1 | **broken** | halt; full prompt revisit |
-| anything else | **degraded** | halt; one-knob fix; restart |
-
-### Diagnosis tree
-
-| Signal | Likely cause | Fix file |
-|---|---|---|
-| `context_object_honored` ✗ | task_context block too low in prompt | `l1_generate.json` |
-| `param_scope_discipline` ✗ | param boundary too loose, or `param_unlock_round` too low | `l1_generate.json` |
-| `not_only_param_variants` ✗ | L1 only mutates node params | `l1_generate.json` |
-| all ✓ + `yield_rate < 0.20` | L1 too conservative | bump `creativity` or rewrite `l1_critique.json` |
-| all ✓ + `top_lift ≤ 0` | scoring or sample-set issue, not prompt | check `campaign.json::scoring`; check scoring set |
-| early `lineage.source == l2_context` | `l1_critique` weak; L2 forced to fire | `l1_critique.json` |
-
-### Sweep mode (multi-candidate screening)
-
-When comparing N candidate L1 prompts, run each as 1 scored round + 1 generation peek instead of 5 full rounds per candidate. Promote winners to a full run.
-
-```
-1. Edit l1_generate.json (or another optimizer prompt) — candidate A.
-2. python -m promptpotter optimize --sweep
-   → cycle_A: origin + 1 full round + 1 gen-only round.
-3. Repeat for candidates B, C, D, ...
-4. /potter-review --sweep → ranked by round_1_top_lift.
-5. Promote top 2-3 to full optimize runs.
-```
-
-`proxy_lift_corr` over ≥ 4 paired (sweep, full) cycles drives the verdict: ≥ 0.6 = sweep is the primary screen; < 0.4 = suspend sweep mode.
+Hand-tuning `l1_generate` (or another optimizer meta-prompt) is owned by [`/potter-l1-meta-campaign`](../../.claude/skills/potter-l1-meta-campaign/SKILL.md) — a same-command-every-tick strategist that reads cycle artifacts, applies the round-1 verdict + top-issue ranking, and writes one proposed edit per non-healthy cycle to `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/`. State persists on disk; ten ticks in a row produce ten consistent decisions.
 
 Full M10 spec: [`../specs/m10-prompt-iteration-framework.md`](../specs/m10-prompt-iteration-framework.md).
-
-### Bundling and generality
-
-- One change at a time by default. Carve-out: edits targeting the same observed failure may bundle.
-- General fix, not specific. When L1 misbehaves on input X, the prompt edit guards against the *class* of mistake. Re-run to verify.
