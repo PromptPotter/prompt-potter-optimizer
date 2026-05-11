@@ -15,7 +15,7 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 ## Spend control
 
 - **Search-only-with-evidence.** Each variant runs against ~3–5 samples by default. Only variants with statistical evidence of being promising get extended; the rest drop out before the bill grows.
-- **Hard-sample dashboard.** Samples that everyone aces or everyone fails carry no signal. The dashboard surfaces samples that actually separate variants, and the loop preferentially scores on those.
+- **Hard-sample leaderboard.** Samples that everyone aces or everyone fails carry no signal. The leaderboard surfaces samples that actually separate variants, and the loop preferentially scores on those.
 
 ## Pages
 
@@ -30,6 +30,6 @@ CONTEXT and PLAN live on disk inside each round file — the loop's actual confi
 | [Optimizer of the optimizer](optimizer-of-the-optimizer.md) | PromptPotter optimizing its own meta-prompts (M12) |
 | [Glossary](glossary.md) | Terms used across the docs |
 | [Mid-round elimination (PoBB)](../methods/candidate-elimination.md) | "Search-only-with-evidence" in detail |
-| [Hard-sample dashboard](../methods/exploration-exploitation.md) | Sample selection in detail |
+| [Hard-sample leaderboard](../methods/exploration-exploitation.md) | Sample selection in detail |
 
 Implementation: [`../developer/`](../developer/README.md).

@@ -186,7 +186,7 @@ code; cleanup ships in lockstep with the §4 drop PR.
 
 **`presentation/api.py` routes (22 routes):**
 
-All 21 extant routes load-bearing or sanctioned (backend registration, multi-backend onboarding, dashboard polling, audit reads). `/file-content` confirmed absent (matches spec). `/datasets/{name}/preview` present and serving the hard-sample dashboard data path per §0.
+All 21 extant routes load-bearing or sanctioned (backend registration, multi-backend onboarding, dashboard polling, audit reads). `/file-content` confirmed absent (matches spec). `/datasets/{name}/preview` present and serving the hard-sample leaderboard data path per §0.
 
 **`presentation/writers.py::refresh_tenant_leaderboards()`:**
 
@@ -230,9 +230,9 @@ Findings:
   source layer, with `failure_analysis` as the derived view.
   Design decision; flagged for §4.5 or sub-spec.
 
-### 2. Free-deliverable verification (hard-sample dashboard)
+### 2. Free-deliverable verification (hard-sample leaderboard)
 
-§0 claims the hard-sample dashboard is "fully wired today." Verified:
+§0 claims the hard-sample leaderboard is "fully wired today." Verified:
 
 - `GET /datasets/{name}/preview` API route present in
   `presentation/api.py` and serving sample data.

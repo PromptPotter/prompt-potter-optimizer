@@ -103,7 +103,7 @@ Two architectural commitments shape every bucket on this page:
   - **Hard-sample ordering (Rasch sort).** Samples are scored in order
     of decreasing signal-to-noise — the most discriminating samples
     first. Separates winners from losers with the fewest queries.
-    The same sort drives the operator's hard-sample dashboard for
+    The same sort drives the operator's hard-sample leaderboard for
     free, since "most discriminating" is exactly what an operator
     wants to inspect.
 - `l1_critique` reads the round's outcomes and writes a structured
@@ -314,7 +314,7 @@ the PR description.
 - **Per-cycle `CycleEventLog` + `DerivedView` dispatch** — the
   persistence backbone. No second ingress, ever.
 - **Hard-sample sorter (Rasch)**
-  (`application/intelligence/hard_sample_sorter.py`) + the dashboard
+  (`application/intelligence/hard_sample_sorter.py`) + the leaderboard
   it powers — first-class per §0.
 - **`compile_l1_field_catalogue` / `compile_l2_field_catalogue` field catalogues**
   (`application/optimization/pipeline.py`) — the discoverability

@@ -11,7 +11,7 @@ The pipeline can be a single LLM call or a [multi-step pipeline](../concepts/nod
 💰 Every evaluation costs money. PromptPotter is built to maximize accuracy per dollar:
 
 - **[Search-only-with-evidence](../methods/candidate-elimination.md).** Each candidate runs against a small handful of samples by default (~3–5). Only candidates with statistical evidence of being promising get extended.
-- **[Hard-sample dashboard](../methods/exploration-exploitation.md).** Samples everyone aces or everyone fails carry no signal. The optimizer surfaces and scores on the samples that actually separate candidates.
+- **[Hard-sample leaderboard](../methods/exploration-exploitation.md).** Samples everyone aces or everyone fails carry no signal. The optimizer surfaces and scores on the samples that actually separate candidates.
 
 ---
 

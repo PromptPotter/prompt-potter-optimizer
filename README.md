@@ -13,7 +13,7 @@
 Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Every measurement costs money, so the design is built to **maximize fitness, minimize spend**:
 
 - **Search-only-with-evidence.** Variants default to a small budget (~3–5 samples) and only get extended when there's statistical evidence they have a chance.
-- **Hard-sample dashboard.** Score preferentially on samples that actually separate variants — samples everyone aces or fails are noise.
+- **Hard-sample leaderboard.** Score preferentially on samples that actually separate variants — samples everyone aces or fails are noise.
 - **Cross-run memory.** Every datapoint is stored; the optimizer carries what it learned into the next run.
 
 

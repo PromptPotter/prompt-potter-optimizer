@@ -9,7 +9,7 @@
 - Build pipeline: `npm run deploy` (= `next build && node scripts/deploy-to-webapp.mjs`) writes the export over `webapp/`. During development: `next dev` on :3000 (visit `/ui`), FastAPI on :8001, Next config rewrites `/api/*` → `http://127.0.0.1:8001/api/*` (dev only — rewrites are stripped from the export).
 
 **Depends on:** Vanilla a11y / tooltip / resilience pass (DONE — commit `f1dab82`). FastAPI read endpoints (DONE — `m11-webapp-minimal-preview.md`). Active session pointer (DONE).
-**Blocks:** M11 monitoring slices (hard-sample dashboard, per-searchpoint score histogram, family-tree speciation, dataset preview on drop). M12 webapp Phase 2 (control plane, chat panel, wand toggle, multi-cycle).
+**Blocks:** M11 monitoring slices (hard-sample leaderboard, per-searchpoint score histogram, family-tree speciation, dataset preview on drop). M12 webapp Phase 2 (control plane, chat panel, wand toggle, multi-cycle).
 
 ---
 

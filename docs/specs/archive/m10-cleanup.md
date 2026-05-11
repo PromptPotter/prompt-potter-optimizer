@@ -139,7 +139,7 @@ of the operator's interface:
   (load-bearing) or drop?
 - `presentation/api.py` — list every FastAPI route. Specific
   decisions: `/datasets/{name}/preview` — load-bearing (today's
-  hard-sample dashboard data path) or aspirational?
+  hard-sample leaderboard data path) or aspirational?
 - `presentation/writers.py` — `refresh_tenant_leaderboards()` writes
   `runs.md`, `individuals.md`, `hard_samples.md`, `README.md` to
   `archive/`. Decision: load-bearing operator surface or
@@ -171,7 +171,7 @@ Fields without a bucket, or without both a writer and a reader, are
 drift. Output: a per-field table at
 `docs/specs/m10-cleanup-osp-fields.md`; drop the orphans in §4.
 
-**Free-deliverable verification.** §0 claims the hard-sample dashboard
+**Free-deliverable verification.** §0 claims the hard-sample leaderboard
 is a free side-deliverable. Audit:
 
 - Does the dashboard exist today? Where (file path / webapp panel /
@@ -184,7 +184,7 @@ is a free side-deliverable. Audit:
   §0."
 
 Apply the same verification to every other "free" claim §0 makes
-(today: only the hard-sample dashboard).
+(today: only the hard-sample leaderboard).
 
 **Self-optimization fixture.** §0 claims accumulated `OptSearchPoint`
 data is "the dataset for optimizing the optimizer." `load_potter_traces`
@@ -573,7 +573,7 @@ of keeping; commit to drop or keep when the audit closes):
 
 Note: `/file-content` API endpoint does NOT exist (verified during
 planning). `/datasets/{name}/preview` DOES exist
-(`presentation/api.py:834`) and is today's hard-sample dashboard
+(`presentation/api.py:834`) and is today's hard-sample leaderboard
 data path — see §0.5 conditional-load-bearing list.
 
 Net result: one bundled escalation package, the typed `INJECTIONS`
@@ -891,7 +891,7 @@ rollback is cheap.
 3. §1 reality audit — produces the trim punch-list (docs + code +
    spec docs + OSP fields + free-deliverable verification +
    ledger-vs-projections duplication map). **Free-deliverable
-   verification (hard-sample dashboard data path) lands early
+   verification (hard-sample leaderboard data path) lands early
    within §1**, so §0's "free deliverable" claim isn't aspirational
    by the time §6 gate references §0.
 4. §3.5 pin the `pipeline.json` contract — additive doc, no code
