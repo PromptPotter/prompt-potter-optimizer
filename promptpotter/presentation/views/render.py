@@ -302,6 +302,15 @@ def _render_round_complete(v: RoundCompleteView) -> str:
             f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
             f"  ->  next: {v.next_action}"
         )
+    elif v.improved_reason:
+        # Positive Δ but blocked by significance or sample-count floor — name
+        # the reason so the operator sees why a numerically-better candidate
+        # didn't graduate.
+        out.append(
+            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
+            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}, n={v.winner_total})"
+            f"  reason: {v.improved_reason}{comp_tag}"
+        )
     else:
         out.append(
             f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate "

@@ -235,10 +235,13 @@ def test_round_complete_view_no_improvement() -> None:
 
     live_view = replace(live_view, next_action="")
 
-    # No improvement → delta is 0, p_value is None, both ends agree.
+    # Delta now reflects the true gap vs origin even when ``improved=False``
+    # — the renderer surfaces it on the ``✗ NOT PROMOTED`` path so the
+    # operator sees the actual difference. Round-trip parity holds: both
+    # live and disk views compute the gap the same way.
     assert live_view.improved is False
-    assert live_view.delta == 0.0
-    assert live_view.p_value is None
+    assert live_view.delta == pytest.approx(-0.10)
+    assert live_view.improved_reason is None
     assert live_view == disk_view
 
 

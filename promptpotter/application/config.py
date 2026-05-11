@@ -155,11 +155,40 @@ class OptimizationConfig(BaseModel):
         "samples for posterior stability than the loser-elimination floor.",
     )
 
+    improvement_significance: float = Field(
+        0.10,
+        description="One-sided proportion-test threshold for declaring a round "
+        "IMPROVED. The challenger must beat origin by `improvement_threshold` AND "
+        "score at least `elimination_n_min` samples AND yield p < this. Smaller = "
+        "stricter. Set to 1.0 to disable the significance gate (point-estimate only).",
+    )
+
     max_consecutive_errors: int = Field(3)
     hard_cap: int = Field(100)
 
     stale_data_load_protocol: list[str] = Field(
         default_factory=lambda: ["rerun", "samplescan", "sampleswitch"]
+    )
+    rerun_trigger_count: int = Field(
+        3,
+        description="Stale-data ``rerun`` step: how many independent degradation "
+        "sightings (cached + historical) before rerunning the sample.",
+    )
+    samplescan_candidates: int = Field(
+        3,
+        description="Stale-data ``samplescan`` step: number of fresh probes "
+        "with the active pipeline params; first non-degraded probe wins.",
+    )
+    samplescan_threshold: float = Field(
+        0.5,
+        description="Stale-data ``samplescan`` step: minimum fraction of probes "
+        "that must resolve cleanly to accept the result.",
+    )
+    sampleswitch_min_degradation_rate: float = Field(
+        0.5,
+        description="Stale-data ``sampleswitch`` step: historical degradation "
+        "rate at which the sample short-circuits to the cached deprecated answer "
+        "instead of re-evaluating. Set to 1.0 to disable cached-deprecation reuse.",
     )
 
     zero_signal_filter_enabled: bool = Field(False)

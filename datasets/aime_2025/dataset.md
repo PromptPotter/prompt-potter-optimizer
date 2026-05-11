@@ -38,3 +38,9 @@ methodology. Registered in
 - Optimization target: prompt template (reasoning strategy, verification
   steps, answer formatting), `temperature`
 - Prompts should instruct the model to put the final answer in `\boxed{N}` format
+- `max_tokens` override at 16384 in `campaign.json::pipeline_overrides.llm_only`:
+  Groq's gpt-oss-120b default output ceiling (~3072 tokens) truncates
+  AIME-difficulty reasoning chains, causing `finish_reason=length` deprecations
+  on the same handful of problems across every candidate (sample #8 parabola,
+  #10 piecewise linear, #6 twelve-letter combinatorics). Raise the cap so
+  deeper-reasoning candidates can actually finish.

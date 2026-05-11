@@ -130,6 +130,10 @@ def populate_session_scoring(
     cycle_id: str | None = None,
     max_consecutive_errors: int = 3,
     stale_data_load_protocol: list[str] | None = None,
+    rerun_trigger_count: int = 3,
+    samplescan_candidates: int = 3,
+    samplescan_threshold: float = 0.5,
+    sampleswitch_min_degradation_rate: float = 0.5,
     source: str = "optimization_loop",
 ) -> None:
     """Attach the scoring block onto ``session`` (mutates in place)."""
@@ -146,6 +150,10 @@ def populate_session_scoring(
     session.source = source
     session.max_consecutive_errors = max_consecutive_errors
     session.stale_data_load_protocol = stale_data_load_protocol
+    session.rerun_trigger_count = rerun_trigger_count
+    session.samplescan_candidates = samplescan_candidates
+    session.samplescan_threshold = samplescan_threshold
+    session.sampleswitch_min_degradation_rate = sampleswitch_min_degradation_rate
     session.scoring.scorer = compile_scorer(scoring_formula)
     session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
     session.scoring.scorer_formula = scoring_formula
@@ -266,6 +274,10 @@ def _start_observability_and_scoring(
         cycle_id=resolved_cycle_id,
         max_consecutive_errors=opt.max_consecutive_errors,
         stale_data_load_protocol=opt.stale_data_load_protocol,
+        rerun_trigger_count=opt.rerun_trigger_count,
+        samplescan_candidates=opt.samplescan_candidates,
+        samplescan_threshold=opt.samplescan_threshold,
+        sampleswitch_min_degradation_rate=opt.sampleswitch_min_degradation_rate,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,

@@ -338,10 +338,10 @@ async def execute_stale_data_protocol(
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
-    Hyperparameters are read from the ``l1_score`` node config in
-    ``optimizer_pipeline.json``.  The protocol step list and all thresholds
-    live on that single node — tunable via ``param_keys`` when PromptPotter
-    self-optimizes.
+    Hyperparameters come from ``Session`` (populated at scoring-context bootstrap
+    from ``campaign.json::optimization.*``). The four knobs:
+    ``rerun_trigger_count``, ``samplescan_candidates``, ``samplescan_threshold``,
+    ``sampleswitch_min_degradation_rate``.
 
     Observation counts come from ``axes.sample_index`` (degradation
     tables ingested from the measurement archive at round boundaries). Within a round
@@ -350,18 +350,13 @@ async def execute_stale_data_protocol(
     Returns ``(result_dict, step_taken)`` where *step_taken* is the step
     that resolved the query, or ``"exhausted"``.
     """
-    from promptpotter.application.optimization.llm_call import get_optimizer_schema
-
-    node = get_optimizer_schema().get_node("l1_score")
-    assert node is not None, "l1_score node missing from optimizer schema"
-    cfg = node.current_config
     result = cached_result
 
     for step in protocol_steps:
         if session.stop_check and session.stop_check():
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
-            trigger_count = cfg.get("rerun_trigger_count", 3)
+            trigger_count = session.rerun_trigger_count
             historical = axes.sample_index.degradation_count(sample.id) if axes else 0
             effective_count = historical + 1
             if effective_count < trigger_count:
@@ -380,8 +375,8 @@ async def execute_stale_data_protocol(
                 return result, "rerun"
 
         elif step == "samplescan":
-            n_candidates = cfg.get("samplescan_candidates", 3)
-            resolved_threshold = cfg.get("samplescan_threshold", 0.5)
+            n_candidates = session.samplescan_candidates
+            resolved_threshold = session.samplescan_threshold
             probe_params = (
                 session.pipeline_schema.to_pipeline_params()
                 if session.pipeline_schema is not None
@@ -397,7 +392,7 @@ async def execute_stale_data_protocol(
                 return result, "samplescan"
 
         elif step == "sampleswitch":
-            min_deg_rate = cfg.get("sampleswitch_min_degradation_rate", 0.5)
+            min_deg_rate = session.sampleswitch_min_degradation_rate
             if axes and axes.sample_index.degradation_rate(sample.id) >= min_deg_rate:
                 result = {**cached_result, "cached": True, "switched_out": True}
                 return result, "sampleswitch"

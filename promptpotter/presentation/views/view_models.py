@@ -169,6 +169,7 @@ class RoundCompleteView:
     improved: bool
     delta: float
     p_value: float | None
+    improved_reason: str | None
     next_action: str
     l1_critique_text: str
     composite_fitness_formula: str | None

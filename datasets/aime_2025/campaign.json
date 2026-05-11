@@ -4,7 +4,11 @@
     "scoring": "aime_match(predicted, ground_truth)",
     "sp_budget_ttest": 20,
     "exclude_nodes": [],
-    "pipeline_overrides": {},
+    "pipeline_overrides": {
+      "llm_only": {
+        "max_tokens": 16384
+      }
+    },
     "optimization": {
       "l1_patience": 3,
       "max_rounds": 4,

@@ -638,6 +638,7 @@ async def l1_score(
     *,
     pipeline_params: dict | None = None,
     improvement_threshold: float = 0.01,
+    improvement_significance: float = 0.10,
     callbacks: RunCallbacks,
     degradation_checks: list[StopRule] | None = None,
     pobb_config: PoBBConfig,
@@ -718,11 +719,27 @@ async def l1_score(
     )
 
     base = _compute_accuracy(best_results)
-    improved = best_acc > origin.accuracy + improvement_threshold
     p_value: float | None = None
-    if improved and base["total"] > 0:
+    if base["total"] > 0:
         origin_hits = round(origin.accuracy * base["total"])
         p_value = proportion_test(base["hits"], base["total"], origin_hits, base["total"])
+
+    delta_ok = best_acc > origin.accuracy + improvement_threshold
+    n_min = pobb_config.n_min
+    n_ok = base["total"] >= n_min
+    sig_ok = improvement_significance >= 1.0 or (
+        p_value is not None and p_value < improvement_significance
+    )
+    improved = delta_ok and n_ok and sig_ok
+    improved_reason: str | None = None
+    if delta_ok and not improved:
+        reasons: list[str] = []
+        if not n_ok:
+            reasons.append(f"n={base['total']} < elimination_n_min={n_min}")
+        if not sig_ok:
+            p_repr = f"{p_value:.3f}" if p_value is not None else "None"
+            reasons.append(f"p={p_repr} >= {improvement_significance:.2f}")
+        improved_reason = "; ".join(reasons)
     round_result = RoundResult(
         round=round_num,
         label=best_label,
@@ -732,6 +749,7 @@ async def l1_score(
         total=base["total"],
         improved=improved,
         p_value=p_value,
+        improved_reason=improved_reason,
         origin_accuracy=origin.accuracy,
         prompt_fields={
             **best_osp.prompt_field_dict(),
@@ -944,6 +962,7 @@ async def execute_round(
             origin,
             pipeline_params=cycle.tracking.current_sp.pipeline_params,
             improvement_threshold=opt.improvement_threshold,
+            improvement_significance=opt.improvement_significance,
             callbacks=callbacks,
             degradation_checks=degradation_checks,
             pobb_config=PoBBConfig(
@@ -974,7 +993,11 @@ async def execute_round(
         winner_accuracy=round_result.accuracy,
         winner_composite_fitness=round_result.composite_fitness,
         winner_evaluators=dict(round_result.evaluators),
+        winner_hits=round_result.hits,
+        winner_total=round_result.total,
         improved=round_result.improved,
+        improved_reason=round_result.improved_reason,
+        p_value=round_result.p_value,
         candidate_scores=round_result.candidate_scores,
     )
 

@@ -51,7 +51,7 @@ from promptpotter.presentation.views.view_models import (
     SpDiffView,
     WarningEntry,
 )
-from promptpotter.shared.statistics import min_detectable_effect, proportion_test, wilson_ci
+from promptpotter.shared.statistics import min_detectable_effect, wilson_ci
 
 __all__ = [
     "from_phase_event",
@@ -260,12 +260,11 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
     w_acc = float(d.get("winner_accuracy", 0.0))
     improved = bool(d.get("improved", False))
     origin_acc = ctx.get("origin_accuracy", 0.0)
-    delta = w_acc - origin_acc if improved else 0.0
-    p_value: float | None = None
-    if improved and winner_total > 0:
-        p_value = proportion_test(
-            winner_hits, winner_total, round(origin_acc * winner_total), winner_total
-        )
+    delta = w_acc - origin_acc
+    # ``p_value`` is computed at gate time by l1_score and emitted directly
+    # — the view trusts the emitter rather than recomputing here.
+    p_value: float | None = d.get("p_value")
+    if improved:
         ctx["origin_accuracy"] = w_acc
 
     return RoundCompleteView(
@@ -281,6 +280,7 @@ def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
         improved=improved,
         delta=delta,
         p_value=p_value,
+        improved_reason=d.get("improved_reason"),
         next_action=str(d.get("next_action", "?") or "?"),
         l1_critique_text=format_l1_critique_for_prompt(d.get("critique") or {}),
         composite_fitness_formula=ctx.get("composite_fitness_formula"),

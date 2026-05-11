@@ -151,10 +151,17 @@ class RoundMetadata(BaseModel):
     hits: int
     total: int
     improved: bool
-    # Wilcoxon-paired p-value vs prior round's origin; populated only when
-    # ``improved`` is True (else None — no test run). Stored so log.md / a
-    # webapp can render significance without re-running the test.
+    # One-sided two-proportion p-value vs the round's origin. Now computed
+    # unconditionally (whenever ``total > 0``) so the IMPROVED gate can
+    # consult it — not just for display. ``None`` means no test could be
+    # run (zero samples scored).
     p_value: float | None = None
+    # Diagnostic string set when ``improved=False`` and the challenger had
+    # a positive Δ vs origin — names which of {delta_threshold, significance,
+    # min_samples} blocked promotion. ``None`` when the round was promoted
+    # or had no positive Δ to begin with. Persisted so log.md / dashboard
+    # can render the verdict's reason without re-deriving it.
+    improved_reason: str | None = None
     degraded_samples: int = 0
     # Count of samples discarded as deprecated (fatal warnings) on the
     # round-winner's scoring run; excluded from hits/total/accuracy and

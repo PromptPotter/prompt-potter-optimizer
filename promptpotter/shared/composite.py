@@ -232,8 +232,15 @@ def render_composite_fitness_block(
     if not formula:
         return [f"{line1}  (formula unavailable)"]
 
-    # Line 2: formula text (literal — caller chose short or full)
-    line2 = f"formula:  {formula}"
+    # Line 2: formula text. In short-names mode the formula carries
+    # synthesized codes (``H``, ``R``) that don't appear as keys in the
+    # ``evaluators`` dict — inline their resolved values so the operator
+    # can reconcile the formula against the breakdown without a separate
+    # legend lookup.
+    if use_short_names and evaluators:
+        line2 = f"formula:  {inline_short_formula_values(formula, evaluators) or formula}"
+    else:
+        line2 = f"formula:  {formula}"
 
     # Line 3 (+ optional legend): named evaluator values.
     #

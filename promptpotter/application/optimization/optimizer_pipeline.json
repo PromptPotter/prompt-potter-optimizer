@@ -20,26 +20,7 @@
     },
     "l1_score": {
       "type": "measurement",
-      "config": {
-        "improvement_threshold": 0.01,
-        "stale_data_load_protocol": [
-          "rerun",
-          "samplescan",
-          "sampleswitch"
-        ],
-        "rerun_trigger_count": 3,
-        "samplescan_candidates": 3,
-        "samplescan_threshold": 0.5,
-        "sampleswitch_min_degradation_rate": 0.5
-      },
-      "optimizer": {
-        "param_keys": [
-          "rerun_trigger_count",
-          "samplescan_candidates",
-          "samplescan_threshold",
-          "sampleswitch_min_degradation_rate"
-        ]
-      }
+      "config": {}
     },
     "l1_critique": {
       "type": "agent",
