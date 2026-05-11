@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Callable
 from typing import TYPE_CHECKING, Any
 
 import httpx
@@ -183,15 +184,42 @@ class BackendClient:
         self,
         query: str,
         pipeline_params: dict[str, Any] | None = None,
+        *,
+        on_warning: Callable[[dict[str, Any]], None] | None = None,
     ) -> dict[str, Any]:
         """POST /matches — payload shape is owned by ``self._wire_adapter``.
 
         HTTP 400 with "session" in the detail triggers a one-shot session
         recovery via the session protocol, then retries once.
+
+        ``on_warning`` is invoked on every retry fire (transport error, 429,
+        5xx) so the caller can emit a typed event to the ledger / dashboard.
+        Payload keys: ``kind`` (transport_error|rate_limit|server_error),
+        ``error_class`` (or status code), ``attempt``, ``max_attempts``,
+        ``wait_s``. The retry behaviour itself is unchanged — this is a
+        visibility hook over the existing loop.
         """
         payload = self._wire_adapter(query, pipeline_params)
 
         client = self._get_http()
+
+        def _warn(kind: str, *, attempt: int, wait_s: float, **extra: Any) -> None:
+            if on_warning is None:
+                return
+            try:
+                on_warning(
+                    {
+                        "kind": kind,
+                        "attempt": attempt + 1,
+                        "max_attempts": MAX_429_ATTEMPTS,
+                        "wait_s": float(wait_s),
+                        **extra,
+                    }
+                )
+            except (KeyboardInterrupt, asyncio.CancelledError):
+                raise
+            except Exception:
+                logger.exception("on_warning callback failed; continuing retry loop")
 
         # Bounded retry with visible countdown. 429 honors RFC 7231 Retry-After;
         # 5xx and transport errors fall back to exponential backoff (1, 2, 4, 8s).
@@ -206,6 +234,13 @@ class BackendClient:
                 )
             except httpx.TransportError as exc:
                 if attempt == MAX_429_ATTEMPTS - 1:
+                    _warn(
+                        "transport_error",
+                        attempt=attempt,
+                        wait_s=0.0,
+                        error_class=exc.__class__.__name__,
+                        final=True,
+                    )
                     raise
                 wait_t = float(2**attempt)
                 logger.warning(
@@ -214,6 +249,12 @@ class BackendClient:
                     MAX_429_ATTEMPTS,
                     exc.__class__.__name__,
                     wait_t,
+                )
+                _warn(
+                    "transport_error",
+                    attempt=attempt,
+                    wait_s=wait_t,
+                    error_class=exc.__class__.__name__,
                 )
                 await wait_with_countdown(wait_t, "backend connection")
                 continue
@@ -229,6 +270,7 @@ class BackendClient:
                     MAX_429_ATTEMPTS,
                     wait_h,
                 )
+                _warn("rate_limit", attempt=attempt, wait_s=wait_h, status_code=429)
                 await wait_with_countdown(wait_h + 1.0, "backend")
                 continue
 
@@ -241,6 +283,7 @@ class BackendClient:
                     MAX_429_ATTEMPTS,
                     wait_5,
                 )
+                _warn("server_error", attempt=attempt, wait_s=wait_5, status_code=code)
                 await wait_with_countdown(wait_5, f"backend {code}")
                 continue
 

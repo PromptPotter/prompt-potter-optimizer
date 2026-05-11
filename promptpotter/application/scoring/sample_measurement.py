@@ -216,7 +216,31 @@ async def measure_sample(
 
     try:
         wire_params = interpolate_pipeline_params(pipeline_params or {}, sample.model_dump())
-        resp = await session.backend_client.run_query(query, pipeline_params=wire_params)
+
+        def _emit_backend_warning(payload: dict[str, Any]) -> None:
+            # Emit a typed ledger record so the dashboard projection bumps its
+            # backend-retry counter and recent-warnings list, and the audit
+            # archive records what the operator was waiting on. The retry
+            # itself is unchanged — this is pure visibility.
+            ledger = session.state.ledger
+            if ledger is None:
+                return
+            from promptpotter.domain.run_records import PhaseRecord
+
+            try:
+                ledger.append(
+                    PhaseRecord(
+                        phase="backend",
+                        event="warning",
+                        payload={**payload, "query": query[:80]},
+                    )
+                )
+            except Exception:
+                logger.exception("backend warning ledger emit failed; continuing")
+
+        resp = await session.backend_client.run_query(
+            query, pipeline_params=wire_params, on_warning=_emit_backend_warning
+        )
         data = resp.get("data", {})
 
         ranked = data.get("final_ranking", [])

@@ -174,6 +174,14 @@ class LiveDashboardView(DerivedView):
             "cycle_id_path": cycle_id_path,
             "degraded_count": 0,
             "error_count": 0,
+            # Backend transport / retry visibility. Bumped by
+            # ``_handle_phase`` on ``phase="backend", event="warning"``
+            # records emitted from ``measure_sample`` whenever
+            # ``BackendClient.run_query`` fires its retry loop. Operator and
+            # webapp see retries land in real time; "silent retry then
+            # forget" is the failure mode this surfaces against.
+            "backend_retry_count": 0,
+            "recent_backend_warnings": [],
             "total_queries_scored": r.get("total_queries_scored", 0),
             "total_backend_calls": r.get("total_backend_calls", 0),
             "current_query_payload": None,
@@ -291,6 +299,29 @@ class LiveDashboardView(DerivedView):
     # no second dispatch path elsewhere.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
+        if record.phase == "backend" and record.event == "warning":
+            # Surface backend transport / 429 / 5xx retries as they fire.
+            # The retry behaviour is unchanged (still bounded, still honoring
+            # Retry-After); this projection only makes them visible.
+            payload = dict(record.payload or {})
+            self.state["backend_retry_count"] = int(self.state.get("backend_retry_count") or 0) + 1
+            warning = {
+                "ts": datetime.now(UTC).isoformat(),
+                "kind": payload.get("kind", "unknown"),
+                "attempt": payload.get("attempt"),
+                "max_attempts": payload.get("max_attempts"),
+                "wait_s": payload.get("wait_s"),
+                "error_class": payload.get("error_class"),
+                "status_code": payload.get("status_code"),
+                "final": bool(payload.get("final", False)),
+                "query": payload.get("query"),
+            }
+            recent: list[dict] = list(self.state.get("recent_backend_warnings") or [])
+            recent.append(warning)
+            self.state["recent_backend_warnings"] = recent[-10:]
+            self._persist()
+            return
+
         if record.phase == "round" and record.event == "display":
             payload = record.payload or {}
             round_result = payload.get("round_result")

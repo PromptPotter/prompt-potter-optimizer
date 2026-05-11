@@ -18,11 +18,23 @@ const SHOWN_ELSEWHERE = new Set([
 const KNOWN_ORDER = [
   "patience",
   "origin", "current_acc", "n_variants", "sp_budget_ttest",
-  "total_backend_calls", "error_count", "degraded_count",
+  "total_backend_calls", "error_count", "degraded_count", "backend_retry_count",
   "state_since", "stop_reason",
 ];
 
-const WARN_IF_POSITIVE = new Set(["error_count", "degraded_count"]);
+const WARN_IF_POSITIVE = new Set(["error_count", "degraded_count", "backend_retry_count"]);
+
+interface BackendWarning {
+  ts?: string;
+  kind?: string;
+  attempt?: number;
+  max_attempts?: number;
+  wait_s?: number;
+  error_class?: string;
+  status_code?: number;
+  final?: boolean;
+  query?: string;
+}
 
 function fmtNum(v: unknown, digits = 3): string {
   if (v == null) return "—";
@@ -101,6 +113,40 @@ export function LiveStateCard({ dash }: Props) {
       </div>
       <div className="var-label" style={{ marginTop: 14 }}>In-flight query payload</div>
       <div className={`payload-block${payloadEmpty ? " empty" : ""}`}>{payloadText}</div>
+      <BackendWarnings dash={dash} />
     </div>
+  );
+}
+
+function BackendWarnings({ dash }: { dash: DashboardSnapshot | null }) {
+  // ``recent_backend_warnings`` is a list payload from
+  // ``dashboard.json``; the operator needs to see retries land in
+  // real time so a transient stall isn't mistaken for a stuck loop.
+  // Surfaces nothing when no retries have happened — zero visual cost
+  // in the happy path.
+  const warnings = (dash as { recent_backend_warnings?: BackendWarning[] } | null)?.recent_backend_warnings;
+  if (!warnings || warnings.length === 0) return null;
+  return (
+    <>
+      <div className="var-label" style={{ marginTop: 14 }}>Recent backend retries (last {warnings.length})</div>
+      <div className="payload-block" style={{ fontSize: 11, lineHeight: 1.5 }}>
+        {warnings.slice().reverse().map((w, i) => {
+          const ts = w.ts ? new Date(w.ts).toLocaleTimeString() : "—";
+          const code = w.status_code != null ? ` HTTP ${w.status_code}` : "";
+          const err = w.error_class ? ` ${w.error_class}` : "";
+          const wait = w.wait_s != null ? ` · wait ${Number(w.wait_s).toFixed(1)}s` : "";
+          const final = w.final ? " · FINAL" : "";
+          const attempts = w.attempt != null ? ` (attempt ${w.attempt}/${w.max_attempts ?? "?"})` : "";
+          const q = w.query ? ` · q="${w.query.slice(0, 40)}${w.query.length > 40 ? "…" : ""}"` : "";
+          return (
+            <div key={i} style={{ marginBottom: 2 }}>
+              <span style={{ color: "var(--color-text-tertiary)" }}>{ts}</span>{" "}
+              <span style={{ color: "var(--color-warn, #d97706)" }}>{w.kind ?? "warning"}</span>
+              {code}{err}{attempts}{wait}{final}{q}
+            </div>
+          );
+        })}
+      </div>
+    </>
   );
 }

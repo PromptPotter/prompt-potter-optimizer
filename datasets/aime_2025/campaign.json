@@ -24,7 +24,7 @@
       "zero_signal_filter_enabled": true
     },
     "optimizer_llm": {
-      "model": "google/gemini-2.5-flash",
+      "model": "meta-llama/llama-3.3-70b-instruct:nitro",
       "provider": "openrouter",
       "temperature": 0.4,
       "max_tokens": 2000
