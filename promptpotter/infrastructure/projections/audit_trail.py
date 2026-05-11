@@ -35,7 +35,6 @@ __all__ = ["AuditTrailView", "audit_rounds_dir", "load_round_audits"]
 
 
 _ROUNDS_SUBPATH = (".runtime", "cache", "rounds")
-_ORIGIN_ROUND_SENTINEL = -1
 
 
 def audit_rounds_dir(cycle_dir: Path) -> Path:
@@ -196,25 +195,18 @@ class AuditTrailView(DerivedView):
 
     # -- Ledger subscription (PhaseRecord 3) ----------------------------------------
 
-    # Round boundaries (``PhaseRecord("round", "enter"|"complete")``) drive
-    # ``begin_round`` and ``flush``. The origin phase emits its own
-    # ``PhaseRecord("origin", "enter"|"exit")`` pair before the first round; treated
-    # as a pseudo-round so its node I/O lands in ``round_origin.json`` instead
-    # of being silently discarded when round 0 begins. ResumeCheckpointRecord and SnapshotRecord
-    # records bypass this projection — decisions are archived in round_data JSON and
-    # snapshots are display-only.
+    # Round boundaries arrive as ``PhaseRecord("round", "enter"|"complete")``;
+    # origin emits ``PhaseRecord("origin", "enter"|"exit", round=0)`` which is
+    # handled by the same boundary logic — origin IS round 0 on disk, flushed
+    # to ``round_0000.json`` alongside the L1 rounds ``round_0001.json``+.
+    # ResumeCheckpointRecord and SnapshotRecord records bypass this projection
+    # — decisions are archived in round_data JSON and snapshots are display-only.
 
     def _handle_phase(self, record: PhaseRecord) -> None:
-        if record.phase == "round":
+        if record.phase in ("round", "origin"):
             if record.event == "enter" and record.round is not None:
                 self.begin_round(record.round, started_at=record.timestamp)
-            elif record.event == "complete":
-                self._finished_at = record.timestamp
-                self.flush()
-        elif record.phase == "origin":
-            if record.event == "enter":
-                self.begin_round(_ORIGIN_ROUND_SENTINEL, started_at=record.timestamp)
-            elif record.event == "exit":
+            elif record.event in ("complete", "exit"):
                 self._finished_at = record.timestamp
                 self.flush()
 
@@ -260,10 +252,7 @@ class AuditTrailView(DerivedView):
             if key not in nodes_ordered:
                 nodes_ordered[key] = block
 
-        if self._current_round == _ORIGIN_ROUND_SENTINEL:
-            path = self.rounds_dir / "round_origin.json"
-        else:
-            path = self.rounds_dir / f"round_{self._current_round:04d}.json"
+        path = self.rounds_dir / f"round_{self._current_round:04d}.json"
         payload: dict[str, Any] = {
             "round": self._current_round,
             "started_at": self._started_at,

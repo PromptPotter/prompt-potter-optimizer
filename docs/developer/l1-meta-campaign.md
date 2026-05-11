@@ -66,9 +66,9 @@ Skill ranked the top issue + wrote a proposed edit. Verify the rank first.
 | Top-issue claim | Corroborate in |
 |---|---|
 | Failed `context_object_honored` / `param_scope_discipline` / `not_only_param_variants` / `parse_success` | `review.md` behavior table — the ✗ row's "evidence" column quotes the failing candidate |
-| Low yield (`<0.20`) | `review.md` L1Stats `yield_rate` + `.runtime/cache/candidates/round_0000.json` — eyeball how many candidates look distinct |
-| Flat lift (`top_lift_mean ≤ 0`) | `.runtime/cache/rounds/round_0000.json::nodes.l1_score` (per-candidate composite vs origin) |
-| `l2_fires > 0` AND round-1 winner from L2 | `.runtime/cache/candidates/round_0000.json[*].lineage.source == "l2_context"` |
+| Low yield (`<0.20`) | `review.md` L1Stats `yield_rate` + `.runtime/cache/candidates/round_0001.json` — eyeball how many candidates look distinct |
+| Flat lift (`top_lift_mean ≤ 0`) | `.runtime/cache/rounds/round_0001.json::nodes.l1_score` (per-candidate composite vs origin) |
+| `l2_fires > 0` AND round-1 winner from L2 | `.runtime/cache/candidates/round_0001.json[*].lineage.source == "l2_context"` |
 
 | Then open | For |
 |---|---|
@@ -79,11 +79,11 @@ After applying, clear `state.json::paused`.
 
 ### Verdict: `broken` (always pauses the skill)
 
-≥2 ✗ behavior checks, OR origin regression on round 0.
+≥2 ✗ behavior checks, OR origin regression on round 1.
 
 | To verify origin regression | Open |
 |---|---|
-| Round-0 best vs parent's origin | `.runtime/cache/rounds/round_0000.json::nodes.l1_score` (best candidate fitness) vs `index.json` of the **parent** cycle's `final.composite_fitness` |
+| Round-1 best vs parent's origin | `.runtime/cache/rounds/round_0001.json::nodes.l1_score` (best candidate fitness) vs `index.json` of the **parent** cycle's `final.composite_fitness` |
 | Which checks failed | `review.md` behavior table — count ✗ rows |
 
 Same proposed-edit + un-pause workflow as `degraded`.
@@ -113,22 +113,22 @@ Skill writes one `screen` row per scored candidate. Verdicts: `winner | tied | l
 | Common | Open |
 |---|---|
 | The screen row itself | `.promptpotter/meta_campaigns/{prompt_id}/log.jsonl` — grep `"kind":"screen"` for the candidate name |
-| The candidate's round-0 trace | `campaigns/{cycle_id}/.runtime/cache/rounds/round_0000.json::nodes.l1_score::candidates[*].composite_fitness` |
+| The candidate's round-1 trace | `campaigns/{cycle_id}/.runtime/cache/rounds/round_0001.json::nodes.l1_score::candidates[*].composite_fitness` |
 | Parent baseline (the `parent_top_lift_r1`) | Same path, **parent cycle** — or `state.json::parent_hash` then look up the cycle that emitted it via `log.jsonl::promote_accept.prompt_hash` |
 
 ### Verdict: `winner`
 
 `top_lift_r1 > parent + epsilon_lift` (default `epsilon_lift = 0.02`).
 
-- Confirm `top_lift_r1` arithmetic: `max(candidates.composite) − origin.composite` from `round_0000.json`.
+- Confirm `top_lift_r1` arithmetic: `max(candidates.composite) − origin.composite` from `round_0001.json`.
 - Candidate auto-flows to `pending_full`. Next tick will recommend the full-cycle CLI.
 
 ### Verdict: `tied` / `loser`
 
 Margin too small or negative. Skill recommends another sweep arm.
 
-- Open the **parent's** `round_0000.json` to see what the parent's best looked like.
-- Eyeball the lineage `changes_description` of the failing candidate in `.runtime/cache/candidates/round_0000.json[*].lineage` — was the mutation in scope?
+- Open the **parent's** `round_0001.json` to see what the parent's best looked like.
+- Eyeball the lineage `changes_description` of the failing candidate in `.runtime/cache/candidates/round_0001.json[*].lineage` — was the mutation in scope?
 
 ### Verdict: `reject_health`
 

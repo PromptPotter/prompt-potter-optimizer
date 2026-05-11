@@ -106,8 +106,8 @@ Otherwise (review verdict was `healthy`), compute:
 | Rung | Read | Compute |
 |---|---|---|
 | 0 — Behavior (sanity) | `review.md` behavior table | Pass = all ✓ on the four seeded checks. Healthy-gated cycles always pass; if not, log a defect and `reject_behavior`. |
-| 2 — R1 lift | `rounds/round_0000.json::candidate_scores[*].composite_fitness` + `origin.composite_fitness` | `top_lift_r1 = max(candidate.composite) − origin.composite`. |
-| 3 — R1+R2 (only when `screen_floor == "rung_3"`) | `rounds/round_0001.json::accuracy` | Reject if round-1 accuracy regresses below round-0 (proxy floor raised by Phase 6). |
+| 2 — R1 lift | `rounds/round_0001.json::candidate_scores[*].composite_fitness` + `origin.composite_fitness` | `top_lift_r1 = max(candidate.composite) − origin.composite`. (Origin = `round_0000.json`.) |
+| 3 — R1+R2 (only when `screen_floor == "rung_3"`) | `rounds/round_0002.json::accuracy` | Reject if round-2 accuracy regresses below round-1 (proxy floor raised by Phase 6). |
 
 Verdict (first match wins):
 

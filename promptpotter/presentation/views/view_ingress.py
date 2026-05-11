@@ -196,7 +196,7 @@ def _l1_generate_enter(d: dict, ctx: dict) -> RoundStartView:
     ctx["current_sp_flat"] = new_flat
 
     return RoundStartView(
-        round=ctx.get("round_num", 0) + 1,
+        round=ctx.get("round_num", 0),
         max_rounds=ctx.get("max_rounds", 0),
         l1_stall_count=ctx.get("l1_stall_count", 0),
         patience=ctx.get("patience", 0),
@@ -218,7 +218,7 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
     ]
     clone_labels: list[str] = []
     for c in candidates_meta:
-        label = f"C{c['idx'] + 1}"
+        label = c.get("label") or "C?"
         flat = build_candidate_flat(parent, c)
         if flat == parent:
             clone_labels.append(label)
@@ -230,7 +230,7 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
     sp_diff = SpDiffView(
         columns=tuple(columns),
         node_param_keys=ctx.get("node_param_keys"),
-        round_num=ctx.get("round_num", 0) + 1,
+        round_num=ctx.get("round_num", 0),
         clone_labels=tuple(clone_labels),
         l1_yield=l1_yield,
         l1_n_no_op=n_no_op,
@@ -249,10 +249,7 @@ def _l1_generate_exit(d: dict, ctx: dict) -> CandidatesGeneratedView:
 
 
 def _l1_score_exit(d: dict, ctx: dict) -> RoundCompleteView:
-    score_entries = [
-        score_entry_from_dict(s, fallback_label=f"C{i + 1}")
-        for i, s in enumerate(d.get("candidate_scores") or [])
-    ]
+    score_entries = [score_entry_from_dict(s) for s in d.get("candidate_scores") or []]
 
     winner = pick_round_winner(score_entries)
     if winner is not None:
@@ -433,12 +430,11 @@ def pick_round_winner(score_entries: list[ScoreEntry]) -> ScoreEntry | None:
     )
 
 
-def score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
+def score_entry_from_dict(s: dict) -> ScoreEntry:
     """Project a candidate-score wire dict (``CandidateScore.to_dict()`` shape)
-    into a ``ScoreEntry``. ``fallback_label`` covers in-memory call sites where
-    the dict carries no ``"label"`` and the index-tag (e.g. ``C3``) is supplied
-    by the caller; ``ci_lo``/``ci_hi`` are recomputed from hits/total when the
-    dict pre-dates Wilson-CI persistence.
+    into a ``ScoreEntry``. ``label`` is read from the dict (set canonically by
+    ``build_score_report``); ``ci_lo``/``ci_hi`` are recomputed from hits/total
+    when the dict pre-dates Wilson-CI persistence.
     """
     hits = int(s.get("hits", 0))
     total = int(s.get("total", 0))
@@ -447,7 +443,7 @@ def score_entry_from_dict(s: dict, *, fallback_label: str = "") -> ScoreEntry:
     else:
         ci_lo, ci_hi = wilson_ci(hits, total)
     return ScoreEntry(
-        label=s.get("label") or fallback_label,
+        label=s.get("label", ""),
         accuracy=float(s.get("accuracy", 0.0)),
         composite_fitness=s.get("composite_fitness"),
         hits=hits,

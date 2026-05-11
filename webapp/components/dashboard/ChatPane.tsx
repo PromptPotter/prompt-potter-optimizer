@@ -186,7 +186,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} themeKey={themeKey} />
+              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={Number(dash?.current_round?.round ?? dash?.round ?? 0)} themeKey={themeKey} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12

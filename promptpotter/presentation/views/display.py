@@ -229,7 +229,7 @@ def _scoreboard(
     lines = [f"  {_box_top('SCOREBOARD', width=w)}", f"  {_box_line(hdr, width=w)}"]
 
     for i, s in enumerate(ranked, 1):
-        label = s.get("label", f"C{i}")[:8]
+        label = (s.get("label") or "")[:8]
         acc = s["accuracy"]
         ci_str = fmt_ci(*wilson_ci(s.get("hits", 0), s.get("total", 0)))
         delta = acc - origin_accuracy

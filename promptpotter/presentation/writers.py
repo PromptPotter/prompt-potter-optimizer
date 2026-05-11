@@ -53,10 +53,7 @@ def from_disk_round(
     origin_composite_fitness: float | None = None,
 ) -> RoundCompleteView:
     """Reconstruct a ``RoundCompleteView`` from a persisted ``trial_NNNN.json``."""
-    score_entries = [
-        score_entry_from_dict(s, fallback_label=f"C{i + 1}")
-        for i, s in enumerate(round_data.get("candidate_scores") or [])
-    ]
+    score_entries = [score_entry_from_dict(s) for s in round_data.get("candidate_scores") or []]
 
     winner = pick_round_winner(score_entries)
     winner_label = winner.label if winner is not None else ""

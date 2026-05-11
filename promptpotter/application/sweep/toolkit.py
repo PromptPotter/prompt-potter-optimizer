@@ -146,13 +146,7 @@ def write_sweep_result(
     dataset = result["dataset"]
     h = result["l1_meta_prompt_hash"]
     slice_name = result.get("slice") or "all"
-    ts = (
-        result["timestamp"]
-        .replace(":", "")
-        .replace("-", "")
-        .replace(".", "")
-        .replace("+", "z")
-    )
+    ts = result["timestamp"].replace(":", "").replace("-", "").replace(".", "").replace("+", "z")
     parts = [verb]
     if target is not None:
         parts.append(str(target))
@@ -466,9 +460,13 @@ def rank_sweep_results(
         return str(v)
 
     rows = [[fmt(_row_value(r, h)) for h in headers] for r in ordered]
-    widths = [max(len(h), *(len(r[i]) for r in rows)) if rows else len(h) for i, h in enumerate(headers)]
+    widths = [
+        max(len(h), *(len(r[i]) for r in rows)) if rows else len(h) for i, h in enumerate(headers)
+    ]
     sep = "  "
     head_line = sep.join(h.ljust(w) for h, w in zip(headers, widths, strict=False))
     out_lines = [head_line, sep.join("-" * w for w in widths)]
-    out_lines.extend(sep.join(c.ljust(w) for c, w in zip(row, widths, strict=False)) for row in rows)
+    out_lines.extend(
+        sep.join(c.ljust(w) for c, w in zip(row, widths, strict=False)) for row in rows
+    )
     return "\n".join(out_lines)

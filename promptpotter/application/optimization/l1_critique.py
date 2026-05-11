@@ -62,7 +62,7 @@ async def run_l1_critique(
     logger.info(
         "L1 critique: %d chars prompt, round %d, acc=%.3f",
         len(prompt),
-        round_num + 1,
+        round_num,
         round_result.accuracy,
     )
     return result

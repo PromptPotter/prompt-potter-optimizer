@@ -308,8 +308,10 @@ async def _run_round_loop(
     """
     opt = config.optimization
     hard_cap = opt.hard_cap
+    # ``resumed_from_round`` is next-L1-round-to-run (fresh = 1). ``clean_rounds``
+    # tracks lifetime L1 rounds completed; origin (round 0) is not counted.
     round_num = session.state.resumed_from_round
-    clean_rounds = session.state.resumed_from_round
+    clean_rounds = max(session.state.resumed_from_round - 1, 0)
     max_rounds = opt.max_rounds or 999
 
     try:
@@ -394,10 +396,7 @@ async def _run_round_loop(
             round_num += 1
             clean_rounds += 1
 
-            if (
-                halt_at_accuracy is not None
-                and cycle.tracking.best_accuracy >= halt_at_accuracy
-            ):
+            if halt_at_accuracy is not None and cycle.tracking.best_accuracy >= halt_at_accuracy:
                 return StopReason.TARGET_HIT
             if (
                 max_spend_usd is not None

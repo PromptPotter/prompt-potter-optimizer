@@ -825,7 +825,7 @@ def build_bundle(
         latest_round = cycle.rounds[-1]
     latest_diag = latest_round.diagnostics if latest_round else None
     latest_crit = latest_round.critique if latest_round else None
-    round_num = latest_round.round + 1 if latest_round else 0
+    round_num = latest_round.round + 1 if latest_round else 1
 
     cs = CycleSlice(
         round_num=round_num,

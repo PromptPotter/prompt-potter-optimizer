@@ -68,13 +68,17 @@ def bootstrap_cycle(
 ) -> tuple[str | None, int]:
     """Resume an existing cycle or create one. Returns (cycle_id, resumed_from_round).
 
+    ``resumed_from_round`` is the next L1 round_num to execute. Origin is
+    round 0 (always already scored by the time this returns); the first L1
+    round is round 1. Fresh cycle ⇒ ``1``. Resumed cycle ⇒ ``len(rounds) + 1``.
+
     Hot-updateable config keys refresh from the current snapshot when
     cycle_id_override is set.
     """
     from promptpotter.application.runner import cycle_config_identity
 
     if not session.backend_id:
-        return None, 0
+        return None, 1
     try:
         store = session.store.campaigns
         resolved = cycle_id_override or cycle_config_identity(origin_jsp, dataset)
@@ -98,7 +102,7 @@ def bootstrap_cycle(
             # against their own JSP — refresh top-level field if drift.
             if existing.get("origin_accuracy") != origin_accuracy:
                 store.update(session.backend_id, resolved, {"origin_accuracy": origin_accuracy})
-            return resolved, len(existing.get("rounds", []))
+            return resolved, len(existing.get("rounds", [])) + 1
         store.create(
             session.backend_id,
             resolved,
@@ -109,10 +113,10 @@ def bootstrap_cycle(
                 "parent_session_id": parent_session_id,
             },
         )
-        return resolved, 0
+        return resolved, 1
     except (OSError, json.JSONDecodeError, KeyError):
         logger.warning("Cycle resume setup failed — running fresh", exc_info=True)
-        return None, 0
+        return None, 1
 
 
 def populate_session_scoring(
@@ -285,7 +289,9 @@ def _apply_resume_fork(
         resume_with_divergence_check,
     )
 
-    if resumed_from_round > 0 and resolved_cycle_id:
+    # resumed_from_round=1 is fresh (only origin done, no L1 round to replay).
+    # Real resumes are >=2 (at least one L1 round on disk to walk).
+    if resumed_from_round > 1 and resolved_cycle_id:
         fork_result = resume_with_divergence_check(
             session.store.campaigns,
             session.backend_id,

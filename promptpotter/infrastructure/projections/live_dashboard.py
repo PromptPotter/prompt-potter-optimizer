@@ -27,6 +27,7 @@ from typing import TYPE_CHECKING, Any
 
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
@@ -298,9 +299,23 @@ class LiveDashboardView(DerivedView):
                 self._absorb_round_complete(round_result.accuracy, l1_stall)
                 if self._recorder is not None:
                     self._recorder.set_l1_score(self._build_l1_score_block(round_result))
-                self._round = {"round": round_result.round + 1, "candidates": {}}
+                # current_round.round = the just-completed round (= the
+                # round_NNNN.json file the webapp should fetch). Webapp reads
+                # this value directly with no arithmetic.
+                self._round = {"round": round_result.round, "candidates": {}}
                 self._persist()
             return
+
+        # Origin completion → push live l1_score block to the audit recorder
+        # so ``round_0000.json`` carries origin's candidate snapshot when
+        # audit_trail flushes (subscriber order: dashboard → audit).
+        if (
+            record.phase == "origin"
+            and record.event == "exit"
+            and self._recorder is not None
+            and self._round.get("candidates")
+        ):
+            self._recorder.set_l1_score(self._build_l1_score_block())
 
         payload = record.payload or {}
         view = payload.get("view")
@@ -414,7 +429,8 @@ class LiveDashboardView(DerivedView):
 
     def _update_sample_markers(self, ci: int, ct: int, qi: int, qt: int) -> None:
         s = self.state
-        s["candidate"] = f"C{ci + 1}/{ct}"
+        round_num = int(s.get("round") or 0)
+        s["candidate"] = f"{candidate_label(round_num, ci)}/{ct}"
         s["query"] = f"{qi + 1}/{qt}"
 
     def _absorb_sample_scored(self, result: dict, *, last_in_candidate: bool) -> None:
@@ -455,9 +471,21 @@ class LiveDashboardView(DerivedView):
 
     def _candidate(self, idx: int, total: int = 0) -> dict[str, Any]:
         """Lazy-init candidate slot. Sample/score/p_best callbacks may fire
-        before candidate_started seeds the slot, so all mutators funnel here."""
+        before candidate_started seeds the slot, so all mutators funnel here.
+
+        ``changes_description`` holds the human-readable mutation text; the
+        canonical display ``label`` is composed in ``_build_l1_score_block``
+        from the slot's round + idx via :func:`candidate_label`.
+        """
         return self._round.setdefault("candidates", {}).setdefault(
-            idx, {"idx": idx, "total": total, "label": "", "samples": [], "scores": None}
+            idx,
+            {
+                "idx": idx,
+                "total": total,
+                "changes_description": "",
+                "samples": [],
+                "scores": None,
+            },
         )
 
     def _seed_candidate(
@@ -470,7 +498,7 @@ class LiveDashboardView(DerivedView):
         # Seed so CURRENT shows labelled pending slots before scoring lands.
         entry = self._candidate(idx, total)
         entry["total"] = total
-        entry["label"] = changes_description or ""
+        entry["changes_description"] = changes_description or ""
         entry["pp_override"] = pp_override
 
     def _append_sample(self, ci: int, ct: int, qi: int, qt: int, result: dict) -> None:
@@ -568,6 +596,10 @@ class LiveDashboardView(DerivedView):
     ) -> dict[str, Any]:
         """Project current candidates to dashboard's l1_score shape.
 
+        ``label`` is canonical ``CN.M`` (``C0`` for origin), composed from
+        the slot's round + idx via :func:`candidate_label`. Display sites
+        read this field verbatim — no ``idx + 1`` arithmetic anywhere.
+
         ``live`` (round_result is None) renders samples as compact
         one-liners (keeps dashboard.json from carrying 2 kB query strings
         per sample); ``not live`` emits the full sample dicts (round-
@@ -578,17 +610,20 @@ class LiveDashboardView(DerivedView):
         live = round_result is None
         active_formula = self.state.get("composite_fitness_formula")
         candidates = self._round.get("candidates") or {}
+        round_num = int(self._round.get("round", 0))
         input_candidates: list[dict[str, Any]] = []
         output_candidates: list[dict[str, Any]] = []
         for idx in sorted(candidates.keys()):
             cand = candidates[idx]
             scores = cand.get("scores") or {}
-            label = cand.get("label") or scores.get("changes_description") or ""
+            label = candidate_label(round_num, idx)
             input_candidates.append(
                 {
                     "idx": idx,
                     "label": label,
-                    "changes_description": scores.get("changes_description") or label,
+                    "changes_description": (
+                        cand.get("changes_description") or scores.get("changes_description") or ""
+                    ),
                     "pp_override": cand.get("pp_override"),
                 }
             )
@@ -612,6 +647,7 @@ class LiveDashboardView(DerivedView):
             output_candidates.append(
                 {
                     "idx": idx,
+                    "label": label,
                     "stats": stats,
                     "samples": [fmt_sample_line(s) for s in samples] if live else list(samples),
                 }

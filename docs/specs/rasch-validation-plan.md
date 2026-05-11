@@ -74,7 +74,7 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 |------|-----------|
 | `dashboard.json` (at root) | Live state — phase, round, current accuracy, current candidate's per-sample HIT/MISS lines |
 | `output.log` (at root) | Append-only HIT/MISS history, per query |
-| `rounds/round_0001.json` (round 2) | Smoking-gun source — `scoring_set_events`, `candidate_scores[].samples` |
+| `rounds/round_0002.json` (round 2) | Smoking-gun source — `scoring_set_events`, `candidate_scores[].samples` |
 | `log.md` (at leaf, regenerated each round) | Final digest with **Hard Samples** heatmap section |
 | `index.json` (at leaf) | `final.prompt_hashes` (Step 1c) + `final.stop_reason` |
 
@@ -82,7 +82,7 @@ For forks (likely on a fresh notebook run that re-mints from an existing root): 
 
 ## Step 6 — Smoking gun: are sample IDs in 0-19 order?
 
-Open `rounds/round_0001.json` (= round 2; `trial_0000.json` is round 1).
+Open `rounds/round_0002.json` (= round 2). Round 1 lives in `rounds/round_0001.json`; origin in `rounds/round_0000.json`.
 
 **Check 1 — `scoring_set_events`:** look for the field at the top level. Should be a non-empty list. Each entry:
 ```json
@@ -103,8 +103,8 @@ If `swapped_in` and `swapped_out` are non-empty → swap fired. ✓
 ```
 The `#NNN` is the sample_id (positional index into the BBEH flattened mini list).
 
-- Round 1 (`trial_0000.json`): all IDs should be `#000` through `#019` — the deterministic 20-sample prefix.
-- Round 2 (`trial_0001.json`): if Rasch swapped any sample, you'll see at least one ID ≥ `#020` mixed in.
+- Round 1 (`round_0001.json`): all IDs should be `#000` through `#019` — the deterministic 20-sample prefix.
+- Round 2 (`round_0002.json`): if Rasch swapped any sample, you'll see at least one ID ≥ `#020` mixed in.
 
 **Smoking gun:** any ID ≥ #020 in round 2 = the mechanic fired. If all 20 IDs are still 0-19 → no swap; either thresholds still too tight (push to 0.8) or Rasch isn't fitting (look at `log.md` heatmap).
 

@@ -1,6 +1,7 @@
 "use client";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
+import { candidateLabel } from "@/lib/candidate-label";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -8,18 +9,22 @@ interface Props {
 
 interface CandidateLike {
   idx?: number;
+  label?: string;
   samples?: string[];
 }
 
 export function LiveSamplesCard({ dash }: Props) {
   const score = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: CandidateLike[] } }> | undefined)?.l1_score;
   const cands = score?.output?.candidates ?? [];
+  // Canonical round (0 = origin, 1..N = L1) — no arithmetic.
+  const roundNum = Number(dash?.current_round?.round ?? dash?.round ?? 0);
 
-  // Flatten across candidates, tagging each sample with its candidate idx.
-  const rows: { candIdx: number | undefined; raw: string }[] = [];
+  // Flatten across candidates, tagging each sample with its candidate label.
+  const rows: { candLabel: string; raw: string }[] = [];
   for (const c of cands) {
+    const label = c.label || candidateLabel(roundNum, c.idx);
     const samples = c.samples ?? [];
-    for (const s of samples) rows.push({ candIdx: c.idx, raw: s });
+    for (const s of samples) rows.push({ candLabel: label, raw: s });
   }
 
   // Newest first, cap at 100.
@@ -53,7 +58,7 @@ export function LiveSamplesCard({ dash }: Props) {
                 <span className={tag}>{p.status}</span>
                 <span className="idx">#{String(p.idx ?? "").padStart(3, "0")}</span>
                 <span className="elapsed">{(p.elapsed ?? 0).toFixed(1)}s</span>
-                <span className="body">[c{r.candIdx ?? "?"}/{p.scorer}] {body}</span>
+                <span className="body">[{r.candLabel}/{p.scorer}] {body}</span>
               </div>
             );
           })

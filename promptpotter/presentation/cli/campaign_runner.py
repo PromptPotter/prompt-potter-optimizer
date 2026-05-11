@@ -684,8 +684,7 @@ def _parse_variants(args: argparse.Namespace) -> list[_Variant]:
     if missing:
         raise SystemExit(f"L1 prompt file(s) not found: {', '.join(missing)}")
     return [
-        _Variant(path=p, label=label_override if len(paths) == 1 else None or p.stem)
-        for p in paths
+        _Variant(path=p, label=label_override if len(paths) == 1 else None or p.stem) for p in paths
     ]
 
 
@@ -923,9 +922,7 @@ async def _fork_and_bind(
 
     tenant_id = getattr(args, "tenant", "default")
     store = build_stores(tenant_id=tenant_id)
-    source_file = (
-        variant.path.name if variant.path else f"current-{variant.label or 'unset'}.json"
-    )
+    source_file = variant.path.name if variant.path else f"current-{variant.label or 'unset'}.json"
     fork_payload = ForkPayload(
         trigger=ForkTrigger.OPERATOR_SWEEP,
         reason=f"sweep-toolkit:{sweep_id}",
@@ -1153,9 +1150,7 @@ async def _run_panel_verb(
     if multi:
         # _mint_fork retargeted the active pointer per iteration; put it
         # back so subsequent operator commands hit the parent cycle.
-        save_active_pointer(
-            getattr(args, "tenant", "default"), ctx.session_id, parent_cycle_id
-        )
+        save_active_pointer(getattr(args, "tenant", "default"), ctx.session_id, parent_cycle_id)
 
     human_lines = [f"Sweep {verb}: {len(results)} variant(s); sweep_id={sweep_id}"]
     for r in results:
@@ -1190,9 +1185,7 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
 
     if getattr(args, "from_sweep", None):
         stores = build_stores(tenant_id=getattr(args, "tenant", "default"))
-        prior = find_sweep_results(
-            stores.base_dir, sweep_id=args.from_sweep, verb="round1"
-        )
+        prior = find_sweep_results(stores.base_dir, sweep_id=args.from_sweep, verb="round1")
         if not prior:
             return CommandResult(
                 data={"error": "from_sweep_not_found", "sweep_id": args.from_sweep},
@@ -1212,9 +1205,7 @@ async def _cmd_sweep_round2(args: argparse.Namespace) -> CommandResult:
                 priors[label] = float(r1)
                 if path is not None:
                     priors[str(path)] = float(r1)
-        logger.info(
-            "round2: anchoring against sweep %s top-%d", args.from_sweep, len(variants)
-        )
+        logger.info("round2: anchoring against sweep %s top-%d", args.from_sweep, len(variants))
         return await _run_panel_verb(
             args, verb="round2", n_rounds=2, variants=variants, variant_priors=priors
         )

@@ -70,7 +70,10 @@ class CampaignBundle:
 
     cycle_id: str = ""
     tracing_campaign_id: str = ""
-    resumed_from_round: int = 0
+    # Next L1 round_num to execute. Origin = round 0 (always already done by
+    # the time the round loop starts); first L1 round is 1. Fresh ⇒ 1,
+    # resumed ⇒ ``len(prior_l1_rounds) + 1``.
+    resumed_from_round: int = 1
     obs: ObservabilityBridge | None = None
     audit_projection: AuditTrailView | None = None
     ledger: CycleEventLog | None = None

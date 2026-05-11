@@ -41,6 +41,7 @@ from promptpotter.shared.statistics import wilson_ci
 def _candidate_score_dict(
     *,
     candidate_id: str,
+    label: str,
     accuracy: float,
     composite_fitness: float,
     hits: int,
@@ -51,6 +52,7 @@ def _candidate_score_dict(
     ci_lo, ci_hi = wilson_ci(hits, total)
     return {
         "candidate_id": candidate_id,
+        "label": label,
         "changes_description": "",
         "pipeline_params_override": None,
         "accuracy": accuracy,
@@ -81,10 +83,11 @@ def test_round_complete_view_roundtrip() -> None:
     winner_total = 20
     winner_composite_fitness = 0.60
 
-    # Three candidates; the second one wins (highest composite_fitness).
+    # Three candidates in round 1; the second one wins.
+    # Labels follow the canonical CN.M scheme (round=1, idx=0/1/2 → C1.1/C1.2/C1.3).
     candidate_scores = [
         {
-            "label": "C1",
+            "label": "C1.1",
             "accuracy": 0.40,
             "composite_fitness": 0.45,
             "hits": 8,
@@ -92,7 +95,7 @@ def test_round_complete_view_roundtrip() -> None:
             "escalation_aborted": False,
         },
         {
-            "label": "C2",
+            "label": "C1.2",
             "accuracy": winner_acc,
             "composite_fitness": winner_composite_fitness,
             "hits": winner_hits,
@@ -100,7 +103,7 @@ def test_round_complete_view_roundtrip() -> None:
             "escalation_aborted": False,
         },
         {
-            "label": "C3",
+            "label": "C1.3",
             "accuracy": 0.20,
             "composite_fitness": 0.25,
             "hits": 4,
@@ -112,7 +115,7 @@ def test_round_complete_view_roundtrip() -> None:
     # Live path: build a phase event identical to what l1.py emits at
     # L1_SCORE:exit, run from_phase_event with a fresh ctx.
     ctx = {
-        "round_num": 0,
+        "round_num": 1,
         "origin_accuracy": origin_acc,
         "origin_composite_fitness": 0.40,
         "composite_fitness_formula": "0.7*acc + 0.3*recall",
@@ -121,9 +124,9 @@ def test_round_complete_view_roundtrip() -> None:
     event = PhaseEvent(
         phase="l1_score",
         event="exit",
-        round=0,
+        round=1,
         data={
-            "winner_label": "C2",
+            "winner_label": "C1.2",
             "winner_accuracy": winner_acc,
             "winner_composite_fitness": winner_composite_fitness,
             "winner_evaluators": {"accuracy": winner_acc},
@@ -137,9 +140,9 @@ def test_round_complete_view_roundtrip() -> None:
     # Disk path: build a round_data dict shaped like ``RoundResult.model_dump()``
     # for the same round, then run from_disk_round.
     round_data = {
-        "round_id": "round_0",
-        "round": 0,
-        "label": "round_0",
+        "round_id": "round_1",
+        "round": 1,
+        "label": "round_1",
         "accuracy": winner_acc,
         "composite_fitness": winner_composite_fitness,
         "hits": winner_hits,
@@ -151,6 +154,7 @@ def test_round_complete_view_roundtrip() -> None:
         "candidate_scores": [
             _candidate_score_dict(
                 candidate_id=f"cand_{i}",
+                label=cs["label"],
                 accuracy=cs["accuracy"],
                 composite_fitness=cs["composite_fitness"],
                 hits=cs["hits"],
@@ -180,7 +184,7 @@ def test_round_complete_view_no_improvement() -> None:
     origin_acc = 0.50
     candidate_scores = [
         {
-            "label": "C1",
+            "label": "C1.1",
             "accuracy": 0.40,
             "composite_fitness": 0.42,
             "hits": 8,
@@ -188,13 +192,13 @@ def test_round_complete_view_no_improvement() -> None:
             "escalation_aborted": False,
         },
     ]
-    ctx = {"round_num": 0, "origin_accuracy": origin_acc}
+    ctx = {"round_num": 1, "origin_accuracy": origin_acc}
     event = PhaseEvent(
         phase="l1_score",
         event="exit",
-        round=0,
+        round=1,
         data={
-            "winner_label": "C1",
+            "winner_label": "C1.1",
             "winner_accuracy": 0.40,
             "winner_composite_fitness": 0.42,
             "winner_evaluators": {},
@@ -206,7 +210,7 @@ def test_round_complete_view_no_improvement() -> None:
     assert isinstance(live_view, RoundCompleteView)
 
     round_data = {
-        "round": 0,
+        "round": 1,
         "accuracy": 0.40,
         "composite_fitness": 0.42,
         "hits": 8,
@@ -218,6 +222,7 @@ def test_round_complete_view_no_improvement() -> None:
         "candidate_scores": [
             _candidate_score_dict(
                 candidate_id="cand_0",
+                label="C1.1",
                 accuracy=0.40,
                 composite_fitness=0.42,
                 hits=8,
@@ -340,12 +345,10 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
 
 
-def test_audit_trail_persists_origin_phase(tmp_path: Path) -> None:
-    """Origin LLM-call metadata must persist to ``round_origin.json`` instead of being discarded.
-
-    The origin phase emits ``PhaseRecord('origin', 'enter'|'exit')`` before
-    the first round's enter/complete. Pre-fix, origin node accumulation
-    leaked into round 0's ``begin_round`` slot and was warn-and-discarded.
+def test_audit_trail_persists_origin_as_round_0000(tmp_path: Path) -> None:
+    """Origin IS round 0 on disk: ``PhaseRecord('origin','enter'|'exit',round=0)``
+    flushes to ``round_0000.json``; the first L1 round (round=1) flushes to
+    ``round_0001.json``. No ``round_origin.json``, no collision.
     """
     from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
 
@@ -359,17 +362,19 @@ def test_audit_trail_persists_origin_phase(tmp_path: Path) -> None:
         1,
     )
     proj.on_record(PhaseRecord(phase="origin", event="exit", round=0), 2)
-    # Round 0 begins fresh — no warn-and-discard, no leakage of origin.
-    proj.on_record(PhaseRecord(phase="round", event="enter", round=0), 3)
+    # First L1 round = round 1 (origin = round 0 is already on disk).
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=1), 3)
     proj.on_record(
         LLMCallRecord(
-            node="l1_generate", round=0, payload={"type": "l1_generate", "response": "ok"}
+            node="l1_generate", round=1, payload={"type": "l1_generate", "response": "ok"}
         ),
         4,
     )
-    proj.on_record(PhaseRecord(phase="round", event="complete", round=0), 5)
+    proj.on_record(PhaseRecord(phase="round", event="complete", round=1), 5)
 
-    origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_origin.json"
-    round_0_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"
-    assert origin_path.exists(), "origin phase must flush to round_origin.json"
-    assert round_0_path.exists(), "round 0 must flush independently of origin"
+    origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0000.json"
+    round_1_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0001.json"
+    legacy_origin_path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_origin.json"
+    assert origin_path.exists(), "origin phase must flush to round_0000.json"
+    assert round_1_path.exists(), "first L1 round must flush to round_0001.json"
+    assert not legacy_origin_path.exists(), "round_origin.json must not be written"

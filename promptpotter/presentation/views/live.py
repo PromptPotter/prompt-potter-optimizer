@@ -20,6 +20,7 @@ from promptpotter.application.optimization.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
 from promptpotter.domain.opt_search_point import OptSearchPoint
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
+from promptpotter.domain.results import candidate_label
 from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
@@ -881,7 +882,7 @@ class LiveDisplay(DerivedView):
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
         self._bars_close()
         w = 66
-        label = f"C{idx + 1}"
+        label = scores.get("label") or candidate_label(self._core.round_num, idx)
         origin_acc = self._phase_ctx.get("origin_accuracy", self.origin_acc)
         origin_comp = self._phase_ctx.get("origin_composite_fitness")
         summary = individual_summary_from_dict(
@@ -914,9 +915,7 @@ class LiveDisplay(DerivedView):
             self._round_best_acc = acc
             self._round_best_label = label
             sign = "+" if delta_origin >= 0 else ""
-            return (
-                f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_origin:.1%} vs origin){RESET}"
-            )
+            return f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_origin:.1%} vs origin){RESET}"
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
@@ -941,7 +940,7 @@ class LiveDisplay(DerivedView):
             }
         )
 
-        rn = self._core.round_num + 1
+        rn = self._core.round_num
         elapsed_label = ""
         if self._round_started_at is not None:
             elapsed = time.monotonic() - self._round_started_at

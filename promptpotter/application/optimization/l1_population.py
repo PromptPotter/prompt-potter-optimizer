@@ -100,6 +100,7 @@ def build_score_report(
     query_results: list,
     dataset: list,
     *,
+    label: str,
     aborted: bool = False,
     elimination_stopped: bool = False,
     elimination_context: dict | None = None,
@@ -108,10 +109,15 @@ def build_score_report(
     new_runtime_failure: RuntimeFailure | None = None,
     l1_diversity: float = 1.0,
 ) -> CandidateScore:
-    """Build the typed candidate score report — stable shape, defaults always present."""
+    """Build the typed candidate score report — stable shape, defaults always present.
+
+    ``label`` is the persisted display identity (``"C0"`` for origin,
+    ``"CN.M"`` for L1 candidates). See ``domain.results.candidate_label``.
+    """
     evaluators = {**(score_summary.get("evaluators") or {}), "l1_diversity": l1_diversity}
     return CandidateScore(
         candidate_id=osp.lineage.id,
+        label=label,
         changes_description=osp.lineage.changes_description or "",
         pipeline_params_override=pipeline_params_override,
         accuracy=score_summary["accuracy"],

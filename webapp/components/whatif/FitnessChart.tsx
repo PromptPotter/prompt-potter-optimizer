@@ -3,108 +3,55 @@ import { useMemo } from "react";
 import { Bar } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
 import { cssRgba, getCss } from "@/lib/theme";
-import { parseSampleLine } from "@/lib/sample-line";
 import type { ChartData, ChartOptions } from "chart.js";
-import type { Row } from "./meta";
 
 ensureChartRegistered();
 
-interface Candidate {
-  idx?: number;
-  stats?: {
-    composite_fitness?: number;
-    accuracy?: number;
-    evaluators?: Record<string, number>;
-  };
-  samples?: string[];
-}
-
-// Pass-rate from in-flight HIT/MISS lines — proxy for accuracy while the
-// candidate's full eval is still in progress and stats hasn't landed.
-function runningAccuracy(cand: Candidate): number | null {
-  const samples = cand.samples ?? [];
-  if (samples.length === 0) return null;
-  let hits = 0;
-  let total = 0;
-  for (const raw of samples) {
-    const p = parseSampleLine(raw);
-    if (p.status === "HIT") { hits += 1; total += 1; }
-    else if (p.status === "MISS") { total += 1; }
-  }
-  return total > 0 ? hits / total : null;
-}
-
-function correctedScore(cand: Candidate, selected: Set<string>, rows: Row[]): number | null {
-  const ev = cand.stats?.evaluators ?? {};
-  let sum = 0;
-  let n = 0;
-  for (const sel of selected) {
-    const v = ev[sel];
-    if (v == null) continue;
-    const direction = rows.find((r) => r.displayName === sel)?.direction ?? "high";
-    sum += direction === "low" ? 1 - v : v;
-    n += 1;
-  }
-  return n > 0 ? sum / n : null;
+// Pre-projected bar slot. Origin, historical rounds, and the in-flight
+// current round all collapse to the same shape — FitnessPanel handles the
+// merge so this component stays a pure plotter.
+export interface BarSlot {
+  key: string;          // React + dedup key
+  label: string;        // x-axis label (e.g. "C0", "C1.1", "C2.3")
+  accuracy: number | null;
+  composite: number | null;
+  whatif: number | null;
+  started: boolean;     // false = blank slot, true = scored or scoring
 }
 
 interface Props {
-  candidates: Candidate[];
-  selected: Set<string>;
-  rows: Row[];
-  nVariants: number;
+  bars: BarSlot[];
   showComposite: boolean;
   showWhatIf: boolean;
   themeKey: string;
 }
 
 export function FitnessChart({
-  candidates,
-  selected,
-  rows,
-  nVariants,
+  bars,
   showComposite,
   showWhatIf,
   themeKey,
 }: Props) {
-  const total = Math.max(nVariants, 1);
-  const labels = useMemo(() => Array.from({ length: total }, (_, i) => `C${i}`), [total]);
+  const labels = useMemo(() => bars.map((b) => b.label), [bars]);
 
-  // Two parallel arrays per series:
-  //  *Raw — the true value (number or null) — drives the tooltip.
-  //  *Plot — the value pushed to chart.js. Null is coerced to 0 (so
-  //   `minBarLength` paints a stub) ONLY for candidates that have
-  //   produced their first datum; candidates that haven't started stay
-  //   null so chart.js leaves the slot blank — distinguishing "still
-  //   computing" from "not yet started".
+  // Two parallel arrays per series: *Raw drives the tooltip; *Plot pushes
+  // null → 0 only for bars whose scoring has begun (so `minBarLength`
+  // paints a stub). Unstarted bars stay null so chart.js leaves the slot
+  // blank — distinguishing "still computing" from "not yet started".
   const { accRaw, compRaw, whatifRaw, accPlot, compPlot, whatifPlot } = useMemo(() => {
-    const aR: (number | null)[] = new Array(total).fill(null);
-    const cR: (number | null)[] = new Array(total).fill(null);
-    const wR: (number | null)[] = new Array(total).fill(null);
-    const started: boolean[] = new Array(total).fill(false);
-    for (const cand of candidates) {
-      const i = Number(cand.idx);
-      if (!Number.isFinite(i) || i < 0 || i >= total) continue;
-      aR[i] = typeof cand.stats?.accuracy === "number" ? cand.stats.accuracy : runningAccuracy(cand);
-      cR[i] = typeof cand.stats?.composite_fitness === "number" ? cand.stats.composite_fitness : null;
-      wR[i] = correctedScore(cand, selected, rows);
-      started[i] =
-        (cand.samples?.length ?? 0) > 0 ||
-        typeof cand.stats?.accuracy === "number" ||
-        typeof cand.stats?.composite_fitness === "number" ||
-        Object.keys(cand.stats?.evaluators ?? {}).length > 0;
-    }
+    const aR = bars.map((b) => b.accuracy);
+    const cR = bars.map((b) => b.composite);
+    const wR = bars.map((b) => b.whatif);
     const coerce = (v: number | null, i: number): number | null =>
-      v == null ? (started[i] ? 0 : null) : v;
+      v == null ? (bars[i].started ? 0 : null) : v;
     return {
       accRaw: aR, compRaw: cR, whatifRaw: wR,
       accPlot: aR.map(coerce), compPlot: cR.map(coerce), whatifPlot: wR.map(coerce),
     };
-  }, [candidates, selected, rows, total]);
+  }, [bars]);
 
   const data = useMemo<ChartData<"bar">>(() => {
     const seriesCount = 1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0);
-    // Single bar centred per category; widen the group as series stack on.
     const cat = seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : 0.9;
     const datasets: ChartData<"bar">["datasets"] = [
       {
@@ -161,7 +108,7 @@ export function FitnessChart({
     maintainAspectRatio: false,
     animation: { duration: 200 },
     scales: {
-      x: { grid: { display: false }, ticks: { font: { size: 12, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false } },
+      x: { grid: { display: false }, ticks: { font: { size: 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border-tertiary") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
     },
     plugins: {

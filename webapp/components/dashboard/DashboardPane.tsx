@@ -108,12 +108,14 @@ export function DashboardPane() {
     };
   }, [cycleId]);
 
-  // Round-based panels: fetch the most recent round JSON when dash.round bumps
+  // Round-based panels: fetch the most recent round JSON when dash.round bumps.
+  // `dash.round` is the canonical round number (0 = origin, 1..N = L1) —
+  // matches `rounds/round_NNNN.json` directly. No arithmetic.
   useEffect(() => {
     if (!cycleId || !dash) return;
-    const round = Number(dash.round ?? 0);
-    if (round <= 0 || round - 1 === lastRoundFetched) return;
-    const nn = String(round - 1).padStart(4, "0");
+    const round = Number(dash.round ?? -1);
+    if (round < 0 || round === lastRoundFetched) return;
+    const nn = String(round).padStart(4, "0");
     let cancelled = false;
     (async () => {
       try {
@@ -121,7 +123,7 @@ export function DashboardPane() {
         const data = JSON.parse(r.content) as RoundData;
         if (cancelled) return;
         setLatestRound(data);
-        setLastRoundFetched(round - 1);
+        setLastRoundFetched(round);
       } catch {
         /* round may not be on disk yet */
       }
@@ -187,7 +189,7 @@ export function DashboardPane() {
               <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />
               <TrendChart cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             </div>
-            <FitnessPanel dash={dash} themeKey={themeKey} />
+            <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             <LiveSamplesCard dash={dash} />
             <EvalTable round={latestRound} />
             <RawJsonCard dash={dash} />

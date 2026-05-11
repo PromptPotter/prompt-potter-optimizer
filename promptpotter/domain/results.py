@@ -21,7 +21,22 @@ __all__ = [
     "RoundPayload",
     "RoundResult",
     "SweepBatchResult",
+    "candidate_label",
 ]
+
+
+def candidate_label(round_num: int, idx: int) -> str:
+    """Canonical candidate display identity. Sole writer for ``CN.M`` labels.
+
+    Round 0 is origin — collapses to ``"C0"`` (single candidate). L1 round
+    N produces candidates ``"CN.1"``..``"CN.{idx+1}"``. Every display site
+    (CLI, dashboard, webapp) reads the persisted ``CandidateScore.label`` /
+    candidate-dict ``label`` field; this helper is the one place it gets
+    composed.
+    """
+    if round_num == 0:
+        return "C0"
+    return f"C{round_num}.{idx + 1}"
 
 
 @dataclass(frozen=True)
@@ -31,9 +46,14 @@ class CandidateScore:
     Stable shape, defaults always present. Built typed in ``score_population``
     and serialized to flat dicts via :meth:`to_dict` for ``RoundResult``,
     phase events, and archive persistence.
+
+    ``label`` is the persisted display identity: ``"C0"`` for origin,
+    ``f"C{round}.{n}"`` (n=1..N) for L1 candidates. Single source of truth
+    at every render site — no display-side arithmetic.
     """
 
     candidate_id: str
+    label: str
     changes_description: str
     accuracy: float
     composite_fitness: float
@@ -58,6 +78,7 @@ class CandidateScore:
         ci_lo, ci_hi = wilson_ci(self.hits, self.total)
         return {
             "candidate_id": self.candidate_id,
+            "label": self.label,
             "changes_description": self.changes_description,
             "pipeline_params_override": self.pipeline_params_override,
             "accuracy": self.accuracy,
@@ -220,7 +241,7 @@ class CycleResult(BaseModel):
     langfuse_trace_id: str | None = None
     cycle_id: str | None = None
     session_id: str | None = None
-    resumed_from_round: int = 0
+    resumed_from_round: int = 1
 
 
 class PayloadOutcome(BaseModel):

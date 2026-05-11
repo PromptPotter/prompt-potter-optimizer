@@ -66,6 +66,7 @@ from promptpotter.domain.results import (
     CandidateScore,
     RoundOrigin,
     RoundResult,
+    candidate_label,
 )
 from promptpotter.domain.scoring import QueryMeasurement
 from promptpotter.domain.validators import StopRule
@@ -101,13 +102,19 @@ __all__ = [
 ]
 
 
-def candidate_summaries(proposals: list[CandidateProposal]) -> list[dict]:
-    """Build compact per-candidate summary dicts for phase event data."""
+def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict]:
+    """Build compact per-candidate summary dicts for phase event data.
+
+    Each summary carries ``label`` (canonical ``CN.M``), set once here so the
+    audit trail's ``l1_score.input.candidates`` and every downstream reader
+    share one identity — no display-side ``idx + 1`` arithmetic.
+    """
     summaries = []
     for i, cp in enumerate(proposals):
         prompt_fields = {k: getattr(cp.osp, k) for k in PROMPT_STRING_FIELDS if getattr(cp.osp, k)}
         summary: dict = {
             "idx": i,
+            "label": candidate_label(round_num, i),
             "changes_description": cp.osp.lineage.changes_description or "",
         }
         if cp.pipeline_params_override:
@@ -397,6 +404,8 @@ async def score_one_candidate(
 
     ``candidate_scores`` is read for prior_label resolution (already-scored
     candidates only — caller appends the current report after this returns)."""
+    label = candidate_label(round_num, idx)
+
     # Path 1 — validation-skip synthetic-0.
     if osp_c.validation_failures:
         return CandidateRunResult(
@@ -408,6 +417,7 @@ async def score_one_candidate(
                 INVALID_SCORES,
                 [],
                 dataset,
+                label=label,
                 invalid=True,
                 l1_diversity=l1_diversity,
             ),
@@ -443,6 +453,7 @@ async def score_one_candidate(
                 scores,
                 results,
                 dataset,
+                label=label,
                 resumed_from_cache=True,
                 l1_diversity=l1_diversity,
             ),
@@ -473,6 +484,7 @@ async def score_one_candidate(
         scores,
         results,
         dataset,
+        label=label,
         aborted=effect.aborted,
         elimination_stopped=effect.elimination_stopped,
         elimination_context=dict(effect.elim_context) if effect.elim_context else None,
@@ -487,11 +499,7 @@ async def score_one_candidate(
         and report.elimination_context is not None
     ):
         prior_label = next(
-            (
-                f"C{i + 1}"
-                for i, r in enumerate(candidate_scores)
-                if r.candidate_id == effect.leader_id
-            ),
+            (r.label for r in candidate_scores if r.candidate_id == effect.leader_id),
             None,
         )
         if prior_label:
@@ -811,7 +819,7 @@ async def generate_or_load_candidates(
                         payload={
                             "type": "l1_generate",
                             "input": {"source": "loaded_from_disk", "round": round_num},
-                            "response": {"candidates": candidate_summaries(persisted)},
+                            "response": {"candidates": candidate_summaries(persisted, round_num)},
                         },
                     )
                 )
@@ -823,7 +831,7 @@ async def generate_or_load_candidates(
                 n_candidates=len(persisted),
                 n_eval_queries=n_eval_queries,
                 loaded_from_disk=True,
-                candidates=candidate_summaries(persisted),
+                candidates=candidate_summaries(persisted, round_num),
                 l1_yield=yield_stats.l1_yield,
                 l1_n_no_op=yield_stats.l1_n_no_op,
                 l1_n_duplicate=yield_stats.l1_n_duplicate,
@@ -868,7 +876,7 @@ async def generate_or_load_candidates(
         n_candidates=len(candidates),
         n_eval_queries=n_eval_queries,
         loaded_from_disk=False,
-        candidates=candidate_summaries(candidates),
+        candidates=candidate_summaries(candidates, round_num),
         l1_yield=yield_stats.l1_yield,
         l1_n_no_op=yield_stats.l1_n_no_op,
         l1_n_duplicate=yield_stats.l1_n_duplicate,
