@@ -22,6 +22,7 @@ from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVER
 
 __all__ = [
     "CHECK_REGISTRY",
+    "PARAM_FORBIDDEN_KEYS",
     "PARAM_SCOPE_KEYS",
     "CheckContext",
     "CheckResult",
@@ -54,6 +55,12 @@ def extract_l1_variants(container: dict[str, Any] | None) -> list[dict[str, Any]
 PARAM_SCOPE_KEYS: frozenset[str] = frozenset(
     {"temperature", "max_tokens", "reasoning_effort", "top_p"}
 )
+
+# Per-node LLM-call params that are operator-fixed at the dataset overlay
+# (`datasets/{name}/pipeline.json::nodes.{name}.config`) and never optimizer turf:
+# model identity and provider are infrastructure-level decisions. Any candidate
+# touching these is a wasted slot and fails forbidden_axes_honored.
+PARAM_FORBIDDEN_KEYS: frozenset[str] = frozenset({"model", "provider"})
 
 
 @dataclass(frozen=True)
@@ -180,6 +187,37 @@ def _check_param_scope_discipline(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
+def _check_forbidden_axes_honored(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+    """No variant may mutate ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``).
+
+    These ride the per-dataset overlay and are out of L1's surface — touching
+    them wastes a candidate slot. A single offender fails the cycle.
+    """
+    variants = extract_l1_variants(round_dict)
+    if not variants:
+        return CheckResult("forbidden_axes_honored", True, "no variants emitted")
+
+    offenders: list[tuple[str, str]] = []
+    for v in variants:
+        pp = v.get("pipeline_params_override") or {}
+        touched = _touched_forbidden_keys(pp)
+        if touched:
+            label = str(v.get("variant_name") or "?")
+            offenders.append((label, ",".join(sorted(touched))))
+    if offenders:
+        sample = ", ".join(f"{label}({keys})" for label, keys in offenders[:3])
+        return CheckResult(
+            "forbidden_axes_honored",
+            False,
+            f"{len(offenders)} variant(s) touched operator-fixed axes: {sample}",
+        )
+    return CheckResult(
+        "forbidden_axes_honored",
+        True,
+        f"{len(variants)}/{len(variants)} variants honour {sorted(PARAM_FORBIDDEN_KEYS)}",
+    )
+
+
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """≥1 variant per round must mutate a ``PROMPT_STRING_FIELDS`` field."""
     variants = extract_l1_variants(round_dict)
@@ -207,6 +245,7 @@ def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext
 CHECK_REGISTRY: dict[str, CheckFn] = {
     "context_object_honored": _check_context_object_honored,
     "param_scope_discipline": _check_param_scope_discipline,
+    "forbidden_axes_honored": _check_forbidden_axes_honored,
     "not_only_param_variants": _check_not_only_param_variants,
 }
 
@@ -229,6 +268,19 @@ def _touches_param_scope(pp_override: dict[str, Any]) -> bool:
         if isinstance(value, dict) and _touches_param_scope(value):
             return True
     return False
+
+
+def _touched_forbidden_keys(pp_override: dict[str, Any]) -> set[str]:
+    """Recursively collect PARAM_FORBIDDEN_KEYS present in a pipeline_params_override."""
+    out: set[str] = set()
+    if not isinstance(pp_override, dict):
+        return out
+    for key, value in pp_override.items():
+        if key in PARAM_FORBIDDEN_KEYS:
+            out.add(key)
+        if isinstance(value, dict):
+            out.update(_touched_forbidden_keys(value))
+    return out
 
 
 def _stale_prompt_field(ctx: CheckContext) -> str | None:

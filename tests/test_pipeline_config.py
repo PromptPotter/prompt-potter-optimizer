@@ -315,11 +315,25 @@ def test_validate_overrides_rejects_out_of_enum_reasoning_effort():
     assert "medium" in failures[0].allowed
 
 
-def test_validate_overrides_still_rejects_bad_model():
+def test_validate_overrides_rejects_model_as_forbidden_axis_by_default():
+    """Strict mode (default): any model touch is forbidden, regardless of value."""
     schema = _bbeh_schema()
     failures = validate_overrides(
         {"llm_only": {"model": "gpt-5-turbo-xxl"}},
         schema,
+    )
+    assert len(failures) == 1
+    assert failures[0].axis == "llm_only.model"
+    assert failures[0].reason == "forbidden_axis"
+
+
+def test_validate_overrides_falls_back_to_available_models_when_strict_off():
+    """With strict mode off (ablation runs), the model-allowlist check still fires."""
+    schema = _bbeh_schema()
+    failures = validate_overrides(
+        {"llm_only": {"model": "gpt-5-turbo-xxl"}},
+        schema,
+        forbidden_axes_strict=False,
     )
     assert len(failures) == 1
     assert failures[0].axis == "llm_only.model"

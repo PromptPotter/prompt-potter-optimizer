@@ -221,7 +221,12 @@ def _build_cycle_and_bootstrap(
         config=config,
     )
 
-    base_pp = session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
+    # session.pipeline_params carries the dataset overlay (provider/model/etc.)
+    # merged by configure_and_apply_pipeline. Use it so the origin JSP — and the
+    # cycle-id derived from its content_hash — is sensitive to overlay edits.
+    base_pp = session.pipeline_params or (
+        session.pipeline_schema.to_pipeline_params() if session.pipeline_schema else {}
+    )
     origin_jsp = origin_osp.to_job_search_point(
         base_pipeline_params=base_pp, schema=session.pipeline_schema
     )

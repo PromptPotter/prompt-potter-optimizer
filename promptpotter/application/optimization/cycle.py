@@ -163,10 +163,31 @@ class Cycle:
                 "l1_overrides": dict(origin_osp.l1_overrides),
             }
         )
+        # session.pipeline_params already carries the dataset overlay merged in by
+        # configure_and_apply_pipeline (provider/model/temperature/reasoning_effort,
+        # anything in nodes.{name}.config). Use it directly — schema.to_pipeline_params()
+        # is intentionally sparse ({"steps": [...]}) and would strip the operator-fixed
+        # config, causing the cycle's content_hash to ignore overlay edits and the wire
+        # payload to fall back to backend defaults.
         sp = opt_sp.to_job_search_point(
-            base_pipeline_params=schema.to_pipeline_params() if schema else None,
+            base_pipeline_params=session.pipeline_params or None,
             schema=schema,
         )
+        # Invariant: every key the operator set under nodes.{name}.config in
+        # the dataset overlay must survive into sp.pipeline_params, so that
+        # (a) JobSearchPoint.content_hash flips on overlay edits → auto-fork,
+        # and (b) the wire adapter forwards the overlay to the backend instead
+        # of falling back to backend defaults. If this trips, a caller
+        # regressed to schema.to_pipeline_params() (sparse) somewhere.
+        _sp_pp = sp.pipeline_params or {}
+        for _node, _cfg in (session.pipeline_params or {}).items():
+            if _node == "steps" or not isinstance(_cfg, dict):
+                continue
+            _missing = set(_cfg) - set(_sp_pp.get(_node, {}))
+            assert not _missing, (
+                f"overlay keys stripped from {_node}: {sorted(_missing)} — "
+                "Cycle.start must pass session.pipeline_params, not a sparse schema view"
+            )
         return cls(
             session=session,
             config=config,

@@ -68,25 +68,37 @@ def parse_population(
     proposals: list[CandidateProposal],
     pipeline_params: dict | None,
     schema: PipelineSchema | None,
+    *,
+    forbidden_axes_strict: bool = True,
 ) -> tuple[list[OptSearchPoint], list[dict | None]]:
-    """Project proposals → OptSearchPoints + merged pp; attaches validation failures."""
+    """Project proposals → OptSearchPoints + merged pp; attaches validation failures.
+
+    ``forbidden_axes_strict`` (default on) gates the strict-mode rejection
+    of ``model``/``provider`` mutations — see
+    ``OptimizationConfig.forbidden_axes_strict``.
+    """
     osp_list: list[OptSearchPoint] = []
     merged: list[dict | None] = []
     for cp in proposals:
         pipeline_params_override = cp.pipeline_params_override or None
         osp = cp.osp
         if schema and pipeline_params_override:
-            outcome = L1_SCHEMA_COMPLIANCE.run(pipeline_params_override, pipeline_schema=schema)
+            outcome = L1_SCHEMA_COMPLIANCE.run(
+                pipeline_params_override,
+                pipeline_schema=schema,
+                forbidden_axes_strict=forbidden_axes_strict,
+            )
             if outcome is not None:
                 failures: list[ValidationFailure] = outcome.evidence["failures"]
                 osp.validation_failures = failures
                 for vf in failures:
                     logger.warning(
-                        "candidate %s: validation failure on %s — proposed %r not in allowed %r",
+                        "candidate %s: validation failure on %s — proposed %r not in allowed %r (reason=%s)",
                         osp.lineage.id[:8],
                         vf.axis,
                         vf.value,
                         vf.allowed,
+                        vf.reason,
                     )
         osp_list.append(osp)
         merged.append(merge_pipeline_params(pipeline_params, pipeline_params_override, schema))

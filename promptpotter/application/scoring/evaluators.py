@@ -40,7 +40,9 @@ PROMPT_BUDGET_CHARS = 4_000
 __all__ = [
     "LATENCY_BUDGET_MS",
     "PROMPT_BUDGET_CHARS",
+    "SELF_HEALERS",
     "Evaluator",
+    "SelfHealerSpec",
     "all_evaluators",
     "default_per_round_formula",
     "default_per_round_formula_short",
@@ -73,13 +75,64 @@ def compute_degraded_rate(*, results: list[QueryMeasurement], **_: Any) -> float
     return sum(1 for r in results if is_degraded(r)) / len(results)
 
 
-def compute_runtime_failure_rate(
-    *, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any
-) -> float:
-    if not results or opt_sp is None:
-        return 0.0
-    count = len(opt_sp.runtime_failures)
-    return min(count / len(results), 1.0)
+@dataclass(frozen=True)
+class SelfHealerSpec:
+    """One self-healing channel: the OptSearchPoint attribute that lists its
+    events, the evaluator id used in formula strings, and a short description.
+
+    Each healer fires when a layer below patches a wound: L2 heals L1 on
+    ``validation_failures`` / ``runtime_failures``; L3 heals L2 on
+    ``l2_guard_breaches``; L3 self-heals on ``l3_guard_breaches``. Every
+    event implies budget was spent recovering from a candidate that should
+    have produced clean output the first time — composite_fitness penalizes
+    candidates whose round triggers any of them.
+    """
+
+    name: str
+    attr: str
+    description: str
+
+
+SELF_HEALERS: tuple[SelfHealerSpec, ...] = (
+    SelfHealerSpec(
+        "validation_failure_rate",
+        "validation_failures",
+        "Fraction of samples where L1 output was malformed; L2 healed.",
+    ),
+    SelfHealerSpec(
+        "runtime_failure_rate",
+        "runtime_failures",
+        "Fraction of samples that triggered DegradationCheck; L2 healed.",
+    ),
+    SelfHealerSpec(
+        "l2_guard_breach_rate",
+        "l2_guard_breaches",
+        "Fraction of samples where L2 refinement breached guards; L3 healed.",
+    ),
+    SelfHealerSpec(
+        "l3_guard_breach_rate",
+        "l3_guard_breaches",
+        "Fraction of samples where L3 plan breached its own guards.",
+    ),
+)
+
+
+def _make_self_healer_evaluator(spec: SelfHealerSpec) -> Evaluator:
+    """One parametric Evaluator per self-healing channel: events / sample-count, clipped."""
+
+    def compute(*, results: list[QueryMeasurement], opt_sp: Any = None, **_: Any) -> float:
+        if not results or opt_sp is None:
+            return 0.0
+        events = getattr(opt_sp, spec.attr, None) or []
+        return min(len(events) / len(results), 1.0)
+
+    return Evaluator(
+        name=spec.name,
+        description=spec.description,
+        scope="per_round",
+        compute=compute,
+        direction="low",
+    )
 
 
 def compute_latency_norm(*, results: list[QueryMeasurement], **_: Any) -> float:
@@ -290,13 +343,11 @@ _REGISTRY: list[Evaluator] = [
         compute=compute_degraded_rate,
         direction="low",
     ),
-    Evaluator(
-        name="runtime_failure_rate",
-        description="Runtime failure count on OptSP memory, normalized by total queries.",
-        scope="per_round",
-        compute=compute_runtime_failure_rate,
-        direction="low",
-    ),
+    # Self-healing channels — one Evaluator per SelfHealerSpec. Each penalizes
+    # candidates whose round triggered the corresponding wound + lower-layer
+    # heal. Operators weight them in the composite_fitness formula; the default
+    # formula gives the four combined ~0.30, second only to accuracy.
+    *(_make_self_healer_evaluator(spec) for spec in SELF_HEALERS),
     Evaluator(
         name="latency_norm",
         description=(
@@ -448,14 +499,20 @@ def materialize_sample_values(
 
 
 def default_per_round_formula(schema: PipelineSchema) -> str:
-    """Default per-round formula: ``0.65*accuracy + 0.15*health + 0.10*latency_norm
+    """Default per-round formula: ``0.55*accuracy + 0.30*self_heal + 0.05*latency
     + 0.05*recall + 0.05*prompt_compactness``.
 
-    The ``prompt_compactness`` term is a small but visible verbosity penalty
-    that nudges the optimizer toward shorter prompts at near-equal accuracy.
-    Operators who want a stronger or weaker penalty override the formula
-    via ``campaign.json::scoring`` (or interactively via ``scoring_steer.json``
-    — see ``docs/operations/improvement-tracking.md``).
+    Self-healing carries combined 0.30 — second only to accuracy. Each wound
+    channel rides its own ``(1 - <healer>_rate)`` term so the four healers
+    surface independently in the dashboard (a candidate that triggers L3
+    healing is penalized harder than one that only tripped validation). The
+    weights split inside the self-heal budget by severity: L1/L2 wounds at
+    0.10 each (these fire frequently and are the primary signal), L2/L3
+    guard breaches at 0.05 each (rarer but indicate a deeper failure).
+
+    The ``prompt_compactness`` term keeps a small verbosity penalty. Operators
+    who want a stronger penalty (or a different split between healers)
+    override the formula via ``campaign.json::scoring``.
     """
     recall_names: list[str] = []
     for display_name, ev, _node in _concrete_round_entries(schema):
@@ -468,10 +525,20 @@ def default_per_round_formula(schema: PipelineSchema) -> str:
     else:
         recall_expr = "accuracy"
 
-    health_expr = "(((1 - error_rate) + (1 - degraded_rate) + (1 - runtime_failure_rate)) / 3)"
+    # Per-channel weights inside the 0.30 self-heal budget. Edit one place to
+    # rebalance — name-driven so SELF_HEALERS additions only need a new entry.
+    healer_weights = {
+        "validation_failure_rate": 0.10,
+        "runtime_failure_rate": 0.10,
+        "l2_guard_breach_rate": 0.05,
+        "l3_guard_breach_rate": 0.05,
+    }
+    self_heal_terms = " + ".join(
+        f"{w} * (1 - {spec.name})" for spec in SELF_HEALERS if (w := healer_weights.get(spec.name))
+    )
 
     return (
-        f"0.65 * accuracy + 0.15 * {health_expr} + 0.10 * latency_norm "
+        f"0.55 * accuracy + {self_heal_terms} + 0.05 * latency_norm "
         f"+ 0.05 * {recall_expr} + 0.05 * prompt_compactness"
     )
 
@@ -494,4 +561,4 @@ def default_per_round_formula_short(schema: PipelineSchema) -> str:
         for _name, ev, _node in _concrete_round_entries(schema)
     )
     recall_token = "R" if has_recall else "acc"
-    return f"0.65*acc + 0.15*H + 0.10*lat + 0.05*{recall_token} + 0.05*pc"
+    return f"0.55*acc + 0.30*SH + 0.05*lat + 0.05*{recall_token} + 0.05*pc"

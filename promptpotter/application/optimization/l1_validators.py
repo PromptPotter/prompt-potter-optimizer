@@ -78,8 +78,20 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
 def validate_overrides(
     pipeline_params_override: dict[str, dict],
     pipeline_schema: PipelineSchema,
+    *,
+    forbidden_axes_strict: bool = True,
 ) -> list[ValidationFailure]:
-    """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0."""
+    """Validate overrides vs available_models + param_allowed_values; failures drive synthetic-0.
+
+    When ``forbidden_axes_strict`` is on, any touch of
+    ``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider``) is rejected outright,
+    independent of whether the proposed value would be in ``available_models``
+    — these axes are operator-fixed at the dataset overlay and not on L1's
+    surface at all. Off-by-flag enables ablation runs that intentionally
+    sweep model identity.
+    """
+    from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
+
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
     for node_name, node_params in pipeline_params_override.items():
@@ -88,6 +100,16 @@ def validate_overrides(
         node = pipeline_schema.get_node(node_name)
         node_allowed = (node.param_allowed_values if node else None) or {}
         for param, value in node_params.items():
+            if forbidden_axes_strict and param in PARAM_FORBIDDEN_KEYS:
+                failures.append(
+                    ValidationFailure(
+                        axis=f"{node_name}.{param}",
+                        value=str(value),
+                        allowed=[],
+                        reason="forbidden_axis",
+                    )
+                )
+                continue
             if param == "model" and allowed_models:
                 if value is not None and value not in allowed_models:
                     failures.append(
@@ -114,12 +136,15 @@ def _check_l1_schema_compliance(
     source_output: Any,
     *,
     pipeline_schema: PipelineSchema,
+    forbidden_axes_strict: bool = True,
     **_: Any,
 ) -> ValidatorOutcome | None:
     """Wrap validate_overrides → ValidatorOutcome (nurse_target=L2)."""
     if not source_output or not pipeline_schema:
         return None
-    failures = validate_overrides(source_output, pipeline_schema)
+    failures = validate_overrides(
+        source_output, pipeline_schema, forbidden_axes_strict=forbidden_axes_strict
+    )
     if not failures:
         return None
     return ValidatorOutcome(

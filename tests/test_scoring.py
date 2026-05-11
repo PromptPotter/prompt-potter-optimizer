@@ -289,9 +289,19 @@ def test_composite_fitness_matches_default_formula():
     schema = _single_node_schema()
     results = [_eval_result(score=1.0, total_time=100), _eval_result(score=0.0, total_time=200)]
     scored = compute_composite_fitness(results, schema)
-    # Accuracy=0.5, latency_norm=0.985, health=1.0; recall term falls back to accuracy.
+    # Accuracy=0.5, latency_norm=0.985, recall falls back to accuracy.
+    # With no opt_sp all four self-heal rates are 0 → (1 - rate) = 1 each.
     # prompt_compactness defaults to 1.0 when no opt_sp passed (vacuous).
-    expected = 0.65 * 0.5 + 0.15 * 1.0 + 0.10 * 0.985 + 0.05 * 0.5 + 0.05 * 1.0
+    expected = (
+        0.55 * 0.5
+        + 0.10 * 1.0  # 1 - validation_failure_rate
+        + 0.10 * 1.0  # 1 - runtime_failure_rate
+        + 0.05 * 1.0  # 1 - l2_guard_breach_rate
+        + 0.05 * 1.0  # 1 - l3_guard_breach_rate
+        + 0.05 * 0.985
+        + 0.05 * 0.5
+        + 0.05 * 1.0
+    )
     assert scored["composite_fitness"] == pytest.approx(expected, abs=1e-4)
 
 

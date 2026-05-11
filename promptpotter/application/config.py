@@ -194,6 +194,24 @@ class OptimizationConfig(BaseModel):
     zero_signal_filter_enabled: bool = Field(False)
     zero_signal_filter_min_observations: int = Field(5)
 
+    forbidden_axes_strict: bool = Field(
+        True,
+        description=(
+            "Strict mode: any L1 candidate that proposes a change to "
+            "``PARAM_FORBIDDEN_KEYS`` (``model``, ``provider`` — operator-fixed "
+            "at the dataset overlay) is rejected at parse time with a "
+            "``ValidationFailure(reason='forbidden_axis')``. The candidate "
+            "deterministically skips ``score_search_point()`` (no /matches "
+            "spend) and lands as ``SKIPPED_VALIDATION`` with synthetic-0 "
+            "fitness — same machinery as a malformed L1 output, just gated "
+            "by policy rather than schema-shape. Default on while the "
+            "operator-fixed axes are still operator-fixed; flip to ``false`` "
+            "for ablation experiments that intentionally vary the model. "
+            "Soft detection (the ``forbidden_axes_honored`` behavior check) "
+            "stays on regardless — strict mode is the spend-saver."
+        ),
+    )
+
     exploration: ExplorationConfig = Field(default_factory=ExplorationConfig)
 
 

@@ -655,7 +655,12 @@ async def l1_score(
     schema = session.pipeline_schema
     assert schema is not None, "l1_score requires pipeline_schema"
 
-    osp_population, merged_pp = parse_population(candidates, pipeline_params, schema)
+    osp_population, merged_pp = parse_population(
+        candidates,
+        pipeline_params,
+        schema,
+        forbidden_axes_strict=cycle.config.optimization.forbidden_axes_strict,
+    )
     decisions: list[ResumeCheckpointRecord] = []
     all_candidate_results, candidate_scores, escalation_signal = await score_population(
         cycle,

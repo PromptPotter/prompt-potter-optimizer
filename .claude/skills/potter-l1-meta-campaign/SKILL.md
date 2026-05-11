@@ -54,16 +54,18 @@ Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on t
 
 **Top-issue rank** (M10 Track 6, first match wins):
 
-1. Failed seeded behavior check (`context_object_honored`, `param_scope_discipline`, `not_only_param_variants`, `parse_success`)
-2. Failed scaffolding check (any other ✗ in the behavior table)
-3. Low yield (`yield_rate < 0.20`)
-4. Flat lift (`top_lift_mean ≤ 0`)
-5. L2-source-of-lineage in round 1 (`l2_fires > 0` AND the round-1 winner's `lineage.source == l2_context`)
+1. Failed `forbidden_axes_honored` (any variant touched `model` or `provider`) — operator-policy violation; always outranks every other check.
+2. Failed seeded behavior check (`context_object_honored`, `param_scope_discipline`, `not_only_param_variants`, `parse_success`)
+3. Failed scaffolding check (any other ✗ in the behavior table)
+4. Low yield (`yield_rate < 0.20`)
+5. Flat lift (`top_lift_mean ≤ 0`)
+6. L2-source-of-lineage in round 1 (`l2_fires > 0` AND the round-1 winner's `lineage.source == l2_context`)
 
 **Proposed-edit mapping** (target prompt file ⇐ top issue; one change at a time):
 
 | Top issue | Target | Edit shape |
 |---|---|---|
+| Failed `forbidden_axes_honored` | `l1_generate/1` | Strengthen the forbidden-axes clause; explicitly name the touched axis (`model`/`provider`) in the prohibition. |
 | Failed `context_object_honored` | `l1_generate/1` | Strengthen the context-object honoring clause. |
 | Failed `param_scope_discipline` | `l1_generate/1` | Bound param mutations until `param_unlock_round`. |
 | Failed `not_only_param_variants` | `l1_generate/1` | Require ≥1 prompt-field mutation per round. |
@@ -71,6 +73,8 @@ Append one `review` entry per cycle to `log.jsonl` (schema below). Then act on t
 | Low yield | `l1_generate/1` | Broaden L1 creativity (loosen mutation bounds, raise diversity ask). |
 | Flat lift | `l1_critique/1` | Sharpen critique signal — the bottleneck is feedback, not generation. |
 | Early L2 fires | `l1_critique/1` | Same root cause — critique didn't carry enough signal for L1. |
+
+A failed `forbidden_axes_honored` is a hard halt for both sweep and full cycles — even a single offending variant invalidates the round (`round_1_verdict = broken` once ≥ 2 checks fail, but the meta-campaign treats this single check as broken on its own). Do not allow a `screen` verdict to flow through; record `reject_health` with `top_issue: "forbidden_axes_touched"`.
 
 Skill writes the proposed diff to `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/{cycle_id}_{ts}.diff` as unified-diff against the file's current content. **Skill never applies the diff** — operator applies (or asks Claude to), then clears `paused`. If multiple ✗ behavior checks exist, propose the highest-ranked only; document the others in the diff's leading comment so the operator can bundle if they choose (M10's one-change-at-a-time default is a tiebreaker, not a mandate).
 
