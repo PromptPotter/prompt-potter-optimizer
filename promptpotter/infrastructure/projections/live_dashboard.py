@@ -268,17 +268,14 @@ class LiveDashboardView(DerivedView):
             except (json.JSONDecodeError, OSError):
                 resume_from = None
 
-        if resume_from is not None and resumed_from_round is not None:
-            completed = max(resumed_from_round - 1, 0)
-            if completed == 0:
-                resume_from["best"] = 0.0
-
-        # Self-heal a stale ``round`` pointer: if optimizer checkpoints exist
-        # on disk for the active cycle but the prior dashboard's ``round`` is
-        # behind them (e.g. an earlier re-init zeroed it), promote ``round``
-        # to the highest checkpoint. This makes the webapp fetch a file that
-        # actually exists when an interrupted cycle is observed without a
-        # fresh ``optimize`` run.
+        # ``best`` is the rolling-max composite for the active cycle. The prior
+        # ``dashboard.json`` may hold a number from an earlier campaign run
+        # against the same family root (cycle_id is content-hashed, so a
+        # re-init of the same campaign lands here). Don't surface that number
+        # in the UI until the active cycle has produced an on-disk round to
+        # back it; otherwise every percentage chip shows a value the loop will
+        # never confirm. Self-heal the stale ``round`` pointer in the same
+        # pass — both signals depend on ``disk_round``.
         if resume_from is not None:
             # ``campaign_dir_for`` resolves to the active fork's own dir
             # (forks route under ``forks/{cycle_id}``); ``root_dir_for``
@@ -288,6 +285,10 @@ class LiveDashboardView(DerivedView):
             disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
             if disk_round > int(resume_from.get("round") or 0):
                 resume_from["round"] = disk_round
+            if disk_round == 0 or (
+                resumed_from_round is not None and max(resumed_from_round - 1, 0) == 0
+            ):
+                resume_from["best"] = 0.0
 
         return cls(
             root_dir,

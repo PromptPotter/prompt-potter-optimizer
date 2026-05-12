@@ -211,7 +211,11 @@ function cellFor(
         style: surpriseStyle(item.surprise),
       };
     case "n_obs":
-      return { text: String(item.n_obs), raw: item.n_obs };
+      // ``item.n_obs`` is the lifetime archive count for this backend_id
+      // (cross-cycle, cross-session — see hard_sample_archive.py). The
+      // operator reads "Tries" as in-cycle tries; use the cycle-scoped
+      // measurement count already aggregated for the Meas column instead.
+      return { text: String(measCount), raw: measCount };
     case "task": {
       const t = item.task ?? "";
       return { text: t || "—", raw: t, title: t || undefined };

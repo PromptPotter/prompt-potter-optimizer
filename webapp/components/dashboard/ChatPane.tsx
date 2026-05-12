@@ -96,12 +96,17 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
     return `${n} tok`;
   };
   const fmtUsd = (n: number): string => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
-  const spendChip =
-    rateKnown && usedUsd != null && usedUsd > 0
-      ? fmtUsd(usedUsd)
-      : totalTokens > 0
-        ? fmtTokens(totalTokens)
-        : "—";
+  // Lock the chip into USD mode as soon as any bucket resolves a rate —
+  // otherwise the chip flickers token→USD→token across cache-heavy windows
+  // and reads as "the spend display reverted to the old token format". Once
+  // a rate is known, sub-cent totals (including $0.00) are still the truthful
+  // display; tokens are only the right fallback for genuinely unknown-rate
+  // providers.
+  const spendChip = rateKnown
+    ? fmtUsd(usedUsd ?? 0)
+    : totalTokens > 0
+      ? fmtTokens(totalTokens)
+      : "—";
   const spendTooltip =
     rateKnown && (backendUsd > 0 || loopUsd > 0)
       ? `Backend ${fmtUsd(backendUsd)} • Loop ${fmtUsd(loopUsd)}`

@@ -112,7 +112,17 @@ export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): Das
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cycleRef = useRef<string | null>(null);
 
-  cycleRef.current = cycleId;
+  // Clear the snapshot when cycleId changes. The first tick of the new
+  // cycle's polling cycle is async — without this, every percentage cell
+  // keeps rendering the prior cycle's `best` / `origin_accuracy` until the
+  // new dashboard.json fetch lands, surfacing values the active cycle has
+  // not confirmed.
+  if (cycleRef.current !== cycleId) {
+    cycleRef.current = cycleId;
+    if (state.dash !== null) {
+      setState((prev) => ({ ...prev, dash: null }));
+    }
+  }
 
   useEffect(() => {
     if (!cycleId) {
