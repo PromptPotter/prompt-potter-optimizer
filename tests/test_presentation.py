@@ -17,6 +17,7 @@ Two named invariants:
 
 from __future__ import annotations
 
+import json
 from dataclasses import replace
 from pathlib import Path
 
@@ -282,6 +283,40 @@ def test_live_dashboard_accepts_root_path(tmp_path: Path) -> None:
         sp_budget_ttest=20,
     )
     assert proj.state_path == root_dir / "dashboard.json"
+
+
+def test_live_dashboard_for_session_recovers_round_after_interrupt(
+    tmp_path: Path,
+) -> None:
+    """Resume invariant: when ``rounds/round_NNNN.json`` checkpoints exist on
+    disk but the prior ``dashboard.json::round`` is stale (e.g. zeroed by an
+    earlier re-init), ``for_session`` must restore ``round`` to the highest
+    checkpoint — otherwise the webapp polls ``rounds/round_0000.json``
+    forever on a cycle that has rounds 1–3 completed.
+    """
+    project_root = tmp_path / "default"
+    cycle_id = "cycle_abc123"
+    root_dir = project_root / "campaigns" / cycle_id
+    rounds_dir = root_dir / "rounds"
+    rounds_dir.mkdir(parents=True)
+    for n in (1, 2, 3):
+        (rounds_dir / f"round_{n:04d}.json").write_text("{}", encoding="utf-8")
+    (root_dir / "dashboard.json").write_text(
+        json.dumps({"state": "init", "round": 0, "best": 0.5}),
+        encoding="utf-8",
+    )
+
+    proj = LiveDashboardView.for_session(
+        origin_accuracy=0.1,
+        cycle_id=cycle_id,
+        project_root=str(project_root),
+        session_id="s_test",
+        l1_patience=3,
+        n_variants=5,
+        sp_budget_ttest=20,
+    )
+    assert proj is not None
+    assert proj.state["round"] == 3
 
 
 def test_audit_trail_rejects_non_rounds_path(tmp_path: Path) -> None:

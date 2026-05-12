@@ -40,6 +40,7 @@ from promptpotter.infrastructure.projections.live_state import (
     top_n_p_best,
 )
 from promptpotter.infrastructure.store import (
+    campaign_dir_for,
     root_dir_for,
     session_dir_for,
     walk_cycle_lineage,
@@ -81,6 +82,24 @@ _NODE_BADGES: dict[str, str] = {
     "token_matching": "tk",
     "web_search": "ws",
 }
+
+
+def _max_round_on_disk(rounds_dir: Path) -> int:
+    """Highest ``round_NNNN.json`` index in ``rounds_dir``, or ``0`` if none.
+
+    Used by ``LiveDashboardView.for_session`` to self-heal a stale
+    ``round`` pointer when the prior ``dashboard.json`` was zeroed by an
+    earlier re-init but completed-round checkpoints still exist on disk.
+    """
+    if not rounds_dir.is_dir():
+        return 0
+    highest = 0
+    for path in rounds_dir.glob("round_*.json"):
+        stem = path.stem  # ``round_0003``
+        suffix = stem[len("round_") :]
+        if suffix.isdigit():
+            highest = max(highest, int(suffix))
+    return highest
 
 
 def _trim(text: str, n: int) -> str:
@@ -162,7 +181,13 @@ class LiveDashboardView(DerivedView):
             "state": r.get("state", "init"),
             "state_since": datetime.now(UTC).isoformat(),
             "stop_reason": r.get("stop_reason"),
-            "round": 0,
+            # Inherit ``round`` from prior dashboard so a re-instantiation
+            # (re-run of ``init`` / ``optimize``) doesn't zero the operator-
+            # visible round pointer before the first phase event lands and
+            # restamps it. Without this, an interrupted cycle that never
+            # resumes is permanently displayed at ``round=0`` and the webapp
+            # polls a ``rounds/round_0000.json`` that may not exist.
+            "round": int(r.get("round") or 0),
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
@@ -247,6 +272,22 @@ class LiveDashboardView(DerivedView):
             completed = max(resumed_from_round - 1, 0)
             if completed == 0:
                 resume_from["best"] = 0.0
+
+        # Self-heal a stale ``round`` pointer: if optimizer checkpoints exist
+        # on disk for the active cycle but the prior dashboard's ``round`` is
+        # behind them (e.g. an earlier re-init zeroed it), promote ``round``
+        # to the highest checkpoint. This makes the webapp fetch a file that
+        # actually exists when an interrupted cycle is observed without a
+        # fresh ``optimize`` run.
+        if resume_from is not None:
+            # ``campaign_dir_for`` resolves to the active fork's own dir
+            # (forks route under ``forks/{cycle_id}``); ``root_dir_for``
+            # would point at the family root, whose ``rounds/`` is the
+            # parent's checkpoints, not this fork's.
+            active_cycle_dir = campaign_dir_for(tenant_root, cycle_id)
+            disk_round = _max_round_on_disk(active_cycle_dir / "rounds")
+            if disk_round > int(resume_from.get("round") or 0):
+                resume_from["round"] = disk_round
 
         return cls(
             root_dir,
