@@ -20,7 +20,7 @@ Failures attach to the **candidate that produced them** (direct fields on `OptSe
 
 ## Wound 1 — L2 tends L1's `ValidationFailure`
 
-`L1_SCHEMA_COMPLIANCE` (`application/optimization/l1.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models` or a node's `param_allowed_values`, the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`.
+`L1_SCHEMA_COMPLIANCE` (`application/optimization/l1.py`) wraps `validate_overrides()` and runs at L1 parse time in `parse_population()`. When L1's `pipeline_params_override` proposes a value outside `PipelineSchema.available_models`, outside a node's `param_allowed_values`, mismatched against the declared `param_types`, or touches an operator-locked axis (`PARAM_FORBIDDEN_KEYS = {model, provider}`, gated by `OptimizationConfig.forbidden_axes_strict` — default on), the validator emits a `ValidatorOutcome` whose `evidence["failures"]` is `list[ValidationFailure(axis, value, allowed, reason)]`. `reason` is one of `not_in_available_models`, `not_in_param_allowed_values`, `type_mismatch`, or `forbidden_axis`.
 
 Failures land on `OptSearchPoint.validation_failures` — outer-layer optimizer state, not target-layer. Effect chain: `score_population()` shortcuts to a synthetic-0 report (Path 1) → inline winner-selection deprioritises the candidate → round checkpoint persists the failure.
 

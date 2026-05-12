@@ -15,7 +15,11 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
-from promptpotter.application.optimization.l1_behavior_checks import CheckResult
+from promptpotter.application.optimization.l1_behavior_checks import (
+    PARAM_FORBIDDEN_KEYS,
+    CheckResult,
+    extract_l1_variants,
+)
 
 __all__ = ["L1Stats", "compute_l1_stats", "compute_round_1_verdict"]
 
@@ -34,6 +38,12 @@ class L1Stats:
     stagnation_max: int
     l2_fires: int
     round_1_verdict: str  # "healthy" | "degraded" | "broken" | "unknown"
+    # Wound 1 / forbidden-axes heal trail. The validator (`forbidden_axes_strict`)
+    # rejects model/provider mutations pre-population; this counts attempts so
+    # the meta-campaign skill can distinguish a healed cycle from a persistent
+    # violation without re-parsing OSP snapshots.
+    forbidden_axis_attempts: int
+    forbidden_axis_healed: bool
 
 
 def compute_l1_stats(
@@ -41,12 +51,16 @@ def compute_l1_stats(
     *,
     origin_composite_fitness: float,
     behavior_results: list[list[CheckResult]],
+    audits: list[dict[str, Any] | None] | None = None,
 ) -> L1Stats:
     """Aggregate per-round round_data dicts + behaviour check results into L1Stats.
 
     ``rounds`` is the list of round_data dicts in round order (round 0 first).
     ``behavior_results[i]`` is the list of CheckResults for ``rounds[i]``;
-    empty when no checks ran for that round.
+    empty when no checks ran for that round. ``audits[i]`` is the per-round
+    L1 I/O audit dict and is read to count forbidden-axes attempts (validator
+    rejects them, but the attempt remains in the audit — that's what proves
+    the heal chain is exercised).
     """
     rounds_to_95 = _first_round_at_threshold(rounds, HEADLINE_ACC)
     yield_rate = _mean_yield_rate(rounds)
@@ -55,12 +69,17 @@ def compute_l1_stats(
     stagnation_max = _max_stagnation_streak(top_lifts)
     behavior_pass_rate = _behavior_pass_rate(behavior_results)
     l2_fires = sum(1 for r in rounds if _round_source(r) == "l2_context")
+    per_round_forbidden = _forbidden_axis_attempts_per_round(audits or [])
+    forbidden_axis_attempts = sum(per_round_forbidden)
+    forbidden_axis_healed = _forbidden_axis_healed(per_round_forbidden)
     round_1_verdict = compute_round_1_verdict(
         rounds,
         origin_composite_fitness=origin_composite_fitness,
         round_1_behavior=behavior_results[0] if behavior_results else [],
         round_1_top_lift=top_lifts[0] if top_lifts else 0.0,
         round_1_yield_rate=_round_yield_rate(rounds[0]) if rounds else 0.0,
+        forbidden_axis_healed=forbidden_axis_healed,
+        forbidden_axis_attempts=forbidden_axis_attempts,
     )
     return L1Stats(
         rounds_to_95=rounds_to_95,
@@ -70,6 +89,8 @@ def compute_l1_stats(
         stagnation_max=stagnation_max,
         l2_fires=l2_fires,
         round_1_verdict=round_1_verdict,
+        forbidden_axis_attempts=forbidden_axis_attempts,
+        forbidden_axis_healed=forbidden_axis_healed,
     )
 
 
@@ -80,24 +101,45 @@ def compute_round_1_verdict(
     round_1_behavior: list[CheckResult],
     round_1_top_lift: float,
     round_1_yield_rate: float,
+    forbidden_axis_healed: bool = True,
+    forbidden_axis_attempts: int = 0,
 ) -> str:
     """Spec § Track 5 rule table.
 
-    - ``healthy`` — all behaviour checks ✓, yield ≥ HEALTHY_YIELD_RATE, lift > 0.
-    - ``degraded`` — exactly one check ✗, OR yield < HEALTHY_YIELD_RATE, OR lift ≤ 0.
-    - ``broken`` — ≥ 2 checks ✗, OR origin regression at round 1.
+    - ``healthy`` — all behaviour checks ✓ OR every ✗ is the
+      ``forbidden_axes_honored`` row with the heal chain converged
+      (``forbidden_axis_healed=True``); yield ≥ HEALTHY_YIELD_RATE; lift > 0.
+    - ``degraded`` — exactly one check ✗ (and not absorbed by the heal), OR
+      yield < HEALTHY_YIELD_RATE, OR lift ≤ 0.
+    - ``broken`` — ≥ 2 checks ✗ (after discounting a healed forbidden-axes ✗),
+      OR origin regression at round 1, OR a persistent forbidden-axes
+      violation (attempts > 0 AND heal did not converge).
     - ``unknown`` — no round 1 yet.
     """
     if not rounds:
         return "unknown"
 
-    failed = sum(1 for c in round_1_behavior if not c.passed)
+    failed_total = sum(1 for c in round_1_behavior if not c.passed)
+    forbidden_failed_r1 = any(
+        not c.passed and c.check_id == "forbidden_axes_honored" for c in round_1_behavior
+    )
+    # A healed forbidden-axes ✗ doesn't count toward the verdict — the
+    # validator caught it, no spend was wasted, the chain absorbed it.
+    failed_for_verdict = failed_total
+    if forbidden_failed_r1 and forbidden_axis_healed:
+        failed_for_verdict -= 1
+
     round_1_composite_fitness = float(rounds[0].get("composite_fitness") or 0.0)
     origin_regression = round_1_composite_fitness < origin_composite_fitness
+    persistent_forbidden = forbidden_axis_attempts > 0 and not forbidden_axis_healed
 
-    if failed >= 2 or origin_regression:
+    if failed_for_verdict >= 2 or origin_regression or persistent_forbidden:
         return "broken"
-    healthy = failed == 0 and round_1_yield_rate >= HEALTHY_YIELD_RATE and round_1_top_lift > 0.0
+    healthy = (
+        failed_for_verdict == 0
+        and round_1_yield_rate >= HEALTHY_YIELD_RATE
+        and round_1_top_lift > 0.0
+    )
     if healthy:
         return "healthy"
     return "degraded"
@@ -161,3 +203,55 @@ def _round_source(round_dict: dict[str, Any]) -> str:
     osp = round_dict.get("opt_search_point") or {}
     lineage = osp.get("lineage") or {}
     return str(lineage.get("source") or "")
+
+
+def _forbidden_axis_attempts_per_round(audits: list[dict[str, Any] | None]) -> list[int]:
+    """Count L1 variants that proposed a ``PARAM_FORBIDDEN_KEYS`` override per round.
+
+    Each entry is the attempt count for that round's audit (or 0 when no audit).
+    The validator rejects these pre-population, but the attempt still rides
+    the audit dict — that's exactly the signal that proves the heal chain is
+    being exercised end-to-end.
+    """
+    counts: list[int] = []
+    for audit in audits:
+        variants = extract_l1_variants(audit)
+        count = 0
+        for v in variants:
+            if _has_forbidden_keys(v.get("pipeline_params_override") or {}):
+                count += 1
+        counts.append(count)
+    return counts
+
+
+def _has_forbidden_keys(override: Any) -> bool:
+    """Recursively check whether ``override`` mentions a forbidden axis."""
+    if not isinstance(override, dict):
+        return False
+    for k, v in override.items():
+        if k in PARAM_FORBIDDEN_KEYS:
+            return True
+        if isinstance(v, dict) and _has_forbidden_keys(v):
+            return True
+    return False
+
+
+def _forbidden_axis_healed(per_round_attempts: list[int]) -> bool:
+    """Heal verdict — the last round that produced attempts must have a
+    successor round with zero attempts (1-round look-ahead).
+
+    No attempts anywhere ⇒ vacuously healed (True).
+    Attempts only in non-final rounds ⇒ healed if the very next round dropped to 0.
+    Attempts in the final round ⇒ not healed (chain didn't demonstrate
+    recovery within this cycle).
+    """
+    last_with_attempts = -1
+    for i, n in enumerate(per_round_attempts):
+        if n > 0:
+            last_with_attempts = i
+    if last_with_attempts == -1:
+        return True
+    next_idx = last_with_attempts + 1
+    if next_idx >= len(per_round_attempts):
+        return False
+    return per_round_attempts[next_idx] == 0

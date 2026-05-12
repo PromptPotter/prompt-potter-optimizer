@@ -51,6 +51,8 @@ The L2-layer also **heals `l1_generate`** on:
 
 Healing uses the same surface as a normal refinement — framed as a remedial nudge rather than a strategic shift.
 
+**Operator-locked axes** (`PARAM_FORBIDDEN_KEYS = {"model", "provider"}` at `application/optimization/l1_behavior_checks.py`) are enforced by the strict validator (`OptimizationConfig.forbidden_axes_strict`, default on) and healed via Wound 1. L2 reads the rejected attempt through `dispatch_hub._r_validation_failures` and writes a remedial `task_context` nudge next round. L1's meta-prompt does NOT enumerate the lock — the validator + heal chain is the contract. The behaviour check `forbidden_axes_honored` counts attempts for the audit trail; the `forbidden_axis_attempts` + `forbidden_axis_healed` fields on L1Stats surface the heal trail in `review.md`.
+
 The L2-layer may **terminate the loop** on:
 
 - goal reached (composite ≥ goal, sustained one round), or

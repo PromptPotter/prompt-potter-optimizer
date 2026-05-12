@@ -111,6 +111,41 @@ def test_duplicate_signature_attaches_validation_failure():
     assert stats.l1_yield == 2 / 3
 
 
+def test_parse_population_attaches_forbidden_axis_failure_to_osp():
+    """Wound 1 integration: a ``model`` override flows through
+    ``parse_population`` (with default ``forbidden_axes_strict=True``) and
+    lands as ``ValidationFailure(reason='forbidden_axis')`` on the OSP — the
+    middle hop of the validator → OSP → dispatch-hub heal chain that
+    replaces an enumerated prompt-clause prohibition. (Validator unit test
+    at ``tests/test_pipeline_config.py::test_validate_overrides_rejects_model_as_forbidden_axis_by_default``;
+    dispatch-hub render path at ``tests/test_invariants.py`` ``validation_failures`` rendering.)
+    """
+    from promptpotter.application.optimization.l1_population import parse_population
+    from promptpotter.domain.pipeline_schema import (
+        NodePromptMeta,
+        PipelineNode,
+        PipelineSchema,
+    )
+
+    schema = PipelineSchema(
+        name="test",
+        available_models=["openai/gpt-oss-120b"],
+        nodes=[PipelineNode(name="llm_only", prompt_meta=NodePromptMeta())],
+    )
+    parent = _parent()
+    proposal = CandidateProposal(
+        osp=parent.mutate(persona="Strict"),
+        pipeline_params_override={"llm_only": {"model": "anything-at-all"}},
+    )
+
+    osp_list, _ = parse_population([proposal], pipeline_params=None, schema=schema)
+
+    failures = osp_list[0].validation_failures
+    assert len(failures) == 1
+    assert failures[0].reason == "forbidden_axis"
+    assert failures[0].axis == "llm_only.model"
+
+
 # ===========================================================================
 # L2 output validators (V1)
 # ===========================================================================

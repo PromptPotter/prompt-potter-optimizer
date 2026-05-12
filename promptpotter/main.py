@@ -13,7 +13,6 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from scalar_fastapi import get_scalar_api_reference
-from starlette.middleware.base import BaseHTTPMiddleware
 
 from promptpotter.config.logging import setup_logging
 from promptpotter.config.settings import APP_VERSION, settings
@@ -73,7 +72,8 @@ app.add_middleware(
 )
 
 
-class NoStoreOnApiMiddleware(BaseHTTPMiddleware):
+@app.middleware("http")
+async def no_store_on_api(request: Request, call_next):
     """Set ``Cache-Control: no-store`` on every ``/api/v1/*`` response.
 
     The API is the webapp's live polling surface — ``dashboard.json``,
@@ -83,15 +83,11 @@ class NoStoreOnApiMiddleware(BaseHTTPMiddleware):
     are tiny. Static webapp assets under ``/ui/`` are unaffected (served
     by StaticFiles with its own caching defaults).
     """
+    response = await call_next(request)
+    if request.url.path.startswith("/api/v1/"):
+        response.headers["Cache-Control"] = "no-store"
+    return response
 
-    async def dispatch(self, request, call_next):
-        response = await call_next(request)
-        if request.url.path.startswith("/api/v1/"):
-            response.headers["Cache-Control"] = "no-store"
-        return response
-
-
-app.add_middleware(NoStoreOnApiMiddleware)
 
 # Health check
 _health = APIRouter()
