@@ -2,13 +2,12 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchActiveDatasetName,
-  fetchCycleFile,
   fetchDatasetPreview,
-  fetchFiles,
   type DatasetItem,
 } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { useRoundHistory } from "@/lib/use-round-history";
 import { HardSamplesTable } from "./HardSamplesTable";
 
 const MAX_FETCH = 1000;
@@ -16,6 +15,7 @@ const MAX_FETCH = 1000;
 interface Props {
   cycleId: string | null;
   dash: DashboardSnapshot | null;
+  refreshKey: number;
 }
 
 interface Measurement {
@@ -37,7 +37,7 @@ interface RoundDoc {
 function liveMeasurements(dash: DashboardSnapshot | null): Map<number, Measurement[]> {
   const out = new Map<number, Measurement[]>();
   if (!dash) return out;
-  const round = Number(dash.current_round?.round ?? dash.round ?? 0);
+  const round = roundOf(dash) ?? 0;
   const nodes = (dash.current_round?.nodes ?? {}) as Record<string, unknown>;
   const l1Score = nodes.l1_score as { output?: { candidates?: unknown[] } } | undefined;
   const cands = l1Score?.output?.candidates ?? [];
@@ -68,11 +68,24 @@ function liveMeasurements(dash: DashboardSnapshot | null): Map<number, Measureme
   return out;
 }
 
-export function HardSamplesHeatmap({ cycleId, dash }: Props) {
+export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
   const [items, setItems] = useState<DatasetItem[]>([]);
   const [datasetName, setDatasetName] = useState<string | null>(null);
-  const [rounds, setRounds] = useState<RoundDoc[]>([]);
   const [expanded, setExpanded] = useState(false);
+  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  const rounds: RoundDoc[] = useMemo(() => {
+    const out: RoundDoc[] = [];
+    for (const d of historyDocs) {
+      if (typeof d.round !== "number") continue;
+      out.push({
+        round: d.round,
+        scoreboard: d.scoreboard as { candidate_id?: string }[] | undefined,
+        all_candidate_results:
+          d.all_candidate_results as Record<string, { sample_id: number; hit?: boolean }[]> | undefined,
+      });
+    }
+    return out;
+  }, [historyDocs]);
 
   useEffect(() => {
     if (!cycleId) return;
@@ -95,42 +108,6 @@ export function HardSamplesHeatmap({ cycleId, dash }: Props) {
       ac.abort();
     };
   }, [cycleId]);
-
-  // Re-fetch round files whenever dash.round bumps — that's the cheapest
-  // staleness signal we have without a websocket. Existing fetches that
-  // overlap are harmless (state replacement is atomic).
-  const roundTick = dash?.round ?? 0;
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const listing = await fetchFiles(cycleId);
-        const roundFiles = listing.entries
-          .filter((e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path))
-          .sort((a, b) => a.path.localeCompare(b.path));
-        const fetched = await Promise.all(
-          roundFiles.map(async (f) => {
-            try {
-              const r = await fetchCycleFile(cycleId, "cycle", f.path);
-              return JSON.parse(r.content) as RoundDoc;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        const valid = fetched
-          .filter((p): p is RoundDoc => p !== null)
-          .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
-        if (!cancelled) setRounds(valid);
-      } catch {
-        /* listing failed — ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cycleId, roundTick]);
 
   // Aggregate per-sample measurement history: rows = samples, columns =
   // chronological candidate measurements. Ordering is round * 1000 + the

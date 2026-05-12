@@ -28,13 +28,6 @@ export const TERMS: Record<string, string> = {
   node_l2_context:  "L2 Context: rewrites the task framing L1 generation reads. Fires on L1 stall.",
   node_l3_plan:     "L3 Plan: rewrites the strategy. Fires on L2 stall.",
 
-  // Eval-table column headers
-  col_id:        "Sample ID — stable identifier from the dataset.",
-  col_status:    "Hit / miss for this sample. Inferred client-side from predicted vs ground truth.",
-  col_query:     "Input given to the pipeline for this sample.",
-  col_predicted: "Top-1 prediction returned by the pipeline.",
-  col_ground:    "Ground-truth answer from the dataset.",
-
   // composite_fitness — wired on the "Pass Rate (composite)" card title
   composite: "composite_fitness — the per-candidate scalar the optimizer optimizes. Recipe in the formula row.",
 

@@ -63,6 +63,16 @@ export interface BucketResult {
   termKey: string;
 }
 
+// Canonical round number across the dashboard. `current_round.round` is the
+// authoritative field (live_dashboard.py:750); the top-level `round` is the
+// inherited-from-prior-dashboard value used during cycle re-instantiation
+// before any phase fires. Prefer the nested one, fall through to top-level,
+// return null only when neither is a number.
+export function roundOf(dash: DashboardSnapshot | null): number | null {
+  const r = dash?.current_round?.round ?? dash?.round;
+  return typeof r === "number" ? r : null;
+}
+
 export function ageBucket(ageS: number | null): BucketResult {
   if (ageS == null) {
     return {

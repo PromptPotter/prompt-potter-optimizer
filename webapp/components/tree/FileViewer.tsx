@@ -2,6 +2,7 @@
 import { useEffect, useState } from "react";
 import { marked } from "marked";
 import { fetchCycleFile } from "@/lib/api";
+import { RoundFileView, type RoundDoc } from "./RoundFileView";
 
 interface Props {
   cycleId: string | null;
@@ -13,16 +14,26 @@ interface ViewerState {
   body: string;
   contentType: string;
   isMarkdown: boolean;
+  roundDoc: RoundDoc | null;
+  rawJson: string;
   error: string | null;
 }
 
 const EMPTY: ViewerState = {
   meta: "",
-  body: "Select a file from the tree to preview its content. JSON renders with formatting; .md renders as Markdown; .log renders as plain text.",
+  body: "Select a file from the tree to preview its content. JSON renders with formatting; .md renders as Markdown; .log renders as plain text. Round files (rounds/round_NNNN.json) render as a scoreboard + per-sample table.",
   contentType: "",
   isMarkdown: false,
+  roundDoc: null,
+  rawJson: "",
   error: null,
 };
+
+const ROUND_FILE_RE = /^rounds\/round_\d+\.json$/;
+
+function isRoundFile(selected: { scope: string; path: string } | null): boolean {
+  return !!selected && selected.scope === "cycle" && ROUND_FILE_RE.test(selected.path);
+}
 
 export function FileViewer({ cycleId, selected }: Props) {
   const [state, setState] = useState<ViewerState>(EMPTY);
@@ -33,7 +44,7 @@ export function FileViewer({ cycleId, selected }: Props) {
       return;
     }
     let cancelled = false;
-    setState({ meta: "loading file…", body: "", contentType: "", isMarkdown: false, error: null });
+    setState({ meta: "loading file…", body: "", contentType: "", isMarkdown: false, roundDoc: null, rawJson: "", error: null });
     (async () => {
       try {
         const r = (await fetchCycleFile(cycleId, selected.scope, selected.path)) as {
@@ -50,19 +61,26 @@ export function FileViewer({ cycleId, selected }: Props) {
               : "(preview unavailable — binary)",
             contentType: ct,
             isMarkdown: false,
+            roundDoc: null,
+            rawJson: "",
             error: null,
           });
           return;
         }
         if (ct === "json") {
           let body = r.content;
-          try { body = JSON.stringify(JSON.parse(r.content), null, 2); } catch { /* keep raw */ }
-          setState({ meta, body, contentType: ct, isMarkdown: false, error: null });
+          let parsed: unknown = null;
+          try {
+            parsed = JSON.parse(r.content);
+            body = JSON.stringify(parsed, null, 2);
+          } catch { /* keep raw */ }
+          const roundDoc = isRoundFile(selected) && parsed && typeof parsed === "object" ? (parsed as RoundDoc) : null;
+          setState({ meta, body, contentType: ct, isMarkdown: false, roundDoc, rawJson: body, error: null });
         } else if (ct === "markdown") {
           const html = await Promise.resolve(marked.parse(r.content));
-          setState({ meta, body: typeof html === "string" ? html : r.content, contentType: ct, isMarkdown: true, error: null });
+          setState({ meta, body: typeof html === "string" ? html : r.content, contentType: ct, isMarkdown: true, roundDoc: null, rawJson: "", error: null });
         } else {
-          setState({ meta, body: r.content, contentType: ct, isMarkdown: false, error: null });
+          setState({ meta, body: r.content, contentType: ct, isMarkdown: false, roundDoc: null, rawJson: "", error: null });
         }
       } catch (e) {
         if (cancelled) return;
@@ -71,6 +89,8 @@ export function FileViewer({ cycleId, selected }: Props) {
           body: `Failed to load: ${(e as Error).message}`,
           contentType: "",
           isMarkdown: false,
+          roundDoc: null,
+          rawJson: "",
           error: (e as Error).message,
         });
       }
@@ -89,7 +109,11 @@ export function FileViewer({ cycleId, selected }: Props) {
         </span>
         <span style={{ color: "var(--color-text-tertiary)" }}>{state.meta}</span>
       </div>
-      {state.isMarkdown ? (
+      {state.roundDoc ? (
+        <div className="viewer-body viewer-structured">
+          <RoundFileView doc={state.roundDoc} raw={state.rawJson} />
+        </div>
+      ) : state.isMarkdown ? (
         <div className="viewer-body markdown" dangerouslySetInnerHTML={{ __html: state.body }} />
       ) : (
         <div className={`viewer-body${selected ? "" : " empty"}`}>{state.body}</div>

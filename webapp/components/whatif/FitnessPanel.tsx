@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { TERMS } from "@/lib/terms";
 import { WHATIF_INLINE_META, buildRows, setsEqual, whatifIdentifiersInFormula, type Row } from "./meta";
 import { whatifIconFor } from "./icons";
@@ -7,8 +7,8 @@ import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
-import { fetchCycleFile, fetchFiles } from "@/lib/api";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { useRoundHistory } from "@/lib/use-round-history";
 
 interface InflightCandidate {
   idx?: number;
@@ -112,54 +112,25 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
   // ── 1. In-flight candidates from the live dashboard
   const cr = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: InflightCandidate[] } }> | undefined)?.l1_score ?? null;
   const inflightCandidates: InflightCandidate[] = cr?.output?.candidates ?? [];
-  // dash.current_round.round is canonical: 0 = origin, 1..N = L1. No
-  // arithmetic; the badge shows it verbatim.
-  const currentRound = Number(dash?.current_round?.round ?? dash?.round ?? 0);
+  const currentRound = roundOf(dash) ?? 0;
 
-  // ── 2. Historical rounds — round_NNNN.json files on disk
-  const [history, setHistory] = useState<HistoricalRound[]>([]);
-  // Cycle change ⇒ clear bars immediately so the prior cycle's history
-  // can't linger on-screen during the new fetch. Without this, switching
-  // cycles (or resume divergence minting a sibling) shows ghost bars
-  // until the new listing resolves. The prev-prop pattern is React's
-  // documented recipe for resetting state on a prop change without the
-  // cascading-render cost of ``setState`` in ``useEffect``.
-  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
-  if (cycleId !== prevCycleId) {
-    setPrevCycleId(cycleId);
-    setHistory([]);
-  }
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const listing = await fetchFiles(cycleId);
-        const rounds = listing.entries
-          .filter((e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path))
-          .sort((a, b) => a.path.localeCompare(b.path));
-        const fetched = await Promise.all(
-          rounds.map(async (f) => {
-            try {
-              const r = await fetchCycleFile(cycleId, "cycle", f.path);
-              return JSON.parse(r.content) as HistoricalRound;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        const valid = fetched.filter((p): p is HistoricalRound => p !== null).sort(
-          (a, b) => (a.round ?? 0) - (b.round ?? 0),
-        );
-        if (!cancelled) setHistory(valid);
-      } catch {
-        /* round list unreachable — fall back to in-flight only */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cycleId, refreshKey]);
+  // ── 2. Historical rounds — round_NNNN.json files on disk, fetched once
+  // per refreshKey bump via the shared hook (also feeds HeroSummary /
+  // TrendChart / LineageTree so the dashboard makes one set of network
+  // calls per round instead of four).
+  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  const history: HistoricalRound[] = useMemo(() => {
+    const out: HistoricalRound[] = [];
+    for (const d of historyDocs) {
+      if (typeof d.round !== "number") continue;
+      out.push({
+        round: d.round,
+        candidate_scores: d.candidate_scores as HistoricalCandidate[] | undefined,
+        origin_accuracy: d.origin_accuracy,
+      });
+    }
+    return out;
+  }, [historyDocs]);
 
   // ── 3. The applicable evaluator set unions every candidate we plot. The
   // origin row has no evaluators; in-flight stats and historical

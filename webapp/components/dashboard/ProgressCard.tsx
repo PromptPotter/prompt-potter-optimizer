@@ -1,7 +1,7 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { TERMS } from "@/lib/terms";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
   dash: DashboardSnapshot | null;
@@ -52,7 +52,8 @@ export function ProgressCard({ dash }: Props) {
   }, [dash]);
 
   const phase = (dash?.state as string | undefined) ?? "—";
-  const round = dash?.round != null ? String(dash.round) : "—";
+  const r = roundOf(dash);
+  const round = r != null ? String(r) : "—";
   const qm = parseProgress((dash as { query?: string } | null)?.query, "q");
   const cm = parseProgress((dash as { candidate?: string } | null)?.candidate, "c");
 

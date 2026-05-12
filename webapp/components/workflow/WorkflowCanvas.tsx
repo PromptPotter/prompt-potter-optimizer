@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { CANVAS_W, CANVAS_H, EDGES, LAYOUT, phaseToNodeId } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 
 interface PipelineView {
   nodes: { id: string; label: string; kind?: string }[];
@@ -100,9 +100,12 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Workflow</span>
         <span style={{ color: dash ? colors.ok : colors.txt }}>● {dash ? "live" : "pending"}</span>
-        {dash?.round != null && dash.round !== 0 && (
-          <span style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}>round {dash.round}</span>
-        )}
+        {(() => {
+          const r = roundOf(dash);
+          return r != null && r !== 0 ? (
+            <span style={{ color: "var(--color-text-tertiary)", marginLeft: 6 }}>round {r}</span>
+          ) : null;
+        })()}
       </div>
       <div className="workflow-canvas-bg" ref={wrapRef}>
         <div className="workflow-canvas">
@@ -193,7 +196,7 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
               currentNodes={currentNodes}
               pipeline={pipeline}
               phase={dash?.state}
-              round={dash?.round}
+              round={roundOf(dash) ?? undefined}
               onClose={() => setSelected(null)}
             />
           )}

@@ -1,9 +1,9 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
-import { fetchCycleFile, fetchFiles } from "@/lib/api";
 import { cssRgba, getCss } from "@/lib/theme";
+import { useRoundHistory } from "@/lib/use-round-history";
 import type { ChartOptions } from "chart.js";
 
 ensureChartRegistered();
@@ -20,42 +20,16 @@ interface Props {
 }
 
 export function TrendChart({ cycleId, refreshKey, themeKey }: Props) {
-  const [points, setPoints] = useState<Point[]>([]);
-
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const listing = await fetchFiles(cycleId);
-        const rounds = listing.entries
-          .filter((e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path))
-          .sort((a, b) => a.path.localeCompare(b.path));
-        if (!rounds.length) {
-          if (!cancelled) setPoints([]);
-          return;
-        }
-        const fetched = await Promise.all(
-          rounds.map(async (f) => {
-            try {
-              const r = await fetchCycleFile(cycleId, "cycle", f.path);
-              const j = JSON.parse(r.content);
-              return { round: j.round as number, composite: (j.composite_fitness ?? j.accuracy ?? 0) as number };
-            } catch {
-              return null;
-            }
-          }),
-        );
-        const valid = fetched.filter((p): p is Point => p !== null).sort((a, b) => a.round - b.round);
-        if (!cancelled) setPoints(valid);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cycleId, refreshKey]);
+  const docs = useRoundHistory(cycleId, refreshKey);
+  const points: Point[] = useMemo(() => {
+    const out: Point[] = [];
+    for (const d of docs) {
+      if (typeof d.round !== "number") continue;
+      out.push({ round: d.round, composite: (d.composite_fitness ?? d.accuracy ?? 0) as number });
+    }
+    out.sort((a, b) => a.round - b.round);
+    return out;
+  }, [docs]);
 
   let runningBest = 0;
   const bestData = points.map((p) => {

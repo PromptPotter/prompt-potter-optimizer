@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useState } from "react";
-import { fetchCycleFile, fetchFiles } from "@/lib/api";
+import { useMemo } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
+import { useRoundHistory } from "@/lib/use-round-history";
 
 interface Props {
   cycleId: string | null;
   dash: DashboardSnapshot | null;
+  refreshKey: number;
 }
 
 interface SparkPoint {
@@ -22,37 +23,17 @@ function fmtSecs(s: number | null | undefined): string {
 
 // One-primary-stat-with-sparkline replaces the canonical 3-stat hero trio.
 // BEST gets the sparkline (page anchor); QUERIES + LAST QUERY sit inline.
-export function HeroSummary({ cycleId, dash }: Props) {
-  const [points, setPoints] = useState<SparkPoint[]>([]);
-
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const listing = await fetchFiles(cycleId);
-        const rounds = listing.entries
-          .filter((e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path))
-          .sort((a, b) => a.path.localeCompare(b.path));
-        const fetched = await Promise.all(rounds.map(async (f) => {
-          try {
-            const r = await fetchCycleFile(cycleId, "cycle", f.path);
-            const j = JSON.parse(r.content);
-            return { round: j.round as number, composite: (j.composite_fitness ?? j.accuracy ?? 0) as number };
-          } catch {
-            return null;
-          }
-        }));
-        const valid = fetched.filter((p): p is SparkPoint => p !== null).sort((a, b) => a.round - b.round);
-        if (!cancelled) setPoints(valid);
-      } catch {
-        /* ignore */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cycleId, dash?.round]);
+export function HeroSummary({ cycleId, dash, refreshKey }: Props) {
+  const docs = useRoundHistory(cycleId, refreshKey);
+  const points: SparkPoint[] = useMemo(() => {
+    const out: SparkPoint[] = [];
+    for (const d of docs) {
+      if (typeof d.round !== "number") continue;
+      out.push({ round: d.round, composite: (d.composite_fitness ?? d.accuracy ?? 0) as number });
+    }
+    out.sort((a, b) => a.round - b.round);
+    return out;
+  }, [docs]);
 
   const best = typeof dash?.best === "number" ? dash.best : null;
   const queries = dash?.total_queries_scored ?? null;

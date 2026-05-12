@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import { fetchCycleFile, fetchFiles } from "@/lib/api";
+import { useMemo } from "react";
+import type { DashboardSnapshot } from "@/lib/poll";
+import { useRoundHistory } from "@/lib/use-round-history";
 
 interface Candidate {
   candidate_id?: string;
@@ -9,7 +10,7 @@ interface Candidate {
   is_winner?: boolean;
 }
 
-interface RoundDoc {
+interface RoundView {
   round: number;
   origin_accuracy?: number;
   scoreboard?: Candidate[];
@@ -18,6 +19,7 @@ interface RoundDoc {
 interface Props {
   cycleId: string | null;
   refreshKey: number;
+  dash: DashboardSnapshot | null;
 }
 
 // Minimal cladogram layout. Each round occupies a fixed column. Parent
@@ -25,11 +27,11 @@ interface Props {
 // edge, vertically centered on its children. A slanted line runs from
 // parent to the start of each child's horizontal stub; the stub carries
 // the label.
-const ROUND_W = 150;
-const ROW_H = 26;
-const STUB = 36;       // child horizontal length, before the label
-const LEFT_PAD = 20;
-const TOP_PAD = 24;
+const ROUND_W = 90;
+const ROW_H = 22;
+const STUB = 24;       // child horizontal length, before the label
+const LEFT_PAD = 16;
+const TOP_PAD = 20;
 
 interface ChildPos {
   round: number;
@@ -40,45 +42,25 @@ interface ChildPos {
   labelX: number;
 }
 
-function fmtPct(v: number | undefined): string {
+function fmtPct(v: number | undefined | null): string {
   if (v == null || !Number.isFinite(v)) return "—";
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ cycleId, refreshKey }: Props) {
-  const [rounds, setRounds] = useState<RoundDoc[]>([]);
-
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    (async () => {
-      try {
-        const listing = await fetchFiles(cycleId);
-        const roundFiles = listing.entries
-          .filter((e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path))
-          .sort((a, b) => a.path.localeCompare(b.path));
-        const fetched = await Promise.all(
-          roundFiles.map(async (f) => {
-            try {
-              const r = await fetchCycleFile(cycleId, "cycle", f.path);
-              return JSON.parse(r.content) as RoundDoc;
-            } catch {
-              return null;
-            }
-          }),
-        );
-        const valid = fetched
-          .filter((p): p is RoundDoc => p !== null)
-          .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
-        if (!cancelled) setRounds(valid);
-      } catch {
-        /* listing failed — leave empty, retry on next refreshKey */
-      }
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [cycleId, refreshKey]);
+export function LineageTree({ cycleId, refreshKey, dash }: Props) {
+  const docs = useRoundHistory(cycleId, refreshKey);
+  const rounds: RoundView[] = useMemo(() => {
+    const out: RoundView[] = [];
+    for (const d of docs) {
+      if (typeof d.round !== "number") continue;
+      out.push({
+        round: d.round,
+        origin_accuracy: d.origin_accuracy,
+        scoreboard: d.scoreboard as Candidate[] | undefined,
+      });
+    }
+    return out;
+  }, [docs]);
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -132,6 +114,9 @@ export function LineageTree({ cycleId, refreshKey }: Props) {
     };
   }, [rounds]);
 
+  // Live origin if available — surfaces before the first round file lands.
+  const originAcc = dash?.origin_accuracy ?? rounds[0]?.origin_accuracy ?? null;
+
   if (rounds.length === 0) {
     return (
       <div className="card lineage-card">
@@ -140,13 +125,13 @@ export function LineageTree({ cycleId, refreshKey }: Props) {
           <span className="badge">waiting</span>
         </div>
         <div className="lineage-empty">
-          No rounds on disk yet — the tree appears once round 1 lands.
+          {originAcc != null
+            ? `origin ${fmtPct(originAcc)} · waiting for round 1`
+            : "No rounds on disk yet — the tree appears once round 1 lands."}
         </div>
       </div>
     );
   }
-
-  const originAcc = rounds[0]?.origin_accuracy;
 
   return (
     <div className="card lineage-card">

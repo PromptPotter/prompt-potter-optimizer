@@ -113,17 +113,112 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 [data-theme="light"] .theme-toggle .sun{display:none}
 [data-theme="light"] .theme-toggle .moon{display:block}
 
-.content{flex:1;overflow-y:auto;padding:20px}
+.content{flex:1;overflow-y:auto;padding:20px;container-type:inline-size;container-name:content}
+#content-dashboard{padding-top:0}
 
-/* View Results: center every panel at 980px */
-#content-dashboard > .status-bar,
-#content-dashboard > .page-header,
-#content-dashboard > .progress-card,
-#content-dashboard > .live-state-card,
-#content-dashboard > .samples-card,
-#content-dashboard > .raw-card,
-#content-dashboard > .grid2,
-#content-dashboard > .grid3{max-width:980px;margin-left:auto;margin-right:auto}
+/* View Results: every section sits in a 980px centered column. The sticky
+   status strip pins to the top of the scroll container while the rest of the
+   dashboard scrolls underneath it. */
+#content-dashboard > .dash-strip,
+#content-dashboard > .dash-hero,
+#content-dashboard > .dash-top,
+#content-dashboard > .dash-grid,
+#content-dashboard > .dash-charts,
+#content-dashboard > .dash-diag{max-width:980px;margin-left:auto;margin-right:auto}
+
+/* Sticky status strip — one-line synopsis pinned to the top of the scroll
+   container. Reuses .status-bar's color tokens (live/stale/offline) so the
+   palette stays linked, but lays the row out as a flex strip with named
+   cells instead of a single text run. */
+.dash-strip{position:sticky;top:0;z-index:5;display:flex;align-items:center;gap:14px;flex-wrap:nowrap;
+  padding:8px 14px;margin:0 0 14px;border-radius:0;border-left:0;border-right:0;
+  background:var(--color-background-primary);
+  border-top:0.5px solid var(--color-border-tertiary);
+  border-bottom:0.5px solid var(--color-border-tertiary);
+  overflow:hidden}
+.dash-strip.live{box-shadow:inset 3px 0 0 var(--color-success)}
+.dash-strip.stale{box-shadow:inset 3px 0 0 var(--color-warn)}
+.dash-strip.offline{box-shadow:inset 3px 0 0 var(--color-danger)}
+.dash-strip-text{display:inline-flex;align-items:baseline;gap:8px;min-width:0;max-width:36%;
+  overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.dash-strip-text strong{color:currentColor}
+.dash-strip-hint{color:var(--color-text-tertiary);font-weight:400;overflow:hidden;text-overflow:ellipsis}
+.dash-strip-sep{color:var(--color-text-tertiary);opacity:.6}
+.dash-strip-cell{display:inline-flex;align-items:baseline;gap:6px;font-size:12px;color:var(--color-text-secondary);white-space:nowrap;min-width:0}
+.dash-strip-cell code{font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:3px;padding:1px 6px;overflow:hidden;text-overflow:ellipsis;max-width:22ch}
+.dash-strip-cell strong{font-family:var(--font-mono);font-weight:600;color:var(--color-text-primary)}
+.dash-strip-label{font-size:10px;letter-spacing:.08em;text-transform:uppercase;color:var(--color-text-tertiary);font-weight:600}
+.dash-strip-sub{color:var(--color-text-tertiary);font-size:11px}
+.dash-strip-delta{font-family:var(--font-mono);font-size:11px;color:var(--color-text-tertiary);padding:0 4px;border-radius:3px}
+.dash-strip-delta.up{color:var(--color-success);background:var(--color-success-bg)}
+.dash-strip-delta.down{color:var(--color-danger);background:var(--color-danger-bg)}
+.dash-strip-jump{margin-left:auto;font-family:inherit;font-size:12px;color:var(--color-text-secondary);background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:4px 10px;cursor:pointer;transition:color .15s,border-color .15s,background .15s;flex-shrink:0}
+.dash-strip-jump:hover{color:var(--color-accent);border-color:var(--color-accent);background:var(--color-background-hover)}
+.dash-strip-jump:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+
+/* Hero zone — title block + KPIs in one row, progress bars beneath them. */
+.dash-hero{display:flex;flex-direction:column;gap:14px;margin-bottom:18px}
+.dash-hero .page-header{margin-bottom:0}
+.dash-hero .progress-card{margin-bottom:0}
+
+/* Top band — Workflow alone, spanning the full 980px column so it reads as
+   twice the width of the FitnessPanel that sits below in the left grid
+   column. */
+.dash-top{margin-bottom:18px}
+.dash-top > *{margin-bottom:0}
+
+/* Main two-column grid — FitnessPanel left, Lineage right. Columns split
+   1:1 so both stay at ~half the 980 column (matches the user's "Lineage
+   same size as FitnessPanel"). */
+.dash-grid{display:grid;grid-template-columns:1fr 1fr;gap:18px;margin-bottom:18px;align-items:start}
+.dash-grid > *{margin-bottom:0;min-width:0}
+.dash-grid .lineage-scroll{max-height:280px}
+@media (max-width:680px){
+  .dash-grid{grid-template-columns:1fr}
+}
+
+/* Live samples — breaks out of the 980 column. Spans the full available
+   content-area width so the rolling log gets the room it deserves. The
+   margin override pulls it past the centered max-width set on its
+   siblings above (since this section is intentionally NOT in the
+   #content-dashboard > {centered list}). */
+.dash-samples-wide{margin-bottom:18px;width:100%}
+.dash-samples-wide > *{margin-bottom:0}
+.dash-samples-wide .samples-list{height:clamp(260px,38vh,520px)}
+
+/* Eval charts band — Freq + Trend, both kept short and side-by-side under
+   the live samples breakout. */
+.dash-charts{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:18px}
+.dash-charts > *{margin-bottom:0;min-width:0}
+
+/* Diagnostics drawer — collapsed by default, holds the dense KV grid + raw
+   JSON dump. Summary styled to read as a quiet affordance, not a heading. */
+.dash-diag{margin-bottom:18px;border:0.5px dashed var(--color-border-tertiary);border-radius:var(--border-radius-lg);background:transparent}
+.dash-diag > summary{list-style:none;cursor:pointer;padding:10px 16px;font-size:13px;color:var(--color-text-secondary);user-select:none}
+.dash-diag > summary::before{content:'▸ ';color:var(--color-text-tertiary)}
+.dash-diag[open] > summary::before{content:'▾ '}
+.dash-diag > summary:hover{color:var(--color-accent)}
+.dash-diag-body{display:flex;flex-direction:column;gap:14px;padding:0 16px 16px}
+.dash-diag-body > *{margin-bottom:0}
+
+/* Hero / progress fluidity — collapses the KPI trio under the title block on
+   narrow viewports without leaving the cells overlapping. */
+@container content (max-width:780px){
+  .dash-hero .page-header{flex-direction:column;align-items:flex-start}
+  .hero-summary{margin-left:0}
+}
+/* Status strip — drop low-priority cells when the strip can't fit them. */
+@container content (max-width:980px){
+  .dash-strip-hint{display:none}
+}
+@container content (max-width:760px){
+  .dash-strip-cell .dash-strip-sub{display:none}
+  .dash-strip-delta{display:none}
+}
+@container content (max-width:620px){
+  .dash-strip{flex-wrap:wrap;gap:8px}
+  .dash-strip-text{max-width:100%}
+}
 
 .page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:20px;flex-wrap:wrap}
 .page-header-text{display:flex;flex-direction:column;gap:4px;min-width:0}
@@ -148,8 +243,6 @@ h1{font-size:26px;font-weight:600;line-height:1.2}
 .hero-secondary-label{font-size:11px;letter-spacing:.08em;color:var(--color-text-tertiary);text-transform:uppercase;font-weight:600}
 .hero-secondary-val{font-size:18px;color:var(--color-text-primary);font-weight:500;font-family:var(--font-mono)}
 
-.grid3{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px;margin-bottom:14px}
-.grid2{display:grid;grid-template-columns:1fr 2fr;gap:14px;margin-bottom:14px}
 .card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);padding:16px}
 .card-title{font-size:14px;font-weight:500;margin-bottom:14px;display:flex;align-items:center;justify-content:space-between}
 .badge{font-size:11px;padding:2px 8px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary)}
@@ -174,17 +267,18 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 
 .prompt-box{background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:10px;font-size:13px;color:var(--color-text-secondary);line-height:1.5;white-space:pre-wrap;max-height:240px;overflow-y:auto;font-family:var(--font-mono)}
 
-/* Progress bars */
-.progress-card{padding:12px 18px;margin-bottom:14px}
-.progress-row{display:flex;align-items:center;gap:14px;font-size:13px;margin-bottom:8px}
+/* Progress bars — width-capped so the card doesn't span the full 980 column.
+   Sits beneath the hero, left-aligned, ~520px wide. */
+.progress-card{padding:10px 16px;margin-bottom:14px;max-width:520px;align-self:flex-start}
+.progress-row{display:flex;align-items:center;gap:12px;font-size:12px;margin-bottom:5px}
 .progress-row:last-child{margin-bottom:0}
-.progress-label{min-width:130px;font-family:var(--font-mono);font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
-.progress-label .phase-tag{font-size:11px;color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:1px 6px;border-radius:4px;margin-right:6px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
-.progress-bar-wrap{flex:1;height:10px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:5px;overflow:hidden;min-width:120px}
-.progress-bar-fill{height:100%;background:var(--color-accent);border-radius:5px;transition:width .3s ease}
+.progress-label{min-width:110px;font-family:var(--font-mono);font-weight:500;color:var(--color-text-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.progress-label .phase-tag{font-size:10px;color:var(--color-success);background:var(--color-success-bg);border:0.5px solid var(--color-success-border);padding:0 5px;border-radius:3px;margin-right:5px;font-weight:600;letter-spacing:.04em;text-transform:uppercase}
+.progress-bar-wrap{flex:1;height:7px;background:var(--color-background-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:4px;overflow:hidden;min-width:100px}
+.progress-bar-fill{height:100%;background:var(--color-accent);border-radius:4px;transition:width .3s ease}
 .progress-bar-fill.complete{background:var(--color-success)}
 .progress-bar-fill.empty{background:transparent}
-.progress-stats{font-family:var(--font-mono);font-size:12px;color:var(--color-text-secondary);min-width:140px;text-align:right}
+.progress-stats{font-family:var(--font-mono);font-size:11px;color:var(--color-text-secondary);min-width:120px;text-align:right}
 
 /* Status banner */
 .status-bar{padding:8px 14px;border-radius:var(--border-radius-md);font-size:13px;margin-bottom:14px;display:flex;align-items:center;gap:10px;border:0.5px solid transparent}
@@ -218,7 +312,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 
 /* Live samples */
 .samples-card{margin-bottom:14px}
-.samples-list{font-family:var(--font-mono);font-size:12px;line-height:1.45;max-height:240px;overflow-y:auto;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:6px 10px;border:0.5px solid var(--color-border-tertiary)}
+.samples-list{font-family:var(--font-mono);font-size:12px;line-height:1.45;height:clamp(320px,50vh,720px);overflow-y:auto;background:var(--color-background-secondary);border-radius:var(--border-radius-md);padding:6px 10px;border:0.5px solid var(--color-border-tertiary)}
+.samples-card{display:flex;flex-direction:column}
+.samples-card .samples-list{flex:1 1 auto;min-height:0}
 .samples-list .row{display:flex;gap:8px;align-items:origin;border-bottom:0.5px dotted var(--color-border-tertiary);padding:2px 0}
 .samples-list .row:last-child{border-bottom:none}
 .samples-list .tag-hit{color:var(--color-success);font-weight:600}
@@ -316,7 +412,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .workflow-card{background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);margin-bottom:14px;overflow:hidden}
 .workflow-toolbar{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);display:flex;align-items:center;gap:8px;font-size:13px;color:var(--color-text-secondary)}
 .workflow-canvas-bg{background:var(--color-background-tertiary);background-image:radial-gradient(circle,var(--color-border-tertiary) 1px,transparent 1px);background-size:24px 24px;width:100%}
-.workflow-canvas{position:relative;width:100%;max-width:800px;aspect-ratio:800/274;margin:0 auto;overflow:hidden}
+.workflow-canvas{position:relative;width:100%;max-width:960px;aspect-ratio:800/274;margin:0 auto;overflow:hidden}
 .wf-node{position:absolute;cursor:pointer;user-select:none}
 .wf-box{position:relative;background:var(--color-background-primary);border:0.5px solid var(--color-border-tertiary);border-radius:8px;padding:6px 10px;transition:border-color .15s,box-shadow .15s;display:flex;flex-direction:column;justify-content:center;height:100%;width:100%}
 .wf-box:hover{border-color:var(--color-accent)}
@@ -346,6 +442,11 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .viewer-header{padding:10px 16px;border-bottom:0.5px solid var(--color-border-tertiary);font-family:var(--font-mono);font-size:13px;color:var(--color-text-secondary);display:flex;justify-content:space-between;align-items:center}
 .viewer-body{flex:1;overflow:auto;padding:14px 16px;font-family:var(--font-mono);font-size:13px;line-height:1.5;color:var(--color-text-primary);white-space:pre-wrap}
 .viewer-body.markdown{font-family:var(--font-sans);font-size:15px;white-space:normal}
+.viewer-body.viewer-structured{font-family:var(--font-sans);white-space:normal;padding:12px 14px}
+.viewer-body.viewer-structured .card{margin:8px 0}
+.round-file-summary{padding:6px 0 4px;border-bottom:0.5px solid var(--color-border-tertiary);margin-bottom:6px}
+.round-file-summary-row{display:flex;flex-wrap:wrap;gap:14px;align-items:center;font-size:13px;color:var(--color-text-secondary)}
+.round-file-summary-row .badge{font-family:var(--font-mono)}
 .viewer-body.markdown h1,.viewer-body.markdown h2,.viewer-body.markdown h3{margin:14px 0 8px}
 .viewer-body.markdown p{margin:6px 0}
 .viewer-body.markdown code{font-family:var(--font-mono);background:var(--color-background-secondary);padding:1px 4px;border-radius:3px}
@@ -478,7 +579,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-popover-body{margin:0;padding:14px;overflow:auto;font-family:var(--font-mono);font-size:12px;color:var(--color-text-primary);white-space:pre-wrap;word-break:break-word}
 .chat-grid{display:grid;grid-template-columns:minmax(0,600px) 360px;gap:24px;justify-content:center;flex:1;min-height:0;padding:0 20px}
 @media (max-width:980px){.chat-grid{grid-template-columns:1fr}}
-.chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:380px;min-width:0}
+.chat-panel{background:var(--color-background-primary);border:1px solid var(--color-border-tertiary);border-radius:var(--border-radius-lg);display:flex;flex-direction:column;overflow:hidden;min-height:620px;min-width:0}
 .chat-panel-header{padding:14px 18px;border-bottom:1px solid var(--color-border-tertiary);display:flex;align-items:center;justify-content:space-between}
 .chat-panel-title{font-size:15px;font-weight:500;color:var(--color-text-primary)}
 .chat-panel-status{font-size:12px;color:var(--color-text-secondary);display:flex;align-items:center;gap:6px}
@@ -583,7 +684,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    slightly heavier stroke. Stroke color uses --color-text-primary so the
    tree reads black on light theme, white on dark. */
 .lineage-card{padding:14px 16px}
-.lineage-scroll{overflow-x:auto;margin-top:8px}
+.lineage-scroll{overflow:auto;margin-top:8px;max-height:60vh}
 .lineage-svg{display:block;font-family:var(--font-mono);font-size:11px}
 .lineage-branch,.lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
 .lineage-branch.winner,.lineage-stub.winner{stroke-width:1.6}

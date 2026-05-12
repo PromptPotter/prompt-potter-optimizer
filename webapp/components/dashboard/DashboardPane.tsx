@@ -1,19 +1,17 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
 import { fetchActive, fetchCycleFile, fetchPipeline } from "@/lib/api";
-import { useDashboardPoll, type DashboardSnapshot } from "@/lib/poll";
+import { roundOf, useDashboardPoll, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
 import { Sidebar, type Pane } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
-import { StatusBar } from "@/components/status/StatusBar";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { PassRateCard } from "@/components/eval/PassRateCard";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
-import { EvalTable } from "@/components/eval/EvalTable";
 import { RawJsonCard } from "@/components/raw/RawJsonCard";
+import { TERMS } from "@/lib/terms";
 import { HeroSummary } from "./HeroSummary";
 import { ChatPane } from "./ChatPane";
 import { ProgressCard } from "./ProgressCard";
@@ -123,14 +121,16 @@ export function DashboardPane() {
     setLastRoundFetched(-1);
   }
 
-  // Round-based panels: fetch the most recent round JSON when dash.round bumps.
-  // `dash.round` is the canonical round number (0 = origin, 1..N = L1) —
-  // matches `rounds/round_NNNN.json` directly. No arithmetic.
+  // Round-based panels: fetch the most recent round JSON when the canonical
+  // round number bumps. `roundOf` resolves the nested `current_round.round`
+  // first (the authoritative field per live_dashboard.py:750), falling back
+  // to the top-level `round` only during cycle re-instantiation before the
+  // first phase fires.
+  const dashRound = roundOf(dash);
   useEffect(() => {
-    if (!cycleId || !dash) return;
-    const round = Number(dash.round ?? -1);
-    if (round < 0 || round === lastRoundFetched) return;
-    const nn = String(round).padStart(4, "0");
+    if (!cycleId || dashRound == null) return;
+    if (dashRound < 0 || dashRound === lastRoundFetched) return;
+    const nn = String(dashRound).padStart(4, "0");
     let cancelled = false;
     (async () => {
       try {
@@ -138,7 +138,7 @@ export function DashboardPane() {
         const data = JSON.parse(r.content) as RoundData;
         if (cancelled) return;
         setLatestRound(data);
-        setLastRoundFetched(round);
+        setLastRoundFetched(dashRound);
       } catch {
         /* round may not be on disk yet */
       }
@@ -146,7 +146,7 @@ export function DashboardPane() {
     return () => {
       cancelled = true;
     };
-  }, [cycleId, dash, dash?.round, lastRoundFetched]);
+  }, [cycleId, dashRound, lastRoundFetched]);
 
   // Re-applies chart defaults on theme swap; the themeKey bump forces all
   // chart components to remount so they pick up the new --color-* values.
@@ -173,47 +173,134 @@ export function DashboardPane() {
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         {tab === "newjob" ? (
-          <ChatPane cycleId={cycleId} sessionId={sessionId} datasetTitle={datasetTitle} dash={dash} cycleStartedAt={cycleStartedAt} themeKey={themeKey} />
+          <ChatPane cycleId={cycleId} sessionId={sessionId} datasetTitle={datasetTitle} dash={dash} cycleStartedAt={cycleStartedAt} themeKey={themeKey} refreshKey={lastRoundFetched} />
         ) : pane === "dashboard" ? (
           <div className="content" id="content-dashboard">
-            <StatusBar
-              kind={dashState.status}
-              text={activeError && !cycleId ? "No active session" : dashState.statusText}
-              hint={activeError && !cycleId
+            <DashStatusStrip
+              status={dashState.status}
+              statusText={activeError && !cycleId ? "No active session" : dashState.statusText}
+              statusHint={activeError && !cycleId
                 ? "Initialize a cycle: `python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json`, then `python -m promptpotter optimize` in another terminal."
                 : dashState.statusHint}
               termKey={dashState.termKey}
+              cycleId={cycleId}
+              dash={dash}
+              onOpenFiles={() => onPaneSelect("files")}
             />
-            <div className="page-header">
-              <div className="page-header-text">
-                <div className="breadcrumb">
-                  Cycle » {cycleId || (activeError ? "no active session" : "loading…")}
+            <header className="dash-hero">
+              <div className="page-header">
+                <div className="page-header-text">
+                  <div className="breadcrumb">
+                    Cycle » {cycleId || (activeError ? "no active session" : "loading…")}
+                  </div>
+                  <h1>{datasetTitle || cycleId || (activeError ? "No active session" : "Loading…")}</h1>
+                  <div className="meta">
+                    session {sessionId || "—"} • updated {dash?.wallclock_serialized_at || "—"}
+                  </div>
                 </div>
-                <h1>{datasetTitle || cycleId || (activeError ? "No active session" : "Loading…")}</h1>
-                <div className="meta">
-                  session {sessionId || "—"} • updated {dash?.wallclock_serialized_at || "—"}
-                </div>
+                <HeroSummary cycleId={cycleId} dash={dash} refreshKey={lastRoundFetched} />
               </div>
-              <HeroSummary cycleId={cycleId} dash={dash} />
+              <ProgressCard dash={dash} />
+            </header>
+            <section className="dash-top" aria-label="Pipeline">
+              <WorkflowCanvas pipeline={pipeline} dash={dash} />
+            </section>
+            <div className="dash-grid">
+              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
+              <LineageTree cycleId={cycleId} refreshKey={lastRoundFetched} dash={dash} />
             </div>
-            <ProgressCard dash={dash} />
-            <EvalTable round={latestRound} />
-            <LineageTree cycleId={cycleId} refreshKey={lastRoundFetched} />
-            <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
-            <WorkflowCanvas pipeline={pipeline} dash={dash} />
-            <LiveStateCard dash={dash} />
-            <div className="grid3">
-              <PassRateCard round={latestRound} />
+            <section className="dash-samples-wide" aria-label="Live samples">
+              <LiveSamplesCard dash={dash} status={dashState.status} />
+            </section>
+            <div className="dash-charts">
               <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />
               <TrendChart cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             </div>
-            <LiveSamplesCard dash={dash} />
-            <RawJsonCard dash={dash} />
+            <details className="dash-diag">
+              <summary>Diagnostics — live state & raw payload</summary>
+              <div className="dash-diag-body">
+                <LiveStateCard dash={dash} />
+                <RawJsonCard dash={dash} />
+              </div>
+            </details>
           </div>
         ) : (
           <FilesPane cycleId={cycleId} />
         )}
       </main>
+    </div>
+  );
+}
+
+interface DashStatusStripProps {
+  status: StatusKind;
+  statusText: string;
+  statusHint?: string;
+  termKey?: string;
+  cycleId: string | null;
+  dash: DashboardSnapshot | null;
+  onOpenFiles: () => void;
+}
+
+function fmtPct(v: number | null | undefined): string {
+  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
+}
+
+function shortCycleId(id: string | null): string {
+  if (!id) return "—";
+  return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-4)}` : id;
+}
+
+function ageText(iso: string | undefined | null): string {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (!Number.isFinite(t)) return "—";
+  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  if (s < 3600) return `${Math.round(s / 60)}m ago`;
+  return `${Math.round(s / 3600)}h ago`;
+}
+
+function DashStatusStrip({ status, statusText, statusHint, termKey, cycleId, dash, onOpenFiles }: DashStatusStripProps) {
+  const tip = termKey ? TERMS[termKey] : "";
+  const round = roundOf(dash);
+  const patience = (dash as { patience?: string } | null)?.patience;
+  const best = typeof dash?.best === "number" ? dash.best : null;
+  const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
+  const delta = best != null && origin != null ? best - origin : null;
+  const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";
+  const deltaCls = delta == null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
+  return (
+    <div className={`dash-strip status-bar ${status}`} role="status" aria-live="polite" aria-atomic="true" title={tip || undefined}>
+      <span className="status-dot" aria-hidden="true" />
+      <span className="dash-strip-text">
+        <strong>{statusText}</strong>
+        {statusHint ? <span className="dash-strip-hint">{statusHint}</span> : null}
+      </span>
+      <span className="dash-strip-sep" aria-hidden="true">·</span>
+      <span className="dash-strip-cell" title={cycleId ?? ""}>
+        <span className="dash-strip-label">cycle</span>
+        <code>{shortCycleId(cycleId)}</code>
+      </span>
+      <span className="dash-strip-cell">
+        <span className="dash-strip-label">round</span>
+        <strong>{round != null ? `R${round}` : "—"}</strong>
+        {patience ? <span className="dash-strip-sub">· patience {patience}</span> : null}
+      </span>
+      <span className="dash-strip-cell">
+        <span className="dash-strip-label">best</span>
+        <strong>{fmtPct(best)}</strong>
+        {delta != null && origin != null ? (
+          <span className={`dash-strip-delta ${deltaCls}`}>{deltaSign}{(delta * 100).toFixed(1)}% vs origin</span>
+        ) : null}
+      </span>
+      <span className="dash-strip-cell">
+        <span className="dash-strip-label">updated</span>
+        <strong>{ageText(dash?.wallclock_serialized_at)}</strong>
+      </span>
+      <button type="button" className="dash-strip-jump" onClick={onOpenFiles} aria-label="Open files pane">
+        Files →
+      </button>
     </div>
   );
 }

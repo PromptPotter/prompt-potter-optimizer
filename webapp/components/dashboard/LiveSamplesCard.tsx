@@ -1,10 +1,11 @@
 "use client";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { roundOf, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  status: StatusKind;
 }
 
 interface CandidateLike {
@@ -13,11 +14,10 @@ interface CandidateLike {
   samples?: string[];
 }
 
-export function LiveSamplesCard({ dash }: Props) {
+export function LiveSamplesCard({ dash, status }: Props) {
   const score = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: CandidateLike[] } }> | undefined)?.l1_score;
   const cands = score?.output?.candidates ?? [];
-  // Canonical round (0 = origin, 1..N = L1) — no arithmetic.
-  const roundNum = Number(dash?.current_round?.round ?? dash?.round ?? 0);
+  const roundNum = roundOf(dash) ?? 0;
 
   // Flatten across candidates, tagging each sample with its candidate label.
   const rows: { candLabel: string; raw: string }[] = [];
@@ -27,14 +27,20 @@ export function LiveSamplesCard({ dash }: Props) {
     for (const s of samples) rows.push({ candLabel: label, raw: s });
   }
 
-  // Newest first, cap at 100.
-  const latest = rows.slice().reverse().slice(0, 100);
+  // Newest first, cap at 200.
+  const latest = rows.slice().reverse().slice(0, 200);
+
+  // Liveness label tracks the status banner: "rolling" only when the
+  // optimizer is actively writing, "snapshot" once the dashboard is frozen.
+  // Without this, a stale dashboard kept claiming to be rolling for samples
+  // that hadn't moved in minutes.
+  const liveness = status === "live" ? "rolling" : "snapshot";
 
   return (
     <div className="card samples-card">
       <h2 className="card-title">
         Live samples
-        <span className="badge">rolling · {latest.length} shown</span>
+        <span className="badge">{liveness} · {latest.length} shown</span>
       </h2>
       <div className="samples-list" role="log" aria-live="polite" aria-atomic="false">
         {latest.length === 0 ? (

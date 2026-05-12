@@ -12,6 +12,7 @@ interface Props {
   dash: DashboardSnapshot | null;
   cycleStartedAt: string | null;
   themeKey: string;
+  refreshKey: number;
 }
 
 function fmt(v: unknown): string {
@@ -34,7 +35,7 @@ function fmtDuration(sec: number): string {
 // toggles are disabled. The wand-row toggle is the lone interactive element
 // (purely visual, mirrors vanilla). Control plane lands in M12 — see
 // docs/specs/m12-newjob-status-bar.md for the interactive write path.
-export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedAt, themeKey }: Props) {
+export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedAt, themeKey, refreshKey }: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
@@ -48,7 +49,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
   const best = typeof dash?.best === "number" ? dash.best : null;
   const accPct = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}% acc` : "— acc";
   const bestPctOnly = best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—";
-  const origin = typeof dash?.origin === "number" ? dash.origin : null;
+  const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
   const originPct =
     origin != null && Number.isFinite(origin) ? `${(origin * 100).toFixed(0)}%` : null;
 
@@ -186,7 +187,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={Number(dash?.current_round?.round ?? dash?.round ?? 0)} themeKey={themeKey} />
+              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12
@@ -251,7 +252,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
             <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
           </button>
         </div>
-        {samplesOpen && <HardSamplesHeatmap cycleId={cycleId} dash={dash} />}
+        {samplesOpen && <HardSamplesHeatmap cycleId={cycleId} dash={dash} refreshKey={refreshKey} />}
       </div>
 
       <div className="chat-grid">

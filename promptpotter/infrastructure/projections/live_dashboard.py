@@ -191,7 +191,7 @@ class LiveDashboardView(DerivedView):
             "candidate": "",
             "query": "",
             "patience": f"0/{l1_patience}",
-            "origin": r.get("origin", 0.0),
+            "origin_accuracy": r.get("origin_accuracy", 0.0),
             "best": r.get("best", 0.0),
             "current_acc": 0.0,
             "composite_fitness_formula": r.get("composite_fitness_formula"),
@@ -224,7 +224,7 @@ class LiveDashboardView(DerivedView):
         # holds the same shape so both subscribers share one accumulator.
         self._core = LiveStateCore(
             round_num=int(self.state.get("round") or 0),
-            origin_acc=float(self.state.get("origin") or 0.0),
+            origin_acc=float(self.state.get("origin_accuracy") or 0.0),
             best_acc=float(self.state.get("best") or 0.0),
         )
 
@@ -264,7 +264,7 @@ class LiveDashboardView(DerivedView):
         if prior_state.exists():
             try:
                 resume_from = json.loads(prior_state.read_text(encoding="utf-8"))
-                resume_from["origin"] = origin_accuracy
+                resume_from["origin_accuracy"] = origin_accuracy
             except (json.JSONDecodeError, OSError):
                 resume_from = None
 
