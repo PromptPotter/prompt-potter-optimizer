@@ -1,8 +1,5 @@
 """Live ledger subscriber — CLI and notebook share one ``LiveDisplay``.
 
-Surface differentiation via constructor flag, not subclasses:
-``sp_budget_ttest`` truthy → enables tqdm progress bars (CLI feel).
-
 Single ingress: the display consumes ``CycleRecord``s from the per-cycle
 ``CycleEventLog`` via ``on_record``. All per-sample, per-candidate, and
 round-summary renderers are private to this file because nothing else
@@ -14,7 +11,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Literal
+from typing import TYPE_CHECKING, Literal
 
 from promptpotter.application.optimization.elimination import classify_result
 from promptpotter.application.scoring.formula import extract_display_answer
@@ -595,10 +592,6 @@ def individual_summary_from_dict(
 class LiveDisplay(DerivedView):
     """Live ``RunCallbacks`` adapter — CLI + notebook share this one class.
 
-    When ``sp_budget_ttest`` is provided, tqdm progress bars are rendered
-    inline (CLI feel). The bar lifecycle is fused into ``LiveDisplay``
-    state — no separate inner class.
-
     Subclasses ``DerivedView`` so the ``isinstance`` dispatch over
     ledger ``CycleRecord`` subtypes lives in one place; this class only
     overrides ``_handle_phase`` / ``_handle_snapshot``. The ``on_*``
@@ -614,7 +607,6 @@ class LiveDisplay(DerivedView):
         pipeline_schema: PipelineSchema | None,
         scoring_formula: str | None = None,
         campaign_rounds: list | None = None,
-        sp_budget_ttest: int | None = None,
     ) -> None:
         # Per-cycle scalars live on a shared ``LiveStateCore`` (round number,
         # origin + best anchors, P(best) round snapshot) so the dashboard
@@ -646,29 +638,9 @@ class LiveDisplay(DerivedView):
         # "no measurement yet" (resume points, pre-origin) — render
         # falls back to omitting the elapsed field.
         self._round_started_at: float | None = None
-        # tqdm bar lifecycle (CLI surface). When ``sp_budget_ttest`` is
-        # None the bars are skipped entirely; ``_write`` falls back to
-        # plain ``print`` so the notebook surface stays stdout-clean.
-        self._bar_budget = sp_budget_ttest
-        self._bar: Any = None
-        self._bar_cand_idx: int = -1
-        self._in_origin: bool = False
-
-    # --- tqdm bar helpers (active only when ``_bar_budget`` is set) -----
-
-    def _bars_close(self) -> None:
-        if self._bar is not None:
-            self._bar.close()
-            self._bar = None
-        self._bar_cand_idx = -1
 
     def _write(self, line: str) -> None:
-        if self._bar_budget is not None:
-            from tqdm.auto import tqdm
-
-            tqdm.write(line)
-        else:
-            print(line, flush=True)
+        print(line, flush=True)
 
     @property
     def origin_acc(self) -> float:
@@ -713,9 +685,7 @@ class LiveDisplay(DerivedView):
         qi = int(record.sample_idx or 0)
         qt = int(record.sample_total or 0)
         ev = record.event
-        if ev == "sample_started":
-            self.on_sample_started(ci, ct, payload.get("query_text") or "", qi, qt)
-        elif ev == "sample_scored":
+        if ev == "sample_scored":
             self.on_sample_scored(ci, ct, payload.get("result") or {}, qi, qt)
         elif ev == "candidate_started":
             self.on_candidate_started(
@@ -741,18 +711,6 @@ class LiveDisplay(DerivedView):
     # forwards ledger-driven events into the same handlers.
 
     def on_phase(self, event: PhaseEvent, view: dict | None = None) -> None:
-        # Bar lifecycle inline — close on phase-exit boundaries; mark
-        # origin phase so ``on_sample_started`` opens the right bar.
-        if self._bar_budget is not None:
-            if event.event == "exit":
-                if event.phase == CampaignPhase.ORIGIN:
-                    self._bars_close()
-                    self._in_origin = False
-                elif event.phase == CampaignPhase.L1_SCORE:
-                    self._bars_close()
-            elif event.event == "enter" and event.phase == CampaignPhase.ORIGIN:
-                self._in_origin = True
-
         if event.phase == CampaignPhase.L1_SCORE and event.event == "enter":
             self._write("\n" + _node_top("SCORE"))
         if view is not None:
@@ -791,34 +749,6 @@ class LiveDisplay(DerivedView):
             if new_formula:
                 self._phase_ctx["composite_fitness_formula"] = new_formula
 
-    def on_sample_started(
-        self, cand_idx: int, n_cands: int, query_text: str, sample_idx: int, n_samples: int
-    ) -> None:
-        # Per-sample output renders after the result lands; the emitter's
-        # dashboard.json surfaces the in-flight state.
-        if self._bar_budget is None:
-            return
-        from tqdm.auto import tqdm
-
-        if self._in_origin:
-            if self._bar is None:
-                self._bar = tqdm(
-                    total=n_samples or 1, desc="  origin", unit="q", leave=False, ncols=60
-                )
-            return
-        if cand_idx != self._bar_cand_idx:
-            self._bars_close()
-            self._bar_cand_idx = cand_idx
-            # Bar tops out at sp_budget_ttest; early t-test elimination
-            # leaves it partially filled — which is the signal, not a bug.
-            self._bar = tqdm(
-                total=self._bar_budget,
-                desc=f"  cand {cand_idx + 1}/{n_cands}",
-                unit="q",
-                leave=False,
-                ncols=60,
-            )
-
     def on_sample_scored(
         self, cand_idx: int, n_cands: int, result: dict, sample_idx: int, n_samples: int
     ) -> None:
@@ -832,8 +762,6 @@ class LiveDisplay(DerivedView):
                 scoring_formula=self.scoring_formula,
             )
         )
-        if self._bar is not None:
-            self._bar.update(1)
 
     def on_p_best_update(self, current_id: str, n_samples: int, p_best: dict[str, float]) -> None:
         """Stash latest Posterior-of-Being-Best snapshot for the round-end roll-up.
@@ -874,13 +802,9 @@ class LiveDisplay(DerivedView):
         changes_description: str,
         pp_override: dict | None,
     ) -> None:
-        # Close any still-open bar (e.g. final query of prior candidate) so
-        # the header lands above the fresh bar.
-        self._bars_close()
         self._write(fmt_individual_header(idx, total, changes_description, pp_override))
 
     def on_candidate_scored(self, idx: int, total: int, scores: dict) -> None:
-        self._bars_close()
         w = 66
         label = scores.get("label") or candidate_label(self._core.round_num, idx)
         origin_acc = self._phase_ctx.get("origin_accuracy", self.origin_acc)
@@ -921,7 +845,6 @@ class LiveDisplay(DerivedView):
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
 
     def on_round_complete(self, round_result: RoundResult, l1_stall_count: int) -> None:
-        self._bars_close()
         self.sample_counter = 0
 
         self.campaign_rounds.append(

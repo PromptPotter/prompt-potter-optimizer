@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
-import { HardSamplesTable } from "@/components/dashboard/HardSamplesTable";
+import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
 
 interface Props {
   cycleId: string | null;
@@ -251,7 +251,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
             <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
           </button>
         </div>
-        {samplesOpen && <HardSamplesTable cycleId={cycleId} dash={dash} />}
+        {samplesOpen && <HardSamplesHeatmap cycleId={cycleId} dash={dash} />}
       </div>
 
       <div className="chat-grid">

@@ -448,6 +448,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
           {showWhatIf && <span><span className="dot whatif" />what-if</span>}
         </div>
       )}
+      <div className="fitness-body">
       <FitnessChart
         bars={bars}
         showComposite={showComposite}
@@ -522,6 +523,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
           <div className="whatif-summary">{summary}</div>
         </div>
       )}
+      </div>
     </div>
   );
 }

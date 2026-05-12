@@ -20,14 +20,27 @@ const CELL_PADDING_PX = 22;
 const HEADER_PADDING_CH = 4;
 const MAX_AUTO_CH = 50;
 
+export interface MeasurementDot {
+  hit: boolean;
+  ord: number;
+}
+
 interface Props {
   cycleId: string | null;
   dash: DashboardSnapshot | null;
+  // Per-sample chronological measurement dots. When supplied, the table
+  // shows a "measurements" column with one dot per measurement; when
+  // omitted (legacy callers) the column is hidden.
+  perSample?: Map<number, MeasurementDot[]>;
+  // Compact = tiny default height (~3 rows visible). User can still drag
+  // the resize handle to grow it. Off = standard preset height.
+  compact?: boolean;
 }
 
 type ColId =
   | "rank"
   | "sample_id"
+  | "measurements"
   | "surprise"
   | "n_obs"
   | "task"
@@ -54,6 +67,7 @@ interface ColDef {
 const COLUMNS: ColDef[] = [
   { id: "rank",          label: "#",          align: "right",  numeric: true  },
   { id: "sample_id",     label: "ID",         align: "right",  numeric: true  },
+  { id: "measurements",  label: "Meas",       align: "left",   numeric: true  },
   { id: "surprise",      label: "Surprise",   align: "right",  numeric: true  },
   { id: "n_obs",         label: "Tries",      align: "right",  numeric: true  },
   { id: "task",          label: "Task",       align: "left",   numeric: false },
@@ -175,12 +189,21 @@ interface CellValue {
 
 // Cell value for non-rank columns. Rank is computed inline in the render loop
 // from the row's position in `sortedItems`.
-function cellFor(col: ColId, item: DatasetItem, live: LiveEntry | undefined): CellValue {
+function cellFor(
+  col: ColId,
+  item: DatasetItem,
+  live: LiveEntry | undefined,
+  measCount: number,
+): CellValue {
   switch (col) {
     case "rank":
       return { text: "", raw: null };
     case "sample_id":
       return { text: String(item.sample_id), raw: item.sample_id };
+    case "measurements":
+      // Sort key is the measurement count; visual rendering happens
+      // separately in the cell render loop (dots JSX, not text).
+      return { text: measCount > 0 ? String(measCount) : "—", raw: measCount };
     case "surprise":
       return {
         text: item.surprise.toFixed(2),
@@ -230,15 +253,32 @@ function cellFor(col: ColId, item: DatasetItem, live: LiveEntry | undefined): Ce
 // Auto-size a column by sampling its rendered text. Floor is the header label
 // length (so headers never get clipped); ceiling is MAX_AUTO_CH (long text
 // wraps or expands via popover instead of forcing a 1000 px column).
-function autoWidthFor(col: ColDef, items: DatasetItem[], live: Map<number, LiveEntry>): number {
+function autoWidthFor(
+  col: ColDef,
+  items: DatasetItem[],
+  live: Map<number, LiveEntry>,
+  perSample: Map<number, MeasurementDot[]> | undefined,
+): number {
   const headerCh = col.label.length + HEADER_PADDING_CH;
   let maxCh = headerCh;
   if (col.id === "rank") {
     // Rank shows row position; longest is items.length digits.
     maxCh = Math.max(headerCh, String(Math.max(1, items.length)).length + 1);
+  } else if (col.id === "measurements") {
+    // Dots column — sized by dot count (12 px stride incl. gap), capped
+    // so the column stays narrow. We measure in *pixels* directly here
+    // instead of in characters; return early to skip the char→px math.
+    let maxDots = 0;
+    for (const item of items) {
+      const n = perSample?.get(item.sample_id)?.length ?? 0;
+      if (n > maxDots) maxDots = n;
+    }
+    const cappedDots = Math.min(maxDots, 20);
+    return Math.max(60, 16 + cappedDots * 8);
   } else {
     for (const item of items) {
-      const text = cellFor(col.id, item, live.get(item.sample_id)).text;
+      const count = perSample?.get(item.sample_id)?.length ?? 0;
+      const text = cellFor(col.id, item, live.get(item.sample_id), count).text;
       const ch = Math.min(text.length, MAX_AUTO_CH);
       if (ch > maxCh) maxCh = ch;
     }
@@ -248,7 +288,13 @@ function autoWidthFor(col: ColDef, items: DatasetItem[], live: Map<number, LiveE
 
 const RANK_HINT = "Position in current sort order — click to clear sort";
 
-export function HardSamplesTable({ cycleId, dash }: Props) {
+export function HardSamplesTable({ cycleId, dash, perSample, compact }: Props) {
+  // When perSample is undefined (legacy callers), drop the dots column
+  // entirely so the table renders exactly as before.
+  const columns = useMemo<ColDef[]>(
+    () => COLUMNS.filter((c) => perSample || c.id !== "measurements"),
+    [perSample],
+  );
   const [items, setItems] = useState<DatasetItem[]>([]);
   const [datasetName, setDatasetName] = useState<string | null>(null);
   const [trainCount, setTrainCount] = useState(0);
@@ -305,25 +351,36 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
     [live],
   );
 
+  // Stable signature of measurement counts per sample. Drives auto-width
+  // recompute for the dots column on real changes only.
+  const perSampleSig = useMemo(() => {
+    if (!perSample) return "";
+    return [...perSample.entries()]
+      .sort((a, b) => a[0] - b[0])
+      .map(([sid, ms]) => `${sid}:${ms.length}`)
+      .join(",");
+  }, [perSample]);
+
   const autoWidths = useMemo<Partial<Record<ColId, number>>>(() => {
     if (items.length === 0) return {};
     const w: Partial<Record<ColId, number>> = {};
-    for (const col of COLUMNS) {
-      w[col.id] = autoWidthFor(col, items, live);
+    for (const col of columns) {
+      w[col.id] = autoWidthFor(col, items, live, perSample);
     }
     return w;
     // `live` is read inside via cellFor; `liveSignature` captures the set of
     // measured samples so we recompute on cardinality change but not on every
     // value tick. Suppress the exhaustive-deps lint for this trade-off.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, liveSignature]);
+  }, [items, liveSignature, columns, perSampleSig]);
 
   const sortedItems = useMemo(() => {
     if (!sortBy) return items;
     const { col, dir } = sortBy;
     const sign = dir === "asc" ? 1 : -1;
     const keyOf = (it: DatasetItem): number | string => {
-      const v = cellFor(col, it, live.get(it.sample_id)).raw;
+      const count = perSample?.get(it.sample_id)?.length ?? 0;
+      const v = cellFor(col, it, live.get(it.sample_id), count).raw;
       if (v === null || v === undefined) return Number.NEGATIVE_INFINITY;
       if (typeof v === "boolean") return v ? 1 : 0;
       return v;
@@ -334,21 +391,21 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
       if (typeof ka === "number" && typeof kb === "number") return (ka - kb) * sign;
       return String(ka).localeCompare(String(kb)) * sign;
     });
-  }, [items, sortBy, live]);
+  }, [items, sortBy, live, perSample]);
 
   const widthFor = (col: ColDef): number => {
     if (persisted.folded.includes(col.id)) return FOLDED_WIDTH;
     return persisted.widths[col.id] ?? autoWidths[col.id] ?? 80;
   };
 
-  const gridTemplate = COLUMNS.map((c) => `${widthFor(c)}px`).join(" ");
-  const totalWidth = COLUMNS.reduce((sum, c) => sum + widthFor(c), 0);
+  const gridTemplate = columns.map((c) => `${widthFor(c)}px`).join(" ");
+  const totalWidth = columns.reduce((sum, c) => sum + widthFor(c), 0);
 
   const startResize = (col: ColId) => (e: PointerEvent<HTMLDivElement>) => {
     e.preventDefault();
     e.stopPropagation();
     const startX = e.clientX;
-    const startWidth = widthFor(COLUMNS.find((c) => c.id === col)!);
+    const startWidth = widthFor(columns.find((c) => c.id === col)!);
     const onMove = (ev: globalThis.PointerEvent) => {
       const dx = ev.clientX - startX;
       const w = Math.max(MIN_WIDTH, Math.round(startWidth + dx));
@@ -415,7 +472,7 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
 
   return (
     <div className="hs-zone">
-      <div className="hs-block">
+      <div className={`hs-block${compact ? " compact" : ""}`}>
         <div className="hs-scroll">
           <div
             className="hs-grid"
@@ -424,7 +481,7 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
               minWidth: `${totalWidth}px`,
             }}
           >
-            {COLUMNS.map((col) => {
+            {columns.map((col) => {
               const folded = persisted.folded.includes(col.id);
               const sorted = sortBy?.col === col.id ? sortBy.dir : null;
               const isRank = col.id === "rank";
@@ -487,15 +544,18 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
 
             {sortedItems.map((item, idx) => {
               const liveEntry = live.get(item.sample_id);
-              return COLUMNS.map((col) => {
+              const meas = perSample?.get(item.sample_id) ?? [];
+              return columns.map((col) => {
                 const folded = persisted.folded.includes(col.id);
                 const wrapped = persisted.wrapped.includes(col.id) && wrappable(col);
                 const isRank = col.id === "rank";
+                const isMeas = col.id === "measurements";
                 const cell = isRank
                   ? ({ text: String(idx + 1), raw: idx + 1 } as CellValue)
-                  : cellFor(col.id, item, liveEntry);
+                  : cellFor(col.id, item, liveEntry, meas.length);
                 const isExpandable =
                   !isRank &&
+                  !isMeas &&
                   !col.numeric &&
                   col.align === "left" &&
                   Boolean(cell.raw);
@@ -512,13 +572,29 @@ export function HardSamplesTable({ cycleId, dash }: Props) {
                 return (
                   <div
                     key={`${item.sample_id}-${col.id}`}
-                    className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${cell.className ? ` ${cell.className}` : ""}`}
+                    className={`hs-cell${folded ? " folded" : ""}${wrapped ? " wrapped" : ""}${isRank ? " rank" : ""}${isMeas ? " meas" : ""}${cell.className ? ` ${cell.className}` : ""}`}
                     data-align={col.align}
                     style={cell.style}
                     title={folded ? undefined : cell.title}
                     onClick={onClick}
                   >
-                    {folded ? "" : cell.text}
+                    {folded ? "" : isMeas ? (
+                      meas.length === 0 ? (
+                        <span className="hs-heat-empty">—</span>
+                      ) : (
+                        <span className="hs-cell-meas-strip">
+                          {meas.map((m, i) => (
+                            <span
+                              key={i}
+                              className={`hs-heat-dot ${m.hit ? "hit" : "miss"}`}
+                              title={`R${Math.floor(m.ord / 1000)} cand ${m.ord % 1000} · ${m.hit ? "HIT" : "MISS"}`}
+                            />
+                          ))}
+                        </span>
+                      )
+                    ) : (
+                      cell.text
+                    )}
                   </div>
                 );
               });

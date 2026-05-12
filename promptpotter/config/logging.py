@@ -37,6 +37,28 @@ class _TqdmStreamHandler(logging.StreamHandler):
             self.handleError(record)
 
 
+class _QuietDashboardPoll(logging.Filter):
+    """Drop successful 2 s dashboard/index polls from ``uvicorn.access``.
+
+    The React webapp polls a small set of JSON files via the generic
+    ``/api/v1/campaigns/{cycle_id}/file?scope=cycle&path=...`` reader.
+    With a live campaign this is ~30 identical 200s per minute and crowds
+    out real signal (errors, non-poll requests, startup). 4xx/5xx still
+    log — only 200s on the polled paths are silenced.
+    """
+
+    _POLLED = ("path=dashboard.json", "path=index.json")
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        args = record.args
+        if not (isinstance(args, tuple) and len(args) >= 5):
+            return True
+        method, path, _http, status = args[1], args[2], args[3], args[4]
+        if method != "GET" or status != 200:
+            return True
+        return not any(p in str(path) for p in self._POLLED)
+
+
 def setup_logging(
     level: int = logging.INFO,
     *,
@@ -67,3 +89,4 @@ def setup_logging(
         # Deep layers stay quiet — campaign_runner (presentation) prints the summary.
         logging.getLogger("promptpotter.application").setLevel(logging.WARNING)
         logging.getLogger("promptpotter.infrastructure").setLevel(logging.WARNING)
+    logging.getLogger("uvicorn.access").addFilter(_QuietDashboardPoll())

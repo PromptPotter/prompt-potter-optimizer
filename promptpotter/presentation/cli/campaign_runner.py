@@ -416,7 +416,6 @@ def _build_live_display(
     return _LiveDisplay(
         origin_acc=origin_acc,
         l1_patience=opt.l1_patience,
-        sp_budget_ttest=campaign_config.sp_budget_ttest,
         scoring_formula=scoring_formula,
         pipeline_schema=session.pipeline_schema,
     )

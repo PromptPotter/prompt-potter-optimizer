@@ -19,6 +19,7 @@ import { ChatPane } from "./ChatPane";
 import { ProgressCard } from "./ProgressCard";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
+import { LineageTree } from "./LineageTree";
 import { FilesPane } from "@/components/tree/FilesPane";
 
 interface PipelineDoc {
@@ -196,6 +197,9 @@ export function DashboardPane() {
               <HeroSummary cycleId={cycleId} dash={dash} />
             </div>
             <ProgressCard dash={dash} />
+            <EvalTable round={latestRound} />
+            <LineageTree cycleId={cycleId} refreshKey={lastRoundFetched} />
+            <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             <WorkflowCanvas pipeline={pipeline} dash={dash} />
             <LiveStateCard dash={dash} />
             <div className="grid3">
@@ -203,9 +207,7 @@ export function DashboardPane() {
               <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />
               <TrendChart cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             </div>
-            <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
             <LiveSamplesCard dash={dash} />
-            <EvalTable round={latestRound} />
             <RawJsonCard dash={dash} />
           </div>
         ) : (

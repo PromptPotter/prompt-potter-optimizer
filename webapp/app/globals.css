@@ -233,18 +233,31 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
    (accuracy); chips reveal paired bars and the ablation widget. The card
    auto-shrinks to the chart width by default; opening the What-If body
    expands it to dashboard-wide so the tile grid fits. */
-.fitness-card{margin-bottom:14px;width:fit-content;max-width:480px;margin-left:auto;margin-right:auto}
-.fitness-card.whatif-open{width:auto;max-width:980px}
+.fitness-card{margin-bottom:14px;width:auto;max-width:100%;margin-left:auto;margin-right:auto}
+.fitness-card.whatif-open{max-width:100%}
 .fitness-toggles{display:flex;gap:6px}
 .fitness-chip{font-family:inherit;font-size:11px;padding:3px 9px;border-radius:var(--border-radius-md);background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);cursor:pointer;letter-spacing:.04em;transition:background .15s,color .15s,border-color .15s}
 .fitness-chip:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
 .fitness-chip.on{background:var(--color-background-tint-active);color:var(--color-accent);border-color:rgba(var(--color-accent-rgb),0.55)}
-.fitness-chart-frame{position:relative;height:240px;width:440px;max-width:100%;margin:0 auto}
+/* Chart frame: fills available width so 5 → 25 bars all read; height stays
+   compact. Chart.js handles the bar fan-out within its responsive options. */
+.fitness-chart-frame{position:relative;height:200px;width:100%;max-width:100%;margin:0 auto;min-width:0}
 .fitness-legend{display:flex;justify-content:center;gap:14px;font-size:11px;color:var(--color-text-tertiary);font-family:var(--font-mono);margin-bottom:8px}
 .fitness-legend .dot{display:inline-block;width:8px;height:8px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .fitness-legend .dot.accuracy{background:rgba(var(--color-accent-rgb),0.95)}
 .fitness-legend .dot.composite{background:rgba(var(--color-accent-rgb),0.55)}
 .fitness-legend .dot.whatif{background:var(--color-accent-strong)}
+/* When What-If is open, chart (left) and evaluator cards (right) sit
+   side-by-side. The body block becomes a flex row; we re-target the chart
+   frame + the whatif body so the existing JSX (chart + sibling
+   .fitness-whatif div) reflows without restructuring. */
+.fitness-card.whatif-open .fitness-chart-frame{width:auto;flex:1 1 0;min-width:340px}
+.fitness-card.whatif-open .fitness-body{display:flex;flex-direction:row;align-items:stretch;gap:18px}
+.fitness-card.whatif-open .fitness-whatif{margin-top:0;padding-top:0;padding-left:18px;border-top:none;border-left:0.5px solid var(--color-border-tertiary);flex:1 1 auto;min-width:0;max-width:520px}
+@media (max-width:880px){
+  .fitness-card.whatif-open .fitness-body{flex-direction:column}
+  .fitness-card.whatif-open .fitness-whatif{padding-left:0;padding-top:18px;border-left:none;border-top:0.5px solid var(--color-border-tertiary);max-width:none}
+}
 .fitness-whatif{margin-top:18px;padding-top:18px;border-top:0.5px solid var(--color-border-tertiary)}
 .fitness-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:16px 0;text-align:center}
 .whatif-intro{font-size:12px;color:var(--color-text-secondary);line-height:1.55;margin-bottom:12px}
@@ -417,7 +430,7 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 }
 .wf-hero-kb{display:flex;justify-content:center;margin-top:2px}
 .wf-hero-kb-pill{font-size:12px;padding:5px 14px;border-radius:999px;background:rgba(var(--color-accent-rgb),0.08);border:1px solid rgba(var(--color-accent-rgb),0.30);color:var(--color-accent);letter-spacing:.04em}
-.hs-zone{display:flex;justify-content:center;margin-top:24px;padding:0 8px}
+.hs-zone{display:flex;flex-direction:column;align-items:center;gap:12px;margin-top:24px;padding:0 8px}
 .hs-block{width:100%;max-width:1280px;display:flex;flex-direction:column;align-items:stretch;border:1px solid var(--color-border-tertiary);border-radius:10px;background:var(--color-background-secondary);overflow:hidden;resize:vertical;height:320px;min-height:200px;max-height:80vh}
 .hs-scroll{flex:1;min-height:0;overflow:auto}
 .hs-grid{display:grid;grid-auto-rows:min-content;background:var(--color-background-secondary)}
@@ -450,6 +463,9 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 .hs-cell.hs-cell-hit{color:var(--color-success);font-weight:600}
 .hs-cell.hs-cell-miss{color:var(--color-danger)}
 .hs-cell.hs-cell-cached{color:var(--color-text-tertiary)}
+.hs-cell.meas{padding:3px 6px;overflow:hidden}
+.hs-cell-meas-strip{display:flex;gap:1px;align-items:center;min-width:0;overflow-x:auto;max-width:100%}
+.hs-cell-meas-strip::-webkit-scrollbar{height:4px}
 .hs-footer{padding:6px 10px;border-top:1px solid var(--color-border-tertiary);background:var(--color-background-primary);font-size:11px;color:var(--color-text-tertiary);letter-spacing:.04em;display:flex;justify-content:space-between;align-items:center;gap:12px}
 .hs-counts{font-family:var(--font-mono);color:var(--color-text-secondary);white-space:nowrap}
 .hs-reset{font-family:var(--font-mono);font-size:11px;background:transparent;border:1px solid var(--color-border-tertiary);color:var(--color-text-secondary);padding:3px 8px;border-radius:4px;cursor:pointer}
@@ -561,6 +577,60 @@ td:first-child{color:var(--color-text-primary);font-weight:500}
 /* Chat-mode collapses the sidebar — vanilla used display:none; the React port
    keeps it transform-based so prefers-reduced-motion can fall through. */
 .shell.chat-mode > .sidebar{display:none}
+
+/* Lineage tree — paper-cladogram aesthetic: horizontal child stubs and
+   slanted parent-to-child branches, sharp corners, no dots. Winner gets
+   slightly heavier stroke. Stroke color uses --color-text-primary so the
+   tree reads black on light theme, white on dark. */
+.lineage-card{padding:14px 16px}
+.lineage-scroll{overflow-x:auto;margin-top:8px}
+.lineage-svg{display:block;font-family:var(--font-mono);font-size:11px}
+.lineage-branch,.lineage-stub{stroke:var(--color-text-primary);stroke-width:1;fill:none}
+.lineage-branch.winner,.lineage-stub.winner{stroke-width:1.6}
+.lineage-label{fill:var(--color-text-secondary);font-size:11px;letter-spacing:.02em}
+.lineage-label.winner{fill:var(--color-text-primary);font-weight:600}
+.lineage-empty{color:var(--color-text-tertiary);font-style:italic;font-size:12px;padding:14px 0;text-align:center}
+
+/* Hard-samples heat-map — full HardSamplesTable in both compact and
+   expanded states. Compact = small default height showing ~3 rows; the
+   .hs-block resize handle still works in both states. */
+.hs-heat-wrap{display:flex;flex-direction:column;align-items:center;gap:6px;width:100%;margin-top:24px;padding:0 8px}
+.hs-heat-bar{display:flex;justify-content:flex-end;align-items:center;width:100%;max-width:1280px;font-size:12px;color:var(--color-text-secondary);font-family:var(--font-mono);gap:10px;padding:0 4px}
+.hs-heat-title{letter-spacing:.03em}
+.hs-heat-hit{color:var(--color-success);font-weight:600}
+.hs-heat-miss{color:var(--color-danger);font-weight:600}
+.hs-heat-toggle{background:var(--color-background-secondary);color:var(--color-text-secondary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:3px 10px;font-size:11px;cursor:pointer;font-family:inherit;letter-spacing:.04em}
+.hs-heat-toggle:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.hs-heat-empty{color:var(--color-text-tertiary);font-style:italic}
+.hs-heat-dot{display:inline-block;width:8px;height:8px;border-radius:1px;flex-shrink:0;transition:transform .1s}
+.hs-heat-dot:hover{transform:scale(1.6);position:relative;z-index:1}
+.hs-heat-dot.hit{background:var(--color-success)}
+.hs-heat-dot.miss{background:var(--color-danger)}
+/* Compact preset: ~3 rows visible (header + 3 × 26 px ≈ 100 px). User
+   drags the bottom edge to grow it. Larger preset (Grow button) drops
+   the compact class so .hs-block falls back to its 320 px default. */
+.hs-block.compact{height:96px;min-height:60px}
+/* Mini heat-map — collapsed dynamic-icon view. Three rows of 4 px cells
+   with a 1 px gap; the whole thing is wrapped in a button that expands
+   to the full table on click. No header bar, no chrome — it reads as a
+   little badge. */
+/* Expanded wrap: positions the Shrink FAB over the table's top-right
+   corner so the toggle lives inside the table chrome rather than adding
+   a banner above it. Override .hs-zone margin so .hs-block lines up
+   with the wrap's top edge — the FAB then anchors to that corner. */
+.hs-expand-wrap{position:relative;width:100%;display:flex;justify-content:center}
+.hs-expand-wrap > .hs-zone{margin-top:0}
+.hs-heat-shrink-fab{position:absolute;top:5px;right:18px;z-index:5;display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;padding:0;border:0.5px solid var(--color-border-tertiary);border-radius:4px;background:var(--color-background-primary);color:var(--color-text-secondary);cursor:pointer;transition:background .12s,color .12s,border-color .12s,box-shadow .12s}
+.hs-heat-shrink-fab:hover{background:var(--color-background-hover);color:var(--color-text-primary);border-color:var(--color-accent)}
+.hs-heat-shrink-fab:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+
+.hs-heat-mini-btn{display:inline-flex;background:transparent;border:0;padding:4px;margin:0 auto;cursor:pointer;border-radius:4px;transition:background .12s,box-shadow .12s;font-family:inherit}
+.hs-heat-mini-btn:hover{background:var(--color-background-secondary);box-shadow:0 0 0 1px var(--color-border-tertiary)}
+.hs-heat-mini-btn:focus-visible{outline:none;box-shadow:0 0 0 2px var(--color-accent)}
+.hs-heat-mini{display:grid;grid-template-rows:repeat(3,4px);grid-auto-flow:column;grid-auto-columns:4px;gap:1px}
+.hs-heat-mini-cell{width:4px;height:4px;border-radius:1px;background:var(--color-background-tertiary)}
+.hs-heat-mini-cell.hit{background:var(--color-success)}
+.hs-heat-mini-cell.miss{background:var(--color-danger)}
 
 /* Phase 4 — cadence signals readout + stuck-diagnosis verdict. */
 .signals-panel .signals-list{display:flex;flex-direction:column;gap:10px;margin-top:8px}

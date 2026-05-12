@@ -347,18 +347,6 @@ def _read_text_or_404(path: Path, label: str) -> str:
     return path.read_text(encoding="utf-8")
 
 
-class DashboardSnapshot(BaseModel):
-    """Pass-through envelope for ``dashboard.json``.
-
-    Shape matches whatever ``LiveDashboardView`` writes — kept as
-    a free-form ``data`` dict so dashboard schema changes don't break
-    the API contract.
-    """
-
-    cycle_id: str = Field(description="Cycle the dashboard belongs to")
-    data: dict[str, Any] = Field(description="Verbatim dashboard.json contents")
-
-
 class CycleRecordEnvelope(BaseModel):
     """One typed ledger record + its offset.
 
@@ -421,23 +409,6 @@ def _record_to_envelope(record: Any, offset: int) -> CycleRecordEnvelope:
         record_type=record.record_type,
         payload=record.model_dump(),
     )
-
-
-@campaigns_router.get(
-    "/campaigns/{cycle_id}/dashboard",
-    response_model=DashboardSnapshot,
-)
-async def get_cycle_dashboard(store: StoreDep, cycle_id: str):
-    """Live dashboard.json snapshot for a cycle (family-root-bound)."""
-    import json
-
-    root_dir = root_dir_for(store.base_dir, cycle_id)
-    text = _read_text_or_404(root_dir / "dashboard.json", "dashboard.json")
-    try:
-        data = json.loads(text)
-    except json.JSONDecodeError as exc:
-        raise HTTPException(500, f"dashboard.json corrupt: {exc}") from exc
-    return DashboardSnapshot(cycle_id=cycle_id, data=data)
 
 
 class LogMdResponse(BaseModel):

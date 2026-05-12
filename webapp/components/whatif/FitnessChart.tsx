@@ -53,6 +53,11 @@ export function FitnessChart({
   const data = useMemo<ChartData<"bar">>(() => {
     const seriesCount = 1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0);
     const cat = seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : 0.9;
+    // Dynamic bar thickness ceiling: chart frame fans out to ~720px on
+    // wide layouts, so 25 bars × 3 series should leave room without
+    // clipping. Scale max thickness down as the bar count grows; min 6.
+    const barCount = Math.max(1, labels.length);
+    const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * seriesCount))));
     const datasets: ChartData<"bar">["datasets"] = [
       {
         label: "accuracy",
@@ -62,7 +67,7 @@ export function FitnessChart({
         borderWidth: 0,
         barPercentage: 0.95,
         categoryPercentage: cat,
-        maxBarThickness: 28,
+        maxBarThickness: maxBar,
         minBarLength: 2,
       },
     ];
@@ -75,7 +80,7 @@ export function FitnessChart({
         borderWidth: 0,
         barPercentage: 0.95,
         categoryPercentage: cat,
-        maxBarThickness: 24,
+        maxBarThickness: maxBar,
         minBarLength: 2,
       });
     }
@@ -89,7 +94,7 @@ export function FitnessChart({
         borderWidth: 0,
         barPercentage: 0.95,
         categoryPercentage: cat,
-        maxBarThickness: 24,
+        maxBarThickness: maxBar,
         minBarLength: 2,
       });
     }
@@ -103,12 +108,13 @@ export function FitnessChart({
     return `${label}: ${v == null ? "—" : v.toFixed(3)}`;
   };
 
+  const rotate = labels.length > 14;
   const options = useMemo<ChartOptions<"bar">>(() => ({
     responsive: true,
     maintainAspectRatio: false,
     animation: { duration: 200 },
     scales: {
-      x: { grid: { display: false }, ticks: { font: { size: 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: 0 } },
+      x: { grid: { display: false }, ticks: { font: { size: rotate ? 10 : 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border-tertiary") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
     },
     plugins: {
@@ -120,7 +126,7 @@ export function FitnessChart({
       },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeKey, accRaw, compRaw, whatifRaw]);
+  }), [themeKey, accRaw, compRaw, whatifRaw, rotate]);
 
   return (
     <div className="fitness-chart-frame">

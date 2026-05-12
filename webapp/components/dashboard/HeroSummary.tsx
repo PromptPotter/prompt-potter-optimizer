@@ -81,7 +81,7 @@ export function HeroSummary({ cycleId, dash }: Props) {
     <div className="hero-summary">
       <div className="hero-primary">
         <span className="hero-primary-label">Best</span>
-        <span className="hero-primary-val">{best != null ? best.toFixed(3) : "—"}</span>
+        <span className="hero-primary-val">{best != null && Number.isFinite(best) ? `${(best * 100).toFixed(0)}%` : "—"}</span>
         {points.length >= 2 && (
           <svg className="hero-spark" viewBox="0 0 160 34" aria-hidden="true">
             <path className="area" d={area} />

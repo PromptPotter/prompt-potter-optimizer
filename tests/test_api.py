@@ -90,22 +90,6 @@ def seeded_tenant(tmp_path: Path) -> Iterator[tuple[TestClient, str]]:
         app.dependency_overrides.clear()
 
 
-def test_dashboard_returns_verbatim_state(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, cycle_id = seeded_tenant
-    resp = client.get(f"/api/v1/campaigns/{cycle_id}/dashboard")
-    assert resp.status_code == 200
-    body = resp.json()
-    assert body["cycle_id"] == cycle_id
-    assert body["data"]["phase"] == "l1_score"
-    assert body["data"]["round"] == 3
-
-
-def test_dashboard_404_on_missing_cycle(seeded_tenant: tuple[TestClient, str]) -> None:
-    client, _ = seeded_tenant
-    resp = client.get("/api/v1/campaigns/nonexistent_cycle/dashboard")
-    assert resp.status_code == 404
-
-
 def test_log_md_returns_markdown_envelope(seeded_tenant: tuple[TestClient, str]) -> None:
     client, cycle_id = seeded_tenant
     resp = client.get(f"/api/v1/campaigns/{cycle_id}/log_md")

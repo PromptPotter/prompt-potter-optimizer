@@ -192,13 +192,11 @@ async def prepare_origin_notebook(
     dataset + origin for the next cell to feed into ``run_optimization_notebook``.
     """
     scoring_formula = split_scoring_block(campaign_config.scoring).per_sample
-    n_samples = len(train_data) or 1
     display = LiveDisplay(
         origin_acc=0.0,
         l1_patience=campaign_config.optimization.l1_patience,
         pipeline_schema=session.pipeline_schema,
         scoring_formula=scoring_formula,
-        sp_budget_ttest=n_samples,
     )
 
     observers = build_run_observers(
