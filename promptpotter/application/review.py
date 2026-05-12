@@ -233,25 +233,42 @@ def _render_variants_table(audit: dict[str, Any] | None, *, scored: bool) -> lis
         return []
     parts: list[str] = ["**Variants**", ""]
     if scored:
-        parts.append("| variant | composite_fitness | acc | Δ_parent | Δ_origin | beat | changes |")
-        parts.append("|---|---|---|---|---|---|---|")
+        parts.append(
+            "| variant | composite_fitness | acc | Δ_parent | Δ_origin | beat | evidence | changes |"
+        )
+        parts.append("|---|---|---|---|---|---|---|---|")
         # Without per-variant scores in the audit dict the table degrades to
         # changes_description only — full per-variant scoring lives on the
         # round_data dict's candidate_scores array, surfaced when available.
         for v in variants:
             name = str(v.get("variant_name") or "?")
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
-            parts.append(f"| `{name}` | — | — | — | — | — | {changes} |")
+            evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
+            parts.append(f"| `{name}` | — | — | — | — | — | {evidence} | {changes} |")
     else:
-        parts.append("| cand_id | changes | derived_axes |")
-        parts.append("|---|---|---|")
+        parts.append("| cand_id | changes | derived_axes | evidence |")
+        parts.append("|---|---|---|---|")
         for v in variants:
             name = str(v.get("variant_name") or "?")
             changes = (v.get("changes_description") or "").replace("|", "\\|").strip()[:80]
             axes = ", ".join(sorted((v.get("pipeline_params_override") or {}).keys()))
-            parts.append(f"| `{name}` | {changes} | {axes} |")
+            evidence = _fmt_evidence_cell(v.get("evidence_grounding"))
+            parts.append(f"| `{name}` | {changes} | {axes} | {evidence} |")
     parts.append("")
     return parts
+
+
+def _fmt_evidence_cell(raw: object) -> str:
+    """Render evidence_grounding for the variants table — one cell, terse."""
+    if not isinstance(raw, dict):
+        return "—"
+    field_name = str(raw.get("field") or "").strip()
+    citation = str(raw.get("citation") or "").replace("|", "\\|").strip()
+    if not field_name:
+        return "—"
+    if citation:
+        return f"`{field_name}` — {citation[:60]}"
+    return f"`{field_name}` _(no citation)_"
 
 
 def _render_critique(round_data: dict[str, Any]) -> list[str]:

@@ -10,7 +10,7 @@
 - [ ] **Multi-objective fitness.** Accuracy + cost + time axes designed in spec; not wired. → [`m12-composite-fitness.md`](m12-composite-fitness.md)
 - [ ] **L2 Imagination (5th LLM call).** Read-forward rollout; would amend §0's four-LLM-call invariant. → [`m10-l2-self-diagnosis-and-imagination.md`](m10-l2-self-diagnosis-and-imagination.md)
 - [ ] **L2 self-diagnosis panels.** Option-set / axis-exhaustion / sample-delta / verbosity stats — L2 today reads winner only. → [`m10-l2-self-diagnosis-and-imagination.md`](m10-l2-self-diagnosis-and-imagination.md)
-- [ ] **L1 evidence-grounding validator.** Contract says no-data ⇒ no-gamble; nothing enforces it. → [`m10-l2-self-diagnosis-and-imagination.md`](m10-l2-self-diagnosis-and-imagination.md)
+- [x] **L1 evidence-grounding validator.** Shipped: `evidence_grounding` is a required L1-output field; `evidence_grounding_present` behavior check + `EvidenceGrounding` lineage carry. Healing rule (`l2_unjustified_mutations`) ships with Track 4. → [`m10-l2-self-diagnosis-and-imagination.md`](m10-l2-self-diagnosis-and-imagination.md)
 - [ ] **Webapp control plane + multi-cycle.** Read-only ships (M11); control plane is M12. → [`m12-multi-connector.md`](m12-multi-connector.md)
 - [ ] **Publication benchmarks + ablation.** BBEH headline + ablation studies not yet published. → [`m11-publication-benchmarks.md`](m11-publication-benchmarks.md)
 - [ ] **L4 outer loop.** Sequenced M10 partial → M11 Track 5 → M12 Track 4. → [`m10-prompt-iteration-framework.md`](m10-prompt-iteration-framework.md)

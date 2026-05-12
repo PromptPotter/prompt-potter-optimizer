@@ -59,7 +59,11 @@ from promptpotter.application.scoring.metrics import (
 from promptpotter.application.scoring.search_point_scorer import score_search_point
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import EscalationSignal, RuntimeFailure
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import (
+    EVIDENCE_GROUNDING_FIELDS,
+    EvidenceGrounding,
+    OptSearchPoint,
+)
 from promptpotter.domain.phases import CampaignPhase, emit_phase
 from promptpotter.domain.results import (
     CandidateProposal,
@@ -100,6 +104,24 @@ __all__ = [
     "l1_score",
     "score_population",
 ]
+
+
+def _parse_evidence_grounding(raw: object) -> EvidenceGrounding | None:
+    """Build an ``EvidenceGrounding`` from one LLM variant's emitted dict.
+
+    Returns ``None`` when the variant omits the field, emits a non-dict, or
+    when ``field`` falls outside :data:`EVIDENCE_GROUNDING_FIELDS`. The
+    ``evidence_grounding_present`` behavior check turns the ``None`` /
+    empty-citation cases into a per-round failure surfaced in
+    ``review.md`` and ``round_NNNN.json``; we never raise here.
+    """
+    if not isinstance(raw, dict):
+        return None
+    field_name = str(raw.get("field") or "").strip()
+    citation = str(raw.get("citation") or "").strip()
+    if field_name not in EVIDENCE_GROUNDING_FIELDS:
+        return None
+    return EvidenceGrounding(field=field_name, citation=citation)
 
 
 def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict]:
@@ -188,15 +210,21 @@ async def l1_generate(
             v.get("pipeline_params_override") or {}, pipeline_schema
         )
         # Override validation is deferred to parse_population — one producer of truth.
+        evidence = _parse_evidence_grounding(v.get("evidence_grounding"))
         child = opt_sp.mutate(
             changes_description=v.get("changes_description", ""),
             source="l1_generate",
+            evidence_grounding=evidence,
             **prompt_changes,
         )
         if tc_changes:
             child.task_context = child.task_context.merge(tc_changes)
         population.append(
-            CandidateProposal(osp=child, pipeline_params_override=pipeline_params_override)
+            CandidateProposal(
+                osp=child,
+                pipeline_params_override=pipeline_params_override,
+                evidence_grounding=evidence,
+            )
         )
 
         if obs:

@@ -148,10 +148,39 @@ class PromptTemplate(SearchPoint):
         return cls(few_shot_examples=fse, **fields, **kwargs)
 
 
+EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
+    {
+        "parent_panel",
+        "sibling_yield",
+        "axis_memory",
+        "escalation_panel",
+        "task_context",
+        "plan",
+        "stall_exploration",
+    }
+)
+
+
+class EvidenceGrounding(BaseModel):
+    """Panel field cited by L1 to justify a candidate's mutation.
+
+    Per ``promptpotter/CLAUDE.md`` L1 contract: *no data justifying a choice
+    ⇒ do not gamble*. Each L1-emitted variant declares which evidence panel
+    the mutation was anchored on, plus a short citation pointing at the
+    specific entry. ``stall_exploration`` is the escape hatch — only valid
+    when ``escalation_panel.exploration_budget != "tight"``.
+    """
+
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    field: str = Field(description="One of EVIDENCE_GROUNDING_FIELDS.")
+    citation: str = Field(description="Short string naming the panel entry cited.")
+
+
 class IndividualLineage(BaseModel):
     """Identity and provenance of a single individual in the population.
 
-    Groups the four fields that describe *what this individual is and where it
+    Groups the fields that describe *what this individual is and where it
     came from*.  Set once at individual creation (``mutate`` and
     ``OptSearchPoint.__init__``); never mutated after that.
     """
@@ -164,6 +193,11 @@ class IndividualLineage(BaseModel):
         default="",
         description="Origin of this individual: 'origin' / 'l1_generate' / "
         "'l2_context' / 'l3_plan'.",
+    )
+    evidence_grounding: EvidenceGrounding | None = Field(
+        default=None,
+        description="L1-declared panel evidence for this individual's mutation. "
+        "None for origin / L2 / L3 individuals; populated for L1 children.",
     )
 
 
@@ -326,6 +360,7 @@ class OptSearchPoint(PromptTemplate):
             parent_id=self.lineage.id,
             changes_description=changes.pop("changes_description", ""),
             source=changes.pop("source", ""),
+            evidence_grounding=changes.pop("evidence_grounding", None),
         )
         # Any remaining changes
         data.update(changes)

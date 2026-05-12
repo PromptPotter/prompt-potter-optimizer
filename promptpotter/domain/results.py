@@ -8,7 +8,7 @@ from typing import Any
 from pydantic import BaseModel, ConfigDict, Field
 
 from promptpotter.domain.analysis import EscalationSignal
-from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.opt_search_point import EvidenceGrounding, OptSearchPoint
 from promptpotter.domain.round_diagnostics import RoundDiagnostics
 
 __all__ = [
@@ -105,14 +105,21 @@ class CandidateProposal(BaseModel):
 
     Persisted between generate and score so resume can replay a round without
     re-querying the LLM. The ``osp`` carries the prompt-field mutations and
-    lineage; ``pipeline_params_override`` is the nested LLM-proposed override
-    (deep-merged into the base ``pipeline_params`` at score time).
+    lineage (including ``evidence_grounding``); ``pipeline_params_override``
+    is the nested LLM-proposed override (deep-merged into the base
+    ``pipeline_params`` at score time).
     """
 
     model_config = ConfigDict(arbitrary_types_allowed=True)
 
     osp: OptSearchPoint
     pipeline_params_override: dict[str, dict] = Field(default_factory=dict)
+    evidence_grounding: EvidenceGrounding | None = Field(
+        default=None,
+        description="L1-declared panel evidence for this proposal. Mirrors "
+        "``osp.lineage.evidence_grounding`` — duplicated on the proposal so "
+        "audit / display sites can read it before the OSP is constructed.",
+    )
 
 
 class RoundOrigin(BaseModel):

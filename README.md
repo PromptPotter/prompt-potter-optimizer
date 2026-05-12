@@ -8,6 +8,17 @@
 
 **PromptPotter brews better prompts.** Most prompt engineering is manual. PromptPotter automates the generate → score → critique cycle. It tries multiple prompt and pipeline variations together, keeps memory across runs, and recovers automatically when a generated prompt produces broken output. Weak candidates get eliminated early using statistical confidence (population-aware Bayesian best-arm identification — *Posterior-of-Being-Best, PoBB*) so you don't burn LLM budget on losers. Built for RAG pipelines, LLM agents, and multi-step LLM workflows — drop in via CLI, Python SDK, or the `/potter-run` Claude Code skill.
 
+## How to Optimize LLM Prompts in 3 Steps
+
+Works for RAG pipelines, LLM agents, and any multi-step LLM workflow.
+
+Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. Each round, PromptPotter generates variations 🧪, scores them ⚖️, and keeps the winners 🏆. It stops when results plateau. ✨ **Prompt optimized.**
+
+> [!IMPORTANT]
+> **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
+>
+> **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp (localhost)
+
 ## Why PromptPotter?
 
 Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter automates the loop: it tries variations, measures what works, and remembers across runs. Every measurement costs money, so the design is built to **maximize fitness, minimize spend**:
@@ -16,6 +27,7 @@ Manual prompt tuning is slow, inconsistent, and doesn't compound. PromptPotter a
 - **Hard-sample leaderboard.** Score preferentially on samples that actually separate variants — samples everyone aces or fails are noise.
 - **Cross-run memory.** Every datapoint is stored; the optimizer carries what it learned into the next run.
 
+# How It Works
 
 ## The Optimization Loop
 
@@ -28,16 +40,13 @@ PromptPotter is a **critique-guided feedback cycle** for prompt and pipeline tun
 
 When the inner layer stalls, an outer layer steps in to redirect — see [the-loop.md](docs/concepts/the-loop.md) for the full mechanics.
 
-## How to Optimize LLM Prompts in 3 Steps
+## Common questions
 
-Works for RAG pipelines, LLM agents, and any multi-step LLM workflow.
-
-Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️⃣ **run the loop**. The task is the goal you want the AI to hit; the dataset is examples of hitting it. Each round, PromptPotter generates variations 🧪, scores them ⚖️, and keeps the winners 🏆. It stops when results plateau. ✨ **Prompt optimized.**
-
-> [!IMPORTANT]
-> **New here?** Start with [`docs/manual/`](docs/manual/README.md) — six chapters covering install → first run → reading output → troubleshooting.
->
-> **Five ways to run it:** 1) `/potter-run` Claude Code skill · 2) CLI · 3) Python / Jupyter notebook · 4) REST API · 5) WebApp *(planned)*
+- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
+- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
+- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run) above.
+- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
+- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/concepts/self-healing.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
 
 ## ⭐ Features
 
@@ -48,7 +57,38 @@ Describe your 1️⃣ **task**, drop in a labeled 2️⃣ **dataset**, and 3️�
 - **Statistical early-stopping:** unfit candidates are eliminated after a handful of queries — population-aware joint posterior, stop when `P(c is best) < ε` — instead of burning the full budget (*Posterior-of-Being-Best, PoBB*). Methods: [candidate-elimination.md](docs/methods/candidate-elimination.md).
 - **Cross-run learning:** every fitness measurement flows into a shared memory store. Parameter impact, query difficulty, and failure patterns are remembered. The optimizer carries what it learned into the next run.
 
-## How It Works
+## Limitations
+
+- **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
+- **Requires a labeled dataset.** Input/output pairs are mandatory.
+
+## Benchmarks
+
+[![PromptWizard](https://img.shields.io/badge/inspired_by-PromptWizard-blue)](https://arxiv.org/abs/2405.18369)
+[![BBEH](https://img.shields.io/badge/benchmark-BBEH-purple)](https://github.com/google-deepmind/bbeh)
+[![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
+[![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
+
+Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
+
+Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
+
+## Documentation
+
+| 🧠 Concepts | ⚙ Operations | 🔬 Research |
+|---|---|---|
+| [Three-layer loop](docs/concepts/the-loop.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
+| [State record](docs/concepts/state-record.md) | [Backend integration](docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
+| [Self-healing](docs/concepts/self-healing.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
+| [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |
+| [Campaign tree](docs/concepts/campaign-tree.md) | | |
+| [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
+
+Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).
+
+## Watching a run
+
+While `python -m promptpotter optimize` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the planned webapp. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
 
 PromptPotter's inner **generate → score → critique** loop mirrors the classic **plan / implement / validate (PIV)** developer workflow, driven by an LLM at scale.
 
@@ -71,17 +111,6 @@ PromptPotter's inner **generate → score → critique** loop mirrors the classi
 > ```
 > 
 > </details>
-
-## Benchmarks
-
-[![PromptWizard](https://img.shields.io/badge/inspired_by-PromptWizard-blue)](https://arxiv.org/abs/2405.18369)
-[![BBEH](https://img.shields.io/badge/benchmark-BBEH-purple)](https://github.com/google-deepmind/bbeh)
-[![DSPy](https://img.shields.io/badge/compared_against-DSPy-green)](https://github.com/stanfordnlp/dspy)
-[![CAPO](https://img.shields.io/badge/compared_against-CAPO-orange)](https://arxiv.org/abs/2504.16005)
-
-Head-to-head comparison on the *BIG-Bench Extra Hard (BBEH)* benchmark against DSPy optimizers (GEPA, MIPROv2, BootstrapFewShot) and CAPO. Same model (`gpt-oss-120b`), same dataset splits, same scoring, no cross-paper number mixing. See [`docs/research/benchmarks.md`](docs/research/benchmarks.md) for results and [`docs/research/bbeh-comparison/`](docs/research/bbeh-comparison/) for reproducible Colab notebooks.
-
-Compared head-to-head with DSPy (GEPA, MIPROv2, BootstrapFewShot), CAPO, and PromptWizard. See [related work](docs/research/related-work.md).
 
 ## Relation to Karpathy's AutoResearch
 
@@ -113,37 +142,7 @@ It is *not literally* a configuration of PromptPotter today — running AutoRese
 | Statistical guarantees | None — single noisy trial | Bayesian Posterior-of-Being-Best (population-aware best-arm-ID) |
 | Domain | ML training research | Prompt/pipeline optimization for production LLM apps |
 
-## Documentation
-
-| 🧠 Concepts | ⚙ Operations | 🔬 Research |
-|---|---|---|
-| [Three-layer loop](docs/concepts/the-loop.md) | [CLI reference](docs/operations/cli-reference.md) | [Benchmarks](docs/research/benchmarks.md) |
-| [State record](docs/concepts/state-record.md) | [Backend integration](docs/operations/backend-integration.md) | [Metrics (HC, SE, R₉₀)](docs/research/metrics.md) |
-| [Self-healing](docs/concepts/self-healing.md) | [Persistence, state, recovery](docs/operations/persistence-and-state.md) | [Related work](docs/research/related-work.md) |
-| [Scoring and memory](docs/concepts/scoring-and-memory.md) | [Observability](docs/operations/observability.md) | |
-| [Campaign tree](docs/concepts/campaign-tree.md) | | |
-| [Nodes and pipelines](docs/concepts/nodes-and-pipelines.md) | | |
-
-Developer internals (Python symbols, data contracts, wiring) live under [`docs/developer/`](docs/developer/README.md). Statistical foundations under [`docs/methods/`](docs/methods/README.md).
-
-## Limitations
-
-- **Parameter-based optimization only.** PromptPotter optimizes any pipeline that exposes tunable parameters (prompts, thresholds, model settings). It cannot optimize internal model weights, neural architectures, or modality-specific representations (e.g. image embeddings, DNA sequences).
-- **Requires a labeled dataset.** Input/output pairs are mandatory.
-
-## Watching a run
-
-While `python -m promptpotter optimize` is running, the cleanest setup is **`campaigns/{cycle_id}/dashboard.json` open in an auto-reloading editor + the CLI terminal visible**. `dashboard.json` is the live scalar state (phase, round, candidate, accuracy, in-flight query, per-round node I/O); the CLI prints HIT/MISS lines + per-candidate + per-round banners as they happen. Drill-down peers in the same directory: `output.log`, `rounds/`, `log.md`. Internal resume + audit state lives under `.cache/` (hidden by convention). Alternatives: `/potter-run` Claude Code skill, the notebook, or the planned webapp. Full guide in [`CLAUDE.md`](CLAUDE.md#superuser-monitoring-live-runs).
-
-## Common questions
-
-- **What does L1 actually mutate?** The prompt template's fields (persona, task instruction, …) plus whatever your `pipeline.json` declares as tunable. See [`state-record.md`](docs/concepts/state-record.md).
-- **Where do I get a starting prompt?** Bring one with your dataset (`datasets/{name}/prompts/{node}.json`). Walkthrough: [manual ch. 03](docs/manual/03-first-campaign.md).
-- **How do I watch a run?** Open `dashboard.json` in an auto-reload editor + watch the CLI terminal. Full guide: [Watching a run](#watching-a-run) above.
-- **My scoring formula was wrong — did I lose results?** No. Traces are facts; scores are policy. The optimizer rescores on load and replays decisions; on divergence, fork. See [`scoring-and-memory.md`](docs/concepts/scoring-and-memory.md).
-- **What if it stalls?** Stall and failure are different triggers. Failures route back to the proposing layer ([self-healing](docs/concepts/self-healing.md)); stalls escalate L1 → L2 → L3 ([the-loop](docs/concepts/the-loop.md)). Stuck for other reasons: [troubleshooting](docs/manual/05-troubleshooting.md).
-
-## Citation
+# Citation
 
 ```bibtex
 @software{promptpotter,

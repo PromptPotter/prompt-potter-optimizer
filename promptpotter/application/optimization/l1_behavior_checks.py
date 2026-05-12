@@ -19,6 +19,7 @@ from dataclasses import dataclass, field
 from typing import Any
 
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
+from promptpotter.domain.opt_search_point import EVIDENCE_GROUNDING_FIELDS
 
 __all__ = [
     "CHECK_REGISTRY",
@@ -78,6 +79,11 @@ class CheckContext:
     in order; ``opt_search_point`` is the OSP snapshot at round-start
     (carries ``task_context`` + the live prompt fields); ``context_object``
     is the three task-decomposition strings L1's prompt was shown.
+    ``exploration_budget`` is the round's escalation-panel exploration
+    budget (``tight`` / ``normal`` / ``wide``) — read by
+    ``evidence_grounding_present`` to gate the ``stall_exploration``
+    escape hatch. ``None`` means the wiring layer could not determine it,
+    in which case ``stall_exploration`` citations fail-open (no flag).
     """
 
     round_num: int
@@ -85,6 +91,7 @@ class CheckContext:
     opt_search_point: dict[str, Any] = field(default_factory=dict)
     context_object: list[str] = field(default_factory=list)
     param_unlock_round: int = 3
+    exploration_budget: str | None = None
 
 
 CheckFn = Callable[[dict[str, Any], CheckContext], CheckResult]
@@ -218,6 +225,54 @@ def _check_forbidden_axes_honored(round_dict: dict[str, Any], ctx: CheckContext)
     )
 
 
+def _check_evidence_grounding_present(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
+    """Each L1 variant must cite a panel field that justifies its mutation.
+
+    Per ``promptpotter/CLAUDE.md`` L1 contract: *no data justifying a choice
+    ⇒ do not gamble*. Fails when:
+
+    - ``evidence_grounding`` is missing / not a dict, or
+    - ``field`` is empty / not in :data:`EVIDENCE_GROUNDING_FIELDS`, or
+    - ``citation`` is empty / whitespace, or
+    - ``field == "stall_exploration"`` while
+      ``ctx.exploration_budget == "tight"`` (escape hatch disallowed).
+    """
+    variants = extract_l1_variants(round_dict)
+    if not variants:
+        return CheckResult("evidence_grounding_present", True, "no variants emitted")
+
+    offenders: list[tuple[str, str]] = []
+    for v in variants:
+        label = str(v.get("variant_name") or "?")
+        eg = v.get("evidence_grounding")
+        if not isinstance(eg, dict):
+            offenders.append((label, "missing"))
+            continue
+        field_name = str(eg.get("field") or "").strip()
+        citation = str(eg.get("citation") or "").strip()
+        if field_name not in EVIDENCE_GROUNDING_FIELDS:
+            offenders.append((label, f"bad_field={field_name!r}" if field_name else "no_field"))
+            continue
+        if not citation:
+            offenders.append((label, "empty_citation"))
+            continue
+        if field_name == "stall_exploration" and ctx.exploration_budget == "tight":
+            offenders.append((label, "stall_exploration_when_tight"))
+
+    if offenders:
+        sample = ", ".join(f"{label}({reason})" for label, reason in offenders[:3])
+        return CheckResult(
+            "evidence_grounding_present",
+            False,
+            f"{len(offenders)}/{len(variants)} variants lack valid evidence: {sample}",
+        )
+    return CheckResult(
+        "evidence_grounding_present",
+        True,
+        f"{len(variants)}/{len(variants)} variants cite a panel field",
+    )
+
+
 def _check_not_only_param_variants(round_dict: dict[str, Any], ctx: CheckContext) -> CheckResult:
     """≥1 variant per round must mutate a ``PROMPT_STRING_FIELDS`` field."""
     variants = extract_l1_variants(round_dict)
@@ -247,6 +302,7 @@ CHECK_REGISTRY: dict[str, CheckFn] = {
     "param_scope_discipline": _check_param_scope_discipline,
     "forbidden_axes_honored": _check_forbidden_axes_honored,
     "not_only_param_variants": _check_not_only_param_variants,
+    "evidence_grounding_present": _check_evidence_grounding_present,
 }
 
 
