@@ -8,7 +8,6 @@ from __future__ import annotations
 import asyncio
 import enum
 import logging
-from collections import Counter
 from collections.abc import Mapping
 from contextlib import contextmanager
 from typing import Any
@@ -174,12 +173,3 @@ def error_category(error: str | None) -> ErrorCategory | None:
             except ValueError:
                 return None
     return None
-
-
-def most_common_error_category(results: list) -> ErrorCategory | None:
-    """Return the most common error category across errored results."""
-    cats = [error_category(r.get("error")) for r in results if is_error_result(r)]
-    cats = [c for c in cats if c]
-    if not cats:
-        return None
-    return Counter(cats).most_common(1)[0][0]

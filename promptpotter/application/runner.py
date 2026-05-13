@@ -368,13 +368,12 @@ async def _run_round_loop(
                 ", PROBE" if is_probe else "",
             )
 
-            # Ledger drives AuditTrailView.begin_round; direct call is
-            # kept as no-ledger fallback (test fixtures, headless tools).
             cb.set_round(round_num)
-            if (ledger := session.state.ledger) is not None:
-                ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
-            elif _rr := session.state.audit_projection:
-                _rr.begin_round(round_num)
+            ledger = session.state.ledger
+            assert ledger is not None, (
+                "build_run_observers must bind state.ledger before the round loop"
+            )
+            ledger.append(PhaseRecord(phase="round", event="enter", round=round_num))
 
             round_result = await execute_round(
                 cycle,

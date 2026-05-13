@@ -10,7 +10,6 @@ Pure computation — no I/O, no backend dependencies.
 
 from __future__ import annotations
 
-from collections import defaultdict
 from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
@@ -21,13 +20,11 @@ from promptpotter.application.scoring.evaluators import (
     materialize_round_values,
 )
 from promptpotter.application.scoring.formula import compile_round_scorer, extract_item_label
-from promptpotter.domain.analysis import SampleDifficulty, SampleProfile
 from promptpotter.domain.pipeline_schema import NodeType
 from promptpotter.domain.scoring import RoundScorer
 from promptpotter.shared.errors import is_degraded, is_error_result
 
 if TYPE_CHECKING:
-    from promptpotter.domain.analysis import DifficultyClass
     from promptpotter.domain.pipeline_schema import (
         PipelineNode,
         PipelineSchema,
@@ -38,7 +35,6 @@ if TYPE_CHECKING:
 __all__ = [
     "Evaluator",
     "all_evaluators",
-    "compile_sample_difficulty",
     "compute_composite_fitness",
     "count_degraded_samples",
     "extract_sample_diagnostics",
@@ -276,52 +272,3 @@ def compute_composite_fitness(
         "validation_failure_count": validation_failure_count,
         "runtime_failure_count": runtime_failure_count,
     }
-
-
-# ---------------------------------------------------------------------------
-# Sample difficulty — historical hit-rate classification.
-# ---------------------------------------------------------------------------
-
-
-def _classify_difficulty(hit_rate: float) -> DifficultyClass:
-    if hit_rate >= 1.0 or hit_rate <= 0.0:
-        return "dead"
-    if hit_rate > 0.9:
-        return "easy"
-    if hit_rate >= 0.1:
-        return "discriminating"
-    return "hard"
-
-
-def compile_sample_difficulty(
-    historical_results: Sequence[Sequence[Mapping[str, Any]]],
-) -> SampleDifficulty:
-    """Classify samples by hit rate across multiple scoring rounds.
-
-    Deprecated samples (fatal warnings) are skipped so hit-rate
-    classification isn't biased by garbage measurements.
-    """
-    from promptpotter.application.optimization.elimination import is_deprecated
-
-    sample_hits: dict[str, list[bool]] = defaultdict(list)
-    for round_results in historical_results:
-        for r in round_results:
-            if is_deprecated(r):
-                continue
-            q = r.get("query", "")
-            if q:
-                sample_hits[q].append(bool(r.get("hit")))
-
-    profiles = []
-    for query, hits in sorted(sample_hits.items()):
-        hit_rate = sum(hits) / len(hits) if hits else 0.0
-        profiles.append(
-            SampleProfile(
-                query=query,
-                hit_rate=hit_rate,
-                n_measurements=len(hits),
-                classification=_classify_difficulty(hit_rate),
-            )
-        )
-
-    return SampleDifficulty(profiles=profiles)

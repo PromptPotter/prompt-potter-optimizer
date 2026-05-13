@@ -16,11 +16,9 @@ A test earns its place only if it guards one of these:
 1. **Named invariants from root CLAUDE.md.** Persistence parity
    (`CAMPAIGN_ARTIFACTS` / `SESSION_ARTIFACTS`), rescore-on-load +
    decision-replay + fork, `score_search_point` as the single scoring gateway,
-   nested-only `pipeline_params`, round-boundary dataset mutation, cadence
-   rules engine (`decide_escalation` over `DEFAULT_ESCALATION_RULES`), and the
-   `escalation/rule_fired` two-writer parity (`SignalsProjection` →
-   `.runtime/signals.jsonl` and `LiveDashboardView` →
-   `dashboard.json::recent_rules`).
+   nested-only `pipeline_params`, round-boundary dataset mutation, and the
+   cadence rules engine (`decide_escalation` over `DEFAULT_ESCALATION_RULES`).
+   Escalation rule firings ride `events.jsonl` directly — the canonical record.
 2. **Statistical / numerical correctness.** Bayesian Posterior-of-Being-Best
    (joint Normal-CLT posterior, Monte Carlo argmax), composite scoring,
    per-dataset scorer formulas. The math must be wrong-reveal, not

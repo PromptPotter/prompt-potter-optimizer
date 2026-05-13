@@ -131,7 +131,7 @@ def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> l
     """
     summaries = []
     for i, cp in enumerate(proposals):
-        prompt_fields = {k: getattr(cp.osp, k) for k in PROMPT_STRING_FIELDS if getattr(cp.osp, k)}
+        prompt_fields = cp.osp.prompt_fields()
         summary: dict = {
             "idx": i,
             "label": candidate_label(round_num, i),

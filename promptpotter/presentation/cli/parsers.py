@@ -66,9 +66,7 @@ def _add_fresh_init_args(p: argparse.ArgumentParser) -> None:
         help="Campaign config JSON file. Triggers fresh-init mode "
         "(mint new session+cycle, start at round 0).",
     )
-    p.add_argument(
-        "--task-file", default=None, help="Override datasets/<name>/task_description.md"
-    )
+    p.add_argument("--task-file", default=None, help="Override datasets/<name>/task_description.md")
     p.add_argument(
         "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )

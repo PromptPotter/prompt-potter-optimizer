@@ -326,7 +326,6 @@ class PoBBCheck:
         self.prior_ids: list[str] = []
         self._current_id: str = ""
         self._on_snapshot: Callable[[PoBBSnapshot], None] | None = None
-        self._last_snapshot: PoBBSnapshot | None = None
 
     def set_current(
         self,
@@ -336,15 +335,11 @@ class PoBBCheck:
         """Bind the candidate-under-evaluation; reset per-candidate snapshot state."""
         self._current_id = candidate_id
         self._on_snapshot = on_snapshot
-        self._last_snapshot = None
 
     def register_completed(self, scores: list[float], candidate_id: str = "") -> None:
         """Add a completed candidate's score history to the priors pool."""
         self.priors[candidate_id] = list(scores)
         self.prior_ids.append(candidate_id)
-
-    def latest_snapshot(self) -> PoBBSnapshot | None:
-        return self._last_snapshot
 
     def check(
         self, results: list[QueryMeasurement], candidate_idx: int, n_total_candidates: int
@@ -360,7 +355,6 @@ class PoBBCheck:
         histories: dict[str, list[float]] = {**self.priors, cid: scores}
         snapshot = posterior_best_probabilities(histories)
         snap = PoBBSnapshot(p_best=snapshot, current_id=cid, n_samples=n)
-        self._last_snapshot = snap
         if self._on_snapshot is not None:
             self._on_snapshot(snap)
 

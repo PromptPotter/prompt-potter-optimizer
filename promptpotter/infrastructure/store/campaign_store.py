@@ -317,50 +317,6 @@ class CampaignStore(EntityStore):
         with graceful("Campaign completion update failed"):
             self.update(backend_id, cycle_id, updates)
 
-    def prune_dead_forks(
-        self,
-        backend_id: str,
-        family_root_cycle_id: str,
-        *,
-        min_age_seconds: float = 3600.0,
-    ) -> list[str]:
-        """Delete sibling cycle dirs (``forks/``, ``diag/``, ``sweeps/*/forks/``)
-        that ran zero rounds and were created at least ``min_age_seconds`` ago
-        (default 1 hour). Returns the cycle_ids that were removed.
-        Operator-callable; never auto-fired.
-
-        ``min_age_seconds`` guards against racing with an in-progress fork
-        whose ``save_round_file`` hasn't fired yet."""
-        family_dir = self._campaign_dir(backend_id, family_root_cycle_id)
-        sibling_dirs: list[Path] = []
-        if (forks_dir := family_dir / "forks").is_dir():
-            sibling_dirs.extend(sorted(forks_dir.iterdir()))
-        if (diag_dir := family_dir / "diag").is_dir():
-            sibling_dirs.extend(sorted(diag_dir.iterdir()))
-        if (sweeps_dir := family_dir / "sweeps").is_dir():
-            for batch_dir in sorted(sweeps_dir.iterdir()):
-                if (batch_forks := batch_dir / "forks").is_dir():
-                    sibling_dirs.extend(sorted(batch_forks.iterdir()))
-        if not sibling_dirs:
-            return []
-        now_ts = datetime.now(UTC).timestamp()
-        removed: list[str] = []
-        for fork_dir in sibling_dirs:
-            if not fork_dir.is_dir():
-                continue
-            idx = fork_dir / "index.json"
-            data = read_json_optional(idx) or {}
-            if int(data.get("n_rounds") or 0) > 0:
-                continue
-            if data.get("final"):
-                continue
-            age_seconds = now_ts - fork_dir.stat().st_mtime
-            if age_seconds < min_age_seconds:
-                continue
-            shutil.rmtree(fork_dir, ignore_errors=False)
-            removed.append(fork_dir.name)
-        return removed
-
     def load_many(
         self,
         backend_id: str,

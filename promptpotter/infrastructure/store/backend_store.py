@@ -6,7 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
-from promptpotter.domain.backend import BackendConnection, Execution
+from promptpotter.domain.backend import BackendConnection
 from promptpotter.infrastructure.store.base import (
     read_json,
     read_json_optional,
@@ -91,40 +91,6 @@ class BackendStore:
         if not exp_dir.exists():
             return []
         return [read_json(p) for p in sorted(exp_dir.glob("*.json"))]
-
-    # -- executions (absorbed from ExecutionStore) ----------------------------
-
-    def _executions_dir(self, backend_id: str) -> Path:
-        return self._backend_dir(backend_id) / "executions"
-
-    def load_execution(self, backend_id: str, execution_id: str) -> Execution | None:
-        """Load an execution by ID. Returns None if not found."""
-        data = read_json_optional(
-            self._executions_dir(backend_id) / f"{execution_id}.json",
-        )
-        return Execution(**data) if data is not None else None
-
-    def list_executions(self, backend_id: str) -> list[dict[str, Any]]:
-        """List execution summaries (without full results array)."""
-        d = self._executions_dir(backend_id)
-        if not d.exists():
-            return []
-        items = []
-        for p in sorted(d.glob("*.json")):
-            data = read_json(p)
-            items.append(
-                {
-                    "execution_id": data["execution_id"],
-                    "backend_id": data["backend_id"],
-                    "experiment_id": data["experiment_id"],
-                    "variant_label": data.get("variant_label", ""),
-                    "pipeline_notation": data.get("pipeline_notation", ""),
-                    "query_count": data.get("query_count", 0),
-                    "successful_count": data.get("successful_count", 0),
-                    "created_at": data.get("created_at", ""),
-                }
-            )
-        return items
 
     # -- datasets (repo-adjacent, gitignored) ----------------------------------
     # Datasets are identified by name alone, not by backend. Caches live at
@@ -257,11 +223,6 @@ class BackendStore:
         return restored
 
     # -- connector profile (persistent per-backend defaults) -------------------
-
-    def save_connector_profile(self, backend_id: str, profile: dict[str, Any]) -> None:
-        """Write connector profile — persistent campaign defaults for this backend."""
-        path = self._backend_dir(backend_id) / "connector_profile.json"
-        write_json(path, profile)
 
     def load_connector_profile(self, backend_id: str) -> dict[str, Any] | None:
         """Load connector profile. Returns None if no profile saved."""

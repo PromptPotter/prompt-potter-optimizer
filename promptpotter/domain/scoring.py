@@ -16,7 +16,7 @@ A missing ``scoring`` key raises in ``compile_scorer`` — there is no implicit 
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any, NamedTuple, NotRequired, Protocol, TypedDict, runtime_checkable
+from typing import Any, NamedTuple, NotRequired, TypedDict
 
 # ---------------------------------------------------------------------------
 # Per-sample result types
@@ -63,63 +63,6 @@ class QueryMeasurement(TypedDict):
     fitness: NotRequired[float]
     error: str | None
     pipeline_data: PipelineData | None
-
-
-class QueryMeasurementFull(QueryMeasurement, total=False):
-    """Extended result with optional fields from scoring pipeline and stale-data protocol."""
-
-    # Multi-scorer audit map — {scorer_id: {score, hit, formula}}.
-    # Accumulated by ``rescore_results``; persisted to both round_data JSON
-    # and ``archive/measurements/`` items so parent + forked cycles can
-    # share the same traces with their own scorer-specific views.
-    scored: dict[str, dict]
-
-    # Scoring pipeline
-    n_candidates: int
-    ground_truth_rank: int | None
-    cached: bool
-
-    # Stale-data protocol fields (set by stale_data.py)
-    retry_of_degraded: bool
-    rerun_comparison: dict[str, Any]
-    samplescan_resolved: bool
-    samplescan_config: dict[str, Any]
-    degraded_observed: bool
-    degraded_obs_count: int
-    degraded_obs_threshold: int
-    switched_out: bool
-    persistently_degraded: bool
-
-    # Deprecated-sample retry: set in search_point_scorer when a fresh
-    # measurement supersedes a cached entry that carried a fatal warning.
-    retry_of_deprecated_cache: bool
-
-
-# ---------------------------------------------------------------------------
-# Query runner protocol
-# ---------------------------------------------------------------------------
-
-
-@runtime_checkable
-class QueryRunner(Protocol):
-    """Async backend connector interface.
-
-    Satisfied by :class:`BackendClient`.
-    """
-
-    async def run_query(
-        self,
-        query: str,
-        pipeline_params: dict[str, Any] | None = ...,
-    ) -> dict[str, Any]: ...
-
-    async def check_status(self) -> dict[str, Any]: ...
-
-    async def fetch_pipeline(self) -> dict[str, Any]: ...
-
-    async def init_session(self, terms: list[str]) -> dict[str, Any]: ...
-
-    async def aclose(self) -> None: ...
 
 
 # ---------------------------------------------------------------------------

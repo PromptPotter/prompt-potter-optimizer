@@ -703,9 +703,7 @@ async def stop_cycle(cycle_id: str, store: StoreDep) -> StopCycleResponse:
     runtime_dir = cycle_dir / ".runtime"
     runtime_dir.mkdir(parents=True, exist_ok=True)
     flag = runtime_dir / "stop.flag"
-    flag.write_text(
-        f"requested_at={datetime.now(UTC).isoformat()}\n", encoding="utf-8"
-    )
+    flag.write_text(f"requested_at={datetime.now(UTC).isoformat()}\n", encoding="utf-8")
     return StopCycleResponse(cycle_id=cycle_id, flag_written=True)
 
 

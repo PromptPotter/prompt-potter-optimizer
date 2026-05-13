@@ -242,7 +242,7 @@ Self-enforcing primitives — if you're about to add a sidecar, check the matchi
 - **Per-dataset config:** `datasets/{name}/{pipeline.json,campaign.json,task_description.md,scan_variants.json}`
 - **Per-dataset prompts:** `datasets/{name}/prompts/{l1_generate,l1_critique,l2_context,l3_plan}.json` (also per-node prompts: `datasets/{name}/prompts/{node}.json`)
 - **Per-layer contracts:** `promptpotter/{layer}/CLAUDE.md` (layer ∈ `application`, `domain`, `infrastructure`, `presentation`, `connectors`)
-- **Per-cycle on-disk:** `.promptpotter/campaigns/{root_cycle_id}/[forks|diag|sweeps/]{cycle_id}/{index.json,log.md,rounds/,prompts/,.runtime/{cache/,streams/,signals.jsonl,events.jsonl}}`
+- **Per-cycle on-disk:** `.promptpotter/campaigns/{root_cycle_id}/[forks|diag|sweeps/]{cycle_id}/{index.json,log.md,rounds/,prompts/,.runtime/{cache/,streams/,events.jsonl}}`
 - **Cross-cycle archive:** `.promptpotter/campaigns/{root_cycle_id}/archive/measurements/{hash}.json`
 - **Operator workspace:** `.promptpotter/sessions/{session_id}/active_session.json`
 

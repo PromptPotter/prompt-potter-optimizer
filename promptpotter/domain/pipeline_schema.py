@@ -117,7 +117,7 @@ class PipelineSchema(BaseModel):
     per-node config (baked into ``PipelineNode.current_config``).
 
     Nodes form the coordinate system for each dataset.  Indexed lookups
-    (``node_position``, ``get_node``, ``node_for_param``) are O(1).
+    (``get_node``, ``node_for_param``) are O(1).
     ``exclude()`` / ``filter_to_steps()`` slice valid sub-pipelines.
     """
 
@@ -183,10 +183,6 @@ class PipelineSchema(BaseModel):
     def has_node(self, name: str) -> bool:
         """Whether *name* is a node in this schema (O(1))."""
         return name in self._node_map  # type: ignore[attr-defined]
-
-    def node_position(self, name: str) -> int:
-        """Pipeline position of *name*.  Raises ``KeyError`` if unknown."""
-        return self._node_map[name]  # type: ignore[attr-defined]
 
     def get_node(self, name: str) -> PipelineNode | None:
         """Find a node by name (O(1)), or None if not found."""
@@ -259,15 +255,3 @@ class PipelineSchema(BaseModel):
         (empty means prompt doesn't affect pipeline output).
         """
         return [node.name for node in self.nodes if node.prompt_meta is not None]
-
-    def required_pipeline_key(self) -> str:
-        """The pipeline_data key that gates trace validity.
-
-        Returns the first observation mapping's pipeline_key from the first
-        LLM node, or ``""`` when no LLM mappings exist.
-        """
-        for node in self.nodes:
-            for mapping in node.observation_mappings:
-                if mapping.is_llm:
-                    return mapping.pipeline_key
-        return ""

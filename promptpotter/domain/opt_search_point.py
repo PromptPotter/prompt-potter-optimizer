@@ -123,13 +123,18 @@ class PromptTemplate(SearchPoint):
 
     # -- Field extraction --------------------------------------------------
 
+    def prompt_fields(self) -> dict[str, str]:
+        """Non-empty ``PROMPT_STRING_FIELDS`` as ``{name: value}`` (no few-shot).
+
+        The string-only projection used by L1 candidate summaries + the
+        validator's parent/child diff. Distinct from ``prompt_field_dict()``
+        which adds ``few_shot_examples`` for the L1-generation roundtrip.
+        """
+        return {f: v for f in PROMPT_STRING_FIELDS if (v := getattr(self, f))}
+
     def prompt_field_dict(self) -> dict[str, Any]:
         """Return prompt decomposition fields as a dict (for L1 candidate generation)."""
-        d: dict[str, Any] = {}
-        for f in PROMPT_STRING_FIELDS:
-            v = getattr(self, f)
-            if v:
-                d[f] = v
+        d: dict[str, Any] = dict(self.prompt_fields())
         if self.few_shot_examples:
             d["few_shot_examples"] = [ex.model_dump() for ex in self.few_shot_examples]
         return d

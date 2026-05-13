@@ -90,7 +90,7 @@ EscalationRule(
 
 Requires extending `EscalationInputs` with `over_threshold_field_count: int = 0` and computing it at observation time (`EscalationState.observe_round` reads `cycle.opt_sp.prompt_field_dict()` + thresholds).
 
-Rule fires `CONTINUE` — it never stops or escalates. Effect: one line per fire in `.runtime/signals.jsonl` (via `SignalsProjection`) + a `recent_rules` entry on the dashboard. L2 reads `current_signals` next round and may issue a trim directive on its own initiative.
+Rule fires `CONTINUE` — it never stops or escalates. Effect: one `escalation/rule_fired` PhaseRecord in `events.jsonl` per fire. L2 reads the latest firing for its layer next round and may issue a trim directive on its own initiative.
 
 Composite-score *penalty* for verbosity is M12 (`m12-composite-fitness.md`). This rule only surfaces the signal; weighting it into the fitness function is a separate, harder decision (per-objective weights, Pareto front).
 
@@ -140,7 +140,7 @@ When gated off, L2's existing `task_context` refinement runs unchanged.
 3. **Name distinct:** `evidence_grounding`, `l1_considered_mutations`, `axis_exhaustion`, `sample_delta`, `l1_verbosity_stats`, `l2_imagine` — all greppable, all single-use.
 4. **Self-describing:** `l2_imagine` is the only name that could read as ambiguous; documented inline as "L2's read-forward rollout call" wherever it appears.
 5. **Rides existing infra:** Tracks 1-3 yes. Track 4 needs one new `ResumeCheckpointKind` + one new prompt entry — minimal sidecar.
-6. **AI-accessible on disk:** All four tracks land facts on disk: variant evidence in `round_NNNN.json`, exhaustion + sample delta in derived projections, verbosity firings in `signals.jsonl`, imagine inputs/outputs in `LLMCallRecord` + `round_NNNN.json`.
+6. **AI-accessible on disk:** All four tracks land facts on disk: variant evidence in `round_NNNN.json`, exhaustion + sample delta in derived projections, verbosity firings in `events.jsonl`, imagine inputs/outputs in `LLMCallRecord` + `round_NNNN.json`.
 7. **§0 update:** Track 4 yes (separate PR, lands first). Tracks 1-3 no.
 8. **Langfuse trace:** Track 4 LLM call wraps with `observed_node("l2_imagine_r{N}", "llm/meta", ...)`.
 

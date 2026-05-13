@@ -25,10 +25,10 @@ modification. Three observations the next connector should heed:
    nested-by-node shape under `meta_prompt_overrides`. The protocol
    carries the dict through; each connector decides its own outer key.
 2. **Session contract works for in-process backends with a noop.**
-   `PromptPotterSession.has_terms = True` lets `BackendClient` skip the
-   init step. Non-HTTP connectors can fully implement the protocol
-   without a transport layer — but they pay the cost of the HTTP shape
-   leaking into the rest of `BackendClient`.
+   `PromptPotterSession` no-ops `set_terms`/`recover` so non-HTTP
+   connectors can fully implement the protocol without a transport
+   layer — but they pay the cost of the HTTP shape leaking into the
+   rest of `BackendClient`.
 3. **`extract_experiment` is the impedance-match seam.** TermNorm reads
    `mappings` + `runs[0].evaluation_results`; PromptPotter-self reads a
    simple `tasks` list. Both produce `(queries, index_terms)` for the

@@ -294,8 +294,8 @@ def _normalize_pp_override(
             node, _, param = dk.partition(".")
             if pipeline_schema.has_node(node) and param:
                 logger.warning("l1_generate: splitting dotted key %r → %s.%s", dk, node, param)
-                pipeline_params_override.setdefault(node, {})[param] = (
-                    pipeline_params_override.pop(dk)
+                pipeline_params_override.setdefault(node, {})[param] = pipeline_params_override.pop(
+                    dk
                 )
         # Auto-nest flat params + drop hallucinated nodes.
         for fk in [k for k, val in pipeline_params_override.items() if not isinstance(val, dict)]:

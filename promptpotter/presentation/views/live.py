@@ -852,13 +852,9 @@ class LiveDisplay(DerivedView):
                     f"(Δ +{delta_origin:.1%} vs origin){RESET}"
                 )
             if delta_origin == 0:
-                return (
-                    f"  {YELLOW}= ties origin: {label} {acc:.1%}  "
-                    f"(Δ ±0.0% vs origin){RESET}"
-                )
+                return f"  {YELLOW}= ties origin: {label} {acc:.1%}  (Δ ±0.0% vs origin){RESET}"
             return (
-                f"  {DIM}→ round-best: {label} {acc:.1%}  "
-                f"(Δ {delta_origin:.1%} vs origin){RESET}"
+                f"  {DIM}→ round-best: {label} {acc:.1%}  (Δ {delta_origin:.1%} vs origin){RESET}"
             )
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"

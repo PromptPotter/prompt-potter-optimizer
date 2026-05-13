@@ -222,11 +222,6 @@ def sample_kg_max(
     return max(knowledge_gradient(posterior, cid, sample_id) for cid in candidate_ids)
 
 
-def confidence_interval_width(se: float, z: float = 1.96) -> float:
-    """Two-sided CI width: ``2 * z * se``. Default z=1.96 → 95% CI."""
-    return 2.0 * z * se
-
-
 # ===========================================================================
 # Round-level scoring-set evolution via Rasch + KG
 # ===========================================================================

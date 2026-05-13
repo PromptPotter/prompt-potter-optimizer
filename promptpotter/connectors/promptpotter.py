@@ -98,15 +98,10 @@ class PromptPotterSession:
     """In-process noop session — implements ``SessionProtocol``.
 
     PromptPotter-as-connector has no remote service, so there's no
-    handshake. ``has_terms`` reports ``True`` so ``BackendClient`` skips
-    the init step; ``set_terms`` and ``recover`` are no-ops.
+    handshake. ``set_terms`` and ``recover`` are no-ops.
     """
 
     __slots__ = ()
-
-    @property
-    def has_terms(self) -> bool:
-        return True
 
     async def set_terms(
         self,

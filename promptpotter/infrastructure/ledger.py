@@ -43,12 +43,9 @@ class CycleEventLog:
 
     One ledger per cycle. The on-disk file is the source of truth; the
     subscriber list is a transient runtime convenience for live projections.
-    Replay (``replay_into``) is independent of subscribers — it walks the
-    file from offset 0.
 
-    Forks: Phase 4 will add ``inherit_from(parent, offset)`` so a fork's
-    ``iter()`` walks the parent's records up to the cut point before its own.
-    The current implementation is the per-cycle base case.
+    Forks: ``inherit_from(parent, offset)`` lets a fork's ``iter()`` walk
+    the parent's records up to the cut point before its own.
     """
 
     def __init__(self, path: Path) -> None:
@@ -143,21 +140,8 @@ class CycleEventLog:
         self._inherit_offset = offset
 
     def bind(self, projection: Projection) -> None:
-        """Subscribe a projection to subsequent appends.
-
-        Does NOT replay history; call ``replay_into`` first if the projection
-        needs to catch up from offset 0.
-        """
+        """Subscribe a projection to subsequent appends."""
         self._subscribers.append(projection)
-
-    def replay_into(self, projection: Projection) -> None:
-        """Walk the ledger from offset 0 and feed each record to ``projection``.
-
-        Does NOT bind for future appends — call ``bind`` separately if live
-        updates are also wanted.
-        """
-        for offset, record in enumerate(self.iter()):
-            projection.on_record(record, offset)
 
     @property
     def next_offset(self) -> int:

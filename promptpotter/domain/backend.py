@@ -1,12 +1,6 @@
-"""
-Pydantic models for project-based backend storage.
-
-BackendConnection represents a connected backend (e.g. a local backend).
-Execution captures results from pipeline replays triggered by PromptPotter.
-"""
+"""Pydantic model for the connected-backend record (one per registered backend)."""
 
 from datetime import UTC, datetime
-from typing import Any
 
 from pydantic import BaseModel, Field
 
@@ -20,48 +14,3 @@ class BackendConnection(BaseModel):
     base_url: str = Field(..., description="Backend API base URL")
     created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     last_synced_at: str | None = None
-
-
-class ExecutionResultItem(BaseModel):
-    """One query's result from a pipeline execution replay.
-
-    Connector-specific metadata belongs in ``query_fields`` (query context)
-    or ``pipeline_data`` (per-node outputs).
-    """
-
-    query: str
-    query_fields: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Generic query metadata (populated per connector).",
-    )
-    ground_truth: str
-    predicted: str
-    confidence: float = 0.0
-    ranked_items: list[dict[str, Any]] = Field(default_factory=list)
-    latency_ms: float = 0.0
-    pipeline_data: dict[str, Any] = Field(default_factory=dict)
-    status: str = "success"
-    error: str | None = None
-    timestamp: str | None = None
-
-
-class Execution(BaseModel):
-    """A pipeline execution replay triggered by PromptPotter."""
-
-    execution_id: str
-    backend_id: str
-    experiment_id: str
-    variant_label: str = ""
-    pipeline_notation: str = ""
-    source_run_id: str | None = None
-    index_terms_count: int | None = None
-    limitations: list[str] = Field(default_factory=list)
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
-    pipeline_params: dict[str, Any] = Field(
-        default_factory=dict,
-        description="Pipeline parameter overrides forwarded to the backend",
-    )
-    query_count: int = 0
-    successful_count: int = 0
-    error_count: int = 0
-    results: list[ExecutionResultItem] = Field(default_factory=list)

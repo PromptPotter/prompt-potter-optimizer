@@ -66,9 +66,7 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         when=lambda s: s.fire_l2_every_round and s.enable_l2,
         fire=NextAction.FIRE_L2,
         priority=80,
-        reason=lambda s: (
-            f"fire_l2_every_round=True (L1 stall {s.l1_stall_count}/{s.l1_patience})"
-        ),
+        reason=lambda s: f"fire_l2_every_round=True (L1 stall {s.l1_stall_count}/{s.l1_patience})",
     ),
     EscalationRule(
         name="l2_axis_yield_drought",

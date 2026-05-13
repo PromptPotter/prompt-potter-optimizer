@@ -58,12 +58,9 @@ class SessionProtocol(Protocol):
     idempotency check and the recovery handshake; ``BackendClient`` only
     asks them to initialize or recover.
 
-    For backends with no session concept, pass an instance that returns
-    ``has_terms = True`` and no-ops on ``set_terms`` / ``recover``.
+    For backends with no session concept, pass an instance that
+    no-ops on ``set_terms`` / ``recover``.
     """
-
-    @property
-    def has_terms(self) -> bool: ...
 
     async def set_terms(
         self,

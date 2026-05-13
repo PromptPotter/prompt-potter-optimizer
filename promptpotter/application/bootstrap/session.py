@@ -1,6 +1,6 @@
 """Session/Cycle identity + ``active_session.json`` claim.
 
-Owns ``Session``, the per-cycle bundles it carries (``CampaignBundle``,
+Owns ``Session``, the per-cycle bundles it carries (``CycleState``,
 ``ScoringContext``), the tenant context, and the identity helpers used to
 mint a session, claim the active pointer, and open per-cycle ledgers.
 Wiring of stores/clients/datasets lives next door in :mod:`wiring`; the
@@ -61,7 +61,7 @@ class ScoringContext:
 
 
 @dataclass
-class CampaignBundle:
+class CycleState:
     """Per-cycle mutable bundle — flips on fork; ledger is the sole event ingress.
 
     Bundle of objects (ledger, projection writer, observability bridge), not a
@@ -103,7 +103,7 @@ class Session:
     session_id: str = ""
 
     # -- Per-cycle bundles ----------------------------------------------
-    state: CampaignBundle = field(default_factory=CampaignBundle)
+    state: CycleState = field(default_factory=CycleState)
     scoring: ScoringContext = field(default_factory=ScoringContext)
 
     # -- Runtime config --------------------------------------------------

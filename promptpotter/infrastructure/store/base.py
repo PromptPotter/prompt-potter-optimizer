@@ -99,38 +99,6 @@ def write_text(path: Path, content: str) -> None:
         f.write(content)
 
 
-def append_text(path: Path, line: str) -> None:
-    """Append *line* to *path*, creating parent directories if needed."""
-    ensure_parent_dir(path)
-    with open(_long_path(path), "a", encoding="utf-8") as f:
-        f.write(line)
-
-
-def write_yaml_kv(path: Path, data: dict) -> None:
-    """Write *data* as YAML-compatible ``key: value`` lines.
-
-    Handles None → ``null``, bools → lowercase, lists → JSON arrays.
-    Used for MLflow meta.yaml files.
-    """
-    ensure_parent_dir(path)
-    with open(_long_path(path), "w", encoding="utf-8") as f:
-        for key, value in data.items():
-            f.write(f"{key}: {_yaml_value(value)}\n")
-
-
-def _yaml_value(v: Any) -> str:
-    """Format a Python value for YAML key-value output."""
-    if isinstance(v, str):
-        return f'"{v}"'
-    if v is None:
-        return "null"
-    if isinstance(v, bool):
-        return str(v).lower()
-    if isinstance(v, list):
-        return json.dumps(v)
-    return str(v)
-
-
 def read_json(path: Path) -> Any:
     """Read and parse JSON from *path*."""
     with open(_long_path(path), encoding="utf-8") as f:

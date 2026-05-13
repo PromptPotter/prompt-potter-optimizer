@@ -84,10 +84,6 @@ class TermNormSession:
     def __init__(self) -> None:
         self._terms: list[str] | None = None
 
-    @property
-    def has_terms(self) -> bool:
-        return bool(self._terms)
-
     async def set_terms(
         self, http: httpx.AsyncClient, base_url: str, terms: list[str]
     ) -> dict[str, Any]:

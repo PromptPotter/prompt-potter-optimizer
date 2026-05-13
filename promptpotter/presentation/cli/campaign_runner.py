@@ -230,8 +230,7 @@ async def _run_init_body(args: argparse.Namespace) -> dict[str, Any]:
 
         raise SystemExit(
             "ERROR: fresh-init mode requires a dataset name. Pass "
-            "--dataset-name <name> or a --config that names one.\n\n"
-            + no_dataset_hint()
+            "--dataset-name <name> or a --config that names one.\n\n" + no_dataset_hint()
         )
 
     # Auto-load the dataset's campaign.json when --config wasn't given. Without this,
@@ -627,7 +626,7 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
 
     refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
 
-    fresh_mode = bool(getattr(args, "config", None) or getattr(args, "dataset_name", None))
+    fresh_mode = bool(args.config or args.dataset_name)
     if fresh_mode:
         bad = [
             flag
@@ -717,6 +716,9 @@ def _parse_variants(args: argparse.Namespace) -> list[_Variant]:
     loaded L1 in one iteration."""
     label_override = getattr(args, "l1_prompt_label", None)
     raw = getattr(args, "l1_prompts", None) or getattr(args, "l1_prompt", None)
+    # NB: argparse declares only ONE of --l1-prompts / --l1-prompt per subparser
+    # (see _add_sweep_l1_prompt_args), so the unused attribute is never set on
+    # `args`. getattr-with-default is the correct contract here, not a shim.
     if not raw:
         return [_Variant(path=None, label=label_override)]
     paths = [Path(p.strip()) for p in str(raw).split(",") if p.strip()]
