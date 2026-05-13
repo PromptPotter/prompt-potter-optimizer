@@ -1,10 +1,11 @@
 "use client";
 import { useEffect, useRef } from "react";
 import { TERMS } from "@/lib/terms";
-import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import type { DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  dashRound: number | null;
 }
 
 interface QpsState {
@@ -43,7 +44,7 @@ function parseProgress(raw: string | undefined, anchor: "q" | "c"): { cur: numbe
   return { cur: parseInt(m[1], 10), tot: parseInt(m[2], 10) };
 }
 
-export function ProgressCard({ dash }: Props) {
+export function ProgressCard({ dash, dashRound }: Props) {
   // Persist the QPS state across renders so the moving average actually
   // accumulates — without the ref, every parent re-render resets it.
   const qpsRef = useRef<QpsState>({ lastQ: null, lastT: null, qps: null });
@@ -52,8 +53,7 @@ export function ProgressCard({ dash }: Props) {
   }, [dash]);
 
   const phase = (dash?.state as string | undefined) ?? "—";
-  const r = roundOf(dash);
-  const round = r != null ? String(r) : "—";
+  const round = dashRound != null ? String(dashRound) : "—";
   const qm = parseProgress((dash as { query?: string } | null)?.query, "q");
   const cm = parseProgress((dash as { candidate?: string } | null)?.candidate, "c");
 

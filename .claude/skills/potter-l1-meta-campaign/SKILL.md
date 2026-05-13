@@ -18,7 +18,11 @@ Each invocation walks the six phases in order. Stop at the first phase that's bl
 
 ### Phase 1 — Assess (always runs)
 
-Read `state.json` + `log.jsonl`. For each `cycle_id` in `pending_screen` ∪ `pending_full`, read `campaigns/{cycle_id}/index.json` to see whether `status == "complete"`. Classify mode from log history:
+Read `state.json` + `log.jsonl`. **Cycle-discovery walk:** every cycle directory lives at `projects/{tenant}/campaigns/{cycle_id}/` **or** nested under `forks/`, `diag/`, `sweeps/` of an existing campaign (e.g. `campaigns/{parent}/forks/{cycle_id}/`). Both levels are first-class cycles — enumerate the union, never just the top level.
+
+**Completeness gate (authoritative):** a cycle is finished when its `index.json::final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}`. The outer `index.json::status` is **not** authoritative — it flips to `"interrupted"` when a cycle is itself forked later, even though that cycle reached its boundary. Always read `final.stop_reason`.
+
+For each `cycle_id` in `pending_screen` ∪ `pending_full`, read its `index.json::final.stop_reason` to see whether the cycle is finished. Classify mode from log history:
 
 | Mode | Trigger |
 |---|---|
@@ -31,9 +35,19 @@ Mode change since last tick ⇒ surface loudly with the triggering cycle IDs. Mo
 
 ### Phase 2 — Per-cycle review (always runs over newly-complete cycles)
 
-For each `cycle_id` in `pending_screen` ∪ `pending_full` whose `index.json::status == "complete"` and which has **no `review` entry yet** in `log.jsonl`:
+For each `cycle_id` in `pending_screen` ∪ `pending_full` whose `index.json::final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` and which has **no `review` entry yet** in `log.jsonl`:
 
-Read L1Stats from `campaigns/{cycle_id}/review.md` header (Track 3 fields): `behavior_pass_rate`, `yield_rate`, `top_lift_mean`, `stagnation_max`, `l2_fires`, and the origin-regression flag (round 0 best accuracy vs parent origin).
+**Family-grouped fork accounting.** The skill tracks evolution of one L1 prompt hash, not one cycle id. For each finished cycle, the effective key is `effective_l1_hash := final.prompt_hashes.l1_generate`. A fork that inherits its parent's hash is a continuation of the same family (do not double-count); a fork with a different hash is an independent L1 observation (its own `review` entry). When parent and fork share a hash, prefer the cycle with `final.stop_reason ∈ {max_rounds, goal_reached, infinite_stall}` and the most rounds. Cross-fork data may be split: a fork-on-divergence preserves the *original* `rounds/` snapshot in the fork dir while the parent's `rounds/` may have been overwritten by a later resume — read whichever has the matching `final.prompt_hashes.l1_generate`.
+
+**Backfill missing `review.md`.** The in-loop renderer (`write_review_md` in `runner.py::_finalize_run`) is gated on `emitter` being non-None and runs under `graceful()` — so a finished cycle may lack `review.md` (notebook context, fork-on-divergence, swallowed exception). If `review.md` is missing on a finished cycle, render it before reading:
+
+```
+python scripts/render_review.py <cycle_dir> [--audit-dir <parent>/.runtime/cache/rounds]
+```
+
+Pass `--audit-dir` pointing at the parent's runtime cache when the cycle is a fork that didn't itself run rounds (the fork's own `.runtime/cache/rounds/` will be empty; audits live with the cycle that actually executed them). Default (omit `--audit-dir`) reads from `{cycle_dir}/.runtime/cache/rounds`.
+
+Read L1Stats from `{cycle_dir}/review.md` header (Track 3 fields): `behavior_pass_rate`, `yield_rate`, `top_lift_mean`, `stagnation_max`, `l2_fires`, and the origin-regression flag (round 0 best accuracy vs parent origin).
 
 Compute `round_1_verdict`:
 
@@ -108,7 +122,7 @@ When a real slate is locked (developer-supplied or operator-promoted from `propo
 
 ### Phase 4 — Screen (cheap; rung 0 + rung 2; rung 3 when proxy collapsed)
 
-For each candidate in `pending_screen` whose sweep cycle has `status == "complete"` and a matching `review` entry from Phase 2:
+For each candidate in `pending_screen` whose sweep cycle has `final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` and a matching `review` entry from Phase 2:
 
 If the `review` entry's `round_1_verdict ∈ {degraded, broken}` ⇒ append `screen` with `verdict: reject_health` and the cycle's top issue; drop from `pending_screen`; do not promote. Continue to the next candidate.
 
@@ -133,7 +147,7 @@ Append one `screen` line per scored candidate to `log.jsonl`. Drop completed fro
 
 ### Phase 5 — Promote (expensive; full cycles)
 
-For each candidate in `pending_full` whose full cycle has `status == "complete"` and whose Phase-2 `review` entry was `healthy` (non-healthy full cycles already halted the loop in Phase 2; if you reach this branch for a non-healthy cycle, it's a defect — surface it):
+For each candidate in `pending_full` whose full cycle has `final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` and whose Phase-2 `review` entry was `healthy` (non-healthy full cycles already halted the loop in Phase 2; if you reach this branch for a non-healthy cycle, it's a defect — surface it):
 
 Read `campaigns/{cycle_id}/index.json::final.{rounds_to_95, final_accuracy}` and `final.{prompt_id}_hash`.
 
@@ -226,14 +240,19 @@ ls    .promptpotter/meta_campaigns/l1_generate/proposed_edits/
 
 | Fact | Path |
 |---|---|
-| Per-cycle review (header: behavior table, `round_1_verdict`, L1Stats block) | `campaigns/{cycle_id}/review.md` |
-| L1Stats fields (`rounds_to_95`, `round_1_verdict`, `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`, `forbidden_axis_attempts`, `forbidden_axis_healed`) | `campaigns/{cycle_id}/review.md` header |
-| Round trace (`accuracy`, `candidate_scores`, `origin`, `critique`, `lineage.source`) | `campaigns/{cycle_id}/rounds/round_NNNN.json` |
-| Cycle index (`status`, `final.{rounds_to_95, final_accuracy, *_hash}`, `fork.trigger`) | `campaigns/{cycle_id}/index.json` |
+| Cycle root (both flavors) | `projects/{tenant}/campaigns/{cycle_id}/` **and** `projects/{tenant}/campaigns/{parent}/forks/{cycle_id}/` (also `diag/`, `sweeps/`) — both are first-class cycles |
+| Per-cycle review (header: behavior table, `round_1_verdict`, L1Stats block) | `{cycle_dir}/review.md` (may be missing — backfill with `python scripts/render_review.py`) |
+| L1Stats fields (`rounds_to_95`, `round_1_verdict`, `yield_rate`, `top_lift_mean`, `behavior_pass_rate`, `stagnation_max`, `l2_fires`, `forbidden_axis_attempts`, `forbidden_axis_healed`) | `{cycle_dir}/review.md` header |
+| Round trace (`accuracy`, `candidate_scores`, `origin`, `critique`, `lineage.source`) | `{cycle_dir}/rounds/round_NNNN.json` |
+| Cycle completeness (authoritative) | `{cycle_dir}/index.json::final.stop_reason ∈ {"max_rounds", "goal_reached", "infinite_stall"}` — **not** the outer `status` field |
+| Cycle L1 hash (family key) | `{cycle_dir}/index.json::final.prompt_hashes.l1_generate` |
+| Cycle index summary (`final.{rounds_to_95, final_accuracy, prompt_hashes, stop_reason}`, `fork.trigger`, `parent_cycle_id`) | `{cycle_dir}/index.json` |
+| Per-round audit (L1 variants, validator outcomes — fuel for `render_review.py`) | `{cycle_dir}/.runtime/cache/rounds/round_NNNN.json` (forks created at divergence may have an empty audit dir — pass parent's via `--audit-dir`) |
 | Sweep payloads | `datasets/{name}/sweep/NN_*.json` (skill-authored drafts in `sweep/proposed/`) |
 | Meta-campaign state + log | `.promptpotter/meta_campaigns/{prompt_id}/{state.json,log.jsonl}` |
 | Proposed edits awaiting operator | `.promptpotter/meta_campaigns/{prompt_id}/proposed_edits/{cycle_id}_{ts}.diff` |
 | Meta-prompt under iteration | `promptpotter/application/optimization/optimizer_pipeline.json::resolved_prompts['{prompt_id}/1']` |
+| Review.md backfill helper | `scripts/render_review.py {cycle_dir} [--audit-dir {parent_or_self}/.runtime/cache/rounds]` |
 | Framework spec (origin of thresholds + verdict rules + top-issue rank) | `docs/specs/m10-prompt-iteration-framework.md` (Tracks 1, 3, 6, 7) |
 
 ## Boundaries

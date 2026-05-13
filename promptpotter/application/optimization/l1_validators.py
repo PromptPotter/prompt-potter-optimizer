@@ -24,6 +24,7 @@ import logging
 from dataclasses import dataclass
 from typing import Any
 
+from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
 from promptpotter.application.optimization.llm_call import get_optimizer_schema
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.analysis import ValidationFailure
@@ -72,6 +73,13 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
             continue
         param_props: dict[str, dict] = {}
         for param in sorted(node.param_keys):
+            # Operator-locked axes (model, provider) live in the dataset
+            # overlay and are off L1's surface. Keeping them out of the
+            # output schema closes the loop the validator otherwise has
+            # to reject every round — the LLM cannot emit a key the
+            # structured-output schema does not declare.
+            if param in PARAM_FORBIDDEN_KEYS:
+                continue
             allowed = node.param_allowed_values.get(param)
             declared_type = node.param_types.get(param)
             if allowed:
@@ -80,6 +88,8 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
                 param_props[param] = {"type": declared_type}
             else:
                 param_props[param] = {}
+        if not param_props:
+            continue
         override_properties[node.name] = {
             "type": "object",
             "properties": param_props,
@@ -130,8 +140,6 @@ def validate_overrides(
     meant to prevent — both layers run because not every provider/SDK
     enforces structured-output schemas with full fidelity.
     """
-    from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
-
     failures: list[ValidationFailure] = []
     allowed_models = list(pipeline_schema.available_models)
     for node_name, node_params in pipeline_params_override.items():

@@ -1,21 +1,20 @@
 "use client";
-import { useEffect, useMemo, useState } from "react";
-import {
-  fetchActiveDatasetName,
-  fetchDatasetPreview,
-  type DatasetItem,
-} from "@/lib/api";
+import { useMemo, useState } from "react";
+import { type DatasetItem } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
-import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 import { useRoundHistory } from "@/lib/use-round-history";
 import { HardSamplesTable } from "./HardSamplesTable";
-
-const MAX_FETCH = 1000;
 
 interface Props {
   cycleId: string | null;
   dash: DashboardSnapshot | null;
+  dashRound: number | null;
   refreshKey: number;
+  datasetName: string | null;
+  datasetItems: DatasetItem[];
+  datasetTrainCount: number;
+  datasetTestCount: number;
 }
 
 interface Measurement {
@@ -34,16 +33,14 @@ interface RoundDoc {
 // file yet. Live samples are compact strings ("0.0s #000 HIT ..."); the
 // parser yields idx + status. We append them as the highest ord so they
 // sit at the right edge of each row.
-function liveMeasurements(dash: DashboardSnapshot | null): Map<number, Measurement[]> {
+function liveMeasurements(
+  dash: DashboardSnapshot | null,
+  dashRound: number | null,
+): Map<number, Measurement[]> {
   const out = new Map<number, Measurement[]>();
-  if (!dash) return out;
-  const round = roundOf(dash) ?? 0;
-  const nodes = (dash.current_round?.nodes ?? {}) as Record<string, unknown>;
-  const l1Score = nodes.l1_score as { output?: { candidates?: unknown[] } } | undefined;
-  const cands = l1Score?.output?.candidates ?? [];
-  cands.forEach((c, ci) => {
-    const samples = (c as { samples?: unknown[] }).samples ?? [];
-    for (const s of samples) {
+  const round = dashRound ?? 0;
+  liveL1Candidates(dash).forEach((c, ci) => {
+    for (const s of c.samples ?? []) {
       let sid: number | null = null;
       let hit: boolean | null = null;
       if (typeof s === "string") {
@@ -53,10 +50,9 @@ function liveMeasurements(dash: DashboardSnapshot | null): Map<number, Measureme
           hit = p.status === "HIT";
         }
       } else if (s && typeof s === "object") {
-        const r = s as Record<string, unknown>;
-        if (typeof r.sample_id === "number" && typeof r.hit === "boolean") {
-          sid = r.sample_id;
-          hit = r.hit;
+        if (typeof s.sample_id === "number" && typeof s.hit === "boolean") {
+          sid = s.sample_id;
+          hit = s.hit;
         }
       }
       if (sid == null || hit == null) continue;
@@ -68,9 +64,16 @@ function liveMeasurements(dash: DashboardSnapshot | null): Map<number, Measureme
   return out;
 }
 
-export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
-  const [items, setItems] = useState<DatasetItem[]>([]);
-  const [datasetName, setDatasetName] = useState<string | null>(null);
+export function HardSamplesHeatmap({
+  cycleId,
+  dash,
+  dashRound,
+  refreshKey,
+  datasetName,
+  datasetItems,
+  datasetTrainCount,
+  datasetTestCount,
+}: Props) {
   const [expanded, setExpanded] = useState(false);
   const historyDocs = useRoundHistory(cycleId, refreshKey);
   const rounds: RoundDoc[] = useMemo(() => {
@@ -86,28 +89,6 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
     }
     return out;
   }, [historyDocs]);
-
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const name = await fetchActiveDatasetName(cycleId, ac.signal);
-        if (cancelled || !name) return;
-        setDatasetName(name);
-        const preview = await fetchDatasetPreview(name, MAX_FETCH, ac.signal);
-        if (cancelled) return;
-        setItems(preview.items);
-      } catch {
-        // load may race with cycle-mint
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [cycleId]);
 
   // Aggregate per-sample measurement history: rows = samples, columns =
   // chronological candidate measurements. Ordering is round * 1000 + the
@@ -134,7 +115,7 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
       }
     }
     // Fold in live mid-round
-    const live = liveMeasurements(dash);
+    const live = liveMeasurements(dash, dashRound);
     for (const [sid, ms] of live) {
       if (!out.has(sid)) out.set(sid, []);
       out.get(sid)!.push(...ms);
@@ -154,9 +135,9 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
       ms.length = w;
     }
     return out;
-  }, [rounds, dash]);
+  }, [rounds, dash, dashRound]);
 
-  if (items.length === 0) return null;
+  if (datasetItems.length === 0) return null;
 
   const totalHits = [...perSample.values()].reduce(
     (n, ms) => n + ms.filter((m) => m.hit).length,
@@ -164,7 +145,7 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
   );
   const totalMeas = [...perSample.values()].reduce((n, ms) => n + ms.length, 0);
 
-  const summary = `${datasetName ? `${datasetName} · ` : ""}${items.length} samples${
+  const summary = `${datasetName ? `${datasetName} · ` : ""}${datasetItems.length} samples${
     totalMeas > 0 ? ` · ${totalHits}/${totalMeas} hit` : ""
   }`;
 
@@ -185,9 +166,12 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
             </svg>
           </button>
           <HardSamplesTable
-            cycleId={cycleId}
             dash={dash}
             perSample={perSample}
+            datasetName={datasetName}
+            datasetItems={datasetItems}
+            datasetTrainCount={datasetTrainCount}
+            datasetTestCount={datasetTestCount}
           />
         </div>
       ) : (
@@ -200,7 +184,7 @@ export function HardSamplesHeatmap({ cycleId, dash, refreshKey }: Props) {
           title={summary}
         >
           <span className="hs-heat-mini" aria-hidden="true">
-            {items.map((it) => {
+            {datasetItems.map((it) => {
               const ms = perSample.get(it.sample_id);
               let cls: "hit" | "miss" | "none" = "none";
               if (ms && ms.length > 0) {

@@ -5,6 +5,12 @@
 // own <FitnessPanel/>, but only one tab is mounted at a time. Local
 // component state would reset every tab swap. This module-scoped store
 // keeps the chip toggles and what-if selection coherent across remounts.
+//
+// Selection seeding is scoped to the cycle: `seededForCycle` records which
+// cycle the current `selected` set was seeded for. When the cycle changes
+// (operator re-`init`s, or webapp polls a fresh active session), the panel
+// re-seeds against the new cycle's formula instead of inheriting the prior
+// cycle's picks.
 
 import { useSyncExternalStore } from "react";
 
@@ -12,16 +18,14 @@ interface FitnessState {
   showComposite: boolean;
   showWhatIf: boolean;
   selected: Set<string>;
-  // Once the panel has seeded `selected` from the active formula it sets
-  // this so subsequent remounts don't overwrite operator picks.
-  seeded: boolean;
+  seededForCycle: string | null;
 }
 
 let state: FitnessState = {
   showComposite: false,
   showWhatIf: false,
   selected: new Set<string>(),
-  seeded: false,
+  seededForCycle: null,
 };
 
 const listeners = new Set<() => void>();

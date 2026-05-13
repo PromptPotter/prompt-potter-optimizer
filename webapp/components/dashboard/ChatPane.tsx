@@ -1,6 +1,7 @@
 "use client";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { DashboardSnapshot } from "@/lib/poll";
+import type { DatasetItem } from "@/lib/api";
 import { TERMS } from "@/lib/terms";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { HardSamplesHeatmap } from "@/components/dashboard/HardSamplesHeatmap";
@@ -10,9 +11,14 @@ interface Props {
   sessionId: string | null;
   datasetTitle: string | null;
   dash: DashboardSnapshot | null;
+  dashRound: number | null;
   cycleStartedAt: string | null;
   themeKey: string;
   refreshKey: number;
+  datasetName: string | null;
+  datasetItems: DatasetItem[];
+  datasetTrainCount: number;
+  datasetTestCount: number;
 }
 
 function fmt(v: unknown): string {
@@ -35,15 +41,34 @@ function fmtDuration(sec: number): string {
 // toggles are disabled. The wand-row toggle is the lone interactive element
 // (purely visual, mirrors vanilla). Control plane lands in M12 — see
 // docs/specs/m12-newjob-status-bar.md for the interactive write path.
-export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedAt, themeKey, refreshKey }: Props) {
+export function ChatPane({
+  cycleId,
+  sessionId,
+  datasetTitle,
+  dash,
+  dashRound,
+  cycleStartedAt,
+  themeKey,
+  refreshKey,
+  datasetName,
+  datasetItems,
+  datasetTrainCount,
+  datasetTestCount,
+}: Props) {
   const [jobOpen, setJobOpen] = useState(false);
   const [wandOn, setWandOn] = useState(true);
   const [samplesOpen, setSamplesOpen] = useState(false);
   const toggleSamples = () => setSamplesOpen((v) => !v);
-  // Auto-open as soon as a cycle is bound — saves the operator one click per
-  // page reload during dev. Manual close still sticks within the session.
+  // Auto-open once per mount as soon as a cycle is bound — saves the operator
+  // one click on page reload. The ref guard means that if the user manually
+  // closes the drawer and the cycle later changes (or a new cycle is bound),
+  // their close preference stays respected instead of being overridden.
+  const samplesAutoOpened = useRef(false);
   useEffect(() => {
-    if (cycleId) setSamplesOpen(true);
+    if (cycleId && !samplesAutoOpened.current) {
+      samplesAutoOpened.current = true;
+      setSamplesOpen(true);
+    }
   }, [cycleId]);
 
   const best = typeof dash?.best === "number" ? dash.best : null;
@@ -192,7 +217,7 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
+              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12
@@ -257,7 +282,18 @@ export function ChatPane({ cycleId, sessionId, datasetTitle, dash, cycleStartedA
             <div className="text-col"><div className="lbl">Output</div><div className="val">Answer</div></div>
           </button>
         </div>
-        {samplesOpen && <HardSamplesHeatmap cycleId={cycleId} dash={dash} refreshKey={refreshKey} />}
+        {samplesOpen && (
+          <HardSamplesHeatmap
+            cycleId={cycleId}
+            dash={dash}
+            dashRound={dashRound}
+            refreshKey={refreshKey}
+            datasetName={datasetName}
+            datasetItems={datasetItems}
+            datasetTrainCount={datasetTrainCount}
+            datasetTestCount={datasetTestCount}
+          />
+        )}
       </div>
 
       <div className="chat-grid">

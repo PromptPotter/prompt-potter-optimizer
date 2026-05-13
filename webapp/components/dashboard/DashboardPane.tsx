@@ -1,6 +1,13 @@
 "use client";
 import { useCallback, useEffect, useState } from "react";
-import { fetchActive, fetchCycleFile, fetchPipeline } from "@/lib/api";
+import {
+  fetchActive,
+  fetchActiveDatasetName,
+  fetchCycleFile,
+  fetchDatasetPreview,
+  fetchPipeline,
+  type DatasetItem,
+} from "@/lib/api";
 import { roundOf, useDashboardPoll, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
@@ -25,15 +32,6 @@ interface PipelineDoc {
   nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
 }
 
-interface RoundData {
-  round?: number;
-  scoreboard?: { candidate_id?: string; label?: string; composite_fitness?: number; accuracy?: number; is_winner?: boolean }[];
-  origin_accuracy?: number;
-  results?: { id?: string | number; query?: string; predicted?: string; ground_truth?: string; score?: number; error?: unknown }[];
-  composite_fitness?: number;
-  accuracy?: number;
-}
-
 export function DashboardPane() {
   // Default to New Job (chat shell) — matches vanilla's first-load tab.active.
   const [tab, setTab] = useState<Tab>("newjob");
@@ -43,13 +41,22 @@ export function DashboardPane() {
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
   const [pipeline, setPipeline] = useState<PipelineDoc | null>(null);
-  const [latestRound, setLatestRound] = useState<RoundData | null>(null);
-  const [lastRoundFetched, setLastRoundFetched] = useState<number>(-1);
+  const [datasetName, setDatasetName] = useState<string | null>(null);
+  const [datasetItems, setDatasetItems] = useState<DatasetItem[]>([]);
+  const [datasetTrainCount, setDatasetTrainCount] = useState(0);
+  const [datasetTestCount, setDatasetTestCount] = useState(0);
   const [themeKey, setThemeKey] = useState<string>("init");
   const [activeError, setActiveError] = useState<string | null>(null);
 
   const dashState = useDashboardPoll(cycleId);
   const dash: DashboardSnapshot | null = dashState.dash;
+  // Canonical round number — derived once, threaded down to children that
+  // need it (ProgressCard, LiveSamplesCard, FitnessPanel, HardSamples*).
+  // Doubles as the refreshKey for round-file consumers: bumping it triggers
+  // `useRoundHistory` to refetch the round listing, which is the single
+  // source for every component that reads round_NNNN.json on disk.
+  const dashRound = roundOf(dash);
+  const refreshKey = dashRound ?? -1;
 
   // One-shot active session lookup
   useEffect(() => {
@@ -107,46 +114,47 @@ export function DashboardPane() {
     };
   }, [cycleId]);
 
-  // Cycle change ⇒ clear per-cycle derived state. Without this, the
-  // ``lastRoundFetched`` guard below silently skips the new cycle's round
-  // file when its round number happens to match the prior cycle's, and the
-  // ``latestRound`` snapshot from the prior cycle stays on screen until a
-  // larger round number lands. The prev-prop pattern (React's documented
-  // "adjusting state when a prop changes" recipe) avoids a cascading
-  // render that ``setState`` in ``useEffect`` would cost.
-  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
-  if (cycleId !== prevCycleId) {
-    setPrevCycleId(cycleId);
-    setLatestRound(null);
-    setLastRoundFetched(-1);
-  }
-
-  // Round-based panels: fetch the most recent round JSON when the canonical
-  // round number bumps. `roundOf` resolves the nested `current_round.round`
-  // first (the authoritative field per live_dashboard.py:750), falling back
-  // to the top-level `round` only during cycle re-instantiation before the
-  // first phase fires.
-  const dashRound = roundOf(dash);
+  // Dataset preview — one fetch per cycle, threaded down through ChatPane to
+  // HardSamplesHeatmap → HardSamplesTable. Owning it here means a tab swap
+  // (New Job ↔ View Results) doesn't re-fetch, and the heat-map and table
+  // both read the same data instead of each running their own fetch chain.
   useEffect(() => {
-    if (!cycleId || dashRound == null) return;
-    if (dashRound < 0 || dashRound === lastRoundFetched) return;
-    const nn = String(dashRound).padStart(4, "0");
+    if (!cycleId) return;
     let cancelled = false;
+    const ac = new AbortController();
     (async () => {
       try {
-        const r = await fetchCycleFile(cycleId, "cycle", `rounds/round_${nn}.json`);
-        const data = JSON.parse(r.content) as RoundData;
+        const name = await fetchActiveDatasetName(cycleId, ac.signal);
+        if (cancelled || !name) return;
+        setDatasetName(name);
+        const preview = await fetchDatasetPreview(name, 1000, ac.signal);
         if (cancelled) return;
-        setLatestRound(data);
-        setLastRoundFetched(dashRound);
+        setDatasetItems(preview.items);
+        setDatasetTrainCount(preview.train_count);
+        setDatasetTestCount(preview.test_count);
       } catch {
-        /* round may not be on disk yet */
+        // load may race with cycle-mint; retry on next cycle change
       }
     })();
     return () => {
       cancelled = true;
+      ac.abort();
     };
-  }, [cycleId, dashRound, lastRoundFetched]);
+  }, [cycleId]);
+
+  // Cycle change ⇒ clear per-cycle derived state. Prev-prop pattern (React's
+  // documented "adjusting state when a prop changes" recipe) avoids the
+  // cascading render that `setState` in `useEffect` would cost. Round-file
+  // state owns its own reset in `useRoundHistory`; this only handles the
+  // dataset preview owned by this component.
+  const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
+  if (cycleId !== prevCycleId) {
+    setPrevCycleId(cycleId);
+    setDatasetName(null);
+    setDatasetItems([]);
+    setDatasetTrainCount(0);
+    setDatasetTestCount(0);
+  }
 
   // Re-applies chart defaults on theme swap; the themeKey bump forces all
   // chart components to remount so they pick up the new --color-* values.
@@ -173,7 +181,20 @@ export function DashboardPane() {
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         {tab === "newjob" ? (
-          <ChatPane cycleId={cycleId} sessionId={sessionId} datasetTitle={datasetTitle} dash={dash} cycleStartedAt={cycleStartedAt} themeKey={themeKey} refreshKey={lastRoundFetched} />
+          <ChatPane
+            cycleId={cycleId}
+            sessionId={sessionId}
+            datasetTitle={datasetTitle}
+            dash={dash}
+            dashRound={dashRound}
+            cycleStartedAt={cycleStartedAt}
+            themeKey={themeKey}
+            refreshKey={refreshKey}
+            datasetName={datasetName}
+            datasetItems={datasetItems}
+            datasetTrainCount={datasetTrainCount}
+            datasetTestCount={datasetTestCount}
+          />
         ) : pane === "dashboard" ? (
           <div className="content" id="content-dashboard">
             <DashStatusStrip
@@ -198,23 +219,23 @@ export function DashboardPane() {
                     session {sessionId || "—"} • updated {dash?.wallclock_serialized_at || "—"}
                   </div>
                 </div>
-                <HeroSummary cycleId={cycleId} dash={dash} refreshKey={lastRoundFetched} />
+                <HeroSummary cycleId={cycleId} dash={dash} refreshKey={refreshKey} />
               </div>
-              <ProgressCard dash={dash} />
+              <ProgressCard dash={dash} dashRound={dashRound} />
             </header>
             <section className="dash-top" aria-label="Pipeline">
               <WorkflowCanvas pipeline={pipeline} dash={dash} />
             </section>
             <div className="dash-grid">
-              <FitnessPanel dash={dash} cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
-              <LineageTree cycleId={cycleId} refreshKey={lastRoundFetched} dash={dash} />
+              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
+              <LineageTree cycleId={cycleId} refreshKey={refreshKey} dash={dash} />
             </div>
             <section className="dash-samples-wide" aria-label="Live samples">
-              <LiveSamplesCard dash={dash} status={dashState.status} />
+              <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
             </section>
             <div className="dash-charts">
-              <FreqChart round={latestRound} dash={dash} themeKey={themeKey} />
-              <TrendChart cycleId={cycleId} refreshKey={lastRoundFetched} themeKey={themeKey} />
+              <FreqChart cycleId={cycleId} refreshKey={refreshKey} dash={dash} themeKey={themeKey} />
+              <TrendChart cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
             </div>
             <details className="dash-diag">
               <summary>Diagnostics — live state & raw payload</summary>

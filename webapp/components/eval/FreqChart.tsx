@@ -1,11 +1,12 @@
 "use client";
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { Bar } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
 import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
+import { useRoundHistory } from "@/lib/use-round-history";
 import type { ChartOptions } from "chart.js";
 
 ensureChartRegistered();
@@ -17,17 +18,9 @@ interface ResultRow {
   ground_truth?: string;
 }
 
-interface RoundData {
-  results?: ResultRow[];
-}
-
-interface CandidateLike {
-  idx?: number;
-  samples?: string[];
-}
-
 interface Props {
-  round: RoundData | null;
+  cycleId: string | null;
+  refreshKey: number;
   dash: DashboardSnapshot | null;
   themeKey: string;
 }
@@ -48,17 +41,14 @@ function bucketScores(results: ResultRow[]): number[] {
   return buckets;
 }
 
-// Parse the live sample lines from `dash.current_round.nodes.l1_score
-// .output.candidates[*].samples[]` into pseudo-results so the chart can
-// bucket per-sample HIT/MISS without waiting for round completion.
+// Parse the live sample lines from in-flight candidates into pseudo-results
+// so the chart can bucket per-sample HIT/MISS without waiting for round
+// completion.
 function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
-  const score = (dash?.current_round?.nodes as
-    | Record<string, { output?: { candidates?: CandidateLike[] } }>
-    | undefined)?.l1_score;
-  const cands = score?.output?.candidates ?? [];
   const out: ResultRow[] = [];
-  for (const c of cands) {
+  for (const c of liveL1Candidates(dash)) {
     for (const raw of c.samples ?? []) {
+      if (typeof raw !== "string") continue;
       const p = parseSampleLine(raw);
       if (p.status === "HIT") out.push({ score: 1 });
       else if (p.status === "MISS") out.push({ score: 0 });
@@ -67,11 +57,22 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   return out;
 }
 
-export function FreqChart({ round, dash, themeKey }: Props) {
+export function FreqChart({ cycleId, refreshKey, dash, themeKey }: Props) {
   const chartRef = useRef(null);
+
+  // Reuse the shared round-history hook — the latest entry is the freshest
+  // round_NNNN.json on disk. No second round-file fetch path: every consumer
+  // (HeroSummary, TrendChart, LineageTree, FitnessPanel, HardSamples*, here)
+  // reads from the same hook.
+  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  const latestResults = useMemo<ResultRow[]>(() => {
+    const latest = historyDocs[historyDocs.length - 1];
+    return (latest?.results as ResultRow[] | undefined) ?? [];
+  }, [historyDocs]);
+
   const live = liveResultsFrom(dash);
   const useLive = live.length > 0;
-  const data = bucketScores(useLive ? live : (round?.results ?? []));
+  const data = bucketScores(useLive ? live : latestResults);
   const accStrong = getCss("--color-accent-strong");
   const acc = getCss("--color-accent");
   const colors = data.map((_, i) => (i < 5 ? accStrong : acc));

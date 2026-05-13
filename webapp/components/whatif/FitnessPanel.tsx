@@ -7,21 +7,8 @@ import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
-import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot, type LiveCandidate } from "@/lib/poll";
 import { useRoundHistory } from "@/lib/use-round-history";
-
-interface InflightCandidate {
-  idx?: number;
-  label?: string;
-  stats?: {
-    composite_fitness?: number;
-    accuracy?: number;
-    evaluators?: Record<string, number>;
-  };
-  // Live HIT/MISS lines from LiveDashboardProjection. Populated per-sample
-  // before stats lands at candidate-eval completion.
-  samples?: string[];
-}
 
 interface HistoricalCandidate {
   label?: string;
@@ -40,6 +27,7 @@ interface HistoricalRound {
 
 interface Props {
   dash: DashboardSnapshot | null;
+  dashRound: number | null;
   cycleId: string | null;
   refreshKey: number;              // bumped each completed round (drives refetch)
   themeKey: string;
@@ -62,14 +50,19 @@ function correctedFromEvaluators(
   return n > 0 ? sum / n : null;
 }
 
-function runningFromSamples(samples: string[] | undefined): number | null {
+function runningFromSamples(samples: LiveCandidate["samples"] | undefined): number | null {
   if (!samples || samples.length === 0) return null;
   let hits = 0;
   let total = 0;
   for (const raw of samples) {
-    const p = parseSampleLine(raw);
-    if (p.status === "HIT") { hits += 1; total += 1; }
-    else if (p.status === "MISS") { total += 1; }
+    if (typeof raw === "string") {
+      const p = parseSampleLine(raw);
+      if (p.status === "HIT") { hits += 1; total += 1; }
+      else if (p.status === "MISS") { total += 1; }
+    } else if (raw && typeof raw === "object" && typeof raw.hit === "boolean") {
+      if (raw.hit) hits += 1;
+      total += 1;
+    }
   }
   return total > 0 ? hits / total : null;
 }
@@ -94,13 +87,19 @@ function pickWinner(lines: { key: string; v: number | null }[]): string | null {
   return best;
 }
 
-export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
+export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }: Props) {
   // Default view: chart-only (one bar per candidate = accuracy). The
   // composite chip pairs the formula-weighted score; the what-if chip
   // opens the ablation widget below the chart. State lives in a module
   // store so swapping tabs (New Job ↔ View Results) preserves chip and
   // selection state across the FitnessPanel unmount.
-  const { showComposite, showWhatIf, selected, seeded } = useFitnessState();
+  //
+  // Seeding is scoped to the cycle: `seededForCycle` records which cycle
+  // the current `selected` set was seeded for. When the operator binds a
+  // fresh cycle, the panel re-seeds against that cycle's formula rather
+  // than inheriting the prior cycle's picks.
+  const { showComposite, showWhatIf, selected, seededForCycle } = useFitnessState();
+  const seeded = seededForCycle != null && seededForCycle === cycleId;
   const setShowComposite = (v: boolean | ((p: boolean) => boolean)) =>
     setFitnessState({ showComposite: typeof v === "function" ? v(showComposite) : v });
   const setShowWhatIf = (v: boolean | ((p: boolean) => boolean)) =>
@@ -110,9 +109,8 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
   const meta = WHATIF_INLINE_META;
 
   // ── 1. In-flight candidates from the live dashboard
-  const cr = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: InflightCandidate[] } }> | undefined)?.l1_score ?? null;
-  const inflightCandidates: InflightCandidate[] = cr?.output?.candidates ?? [];
-  const currentRound = roundOf(dash) ?? 0;
+  const inflightCandidates: LiveCandidate[] = liveL1Candidates(dash);
+  const currentRound = dashRound ?? 0;
 
   // ── 2. Historical rounds — round_NNNN.json files on disk, fetched once
   // per refreshKey bump via the shared hook (also feeds HeroSummary /
@@ -164,7 +162,7 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
       parsed = whatifIdentifiersInFormula(top);
     } else {
       for (const c of inflightCandidates) {
-        const f = (c.stats as { composite_fitness_formula?: string | null } | undefined)?.composite_fitness_formula;
+        const f = c.stats?.composite_fitness_formula;
         if (f) { parsed = whatifIdentifiersInFormula(f); break; }
       }
     }
@@ -199,23 +197,30 @@ export function FitnessPanel({ dash, cycleId, refreshKey, themeKey }: Props) {
     return built.slice().sort((a, b) => bucketOf(a) - bucketOf(b));
   }, [meta, realApplicable, inActive, selected, isPrestaging]);
 
+  // One-shot seed: when the cycle binds applicable evaluators for the first
+  // time (or the cycle changes), seed `selected` from the formula's inActive
+  // set so the operator opens to "what's actually scored" as the default.
   useEffect(() => {
-    if (seeded) {
-      const drop = [...selected].filter((n) => !viewApplicable.has(n));
-      if (drop.length) {
-        const next = new Set(selected);
-        for (const n of drop) next.delete(n);
-        setFitnessState({ selected: next });
-      }
-      return;
-    }
-    if (viewApplicable.size === 0) return;
+    if (seeded || viewApplicable.size === 0) return;
     const seed = new Set<string>();
     for (const r of rows) {
       if (r.applicable && inActive.has(r.displayName)) seed.add(r.displayName);
     }
-    setFitnessState({ selected: seed, seeded: true });
-  }, [rows, inActive, viewApplicable, seeded, selected]);
+    setFitnessState({ selected: seed, seededForCycle: cycleId });
+  }, [seeded, viewApplicable, rows, inActive, cycleId]);
+
+  // Prune: when the applicable evaluator set shrinks (e.g. a node was
+  // disabled and its evaluators dropped out), remove selections that fell
+  // off. The effect only removes from `selected`, never adds, so it
+  // terminates after one render (next pass: drop.length === 0).
+  useEffect(() => {
+    if (!seeded) return;
+    const drop = [...selected].filter((n) => !viewApplicable.has(n));
+    if (!drop.length) return;
+    const next = new Set(selected);
+    for (const n of drop) next.delete(n);
+    setFitnessState({ selected: next });
+  }, [seeded, viewApplicable, selected]);
 
   const toggle = (name: string) => {
     const next = new Set(selected);

@@ -1,30 +1,27 @@
 "use client";
-import { roundOf, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
+import { liveL1Candidates, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
 
 interface Props {
   dash: DashboardSnapshot | null;
+  dashRound: number | null;
   status: StatusKind;
 }
 
-interface CandidateLike {
-  idx?: number;
-  label?: string;
-  samples?: string[];
-}
-
-export function LiveSamplesCard({ dash, status }: Props) {
-  const score = (dash?.current_round?.nodes as Record<string, { output?: { candidates?: CandidateLike[] } }> | undefined)?.l1_score;
-  const cands = score?.output?.candidates ?? [];
-  const roundNum = roundOf(dash) ?? 0;
+export function LiveSamplesCard({ dash, dashRound, status }: Props) {
+  const cands = liveL1Candidates(dash);
+  const roundNum = dashRound ?? 0;
 
   // Flatten across candidates, tagging each sample with its candidate label.
+  // Live samples arrive as compact strings from LiveDashboardProjection; full
+  // dict rows are only emitted post-round and don't surface in this card.
   const rows: { candLabel: string; raw: string }[] = [];
   for (const c of cands) {
     const label = c.label || candidateLabel(roundNum, c.idx);
-    const samples = c.samples ?? [];
-    for (const s of samples) rows.push({ candLabel: label, raw: s });
+    for (const s of c.samples ?? []) {
+      if (typeof s === "string") rows.push({ candLabel: label, raw: s });
+    }
   }
 
   // Newest first, cap at 200.

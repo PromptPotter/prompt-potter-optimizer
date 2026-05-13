@@ -35,6 +35,46 @@ export interface DashboardSnapshot {
   [key: string]: unknown;
 }
 
+// `current_round.nodes.l1_score.output.candidates[]` shape — the live in-flight
+// projection of the round in progress. Samples are compact strings during the
+// round (per `fmt_sample_line` in live_dashboard.py) and dicts once the round
+// completes. Every consumer drills into this same path; `liveL1Candidates`
+// narrows once so the call sites don't repeat the `as Record<...>` cast.
+export interface LiveSample {
+  sample_id?: number;
+  hit?: boolean;
+  prediction?: string;
+  cached?: boolean;
+  time_s?: number;
+  terminated_at?: string;
+  input_tokens?: number;
+  output_tokens?: number;
+}
+
+export interface LiveCandidate {
+  idx?: number;
+  label?: string;
+  model?: string;
+  samples?: (LiveSample | string)[];
+  stats?: {
+    accuracy?: number;
+    composite_fitness?: number;
+    composite_fitness_formula?: string | null;
+    evaluators?: Record<string, number>;
+  };
+}
+
+export interface L1ScoreOutput {
+  candidates?: LiveCandidate[];
+}
+
+export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[] {
+  const nodes = dash?.current_round?.nodes;
+  if (!nodes || typeof nodes !== "object") return [];
+  const l1 = (nodes as Record<string, { output?: L1ScoreOutput }>).l1_score;
+  return l1?.output?.candidates ?? [];
+}
+
 export interface DashboardState {
   dash: DashboardSnapshot | null;
   status: StatusKind;

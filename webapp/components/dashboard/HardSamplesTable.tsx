@@ -1,13 +1,8 @@
 "use client";
 import { useEffect, useMemo, useState, type CSSProperties, type PointerEvent } from "react";
-import {
-  fetchActiveDatasetName,
-  fetchDatasetPreview,
-  type DatasetItem,
-} from "@/lib/api";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { type DatasetItem } from "@/lib/api";
+import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
 
-const MAX_FETCH = 1000;
 const STORAGE_KEY = "hs-grid:v1";
 const FOLDED_WIDTH = 28;
 const MIN_WIDTH = 32;
@@ -26,15 +21,18 @@ export interface MeasurementDot {
 }
 
 interface Props {
-  cycleId: string | null;
   dash: DashboardSnapshot | null;
   // Per-sample chronological measurement dots. When supplied, the table
   // shows a "measurements" column with one dot per measurement; when
-  // omitted (legacy callers) the column is hidden.
+  // omitted, the column is hidden.
   perSample?: Map<number, MeasurementDot[]>;
   // Compact = tiny default height (~3 rows visible). User can still drag
   // the resize handle to grow it. Off = standard preset height.
   compact?: boolean;
+  datasetName: string | null;
+  datasetItems: DatasetItem[];
+  datasetTrainCount: number;
+  datasetTestCount: number;
 }
 
 type ColId =
@@ -103,24 +101,19 @@ interface LiveEntry {
 // completes and full dicts land. Live columns then show em-dashes mid-round.
 function extractLive(dash: DashboardSnapshot | null): Map<number, LiveEntry> {
   const out = new Map<number, LiveEntry>();
-  if (!dash) return out;
-  const nodes = (dash.current_round?.nodes ?? {}) as Record<string, unknown>;
-  const l1Score = nodes.l1_score as { output?: { candidates?: unknown[] } } | undefined;
-  const candidates = l1Score?.output?.candidates ?? [];
-  for (const c of candidates) {
-    const samples = (c as { samples?: unknown[] }).samples ?? [];
-    for (const s of samples) {
-      const r = s as Record<string, unknown>;
-      const sid = typeof r.sample_id === "number" ? r.sample_id : null;
+  for (const c of liveL1Candidates(dash)) {
+    for (const s of c.samples ?? []) {
+      if (typeof s !== "object" || s == null) continue;
+      const sid = typeof s.sample_id === "number" ? s.sample_id : null;
       if (sid == null) continue;
       out.set(sid, {
-        prediction:    typeof r.prediction === "string" ? r.prediction : undefined,
-        hit:           typeof r.hit === "boolean" ? r.hit : undefined,
-        cached:        typeof r.cached === "boolean" ? r.cached : undefined,
-        time_s:        typeof r.time_s === "number" ? r.time_s : undefined,
-        terminated_at: typeof r.terminated_at === "string" ? r.terminated_at : undefined,
-        input_tokens:  typeof r.input_tokens === "number" ? r.input_tokens : undefined,
-        output_tokens: typeof r.output_tokens === "number" ? r.output_tokens : undefined,
+        prediction:    s.prediction,
+        hit:           s.hit,
+        cached:        s.cached,
+        time_s:        s.time_s,
+        terminated_at: s.terminated_at,
+        input_tokens:  s.input_tokens,
+        output_tokens: s.output_tokens,
       });
     }
   }
@@ -292,47 +285,30 @@ function autoWidthFor(
 
 const RANK_HINT = "Position in current sort order — click to clear sort";
 
-export function HardSamplesTable({ cycleId, dash, perSample, compact }: Props) {
+export function HardSamplesTable({
+  dash,
+  perSample,
+  compact,
+  datasetName,
+  datasetItems,
+  datasetTrainCount,
+  datasetTestCount,
+}: Props) {
   // When perSample is undefined (legacy callers), drop the dots column
   // entirely so the table renders exactly as before.
   const columns = useMemo<ColDef[]>(
     () => COLUMNS.filter((c) => perSample || c.id !== "measurements"),
     [perSample],
   );
-  const [items, setItems] = useState<DatasetItem[]>([]);
-  const [datasetName, setDatasetName] = useState<string | null>(null);
-  const [trainCount, setTrainCount] = useState(0);
-  const [testCount, setTestCount] = useState(0);
+  const items = datasetItems;
+  const trainCount = datasetTrainCount;
+  const testCount = datasetTestCount;
 
   const [persisted, setPersisted] = useState<PersistedState>(() => loadPersisted());
   const [sortBy, setSortBy] = useState<{ col: ColId; dir: "asc" | "desc" } | null>(null);
   const [popover, setPopover] = useState<{ col: ColId; sampleId: number; text: string } | null>(null);
 
   useEffect(() => savePersisted(persisted), [persisted]);
-
-  useEffect(() => {
-    if (!cycleId) return;
-    let cancelled = false;
-    const ac = new AbortController();
-    (async () => {
-      try {
-        const name = await fetchActiveDatasetName(cycleId, ac.signal);
-        if (cancelled || !name) return;
-        setDatasetName(name);
-        const preview = await fetchDatasetPreview(name, MAX_FETCH, ac.signal);
-        if (cancelled) return;
-        setItems(preview.items);
-        setTrainCount(preview.train_count);
-        setTestCount(preview.test_count);
-      } catch {
-        // initial load may race with cycle-mint; user retries via reload
-      }
-    })();
-    return () => {
-      cancelled = true;
-      ac.abort();
-    };
-  }, [cycleId]);
 
   // Dismiss popover on Escape.
   useEffect(() => {
