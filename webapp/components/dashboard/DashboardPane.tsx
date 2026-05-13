@@ -220,7 +220,16 @@ export function DashboardPane() {
 
   return (
     <div className={`shell${tab === "newjob" ? " chat-mode" : ""}`}>
-      <Sidebar pane={pane} onSelect={onPaneSelect} />
+      <Sidebar
+        pane={pane}
+        onSelect={onPaneSelect}
+        cycleId={cycleId}
+        onSelectCycle={(id) => {
+          handleCycleChange(id);
+          setTab("results");
+          setPane("dashboard");
+        }}
+      />
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
         {tab === "newjob" ? (
