@@ -191,6 +191,19 @@ class RunObservers:
     pobb: PoBBStreamView
     display: LiveDisplay | None
 
+    def drain_all(self) -> None:
+        """Call ``drain()`` on every projection in the bundle.
+
+        The runner invokes this in ``_finalize_run`` regardless of stop
+        reason so the audit cache reflects whatever the ledger has, even
+        when an interrupt prevented the round's ``round:complete`` event.
+        Incremental projections (``LiveDashboardView``, ``PoBBStreamView``)
+        inherit the no-op default.
+        """
+        self.audit.drain()
+        self.dashboard.drain()
+        self.pobb.drain()
+
 
 @dataclass(frozen=True)
 class ForkInfo:

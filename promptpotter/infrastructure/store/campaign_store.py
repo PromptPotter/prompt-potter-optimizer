@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import shutil
 from datetime import UTC, datetime
@@ -19,6 +20,46 @@ from promptpotter.infrastructure.store.base import (
 from promptpotter.infrastructure.store.paths import campaign_dir_for, sibling_kind
 
 logger = logging.getLogger(__name__)
+
+
+def _scan_ledger_max_round_complete(ledger_path: Path) -> int:
+    """Return the highest round number that has a closing PhaseRecord in the
+    ledger at ``ledger_path``. Returns ``-1`` if no round has closed.
+
+    Closing events follow ``AuditTrailView._handle_phase``'s symmetry:
+    ``(phase="origin", event="exit", round=0)`` for origin and
+    ``(phase="round", event="complete", round=N)`` for normal rounds.
+    Both close their round and flush the audit cache.
+
+    Pure file read — does not instantiate :class:`CycleEventLog` so no
+    subscribers fire. The ledger is JSONL; each line is one record dict.
+    Corrupt lines are skipped (graceful — the ledger has at-least-once
+    semantics from the writer's perspective; readers tolerate gaps).
+    """
+    max_complete = -1
+    try:
+        with ledger_path.open("r", encoding="utf-8") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    rec = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if rec.get("record_type") != "phase":
+                    continue
+                phase = rec.get("phase")
+                event = rec.get("event")
+                if (phase == "round" and event == "complete") or (
+                    phase == "origin" and event == "exit"
+                ):
+                    rnd = rec.get("round")
+                    if isinstance(rnd, int) and rnd > max_complete:
+                        max_complete = rnd
+    except OSError:
+        return -1
+    return max_complete
 
 
 class CampaignStore(EntityStore):
@@ -117,24 +158,52 @@ class CampaignStore(EntityStore):
     ) -> None:
         """Archive round_data/candidate files for rounds > ``after_round``.
 
-        Moves ``rounds/trial_{M:04d}.json`` and
+        Moves ``rounds/round_{M:04d}.json`` and
         ``.runtime/cache/candidates/round_{M:04d}.json`` for M > after_round
         into ``.runtime/archived/resumed_at_<ts>/{rounds,candidates}/``,
         then rebuilds the cycle's round_data index to reflect only surviving
-        rounds (rounds 0..after_round). No-op on a cycle with no such round_data.
+        rounds (rounds 0..after_round).
+
+        Admissibility consults the ledger first: ``--from N`` is valid iff
+        the ledger has a ``PhaseRecord(round, complete, round=N)``. The
+        public ``rounds/`` tree IS expected to be present for every round
+        in ``[0..max_complete]`` because ``save_round_file`` fires inside
+        the same ``_persist_round`` call that emits ``round:complete``.
+        Mismatch (ledger has it, public tree doesn't) is surfaced as a
+        separate, sharper error.
         """
         cycle_dir = self._campaign_dir(backend_id, cycle_id)
         rounds_dir = self._rounds_dir(backend_id, cycle_id)
         candidates_dir = self._candidates_dir(backend_id, cycle_id)
 
-        if not rounds_dir.exists():
-            raise LookupError(f"cycle {cycle_id!r} has no rounds on disk")
-
-        target = rounds_dir / f"round_{after_round:04d}.json"
-        if not target.exists():
+        ledger_path = cycle_dir / ".runtime" / "ledger.jsonl"
+        if not ledger_path.exists():
+            raise LookupError(f"cycle {cycle_id!r} has no ledger on disk")
+        max_complete = _scan_ledger_max_round_complete(ledger_path)
+        if after_round > max_complete:
             raise LookupError(
-                f"--from {after_round}: round_{after_round:04d}.json not found in {rounds_dir}"
+                f"--from {after_round}: ledger only has completed rounds 0..{max_complete}"
             )
+
+        # Origin (round 0) closes via ``(phase=origin, event=exit)`` and writes
+        # only the audit cache (``.runtime/cache/rounds/round_0000.json``);
+        # ``save_round_file`` runs only inside ``_persist_round`` for round≥1.
+        # So ``--from 0`` on an origin-only cycle is legitimate even when
+        # the public ``rounds/`` tree doesn't exist yet — there's nothing
+        # to archive in that case.
+        if after_round >= 1:
+            if not rounds_dir.exists():
+                raise LookupError(
+                    f"cycle {cycle_id!r}: ledger has rounds 0..{max_complete} but "
+                    f"{rounds_dir} is missing — projection cache out of sync with ledger"
+                )
+            target = rounds_dir / f"round_{after_round:04d}.json"
+            if not target.exists():
+                raise LookupError(
+                    f"--from {after_round}: round_{after_round:04d}.json not found in "
+                    f"{rounds_dir} (ledger has completed rounds 0..{max_complete} — "
+                    "projection cache out of sync)"
+                )
 
         survivors: list[Path] = []
         to_archive_rounds: list[Path] = []
@@ -224,23 +293,29 @@ class CampaignStore(EntityStore):
         best_round: int,
         n_rounds: int,
         finished_at: str,
+        interrupted_round: int | None = None,
     ) -> None:
-        """Write the terminal status/stop_reason + outcome summary to disk."""
+        """Write the terminal status/stop_reason + outcome summary to disk.
+
+        ``interrupted_round`` is recorded only when ``status == "interrupted"``;
+        it names which round was active when the operator hit Ctrl+C so the
+        webapp / CLI can show "partial round N" without re-deriving from the
+        ledger.
+        """
         from promptpotter.shared.errors import graceful
 
+        updates: dict[str, Any] = {
+            "status": status,
+            "stop_reason": stop_reason,
+            "best_accuracy": best_accuracy,
+            "best_round": best_round,
+            "n_rounds": n_rounds,
+            "finished_at": finished_at,
+        }
+        if status == "interrupted" and interrupted_round is not None:
+            updates["interrupted_round"] = interrupted_round
         with graceful("Campaign completion update failed"):
-            self.update(
-                backend_id,
-                cycle_id,
-                {
-                    "status": status,
-                    "stop_reason": stop_reason,
-                    "best_accuracy": best_accuracy,
-                    "best_round": best_round,
-                    "n_rounds": n_rounds,
-                    "finished_at": finished_at,
-                },
-            )
+            self.update(backend_id, cycle_id, updates)
 
     def prune_dead_forks(
         self,

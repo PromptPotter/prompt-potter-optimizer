@@ -127,6 +127,10 @@ class AuditTrailView(DerivedView):
         # wall-clock observation in this projection.
         self._started_at: str = ""
         self._finished_at: str = ""
+        # Set by the runner before ``drain()`` when the cycle is being torn
+        # down on Ctrl+C; threads ``"interrupted": True`` onto the payload of
+        # the round that never received a ``round:complete``.
+        self._cycle_was_interrupted: bool = False
 
     @classmethod
     def from_cycle_dir(cls, cycle_dir: CycleDir) -> AuditTrailView:
@@ -285,6 +289,8 @@ class AuditTrailView(DerivedView):
             "finished_at": self._finished_at,
             "nodes": nodes_ordered,
         }
+        if self._cycle_was_interrupted:
+            payload["interrupted"] = True
 
         write_json(path, payload, default=str)
         logger.debug(
@@ -297,3 +303,16 @@ class AuditTrailView(DerivedView):
         self._nodes = {}
         self._l1_score = None
         return path
+
+    def drain(self) -> None:
+        """Flush any buffered round state to disk on cycle teardown.
+
+        The normal flush path fires on ``PhaseRecord("round", "complete"|"exit")``;
+        a mid-candidate interrupt never emits ``complete``, so the buffered
+        nodes would otherwise be lost on the runner returning. ``drain`` is
+        the runner's seam for "the cycle is over — settle to disk now."
+        When ``_cycle_was_interrupted`` is true (set externally), the partial
+        ``round_NNNN.json`` carries ``"interrupted": true`` at top level.
+        """
+        if self._nodes or self._l1_score is not None:
+            self.flush()

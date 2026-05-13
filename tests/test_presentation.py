@@ -383,6 +383,42 @@ def test_audit_trail_on_record_handles_round_phase(tmp_path: Path) -> None:
     assert written.exists(), "PhaseRecord('round', 'complete') must flush round_NNNN.json"
 
 
+def test_audit_trail_drain_flushes_partial_round(tmp_path: Path) -> None:
+    """`drain()` flushes a buffered round even when `round:complete` never arrives.
+
+    Doctrine: ledger is the truth; projection files are caches. An operator
+    Ctrl+C mid-candidate produces a ledger with the round's `enter` event
+    and LLMCallRecord(s), but no `complete`. Without `drain()`, the audit
+    projection's `_nodes` buffer is silently discarded on teardown. With
+    `drain()`, the partial round lands on disk tagged `"interrupted": true`
+    so future tooling can read it.
+    """
+    from promptpotter.domain.run_records import LLMCallRecord, PhaseRecord
+
+    cycle_dir = tmp_path / "campaigns" / "cyc_drain"
+    cycle_dir.mkdir(parents=True)
+    proj = AuditTrailView.from_cycle_dir(CycleDir(cycle_dir))
+
+    # Round 1 begins, an L1 call is recorded, then the run is interrupted —
+    # no `complete` event arrives. Simulate the runner's teardown by setting
+    # the interrupted flag and calling drain().
+    proj.on_record(PhaseRecord(phase="round", event="enter", round=1), 0)
+    proj.on_record(
+        LLMCallRecord(
+            node="l1_generate", round=1, payload={"type": "l1_generate", "response": "partial"}
+        ),
+        1,
+    )
+    proj._cycle_was_interrupted = True
+    proj.drain()
+
+    path = cycle_dir / ".runtime" / "cache" / "rounds" / "round_0001.json"
+    assert path.exists(), "drain() must flush the partial round to disk"
+    payload = json.loads(path.read_text(encoding="utf-8"))
+    assert payload.get("interrupted") is True, "interrupted flag must surface on the partial round"
+    assert "l1_generate" in payload["nodes"], "the buffered LLM call must be in the flushed nodes"
+
+
 def test_audit_trail_persists_origin_as_round_0000(tmp_path: Path) -> None:
     """Origin IS round 0 on disk: ``PhaseRecord('origin','enter'|'exit',round=0)``
     flushes to ``round_0000.json``; the first L1 round (round=1) flushes to

@@ -29,6 +29,23 @@ MUST NOT write campaign artifacts beyond their declared allowlist (guarded
 by `tests/test_invariants.py::test_no_direct_artifact_writes_outside_stores`
 + `test_artifact_sets_are_disjoint_and_well_formed`).
 
+`DerivedView.drain()` is the runner's teardown seam: `_finalize_run` calls
+`RunObservers.drain_all()` on every stop reason so buffered projection
+state is flushed to disk without faking a `round:complete`. `AuditTrailView`
+is the only projection that buffers — its `drain()` writes the partial
+`round_NNNN.json` with `"interrupted": true` at top level when the cycle
+was torn down on Ctrl+C. The public `rounds/` tree stays empty for
+interrupted rounds by design (a partial round is not a complete round);
+the audit cache under `.runtime/cache/rounds/` carries the partial so
+post-mortem readers can see what the ledger has.
+
+`CampaignStore.rewind_to_round` consults the ledger (not the public
+`rounds/` tree) for admissibility: `--from N` is valid iff the ledger
+contains a closing PhaseRecord for round N (`(phase="round", event="complete")`
+or, for round 0, `(phase="origin", event="exit")`). The pure ledger scan
+lives in `_scan_ledger_max_round_complete` and never instantiates
+`CycleEventLog`, so no subscribers fire during admissibility checks.
+
 ## Stores — composite over leaves
 
 `store/stores.py`: `Stores` frozen dataclass + `build_stores(base_dir)`

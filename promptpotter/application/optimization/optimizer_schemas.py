@@ -50,6 +50,7 @@ def _truncate(max_len: int):
 
     return _v
 
+
 __all__ = [
     "OPTIMIZER_RESPONSE_MODELS",
     "L1CritiqueOutput",
@@ -74,6 +75,7 @@ EvidenceGroundingField = Literal[
     "escalation_panel",
     "task_context",
     "plan",
+    "critique",
     "stall_exploration",
 ]
 

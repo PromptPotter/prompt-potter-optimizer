@@ -51,7 +51,6 @@ from promptpotter.shared.errors import graceful
 if TYPE_CHECKING:
     from promptpotter.domain.pipeline_schema import PipelineSchema
     from promptpotter.domain.search_point import JobSearchPoint
-    from promptpotter.infrastructure.projections import LiveDashboardView
 
 logger = logging.getLogger(__name__)
 
@@ -607,28 +606,33 @@ async def run_optimization(
         session_id=session.session_id or None,
         resumed_from_round=session.state.resumed_from_round,
     )
-    _finalize_run(
-        cycle, session, observers.dashboard, cycle_result, campaign_config, sweep=sweep, diag=diag
-    )
+    _finalize_run(cycle, session, observers, cycle_result, campaign_config, sweep=sweep, diag=diag)
     return cycle_result
 
 
 def _finalize_run(
     cycle: Cycle,
     session: Session,
-    emitter: LiveDashboardView | None,
+    observers: RunObservers,
     cycle_result: CycleResult,
     campaign_config: CampaignConfig,
     *,
     sweep: bool = False,
     diag: bool = False,
 ) -> None:
-    """Mark cycle finished, fold summary into index.json::final, render log.md, finalize emitter."""
+    """Mark cycle finished, fold summary into index.json::final, render log.md, drain projections."""
     stop_reason = cycle_result.stop_reason
+    is_interrupted = stop_reason == StopReason.INTERRUPTED
+    emitter = observers.dashboard
     if session.state.cycle_id:
         status_map = {
             str(StopReason.INTERRUPTED): "interrupted",
         }
+        # The active round number when the interrupt fired lives on the
+        # callbacks (set by ``cb.set_round`` at each iteration). Surfacing
+        # it on ``index.json::interrupted_round`` lets the operator see
+        # which round is partial without diffing the on-disk tree.
+        interrupted_round = int(observers.callbacks._current_round) if is_interrupted else None
         session.store.campaigns.mark_finished(
             session.backend_id,
             session.state.cycle_id,
@@ -638,9 +642,16 @@ def _finalize_run(
             best_round=cycle_result.best_round,
             n_rounds=cycle_result.n_rounds,
             finished_at=cycle_result.finished_at,
+            interrupted_round=interrupted_round,
         )
+    # Drain projections AFTER mark_stopped so dashboard.json's stopped-state
+    # is in place before the audit cache settles. ``_cycle_was_interrupted``
+    # threads ``"interrupted": true`` into any partial round_NNNN.json the
+    # audit projection writes on its way out.
     if emitter is not None:
         emitter.mark_stopped(str(stop_reason or ""))
+    observers.audit._cycle_was_interrupted = is_interrupted
+    observers.drain_all()
 
     obs = session.state.obs
     if obs:

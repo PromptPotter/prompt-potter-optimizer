@@ -47,3 +47,10 @@ class DerivedView:
     def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...
     def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None: ...
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...
+
+    def drain(self) -> None:
+        """Settle any buffered state to disk. Called by the runner on cycle
+        teardown (interrupted or completed) so the ledger's truth is mirrored
+        on disk even when no ``round:complete`` boundary arrived. Default:
+        no-op for incremental projections that already flush every event.
+        """

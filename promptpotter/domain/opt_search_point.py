@@ -156,6 +156,7 @@ EVIDENCE_GROUNDING_FIELDS: frozenset[str] = frozenset(
         "escalation_panel",
         "task_context",
         "plan",
+        "critique",
         "stall_exploration",
     }
 )

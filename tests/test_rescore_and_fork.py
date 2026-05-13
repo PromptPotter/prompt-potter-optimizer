@@ -387,6 +387,26 @@ def _seed_rewind_cycle(store, backend_id: str, cycle_id: str, rounds: int) -> No
             r,
             [{"round": r, "id": f"cand_{r}"}],
         )
+    # Mint a minimal ledger so the ledger-aware ``rewind_to_round`` admissibility
+    # check sees each seeded round as completed. Origin (round 0) closes via
+    # ``(phase=origin, event=exit)``; normal rounds via ``(phase=round, event=complete)``.
+    cycle_dir = store.campaign_dir(cycle_id)
+    runtime_dir = cycle_dir / ".runtime"
+    runtime_dir.mkdir(parents=True, exist_ok=True)
+    ledger_path = runtime_dir / "ledger.jsonl"
+    lines: list[str] = []
+    for r in range(rounds):
+        if r == 0:
+            lines.append(
+                json.dumps({"record_type": "phase", "phase": "origin", "event": "exit", "round": 0})
+            )
+        else:
+            lines.append(
+                json.dumps(
+                    {"record_type": "phase", "phase": "round", "event": "complete", "round": r}
+                )
+            )
+    ledger_path.write_text("\n".join(lines) + ("\n" if lines else ""), encoding="utf-8")
 
 
 class TestRewindToRound:
@@ -449,7 +469,11 @@ class TestRewindToRound:
         store = CampaignStore(tmp_path)
         _seed_rewind_cycle(store, "bid", "cycle_a", rounds=3)
 
-        with _pytest.raises(LookupError, match=r"round_0099\.json not found"):
+        # ``rewind_to_round`` consults the ledger first for admissibility.
+        # Asking for a round the ledger never closed surfaces a truthful
+        # "ledger only has completed rounds 0..N" rather than the cache-name
+        # error of the prior contract.
+        with _pytest.raises(LookupError, match=r"ledger only has completed rounds 0\.\.2"):
             store.rewind_to_round("bid", "cycle_a", after_round=99)
 
     def test_resume_from_missing_cycle_raises(self, tmp_path):
@@ -458,5 +482,7 @@ class TestRewindToRound:
         from promptpotter.infrastructure.store import CampaignStore
 
         store = CampaignStore(tmp_path)
-        with _pytest.raises(LookupError, match="no rounds on disk"):
+        # A nonexistent cycle has no ledger on disk — the ledger pre-check
+        # raises before the public ``rounds/`` tree is consulted.
+        with _pytest.raises(LookupError, match="no ledger on disk"):
             store.rewind_to_round("bid", "cycle_nonexistent", after_round=0)

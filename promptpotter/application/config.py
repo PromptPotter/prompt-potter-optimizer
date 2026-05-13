@@ -156,11 +156,12 @@ class OptimizationConfig(BaseModel):
     )
 
     improvement_significance: float = Field(
-        0.10,
+        1.0,
         description="One-sided proportion-test threshold for declaring a round "
         "IMPROVED. The challenger must beat origin by `improvement_threshold` AND "
         "score at least `elimination_n_min` samples AND yield p < this. Smaller = "
-        "stricter. Set to 1.0 to disable the significance gate (point-estimate only).",
+        "stricter. Default 1.0 disables the gate (promote on observed lift only); "
+        "set lower (e.g. 0.10) to require statistical significance for ablation runs.",
     )
 
     max_consecutive_errors: int = Field(3)

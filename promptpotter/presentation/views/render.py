@@ -148,11 +148,17 @@ def _render_sp_diff(view: SpDiffView) -> str:
         rows: list[tuple[str, list[str]]] = []
         for k in group_keys:
             cells: list[str] = []
-            prev_val: str | None = None
-            for _, d in columns:
+            start_val = columns[0][1].get(k) if columns else None
+            parent_val = columns[1][1].get(k) if len(columns) > 1 else None
+            for ci, (_, d) in enumerate(columns):
                 v = d.get(k)
-                cells.append(_cell(v, prev_val))
-                prev_val = v
+                if ci == 0:
+                    prior: str | None = None
+                elif ci == 1:
+                    prior = start_val
+                else:
+                    prior = parent_val
+                cells.append(_cell(v, prior))
             rows.append((k, cells))
         rendered_groups.append((node_name, rows))
 

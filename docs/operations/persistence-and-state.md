@@ -149,6 +149,10 @@ Archives `rounds/round_0003.json` onward into `campaigns/{cycle_id}/.runtime/arc
 
 **Editing optimizer state by hand.** Open `campaigns/{cycle_id}/rounds/round_{N:04d}.json` and edit before `optimize --from N`. Keep the `opt_search_point` block shape round-trippable. Schema: [`../developer/self-healing-internals.md`](../developer/self-healing-internals.md).
 
+#### Interrupted rounds
+
+If you Ctrl+C mid-round, the ledger has the partial events but the round never received `round:complete`. On teardown the runner drains projections: `.runtime/cache/rounds/round_NNNN.json` is written with `"interrupted": true` so post-mortem readers can see what landed. The public `rounds/round_NNNN.json` stays absent — a partial round is not a complete round — and `index.json` records `status: "interrupted"` + `interrupted_round: N`. `--from M` admissibility consults the ledger: `M` is valid iff round `M` has a closing PhaseRecord (`round:complete`, or `origin:exit` for round 0). After an interrupt mid-round-1, `--from 1` correctly refuses with `"ledger only has completed rounds 0..0"`; `--from 0` resumes cleanly.
+
 ### Fork — `optimize --fork-on-divergence`
 
 Use when the scoring formula changed and resume detects that decisions recorded under the old scorer don't match rescored results under the new scorer. The optimizer halts rather than drift silently. Two choices: revert the scoring change, or commit by rerunning with `--fork-on-divergence`.

@@ -79,9 +79,10 @@ def _init_enter(d: dict, ctx: dict) -> InitEnterView:
 
     ctx["max_rounds"] = opt.max_rounds or 0
     ctx["patience"] = opt.l1_patience
-    ctx["original_sp_flat"] = flatten_sp_summary(
-        schema.to_pipeline_params() if schema else None,
-    )
+    origin_pp = session.pipeline_params if session is not None else None
+    if not origin_pp and schema is not None:
+        origin_pp = schema.to_pipeline_params()
+    ctx["original_sp_flat"] = flatten_sp_summary(origin_pp)
     ctx["node_param_keys"] = (
         {s: sorted(k) for s, k in schema.node_param_keys().items()} if schema else None
     )

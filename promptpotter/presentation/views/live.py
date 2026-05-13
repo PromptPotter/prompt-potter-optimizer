@@ -833,13 +833,33 @@ class LiveDisplay(DerivedView):
                 self._write(self._fmt_round_leader(label, float(acc), origin_acc))
 
     def _fmt_round_leader(self, label: str, acc: float, origin_acc: float) -> str:
-        """One-liner scoreboard: ``★ leader`` on a new best, ``→`` else."""
+        """One-liner scoreboard.
+
+        ``★ leader`` is reserved for a new round-best that strictly beats
+        origin — the only candidate that actually leads. A new round-best
+        that ties or trails origin shows as ``→ round-best`` (still tracks
+        the prior pointer so later candidates can report ``from {prior}``),
+        and non-max candidates fall through to ``→ {label} … from {prior}``.
+        """
         delta_origin = acc - origin_acc
-        if self._round_best_acc is None or acc > self._round_best_acc:
+        new_round_max = self._round_best_acc is None or acc > self._round_best_acc
+        if new_round_max:
             self._round_best_acc = acc
             self._round_best_label = label
-            sign = "+" if delta_origin >= 0 else ""
-            return f"  {GREEN}★ leader: {label} {acc:.1%}  (Δ {sign}{delta_origin:.1%} vs origin){RESET}"
+            if delta_origin > 0:
+                return (
+                    f"  {GREEN}★ leader: {label} {acc:.1%}  "
+                    f"(Δ +{delta_origin:.1%} vs origin){RESET}"
+                )
+            if delta_origin == 0:
+                return (
+                    f"  {YELLOW}= ties origin: {label} {acc:.1%}  "
+                    f"(Δ ±0.0% vs origin){RESET}"
+                )
+            return (
+                f"  {DIM}→ round-best: {label} {acc:.1%}  "
+                f"(Δ {delta_origin:.1%} vs origin){RESET}"
+            )
         gap = acc - (self._round_best_acc or acc)
         prior = self._round_best_label or "leader"
         return f"  {DIM}→ {label} {acc:.1%}  ({gap:.1%} from {prior}){RESET}"
