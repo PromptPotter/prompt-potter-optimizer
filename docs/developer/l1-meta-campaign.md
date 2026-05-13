@@ -29,13 +29,12 @@ call /potter-l1-meta-campaign  ->  reads new cycle, writes log row, prints next 
 
 | Step | Command |
 |---|---|
-| 1 | `python -m promptpotter init --config datasets/{name}/campaign.json` |
-| 2 | `python -m promptpotter optimize` |
-| 3 | `/potter-l1-meta-campaign` |
+| 1 | `python -m promptpotter optimize --config datasets/{name}/campaign.json` |
+| 2 | `/potter-l1-meta-campaign` |
 
-Step 3 reads `index.json::final.prompt_hashes.{prompt_id}` into `state.json::active_hash`, writes the first `review` row, clears `paused`.
+Step 2 reads `index.json::final.prompt_hashes.{prompt_id}` into `state.json::active_hash`, writes the first `review` row, clears `paused`.
 
-Calling the skill before step 2 just prints the pause message and exits. Running `optimize` first saves one tick.
+Calling the skill before step 1 finishes just prints the pause message and exits. Running `optimize` first saves one tick.
 
 ### When to re-invoke
 

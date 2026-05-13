@@ -287,6 +287,16 @@ def _normalize_pp_override(
             del pipeline_params_override[node_name]
 
     if pipeline_schema:
+        # Split dotted-path keys (e.g. {"llm_only.model": "X"} → {"llm_only": {"model": "X"}}).
+        # Weaker LLMs emit this shape; without splitting they fall through to the
+        # hallucinated-node drop below and the variant lands as a no-op.
+        for dk in [k for k in list(pipeline_params_override) if "." in k]:
+            node, _, param = dk.partition(".")
+            if pipeline_schema.has_node(node) and param:
+                logger.warning("l1_generate: splitting dotted key %r → %s.%s", dk, node, param)
+                pipeline_params_override.setdefault(node, {})[param] = (
+                    pipeline_params_override.pop(dk)
+                )
         # Auto-nest flat params + drop hallucinated nodes.
         for fk in [k for k, val in pipeline_params_override.items() if not isinstance(val, dict)]:
             owner = pipeline_schema.node_for_param(fk)

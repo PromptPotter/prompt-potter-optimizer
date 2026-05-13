@@ -1,6 +1,6 @@
 # CLI Reference
 
-Two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening the on-disk artifact tree — no read CLI.
+One write verb: `optimize`. Reads happen by opening the on-disk artifact tree — no read CLI.
 
 ```bash
 python -m promptpotter [--tenant <id>] <subcommand> [options]
@@ -12,43 +12,41 @@ State files: [`persistence-and-state.md`](persistence-and-state.md). Rewind / fo
 
 ---
 
-## Subcommand sequence
+## Two modes of optimize
 
-```
-init ──→ optimize
-```
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| **Fresh** | `--config <path>` or `--dataset-name <name>` | Mint a new session+cycle, decompose the task description on first sight, run from round 0. |
+| **Resume** | No `--config` / `--dataset-name` | Pick up the active session at the latest completed round (or rewind/fork per the flags below). |
 
-| Step | Command | What it does |
-|------|---------|-------------|
-| 1 | `init` | Create session+cycle for a dataset. Decomposes `datasets/<name>/task_description.md` once when present. |
-| 2 | `optimize` | Run the optimization loop against the active session. |
+The presence of `--config` / `--dataset-name` is the only switch. Resume-only flags (`--from`, `--no-divergence-check`, `--fork-on-divergence`) are rejected when combined with the fresh-mode flags.
 
 ---
 
-## init
+## optimize — fresh mode
 
 ```bash
-python -m promptpotter init \
+python -m promptpotter optimize \
     --backend-url http://127.0.0.1:8000 \
     --config datasets/lca-termnorm/campaign.json
 ```
 
-Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config. Pure prep — no backend scoring. Origin runs automatically as phase 0 of `optimize` on the same seeded `sp_budget_ttest` slice L1 uses, so its results cache-hit every L1 round-1 candidate.
+Connects to the backend, fetches pipeline schema via `GET /pipeline`, applies `exclude_nodes` and `pipeline_overrides` from config, mints session+cycle, then runs the optimization loop from round 0.
 
-If `datasets/<name>/task_description.md` exists, `init` decomposes it once into `task_context` and stores it on the session. Disk-cached, so re-`init` on the same dataset is free.
+If `datasets/<name>/task_description.md` exists, the task is decomposed once into `task_context` and stored on the session. Disk-cached, so subsequent fresh-mode runs on the same dataset don't re-pay the decomposition cost.
 
 | Flag | Purpose |
 |---|---|
+| `--config` | Campaign config JSON file — triggers fresh mode |
+| `--dataset-name` | Dataset under `./datasets/` — triggers fresh mode; auto-loads `datasets/<name>/campaign.json` when `--config` is omitted |
 | `--backend-url` | Backend service URL |
 | `--backend-id` | Override backend id (auto-derived from `dataset_name` otherwise) |
-| `--dataset-name` | Override dataset name from config |
-| `--config` | Campaign config JSON file |
 | `--task-file` | Override `datasets/<name>/task_description.md` |
 | `--task-text` | Override `datasets/<name>/task_description.md` inline |
 
 ---
 
-## optimize
+## optimize — resume mode
 
 ```bash
 python -m promptpotter optimize                 # resume from latest completed round
@@ -87,10 +85,9 @@ No read CLI. Two bands — telemetry at the family root, audit per cycle:
 ## Worked example
 
 ```bash
-python -m promptpotter init \
+python -m promptpotter optimize \
     --backend-url http://127.0.0.1:8000 \
     --config datasets/lca-termnorm/campaign.json
-python -m promptpotter optimize
 # Open campaigns/<cycle_id>/{dashboard.json, log.md, index.json} in your editor.
 ```
 
@@ -107,7 +104,7 @@ After an interrupted run, check for orphan processes (`tasklist | findstr python
 
 ## Pipeline params threading
 
-`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through `init` and `optimize`. If `pipeline_params` is `None`, the backend runs the full pipeline.
+`configure_pipeline(svc, campaign_config)` applies `exclude_nodes` and `pipeline_overrides` and returns `pipeline_params`, which flows unchanged through both modes of `optimize` (fresh mint and resume). If `pipeline_params` is `None`, the backend runs the full pipeline.
 
 ---
 

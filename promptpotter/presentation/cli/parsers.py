@@ -1,7 +1,11 @@
-"""Argparse schema for ``init`` / ``optimize`` / ``compare``.
+"""Argparse schema for ``optimize`` / ``compare`` / ``sweep``.
 
 Imported by ``campaign_runner.main()``. Help text is verbose by design — this
 is the operator-facing surface.
+
+``optimize`` is the single entry verb. With ``--config`` (or ``--dataset-name``)
+it mints a fresh session+cycle and runs from round 0. Without, it resumes
+the active session.
 """
 
 from __future__ import annotations
@@ -37,24 +41,45 @@ def _add_global_args(parser: argparse.ArgumentParser) -> None:
     )
 
 
-def _add_init_args(p_init: argparse.ArgumentParser) -> None:
-    """Backend + dataset + task overrides for ``init``."""
-    p_init.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
-    p_init.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
-    p_init.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
-    p_init.add_argument("--dataset-name", default=None)
-    p_init.add_argument("--excel-path", default=None)
-    p_init.add_argument("--config", default=None, help="Campaign config JSON file")
-    p_init.add_argument(
+def _add_fresh_init_args(p: argparse.ArgumentParser) -> None:
+    """Backend + dataset + task overrides used when ``optimize`` mints a fresh
+    session+cycle.
+
+    Presence of ``--config`` or ``--dataset-name`` switches ``optimize`` into
+    fresh mode (run init body, then start at round 0). Absence keeps the
+    resume default.
+    """
+    p.add_argument("--backend-url", default=DEFAULT_BACKEND_URL)
+    p.add_argument("--backend-id", default=DEFAULT_BACKEND_ID)
+    p.add_argument("--experiment-id", default=DEFAULT_EXPERIMENT_ID)
+    p.add_argument(
+        "--dataset-name",
+        default=None,
+        help="Dataset under ./datasets/. Triggers fresh-init mode "
+        "(mint new session+cycle, start at round 0). "
+        "Auto-loads datasets/<name>/campaign.json when --config is omitted.",
+    )
+    p.add_argument("--excel-path", default=None)
+    p.add_argument(
+        "--config",
+        default=None,
+        help="Campaign config JSON file. Triggers fresh-init mode "
+        "(mint new session+cycle, start at round 0).",
+    )
+    p.add_argument(
         "--task-file", default=None, help="Override datasets/<name>/task_description.md"
     )
-    p_init.add_argument(
+    p.add_argument(
         "--task-text", default=None, help="Override datasets/<name>/task_description.md inline"
     )
 
 
 def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
-    """Resume / divergence / mode flags for ``optimize``."""
+    """Resume / divergence / mode flags for ``optimize``.
+
+    These are resume-path-only — combining any with ``--config`` /
+    ``--dataset-name`` is rejected at the top of ``cmd_optimize``.
+    """
     p_opt.add_argument(
         "--from",
         dest="resume_from_round",
@@ -62,7 +87,8 @@ def _add_optimize_args(p_opt: argparse.ArgumentParser) -> None:
         default=None,
         metavar="ROUND",
         help="Resume after round N (archives rounds > N, reloads trial_N). "
-        "Omit to resume from the latest completed round.",
+        "Omit to resume from the latest completed round. "
+        "Resume-path only — rejected with --config / --dataset-name.",
     )
     p_opt.add_argument(
         "--no-divergence-check",
@@ -329,20 +355,26 @@ def _add_compare_args(p_cmp: argparse.ArgumentParser) -> None:
 
 
 def build_parser() -> argparse.ArgumentParser:
-    """Argparse schema for ``init`` + ``optimize`` + ``compare``."""
+    """Argparse schema for ``optimize`` + ``compare`` + ``sweep``."""
     parser = argparse.ArgumentParser(
         prog="python -m promptpotter",
-        description="PromptPotter optimization CLI — init creates a session+cycle, "
-        "optimize runs a campaign against it. Reads happen by opening the artifact "
-        "tree (sessions/{id}/, campaigns/{cycle_id}/) directly.",
+        description="PromptPotter optimization CLI — `optimize --config <path>` "
+        "mints a fresh session+cycle and runs from round 0; `optimize` alone "
+        "resumes the active session. Reads happen by opening the artifact tree "
+        "(sessions/{id}/, campaigns/{cycle_id}/) directly.",
     )
     _add_global_args(parser)
     sub = parser.add_subparsers(dest="command", required=True)
 
-    _add_init_args(sub.add_parser("init", help="Create session+cycle for a dataset"))
-    _add_optimize_args(
-        sub.add_parser("optimize", help="Run optimization loop on the active session")
+    p_optimize = sub.add_parser(
+        "optimize",
+        help="Run optimization loop. With --config / --dataset-name: mint a "
+        "fresh session+cycle and start at round 0. Without: resume the active "
+        "session.",
     )
+    _add_fresh_init_args(p_optimize)
+    _add_optimize_args(p_optimize)
+
     _add_compare_args(
         sub.add_parser(
             "compare",

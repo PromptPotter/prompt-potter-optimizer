@@ -209,6 +209,12 @@ async def llm_call(
 
     if cached_payload is not None:
         response = LLMResponse.model_validate(cached_payload)
+        # ``response.parsed`` was dumped to a dict by ``model_dump()`` at save
+        # time; ``LLMResponse.parsed`` is typed ``Any``, so model_validate
+        # doesn't re-instantiate it as a BaseModel. Re-validate against the
+        # known response_model so consumers can use attribute access.
+        if response_model is not None and isinstance(response.parsed, dict):
+            response.parsed = response_model.model_validate(response.parsed)
         duration_s = round(time.monotonic() - _t0, 2)
         logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
     else:

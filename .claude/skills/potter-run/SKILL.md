@@ -10,20 +10,22 @@ Optional dataset name (e.g. `bbeh`, `aime_2025`, `gsm8k`, `lca-termnorm`). If om
 
 ## CLI Reference
 
-The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a campaign against it. Reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly. Stop with Ctrl+C (first finishes in-flight, second force-quits) — there is no mid-run pause/resume.
+One write verb: `optimize`. Reads happen by opening `campaigns/<cycle_id>/{dashboard.json,log.md,index.json}` directly. Stop with Ctrl+C (first finishes in-flight, second force-quits) — there is no mid-run pause/resume.
 
-| Command | Purpose |
-|---------|---------|
-| `init` | Create session+cycle (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`). Auto-decomposes `datasets/<name>/task_description.md` if present; override via `--task-file` / `--task-text`. |
-| `optimize` | Run L1/L2/L3 loop. Resume-by-default; `--from <round>` to rewind. |
+| Mode | Trigger | Behavior |
+|------|---------|----------|
+| **Fresh** | `optimize --config <path>` or `--dataset-name <name>` | Mint a fresh session+cycle, decompose `task_description.md` on first sight, run from round 0. |
+| **Resume** | `optimize` alone (`--from <round>` optional) | Pick up the active session. Rewind in place with `--from`. |
+
+The fresh-mode prep (`--backend-url`, `--backend-id`, `--config`, `--dataset-name`, `--task-file`, `--task-text`) is the same set of flags formerly on a separate `init` verb — they now live on `optimize` and only fire when `--config`/`--dataset-name` is present.
 
 ---
 
 ## Rules (apply throughout)
 
 - **Dataset overrides.** Check `reference/{dataset}-notes.md` first — if present it supersedes this flow.
-- **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. Every command except `init` reads it; if the pointer matches the target, skip `init` and jump to the phase the session needs. Only `init` overwrites the pointer. `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
-- **Init is pure prep.** No backend scoring; origin runs as phase 0 of `optimize`. There is no `--skip-origin` flag.
+- **Resume is the default.** `.promptpotter/active_session.json` = `{tenant_id, cycle_id}`. `optimize` without `--config`/`--dataset-name` reads the pointer and resumes. `optimize --config …` overwrites the pointer (mints a fresh session+cycle). `init_services()` raises `ActiveSessionMismatchError` on drift unless `take_over=True`.
+- **Fresh mode is pure prep + run.** No backend scoring during the prep step; origin runs as phase 0 of the optimize body. There is no `--skip-origin` flag.
 - **Timeouts: 30s default, 60s hard max.** Never exceed 60s without asking. Never `run_in_background` CLI commands. If auto-backgrounded, `tasklist | findstr python` → `taskkill //F //PID <pid>` before retrying.
 - **Stop when bounded retries exhaust.** `BackendClient.run_query()` auto-retries 429 (RFC 7231 Retry-After) and 5xx/transport errors with countdown backoff (5 attempts max). If a campaign still propagates 5xx after retries, halt and tell the user "Backend returning persistent 5xx — likely Groq upstream rate-limiting or outage. Check and restart." Don't loop on top of the client's loop.
 - **Never wipe project data without asking.** Spell out the full path first.
@@ -36,7 +38,7 @@ The CLI is two write verbs: `init` creates a session+cycle, `optimize` runs a ca
 
 Persistent configs decide behavior — the skill does not carry a parallel default-ladder.
 
-- `datasets/{name}/dataset.md` — init flags, entry point (CLI vs notebook)
+- `datasets/{name}/dataset.md` — fresh-mode flags, entry point (CLI vs notebook)
 - `datasets/{name}/campaign.json` — hyperparameters (max_rounds, n_variants, sp_budget_ttest, patiences)
 - `datasets/{name}/pipeline.json` — pipeline + model + caps
 - BBEH only: `notebooks/bbeh_potter.ipynb::build_campaign_config()` shadows `campaign.json`; notebook wins
@@ -90,19 +92,17 @@ Surface anomalies as a one-line flag at the top, then the normal outlook. Never 
 
 ---
 
-## Phase 1: Initialize (skip if resuming)
+## Phase 1+4: Launch (fresh mint + run as one command)
 
-Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess.
+Flags from `datasets/{name}/dataset.md § Init Flags` — verbatim, never guess. The user runs the single command in their own terminal:
 
 ```bash
-python -m promptpotter init {flags from dataset.md}
+python -m promptpotter optimize {flags from dataset.md}
 ```
 
-Foreground, 30s timeout. `init` auto-decomposes `datasets/{name}/task_description.md` if present (override via `--task-file` / `--task-text`). If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
+Fresh-mode `optimize` (any of `--config`/`--dataset-name`) auto-decomposes `datasets/{name}/task_description.md` if present (override via `--task-file` / `--task-text`) and then runs the loop from round 0. If `llm_ranking` lands in active nodes for `lca-termnorm`, STOP — wrong config.
 
-## Phase 4: Optimize
-
-**The user runs `python -m promptpotter optimize` in their own terminal** — campaigns take minutes to hours. Your job: prep Phase 0 + 1, then let them launch. On their return, read `dashboard.json` (live state) + the latest `rounds/round_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
+Campaigns take minutes to hours, so the operator launches it in their terminal (you don't wrap it in Bash). On their return, read `dashboard.json` (live state) + the latest `rounds/round_NNNN.json` (round summary, critique, leaderboard) and summarize per round:
 
 ```
 ROUND {N} COMPLETE
@@ -114,7 +114,7 @@ CRITIQUE: {2-4 key lines — what failed, what to try next}
 NEXT:     {continue L1 / escalate to L2 / etc.}
 ```
 
-**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json` (active cycle id in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `init`. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` to resume.
+**Monitor** by tailing `.promptpotter/projects/{tenant_id}/campaigns/{root_cycle_id}/dashboard.json` (active cycle id in `.promptpotter/active_session.json`). Surface the full path in your reply so the operator can open it directly. Also recommend the **webapp preview**: in a separate terminal `python -m uvicorn promptpotter.main:app --port 8001`, then <http://127.0.0.1:8001/ui/> — polls `dashboard.json` every 2 s; reload the page after a fresh `optimize --config …` mint. Diagnose via `rounds/round_NNNN.json` (round summary + L1 critique), `.cache/rounds/round_NNNN.json` (per-round node I/O — internal), and `output.log` (per-sample HIT/MISS). Stop with Ctrl+C — first finishes in-flight, second force-quits. Re-run `optimize` (no flags) to resume.
 
 **Incremental persistence.** Every query lands in `archive/dataset_runs/` immediately — hard kills lose zero work, resume auto cache-hits prior results.
 

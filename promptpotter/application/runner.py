@@ -549,6 +549,12 @@ async def run_optimization(
         pre_loop_cycle_id and session.state.cycle_id and pre_loop_cycle_id != session.state.cycle_id
     )
     if forked and pre_loop_cycle_id:
+        # Persist phase_ctx across the rebuild: INIT.enter fired on the
+        # parent callbacks (max_rounds, patience, original_sp_flat,
+        # composite formulas) and won't re-fire on the new ledger.
+        # Without this copy, RoundStartView reads zeros — the operator
+        # sees "ROUND N/999" and "patience N/0" on every forked round.
+        parent_phase_ctx = dict(observers.callbacks._phase_ctx)
         observers = build_run_observers(
             session=session,
             campaign_config=campaign_config,
@@ -561,6 +567,7 @@ async def run_optimization(
                 parent_dashboard=observers.dashboard,
             ),
         )
+        observers.callbacks._phase_ctx.update(parent_phase_ctx)
         cb = observers.callbacks
 
     def _probe_cycle_spend() -> float:

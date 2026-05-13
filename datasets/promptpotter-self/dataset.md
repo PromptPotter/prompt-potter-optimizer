@@ -37,10 +37,10 @@ The actual "run an inner cycle" path is the follow-up — see
 - `prompts/` — outer meta-prompt overrides (none yet; outer cycle uses
   `optimizer_pipeline.json` defaults)
 
-## Init
+## Run
 
 ```
-python -m promptpotter init \
+python -m promptpotter optimize \
   --config datasets/promptpotter-self/campaign.json \
   --backend-url http://127.0.0.1:8001/inner    # placeholder until execution wired
 ```

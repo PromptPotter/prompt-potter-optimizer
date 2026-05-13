@@ -325,11 +325,13 @@ the PR description.
   (`application/optimization/pipeline.py`) — the discoverability
   scaffolding for m10-cleanup §6 pre-flight question 1. Don't drop
   "because nobody calls it from production code today."
-- **`init` command + `/potter-run` onboarding flow** — operator's
-  first-run path; cruft-audit yes, mechanism delete no.
-- **`promptpotter init` decomposition into `task_context`** — the
-  one-time `restructure` LLM call that seeds the campaign. Don't
-  fold into `l1_generate`.
+- **Fresh-init mode of `optimize` (`--config` / `--dataset-name`) +
+  `/potter-run` onboarding flow** — operator's first-run path;
+  cruft-audit yes, mechanism delete no.
+- **Fresh-mode decomposition into `task_context`** — the one-time
+  `restructure` LLM call that seeds the campaign when
+  `optimize --config …` first sees a dataset. Don't fold into
+  `l1_generate`.
 - **`MeasurementArchive` (`archive/measurements/{run_id}.json` +
   `archive/measurements.json` index + retrieval views
   `measurements_for_sample()` / `measurements_for_config()`)** — the

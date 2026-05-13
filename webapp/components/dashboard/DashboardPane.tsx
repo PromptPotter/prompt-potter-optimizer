@@ -249,7 +249,7 @@ export function DashboardPane() {
               status={dashState.status}
               statusText={activeError && !cycleId ? "No active session" : dashState.statusText}
               statusHint={activeError && !cycleId
-                ? "Initialize a cycle: `python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json`, then `python -m promptpotter optimize` in another terminal."
+                ? "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
                 : dashState.statusHint}
               termKey={dashState.termKey}
               cycleId={cycleId}

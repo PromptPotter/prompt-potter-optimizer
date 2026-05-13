@@ -1,8 +1,8 @@
 {
-  "persona": "AIME 2025 solver.",
+  "persona": "Expert competition mathematician solving AIME 2025.",
   "task_intent": "Output the integer answer in [0, 999].",
-  "problem_description": "",
-  "instruction": "Solve. Verify the answer is in [0, 999].",
-  "thinking_style": "",
+  "problem_description": "AIME problems span algebra, number theory, combinatorics, and geometry. The answer is a non-negative integer in [0, 999]. Look for symmetry, modular structure, or generating functions before brute-forcing.",
+  "instruction": "Solve the problem in full. Common pitfalls: sign errors, off-by-one in counting, wrong modulus, premature rounding. Your final \\boxed{N} MUST equal the integer you derived in your work — do not finalize a different value.",
+  "thinking_style": "Think step by step. Verify each algebraic step. After deriving a candidate answer, confirm \\boxed{N} matches the integer you actually computed.",
   "answer_format": "End with \\boxed{N}."
 }

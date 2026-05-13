@@ -69,14 +69,16 @@ These primitives are settled. Reorganizing them — adding a parallel ingress, a
 ```bash
 pip install -e ".[all,dev]"
 ruff check . && ruff format --check . && deptry . && mypy promptpotter/ && pytest -q   # CI runs same chain
-python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json
-python -m promptpotter optimize                              # resume default; Ctrl+C: 1st saves, 2nd force-quits
-python -m promptpotter optimize --from N                     # rewind in place
-python -m promptpotter optimize --fork-on-divergence         # sibling cycle at divergence point
+python -m promptpotter optimize --config datasets/<name>/campaign.json  # fresh: mint session+cycle, run from round 0
+python -m promptpotter optimize                              # resume active; Ctrl+C: 1st saves, 2nd force-quits
+python -m promptpotter optimize --from N                     # resume: rewind in place
+python -m promptpotter optimize --fork-on-divergence         # resume: sibling cycle at divergence point
 python -m uvicorn promptpotter.main:app --port 8001          # read-only API + /ui webapp preview
 ```
 
-Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **When the operator mentions the dashboard / webapp / UI**: probe `GET /api/v1/health` on :8001 — if it answers, share the URL; if not, suggest the uvicorn line above and remind them to keep `python -m promptpotter optimize` running in another terminal so `dashboard.json` refreshes live. Page reads `active_session.json` on load — `init` a new cycle ⇒ reload the page.
+`optimize` is the single write verb. Presence of `--config` (or `--dataset-name`) means "mint a fresh session+cycle and run from round 0"; absence means "resume the active session." Resume-only flags (`--from`, `--no-divergence-check`, `--fork-on-divergence`) are rejected when combined with `--config`/`--dataset-name`.
+
+Webapp preview lives at `http://localhost:8001/ui/` once uvicorn is running. **When the operator mentions the dashboard / webapp / UI**: probe `GET /api/v1/health` on :8001 — if it answers, share the URL; if not, suggest the uvicorn line above and remind them to keep `python -m promptpotter optimize` running in another terminal so `dashboard.json` refreshes live. Page reads `active_session.json` on load — a fresh `optimize --config …` mint ⇒ reload the page.
 
 `.env` with `GROQ_API_KEY` (or OPENAI/ANTHROPIC/OPENROUTER) required. Provider is per-campaign in `campaign.json::optimizer_llm.provider`.
 

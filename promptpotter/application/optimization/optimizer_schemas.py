@@ -29,9 +29,26 @@ enums per backend).
 
 from __future__ import annotations
 
-from typing import Any, Literal
+from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, BeforeValidator, ConfigDict, Field
+
+
+def _truncate(max_len: int):
+    """Silent string truncation for LLM outputs that overshoot a Field max_length.
+
+    Pydantic's max_length raises ValidationError on overflow, which would
+    discard the *entire* critique on a single overrun field. The schema
+    cap stays (it tells the LLM the budget via JSON Schema export); this
+    BeforeValidator drops the tail and keeps the head.
+    """
+
+    def _v(value: Any) -> Any:
+        if isinstance(value, str) and len(value) > max_len:
+            return value[:max_len]
+        return value
+
+    return _v
 
 __all__ = [
     "OPTIMIZER_RESPONSE_MODELS",
@@ -131,10 +148,16 @@ class L1CritiqueOutput(BaseModel):
 
     model_config = ConfigDict(extra="forbid")
 
-    summary: str = Field(max_length=400)
-    positive_critique: str = Field(default="", max_length=300)
-    negative_critique: str = Field(default="", max_length=400)
-    priority_fix: str = Field(default="", max_length=200)
+    summary: Annotated[str, BeforeValidator(_truncate(400))] = Field(max_length=400)
+    positive_critique: Annotated[str, BeforeValidator(_truncate(300))] = Field(
+        default="", max_length=300
+    )
+    negative_critique: Annotated[str, BeforeValidator(_truncate(400))] = Field(
+        default="", max_length=400
+    )
+    priority_fix: Annotated[str, BeforeValidator(_truncate(200))] = Field(
+        default="", max_length=200
+    )
     suggested_axes: list[str] = Field(
         default_factory=list,
         max_length=4,

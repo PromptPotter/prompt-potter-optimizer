@@ -197,7 +197,9 @@ This is the same L1-surface field L2 writes when it fires — sweep just lets th
 **Running a batch:**
 
 ```bash
-python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/bbeh/campaign.json
+python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/bbeh/campaign.json
+# Active session now points at the freshly-minted bbeh cycle; --sweep on the
+# next call dispatches sweep-mode against it:
 python -m promptpotter optimize --sweep
 ```
 

@@ -1,10 +1,14 @@
-"""CLI entry point — argparse schema, ``cmd_init`` + ``cmd_optimize``, ``main()``.
+"""CLI entry point — argparse schema, ``cmd_optimize``, ``main()``.
 
-The CLI is two write verbs: ``init`` creates a session+cycle, ``optimize`` runs
-a campaign against it. Reads happen by opening the on-disk artifact tree
-(``sessions/{id}/``, ``campaigns/{cycle_id}/``) — ``dashboard.json`` for live
-state, ``log.md`` for the digest, ``index.json`` for the final summary
-including ``stop_reason``. Stop with Ctrl+C — there is no mid-run pause/resume.
+``optimize`` is the single write verb. With ``--config`` (or ``--dataset-name``)
+it mints a fresh session+cycle and runs from round 0; without, it resumes
+the active session. The fresh-init body lives in ``_run_init_body`` and is
+called from the top of ``cmd_optimize`` when fresh mode is triggered.
+
+Reads happen by opening the on-disk artifact tree (``sessions/{id}/``,
+``campaigns/{cycle_id}/``) — ``dashboard.json`` for live state, ``log.md``
+for the digest, ``index.json`` for the final summary including
+``stop_reason``. Stop with Ctrl+C — there is no mid-run pause/resume.
 
 ``session.py`` carries ``SessionCtx``/``load_session``/``load_campaign_config``.
 """
@@ -203,16 +207,18 @@ async def _maybe_decompose_task(
     session.store.sessions.update(session_id, state)
 
 
-async def cmd_init(args: argparse.Namespace) -> CommandResult:
-    """Initialize services, load datasets, configure pipeline, create session.
+async def _run_init_body(args: argparse.Namespace) -> dict[str, Any]:
+    """Mint a fresh session+cycle: services, datasets, pipeline, session record.
 
-    No scoring calls — the origin runs as phase 0 of ``optimize`` on the
-    ``sp_budget_ttest`` slice. The one LLM cost paid here is the
-    ``restructure`` template call (via ``_maybe_decompose_task``) the first
-    time a dataset's ``task_description.md`` (or ``--task-file`` /
-    ``--task-text``) is seen; the result is content-hash cached at
-    ``restructure_cache.json`` so subsequent runs are free. ``optimize``
-    reads the decomposition off the session.
+    Called from the top of :func:`cmd_optimize` when ``--config`` or
+    ``--dataset-name`` is set. Returns a small dict describing the minted
+    cycle so the optimize body (which reloads via ``load_session``) can
+    log + sanity-check.
+
+    No scoring calls here — the origin runs as phase 0 of optimize on the
+    ``sp_budget_ttest`` slice. The one LLM cost is the ``restructure``
+    template call via :func:`_maybe_decompose_task`, content-hash cached
+    at ``restructure_cache.json`` so subsequent fresh-mode runs are free.
     """
     from promptpotter.application.config import load_campaign_config as _load_cfg
     from promptpotter.application.origin import prepare_datasets
@@ -223,8 +229,9 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         from promptpotter.presentation.cli.session import no_dataset_hint
 
         raise SystemExit(
-            "ERROR: init requires a dataset name. Silent defaults to the "
-            "TermNorm production experiment are no longer allowed.\n\n" + no_dataset_hint()
+            "ERROR: fresh-init mode requires a dataset name. Pass "
+            "--dataset-name <name> or a --config that names one.\n\n"
+            + no_dataset_hint()
         )
 
     # Auto-load the dataset's campaign.json when --config wasn't given. Without this,
@@ -282,22 +289,22 @@ async def cmd_init(args: argparse.Namespace) -> CommandResult:
         task_text=args.task_text,
     )
 
-    return CommandResult(
-        data={
-            "session_id": session_id,
-            "cycle_id": cycle_id,
-            "backend_id": backend_id,
-            "phase": "init",
-            "dataset_count": len(train_data),
-            "active_steps": active,
-            "excluded_nodes": excluded,
-        },
-        human=(
-            f"\nSession created: {session_id}\n"
-            f"Cycle: {cycle_id}\n"
-            f"Dataset: {len(train_data)} queries (origin runs in optimize phase 0)"
-        ),
+    logger.info(
+        "Fresh cycle minted: session=%s cycle=%s dataset=%s (%d queries)",
+        session_id,
+        cycle_id,
+        dataset_name,
+        len(train_data),
     )
+
+    return {
+        "session_id": session_id,
+        "cycle_id": cycle_id,
+        "backend_id": backend_id,
+        "dataset_count": len(train_data),
+        "active_steps": active,
+        "excluded_nodes": excluded,
+    }
 
 
 def _build_divergence_hint() -> str:
@@ -322,10 +329,13 @@ def _build_divergence_hint() -> str:
     return (
         f"Checked decisions: {', '.join(replayed)}.\n"
         f"(Archival, not divergence-gated: {', '.join(archival)}.)\n\n"
-        "Rerun with `--fork-on-divergence` to branch a sibling cycle "
-        "here under the current scorer, revert "
-        "`campaign.json::scoring` to continue the original trajectory, "
-        "or pass `--no-divergence-check` to accept the divergence."
+        "Options:\n"
+        "  • `optimize --config datasets/<name>/campaign.json` — start a fresh "
+        "cycle (most common: you wanted a new run, not a resume).\n"
+        "  • `optimize --fork-on-divergence` — branch a sibling cycle here "
+        "under the current scorer.\n"
+        "  • Revert `campaign.json::scoring` — continue the original trajectory.\n"
+        "  • `optimize --no-divergence-check` — accept the divergence."
     )
 
 
@@ -600,8 +610,14 @@ async def _run_normal_optimize(
 
 
 async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
-    """Run optimization loop. Live state is ``campaigns/{cycle_id}/dashboard.json``;
-    digest is ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
+    """Run optimization loop.
+
+    Fresh mode (``--config`` or ``--dataset-name`` present): mint a new
+    session+cycle, then run from round 0. Resume mode (neither flag):
+    pick up the active session.
+
+    Live state is ``campaigns/{cycle_id}/dashboard.json``; digest is
+    ``log.md``; final summary is ``index.json::final``. Stop with Ctrl+C.
     """
     # Keep the spend chip honest against provider re-pricing. The cache
     # has a 24 h TTL so this is a no-op on most starts; --refresh-rates
@@ -610,6 +626,24 @@ async def cmd_optimize(args: argparse.Namespace) -> CommandResult:
     from promptpotter.shared.spend import refresh_rates
 
     refresh_rates(force=bool(getattr(args, "refresh_rates", False)))
+
+    fresh_mode = bool(getattr(args, "config", None) or getattr(args, "dataset_name", None))
+    if fresh_mode:
+        bad = [
+            flag
+            for flag, set_ in (
+                ("--from", getattr(args, "resume_from_round", None) is not None),
+                ("--no-divergence-check", getattr(args, "no_divergence_check", False)),
+                ("--fork-on-divergence", getattr(args, "fork_on_divergence", False)),
+            )
+            if set_
+        ]
+        if bad:
+            raise SystemExit(
+                f"ERROR: {', '.join(bad)} is resume-path only and cannot be combined "
+                "with --config / --dataset-name (those mint a fresh cycle at round 0)."
+            )
+        await _run_init_body(args)
 
     ctx = load_session(args)
     campaign_config = ctx.campaign_config
@@ -1330,7 +1364,6 @@ async def cmd_compare(args: argparse.Namespace) -> CommandResult:
 
 
 COMMANDS = {
-    "init": cmd_init,
     "optimize": cmd_optimize,
     "compare": cmd_compare,
     "sweep": cmd_sweep,

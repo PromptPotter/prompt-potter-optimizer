@@ -99,12 +99,12 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 ### Presentation
 | Symbol | File:line |
 |---|---|
-| `cmd_init` | `promptpotter/presentation/cli/campaign_runner.py:206` |
-| `cmd_optimize` | `promptpotter/presentation/cli/campaign_runner.py:596` |
-| `main()` (entry point) | `promptpotter/presentation/cli/campaign_runner.py:1334` |
-| `--from` flag | `promptpotter/presentation/cli/parsers.py:59` |
-| `--fork-on-divergence` flag | `promptpotter/presentation/cli/parsers.py:74` |
-| `--sweep` flag | `promptpotter/presentation/cli/parsers.py:82` |
+| `_run_init_body` (fresh-mode helper) | `promptpotter/presentation/cli/campaign_runner.py:210` |
+| `cmd_optimize` | `promptpotter/presentation/cli/campaign_runner.py:612` |
+| `main()` (entry point) | `promptpotter/presentation/cli/campaign_runner.py:1373` |
+| `--from` flag | `promptpotter/presentation/cli/parsers.py:84` |
+| `--fork-on-divergence` flag | `promptpotter/presentation/cli/parsers.py:100` |
+| `--sweep` flag | `promptpotter/presentation/cli/parsers.py:108` |
 | `LiveDisplay` | `promptpotter/presentation/views/live.py:595` |
 
 ### Config
@@ -175,7 +175,7 @@ Verified `Symbol → file:line` (line numbers as of last codemap update; re-grep
 - `__init__.py` — `CONNECTORS` dict + `get(name)`
 
 **`promptpotter/presentation/`**
-- `cli/campaign_runner.py` — `cmd_init`, `cmd_optimize`, `main()`
+- `cli/campaign_runner.py` — `_run_init_body` (fresh-mode helper), `cmd_optimize`, `main()`
 - `cli/parsers.py` — argparse schema (`--from`, `--fork-on-divergence`, `--sweep`)
 - `cli/session.py` — `SessionCtx`, `load_session`, `load_campaign_config`
 - `api.py` — read-only FastAPI app

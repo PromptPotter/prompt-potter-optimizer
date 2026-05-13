@@ -54,9 +54,9 @@ class SessionCtx:
 
 
 def no_dataset_hint() -> str:
-    """Formatted list of discovered datasets + exact init commands."""
+    """Formatted list of discovered datasets + exact fresh-init commands."""
     datasets = sorted(p.parent.name for p in Path("datasets").glob("*/campaign.json"))
-    lines = [f"  python -m promptpotter init --dataset-name {name}" for name in datasets]
+    lines = [f"  python -m promptpotter optimize --dataset-name {name}" for name in datasets]
     body = "\n".join(lines) if lines else "  (no datasets found under ./datasets/)"
     return "Available datasets:\n\n" + body
 
@@ -68,7 +68,7 @@ def load_session(args: argparse.Namespace) -> SessionCtx:
     if not active_pointer_exists():
         raise SystemExit(
             "ERROR: No active session.\n\n"
-            "To start a campaign, init one of the available datasets:\n\n" + no_dataset_hint()
+            "To start a campaign, run optimize against a dataset:\n\n" + no_dataset_hint()
         )
     store = build_stores(tenant_id=getattr(args, "tenant", "default"))
     _tid, pointer_sid, pointer_cid = read_active_pointer()

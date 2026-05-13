@@ -68,8 +68,8 @@ classify_run_origin	promptpotter/infrastructure/tracing/replay.py:45
 clear_active_pointer	promptpotter/infrastructure/store/__init__.py:57
 clock	tests/test_llm_client.py:129
 cmd_compare	promptpotter/presentation/cli/campaign_runner.py:1262
-cmd_init	promptpotter/presentation/cli/campaign_runner.py:206
-cmd_optimize	promptpotter/presentation/cli/campaign_runner.py:596
+_run_init_body	promptpotter/presentation/cli/campaign_runner.py:210
+cmd_optimize	promptpotter/presentation/cli/campaign_runner.py:612
 cmd_sweep	promptpotter/presentation/cli/campaign_runner.py:1247
 CommandResult	promptpotter/presentation/cli/campaign_runner.py:54
 compare_rerun	promptpotter/application/scoring/sample_measurement.py:373

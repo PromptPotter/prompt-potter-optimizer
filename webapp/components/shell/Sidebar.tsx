@@ -84,7 +84,7 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
         {cycles === null && <div className="cycle-library-note">loading…</div>}
         {cycles !== null && cycles.length === 0 && (
           <div className="cycle-library-note">
-            None on disk yet — run <code>python -m promptpotter init …</code>.
+            None on disk yet — run <code>python -m promptpotter optimize --config datasets/…/campaign.json</code>.
           </div>
         )}
         {cycles !== null && cycles.length > 0 && (

@@ -171,7 +171,7 @@ export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): Das
         status: "offline",
         statusText: "No active session",
         statusHint:
-          "Initialize a cycle: `python -m promptpotter init --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json`, then `python -m promptpotter optimize` in another terminal.",
+          "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal.",
         ageS: null,
         termKey: "status_offline",
         error: null,
