@@ -278,10 +278,12 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .lineage-node:hover .lineage-stub{stroke-width:3}
 .lineage-node.selected .lineage-stub{stroke:var(--color-accent);stroke-width:3}
 .lineage-node.selected .lineage-label{fill:var(--color-accent);font-weight:600}
-/* Scoring inspector — read-only panel beneath the lineage tree.
-   Stage 3 adds the Edit-mode toggle and Fork-from-here action inside this
-   same card; the layout stays put. */
-.scoring-inspector{margin-top:14px}
+/* Scoring inspector — renders inside `.lineage-column`, directly beneath
+   the LineageTree card. Stacks visually as a continuation: same width,
+   small gap, no competing margins. The summary + Endorse button appear
+   where the operator just clicked, not in a separated tile below. */
+.lineage-column{display:flex;flex-direction:column;gap:10px;min-width:0}
+.scoring-inspector{margin-top:0}
 .scoring-inspector .card-title{display:flex;align-items:center;justify-content:space-between}
 .inspector-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
 .inspector-close:hover{color:var(--color-text-primary)}

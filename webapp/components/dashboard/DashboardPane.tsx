@@ -289,24 +289,26 @@ export function DashboardPane() {
             </section>
             <div className="dash-grid">
               <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-              <LineageTree
-                cycleId={cycleId}
-                refreshKey={refreshKey}
-                dash={dash}
-                selected={selected}
-                onSelect={setSelected}
-              />
+              <div className="lineage-column">
+                <LineageTree
+                  cycleId={cycleId}
+                  refreshKey={refreshKey}
+                  dash={dash}
+                  selected={selected}
+                  onSelect={setSelected}
+                />
+                {selected && (
+                  <ScoringInspector
+                    cycleId={cycleId}
+                    refreshKey={refreshKey}
+                    selected={selected}
+                    editMode={editMode}
+                    isLive={isLive}
+                    onClose={() => setSelected(null)}
+                  />
+                )}
+              </div>
             </div>
-            {selected && (
-              <ScoringInspector
-                cycleId={cycleId}
-                refreshKey={refreshKey}
-                selected={selected}
-                editMode={editMode}
-                isLive={isLive}
-                onClose={() => setSelected(null)}
-              />
-            )}
             {/* Clear selection when the operator switches cycles — stale
                candidate ids would point at the wrong tree otherwise. */}
             <section className="dash-samples-wide" aria-label="Live samples">
