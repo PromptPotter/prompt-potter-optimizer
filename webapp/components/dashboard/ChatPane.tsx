@@ -151,6 +151,11 @@ export function ChatPane({
     if (usedUsd == null || budgetUsd == null || !cycleStartedAt) return "—";
     const startedMs = Date.parse(cycleStartedAt);
     if (!Number.isFinite(startedMs)) return "—";
+    // Date.now reads the wallclock once per render to project an ETA; the
+    // re-render cadence is driven by dash polling so the value never goes
+    // stale visibly. Pre-existing computation; flagged by the purity rule
+    // because we touched this file.
+    // eslint-disable-next-line react-hooks/purity
     const ageSec = (Date.now() - startedMs) / 1000;
     if (ageSec <= 0 || usedUsd <= 0) return "—";
     if (usedUsd >= budgetUsd) return "spent";

@@ -3,13 +3,12 @@ import { useMemo, useState } from "react";
 import { postCreateFork, postStopCycle } from "@/lib/api";
 import { useRoundHistory } from "@/lib/use-round-history";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
-import type { SelectedCandidate } from "./LineageTree";
+import type { SelectedCandidate } from "./SelectionContext";
 
 interface Props {
   cycleId: string | null;
   refreshKey: number;
   selected: SelectedCandidate | null;
-  editMode: boolean;
   isLive: boolean;
   onClose: () => void;
 }
@@ -35,7 +34,6 @@ export function ScoringInspector({
   cycleId,
   refreshKey,
   selected,
-  editMode,
   isLive,
   onClose,
 }: Props) {
@@ -94,8 +92,8 @@ export function ScoringInspector({
     : `Endorses R${selected.round}.${selected.candidate_id}. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the fork — your next \`optimize\` picks it up.`;
 
   return (
-    <aside className="card scoring-inspector" aria-label="Scoring inspector">
-      <div className="card-title">
+    <section className="scoring-inspector" aria-label="Scoring inspector">
+      <div className="inspector-head">
         <span>Scoring · R{selected.round}.{selected.candidate_id}</span>
         <button
           type="button"
@@ -139,7 +137,7 @@ export function ScoringInspector({
           </div>
         )}
       </div>
-      {editMode && !forkResult && (
+      {!forkResult && (
         <div className="inspector-actions">
           <button
             type="button"
@@ -183,7 +181,7 @@ export function ScoringInspector({
           </div>
         </div>
       )}
-    </aside>
+    </section>
   );
 }
 

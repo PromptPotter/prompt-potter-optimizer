@@ -9,14 +9,17 @@ import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
 import { liveL1Candidates, type DashboardSnapshot, type LiveCandidate } from "@/lib/poll";
 import { useRoundHistory } from "@/lib/use-round-history";
+import { useSelection } from "@/components/dashboard/SelectionContext";
 
 interface HistoricalCandidate {
+  candidate_id?: string;
   label?: string;
   changes_description?: string;
   accuracy?: number;
   composite_fitness?: number;
   evaluators?: Record<string, number>;
   invalid?: boolean;
+  is_winner?: boolean;
 }
 
 interface HistoricalRound {
@@ -88,6 +91,12 @@ function pickWinner(lines: { key: string; v: number | null }[]): string | null {
 }
 
 export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }: Props) {
+  // Shared candidate selection — driving any of {fitness bar, lineage stub}
+  // sets this context slot; the other surface(s) re-render highlighted.
+  // FitnessChart resolves selectedKey → bar index by matching `bar.key`
+  // against the SelectedCandidate's {round, candidate_id}. Aliased away
+  // from the evaluator-set `selected` already in this component.
+  const { selected: selectedCandidate, setSelected: setSelectedCandidate } = useSelection();
   // Default view: chart-only (one bar per candidate = accuracy). The
   // composite chip pairs the formula-weighted score; the what-if chip
   // opens the ablation widget below the chart. State lives in a module
@@ -288,6 +297,9 @@ export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }:
           composite: comp,
           whatif: useComposite && comp != null ? comp : correctedFromEvaluators(ev, selected, rows),
           started: acc != null || comp != null || Object.keys(ev).length > 0,
+          candidateId: c.candidate_id ?? `r${roundNum}_${i}`,
+          round: roundNum,
+          isWinner: !!c.is_winner,
         });
       });
     }
@@ -318,6 +330,9 @@ export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }:
             typeof c.stats?.accuracy === "number" ||
             typeof c.stats?.composite_fitness === "number" ||
             Object.keys(ev).length > 0,
+          candidateId: `r${currentRound}_${i}`,
+          round: currentRound,
+          isWinner: false,
         });
       }
     }
@@ -430,6 +445,28 @@ export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }:
         showComposite={showComposite}
         showWhatIf={showWhatIf}
         themeKey={themeKey}
+        selectedKey={
+          selectedCandidate
+            ? bars.find(
+                (b) =>
+                  b.round === selectedCandidate.round &&
+                  b.candidateId === selectedCandidate.candidate_id,
+              )?.key ?? null
+            : null
+        }
+        onSelect={(bar) => {
+          if (!bar || !bar.candidateId || bar.round == null) {
+            setSelectedCandidate(null);
+            return;
+          }
+          setSelectedCandidate({
+            round: bar.round,
+            candidate_id: bar.candidateId,
+            label: bar.label,
+            accuracy: bar.accuracy,
+            is_winner: !!bar.isWinner,
+          });
+        }}
       />
       {showWhatIf && (
         <div className="fitness-whatif">

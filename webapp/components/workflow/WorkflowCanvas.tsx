@@ -1,21 +1,22 @@
 "use client";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { CANVAS_W, CANVAS_H, EDGES, LAYOUT, phaseToNodeId } from "./layout";
 import { TERMS } from "@/lib/terms";
 import { getCss } from "@/lib/theme";
 import { roundOf, type DashboardSnapshot } from "@/lib/poll";
+import { useSelection } from "@/components/dashboard/SelectionContext";
 
-interface PipelineView {
+export interface PipelineView {
   nodes: { id: string; label: string; kind?: string }[];
   edges: { from: string; to: string }[];
 }
 
-interface PipelineDoc {
+export interface PipelineDoc {
   view?: PipelineView;
   nodes?: Record<string, { type?: string; config?: Record<string, unknown>; model?: string }>;
 }
 
-interface NodeDataLike {
+export interface NodeDataLike {
   model?: string;
   duration_s?: number;
   round?: number;
@@ -32,11 +33,15 @@ function fmtSecs(s: number | undefined | null): string {
   return `${(s / 60).toFixed(1)}m`;
 }
 
-const EDGE_KIND_VARS: Record<string, { color: string; dash: string }> = {
-  forward:   { color: "--color-text-secondary", dash: "" },
-  loop:      { color: "--color-success",        dash: "5 3" },
-  directive: { color: "--color-accent",         dash: "4 3" },
-  escalate:  { color: "--color-accent-strong",  dash: "2 3" },
+// Edge variants — collapses three parallel switches (stroke colour key,
+// dasharray, arrowhead marker id) into one row per kind. Add a kind:
+// extend the map, no other site changes.
+type ColorKey = "txt" | "ok" | "acc" | "esc";
+const EDGE_VARIANTS: Record<string, { color: ColorKey; dash: string; marker: string }> = {
+  forward:   { color: "txt", dash: "",    marker: "arrh" },
+  loop:      { color: "ok",  dash: "5 3", marker: "arrh-loop" },
+  directive: { color: "acc", dash: "4 3", marker: "arrh-dir" },
+  escalate:  { color: "esc", dash: "2 3", marker: "arrh-esc" },
 };
 
 interface Props {
@@ -47,36 +52,39 @@ interface Props {
 export function WorkflowCanvas({ pipeline, dash }: Props) {
   const view = pipeline?.view;
   const activeId = phaseToNodeId(dash?.state);
-  const [selected, setSelected] = useState<string | null>("l1_score");
-  const [, forceTick] = useState(0);
+  // Node selection rides the shared SelectionContext so SharedInspector
+  // (below the row) can render NodePanel details for the picked node.
+  // No internal state — clicking ✕ in the inspector clears the context.
+  const { node: selected, setNode: setSelected } = useSelection();
+  // Bumped by the MutationObserver below on `data-theme` flips; drives the
+  // `colors` memo so SVG strokes/labels re-derive from the new CSS vars.
+  const [themeTick, setThemeTick] = useState(0);
 
-  // Re-paint markers/edges when CSS variables change (theme swap). The
-  // status-bar / chart layers also re-render; this is the workflow's hook.
-  const wrapRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
-    const obs = new MutationObserver(() => forceTick((n) => n + 1));
+    const obs = new MutationObserver(() => setThemeTick((n) => n + 1));
     obs.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
     return () => obs.disconnect();
   }, []);
 
-  const colors = useMemo(() => {
-    if (typeof window === "undefined") {
-      return { txt: "#9ca3af", ok: "#10b981", acc: "#f59e0b", esc: "#ea580c", bg: "#0d0d0d" };
-    }
-    return {
-      txt: getCss("--color-text-secondary"),
-      ok: getCss("--color-success"),
-      acc: getCss("--color-accent"),
-      esc: getCss("--color-accent-strong"),
-      bg: getCss("--color-background-tertiary"),
-    };
-    // re-derive on theme tick
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [view?.nodes.length, dash?.state, wrapRef.current?.offsetWidth, typeof window === "undefined" ? null : document.documentElement.dataset.theme]);
+  // Re-derived on every render — `themeTick` bumps cause the re-render,
+  // which re-reads CSS vars fresh. No memo: 5 var reads is cheap, and
+  // useMemo would need themeTick in its deps even though the body doesn't
+  // reference it (tripping react-hooks/exhaustive-deps).
+  void themeTick;
+  const colors =
+    typeof window === "undefined"
+      ? { txt: "#9ca3af", ok: "#10b981", acc: "#f59e0b", esc: "#ea580c", bg: "#0d0d0d" }
+      : {
+          txt: getCss("--color-text-secondary"),
+          ok: getCss("--color-success"),
+          acc: getCss("--color-accent"),
+          esc: getCss("--color-accent-strong"),
+          bg: getCss("--color-background-tertiary"),
+        };
 
   if (!view) {
     return (
-      <div className="workflow-card">
+      <div className={`workflow-card${selected ? " expanded" : " collapsed"}`}>
         <div className="workflow-toolbar">
           <span style={{ flex: 1 }}>Workflow</span>
           <span id="wf-status" style={{ color: "var(--color-text-tertiary)" }}>● topology pending</span>
@@ -96,7 +104,7 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
   };
 
   return (
-    <div className="workflow-card">
+    <div className={`workflow-card${selected ? " expanded" : " collapsed"}`}>
       <div className="workflow-toolbar">
         <span style={{ flex: 1 }}>Workflow</span>
         <span style={{ color: dash ? colors.ok : colors.txt }}>● {dash ? "live" : "pending"}</span>
@@ -107,7 +115,7 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
           ) : null;
         })()}
       </div>
-      <div className="workflow-canvas-bg" ref={wrapRef}>
+      <div className="workflow-canvas-bg">
         <div className="workflow-canvas">
           <svg
             width="100%"
@@ -127,17 +135,11 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
             {view.edges.map((e) => {
               const geom = EDGES[`${e.from}>${e.to}`];
               if (!geom) return null;
-              const sty = EDGE_KIND_VARS[geom.kind] ?? EDGE_KIND_VARS.forward;
-              const stroke = sty.color === "--color-text-secondary" ? colors.txt
-                : sty.color === "--color-success" ? colors.ok
-                : sty.color === "--color-accent" ? colors.acc
-                : colors.esc;
-              const markerId = geom.kind === "forward" ? "arrh"
-                : geom.kind === "loop" ? "arrh-loop"
-                : geom.kind === "directive" ? "arrh-dir" : "arrh-esc";
+              const v = EDGE_VARIANTS[geom.kind] ?? EDGE_VARIANTS.forward;
+              const stroke = colors[v.color];
               return (
                 <g key={`${e.from}>${e.to}`}>
-                  <path d={geom.d} fill="none" stroke={stroke} strokeWidth="1.5" strokeDasharray={sty.dash || undefined} markerEnd={`url(#${markerId})`} />
+                  <path d={geom.d} fill="none" stroke={stroke} strokeWidth="1.5" strokeDasharray={v.dash || undefined} markerEnd={`url(#${v.marker})`} />
                   {geom.label && geom.labelXY && (
                     <text x={geom.labelXY[0]} y={geom.labelXY[1]} fontSize="12" fill={stroke} textAnchor="middle" fontFamily="ui-sans-serif,system-ui" paintOrder="stroke" stroke={colors.bg} strokeWidth="3">{geom.label}</text>
                   )}
@@ -169,11 +171,6 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
                   top: `${(pos.y / CANVAS_H) * 100}%`,
                   width: `${(pos.w / CANVAS_W) * 100}%`,
                   height: `${(pos.h / CANVAS_H) * 100}%`,
-                  background: "transparent",
-                  border: 0,
-                  padding: 0,
-                  fontFamily: "inherit",
-                  cursor: n.kind === "io" ? "default" : "pointer",
                 }}
                 aria-label={n.kind === "io" ? `${n.label} (I/O)` : `Node: ${n.label}`}
                 aria-pressed={selected === n.id ? "true" : undefined}
@@ -189,17 +186,6 @@ export function WorkflowCanvas({ pipeline, dash }: Props) {
               </button>
             );
           })}
-          {selected && (
-            <NodePanel
-              id={selected}
-              view={view}
-              currentNodes={currentNodes}
-              pipeline={pipeline}
-              phase={dash?.state}
-              round={roundOf(dash) ?? undefined}
-              onClose={() => setSelected(null)}
-            />
-          )}
         </div>
       </div>
     </div>
@@ -216,7 +202,7 @@ interface PanelProps {
   onClose: () => void;
 }
 
-function NodePanel({ id, view, currentNodes, pipeline, phase, round, onClose }: PanelProps) {
+export function NodePanel({ id, view, currentNodes, pipeline, phase, round, onClose }: PanelProps) {
   const meta = view.nodes.find((n) => n.id === id);
   const data = currentNodes[id];
   const cfg = pipeline?.nodes?.[id];

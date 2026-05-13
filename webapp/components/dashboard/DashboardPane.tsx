@@ -19,16 +19,17 @@ import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
 import { RawJsonCard } from "@/components/raw/RawJsonCard";
 import { TERMS } from "@/lib/terms";
-import { HeroSummary } from "./HeroSummary";
+import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
-import { ProgressCard } from "./ProgressCard";
+import { NarrowSpine, WideSpine } from "./DashboardLayout";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
-import { LineageTree, type SelectedCandidate } from "./LineageTree";
+import { LineageTree } from "./LineageTree";
 import { CyclePicker } from "./CyclePicker";
-import { ScoringInspector } from "./ScoringInspector";
 import { EditModeToggle } from "./EditModeToggle";
 import { StopButton } from "./StopButton";
+import { SelectionProvider } from "./SelectionContext";
+import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
 
 interface PipelineDoc {
@@ -57,8 +58,6 @@ export function DashboardPane() {
   const [datasetTestCount, setDatasetTestCount] = useState(0);
   const [themeKey, setThemeKey] = useState<string>("init");
   const [activeError, setActiveError] = useState<string | null>(null);
-  // Lineage node selection — null = no node selected, inspector hidden.
-  const [selected, setSelected] = useState<SelectedCandidate | null>(null);
   // Edit mode — off by default; gates Stop run + Fork-from-here. Never
   // persisted across reloads (no URL param, no localStorage) so the
   // operator never finds risky affordances quietly enabled.
@@ -119,13 +118,10 @@ export function DashboardPane() {
     window.history.replaceState(null, "", `?${params.toString()}`);
   }, [cycleId]);
 
-  // Picker handoff: clear any lineage selection when the operator picks a
-  // different cycle — a stale candidate id points at the wrong cycle's tree.
-  // Done inline rather than in a `useEffect([cycleId])` so eslint's
-  // react-hooks/set-state-in-effect doesn't flag it.
+  // Picker handoff. SelectionProvider auto-clears its slot on cycleId
+  // change (prev-prop pattern); no need to plumb that here.
   const handleCycleChange = useCallback((next: string) => {
     setCycleId(next);
-    setSelected(null);
   }, []);
 
   // One-shot pipeline (topology) lookup
@@ -220,6 +216,7 @@ export function DashboardPane() {
   }, []);
 
   return (
+    <SelectionProvider cycleId={cycleId}>
     <div className={`shell${tab === "chat" ? " chat-mode" : ""}`}>
       <Sidebar
         cycleId={cycleId}
@@ -259,9 +256,9 @@ export function DashboardPane() {
               dash={dash}
               onOpenFiles={() => setTab("files")}
             />
-            <header className="dash-hero">
-              <div className="page-header">
-                <div className="page-header-text">
+            <NarrowSpine>
+              <header className="dash-hero">
+                <div className="page-header">
                   <div className="breadcrumb">
                     Cycle »{" "}
                     <CyclePicker cycleId={cycleId} onChange={handleCycleChange} />
@@ -275,62 +272,51 @@ export function DashboardPane() {
                       {editMode && cycleId && <StopButton cycleId={cycleId} isLive={isLive} />}
                     </span>
                   </div>
-                  <h1>{datasetTitle || cycleId || (activeError ? "No active session" : "Loading…")}</h1>
-                  <div className="meta">
-                    session {sessionId || "—"} • updated {dash?.wallclock_serialized_at || "—"}
-                  </div>
                 </div>
-                <HeroSummary cycleId={cycleId} dash={dash} refreshKey={refreshKey} />
-              </div>
-              <ProgressCard dash={dash} dashRound={dashRound} />
-            </header>
-            <section className="dash-top" aria-label="Pipeline">
-              <WorkflowCanvas pipeline={pipeline} dash={dash} />
-            </section>
-            <div className="dash-grid">
-              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-              <div className="lineage-column">
+                <TopStrip cycleId={cycleId} dash={dash} dashRound={dashRound} refreshKey={refreshKey} />
+              </header>
+            </NarrowSpine>
+            <WideSpine>
+              <div className="dash-row-three">
                 <LineageTree
                   cycleId={cycleId}
                   refreshKey={refreshKey}
                   dash={dash}
-                  selected={selected}
-                  onSelect={setSelected}
                 />
-                {selected && (
-                  <ScoringInspector
-                    cycleId={cycleId}
-                    refreshKey={refreshKey}
-                    selected={selected}
-                    editMode={editMode}
-                    isLive={isLive}
-                    onClose={() => setSelected(null)}
-                  />
-                )}
+                <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
+                <WorkflowCanvas pipeline={pipeline} dash={dash} />
               </div>
-            </div>
-            {/* Clear selection when the operator switches cycles — stale
-               candidate ids would point at the wrong tree otherwise. */}
-            <section className="dash-samples-wide" aria-label="Live samples">
-              <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
-            </section>
-            <div className="dash-charts">
-              <FreqChart cycleId={cycleId} refreshKey={refreshKey} dash={dash} themeKey={themeKey} />
-              <TrendChart cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-            </div>
-            <details className="dash-diag">
-              <summary>Diagnostics — live state & raw payload</summary>
-              <div className="dash-diag-body">
-                <LiveStateCard dash={dash} />
-                <RawJsonCard dash={dash} />
+            </WideSpine>
+            <WideSpine>
+              <SharedInspector cycleId={cycleId} refreshKey={refreshKey} dash={dash} pipeline={pipeline} isLive={isLive} />
+            </WideSpine>
+            <WideSpine>
+              <section className="dash-samples-wide" aria-label="Live samples">
+                <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
+              </section>
+            </WideSpine>
+            <WideSpine>
+              <div className="dash-charts">
+                <FreqChart cycleId={cycleId} refreshKey={refreshKey} dash={dash} themeKey={themeKey} />
+                <TrendChart cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
               </div>
-            </details>
+            </WideSpine>
+            <NarrowSpine>
+              <details className="dash-diag">
+                <summary>Diagnostics — live state & raw payload</summary>
+                <div className="dash-diag-body">
+                  <LiveStateCard dash={dash} />
+                  <RawJsonCard dash={dash} />
+                </div>
+              </details>
+            </NarrowSpine>
           </div>
         ) : (
           <FilesPane cycleId={cycleId} />
         )}
       </main>
     </div>
+    </SelectionProvider>
   );
 }
 

@@ -1,7 +1,9 @@
 "use client";
 import { useMemo } from "react";
-import type { DashboardSnapshot } from "@/lib/poll";
+import { liveL1Candidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
 import { useRoundHistory } from "@/lib/use-round-history";
+import { parseSampleLine } from "@/lib/sample-line";
+import { useSelection } from "./SelectionContext";
 
 interface Candidate {
   candidate_id?: string;
@@ -16,20 +18,10 @@ interface RoundView {
   scoreboard?: Candidate[];
 }
 
-export interface SelectedCandidate {
-  round: number;
-  candidate_id: string;
-  label: string;
-  accuracy: number | null;
-  is_winner: boolean;
-}
-
 interface Props {
   cycleId: string | null;
   refreshKey: number;
   dash: DashboardSnapshot | null;
-  selected: SelectedCandidate | null;
-  onSelect: (c: SelectedCandidate | null) => void;
 }
 
 // Minimal cladogram layout. Each round occupies a fixed column. Parent
@@ -57,8 +49,14 @@ function fmtPct(v: number | undefined | null): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: Props) {
+export function LineageTree({ cycleId, refreshKey, dash }: Props) {
+  const { selected, setSelected } = useSelection();
   const docs = useRoundHistory(cycleId, refreshKey);
+  // Same merge logic FitnessPanel uses: historical rounds from disk +
+  // a partial "live" round when the dash carries L1 candidates that
+  // haven't been written to round_NNNN.json yet. Without this the
+  // lineage lags the fitness panel by a whole round (the operator sees
+  // C4.x bars in the chart but no R4 column in the tree).
   const rounds: RoundView[] = useMemo(() => {
     const out: RoundView[] = [];
     for (const d of docs) {
@@ -69,8 +67,38 @@ export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: P
         scoreboard: d.scoreboard as Candidate[] | undefined,
       });
     }
+    const inflight = liveL1Candidates(dash);
+    const currentRound = roundOf(dash);
+    if (inflight.length > 0 && currentRound != null && !out.some((r) => r.round === currentRound)) {
+      const scoreboard: Candidate[] = inflight.map((c) => {
+        const i = Number(c.idx);
+        let acc: number | null = null;
+        if (typeof c.stats?.accuracy === "number") {
+          acc = c.stats.accuracy;
+        } else if (c.samples && c.samples.length > 0) {
+          let hits = 0, total = 0;
+          for (const raw of c.samples) {
+            const p = typeof raw === "string" ? parseSampleLine(raw) : null;
+            if (p?.status === "HIT") { hits += 1; total += 1; }
+            else if (p?.status === "MISS") { total += 1; }
+            else if (raw && typeof raw === "object" && typeof raw.hit === "boolean") {
+              if (raw.hit) hits += 1;
+              total += 1;
+            }
+          }
+          acc = total > 0 ? hits / total : null;
+        }
+        return {
+          candidate_id: `r${currentRound}_${i}`,
+          label: c.label,
+          accuracy: acc ?? undefined,
+          is_winner: false,
+        };
+      });
+      out.push({ round: currentRound, scoreboard });
+    }
     return out;
-  }, [docs]);
+  }, [docs, dash]);
 
   // Walk rounds in order. Each round's children sit at column N (1-indexed),
   // vertically centered on the parent of round N (origin or prior winner).
@@ -119,7 +147,9 @@ export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: P
     return {
       branches: { children, segs },
       height: maxY + TOP_PAD,
-      totalW: LEFT_PAD + (rounds[rounds.length - 1]?.round ?? 1) * ROUND_W + 140,
+      // Right padding sized for the final column's label text ("R{N}.{i} {pct}%")
+      // — ~80px is enough; the prior 140 left a wide empty strip on the right.
+      totalW: LEFT_PAD + (rounds[rounds.length - 1]?.round ?? 1) * ROUND_W + 80,
       originY: rounds.length > 0 ? (segs[0]?.py ?? TOP_PAD) : TOP_PAD,
     };
   }, [rounds]);
@@ -182,7 +212,7 @@ export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: P
           ))}
 
           {/* Horizontal child stubs + labels. Clickable: selecting a node
-             feeds the ScoringInspector. Re-clicking the selected node clears. */}
+             feeds the ScoringInspector embedded below within this card. */}
           {branches.children.map((c) => {
             const cid = c.cand.candidate_id ?? `r${c.round}_${c.idx}`;
             const isSelected =
@@ -193,9 +223,9 @@ export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: P
                 className={`lineage-node${isSelected ? " selected" : ""}`}
                 onClick={() => {
                   if (isSelected) {
-                    onSelect(null);
+                    setSelected(null);
                   } else {
-                    onSelect({
+                    setSelected({
                       round: c.round,
                       candidate_id: cid,
                       label: c.cand.label ?? cid,

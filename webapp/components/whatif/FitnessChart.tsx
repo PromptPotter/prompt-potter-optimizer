@@ -10,6 +10,12 @@ ensureChartRegistered();
 // Pre-projected bar slot. Origin, historical rounds, and the in-flight
 // current round all collapse to the same shape — FitnessPanel handles the
 // merge so this component stays a pure plotter.
+//
+// `candidateId` + `round` (optional) lift the bar into the shared
+// SelectionContext: bars carrying them are clickable + highlight when the
+// matching candidate is selected anywhere in the dashboard. Origin and
+// pre-id'd live bars stay non-selectable (no row in the lineage to
+// cross-reference yet).
 export interface BarSlot {
   key: string;          // React + dedup key
   label: string;        // x-axis label (e.g. "C0", "C1.1", "C2.3")
@@ -17,6 +23,9 @@ export interface BarSlot {
   composite: number | null;
   whatif: number | null;
   started: boolean;     // false = blank slot, true = scored or scoring
+  candidateId?: string;
+  round?: number;
+  isWinner?: boolean;
 }
 
 interface Props {
@@ -24,6 +33,8 @@ interface Props {
   showComposite: boolean;
   showWhatIf: boolean;
   themeKey: string;
+  selectedKey: string | null;
+  onSelect: (bar: BarSlot | null) => void;
 }
 
 export function FitnessChart({
@@ -31,6 +42,8 @@ export function FitnessChart({
   showComposite,
   showWhatIf,
   themeKey,
+  selectedKey,
+  onSelect,
 }: Props) {
   const labels = useMemo(() => bars.map((b) => b.label), [bars]);
 
@@ -50,6 +63,18 @@ export function FitnessChart({
     };
   }, [bars]);
 
+  // Per-bar border overlay — picks out the bar matching the shared
+  // SelectionContext. Driven by --color-selection (set in globals.css)
+  // so it matches the lineage tree's selected stub colour.
+  const selectionBorder = useMemo(() => {
+    if (selectedKey == null) return null;
+    const idx = bars.findIndex((b) => b.key === selectedKey);
+    if (idx < 0) return null;
+    const colour = getCss("--color-selection");
+    return { idx, colour };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [bars, selectedKey, themeKey]);
+
   const data = useMemo<ChartData<"bar">>(() => {
     const seriesCount = 1 + (showComposite ? 1 : 0) + (showWhatIf ? 1 : 0);
     const cat = seriesCount === 1 ? 0.55 : seriesCount === 2 ? 0.75 : 0.9;
@@ -58,13 +83,24 @@ export function FitnessChart({
     // clipping. Scale max thickness down as the bar count grows; min 6.
     const barCount = Math.max(1, labels.length);
     const maxBar = Math.max(6, Math.min(28, Math.round(640 / (barCount * seriesCount))));
+    const accent = cssRgba("--color-accent-rgb", 0.95);
+    const accentDim = cssRgba("--color-accent-rgb", 0.55);
+    const accentStrong = getCss("--color-accent-strong");
+    const borderArr = (base: string): string[] | string => {
+      if (!selectionBorder) return base;
+      return labels.map((_, i) => (i === selectionBorder.idx ? selectionBorder.colour : base));
+    };
+    const widthArr = (): number[] | number => {
+      if (!selectionBorder) return 0;
+      return labels.map((_, i) => (i === selectionBorder.idx ? 3 : 0));
+    };
     const datasets: ChartData<"bar">["datasets"] = [
       {
         label: "accuracy",
         data: accPlot,
-        backgroundColor: cssRgba("--color-accent-rgb", 0.95),
-        borderColor: cssRgba("--color-accent-rgb", 0.95),
-        borderWidth: 0,
+        backgroundColor: accent,
+        borderColor: borderArr(accent),
+        borderWidth: widthArr(),
         barPercentage: 0.95,
         categoryPercentage: cat,
         maxBarThickness: maxBar,
@@ -75,9 +111,9 @@ export function FitnessChart({
       datasets.push({
         label: "composite",
         data: compPlot,
-        backgroundColor: cssRgba("--color-accent-rgb", 0.55),
-        borderColor: cssRgba("--color-accent-rgb", 0.55),
-        borderWidth: 0,
+        backgroundColor: accentDim,
+        borderColor: borderArr(accentDim),
+        borderWidth: widthArr(),
         barPercentage: 0.95,
         categoryPercentage: cat,
         maxBarThickness: maxBar,
@@ -85,13 +121,12 @@ export function FitnessChart({
       });
     }
     if (showWhatIf) {
-      const accentStrong = getCss("--color-accent-strong");
       datasets.push({
         label: "what-if",
         data: whatifPlot,
         backgroundColor: accentStrong,
-        borderColor: accentStrong,
-        borderWidth: 0,
+        borderColor: borderArr(accentStrong),
+        borderWidth: widthArr(),
         barPercentage: 0.95,
         categoryPercentage: cat,
         maxBarThickness: maxBar,
@@ -100,7 +135,7 @@ export function FitnessChart({
     }
     return { labels, datasets };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [labels, accPlot, compPlot, whatifPlot, showComposite, showWhatIf, themeKey]);
+  }, [labels, accPlot, compPlot, whatifPlot, showComposite, showWhatIf, themeKey, selectionBorder]);
 
   const tooltipFor = (label: string, idx: number): string => {
     const src = label === "accuracy" ? accRaw : label === "composite" ? compRaw : whatifRaw;
@@ -113,6 +148,21 @@ export function FitnessChart({
     responsive: true,
     maintainAspectRatio: false,
     animation: { duration: 200 },
+    onClick: (_evt, elements) => {
+      if (!elements || elements.length === 0) return;
+      const idx = elements[0].index;
+      const bar = bars[idx];
+      if (!bar || !bar.candidateId || bar.round == null) return;     // origin / pre-id'd live bar
+      if (bar.key === selectedKey) onSelect(null);
+      else onSelect(bar);
+    },
+    onHover: (evt, elements) => {
+      const target = (evt.native?.target ?? null) as HTMLElement | null;
+      if (!target) return;
+      const hit = elements && elements.length > 0;
+      const bar = hit ? bars[elements[0].index] : null;
+      target.style.cursor = bar && bar.candidateId && bar.round != null ? "pointer" : "default";
+    },
     scales: {
       x: { grid: { display: false }, ticks: { font: { size: rotate ? 10 : 11, family: "Cascadia Mono, SF Mono, Menlo, Consolas, monospace" }, autoSkip: false, maxRotation: rotate ? 60 : 0, minRotation: rotate ? 60 : 0 } },
       y: { min: 0, max: 1, grid: { color: getCss("--color-border-tertiary") }, ticks: { font: { size: 11 }, stepSize: 0.25 } },
@@ -126,7 +176,7 @@ export function FitnessChart({
       },
     },
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }), [themeKey, accRaw, compRaw, whatifRaw, rotate]);
+  }), [themeKey, accRaw, compRaw, whatifRaw, rotate, bars, selectedKey, onSelect]);
 
   return (
     <div className="fitness-chart-frame">
