@@ -16,10 +16,20 @@ interface RoundView {
   scoreboard?: Candidate[];
 }
 
+export interface SelectedCandidate {
+  round: number;
+  candidate_id: string;
+  label: string;
+  accuracy: number | null;
+  is_winner: boolean;
+}
+
 interface Props {
   cycleId: string | null;
   refreshKey: number;
   dash: DashboardSnapshot | null;
+  selected: SelectedCandidate | null;
+  onSelect: (c: SelectedCandidate | null) => void;
 }
 
 // Minimal cladogram layout. Each round occupies a fixed column. Parent
@@ -47,7 +57,7 @@ function fmtPct(v: number | undefined | null): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ cycleId, refreshKey, dash }: Props) {
+export function LineageTree({ cycleId, refreshKey, dash, selected, onSelect }: Props) {
   const docs = useRoundHistory(cycleId, refreshKey);
   const rounds: RoundView[] = useMemo(() => {
     const out: RoundView[] = [];
@@ -171,26 +181,58 @@ export function LineageTree({ cycleId, refreshKey, dash }: Props) {
             />
           ))}
 
-          {/* Horizontal child stubs + labels. */}
-          {branches.children.map((c) => (
-            <g key={`child-${c.round}-${c.idx}`}>
-              <line
-                x1={c.x}
-                y1={c.y}
-                x2={c.x + STUB}
-                y2={c.y}
-                className={`lineage-stub${c.cand.is_winner ? " winner" : ""}`}
-              />
-              <text
-                x={c.labelX}
-                y={c.y + 3}
-                className={`lineage-label${c.cand.is_winner ? " winner" : ""}`}
+          {/* Horizontal child stubs + labels. Clickable: selecting a node
+             feeds the ScoringInspector. Re-clicking the selected node clears. */}
+          {branches.children.map((c) => {
+            const cid = c.cand.candidate_id ?? `r${c.round}_${c.idx}`;
+            const isSelected =
+              selected != null && selected.round === c.round && selected.candidate_id === cid;
+            return (
+              <g
+                key={`child-${c.round}-${c.idx}`}
+                className={`lineage-node${isSelected ? " selected" : ""}`}
+                onClick={() => {
+                  if (isSelected) {
+                    onSelect(null);
+                  } else {
+                    onSelect({
+                      round: c.round,
+                      candidate_id: cid,
+                      label: c.cand.label ?? cid,
+                      accuracy: typeof c.cand.accuracy === "number" ? c.cand.accuracy : null,
+                      is_winner: !!c.cand.is_winner,
+                    });
+                  }
+                }}
+                style={{ cursor: "pointer" }}
               >
-                R{c.round}.{c.idx + 1} {fmtPct(c.cand.accuracy)}
-              </text>
-              <title>{c.cand.label ?? c.cand.candidate_id ?? ""}</title>
-            </g>
-          ))}
+                <line
+                  x1={c.x}
+                  y1={c.y}
+                  x2={c.x + STUB}
+                  y2={c.y}
+                  className={`lineage-stub${c.cand.is_winner ? " winner" : ""}`}
+                />
+                <text
+                  x={c.labelX}
+                  y={c.y + 3}
+                  className={`lineage-label${c.cand.is_winner ? " winner" : ""}`}
+                >
+                  R{c.round}.{c.idx + 1} {fmtPct(c.cand.accuracy)}
+                </text>
+                {/* Invisible hit-rect over the label so the row catches clicks
+                   beyond just the thin stub. */}
+                <rect
+                  x={c.x}
+                  y={c.y - 10}
+                  width={STUB + 110}
+                  height={20}
+                  fill="transparent"
+                />
+                <title>{c.cand.label ?? c.cand.candidate_id ?? ""}</title>
+              </g>
+            );
+          })}
         </svg>
       </div>
     </div>

@@ -553,6 +553,13 @@ async def _run_normal_optimize(
     observers = _build_observers(args, session, campaign_config, train_data, pre_origin_acc)
     ctx.save_phase("optimizing")
 
+    # Wire the webapp's "Stop run" channel: presence of .runtime/stop.flag
+    # signals the loop to exit at the next stop_check point. Pre-M12; the
+    # M12 daemon will replace the flag with a proper control channel. See
+    # docs/operations/human-in-the-loop.md.
+    stop_flag = session.store.campaigns.campaign_dir(ctx.cycle_id) / ".runtime" / "stop.flag"
+    session.stop_check = stop_flag.is_file
+
     try:
         cycle_result = await _orch_run_optimization(
             train_data,

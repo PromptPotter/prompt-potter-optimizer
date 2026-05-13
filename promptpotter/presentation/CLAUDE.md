@@ -33,10 +33,25 @@ points MUST NOT write campaign artifacts directly — they call into
 ## Read-only API stance
 
 `api.py` is **read-only by design** beyond the explicitly-sanctioned
-mutating endpoints (e.g. backend registration, dataset preview).
-Webapp panels poll `dashboard.json` + a few JSON endpoints; they don't
-control the loop. Control-plane work (start / stop / steer a cycle
-remotely) is M12 daemon territory and out of charter here.
+mutating endpoints. Webapp panels poll `dashboard.json` + a few JSON
+endpoints; they don't drive the loop. Adding any other mutating route
+is M12 daemon territory and out of charter here.
+
+**Sanctioned mutating endpoints (pre-M12):**
+
+- `POST /backends/...` — backend registration / sync (long-standing).
+- `POST /datasets/.../preview` — dataset upload preview (long-standing).
+- `POST /api/v1/cycles/{cycle_id}/forks` — operator-initiated fork via
+  `CycleEventLog.inherit_from(parent, offset)`. Body `{offset}` only;
+  endorse path (substitute-typed-edit is M12 work).
+- `POST /api/v1/cycles/{cycle_id}/stop` — writes `.runtime/stop.flag`
+  under the cycle dir; the running loop's `Session.stop_check` polls
+  it. The file is the only artifact; no ledger write from the API.
+
+Both new POSTs ride existing Persistence (`inherit_from`) or
+Control-local (`stop_check`) ingresses — they do not introduce a new
+I/O kind. The full Control-remote channel (the M12 daemon) replaces
+both with a single typed control surface.
 
 ## Display constraint
 

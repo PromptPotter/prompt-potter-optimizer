@@ -157,17 +157,22 @@ renderer, period.** No sidecar paths, no out-of-band state mounting.
 
 **State + persistence.** Three entry points (CLI, notebook, webapp)
 share **one** orchestration layer and **one** set of data types — no
-per-entry-point copies. **Four I/O kinds** the orchestrator reads or
+per-entry-point copies. **Three I/O kinds** the orchestrator reads or
 writes through, each with its own ingress: (1) **Persistence** — the
-sole writer is per-cycle `CycleEventLog.append`. (2) **Display** —
-ledger subscribers (`LiveDisplay`, `LiveDashboardView`,
-`AuditTrailView`); read-only, never write campaign artifacts. (3)
-**Control-local** — `stop_check` on `Session`; signals the loop to
-exit, writes nothing. (4) **Human-input** — operator-supplied review
-events written to `CycleEventLog.append` from a watched file path
-when `Session.hitl_mode` is enabled, carrying typed `HumanReviewRecord`
-payloads. M12's orchestrator daemon will add a fifth (Control-remote)
-on the same persistence ingress. Adding a new I/O kind requires
+sole writer is per-cycle `CycleEventLog.append`. Operator-initiated
+HITL collapses into this ingress: `inherit_from(parent, offset)` mints
+a fork at any chosen ledger offset (the operator picks the offset
+through the webapp's lineage inspector; pre-M12 forks endorse the
+parent's typed state unchanged, the substitute-typed-edit path is M12
+work). (2) **Display** — ledger subscribers (`LiveDisplay`,
+`LiveDashboardView`, `AuditTrailView`); read-only, never write
+campaign artifacts. (3) **Control-local** — `stop_check` on
+`Session`; signals the loop to exit, writes nothing. The webapp's
+"Stop run" button rides this kind by writing a `.runtime/stop.flag`
+file the running loop polls via `stop_check`; the API route writing
+the flag is an explicitly-sanctioned mutation listed in
+`promptpotter/presentation/CLAUDE.md`. M12's orchestrator daemon will
+add a fourth (Control-remote) on the same persistence ingress. Adding a new I/O kind requires
 amending §0 first; the pre-flight gate (CLAUDE.md Q4 sub-rule)
 blocks code that introduces one without §0 backing. Hexagonal layer
 separation is enforced by

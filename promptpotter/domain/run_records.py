@@ -24,7 +24,6 @@ __all__ = [
     "CycleRecord",
     "ForkPayload",
     "ForkTrigger",
-    "HumanReviewRecord",
     "LLMCallRecord",
     "LLMCallStartRecord",
     "OperatorSweepFile",
@@ -211,47 +210,12 @@ class LLMCallRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
-class HumanReviewRecord(BaseModel):
-    """Operator review event — L2-equivalent fields supplied by a human.
-
-    Written to the ledger when ``Session.hitl_mode`` is on and the operator
-    has produced a response file at the round's pause point. The payload
-    parallels the auto-L2 output shape: ``task_context`` refinement, optional
-    ``l1_layout`` edits, optimizer-param tweaks. **Pipeline_params are NOT a
-    valid payload field** — those belong to L1's surface (see
-    ``promptpotter/CLAUDE.md`` on layer ownership).
-
-    ``mode`` distinguishes:
-
-    - ``"every_round"`` — HITL on, escalation off; operator runs as L2 every
-      round.
-    - ``"l2_review"`` — HITL on, escalation on; operator reviews/corrects
-      L2's auto-proposal after it fires.
-
-    ``accepted_auto_proposal`` is True when the operator's response file was
-    empty (interpreted as "accept the auto-L2 output verbatim"). When False,
-    the operator's payload supersedes (or augments) L2's output.
-    """
-
-    model_config = ConfigDict(frozen=True)
-
-    record_type: Literal["human_review"] = "human_review"
-    round: int
-    mode: Literal["every_round", "l2_review"]
-    accepted_auto_proposal: bool = False
-    payload: dict[str, Any] = Field(default_factory=dict)
-    bundle_path: str | None = None
-    response_path: str | None = None
-    timestamp: str = Field(default_factory=_utcnow_iso)
-
-
 # Discriminated union — Pydantic uses ``record_type`` to pick the right model
 # when parsing a dict back into a CycleRecord (e.g. when iterating a ledger
 # from disk). Keep the order alphabetical so hash-keyed test snapshots are
 # stable across additions.
 CycleRecord = Annotated[
-    HumanReviewRecord
-    | ResumeCheckpointRecord
+    ResumeCheckpointRecord
     | LLMCallRecord
     | LLMCallStartRecord
     | PhaseRecord

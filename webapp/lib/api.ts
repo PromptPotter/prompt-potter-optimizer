@@ -95,3 +95,70 @@ export async function fetchActiveDatasetName(
   const parsed = JSON.parse(file.content) as { header?: { dataset_name?: string } };
   return parsed.header?.dataset_name ?? null;
 }
+
+export type SiblingKind = "root" | "fork" | "diag" | "sweep";
+
+export interface CycleListEntry {
+  cycle_id: string;
+  parent_session_id: string;
+  dataset_name: string;
+  backend_id: string;
+  sibling_kind: SiblingKind;
+  is_root: boolean;
+  status: string;
+  best_accuracy: number | null;
+  n_rounds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CyclesResponse {
+  tenant_id: string;
+  active_cycle_id: string | null;
+  cycles: CycleListEntry[];
+}
+
+export function fetchCycles(signal?: AbortSignal): Promise<CyclesResponse> {
+  return jget<CyclesResponse>(`${API}/cycles`, signal);
+}
+
+// Sanctioned mutating endpoints — see promptpotter/presentation/CLAUDE.md
+// for the charter. Both ride existing I/O kinds (Persistence's
+// `inherit_from` and Control-local's `stop_check` flag-poll); they do not
+// introduce a new I/O kind.
+
+export interface CreateForkResponse {
+  fork_cycle_id: string;
+  cli_command: string;
+  active_pointer_retargeted: boolean;
+}
+
+export async function postCreateFork(
+  cycleId: string,
+  round: number,
+  candidateId: string,
+): Promise<CreateForkResponse> {
+  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}/forks`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ round, candidate_id: candidateId }),
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`${r.status} POST /forks`);
+  return (await r.json()) as CreateForkResponse;
+}
+
+export interface StopCycleResponse {
+  cycle_id: string;
+  flag_written: boolean;
+}
+
+export async function postStopCycle(cycleId: string): Promise<StopCycleResponse> {
+  const r = await fetch(`${API}/cycles/${encodeURIComponent(cycleId)}/stop`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    cache: "no-store",
+  });
+  if (!r.ok) throw new Error(`${r.status} POST /stop`);
+  return (await r.json()) as StopCycleResponse;
+}

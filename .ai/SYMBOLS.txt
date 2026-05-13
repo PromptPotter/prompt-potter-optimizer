@@ -237,7 +237,6 @@ has_dataset_prompts	promptpotter/application/datasets/datasets.py:431
 has_limit_node	promptpotter/application/scoring/evaluators.py:223
 hash_call	promptpotter/infrastructure/store/stores.py:38
 health_check	promptpotter/main.py:101
-HumanReviewRecord	promptpotter/domain/run_records.py:179
 indexed_stores	tests/test_intelligence.py:208
 individual_summary_from_dict	promptpotter/presentation/views/live.py:480
 IndividualLineage	promptpotter/domain/opt_search_point.py:180

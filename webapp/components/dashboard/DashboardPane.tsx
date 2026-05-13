@@ -24,7 +24,11 @@ import { ChatPane } from "./ChatPane";
 import { ProgressCard } from "./ProgressCard";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
-import { LineageTree } from "./LineageTree";
+import { LineageTree, type SelectedCandidate } from "./LineageTree";
+import { CyclePicker } from "./CyclePicker";
+import { ScoringInspector } from "./ScoringInspector";
+import { EditModeToggle } from "./EditModeToggle";
+import { StopButton } from "./StopButton";
 import { FilesPane } from "@/components/tree/FilesPane";
 
 interface PipelineDoc {
@@ -33,7 +37,10 @@ interface PipelineDoc {
 }
 
 export function DashboardPane() {
-  // Default to New Job (chat shell) — matches vanilla's first-load tab.active.
+  // Default to New Job — matches the prior first-load tab. The default
+  // landing surface is being moved to View Results elsewhere; flipping
+  // this state here without untangling the chat-shell's mount sequence
+  // tripped React #185. Leaving the default as-is until that's wired.
   const [tab, setTab] = useState<Tab>("newjob");
   const [pane, setPane] = useState<Pane>("dashboard");
   const [cycleId, setCycleId] = useState<string | null>(null);
@@ -47,6 +54,12 @@ export function DashboardPane() {
   const [datasetTestCount, setDatasetTestCount] = useState(0);
   const [themeKey, setThemeKey] = useState<string>("init");
   const [activeError, setActiveError] = useState<string | null>(null);
+  // Lineage node selection — null = no node selected, inspector hidden.
+  const [selected, setSelected] = useState<SelectedCandidate | null>(null);
+  // Edit mode — off by default; gates Stop run + Fork-from-here. Never
+  // persisted across reloads (no URL param, no localStorage) so the
+  // operator never finds risky affordances quietly enabled.
+  const [editMode, setEditMode] = useState(false);
 
   const dashState = useDashboardPoll(cycleId);
   const dash: DashboardSnapshot | null = dashState.dash;
@@ -58,23 +71,53 @@ export function DashboardPane() {
   const dashRound = roundOf(dash);
   const refreshKey = dashRound ?? -1;
 
-  // One-shot active session lookup
+  // Initial cycle selection — precedence: URL `?cycle=…` > /api/v1/active
+  // > null. `sessionId` still comes from /active (the workspace pointer is
+  // CLI-owned and doesn't move when the operator browses a different cycle).
   useEffect(() => {
     let cancelled = false;
+    const urlCycle =
+      typeof window !== "undefined"
+        ? new URLSearchParams(window.location.search).get("cycle")
+        : null;
     (async () => {
       try {
         const a = await fetchActive();
         if (cancelled) return;
-        setCycleId(a.cycle_id);
         setSessionId(a.session_id);
+        setCycleId(urlCycle || a.cycle_id);
       } catch (e) {
         if (cancelled) return;
-        setActiveError((e as Error).message);
+        if (urlCycle) {
+          setCycleId(urlCycle); // honour deep-link even when no active session
+        } else {
+          setActiveError((e as Error).message);
+        }
       }
     })();
     return () => {
       cancelled = true;
     };
+  }, []);
+
+  // Keep ?cycle=… in the URL so reloads stick to the currently-viewed cycle.
+  // replaceState (not pushState) — switching cycles isn't a navigation event,
+  // we don't want a back-button entry per pick.
+  useEffect(() => {
+    if (typeof window === "undefined" || !cycleId) return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("cycle") === cycleId) return;
+    params.set("cycle", cycleId);
+    window.history.replaceState(null, "", `?${params.toString()}`);
+  }, [cycleId]);
+
+  // Picker handoff: clear any lineage selection when the operator picks a
+  // different cycle — a stale candidate id points at the wrong cycle's tree.
+  // Done inline rather than in a `useEffect([cycleId])` so eslint's
+  // react-hooks/set-state-in-effect doesn't flag it.
+  const handleCycleChange = useCallback((next: string) => {
+    setCycleId(next);
+    setSelected(null);
   }, []);
 
   // One-shot pipeline (topology) lookup
@@ -212,7 +255,12 @@ export function DashboardPane() {
               <div className="page-header">
                 <div className="page-header-text">
                   <div className="breadcrumb">
-                    Cycle » {cycleId || (activeError ? "no active session" : "loading…")}
+                    Cycle »{" "}
+                    <CyclePicker cycleId={cycleId} onChange={handleCycleChange} />
+                    <span className="cycle-toolbar">
+                      <EditModeToggle on={editMode} onToggle={setEditMode} />
+                      {editMode && cycleId && <StopButton cycleId={cycleId} />}
+                    </span>
                   </div>
                   <h1>{datasetTitle || cycleId || (activeError ? "No active session" : "Loading…")}</h1>
                   <div className="meta">
@@ -228,8 +276,25 @@ export function DashboardPane() {
             </section>
             <div className="dash-grid">
               <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-              <LineageTree cycleId={cycleId} refreshKey={refreshKey} dash={dash} />
+              <LineageTree
+                cycleId={cycleId}
+                refreshKey={refreshKey}
+                dash={dash}
+                selected={selected}
+                onSelect={setSelected}
+              />
             </div>
+            {selected && (
+              <ScoringInspector
+                cycleId={cycleId}
+                refreshKey={refreshKey}
+                selected={selected}
+                editMode={editMode}
+                onClose={() => setSelected(null)}
+              />
+            )}
+            {/* Clear selection when the operator switches cycles — stale
+               candidate ids would point at the wrong tree otherwise. */}
             <section className="dash-samples-wide" aria-label="Live samples">
               <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
             </section>

@@ -16,7 +16,7 @@ from promptpotter.infrastructure.store.base import (
     validate_path_component,
     write_json,
 )
-from promptpotter.infrastructure.store.paths import campaign_dir_for
+from promptpotter.infrastructure.store.paths import campaign_dir_for, sibling_kind
 
 logger = logging.getLogger(__name__)
 
@@ -299,6 +299,38 @@ class CampaignStore(EntityStore):
             cycle_ids = [s["campaign_id"] for s in self.list_all(backend_id)]
         return [c for cid in cycle_ids if (c := self.load(backend_id, cid)) is not None]
 
+    def _index_files(self) -> list[Path]:
+        """Every ``index.json`` under this tenant's campaigns tree.
+
+        Walks root cycles (``campaigns/{cycle_id}/``) plus all three sibling
+        kinds: ``forks/``, ``diag/``, and ``sweeps/*/forks/``. Shared between
+        ``list_all`` (backend-filtered summary) and ``enumerate_cycles``
+        (webapp picker)."""
+        campaigns_dir = self._entity_dir("")
+        if not campaigns_dir.exists():
+            return []
+        out: list[Path] = []
+        for root_dir in sorted(campaigns_dir.iterdir()):
+            if not root_dir.is_dir():
+                continue
+            if (idx := root_dir / "index.json").is_file():
+                out.append(idx)
+            for kind_dir in ("forks", "diag"):
+                parent = root_dir / kind_dir
+                if parent.is_dir():
+                    for fork_dir in sorted(parent.iterdir()):
+                        if (idx := fork_dir / "index.json").is_file():
+                            out.append(idx)
+            sweeps_dir = root_dir / "sweeps"
+            if sweeps_dir.is_dir():
+                for batch_dir in sorted(sweeps_dir.iterdir()):
+                    batch_forks = batch_dir / "forks"
+                    if batch_forks.is_dir():
+                        for fork_dir in sorted(batch_forks.iterdir()):
+                            if (idx := fork_dir / "index.json").is_file():
+                                out.append(idx)
+        return out
+
     def list_all(self, backend_id: str) -> list[dict[str, Any]]:
         """Return summary for every campaign stored under this tenant.
 
@@ -308,35 +340,8 @@ class CampaignStore(EntityStore):
         ``index.json::backend_id``). Pass ``""`` to list all campaigns
         regardless of backend.
         """
-        campaigns_dir = self._entity_dir(backend_id)
-        if not campaigns_dir.exists():
-            return []
-
-        def index_files() -> list[Path]:
-            out: list[Path] = []
-            for root_dir in sorted(campaigns_dir.iterdir()):
-                if not root_dir.is_dir():
-                    continue
-                if (idx := root_dir / "index.json").is_file():
-                    out.append(idx)
-                for sibling_kind_dir in ("forks", "diag"):
-                    parent = root_dir / sibling_kind_dir
-                    if parent.is_dir():
-                        for fork_dir in sorted(parent.iterdir()):
-                            if (idx := fork_dir / "index.json").is_file():
-                                out.append(idx)
-                sweeps_dir = root_dir / "sweeps"
-                if sweeps_dir.is_dir():
-                    for batch_dir in sorted(sweeps_dir.iterdir()):
-                        batch_forks = batch_dir / "forks"
-                        if batch_forks.is_dir():
-                            for fork_dir in sorted(batch_forks.iterdir()):
-                                if (idx := fork_dir / "index.json").is_file():
-                                    out.append(idx)
-            return out
-
         results = []
-        for index_path in index_files():
+        for index_path in self._index_files():
             data = read_json(index_path)
             if "campaign_id" not in data:
                 continue
@@ -353,6 +358,64 @@ class CampaignStore(EntityStore):
                     "created_at": data["created_at"],
                     "updated_at": data["updated_at"],
                     "parent_session_id": data.get("parent_session_id", ""),
+                }
+            )
+        return results
+
+    def enumerate_cycles(self) -> list[dict[str, Any]]:
+        """Every cycle on disk under this tenant, with the richer shape the
+        webapp picker needs.
+
+        Walks the same tree as ``list_all`` (roots + forks + diag + sweeps)
+        but returns one entry per cycle carrying ``sibling_kind`` + dataset
+        header info, and is backend-agnostic (no filter). Tolerant of corrupt
+        or partially-written ``index.json``: a cycle dir with an unreadable
+        index contributes a stub entry with ``status="unreadable"`` and
+        defaulted numeric fields, so the operator can still see it in the
+        picker. The enumeration never raises.
+        """
+        results: list[dict[str, Any]] = []
+        for index_path in self._index_files():
+            cycle_id_from_dir = index_path.parent.name
+            try:
+                data = read_json_optional(index_path)
+            except Exception:  # corrupt JSON, encoding error, etc.
+                data = None
+            if not isinstance(data, dict) or "campaign_id" not in data:
+                # stub entry for unreadable indexes — directory name is the cycle_id by construction
+                results.append(
+                    {
+                        "cycle_id": cycle_id_from_dir,
+                        "parent_session_id": "",
+                        "dataset_name": "",
+                        "backend_id": "",
+                        "sibling_kind": sibling_kind(cycle_id_from_dir),
+                        "is_root": sibling_kind(cycle_id_from_dir) == "root",
+                        "status": "unreadable",
+                        "best_accuracy": None,
+                        "n_rounds": 0,
+                        "created_at": "",
+                        "updated_at": "",
+                    }
+                )
+                continue
+            cycle_id = data["campaign_id"]
+            header_raw = data.get("header")
+            header: dict[str, Any] = header_raw if isinstance(header_raw, dict) else {}
+            kind = sibling_kind(cycle_id)
+            results.append(
+                {
+                    "cycle_id": cycle_id,
+                    "parent_session_id": data.get("parent_session_id", ""),
+                    "dataset_name": header.get("dataset_name", ""),
+                    "backend_id": data.get("backend_id") or header.get("backend_id", ""),
+                    "sibling_kind": kind,
+                    "is_root": kind == "root",
+                    "status": data.get("status", ""),
+                    "best_accuracy": data.get("best_accuracy"),
+                    "n_rounds": data.get("n_rounds", 0),
+                    "created_at": data.get("created_at", ""),
+                    "updated_at": data.get("updated_at", ""),
                 }
             )
         return results

@@ -223,6 +223,60 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .page-header{display:flex;align-items:flex-start;justify-content:space-between;margin-bottom:20px;gap:20px;flex-wrap:wrap}
 .page-header-text{display:flex;flex-direction:column;gap:4px;min-width:0}
 .breadcrumb{font-size:13px;color:var(--color-text-secondary);margin-bottom:6px;font-family:var(--font-mono)}
+/* Inline cycle picker — native <select> styled as breadcrumb text so the
+   `Cycle » {id}` line stays one visual unit. Click expands the native
+   dropdown; refresh button picks up new cycles minted by the CLI. */
+.cycle-picker{display:inline-flex;align-items:center;gap:4px}
+.cycle-picker select{appearance:none;-webkit-appearance:none;background:transparent;border:0;color:inherit;font:inherit;padding:0 14px 0 0;margin:0;cursor:pointer;max-width:100%;text-overflow:ellipsis;background-image:linear-gradient(45deg,transparent 50%,currentColor 50%),linear-gradient(135deg,currentColor 50%,transparent 50%);background-position:right 4px center,right 0 center;background-size:4px 4px,4px 4px;background-repeat:no-repeat}
+.cycle-picker select:hover,.cycle-picker select:focus{color:var(--color-text-primary);outline:none}
+.cycle-picker-refresh{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:13px;padding:0 4px;line-height:1}
+.cycle-picker-refresh:hover{color:var(--color-text-primary)}
+.cycle-picker-err{color:var(--color-status-error,#c53030);font-size:13px}
+/* Lineage clickable nodes — hover/selected feedback so the operator
+   sees which node feeds the ScoringInspector. */
+.lineage-node:hover .lineage-stub{stroke-width:3}
+.lineage-node.selected .lineage-stub{stroke:var(--color-accent);stroke-width:3}
+.lineage-node.selected .lineage-label{fill:var(--color-accent);font-weight:600}
+/* Scoring inspector — read-only panel beneath the lineage tree.
+   Stage 3 adds the Edit-mode toggle and Fork-from-here action inside this
+   same card; the layout stays put. */
+.scoring-inspector{margin-top:14px}
+.scoring-inspector .card-title{display:flex;align-items:center;justify-content:space-between}
+.inspector-close{background:transparent;border:0;color:var(--color-text-secondary);cursor:pointer;font-size:18px;line-height:1;padding:0 4px}
+.inspector-close:hover{color:var(--color-text-primary)}
+.inspector-body{display:grid;grid-template-columns:max-content 1fr;gap:4px 16px;padding:8px 12px;font-family:var(--font-mono);font-size:13px}
+.inspector-row{display:contents}
+.inspector-key{color:var(--color-text-secondary)}
+.inspector-val{color:var(--color-text-primary)}
+.inspector-note{grid-column:1/-1;color:var(--color-text-secondary);font-style:italic;margin-top:6px}
+/* Demoted New Job — small `+ New` button, not a primary tab. Quiet by
+   default; the active state mirrors the topbar's tab styling so the
+   operator still sees they're in New Job when they pick it. */
+.btn-new-job{background:transparent;border:1px solid var(--color-border);border-radius:6px;padding:4px 10px;font-size:13px;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
+.btn-new-job:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.btn-new-job.active{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-color:var(--color-accent)}
+/* Cycle-level toolbar — Edit toggle + Stop button live on the breadcrumb
+   row next to the picker. Off by default; Edit mode reveals Stop and the
+   Fork action inside the ScoringInspector. */
+.cycle-toolbar{display:inline-flex;align-items:center;gap:6px;margin-left:14px}
+.edit-mode-toggle{background:transparent;border:1px solid var(--color-border);border-radius:6px;padding:2px 10px;font-size:12px;color:var(--color-text-secondary);cursor:pointer;font-family:inherit}
+.edit-mode-toggle:hover{color:var(--color-text-primary);border-color:var(--color-text-secondary)}
+.edit-mode-toggle.on{background:var(--color-status-warn,#b45309);color:#fff;border-color:var(--color-status-warn,#b45309)}
+.stop-button-wrap{display:inline-flex;align-items:center;gap:6px}
+.stop-button{background:var(--color-status-error,#c53030);color:#fff;border:0;border-radius:6px;padding:2px 12px;font-size:12px;cursor:pointer;font-family:inherit}
+.stop-button:disabled{background:var(--color-text-secondary);cursor:not-allowed;opacity:0.6}
+.stop-err{color:var(--color-status-error,#c53030);font-size:12px}
+/* Fork action inside the ScoringInspector — only rendered when Edit mode
+   is on. After a successful POST the action is replaced by the CLI command
+   to run the new fork. */
+.inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
+.fork-button{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
+.fork-button:disabled{opacity:0.5;cursor:not-allowed}
+.fork-err{color:var(--color-status-error,#c53030);font-size:12px}
+.inspector-fork-result{padding:10px 12px;border-top:1px solid var(--color-border);font-family:var(--font-mono);font-size:13px;display:grid;gap:6px}
+.inspector-fork-result code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
+.fork-cli{display:flex;align-items:center;gap:6px}
+.fork-cli code{flex:1}
 /* h1 weight 600 — vanilla used 500 which read as a subhead. Bumped per the
    visual-origin-redo carried into the React port. */
 h1{font-size:26px;font-weight:600;line-height:1.2}
