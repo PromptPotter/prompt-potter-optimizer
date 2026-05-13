@@ -97,6 +97,12 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .nav-item.disabled svg{opacity:.4 !important}
 .sidebar-footer{margin-top:auto;padding:12px 16px;border-top:0.5px solid var(--color-border-tertiary)}
 .sidebar-footer-item{font-size:13px;color:var(--color-text-tertiary);padding:5px 0}
+/* Primary sidebar CTA — "+ New cycle". Matches the Replit-style
+   "Create something new" pattern: full-width, prominent, sits between
+   the brand and the cycle library. */
+.sidebar-primary{padding:8px 12px 6px;display:flex;flex-direction:column;gap:6px}
+.sidebar-cta{display:flex;align-items:center;justify-content:center;gap:6px;padding:8px 12px;background:var(--color-background-tint,rgba(255,255,255,0.04));color:var(--color-text-primary);border:0.5px solid var(--color-border);border-radius:8px;font-family:inherit;font-size:13px;font-weight:500;cursor:pointer;width:100%}
+.sidebar-cta:hover{background:var(--color-background-hover);border-color:var(--color-text-secondary)}
 /* Cycle library — chat-history-style list of every cycle on disk under
    the tenant. Active per CLI bullet-marked; currently-viewed highlighted.
    Refresh on focus picks up cycles minted by a parallel CLI run. */

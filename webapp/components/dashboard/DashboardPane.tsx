@@ -11,7 +11,7 @@ import {
 import { roundOf, useDashboardPoll, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
-import { Sidebar, type Pane } from "@/components/shell/Sidebar";
+import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
@@ -37,12 +37,15 @@ interface PipelineDoc {
 }
 
 export function DashboardPane() {
-  // Default to New Job — matches the prior first-load tab. The default
-  // landing surface is being moved to View Results elsewhere; flipping
-  // this state here without untangling the chat-shell's mount sequence
-  // tripped React #185. Leaving the default as-is until that's wired.
-  const [tab, setTab] = useState<Tab>("newjob");
-  const [pane, setPane] = useState<Pane>("dashboard");
+  // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
+  // currently-selected cycle. The sidebar is persistent across all
+  // three. Default = chat: that's where new cycles get conceived and
+  // where the conversational interface lives. Flipping the default to
+  // "dashboard" on initial mount tripped React #185 — the hero/fitness
+  // chain doesn't handle null→non-null cycleId during the first paint;
+  // chat dodges that path. Revisit when we untangle the dashboard
+  // first-render sequence.
+  const [tab, setTab] = useState<Tab>("chat");
   const [cycleId, setCycleId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
@@ -211,28 +214,19 @@ export function DashboardPane() {
     applyChartDefaults(ChartJS);
   }, []);
 
-  // Sidebar tab clicks should also flip the top-tab to View Results so the
-  // operator never lands on Files while the New Job tab is "active".
-  const onPaneSelect = useCallback((p: Pane) => {
-    setPane(p);
-    setTab("results");
-  }, []);
-
   return (
-    <div className={`shell${tab === "newjob" ? " chat-mode" : ""}`}>
+    <div className={`shell${tab === "chat" ? " chat-mode" : ""}`}>
       <Sidebar
-        pane={pane}
-        onSelect={onPaneSelect}
         cycleId={cycleId}
         onSelectCycle={(id) => {
           handleCycleChange(id);
-          setTab("results");
-          setPane("dashboard");
+          setTab("dashboard");
         }}
+        onNewCycle={() => setTab("chat")}
       />
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
-        {tab === "newjob" ? (
+        {tab === "chat" ? (
           <ChatPane
             cycleId={cycleId}
             sessionId={sessionId}
@@ -247,7 +241,7 @@ export function DashboardPane() {
             datasetTrainCount={datasetTrainCount}
             datasetTestCount={datasetTestCount}
           />
-        ) : pane === "dashboard" ? (
+        ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
             <DashStatusStrip
               status={dashState.status}
@@ -258,7 +252,7 @@ export function DashboardPane() {
               termKey={dashState.termKey}
               cycleId={cycleId}
               dash={dash}
-              onOpenFiles={() => onPaneSelect("files")}
+              onOpenFiles={() => setTab("files")}
             />
             <header className="dash-hero">
               <div className="page-header">
