@@ -21,6 +21,7 @@
       "l3_patience": 1,
       "l2_temperature": 0.3,
       "l3_temperature": 0.5,
+      "fire_l2_every_round": true,
       "zero_signal_filter_enabled": true
     },
     "optimizer_llm": {

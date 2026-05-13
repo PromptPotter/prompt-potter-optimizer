@@ -232,6 +232,7 @@ async def _post_round(
         enable_l2=config.optimization.enable_l2,
         axes_with_positive_yield=axes_with_positive_yield,
         escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
+        fire_l2_every_round=config.optimization.fire_l2_every_round,
     )
 
     await _close_round(cycle, round_result, trial_dict, round_num, session, cb)

@@ -162,6 +162,7 @@ class EscalationState:
         enable_l2: bool,
         axes_with_positive_yield: int | None = None,
         escalate_on_yield_drought: bool = False,
+        fire_l2_every_round: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome. Bumps the stall counter; returns CONTINUE /
         FIRE_L2 / STOP_PERFECT / STOP_L1_PATIENCE.
@@ -192,6 +193,7 @@ class EscalationState:
             enable_l2=enable_l2,
             axes_with_positive_yield=axes_with_positive_yield,
             escalate_on_yield_drought=escalate_on_yield_drought,
+            fire_l2_every_round=fire_l2_every_round,
         )
         return decide_escalation(inputs)
 

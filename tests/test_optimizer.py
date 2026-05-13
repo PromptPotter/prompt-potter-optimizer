@@ -702,6 +702,61 @@ def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
     assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
 
 
+def test_l2_every_round_rule_fires_only_when_opted_in():
+    """Priority 80: l2_every_round preempts l1_continue but yields to perfect_accuracy."""
+    from promptpotter.application.optimization.escalation import (
+        EscalationInputs,
+        decide_escalation,
+    )
+    from promptpotter.application.optimization.escalation.state import NextAction
+
+    # Opt-in + no stall + L2 enabled → FIRE_L2 (rule l2_every_round @ priority 80)
+    on_no_stall = EscalationInputs(
+        improved=True,
+        current_accuracy=0.5,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=True,
+        fire_l2_every_round=True,
+    )
+    event = decide_escalation(on_no_stall)
+    assert event.next_action == NextAction.FIRE_L2
+    assert event.rule_name == "l2_every_round"
+
+    # Perfect accuracy still wins (priority 100 > 80) — terminate, don't fire L2
+    perfect_on = EscalationInputs(
+        improved=True,
+        current_accuracy=1.0,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=True,
+        fire_l2_every_round=True,
+    )
+    assert decide_escalation(perfect_on).next_action == NextAction.STOP_PERFECT
+
+    # Off by default — no stall ⇒ CONTINUE (l1_continue @ priority 50)
+    off = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=True,
+        fire_l2_every_round=False,
+    )
+    assert decide_escalation(off).next_action == NextAction.CONTINUE
+
+    # Opt-in but L2 disabled ⇒ falls through to l1_continue (still in patience)
+    on_l2_off = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=0,
+        l1_patience=3,
+        enable_l2=False,
+        fire_l2_every_round=True,
+    )
+    assert decide_escalation(on_l2_off).next_action == NextAction.CONTINUE
+
+
 # ---------------------------------------------------------------------------
 # JobSearchPoint / OptSearchPoint shape + L2-layout copy_memory contract
 # (merged from test_search_point.py — same L1-surface bucket)

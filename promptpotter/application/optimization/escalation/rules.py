@@ -46,12 +46,13 @@ class EscalationRule:
 
 
 # Default rules reproduce :meth:`EscalationState.observe_round` exactly,
-# plus the opt-in yield-drought rule. Branch order in the original FSM
-# (perfect → continue → stop_no_l2 → fire) maps to descending priority
-# below — first match wins. The yield-drought rule sits at priority 60,
-# ABOVE l1_continue (50): when AxisIndex shows no axes with positive
-# yield AND L1 has stalled, escalate to L2 early instead of grinding
-# out the patience window.
+# plus the opt-in yield-drought rule and the opt-in every-round rule.
+# Branch order in the original FSM (perfect → continue → stop_no_l2 →
+# fire) maps to descending priority below — first match wins. The
+# every-round rule sits at priority 80 (above yield-drought) so an
+# operator-opted always-on L2 cadence preempts both yield-drought and
+# l1_continue. perfect_accuracy stays above it so a perfect-fit round
+# still terminates instead of firing one more L2.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
         name="perfect_accuracy",
@@ -59,6 +60,15 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         fire=NextAction.STOP_PERFECT,
         priority=100,
         reason="composite_fitness >= 1.0",
+    ),
+    EscalationRule(
+        name="l2_every_round",
+        when=lambda s: s.fire_l2_every_round and s.enable_l2,
+        fire=NextAction.FIRE_L2,
+        priority=80,
+        reason=lambda s: (
+            f"fire_l2_every_round=True (L1 stall {s.l1_stall_count}/{s.l1_patience})"
+        ),
     ),
     EscalationRule(
         name="l2_axis_yield_drought",

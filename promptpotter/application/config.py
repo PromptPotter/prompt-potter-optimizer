@@ -118,6 +118,15 @@ class OptimizationConfig(BaseModel):
             "default — opt-in until validated on the M10 datasets."
         ),
     )
+    fire_l2_every_round: bool = Field(
+        False,
+        description=(
+            "Escalation rule l2_every_round: fire L2 unconditionally at the end of "
+            "every round (preempts l1_patience and yield-drought). Costs one extra "
+            "optimizer LLM call per round; opt-in per campaign for experiments that "
+            "want continuous task_context refinement instead of stall-driven."
+        ),
+    )
     l2_temperature: float = Field(0.3)
     l3_temperature: float = Field(0.5)
     spend_budget_usd: float | None = Field(

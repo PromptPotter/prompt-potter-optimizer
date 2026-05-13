@@ -58,6 +58,7 @@ class EscalationInputs:
     # or the corresponding feature flag is off — predicates must handle).
     axes_with_positive_yield: int | None = None
     escalate_on_yield_drought: bool = False
+    fire_l2_every_round: bool = False
 
 
 def decide_escalation(
