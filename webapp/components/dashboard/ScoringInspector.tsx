@@ -146,9 +146,18 @@ export function ScoringInspector({
             className="fork-button"
             onClick={() => setConfirming(true)}
             disabled={forkPending}
-            title="Endorse this candidate and mint a fork rooted here"
+            title="Endorse this candidate and mint a fork rooted here. L1 then generates fresh candidates from this point."
           >
-            {forkPending ? "Forking…" : "Fork from here"}
+            {forkPending ? "Forking…" : "Endorse & fork"}
+          </button>
+          <button
+            type="button"
+            className="fork-button-secondary"
+            disabled
+            title="Operator-supplied candidates — write your own list of searchpoints that replace the next L1 generate output. Needs a typed form; landing in M12."
+          >
+            Substitute candidates
+            <span className="fork-coming-soon">M12</span>
           </button>
           {forkErr && <span className="fork-err">fork: {forkErr}</span>}
         </div>

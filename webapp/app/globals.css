@@ -313,6 +313,12 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .inspector-actions{padding:8px 12px;border-top:1px solid var(--color-border);display:flex;align-items:center;gap:8px}
 .fork-button{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border:0;border-radius:6px;padding:6px 14px;font-size:13px;cursor:pointer;font-family:inherit}
 .fork-button:disabled{opacity:0.5;cursor:not-allowed}
+/* Secondary fork action — Substitute candidates. Disabled in MVP
+   (needs the typed-searchpoint form, landing in M12). Rendered as a
+   ghost button to show the path exists without competing with the
+   live Endorse action. */
+.fork-button-secondary{display:inline-flex;align-items:center;gap:6px;background:transparent;color:var(--color-text-secondary);border:1px dashed var(--color-border);border-radius:6px;padding:6px 12px;font-size:13px;font-family:inherit;cursor:not-allowed;opacity:0.7}
+.fork-coming-soon{font-size:10px;padding:1px 5px;border-radius:8px;background:var(--color-background-tint,rgba(0,0,0,0.06));color:var(--color-text-tertiary);font-weight:500;letter-spacing:0.04em}
 .fork-err{color:var(--color-status-error,#c53030);font-size:12px}
 .inspector-fork-result{padding:10px 12px;border-top:1px solid var(--color-border);font-family:var(--font-mono);font-size:13px;display:grid;gap:6px}
 .inspector-fork-result code{background:var(--color-background-tint,rgba(0,0,0,0.04));padding:1px 5px;border-radius:3px}
