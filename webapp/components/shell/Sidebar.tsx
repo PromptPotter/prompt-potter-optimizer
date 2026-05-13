@@ -94,6 +94,11 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
               .map((c) => {
                 const selected = c.cycle_id === cycleId;
                 const active = c.cycle_id === activeCycleId;
+                // index.json status — "running"/"optimizing" while a
+                // cycle is being driven by the CLI; anything else is
+                // frozen. Best-effort; the breadcrumb's `● Live` uses
+                // the dashboard.json mtime heuristic which is fresher.
+                const live = c.status === "running" || c.status === "optimizing";
                 return (
                   <li key={c.cycle_id}>
                     <button
@@ -107,6 +112,7 @@ export function Sidebar({ cycleId, onSelectCycle, onNewCycle }: Props) {
                       <span className="cycle-library-row">
                         <span className="cycle-library-name">
                           {c.dataset_name || c.cycle_id}
+                          {live && <span className="cycle-library-live" title="Cycle status is running">●</span>}
                         </span>
                         <span className="cycle-library-meta">
                           {c.sibling_kind === "root" ? "" : `${c.sibling_kind} · `}

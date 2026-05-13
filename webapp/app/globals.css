@@ -120,6 +120,24 @@ body{font-family:var(--font-sans);background:var(--color-background-tertiary);co
 .cycle-library-row{display:flex;flex-direction:column;gap:1px;min-width:0;flex:1}
 .cycle-library-name{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .cycle-library-meta{font-size:11px;color:var(--color-text-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.cycle-library-live{color:var(--color-status-success,#16a34a);margin-left:4px;font-size:8px;vertical-align:middle}
+/* Live badge in the breadcrumb — passive indicator that the dashboard
+   poll is seeing fresh writes. dashState.status === "live" drives it. */
+.live-badge{display:inline-flex;align-items:center;gap:3px;margin-left:8px;padding:1px 6px;border-radius:10px;background:var(--color-status-success,#16a34a);color:#fff;font-size:10px;font-weight:500;letter-spacing:0.03em}
+/* Modal — used by Fork and Stop confirmations. Backdrop covers the
+   whole viewport; card sits centered. Action buttons render in given
+   order (rightmost = primary by convention). */
+.modal-backdrop{position:fixed;inset:0;background:rgba(0,0,0,0.45);display:flex;align-items:center;justify-content:center;z-index:100}
+.modal-card{background:var(--color-background-primary,#fff);color:var(--color-text-primary);border:1px solid var(--color-border);border-radius:10px;padding:18px 20px 14px;max-width:480px;width:calc(100% - 32px);box-shadow:0 10px 40px rgba(0,0,0,0.3)}
+.modal-title{margin:0 0 8px;font-size:15px;font-weight:600}
+.modal-message{margin:0 0 16px;font-size:13px;color:var(--color-text-secondary);line-height:1.5;white-space:pre-line}
+.modal-actions{display:flex;gap:8px;justify-content:flex-end;flex-wrap:wrap}
+.modal-btn{padding:6px 14px;font-size:13px;border-radius:6px;border:1px solid var(--color-border);background:transparent;color:var(--color-text-primary);cursor:pointer;font-family:inherit}
+.modal-btn:hover{background:var(--color-background-hover)}
+.modal-btn-primary{background:var(--color-accent);color:var(--color-accent-contrast,#fff);border-color:var(--color-accent)}
+.modal-btn-primary:hover{filter:brightness(1.08)}
+.modal-btn-danger{background:var(--color-status-error,#c53030);color:#fff;border-color:var(--color-status-error,#c53030)}
+.modal-btn-danger:hover{filter:brightness(1.08)}
 .new-analysis{background:var(--color-background-secondary);color:var(--color-text-tertiary);border:0.5px solid var(--color-border-tertiary);border-radius:var(--border-radius-md);padding:9px 14px;font-size:14px;cursor:not-allowed;width:100%;font-weight:500}
 
 .main{flex:1;display:flex;flex-direction:column;overflow:hidden;min-width:0}

@@ -1,7 +1,8 @@
 "use client";
 import { useMemo, useState } from "react";
-import { postCreateFork } from "@/lib/api";
+import { postCreateFork, postStopCycle } from "@/lib/api";
 import { useRoundHistory } from "@/lib/use-round-history";
+import { Modal, type ModalAction } from "@/components/shell/Modal";
 import type { SelectedCandidate } from "./LineageTree";
 
 interface Props {
@@ -9,6 +10,7 @@ interface Props {
   refreshKey: number;
   selected: SelectedCandidate | null;
   editMode: boolean;
+  isLive: boolean;
   onClose: () => void;
 }
 
@@ -34,12 +36,14 @@ export function ScoringInspector({
   refreshKey,
   selected,
   editMode,
+  isLive,
   onClose,
 }: Props) {
   const docs = useRoundHistory(cycleId, refreshKey) as RoundDoc[];
   const [forkPending, setForkPending] = useState(false);
   const [forkResult, setForkResult] = useState<{ id: string; cli: string } | null>(null);
   const [forkErr, setForkErr] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState(false);
 
   const entry = useMemo<ScoreboardEntry | null>(() => {
     if (!selected) return null;
@@ -50,18 +54,18 @@ export function ScoringInspector({
   if (!selected) return null;
   const data = entry;
 
-  const onFork = async () => {
+  const runFork = async (alsoStop: boolean) => {
     if (!cycleId) return;
-    if (
-      !window.confirm(
-        `Fork from R${selected.round}.${selected.candidate_id}?\n\nEndorses this candidate. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the new fork — your next \`optimize\` picks it up.`,
-      )
-    ) {
-      return;
-    }
+    setConfirming(false);
     setForkPending(true);
     setForkErr(null);
     try {
+      if (alsoStop) {
+        // Mid-run "Stop & fork" composes the two routes — stop the parent
+        // first so the operator's next `optimize` picks up the fork
+        // cleanly instead of racing the still-running loop.
+        await postStopCycle(cycleId);
+      }
       const r = await postCreateFork(cycleId, selected.round, selected.candidate_id);
       setForkResult({ id: r.fork_cycle_id, cli: r.cli_command });
     } catch (e) {
@@ -70,6 +74,24 @@ export function ScoringInspector({
       setForkPending(false);
     }
   };
+
+  // Three-way modal when the parent is live; single-button when frozen.
+  // "Stop & fork" leads as the recommended affordance — that's the common
+  // operator intent when redirecting a dead-end cycle.
+  const forkActions: ModalAction[] = isLive
+    ? [
+        { label: "Cancel", onClick: () => setConfirming(false) },
+        { label: "Fork only", onClick: () => void runFork(false) },
+        { label: "Stop & fork", variant: "primary", onClick: () => void runFork(true) },
+      ]
+    : [
+        { label: "Cancel", onClick: () => setConfirming(false) },
+        { label: "Fork", variant: "primary", onClick: () => void runFork(false) },
+      ];
+
+  const forkMessage = isLive
+    ? `${cycleId} is currently running. Forking from R${selected.round}.${selected.candidate_id} mints a sibling rooted at this candidate. "Stop & fork" halts the parent first (recommended) so your next \`optimize\` picks up the fork without racing the live loop. "Fork only" leaves the parent running.`
+    : `Endorses R${selected.round}.${selected.candidate_id}. The new fork inherits the parent's ledger and runs L1 generation fresh from this point. The active pointer retargets to the fork — your next \`optimize\` picks it up.`;
 
   return (
     <aside className="card scoring-inspector" aria-label="Scoring inspector">
@@ -122,7 +144,7 @@ export function ScoringInspector({
           <button
             type="button"
             className="fork-button"
-            onClick={() => void onFork()}
+            onClick={() => setConfirming(true)}
             disabled={forkPending}
             title="Endorse this candidate and mint a fork rooted here"
           >
@@ -131,6 +153,13 @@ export function ScoringInspector({
           {forkErr && <span className="fork-err">fork: {forkErr}</span>}
         </div>
       )}
+      <Modal
+        open={confirming}
+        title={isLive ? "Fork from a running cycle?" : "Fork from this point?"}
+        message={forkMessage}
+        actions={forkActions}
+        onClose={() => setConfirming(false)}
+      />
       {forkResult && (
         <div className="inspector-fork-result">
           <div>

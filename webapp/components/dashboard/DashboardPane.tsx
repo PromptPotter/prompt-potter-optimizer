@@ -73,6 +73,11 @@ export function DashboardPane() {
   // source for every component that reads round_NNNN.json on disk.
   const dashRound = roundOf(dash);
   const refreshKey = dashRound ?? -1;
+  // Liveness — used by mid-run guards (three-way fork modal, Live badge,
+  // Stop button visibility). `useDashboardPoll` already classifies the
+  // poll's success/age into "live"/"stale"/"offline" — reuse that signal
+  // instead of inventing a second one.
+  const isLive = dashState.status === "live";
 
   // Initial cycle selection — precedence: URL `?cycle=…` > /api/v1/active
   // > null. `sessionId` still comes from /active (the workspace pointer is
@@ -260,9 +265,14 @@ export function DashboardPane() {
                   <div className="breadcrumb">
                     Cycle »{" "}
                     <CyclePicker cycleId={cycleId} onChange={handleCycleChange} />
+                    {isLive && (
+                      <span className="live-badge" title="Cycle is actively running — dashboard updated in the last 60s">
+                        ● Live
+                      </span>
+                    )}
                     <span className="cycle-toolbar">
                       <EditModeToggle on={editMode} onToggle={setEditMode} />
-                      {editMode && cycleId && <StopButton cycleId={cycleId} />}
+                      {editMode && cycleId && <StopButton cycleId={cycleId} isLive={isLive} />}
                     </span>
                   </div>
                   <h1>{datasetTitle || cycleId || (activeError ? "No active session" : "Loading…")}</h1>
@@ -293,6 +303,7 @@ export function DashboardPane() {
                 refreshKey={refreshKey}
                 selected={selected}
                 editMode={editMode}
+                isLive={isLive}
                 onClose={() => setSelected(null)}
               />
             )}
