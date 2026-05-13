@@ -10,6 +10,7 @@ from promptpotter.application.optimization.dispatch_hub import (
     build_bundle,
 )
 from promptpotter.application.optimization.llm_call import run_optimizer_node
+from promptpotter.application.optimization.optimizer_schemas import L1CritiqueOutput
 from promptpotter.domain.pipeline_schema import PipelineSchema
 from promptpotter.infrastructure.llm import LLMClientBase
 
@@ -35,7 +36,7 @@ async def run_l1_critique(
     model: str | None = None,
     ledger: CycleEventLog | None = None,
 ) -> dict:
-    """Build critique from pipeline stats + LLM analysis. Returns the raw 6-field LLM dict.
+    """Build critique from pipeline stats + LLM analysis. Returns dict form for storage.
 
     L1-critique has no per-section override channel: the template body
     embeds ``{{plan}}``, ``{{task_context}}``, ``{{diagnostics}}``,
@@ -43,6 +44,11 @@ async def run_l1_critique(
     that the dispatch hub resolves to layer-agnostic signal renderers.
     ``RoundDiagnostics`` is read off the freshly-completed round, so the
     rank/health/evolution context is one bundle hop away.
+
+    The LLM returns an :class:`L1CritiqueOutput` (server- and Pydantic-
+    validated); we materialize it to dict so :class:`RoundResult.critique`
+    can be persisted via the audit-trail projection without dragging a
+    Pydantic dep into the domain serialization path.
     """
     bundle = build_bundle(cycle, latest_round=round_result)
     from promptpotter.application.optimization.llm_call import load_optimizer_prompt
@@ -59,10 +65,13 @@ async def run_l1_critique(
         round_num=round_num,
         optimizer_call_cache=cycle.session.store.optimizer_calls,
     )
+    assert isinstance(result, L1CritiqueOutput), (
+        f"l1_critique must return L1CritiqueOutput, got {type(result).__name__}"
+    )
     logger.info(
         "L1 critique: %d chars prompt, round %d, acc=%.3f",
         len(prompt),
         round_num,
         round_result.accuracy,
     )
-    return result
+    return result.model_dump()

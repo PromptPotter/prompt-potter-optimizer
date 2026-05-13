@@ -2,11 +2,12 @@
 
 Every concrete projection in this package isinstance-dispatches the same
 ``CycleRecord`` subtypes (``PhaseRecord`` / ``SnapshotRecord`` /
-``ResumeCheckpointRecord`` / ``TokenUsageRecord`` / ``LLMCallRecord``). This
-base owns that dispatch in one place: subclasses override only the
-hooks they care about, and adding a new ``CycleRecord`` subtype
-touches one file instead of N. Default hooks are no-ops so writers
-that don't care about a kind stay silent without boilerplate.
+``ResumeCheckpointRecord`` / ``TokenUsageRecord`` / ``LLMCallRecord`` /
+``LLMCallStartRecord``). This base owns that dispatch in one place:
+subclasses override only the hooks they care about, and adding a new
+``CycleRecord`` subtype touches one file instead of N. Default hooks
+are no-ops so writers that don't care about a kind stay silent without
+boilerplate.
 """
 
 from __future__ import annotations
@@ -14,6 +15,7 @@ from __future__ import annotations
 from promptpotter.domain.run_records import (
     CycleRecord,
     LLMCallRecord,
+    LLMCallStartRecord,
     PhaseRecord,
     ResumeCheckpointRecord,
     SnapshotRecord,
@@ -34,6 +36,8 @@ class DerivedView:
             self._handle_decision(record)
         elif isinstance(record, TokenUsageRecord):
             self._handle_token_usage(record)
+        elif isinstance(record, LLMCallStartRecord):
+            self._handle_llm_call_start(record)
         elif isinstance(record, LLMCallRecord):
             self._handle_llm_call(record)
 
@@ -41,4 +45,5 @@ class DerivedView:
     def _handle_snapshot(self, record: SnapshotRecord) -> None: ...
     def _handle_decision(self, record: ResumeCheckpointRecord) -> None: ...
     def _handle_token_usage(self, record: TokenUsageRecord) -> None: ...
+    def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None: ...
     def _handle_llm_call(self, record: LLMCallRecord) -> None: ...

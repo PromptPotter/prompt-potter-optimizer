@@ -26,6 +26,7 @@ __all__ = [
     "ForkTrigger",
     "HumanReviewRecord",
     "LLMCallRecord",
+    "LLMCallStartRecord",
     "OperatorSweepFile",
     "PhaseRecord",
     "ResumeCheckpointKind",
@@ -144,6 +145,34 @@ class TokenUsageRecord(BaseModel):
     timestamp: str = Field(default_factory=_utcnow_iso)
 
 
+class LLMCallStartRecord(BaseModel):
+    """One optimizer LLM call's IN-FLIGHT marker — appended BEFORE the SDK call.
+
+    Lets the live dashboard project an ``in_flight`` field on
+    ``dashboard.json`` while a multi-minute optimizer call is still
+    running, so the operator (and any AI reading the file) can see
+    *which* call is in progress and *for how long*, instead of staring
+    at a frozen UI for nine minutes.
+
+    Pairs with :class:`LLMCallRecord` via ``call_id``; the live
+    dashboard clears the in-flight slot when the paired completion
+    record arrives. ``call_id`` is a hex string (caller-provided,
+    typically a ``uuid4().hex``) so the ledger stays JSON-serializable
+    without a custom encoder.
+    """
+
+    model_config = ConfigDict(frozen=True)
+
+    record_type: Literal["llm_call_start"] = "llm_call_start"
+    call_id: str
+    node: str
+    round: int | None = None
+    candidate_idx: int | None = None
+    model: str | None = None
+    started_at_ms: int
+    timestamp: str = Field(default_factory=_utcnow_iso)
+
+
 class LLMCallRecord(BaseModel):
     """One optimizer LLM call's full I/O — rendered prompt + parsed output.
 
@@ -158,6 +187,11 @@ class LLMCallRecord(BaseModel):
     ``messages``/``response``/``usage``) from a synthesized event (e.g.
     persisted-candidate replay where llm_call did not fire — carries
     only ``input``/``output`` fields).
+
+    ``call_id`` pairs the record with a prior :class:`LLMCallStartRecord`
+    so the live dashboard's in-flight projection can clear the slot.
+    Empty string when no start record was emitted (synthesized calls,
+    legacy replay).
     """
 
     model_config = ConfigDict(frozen=True)
@@ -167,6 +201,7 @@ class LLMCallRecord(BaseModel):
     round: int | None = None
     candidate_idx: int | None = None
     payload_kind: Literal["llm_call", "synthesized"] = "llm_call"
+    call_id: str = ""
     # The action-dict shape that AuditTrailView currently consumes;
     # carries every field _action_to_node_block reads (template_fields,
     # variables, template_name, messages, response, usage, model, config,
@@ -218,6 +253,7 @@ CycleRecord = Annotated[
     HumanReviewRecord
     | ResumeCheckpointRecord
     | LLMCallRecord
+    | LLMCallStartRecord
     | PhaseRecord
     | SnapshotRecord
     | TokenUsageRecord,

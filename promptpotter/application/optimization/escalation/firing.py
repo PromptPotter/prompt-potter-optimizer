@@ -34,12 +34,15 @@ from promptpotter.application.optimization.l2_validators import (
     run_l3_output_validators,
 )
 from promptpotter.application.optimization.llm_call import load_optimizer_prompt
+from promptpotter.application.optimization.optimizer_schemas import (
+    L2ContextOutput,
+    L3PlanOutput,
+)
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     record_decision,
 )
 from promptpotter.application.optimization.transitions import (
-    OptimizerAction,
     TransitionResult,
     run_layer_transition,
 )
@@ -123,7 +126,7 @@ def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> N
 # ---------------------------------------------------------------------------
 
 
-ParseFn = Callable[[dict, OptSearchPoint, str], TransitionResult]
+ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
 ApplyFn = Callable[["Cycle", TransitionResult, int], None]
 PayloadFn = Callable[["Cycle"], dict[str, Any]]
 ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
@@ -145,7 +148,7 @@ class LayerStrategy:
         template = load_optimizer_prompt(self.template_name)
         return DispatchHub.fill_fixed(template, bundle)
 
-    def build_result(self, raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    def build_result(self, raw: Any, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
         return self.parse(raw, opt_sp, prompt)
 
     def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
@@ -163,28 +166,20 @@ class LayerStrategy:
 # ---------------------------------------------------------------------------
 
 
-def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
-    changes: dict[str, Any] = {
-        "changes_description": f"L2: {raw.get('rationale', 'L2 refine_strategy transition')[:80]}"
-    }
-    if isinstance(raw.get("l1_overrides"), dict) and raw["l1_overrides"]:
-        changes["l1_overrides"] = {**opt_sp.l1_overrides, **raw["l1_overrides"]}
+def _parse_l2(raw: L2ContextOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    rationale = raw.rationale or "L2 refine_strategy transition"
+    changes: dict[str, Any] = {"changes_description": f"L2: {rationale[:80]}"}
+    if raw.l1_overrides:
+        changes["l1_overrides"] = {**opt_sp.l1_overrides, **raw.l1_overrides}
 
     new_task_context = None
-    proposed_tc = raw.get("task_context") if isinstance(raw.get("task_context"), dict) else None
+    proposed_tc = raw.task_context if raw.task_context else None
     if proposed_tc:
         merged = opt_sp.task_context.merge(proposed_tc)
         if merged.to_dict() != opt_sp.task_context.to_dict():
             new_task_context = merged
 
-    raw_action = raw.get("action")
-    action: OptimizerAction = (
-        raw_action if raw_action in ("normal_round", "probe_round") else "normal_round"
-    )
-    raw_axis = raw.get("axis_targeted")
-    axis_targeted = raw_axis if isinstance(raw_axis, str) else ""
-
-    proposed_layout = _coerce_l1_layout(raw.get("l1_layout"))
+    proposed_layout = _coerce_l1_layout(raw.l1_layout)
     layout_outcomes: list = []
     accepted_layout: L1Layout | None = None
     if proposed_layout is not None:
@@ -208,12 +203,12 @@ def _parse_l2(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
     return TransitionResult(
         opt_search_point=opt_sp.mutate(source="l2_context", **changes),
         task_context=new_task_context,
-        action=action,
-        axis_targeted=axis_targeted,
+        action=raw.action,
+        axis_targeted=raw.axis_targeted,
         l1_layout=accepted_layout,
         l2_guard_breaches=failures,
         debug_prompt=prompt,
-        debug_response=raw,
+        debug_response=raw.model_dump(),
     )
 
 
@@ -298,11 +293,9 @@ L2 = LayerStrategy(
 # ---------------------------------------------------------------------------
 
 
-def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
-    new_plan = raw.get("plan", opt_sp.plan) if isinstance(raw.get("plan"), str) else opt_sp.plan
-    rationale = raw.get("rationale", "L3 modify_plan transition")
-    raw_note = raw.get("note")
-    note = raw_note if isinstance(raw_note, str) else ""
+def _parse_l3(raw: L3PlanOutput, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+    new_plan = raw.plan or opt_sp.plan
+    rationale = raw.rationale or "L3 modify_plan transition"
     failures = run_l3_output_validators({"plan": new_plan}, opt_sp)
     if failures:
         logger.warning(
@@ -314,10 +307,10 @@ def _parse_l3(raw: dict, opt_sp: OptSearchPoint, prompt: str) -> TransitionResul
         opt_search_point=opt_sp.mutate(
             plan=new_plan, changes_description=f"L3: {rationale[:80]}", source="l3_plan"
         ),
-        l3_note=note,
+        l3_note=raw.note,
         l3_guard_breaches=failures,
         debug_prompt=prompt,
-        debug_response=raw,
+        debug_response=raw.model_dump(),
     )
 
 

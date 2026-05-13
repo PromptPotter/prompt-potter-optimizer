@@ -43,6 +43,9 @@ from promptpotter.application.optimization.llm_call import (
     load_optimizer_prompt,
     run_optimizer_node,
 )
+from promptpotter.application.optimization.optimizer_schemas import (
+    VariantEvidenceGrounding,
+)
 from promptpotter.application.optimization.resume_and_fork import (
     ResumeCheckpointKind,
     ResumeCheckpointRecord,
@@ -60,7 +63,6 @@ from promptpotter.application.scoring.search_point_scorer import score_search_po
 from promptpotter.config.settings import PROMPT_STRING_FIELDS
 from promptpotter.domain.analysis import EscalationSignal, RuntimeFailure
 from promptpotter.domain.opt_search_point import (
-    EVIDENCE_GROUNDING_FIELDS,
     EvidenceGrounding,
     OptSearchPoint,
 )
@@ -106,22 +108,18 @@ __all__ = [
 ]
 
 
-def _parse_evidence_grounding(raw: object) -> EvidenceGrounding | None:
-    """Build an ``EvidenceGrounding`` from one LLM variant's emitted dict.
+def _parse_evidence_grounding(raw: VariantEvidenceGrounding | None) -> EvidenceGrounding | None:
+    """Build an ``EvidenceGrounding`` from one Pydantic-typed variant entry.
 
-    Returns ``None`` when the variant omits the field, emits a non-dict, or
-    when ``field`` falls outside :data:`EVIDENCE_GROUNDING_FIELDS`. The
-    ``evidence_grounding_present`` behavior check turns the ``None`` /
-    empty-citation cases into a per-round failure surfaced in
-    ``review.md`` and ``round_NNNN.json``; we never raise here.
+    The Pydantic boundary already guarantees ``field`` is in
+    :data:`EVIDENCE_GROUNDING_FIELDS` (via :class:`EvidenceGroundingField`'s
+    ``Literal`` constraint). An empty citation still surfaces as a per-round
+    behavior-check failure downstream — ``evidence_grounding_present`` flags
+    it in ``review.md`` and ``round_NNNN.json``.
     """
-    if not isinstance(raw, dict):
+    if raw is None:
         return None
-    field_name = str(raw.get("field") or "").strip()
-    citation = str(raw.get("citation") or "").strip()
-    if field_name not in EVIDENCE_GROUNDING_FIELDS:
-        return None
-    return EvidenceGrounding(field=field_name, citation=citation)
+    return EvidenceGrounding(field=raw.field, citation=raw.citation.strip())
 
 
 def candidate_summaries(proposals: list[CandidateProposal], round_num: int) -> list[dict]:
@@ -181,7 +179,7 @@ async def l1_generate(
         llm_client=llm_client,
         model=model,
         temperature=creativity,
-        json_schema=output_schema,
+        response_schema=output_schema,
         ledger=cycle.session.state.ledger,
         round_num=round_num,
         template=template,
@@ -202,17 +200,17 @@ async def l1_generate(
         " | ".join(f"{n}={s}" for n, s in slot_sizes),
     )
 
-    variants_list = generated.get("variants", []) if isinstance(generated, dict) else generated
+    variants_list = generated.variants
 
     population: list[CandidateProposal] = []
     for v in variants_list[:n_variants]:
         prompt_changes, tc_changes, pipeline_params_override = _normalize_pp_override(
-            v.get("pipeline_params_override") or {}, pipeline_schema
+            v.pipeline_params_override or {}, pipeline_schema
         )
         # Override validation is deferred to parse_population — one producer of truth.
-        evidence = _parse_evidence_grounding(v.get("evidence_grounding"))
+        evidence = _parse_evidence_grounding(v.evidence_grounding)
         child = opt_sp.mutate(
-            changes_description=v.get("changes_description", ""),
+            changes_description=v.changes_description,
             source="l1_generate",
             evidence_grounding=evidence,
             **prompt_changes,

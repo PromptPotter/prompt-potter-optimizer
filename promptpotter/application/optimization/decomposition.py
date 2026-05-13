@@ -14,6 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from promptpotter.application.optimization.llm_call import run_optimizer_node
+from promptpotter.application.optimization.optimizer_schemas import RestructureOutput
 from promptpotter.domain.search_point import TaskDecomposition
 from promptpotter.infrastructure.llm import LLMClientBase
 from promptpotter.infrastructure.store.base import (
@@ -65,28 +66,14 @@ async def decompose_prompt_fields(
         model=model,
         user_content=user_content,
     )
-
-    for key in (
-        "persona",
-        "task_intent",
-        "problem_description",
-        "instruction",
-        "thinking_style",
-        "answer_format",
-    ):
-        result.setdefault(key, "")
-
-    tc = result.setdefault("task_context", {})
-    for key in (
-        "domain",
-        "pipeline_purpose",
-        "data_characteristics",
-        "optimization_goals",
-        "key_challenges",
-    ):
-        tc.setdefault(key, "")
-
-    return result
+    assert isinstance(result, RestructureOutput), (
+        f"restructure must return RestructureOutput, got {type(result).__name__}"
+    )
+    # Pydantic guarantees every Layer-1 + task_context field is present
+    # (defaults to empty string on the model). Materialize to dict for
+    # cache persistence + downstream consumers that pre-date the typed
+    # boundary.
+    return result.model_dump()
 
 
 def _decomposition_cache_path(base_dir: Path, backend_id: str) -> Path:

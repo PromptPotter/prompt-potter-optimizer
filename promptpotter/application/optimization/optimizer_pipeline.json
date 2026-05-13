@@ -104,175 +104,482 @@
   },
   "view": {
     "nodes": [
-      {"id": "input",       "label": "Dataset",     "kind": "io"},
-      {"id": "restructure", "label": "restructure", "kind": "llm"},
-      {"id": "origin",    "label": "origin",    "kind": "phase"},
-      {"id": "l3_plan",     "label": "l3_plan",     "kind": "llm"},
-      {"id": "l2_context",  "label": "l2_context",  "kind": "llm"},
-      {"id": "l1_generate", "label": "l1_generate", "kind": "llm"},
-      {"id": "l1_score",    "label": "l1_score",    "kind": "measurement"},
-      {"id": "l1_critique", "label": "l1_critique", "kind": "llm"},
-      {"id": "output",      "label": "Best SP",     "kind": "io"}
+      {
+        "id": "input",
+        "label": "Dataset",
+        "kind": "io"
+      },
+      {
+        "id": "restructure",
+        "label": "restructure",
+        "kind": "llm"
+      },
+      {
+        "id": "origin",
+        "label": "origin",
+        "kind": "phase"
+      },
+      {
+        "id": "l3_plan",
+        "label": "l3_plan",
+        "kind": "llm"
+      },
+      {
+        "id": "l2_context",
+        "label": "l2_context",
+        "kind": "llm"
+      },
+      {
+        "id": "l1_generate",
+        "label": "l1_generate",
+        "kind": "llm"
+      },
+      {
+        "id": "l1_score",
+        "label": "l1_score",
+        "kind": "measurement"
+      },
+      {
+        "id": "l1_critique",
+        "label": "l1_critique",
+        "kind": "llm"
+      },
+      {
+        "id": "output",
+        "label": "Best SP",
+        "kind": "io"
+      }
     ],
     "edges": [
-      {"from": "input",       "to": "restructure", "kind": "forward"},
-      {"from": "restructure", "to": "origin",    "kind": "forward"},
-      {"from": "origin",    "to": "l1_generate", "kind": "forward"},
-      {"from": "l1_generate", "to": "l1_score",    "kind": "forward"},
-      {"from": "l1_score",    "to": "l1_critique", "kind": "forward"},
-      {"from": "l1_critique", "to": "output",      "kind": "forward",   "label": "converged"},
-      {"from": "l1_critique", "to": "l1_generate", "kind": "loop",      "label": "next round"},
-      {"from": "l1_critique", "to": "l2_context",  "kind": "escalate",  "label": "L1 stall"},
-      {"from": "l2_context",  "to": "l1_generate", "kind": "directive", "label": "brief"},
-      {"from": "l1_critique", "to": "l3_plan",     "kind": "escalate",  "label": "L2 stall"},
-      {"from": "l3_plan",     "to": "l1_generate", "kind": "directive", "label": "plan"}
+      {
+        "from": "input",
+        "to": "restructure",
+        "kind": "forward"
+      },
+      {
+        "from": "restructure",
+        "to": "origin",
+        "kind": "forward"
+      },
+      {
+        "from": "origin",
+        "to": "l1_generate",
+        "kind": "forward"
+      },
+      {
+        "from": "l1_generate",
+        "to": "l1_score",
+        "kind": "forward"
+      },
+      {
+        "from": "l1_score",
+        "to": "l1_critique",
+        "kind": "forward"
+      },
+      {
+        "from": "l1_critique",
+        "to": "output",
+        "kind": "forward",
+        "label": "converged"
+      },
+      {
+        "from": "l1_critique",
+        "to": "l1_generate",
+        "kind": "loop",
+        "label": "next round"
+      },
+      {
+        "from": "l1_critique",
+        "to": "l2_context",
+        "kind": "escalate",
+        "label": "L1 stall"
+      },
+      {
+        "from": "l2_context",
+        "to": "l1_generate",
+        "kind": "directive",
+        "label": "brief"
+      },
+      {
+        "from": "l1_critique",
+        "to": "l3_plan",
+        "kind": "escalate",
+        "label": "L2 stall"
+      },
+      {
+        "from": "l3_plan",
+        "to": "l1_generate",
+        "kind": "directive",
+        "label": "plan"
+      }
     ]
   },
   "resolved_schemas": {
-    "l1_critique/1": {
-      "fields": [
-        "positive_critique",
-        "negative_critique",
-        "priority_fix",
-        "suggested_axes",
-        "failure_highlights",
-        "summary"
-      ],
-      "json_schema": {
-        "name": "critique",
-        "strict": false,
-        "schema": {
-          "type": "object",
-          "properties": {
-            "positive_critique": {
-              "type": "string",
-              "maxLength": 300
-            },
-            "negative_critique": {
-              "type": "string",
-              "maxLength": 400
-            },
-            "priority_fix": {
-              "type": "string",
-              "maxLength": 200
-            },
-            "suggested_axes": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "maxLength": 40
-              },
-              "maxItems": 4
-            },
-            "failure_highlights": {
-              "type": "array",
-              "items": {
-                "type": "string",
-                "maxLength": 140
-              },
-              "maxItems": 3
-            },
-            "summary": {
-              "type": "string",
-              "maxLength": 400
-            }
-          },
-          "required": [
-            "summary"
-          ],
-          "additionalProperties": false
-        }
-      }
-    },
     "l1_generate/1": {
       "fields": [
         "variants"
       ],
       "json_schema": {
-        "name": "l1_variants",
-        "strict": false,
+        "name": "l1_generate",
+        "strict": true,
         "schema": {
-          "type": "object",
+          "$defs": {
+            "L1Variant": {
+              "additionalProperties": false,
+              "description": "One candidate variant proposed by ``l1_generate``.\n\n``pipeline_params_override`` is dynamically shaped per backend\npipeline (see :func:`l1_validators.build_l1_output_schema`); we keep\nit as ``dict[str, Any]`` so a Pydantic parse never fails on a\nlegitimately backend-specific override key. The per-backend shape is\nenforced downstream by ``validate_overrides`` against the active\n``PipelineSchema``.\n\n``target_axis`` and ``reasoning`` are LLM-side reasoning aids \u2014 the\n``l1_generate`` prompt's ``answer_format`` instructs the model to\nemit them so its candidate selection is grounded. PromptPotter\npersists them in the audit trail but doesn't read them at runtime;\nthey're recorded so a human reviewing ``round_NNNN.json`` can see\nthe model's stated rationale for each candidate.",
+              "properties": {
+                "variant_name": {
+                  "title": "Variant Name",
+                  "type": "string"
+                },
+                "changes_description": {
+                  "title": "Changes Description",
+                  "type": "string"
+                },
+                "pipeline_params_override": {
+                  "additionalProperties": true,
+                  "description": "Flat or per-node mutations the variant introduces. Empty means clone-of-parent and is rejected downstream by detect_invariants.",
+                  "title": "Pipeline Params Override",
+                  "type": "object"
+                },
+                "target_axis": {
+                  "default": "",
+                  "title": "Target Axis",
+                  "type": "string"
+                },
+                "reasoning": {
+                  "default": "",
+                  "title": "Reasoning",
+                  "type": "string"
+                },
+                "evidence_grounding": {
+                  "$ref": "#/$defs/VariantEvidenceGrounding"
+                }
+              },
+              "required": [
+                "variant_name",
+                "changes_description",
+                "evidence_grounding"
+              ],
+              "title": "L1Variant",
+              "type": "object"
+            },
+            "VariantEvidenceGrounding": {
+              "additionalProperties": false,
+              "description": "One row of evidence justifying a variant's chosen mutation.\n\n``field`` names the panel entry the LLM is grounding on;\n``stall_exploration`` is the escape hatch and is only valid when\n``escalation_panel.exploration_budget`` is ``normal`` or ``wide``\n(enforced downstream in :mod:`l1_behavior_checks`, not here \u2014 that's\na cycle-state check, not a parse check).",
+              "properties": {
+                "field": {
+                  "enum": [
+                    "parent_panel",
+                    "sibling_yield",
+                    "axis_memory",
+                    "escalation_panel",
+                    "task_context",
+                    "plan",
+                    "stall_exploration"
+                  ],
+                  "title": "Field",
+                  "type": "string"
+                },
+                "citation": {
+                  "title": "Citation",
+                  "type": "string"
+                }
+              },
+              "required": [
+                "field",
+                "citation"
+              ],
+              "title": "VariantEvidenceGrounding",
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Top-level shape returned by the ``l1_generate`` meta-prompt.",
           "properties": {
             "variants": {
-              "type": "array",
               "items": {
-                "type": "object",
-                "properties": {
-                  "variant_name": {
-                    "type": "string"
-                  },
-                  "changes_description": {
-                    "type": "string"
-                  },
-                  "pipeline_params_override": {
-                    "type": "object",
-                    "properties": {
-                      "persona": {
-                        "type": "string"
-                      },
-                      "task_intent": {
-                        "type": "string"
-                      },
-                      "problem_description": {
-                        "type": "string"
-                      },
-                      "instruction": {
-                        "type": "string"
-                      },
-                      "thinking_style": {
-                        "type": "string"
-                      },
-                      "answer_format": {
-                        "type": "string"
-                      },
-                      "downstream_context": {
-                        "type": "string"
-                      },
-                      "upstream_context": {
-                        "type": "string"
-                      }
-                    },
-                    "additionalProperties": false,
-                    "minProperties": 1
-                  },
-                  "evidence_grounding": {
-                    "type": "object",
-                    "properties": {
-                      "field": {
-                        "type": "string",
-                        "enum": [
-                          "parent_panel",
-                          "sibling_yield",
-                          "axis_memory",
-                          "escalation_panel",
-                          "task_context",
-                          "plan",
-                          "stall_exploration"
-                        ]
-                      },
-                      "citation": {
-                        "type": "string"
-                      }
-                    },
-                    "required": ["field", "citation"],
-                    "additionalProperties": false
-                  }
-                },
-                "required": [
-                  "variant_name",
-                  "changes_description",
-                  "pipeline_params_override",
-                  "evidence_grounding"
-                ],
-                "additionalProperties": false
-              }
+                "$ref": "#/$defs/L1Variant"
+              },
+              "title": "Variants",
+              "type": "array"
             }
           },
           "required": [
             "variants"
           ],
-          "additionalProperties": false
+          "title": "L1GenerateOutput",
+          "type": "object"
+        }
+      }
+    },
+    "l1_critique/1": {
+      "fields": [
+        "failure_highlights",
+        "negative_critique",
+        "positive_critique",
+        "priority_fix",
+        "suggested_axes",
+        "summary"
+      ],
+      "json_schema": {
+        "name": "l1_critique",
+        "strict": true,
+        "schema": {
+          "additionalProperties": false,
+          "description": "Critique returned at round-end; the only required field is\n``summary`` \u2014 the others are best-effort enrichment the next round's\nL1 may or may not get.",
+          "properties": {
+            "summary": {
+              "maxLength": 400,
+              "title": "Summary",
+              "type": "string"
+            },
+            "positive_critique": {
+              "default": "",
+              "maxLength": 300,
+              "title": "Positive Critique",
+              "type": "string"
+            },
+            "negative_critique": {
+              "default": "",
+              "maxLength": 400,
+              "title": "Negative Critique",
+              "type": "string"
+            },
+            "priority_fix": {
+              "default": "",
+              "maxLength": 200,
+              "title": "Priority Fix",
+              "type": "string"
+            },
+            "suggested_axes": {
+              "description": "\u22644 short axis names. Each item \u226440 chars (downstream truncates).",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 4,
+              "title": "Suggested Axes",
+              "type": "array"
+            },
+            "failure_highlights": {
+              "description": "\u22643 short failure-line excerpts. Each item \u2264140 chars (downstream truncates).",
+              "items": {
+                "type": "string"
+              },
+              "maxItems": 3,
+              "title": "Failure Highlights",
+              "type": "array"
+            }
+          },
+          "required": [
+            "summary"
+          ],
+          "title": "L1CritiqueOutput",
+          "type": "object"
+        }
+      }
+    },
+    "l2_context/1": {
+      "fields": [
+        "action",
+        "axis_targeted",
+        "l1_layout",
+        "l1_overrides",
+        "rationale",
+        "task_context"
+      ],
+      "json_schema": {
+        "name": "l2_context",
+        "strict": true,
+        "schema": {
+          "additionalProperties": false,
+          "description": "L2 refinement. All fields optional \u2014 the LLM sets only what it\nwants to change.\n\n``task_context`` is a free-form refinement dict (keys: domain,\npipeline_purpose, data_characteristics, optimization_goals,\nkey_challenges) \u2014 left as ``dict[str, Any]`` because the cycle's\n:class:`TaskDecomposition` owns the precise key set and merges via\n:meth:`TaskDecomposition.merge`. ``l1_layout`` is a similarly\nflexible ``{slot: [placeholder, ...]}`` map validated downstream by\n:func:`validate_l1_layout`.",
+          "properties": {
+            "task_context": {
+              "additionalProperties": true,
+              "title": "Task Context",
+              "type": "object"
+            },
+            "action": {
+              "default": "normal_round",
+              "enum": [
+                "normal_round",
+                "probe_round"
+              ],
+              "title": "Action",
+              "type": "string"
+            },
+            "axis_targeted": {
+              "default": "",
+              "title": "Axis Targeted",
+              "type": "string"
+            },
+            "l1_layout": {
+              "additionalProperties": {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              "title": "L1 Layout",
+              "type": "object"
+            },
+            "l1_overrides": {
+              "additionalProperties": true,
+              "title": "L1 Overrides",
+              "type": "object"
+            },
+            "rationale": {
+              "default": "",
+              "title": "Rationale",
+              "type": "string"
+            }
+          },
+          "title": "L2ContextOutput",
+          "type": "object"
+        }
+      }
+    },
+    "l3_plan/1": {
+      "fields": [
+        "note",
+        "plan",
+        "rationale"
+      ],
+      "json_schema": {
+        "name": "l3_plan",
+        "strict": true,
+        "schema": {
+          "additionalProperties": false,
+          "description": "L3 strategic replan.",
+          "properties": {
+            "plan": {
+              "title": "Plan",
+              "type": "string"
+            },
+            "note": {
+              "default": "",
+              "title": "Note",
+              "type": "string"
+            },
+            "rationale": {
+              "default": "",
+              "title": "Rationale",
+              "type": "string"
+            }
+          },
+          "required": [
+            "plan"
+          ],
+          "title": "L3PlanOutput",
+          "type": "object"
+        }
+      }
+    },
+    "restructure/1": {
+      "fields": [
+        "answer_format",
+        "consultation",
+        "instruction",
+        "persona",
+        "problem_description",
+        "task_context",
+        "task_intent",
+        "thinking_style"
+      ],
+      "json_schema": {
+        "name": "restructure",
+        "strict": true,
+        "schema": {
+          "$defs": {
+            "RestructureTaskContext": {
+              "additionalProperties": false,
+              "description": "Domain-context sub-object inside the restructure output.",
+              "properties": {
+                "domain": {
+                  "default": "",
+                  "title": "Domain",
+                  "type": "string"
+                },
+                "pipeline_purpose": {
+                  "default": "",
+                  "title": "Pipeline Purpose",
+                  "type": "string"
+                },
+                "data_characteristics": {
+                  "default": "",
+                  "title": "Data Characteristics",
+                  "type": "string"
+                },
+                "optimization_goals": {
+                  "default": "",
+                  "title": "Optimization Goals",
+                  "type": "string"
+                },
+                "key_challenges": {
+                  "default": "",
+                  "title": "Key Challenges",
+                  "type": "string"
+                },
+                "upstream_context": {
+                  "default": "",
+                  "title": "Upstream Context",
+                  "type": "string"
+                },
+                "downstream_context": {
+                  "default": "",
+                  "title": "Downstream Context",
+                  "type": "string"
+                }
+              },
+              "title": "RestructureTaskContext",
+              "type": "object"
+            }
+          },
+          "additionalProperties": false,
+          "description": "Output of the one-shot restructure prompt \u2014 Layer-1 prompt fields\nplus a domain-context sub-object.",
+          "properties": {
+            "persona": {
+              "default": "",
+              "title": "Persona",
+              "type": "string"
+            },
+            "task_intent": {
+              "default": "",
+              "title": "Task Intent",
+              "type": "string"
+            },
+            "problem_description": {
+              "default": "",
+              "title": "Problem Description",
+              "type": "string"
+            },
+            "instruction": {
+              "default": "",
+              "title": "Instruction",
+              "type": "string"
+            },
+            "thinking_style": {
+              "default": "",
+              "title": "Thinking Style",
+              "type": "string"
+            },
+            "answer_format": {
+              "default": "",
+              "title": "Answer Format",
+              "type": "string"
+            },
+            "task_context": {
+              "$ref": "#/$defs/RestructureTaskContext"
+            },
+            "consultation": {
+              "default": "",
+              "title": "Consultation",
+              "type": "string"
+            }
+          },
+          "title": "RestructureOutput",
+          "type": "object"
         }
       }
     }
@@ -280,41 +587,41 @@
   "resolved_prompts": {
     "l1_generate/1": {
       "persona": "You are a pipeline optimization expert.",
-      "task_intent": "Generate {{n_variants}} candidate configurations that improve on the parent searchpoint. The target pipeline, its domain, last round's critique, and the failures so far are described in the context blocks below — do not assume any specific task type. The critique block names the priority fix and suggested axes from L1_CRITIQUE; treat it as the primary steer for what to mutate this round.",
+      "task_intent": "Generate {{n_variants}} candidate configurations that improve on the parent searchpoint. The target pipeline, its domain, last round's critique, and the failures so far are described in the context blocks below \u2014 do not assume any specific task type. The critique block names the priority fix and suggested axes from L1_CRITIQUE; treat it as the primary steer for what to mutate this round.",
       "problem_description": "",
-      "instruction": "Produce {{n_variants}} candidates. Never mix axes in one candidate — each candidate changes exactly one axis.\n\n- Scalar axis: change a single param value.\n- Prompt axis: coherent rewrite of 2–3 subfields from {persona, task_intent, problem_description, instruction, thinking_style}.\n- Structured-output axis: 2–3-edit rewrite of answer_format.\n\nAcross the {{n_variants}}, every candidate must touch a different axis — duplicates are rejected. Empty pipeline_params_override is rejected: each variant MUST mutate at least one field. Clones of the parent waste API budget. For each, the reasoning field MUST cite a specific item from the critique block (priority_fix, a suggested_axis, or a failure_highlight) — variants that ignore the critique are wasted budget.",
+      "instruction": "Produce {{n_variants}} candidates. Never mix axes in one candidate \u2014 each candidate changes exactly one axis.\n\n- Scalar axis: change a single param value.\n- Prompt axis: coherent rewrite of 2\u20133 subfields from {persona, task_intent, problem_description, instruction, thinking_style}.\n- Structured-output axis: 2\u20133-edit rewrite of answer_format.\n\nAcross the {{n_variants}}, every candidate must touch a different axis \u2014 duplicates are rejected. Empty pipeline_params_override is rejected: each variant MUST mutate at least one field. Clones of the parent waste API budget. For each, the reasoning field MUST cite a specific item from the critique block (priority_fix, a suggested_axis, or a failure_highlight) \u2014 variants that ignore the critique are wasted budget.",
       "thinking_style": "",
-      "answer_format": "Return a JSON object with key \"variants\" containing an array of {{n_variants}} objects, each with:\n  - \"variant_name\": short identifier\n  - \"changes_description\": 1-2 sentence description\n  - \"pipeline_params_override\": dict of changes. MUST include at least one parameter change — empty overrides are rejected. Prompt fields (persona, task_intent, problem_description, instruction, thinking_style, answer_format) go as flat key -> value. Pipeline context fields (upstream_context, downstream_context) go as flat key -> value — these inject pipeline awareness into the target prompt's problem_description. Pipeline node params go nested under node name: {\"node_name\": {\"param\": value}} (e.g. {\"web_search\": {\"max_sites\": 5}}).\n  - \"target_axis\": the primary parameter axis this candidate focuses on\n  - \"reasoning\": why this combination is promising\n  - \"evidence_grounding\": object naming the panel field that justifies the mutation. `field` ∈ {parent_panel, sibling_yield, axis_memory, escalation_panel, task_context, plan, stall_exploration}; `citation` is a short string quoting or naming the specific entry (e.g. `\"sibling_yield: persona axis n_beat_parent=3/4 mean_delta=+0.08\"` or `\"task_context.optimization_goals: 'reduce verbosity'\"`). The contract is: no data justifying a choice ⇒ do not gamble. `stall_exploration` is the explicit-stall escape hatch — only valid when `escalation_panel.exploration_budget` is `normal` or `wide`. Variants without a real citation fail the `evidence_grounding_present` behavior check."
+      "answer_format": "Return a JSON object with key \"variants\" containing an array of {{n_variants}} objects, each with:\n  - \"variant_name\": short identifier\n  - \"changes_description\": 1-2 sentence description\n  - \"pipeline_params_override\": dict of changes. MUST include at least one parameter change \u2014 empty overrides are rejected. Prompt fields (persona, task_intent, problem_description, instruction, thinking_style, answer_format) go as flat key -> value. Pipeline context fields (upstream_context, downstream_context) go as flat key -> value \u2014 these inject pipeline awareness into the target prompt's problem_description. Pipeline node params go nested under node name: {\"node_name\": {\"param\": value}} (e.g. {\"web_search\": {\"max_sites\": 5}}).\n  - \"target_axis\": the primary parameter axis this candidate focuses on\n  - \"reasoning\": why this combination is promising\n  - \"evidence_grounding\": object naming the panel field that justifies the mutation. `field` \u2208 {parent_panel, sibling_yield, axis_memory, escalation_panel, task_context, plan, stall_exploration}; `citation` is a short string quoting or naming the specific entry (e.g. `\"sibling_yield: persona axis n_beat_parent=3/4 mean_delta=+0.08\"` or `\"task_context.optimization_goals: 'reduce verbosity'\"`). The contract is: no data justifying a choice \u21d2 do not gamble. `stall_exploration` is the explicit-stall escape hatch \u2014 only valid when `escalation_panel.exploration_budget` is `normal` or `wide`. Variants without a real citation fail the `evidence_grounding_present` behavior check."
     },
     "l1_critique/1": {
       "persona": "You are a pipeline evaluation analyst.",
       "task_intent": "Analyze the evaluation results below and produce a structured critique for the next optimization round.",
       "problem_description": "{{plan}}\n\n{{task_context}}\n\n{{diagnostics}}\n\n{{validation_failures}}\n\n{{runtime_failures}}",
-      "instruction": "Ground every claim in the stat sections above. Cite the specific axes, values, and failure groups you reference — do not generalize past the data shown. If runtime failures appear above, you MUST name the offending axis and value in negative_critique and steer suggested_axes and priority_fix away from that value range.",
+      "instruction": "Ground every claim in the stat sections above. Cite the specific axes, values, and failure groups you reference \u2014 do not generalize past the data shown. If runtime failures appear above, you MUST name the offending axis and value in negative_critique and steer suggested_axes and priority_fix away from that value range.",
       "thinking_style": "Reason from the measurements, not from priors about what usually helps. If the data is thin on an axis, say so rather than guessing.",
-      "answer_format": "Analyze all data above and return JSON:\n{\n  \"positive_critique\": \"<what is working well — patterns to extend>\",\n  \"negative_critique\": \"<what is failing — root causes and blockers>\",\n  \"priority_fix\": \"<what change(s) would have the most impact>\",\n  \"suggested_axes\": [\"<pipeline_param or prompt_field to try next>\"],\n  \"failure_highlights\": [\"<Query: ... | Predicted: ... | GT: ...>\", ...],\n  \"summary\": \"<2-3 sentence actionable critique for the next candidate generator>\"\n}\nRules:\n- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)\n- negative_critique: reference specific stats from the sections above\n- suggested_axes: name parameters or fields visible in the data above\n- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees — choose ones that best illustrate fixable patterns\n- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round — be concise and actionable"
+      "answer_format": "Analyze all data above and return JSON:\n{\n  \"positive_critique\": \"<what is working well \u2014 patterns to extend>\",\n  \"negative_critique\": \"<what is failing \u2014 root causes and blockers>\",\n  \"priority_fix\": \"<what change(s) would have the most impact>\",\n  \"suggested_axes\": [\"<pipeline_param or prompt_field to try next>\"],\n  \"failure_highlights\": [\"<Query: ... | Predicted: ... | GT: ...>\", ...],\n  \"summary\": \"<2-3 sentence actionable critique for the next candidate generator>\"\n}\nRules:\n- positive_critique: identify success patterns from the data (hits, near-misses, rank distribution)\n- negative_critique: reference specific stats from the sections above\n- suggested_axes: name parameters or fields visible in the data above\n- failure_highlights: pick 3-5 most actionable failures (Query/Predicted/GT). These are the ONLY failure examples the next generator sees \u2014 choose ones that best illustrate fixable patterns\n- summary, priority_fix, suggested_axes, and failure_highlights are fed to the next generation round \u2014 be concise and actionable"
     },
     "l2_context/1": {
-      "persona": "You are a prompt optimization expert. You shape the optimizer itself — not the target prompt directly. Your output is written onto the optimizer's state record (OptSearchPoint).",
-      "task_intent": "Read the situation. Refine the persistent task framing so every layer (L1, L1_CRITIQUE, L2, L3) reads a sharper picture of “what is this task” next round.",
+      "persona": "You are a prompt optimization expert. You shape the optimizer itself \u2014 not the target prompt directly. Your output is written onto the optimizer's state record (OptSearchPoint).",
+      "task_intent": "Read the situation. Refine the persistent task framing so every layer (L1, L1_CRITIQUE, L2, L3) reads a sharper picture of \u201cwhat is this task\u201d next round.",
       "problem_description": "{{plan}}\n\n{{l3_to_l2_note}}\n\n{{diagnostics}}\n\n{{validation_failures}}\n\n{{runtime_failures}}\n\n{{axis_memory}}\n\n{{critique}}\n\n{{l1_overrides}}\n\n{{task_context}}\n\n{{l1_signal_catalogue}}",
-      "instruction": "Write a JSON object with the fields below. Each field is independent — set only the ones you want to change.\n\nThe primary work each fire is refining `task_context`. Look at the current TASK CONTEXT shown above plus the diagnostics/failures, and propose updated values for the framing fields that most need sharpening. Refinement is gradual: nudge a field anchored to specific data, don't rewrite from scratch. A no-op task_context (zero delta vs current) flags as verbatim-repeat and escalates to L3; an unanchored framing update or evidence-free layout edit is churn.\n\nIf an L3 NOTE TO L2 is shown above, treat it as a sticky pointer the last L3 fire left for you — it persists across your fires until L3 next replans. Stay consistent with it unless the data shown clearly contradicts it.\n\nLayout edits are situational; only edit a slot list when a placeholder is misleading L1 or when adding one would unblock the next round.",
+      "instruction": "Write a JSON object with the fields below. Each field is independent \u2014 set only the ones you want to change.\n\nThe primary work each fire is refining `task_context`. Look at the current TASK CONTEXT shown above plus the diagnostics/failures, and propose updated values for the framing fields that most need sharpening. Refinement is gradual: nudge a field anchored to specific data, don't rewrite from scratch. A no-op task_context (zero delta vs current) flags as verbatim-repeat and escalates to L3; an unanchored framing update or evidence-free layout edit is churn.\n\nIf an L3 NOTE TO L2 is shown above, treat it as a sticky pointer the last L3 fire left for you \u2014 it persists across your fires until L3 next replans. Stay consistent with it unless the data shown clearly contradicts it.\n\nLayout edits are situational; only edit a slot list when a placeholder is misleading L1 or when adding one would unblock the next round.",
       "thinking_style": "Trace each failure pattern back to the axis it lives on before refining task_context.",
-      "answer_format": "Return a JSON object with these fields (all optional):\n  \"task_context\": dict of refined domain fields (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges). This is the primary L2 lever — broadcast to L1, L1_CRITIQUE, L2, L3 next round. Omit or empty to keep current; a proposed update that merges to a no-op is flagged as a verbatim repeat.\n  \"action\": \"normal_round\" (DEFAULT — full scoring set) or \"probe_round\" (rare — re-run only the warned-query subset; use when one narrow failure mode dominates AND you have a specific axis hypothesis to test).\n  \"axis_targeted\": short axis name (e.g. \"persona\", \"answer_format\", \"rerun_trigger_count\") this fire tests. Required when action=probe_round; optional otherwise. Used to audit probe outcomes.\n  \"l1_layout\": dict {slot_name: [placeholder, ...]} for L1's prompt-slot layout. Slot names: persona, task_intent, problem_description, thinking_style. Placeholder names from L1 SIGNAL MENU above. Omit or null to keep the current layout. Mandatory placeholders {plan, task_context, rendered_prompt, pipeline_param_catalogue} must appear somewhere if you submit a layout.\n  \"l1_overrides\": dict of L1 runtime knobs (creativity, n_variants, etc.). Omit or empty to keep current.\n  \"rationale\": 1-2 sentence explanation of why these changes.\n\nNote: L1 makes the final decision on pipeline_params. Your job is to refine the situation context or rearrange L1's view — not to author specific candidate values."
+      "answer_format": "Return a JSON object with these fields (all optional):\n  \"task_context\": dict of refined domain fields (domain, pipeline_purpose, data_characteristics, optimization_goals, key_challenges). This is the primary L2 lever \u2014 broadcast to L1, L1_CRITIQUE, L2, L3 next round. Omit or empty to keep current; a proposed update that merges to a no-op is flagged as a verbatim repeat.\n  \"action\": \"normal_round\" (DEFAULT \u2014 full scoring set) or \"probe_round\" (rare \u2014 re-run only the warned-query subset; use when one narrow failure mode dominates AND you have a specific axis hypothesis to test).\n  \"axis_targeted\": short axis name (e.g. \"persona\", \"answer_format\", \"rerun_trigger_count\") this fire tests. Required when action=probe_round; optional otherwise. Used to audit probe outcomes.\n  \"l1_layout\": dict {slot_name: [placeholder, ...]} for L1's prompt-slot layout. Slot names: persona, task_intent, problem_description, thinking_style. Placeholder names from L1 SIGNAL MENU above. Omit or null to keep the current layout. Mandatory placeholders {plan, task_context, rendered_prompt, pipeline_param_catalogue} must appear somewhere if you submit a layout.\n  \"l1_overrides\": dict of L1 runtime knobs (creativity, n_variants, etc.). Omit or empty to keep current.\n  \"rationale\": 1-2 sentence explanation of why these changes.\n\nNote: L1 makes the final decision on pipeline_params. Your job is to refine the situation context or rearrange L1's view \u2014 not to author specific candidate values."
     },
     "l3_plan/1": {
       "persona": "You are an expert optimization strategist.",
       "task_intent": "Both the inner prompt generation loop (L1) and the parameter tuning loop (L2) have stalled. Replan the strategic framework so the next L2 fire steers L1 differently.",
       "problem_description": "{{plan}}\n\n{{task_context}}\n\n{{diagnostics}}\n\n{{validation_failures}}\n\n{{runtime_failures}}\n\n{{axis_memory}}\n\n{{l2_guard_breaches}}\n\n{{l3_guard_breaches}}\n\n{{critique}}",
-      "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. Runtime-failure patterns above are discovered constraints — steer L1/L2 around the failing region. L2 OUTPUT FAILURES above mean deterministic validators caught L2 producing broken output; refine the plan text to steer L2 toward novel mutations and away from the failing strategy mode.",
+      "instruction": "The current approach is not working. Suggest a fundamentally different optimization strategy. Runtime-failure patterns above are discovered constraints \u2014 steer L1/L2 around the failing region. L2 OUTPUT FAILURES above mean deterministic validators caught L2 producing broken output; refine the plan text to steer L2 toward novel mutations and away from the failing strategy mode.",
       "thinking_style": "Consider:\n- Which pipeline dimensions the data shows as under-explored\n- Which runtime constraints have been discovered and must be respected\n- Whether L2 itself is the problem (validator failures on L2's output) and the plan must coach L2's next pass",
-      "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization (required)\n  \"note\": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor — e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.\n  \"rationale\": 1-2 sentence explanation of the strategic shift"
+      "answer_format": "\nReturn a JSON object with:\n  \"plan\": new strategy text for guiding future optimization (required)\n  \"note\": OPTIONAL sticky pointer for the L2-layer (string or null). Persists across L2 fires until your next replan replaces it. Use it when the L2-layer keeps drifting away from a constraint your replan needs it to honor \u2014 e.g. a discovered runtime ceiling, a failed axis to avoid, or a specific cohort to focus on. Omit or null when the plan itself is enough.\n  \"rationale\": 1-2 sentence explanation of the strategic shift"
     },
     "restructure/1": {
       "persona": "You are a prompt engineering assistant.",
       "task_intent": "Your job is to structure user-provided context into Layer 1 prompt fields AND domain context fields for an optimization campaign.",
-      "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step — what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step — how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.",
-      "thinking_style": "Prefer the user's own wording for domain terms. Invent nothing — if a field has no source material, leave it sparse rather than padding it.",
+      "instruction": "Layer 1 fields (for prompt construction):\n- persona: Who the LLM should act as (e.g., 'You are a domain expert...')\n- task_intent: What the prompt needs to accomplish\n- problem_description: Description of the problem domain\n- instruction: Core instruction text (may contain template variables)\n- thinking_style: How to reason (e.g., 'Think step by step')\n- answer_format: Expected output format\n\nDomain context fields (for optimization guidance):\n- domain: Research/industry domain (e.g., 'Life Cycle Assessment', 'Medical NLP')\n- pipeline_purpose: What the pipeline does end-to-end in 1-2 sentences\n- data_characteristics: What kind of data flows through (input format, volume, language)\n- optimization_goals: What 'better' means in this context (accuracy metric, edge cases)\n- key_challenges: Known difficulties, ambiguities, or edge cases the optimizer should know about\n- upstream_context: What happens BEFORE this step \u2014 what data/processing feeds into it (e.g., 'Web search retrieves raw content from 7 pages'). Gets injected into the target prompt.\n- downstream_context: What happens AFTER this step \u2014 how the output is consumed (e.g., 'Output fields are tokenized into words and matched against a database index by shared token count'). Gets injected into the target prompt.",
+      "thinking_style": "Prefer the user's own wording for domain terms. Invent nothing \u2014 if a field has no source material, leave it sparse rather than padding it.",
       "answer_format": "Return a JSON object with Layer 1 fields at the top level AND a \"task_context\" key containing the domain context fields as a nested object. {{consultation_instruction}}"
     }
   }

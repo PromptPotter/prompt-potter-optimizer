@@ -28,7 +28,13 @@ from typing import TYPE_CHECKING, Any
 from promptpotter.domain.cycle_paths import RootCycleDir
 from promptpotter.domain.phases import CampaignPhase, PhaseEvent
 from promptpotter.domain.results import candidate_label
-from promptpotter.domain.run_records import PhaseRecord, SnapshotRecord, TokenUsageRecord
+from promptpotter.domain.run_records import (
+    LLMCallRecord,
+    LLMCallStartRecord,
+    PhaseRecord,
+    SnapshotRecord,
+    TokenUsageRecord,
+)
 from promptpotter.infrastructure.projections.base import DerivedView
 from promptpotter.infrastructure.projections.live_state import (
     LiveStateCore,
@@ -215,6 +221,11 @@ class LiveDashboardView(DerivedView):
             "n_variants": n_variants,
             "sp_budget_ttest": sp_budget_ttest,
             "spend": r.get("spend") or empty_spend(),
+            # Filled by ``_handle_llm_call_start`` while a meta-prompt LLM
+            # call is in progress; cleared on the paired ``LLMCallRecord``.
+            # Stays ``None`` between calls — explicit so the webapp doesn't
+            # have to guess "missing key vs cleared".
+            "in_flight": None,
         }
         # Per-candidate value-inlined version of the active short formula;
         # set on INIT:exit, consumed in _build_l1_score_block for each row.
@@ -530,6 +541,43 @@ class LiveDashboardView(DerivedView):
         """Route an optimizer LLM call into the spend rollup, then persist."""
         apply_token_usage(self.state["spend"], record)
         self._persist()
+
+    def _handle_llm_call_start(self, record: LLMCallStartRecord) -> None:
+        """Publish an in-flight slot on ``dashboard.json::in_flight``.
+
+        Lets the operator (and any AI reading the file) see *which*
+        optimizer LLM call is currently in progress and *when* it
+        started — addresses the multi-minute blind spot where a
+        reasoning-heavy critique call would leave the dashboard frozen.
+        Cleared when the paired :class:`LLMCallRecord` arrives via
+        :meth:`_handle_llm_call`.
+        """
+        self.state["in_flight"] = {
+            "call_id": record.call_id,
+            "node": record.node,
+            "model": record.model,
+            "round": record.round,
+            "candidate_idx": record.candidate_idx,
+            "started_at_ms": record.started_at_ms,
+        }
+        self._persist()
+
+    def _handle_llm_call(self, record: LLMCallRecord) -> None:
+        """Clear the in-flight slot when the paired completion record lands.
+
+        Match by ``call_id`` so out-of-order delivery (rare; same ledger,
+        same writer) can't clear the wrong call. The actual audit-trail
+        write happens in :class:`AuditTrailView`; this projection only
+        manages the live ``in_flight`` field.
+        """
+        in_flight = self.state.get("in_flight")
+        if (
+            isinstance(in_flight, dict)
+            and record.call_id
+            and in_flight.get("call_id") == record.call_id
+        ):
+            self.state["in_flight"] = None
+            self._persist()
 
     def _update_current_acc(self, scores: dict) -> None:
         self.state["current_acc"] = round(scores.get("accuracy", 0.0), 4)

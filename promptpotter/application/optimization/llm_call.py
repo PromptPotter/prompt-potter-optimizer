@@ -3,6 +3,13 @@
 ``llm_call`` (429-retry + token emit + recorder + cross-cycle cache),
 ``run_optimizer_node`` (template → compile → call → parse), schema loader,
 and Langfuse-production → local-manifest prompt loading.
+
+Every optimizer node dispatches a Pydantic response model from
+:data:`optimizer_schemas.OPTIMIZER_RESPONSE_MODELS` so the LLM call
+returns a typed instance on ``LLMResponse.parsed`` — server-side
+``response_format`` validation plus client-side ``model_validate`` on
+the parsed JSON. The hand-rolled JSON repair path only runs when no
+model is configured for the node.
 """
 
 from __future__ import annotations
@@ -12,12 +19,18 @@ import hashlib
 import json
 import logging
 import time
+import uuid
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Literal, cast
+from typing import TYPE_CHECKING, Any
 
+from pydantic import BaseModel
+
+from promptpotter.application.optimization.optimizer_schemas import (
+    OPTIMIZER_RESPONSE_MODELS,
+)
 from promptpotter.domain.opt_search_point import PromptTemplate
 from promptpotter.domain.pipeline_schema import PipelineSchema
-from promptpotter.domain.run_records import LLMCallRecord
+from promptpotter.domain.run_records import LLMCallRecord, LLMCallStartRecord
 from promptpotter.infrastructure.llm import (
     MAX_429_ATTEMPTS,
     LLMClientBase,
@@ -104,7 +117,22 @@ def get_optimizer_schema() -> PipelineSchema:
     )
 
 
-_LLM_DEFAULTS = {"temperature": 0.0, "output_format": "text"}
+_LLM_DEFAULTS: dict[str, Any] = {"temperature": 0.0}
+
+
+def _ledger_response_payload(response: LLMResponse) -> Any:
+    """Materialize ``response.parsed`` into a JSON-safe shape for the ledger.
+
+    Typed Pydantic instances dump cleanly; raw dicts pass through; ``None``
+    (text-mode call) falls back to the raw content string. The prior
+    ``json.loads(response.content)`` re-parse is unnecessary now that
+    ``chat()`` populates ``parsed`` itself.
+    """
+    if response.parsed is None:
+        return response.content
+    if isinstance(response.parsed, BaseModel):
+        return response.parsed.model_dump()
+    return response.parsed
 
 
 async def llm_call(
@@ -114,7 +142,8 @@ async def llm_call(
     node: str | None = None,
     config: dict | None = None,
     trace_meta: dict | None = None,
-    json_schema: dict | None = None,
+    response_model: type[BaseModel] | None = None,
+    response_schema: dict | None = None,
     ledger: CycleEventLog | None = None,
     round_num: int | None = None,
     candidate_idx: int | None = None,
@@ -123,17 +152,20 @@ async def llm_call(
 ) -> LLMResponse:
     """LLM call with config-driven defaults; precedence: _LLM_DEFAULTS < config < overrides.
 
-    When *json_schema* is not passed and the node carries an
-    ``output_schema.json_schema`` (resolved from the top-level
-    ``resolved_schemas`` registry in ``optimizer_pipeline.json``), that
-    schema is auto-pulled — same TermNorm-style indirection used for
-    backend pipelines.
+    *response_model* defaults to ``OPTIMIZER_RESPONSE_MODELS[node]`` when a
+    *node* is supplied — every optimizer node has a Pydantic model, so
+    callers get a typed ``response.parsed`` for free. Pass *response_schema*
+    to override the wire JSON Schema (used by ``l1_generate`` whose schema
+    is built dynamically per backend ``PipelineSchema``); the parsed
+    content is still validated against *response_model* for type-level
+    guarantee on the Python side.
 
     When *cache* is provided, the resolved ``(messages, model, temperature,
-    json_schema, provider)`` tuple is hashed and looked up before firing
-    the LLM. A hit replays the stored ``LLMResponse`` (and emits an
-    ``LLMCallRecord`` with ``cached: true``) instead of calling the
-    provider — cross-cycle and cross-fork by construction.
+    response_model, response_schema, provider)`` tuple is hashed and
+    looked up before firing the LLM. A hit replays the stored
+    ``LLMResponse`` (and emits an ``LLMCallRecord`` with ``cached: true``)
+    instead of calling the provider — cross-cycle and cross-fork by
+    construction.
 
     When *ledger* is provided, an :class:`LLMCallRecord` is appended
     after each successful call (or cache hit) — the audit-trail
@@ -147,10 +179,8 @@ async def llm_call(
             if schema_node is None:
                 raise KeyError(f"Unknown optimizer node: {node}")
             config = schema_node.current_config
-            if json_schema is None and schema_node.output_schema is not None:
-                resolved = schema_node.output_schema.json_schema
-                if resolved:
-                    json_schema = resolved
+            if response_model is None:
+                response_model = OPTIMIZER_RESPONSE_MODELS.get(node)
         else:
             config = {}
     merged = {**_LLM_DEFAULTS, **config, **overrides}
@@ -163,22 +193,36 @@ async def llm_call(
             model=merged.get("model"),
             provider=type(llm_client).__name__,
             temperature=merged["temperature"],
-            json_schema=json_schema,
+            json_schema=response_schema,
+            response_model=response_model.__name__ if response_model else None,
         )
         cached_payload = cache.load(cache_key)
 
     _t0 = time.monotonic()
+
+    # ``call_id`` pairs the LLMCallStartRecord (appended before the SDK call,
+    # so the operator/AI can read "currently calling X for Ys" off
+    # dashboard.json::in_flight even mid-call) with the eventual
+    # LLMCallRecord. Empty string when no ledger is bound (call-site tests,
+    # one-shot tools).
+    call_id = uuid.uuid4().hex if ledger is not None else ""
 
     if cached_payload is not None:
         response = LLMResponse.model_validate(cached_payload)
         duration_s = round(time.monotonic() - _t0, 2)
         logger.debug("OptimizerCallCache hit for %s (%s)", node or "llm_call", cache_key)
     else:
-        effective_output_format = cast(
-            Literal["text", "json", "json_schema"],
-            "json_schema" if json_schema else merged["output_format"],
-        )
-
+        if ledger is not None:
+            ledger.append(
+                LLMCallStartRecord(
+                    call_id=call_id,
+                    node=node or "llm_call",
+                    round=round_num,
+                    candidate_idx=candidate_idx,
+                    model=merged.get("model"),
+                    started_at_ms=int(time.time() * 1000),
+                )
+            )
         # 429 honor-Retry-After loop, bounded. Server sets the header per RFC 7231;
         # if missing or attempts run out, surface the SDK exception unchanged.
         for attempt in range(MAX_429_ATTEMPTS):
@@ -188,8 +232,8 @@ async def llm_call(
                     model=merged.get("model"),
                     temperature=merged["temperature"],
                     max_tokens=merged.get("max_tokens"),
-                    output_format=effective_output_format,
-                    json_schema=json_schema,
+                    response_model=response_model,
+                    response_schema=response_schema,
                 )
                 break
             except Exception as exc:
@@ -232,12 +276,6 @@ async def llm_call(
             cache.save(cache_key, response.model_dump())
 
     if ledger is not None:
-        response_data: dict | str
-        try:
-            response_data = json.loads(response.content)
-        except (json.JSONDecodeError, TypeError):
-            response_data = response.content
-
         payload: dict = {
             "type": node or "llm_call",
             "config": {
@@ -245,7 +283,7 @@ async def llm_call(
                 "temperature": merged["temperature"],
                 "max_tokens": merged.get("max_tokens"),
             },
-            "response": response_data,
+            "response": _ledger_response_payload(response),
             "usage": response.usage,
             "model": response.model,
             "duration_s": duration_s,
@@ -261,6 +299,7 @@ async def llm_call(
                 node=node or "llm_call",
                 round=round_num,
                 candidate_idx=candidate_idx,
+                call_id=call_id,
                 payload=payload,
             )
         )
@@ -275,7 +314,7 @@ async def run_optimizer_node(
     llm_client: LLMClientBase,
     model: str | None,
     temperature: float = 0.0,
-    json_schema: dict | None = None,
+    response_schema: dict | None = None,
     user_content: str | None = None,
     ledger: CycleEventLog | None = None,
     round_num: int | None = None,
@@ -283,12 +322,22 @@ async def run_optimizer_node(
     template: PromptTemplate | None = None,
     optimizer_call_cache: OptimizerCallCache | None = None,
 ) -> tuple[Any, str]:
-    """Load prompt template, compile, call LLM, parse JSON → (parsed_result, prompt_text).
+    """Load prompt template, compile, call LLM → (parsed_result, prompt_text).
+
+    The response model is looked up by ``template_name`` in
+    :data:`OPTIMIZER_RESPONSE_MODELS`; the typed Pydantic instance lands on
+    ``LLMResponse.parsed`` and is returned to the caller as the first
+    element of the tuple. Callers that need a dict shape (legacy
+    consumers, audit-trail) call ``.model_dump()`` themselves.
 
     When *template* is provided, it overrides the load-from-name path (used
     by L1's ``l1_template_override`` channel — L2 can rewrite L1's prompt
     body by writing ``template_override`` on its OSP). The trace metadata
     still records ``template_name`` so observability stays continuous.
+
+    When *response_schema* is supplied, it overrides the wire JSON Schema
+    derived from the response model — used by ``l1_generate`` whose
+    schema is built dynamically per backend ``PipelineSchema``.
 
     When *optimizer_call_cache* is provided, it is forwarded to :func:`llm_call`
     for content-addressed cross-cycle reuse of optimizer LLM responses.
@@ -309,7 +358,7 @@ async def run_optimizer_node(
         node=template_name,
         model=model,
         temperature=temperature,
-        json_schema=json_schema,
+        response_schema=response_schema,
         ledger=ledger,
         round_num=round_num,
         candidate_idx=candidate_idx,

@@ -14,6 +14,7 @@ Forks that share their parent's audits can point --audit-dir at the parent.
 
 Writes review.md alongside index.json.
 """
+
 from __future__ import annotations
 
 import argparse
@@ -59,7 +60,6 @@ def main(argv: list[str]) -> int:
     audit_dir = (args.audit_dir or (cycle_dir / ".runtime" / "cache" / "rounds")).resolve()
     audits = _load_audits(audit_dir, len(rounds)) if audit_dir.exists() else [None] * len(rounds)
 
-    final = index.get("final") or {}
     ctx: list[str] = []
     # Best-effort task_context — fork inherits parent's so we don't always have it.
     # Pull from last round's opt_search_point.task_context when present.

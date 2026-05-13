@@ -24,9 +24,10 @@ Seven named invariants:
      dict survives ``model_dump`` → reload; mandatory layout placeholders
      enforced; extra keys rejected at parse.
   7. L2 ``action`` channel: ``probe_round`` round-trips through
-     ``_parse_l2``; garbage values default to ``normal_round``;
-     ``_apply_l2`` sets ``cycle.probe_next_round`` + records a
-     ``PROBE_ROUND_COMMITMENT`` decision keyed on the action.
+     ``_parse_l2``; invalid values are rejected at the Pydantic boundary
+     (:class:`L2ContextOutput.action` is ``Literal["normal_round",
+     "probe_round"]``); ``_apply_l2`` sets ``cycle.probe_next_round`` +
+     records a ``PROBE_ROUND_COMMITMENT`` decision keyed on the action.
 """
 
 from __future__ import annotations
@@ -50,6 +51,10 @@ from promptpotter.application.optimization.l2_validators import (
     L3_PLAN_VERBATIM_REPEAT,
     run_l2_output_validators,
     run_l3_output_validators,
+)
+from promptpotter.application.optimization.optimizer_schemas import (
+    L2ContextOutput,
+    L3PlanOutput,
 )
 from promptpotter.domain.l1_layout import L1Layout, default_l1_layout, validate_l1_layout
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -383,29 +388,15 @@ def _l2_cycle_stub() -> types.SimpleNamespace:
 
 
 def test_parse_l2_round_trips_probe_action_and_axis():
-    raw = {
-        "action": "probe_round",
-        "axis_targeted": "persona",
-        "rationale": "test",
-    }
+    raw = L2ContextOutput(action="probe_round", axis_targeted="persona", rationale="test")
     result = _parse_l2(raw, _osp(), prompt="<prompt>")
     assert result.action == "probe_round"
     assert result.axis_targeted == "persona"
 
 
-def test_parse_l2_invalid_action_defaults_to_normal_round():
-    raw = {"action": "garbage", "rationale": "test"}
-    result = _parse_l2(raw, _osp(), prompt="<prompt>")
-    assert result.action == "normal_round"
-
-
 def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
     cycle = _l2_cycle_stub()
-    raw = {
-        "action": "probe_round",
-        "axis_targeted": "persona",
-        "rationale": "test",
-    }
+    raw = L2ContextOutput(action="probe_round", axis_targeted="persona", rationale="test")
     result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
     _apply_l2(cycle, result, round_num=3)
 
@@ -420,7 +411,7 @@ def test_apply_l2_probe_action_sets_cycle_state_and_records_commitment():
 
 def test_apply_l2_normal_action_records_commitment_without_probe_state():
     cycle = _l2_cycle_stub()
-    raw = {"action": "normal_round", "rationale": "test"}
+    raw = L2ContextOutput(action="normal_round", rationale="test")
     result = _parse_l2(raw, cycle.opt_sp, prompt="<prompt>")
     _apply_l2(cycle, result, round_num=3)
 
@@ -466,7 +457,7 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     from promptpotter.application.optimization.escalation.state import EscalationState
 
     osp = _osp(plan="prior plan", l3_note="prior note")
-    raw = {"plan": "x" * 200, "note": "new sticky pointer", "rationale": "test"}
+    raw = L3PlanOutput(plan="x" * 200, note="new sticky pointer", rationale="test")
     result = _parse_l3(raw, osp, prompt="<prompt>")
     assert result.l3_note == "new sticky pointer"
 
@@ -483,7 +474,7 @@ def test_parse_l3_reads_note_from_raw_and_apply_replaces_on_osp():
     assert cycle.opt_sp.l3_note == "new sticky pointer"  # _apply_l3 replaced
 
     # And: missing note → wipe.
-    raw_no_note = {"plan": "y" * 200, "rationale": "test"}
+    raw_no_note = L3PlanOutput(plan="y" * 200, rationale="test")
     result2 = _parse_l3(raw_no_note, _osp(plan="p", l3_note="something"), prompt="<prompt>")
     assert result2.l3_note == ""
 

@@ -25,7 +25,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from promptpotter.application.optimization.l1_behavior_checks import PARAM_FORBIDDEN_KEYS
-from promptpotter.application.optimization.llm_call import get_optimizer_schema
+from promptpotter.application.optimization.optimizer_schemas import L1GenerateOutput
 from promptpotter.config.settings import PROMPT_STRING_FIELDS, TASK_CONTEXT_OVERRIDES
 from promptpotter.domain.analysis import ValidationFailure
 from promptpotter.domain.opt_search_point import OptSearchPoint
@@ -44,10 +44,35 @@ __all__ = [
 ]
 
 
-def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
-    """Static l1_generate envelope + per-node param_allowed_values grafted as enums.
+def _inline_refs(node: Any, defs: dict[str, dict]) -> Any:
+    """Resolve ``$ref`` references in a Pydantic-emitted JSON Schema in place.
 
-    For each ``param_key``:
+    Pydantic's ``model_json_schema()`` factors nested models into a top-level
+    ``$defs`` table referenced via ``$ref``. Provider response_format wants a
+    self-contained schema (no $ref forward declarations on subtrees); we
+    inline so callers can mutate properties directly, and so the wire
+    payload validates server-side without resolution. ``title`` metadata is
+    stripped along the way — Pydantic auto-emits them, they bloat the
+    schema for no LLM-side benefit.
+    """
+    if isinstance(node, dict):
+        if "$ref" in node:
+            key = node["$ref"].split("/")[-1]
+            return _inline_refs(copy.deepcopy(defs[key]), defs)
+        return {k: _inline_refs(v, defs) for k, v in node.items() if k != "title"}
+    if isinstance(node, list):
+        return [_inline_refs(v, defs) for v in node]
+    return node
+
+
+def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
+    """l1_generate response_schema with per-node ``param_allowed_values`` grafted in.
+
+    The base shape comes from :class:`L1GenerateOutput` (the Pydantic SoT
+    for l1_generate's response); per backend node we then enrich
+    ``pipeline_params_override`` with the node's allowed-value enums so
+    the LLM is constrained at output-time:
+
     - if ``param_allowed_values`` carries an enum → ``{"type": "string", "enum": [...]}``
     - else if ``param_types`` declares a type → ``{"type": <json-type>}``
     - else → ``{}`` (unconstrained — dataset overlay gap)
@@ -56,17 +81,18 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
     emit ``"0.2"`` for ``temperature`` (string instead of number), which
     propagates through the wire payload to the upstream provider and
     triggers a 4xx that PromptPotter has to skip.
+
+    Returns the ``{"name", "schema", "strict"}`` envelope chat() consumes
+    via ``response_schema``.
     """
-    base_node = get_optimizer_schema().get_node("l1_generate")
-    if base_node is None or base_node.output_schema is None:
-        raise RuntimeError(
-            "optimizer manifest missing l1_generate output_schema envelope "
-            "(resolved_schemas['l1_generate/1'])"
-        )
-    schema = copy.deepcopy(base_node.output_schema.json_schema)
-    override_properties = schema["schema"]["properties"]["variants"]["items"]["properties"][
-        "pipeline_params_override"
-    ]["properties"]
+    raw_schema = L1GenerateOutput.model_json_schema()
+    defs = raw_schema.pop("$defs", {})
+    inlined = _inline_refs(raw_schema, defs)
+
+    override = inlined["properties"]["variants"]["items"]["properties"]["pipeline_params_override"]
+    override.setdefault("properties", {})
+    override["additionalProperties"] = False
+    override_properties = override["properties"]
 
     for node in pipeline_schema.nodes:
         if not node.param_keys:
@@ -96,7 +122,7 @@ def build_l1_output_schema(pipeline_schema: PipelineSchema) -> dict:
             "additionalProperties": False,
         }
 
-    return schema
+    return {"name": "l1_variants", "schema": inlined, "strict": False}
 
 
 _JSON_TYPE_TO_PY: dict[str, tuple[type, ...]] = {

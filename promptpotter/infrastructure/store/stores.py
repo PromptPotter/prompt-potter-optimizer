@@ -42,8 +42,15 @@ def hash_call(
     provider: str,
     temperature: float,
     json_schema: dict | None,
+    response_model: str | None = None,
 ) -> str:
-    """SHA-256 (truncated to 24 hex) of the byte-identical LLM-call inputs."""
+    """SHA-256 (truncated to 24 hex) of the byte-identical LLM-call inputs.
+
+    ``response_model`` is the Pydantic model's ``__name__`` when the call
+    used typed output (see ``OPTIMIZER_RESPONSE_MODELS``) — keeping it in
+    the key lets a cached typed response and a cached dict response live
+    side-by-side without colliding.
+    """
     blob = json.dumps(
         {
             "messages": messages,
@@ -51,6 +58,7 @@ def hash_call(
             "provider": provider,
             "temperature": temperature,
             "json_schema": json_schema,
+            "response_model": response_model,
         },
         sort_keys=True,
     )

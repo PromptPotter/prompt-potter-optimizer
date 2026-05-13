@@ -18,13 +18,14 @@ settings — see the rate-limiter section below.
 
 from __future__ import annotations
 
-import json
 import logging
 import re
 from abc import ABC, abstractmethod
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Literal
+
+from json_repair import repair_json
 
 # ``emit_token_usage`` warns on optimizer prompts that exceed
 # ``OPTIMIZER_PROMPT_WARN_TOKENS``.
@@ -54,9 +55,16 @@ __all__ = [
 
 
 def try_parse_json(content: str, provider: str) -> Any | None:
-    """Parse JSON from response content, return None on failure."""
+    """Parse JSON from response content; return None on failure.
+
+    Strips markdown code fences (Groq/Kimi emit ```json ... ``` even with
+    ``response_format=json``), then delegates to ``json_repair.repair_json``
+    for everything else (invalid ``\\X`` escapes, trailing commas, unquoted
+    keys, brace truncation). One library, one repair surface — the
+    hand-rolled regex repair this replaced couldn't handle invalid escape
+    sequences (the failure mode that produced the audit).
+    """
     text = content.strip()
-    # Strip markdown code fences (e.g. ```json ... ```)
     if text.startswith("```"):
         first_nl = text.find("\n")
         if first_nl != -1:
@@ -65,44 +73,33 @@ def try_parse_json(content: str, provider: str) -> Any | None:
             text = text[:-3]
         text = text.strip()
     try:
-        return json.loads(text)
-    except json.JSONDecodeError:
-        pass
-
-    # Best-effort repair of malformed JSON (Groq/kimi artifacts)
-    try:
-        repaired = text.replace("\\\\n", "\\n").replace("\\\\t", "\\t")
-        repaired = re.sub(r"(?<=[{,\s])(\w+)\s*:", r'"\1":', repaired)
-        repaired = re.sub(r",\s*([}\]])", r"\1", repaired)
-        # Truncate after last balanced closing brace
-        depth = 0
-        last_valid = -1
-        for i, ch in enumerate(repaired):
-            if ch in "{[":
-                depth += 1
-            elif ch in "}]":
-                depth -= 1
-                if depth == 0:
-                    last_valid = i
-        if 0 < last_valid < len(repaired) - 1:
-            repaired = repaired[: last_valid + 1]
-        result = json.loads(repaired)
-        logger.info("%s JSON repaired successfully", provider)
-        return result
-    except json.JSONDecodeError:
+        return repair_json(text, return_objects=True)
+    except Exception:
         logger.debug("%s response not valid JSON: %s", provider, content[:200])
         return None
 
 
 def extract_parsed_json(response: Any) -> Any:
-    """Extract parsed JSON from an LLM response.
+    """Return the parsed JSON object from an ``LLMResponse``.
 
-    Uses the pre-parsed ``response.parsed`` if available, otherwise falls
-    back to ``json.loads(response.content)``.
+    ``OpenAICompatibleClient.chat()`` and ``AnthropicClient.chat()`` already
+    populate ``response.parsed`` via :func:`try_parse_json` for every
+    ``json``/``json_schema`` call. This function exists for the rare
+    ``output_format='text'`` caller that happens to want JSON back; in that
+    path ``response.parsed`` is ``None`` and we attempt the same repair
+    pipeline. If even repair fails, raise a ``ValueError`` carrying a
+    diagnostic snippet — the prior raw ``json.loads`` fallback was dead
+    code (re-ran ``json.loads`` on content ``try_parse_json`` had already
+    given up on) and is gone.
     """
-    if response.parsed:
+    if response.parsed is not None:
         return response.parsed
-    return json.loads(response.content)
+    parsed = try_parse_json(response.content, "extract_parsed_json")
+    if parsed is not None:
+        return parsed
+    raise ValueError(
+        f"LLM response could not be parsed as JSON; content: {response.content[:500]!r}"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -278,12 +275,17 @@ def _repair_json_validate_failure(err_str: str) -> tuple[str, Any] | None:
 
 
 def _try_groq_json_validate_repair(
-    exc: Exception, request_params: dict[str, Any], provider_name: str
+    exc: Exception,
+    request_params: dict[str, Any],
+    provider_name: str,
+    response_model: type[BaseModel] | None,
 ) -> LLMResponse | None:
     """Groq-specific: turn a 400 ``json_validate_failed`` into a salvaged response.
 
     Returns ``None`` for any error that isn't this exact quirk so the caller
     re-raises. No-op for non-Groq providers — they don't surface this status.
+    When ``response_model`` is supplied, the salvaged dict is validated and
+    the typed instance lands on ``LLMResponse.parsed``.
     """
     if getattr(exc, "status_code", None) != 400 or "json_validate_failed" not in str(exc):
         return None
@@ -291,6 +293,8 @@ def _try_groq_json_validate_repair(
     if repaired is None:
         return None
     fg_text, parsed = repaired
+    if response_model is not None:
+        parsed = response_model.model_validate(parsed)
     logger.info("%s: salvaged failed_generation via JSON repair", provider_name)
     return LLMResponse(
         content=fg_text,
@@ -298,6 +302,39 @@ def _try_groq_json_validate_repair(
         usage={"prompt_tokens": 0, "completion_tokens": 0},
         parsed=parsed,
     )
+
+
+def _parse_response_content(
+    content: str,
+    response_model: type[BaseModel] | None,
+    response_schema: dict | None,
+    provider_name: str,
+) -> Any | None:
+    """Decode + (optionally) validate provider-returned content.
+
+    Three modes (mirrors ``chat()``'s contract):
+      - ``response_model is None and response_schema is None``: text mode,
+        return ``None``.
+      - ``response_model is None and response_schema is not None``:
+        JSON-mode dict — parse via ``try_parse_json``, return dict (or
+        ``None`` if even repair fails).
+      - ``response_model is not None``: parse via ``try_parse_json`` then
+        ``response_model.model_validate(...)`` for type-level guarantee.
+        Raises ``ValueError`` on parse failure.
+    """
+    if not content:
+        return None
+    if response_model is None and response_schema is None:
+        return None
+    parsed = try_parse_json(content, provider_name)
+    if response_model is None:
+        return parsed
+    if parsed is None:
+        raise ValueError(
+            f"{provider_name} returned unparseable JSON for {response_model.__name__}: "
+            f"{content[:500]!r}"
+        )
+    return response_model.model_validate(parsed)
 
 
 class LLMResponse(BaseModel):
@@ -310,7 +347,14 @@ class LLMResponse(BaseModel):
         description="Token usage: prompt_tokens, completion_tokens, total_tokens",
     )
     finish_reason: str | None = Field(None, description="Why generation stopped")
-    parsed: Any | None = Field(None, description="Parsed JSON if output_format='json'")
+    parsed: Any | None = Field(
+        None,
+        description=(
+            "Parsed response. Typed Pydantic instance when ``chat`` was "
+            "called with ``response_model``; plain dict when only "
+            "``response_schema`` was supplied; ``None`` for text-mode."
+        ),
+    )
 
 
 class LLMClientBase(ABC):
@@ -323,8 +367,8 @@ class LLMClientBase(ABC):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int | None = None,
-        output_format: Literal["text", "json", "json_schema"] = "text",
-        json_schema: dict | None = None,
+        response_model: type[BaseModel] | None = None,
+        response_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
         """Send a chat completion request.
@@ -335,17 +379,25 @@ class LLMClientBase(ABC):
             temperature: Sampling temperature (0.0 = deterministic).
             max_tokens: Maximum response tokens. ``None`` = no cap (provider
                 default — typically the model's output ceiling).
-            output_format: "text", "json" (plain JSON mode), or "json_schema"
-                (structured output with the provided ``json_schema``). When
-                "json_schema" is selected, ``json_schema`` MUST be supplied
-                and the provider must support ``response_format=json_schema``
-                — no graceful fallback; a rejection surfaces as-is.
-            json_schema: OpenAI-compatible JSON Schema dict. Required when
-                ``output_format == "json_schema"``.
+            response_model: Pydantic model class for typed output. When set,
+                the provider receives the model's JSON Schema as
+                ``response_format``, and ``LLMResponse.parsed`` is populated
+                with a typed instance (validated via ``model_validate``
+                against the parsed content). Anthropic does not support
+                ``response_format=json_schema`` server-side — the model is
+                still used for client-side validation of the parsed JSON.
+            response_schema: JSON Schema dict OVERRIDE that takes precedence
+                over ``response_model.model_json_schema()`` for the wire
+                payload. Used by ``l1_generate`` whose schema is built
+                dynamically per backend ``PipelineSchema`` (see
+                ``l1_validators.build_l1_output_schema``). Without an
+                override, the schema is derived from ``response_model``.
+                Independent of ``response_model``: pass only the schema for
+                untyped JSON-mode output (parsed as dict).
             **kwargs: Additional provider-specific parameters.
 
         Returns:
-            LLMResponse with content and usage info.
+            LLMResponse with content + parsed (typed instance, dict, or None).
         """
         ...
 
@@ -397,8 +449,8 @@ class OpenAICompatibleClient(LLMClientBase):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int | None = None,
-        output_format: Literal["text", "json", "json_schema"] = "text",
-        json_schema: dict | None = None,
+        response_model: type[BaseModel] | None = None,
+        response_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
         client = self._ensure_client()
@@ -410,17 +462,17 @@ class OpenAICompatibleClient(LLMClientBase):
         }
         if max_tokens is not None:
             request_params["max_tokens"] = max_tokens
-        if output_format == "json":
-            request_params["response_format"] = {"type": "json_object"}
-        elif output_format == "json_schema":
-            if not json_schema:
-                raise ValueError("output_format='json_schema' requires json_schema arg")
+
+        wire_schema = response_schema or (
+            response_model.model_json_schema() if response_model else None
+        )
+        if wire_schema is not None:
             request_params["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {
-                    "name": json_schema.get("name", "response_schema"),
-                    "schema": json_schema.get("schema", json_schema),
-                    "strict": json_schema.get("strict", False),
+                    "name": (response_model.__name__ if response_model else "response_schema"),
+                    "schema": wire_schema,
+                    "strict": False,
                 },
             }
 
@@ -442,7 +494,7 @@ class OpenAICompatibleClient(LLMClientBase):
             raw = await client.chat.completions.with_raw_response.create(**request_params)
             response = raw.parse()
         except Exception as exc:
-            recovered = self._try_recover_from_chat_error(exc, request_params)
+            recovered = self._try_recover_from_chat_error(exc, request_params, response_model)
             if recovered is not None:
                 return recovered
             raise
@@ -457,10 +509,8 @@ class OpenAICompatibleClient(LLMClientBase):
         if not response.choices:
             raise ValueError(f"{self._provider_name} returned empty choices")
         content = response.choices[0].message.content or ""
-        parsed = (
-            try_parse_json(content, self._provider_name)
-            if output_format in ("json", "json_schema") and content
-            else None
+        parsed = _parse_response_content(
+            content, response_model, response_schema, self._provider_name
         )
 
         usage = response.usage
@@ -479,7 +529,10 @@ class OpenAICompatibleClient(LLMClientBase):
         )
 
     def _try_recover_from_chat_error(
-        self, exc: Exception, request_params: dict[str, Any]
+        self,
+        exc: Exception,
+        request_params: dict[str, Any],
+        response_model: type[BaseModel] | None,
     ) -> LLMResponse | None:
         """Translate known errors: too-large raises, 404 raises a clearer
         ValueError, Groq json_validate_failed salvages. Returns ``None`` to
@@ -492,7 +545,9 @@ class OpenAICompatibleClient(LLMClientBase):
                 f"Update campaign_config['optimizer_llm']['model'] or "
                 f"set EXPERIMENT_ID = None to use current config."
             ) from exc
-        return _try_groq_json_validate_repair(exc, request_params, self._provider_name)
+        return _try_groq_json_validate_repair(
+            exc, request_params, self._provider_name, response_model
+        )
 
 
 class AnthropicClient(LLMClientBase):
@@ -526,15 +581,15 @@ class AnthropicClient(LLMClientBase):
         model: str | None = None,
         temperature: float = 0.0,
         max_tokens: int | None = None,
-        output_format: Literal["text", "json", "json_schema"] = "text",
-        json_schema: dict | None = None,
+        response_model: type[BaseModel] | None = None,
+        response_schema: dict | None = None,
         **kwargs,
     ) -> LLMResponse:
-        if output_format == "json_schema":
-            raise NotImplementedError(
-                "Anthropic client does not support response_format=json_schema. "
-                "Use a JSON-schema-capable provider (Groq/OpenAI) for structured output."
-            )
+        # Anthropic doesn't accept ``response_format`` on the wire — JSON
+        # output is contractual via the prompt body (the optimizer's
+        # ``answer_format`` field already instructs the model to return
+        # JSON). When ``response_model`` / ``response_schema`` is set, we
+        # parse + validate client-side; the schema is unused on the wire.
         client = self._ensure_client()
 
         # Separate system message (Anthropic API convention)
@@ -582,9 +637,7 @@ class AnthropicClient(LLMClientBase):
         )
 
         content = "".join(block.text for block in response.content if hasattr(block, "text"))
-        parsed = (
-            try_parse_json(content, "Anthropic") if output_format == "json" and content else None
-        )
+        parsed = _parse_response_content(content, response_model, response_schema, "Anthropic")
 
         return LLMResponse(
             content=content,

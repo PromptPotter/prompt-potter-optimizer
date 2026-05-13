@@ -27,6 +27,7 @@ dependencies = [
     "httpx>=0.26.0",           # why kept: BackendClient (TermNorm) wire transport
     "filelock>=3.12.0",        # why kept: MeasurementArchive index lock under concurrent writers
     "numpy>=1.26",             # why kept: PoBB posterior + Rasch fit
+    "json-repair>=0.30,<1.0",  # why kept: structured repair of provider-returned JSON (invalid \X escapes, etc.) at the LLM boundary
 ]
 
 [project.optional-dependencies]
