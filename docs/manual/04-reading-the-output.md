@@ -83,11 +83,6 @@ When the optimizer finds something notable, it surfaces a two-line annotation:
 
 The optimizer has already handled it — these exist for audit, not to ask for input. A bare `⚠` without `↳` is a bug; report it. Full mechanics behind these annotations: [`../concepts/self-healing.md`](../concepts/self-healing.md).
 
-## Where results land
-
-- `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
-- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`.
-
 ## Live state ([forks and the family root](../concepts/campaign-tree.md))
 
 - `dashboard.json` — current phase, round, candidate, accuracies, in-flight query. Full path:
@@ -108,6 +103,11 @@ Both live at the **root cycle's** dir (the cycle with no `parent_cycle_id`). Whe
 - `output.log` gets a `=== FORK <id> from round N (parent: …) ===` banner inline at each cutover.
 
 The fork's own dir holds its per-cycle audit (`index.json`, `log.md`, `rounds/`, `.runtime/`). Open those when you want to inspect what specifically happened in one fork; tail the root for live progress.
+
+## Where results land
+
+- `campaigns/<cycle_id>/log.md` — rendered per-round digest (status, per-round critique / L2 brief / changes, hard-samples heatmap, final winner). Regenerated every round-complete + finalize.
+- `campaigns/<cycle_id>/index.json::final` — structured form: `winner_prompt_fields`, `winner_pipeline_params`, `best_accuracy`, `origin_accuracy`, `stop_reason`.
 
 ## Stopping
 

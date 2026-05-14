@@ -144,6 +144,18 @@ archive/                            MeasurementArchive
 
 ---
 
+## Reading the three-layer loop
+
+Order for a contributor who wants to follow L1/L2/L3 end-to-end:
+
+1. [`dispatch-hub.md`](dispatch-hub.md) — signal routing, four wounds, mermaid flow.
+2. [`l1-generate-surface.md`](l1-generate-surface.md) — `INJECTIONS`, `L1Layout`, slot composition.
+3. [`l2-internals.md`](l2-internals.md) — `task_context` mutation, layout edits.
+4. [`../../promptpotter/CLAUDE.md`](../../promptpotter/CLAUDE.md) — L3 plan + per-layer agent contracts.
+5. [`self-healing-internals.md`](self-healing-internals.md) — wound channels, heal-trigger ladder.
+
+---
+
 ## Pages
 
 | Page | Covers |

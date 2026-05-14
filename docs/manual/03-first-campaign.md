@@ -22,7 +22,7 @@ That's it.
 
 ## No backend?
 
-You'll need one. The simplest is [TermNorm-excel](https://github.com/runfish5/TermNorm-excel). Backend contract: [`operations/backend-integration.md`](../operations/backend-integration.md).
+`/potter-run` downloads and starts [TermNorm-excel](https://github.com/runfish5/TermNorm-excel) automatically. CLI-only: do it yourself, contract at [`operations/backend-integration.md`](../operations/backend-integration.md).
 
 ## No Claude Code?
 
