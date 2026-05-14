@@ -59,7 +59,8 @@ __all__ = [
 ]
 
 
-_PIPELINE_PATH = Path(__file__).parent / "pipeline.json"
+_REPO_ROOT = Path(__file__).resolve().parents[4]
+_PIPELINE_PATH = _REPO_ROOT / "datasets" / "_optimizer" / "pipeline.json"
 
 
 @functools.lru_cache(maxsize=1)

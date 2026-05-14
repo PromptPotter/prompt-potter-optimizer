@@ -14,6 +14,7 @@ Modules:
 * ``schemas`` — Pydantic output schemas for the four optimizer nodes
   (``L1GenerateOutput``, ``L1CritiqueOutput``, ``L2ContextOutput``,
   ``L3PlanOutput``, ``VariantEvidenceGrounding``, etc.).
-* ``pipeline.json`` — the optimizer pipeline definition (same shape as
-  a backend ``pipeline.json``; powers self-optimization).
+The optimizer pipeline definition lives at ``datasets/_optimizer/pipeline.json``
+— same shape as a backend ``pipeline.json``; powers self-optimization. Loaded
+by ``llm_call._load_optimizer_manifest``.
 """

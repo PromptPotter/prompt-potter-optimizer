@@ -27,11 +27,7 @@ from promptpotter.presentation.api.deps import StoreDep
 _active_router = APIRouter(tags=["Active"])
 
 _OPTIMIZER_PIPELINE_PATH = (
-    Path(__file__).resolve().parents[3]
-    / "application"
-    / "optimization"
-    / "dispatch"
-    / "pipeline.json"
+    Path(__file__).resolve().parents[4] / "datasets" / "_optimizer" / "pipeline.json"
 )
 
 

@@ -24,9 +24,7 @@ from promptpotter.application.optimization.dispatch.schemas import (
 
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent
-    manifest_path = (
-        repo_root / "promptpotter" / "application" / "optimization" / "dispatch" / "pipeline.json"
-    )
+    manifest_path = repo_root / "datasets" / "_optimizer" / "pipeline.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
 
     resolved: dict[str, dict] = {}

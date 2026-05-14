@@ -173,7 +173,11 @@ class TestCoordinateLookups:
 
 def test_no_numeric_max_tokens_in_dataset_pipeline_configs() -> None:
     repo_root = Path(__file__).resolve().parents[1]
-    pipeline_files = sorted((repo_root / "datasets").glob("*/pipeline.json"))
+    pipeline_files = sorted(
+        p
+        for p in (repo_root / "datasets").glob("*/pipeline.json")
+        if p.parent.name != "_optimizer"
+    )
     assert pipeline_files, "no datasets/*/pipeline.json found — wrong cwd?"
 
     offenders: list[str] = []
@@ -401,8 +405,10 @@ def test_build_l1_output_schema_emits_enum_for_constrained_params():
 # ---------------------------------------------------------------------------
 
 REPO = Path(__file__).resolve().parent.parent
-OPTIMIZER_PIPELINE = REPO / "promptpotter/application/optimization/dispatch/pipeline.json"
-BACKEND_PIPELINES = sorted((REPO / "datasets").glob("*/pipeline.json"))
+OPTIMIZER_PIPELINE = REPO / "datasets/_optimizer/pipeline.json"
+BACKEND_PIPELINES = sorted(
+    p for p in (REPO / "datasets").glob("*/pipeline.json") if p.parent.name != "_optimizer"
+)
 
 
 def _required_top_level_fields(data: dict) -> set[str]:
