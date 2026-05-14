@@ -1,0 +1,307 @@
+"""Text render target — typed View → ANSI string for live CLI/notebook.
+
+Per-view renderers + the :func:`to_text` dispatch entry point. ANSI
+primitives come from :mod:`promptpotter.presentation.views.display`; the
+per-candidate composite_fitness block from :mod:`promptpotter.shared.composite`.
+"""
+
+from __future__ import annotations
+
+import json
+from collections.abc import Callable
+
+from promptpotter.presentation.views.display import (
+    BOLD,
+    CYAN,
+    GREEN,
+    RESET,
+    YELLOW,
+    _fmt_delta,
+    _node_block,
+    _round_rule,
+    _scoreboard,
+    fmt_pvalue,
+)
+from promptpotter.presentation.views.render.sp_diff import render_sp_diff
+from promptpotter.presentation.views.view_models import (
+    AnyView,
+    CandidatesGeneratedView,
+    EscalationEnterView,
+    EscalationExitView,
+    InitEnterView,
+    InitExitView,
+    L2RefineEnterView,
+    L2RefineExitView,
+    PlanEnterView,
+    PlanExitView,
+    ProbeEnterView,
+    ProbeExitView,
+    RoundCompleteView,
+    RoundStartView,
+)
+from promptpotter.shared.composite import render_composite_fitness_block
+
+
+def _render_init_enter(v: InitEnterView) -> str:
+    if not v.warnings:
+        return ""
+    out = [""]
+    for w in v.warnings:
+        out.append(f"{YELLOW}⚠ {BOLD}{w.title}{RESET}")
+        out.append(f"    {YELLOW}{w.detail}{RESET}")
+    return "\n".join(out)
+
+
+def _render_init_exit(v: InitExitView) -> str:
+    obs = "ON" if v.obs_on else "OFF"
+    out = [
+        f"  {GREEN}✓{RESET} Initialized  origin={v.origin_acc:.1%}  "
+        f"cycle={v.cycle_id_short}  samples={v.samples}  obs={obs}"
+    ]
+    if v.resumed_from_round:
+        parts: list[str] = []
+        if v.task_context_keys:
+            parts.append(f"task_context={v.task_context_keys} keys")
+        if v.l2_round:
+            parts.append(f"l2_round={v.l2_round}")
+        suffix = f"  ({', '.join(parts)})" if parts else ""
+        out.append(
+            f"    Resumed from round {v.resumed_from_round} "
+            f"({v.resumed_from_round} rounds cached){suffix}"
+        )
+    else:
+        out.append("    Starting fresh (no prior rounds for this cycle)")
+    return "\n".join(out)
+
+
+def _render_round_start(v: RoundStartView) -> str:
+    crit = "YES" if v.has_l1_critique else "NO"
+    return "\n".join(
+        [
+            "",
+            _round_rule(
+                f"ROUND {v.round}/{v.max_rounds or 999}",
+                f"patience {v.l1_stall_count}/{v.patience}",
+            ),
+            "",
+            _node_block(
+                "GENERATE",
+                f"Current best    {v.current_acc:.1%}",
+                f"Prompt          {v.prompt_preview}",
+                f"Candidates      {v.n_variants}   Creativity: {v.creativity}   Critique: {crit}",
+                f"Model           {v.model}",
+            ),
+        ]
+    )
+
+
+def _render_candidates_generated(v: CandidatesGeneratedView) -> str:
+    src = "loaded from disk" if v.source == "disk" else "from LLM"
+    return "\n".join(
+        [
+            f"  {GREEN}✓{RESET} {v.n_candidates} candidates generated ({src})",
+            "",
+            render_sp_diff(v.sp_diff),
+        ]
+    )
+
+
+def _render_round_complete(v: RoundCompleteView) -> str:
+    out: list[str] = []
+    score_dicts = [
+        {
+            "label": s.label,
+            "accuracy": s.accuracy,
+            "composite_fitness": s.composite_fitness,
+            "hits": s.hits,
+            "total": s.total,
+            "escalation_aborted": s.escalation_aborted,
+        }
+        for s in v.scores
+    ]
+    if len(score_dicts) > 3:
+        if board := _scoreboard(score_dicts, v.winner_label, v.origin_acc):
+            out.append(board)
+    elif score_dicts:
+        parts = [
+            f"{s['label']}={s['accuracy']:.1%}{' (aborted)' if s['escalation_aborted'] else ''}"
+            for s in sorted(
+                score_dicts,
+                key=lambda s: (s.get("composite_fitness") or s["accuracy"], s["accuracy"]),
+                reverse=True,
+            )
+        ]
+        out.append(f"  Scoreboard: {' | '.join(parts)}")
+
+    formula = v.composite_fitness_formula_short or v.composite_fitness_formula
+    show_inline = not formula
+    comp_tag = (
+        f"  composite_fitness={v.winner_composite_fitness:.4f}"
+        if show_inline
+        and v.winner_composite_fitness is not None
+        and v.winner_composite_fitness != v.winner_accuracy
+        else ""
+    )
+
+    if v.improved:
+        sig_tag = f"  {fmt_pvalue(v.p_value)}" if v.p_value is not None else ""
+        out.append(
+            f"  {GREEN}{BOLD}✓ IMPROVED{RESET}  {v.winner_accuracy:.1%}"
+            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}){comp_tag}{sig_tag}"
+            f"  ->  next: {v.next_action}"
+        )
+    elif v.improved_reason:
+        # Positive Δ but blocked by significance or sample-count floor — name
+        # the reason so the operator sees why a numerically-better candidate
+        # didn't graduate.
+        out.append(
+            f"  {YELLOW}{BOLD}✗ NOT PROMOTED{RESET}  {v.winner_accuracy:.1%}"
+            f" (was {v.origin_acc:.1%}, {_fmt_delta(v.delta)}, n={v.winner_total})"
+            f"  reason: {v.improved_reason}{comp_tag}"
+        )
+    else:
+        out.append(
+            f"  {YELLOW}{BOLD}⚠ NO IMPROVEMENT{RESET}  best candidate "
+            f"{v.winner_accuracy:.1%}{comp_tag}"
+        )
+
+    if not show_inline and v.winner_composite_fitness is not None:
+        for line in render_composite_fitness_block(
+            v.winner_composite_fitness,
+            v.winner_evaluators,
+            formula,
+            origin=v.origin_composite_fitness,
+            use_short_names=bool(v.composite_fitness_formula_short),
+        ):
+            out.append(f"  {line}")
+
+    if crit := v.l1_critique_text.replace("\n", " ").strip():
+        out.append(f"  {CYAN}L1 Critique:{RESET} {crit}")
+    return "\n".join(out)
+
+
+def _render_escalation_enter(v: EscalationEnterView) -> str:
+    extras = [f"{wt}: {count} occurrences" for wt, count in v.warning_types.items()]
+    return "\n" + _node_block(
+        "ESCALATION",
+        f"{YELLOW}Degraded: {v.degraded_rate:.0%} of samples{RESET}",
+        *extras,
+        label_right=f"{v.check_name} → {v.target}",
+    )
+
+
+def _render_escalation_exit(v: EscalationExitView) -> str:
+    if not v.classifications:
+        return ""
+    out = [f"  {CYAN}Warning classifications:{RESET}"]
+    out.extend(f"    {wt}: {status}" for wt, status in v.classifications)
+    return "\n".join(out)
+
+
+def _render_l2_refine_enter(v: L2RefineEnterView) -> str:
+    if v.l1_overrides:
+        items = list(v.l1_overrides.items())
+        parts = [f"{k}={s if len(s) <= 30 else s[:27] + '...'}" for k, s in items[:5]]
+        extra = len(items) - 5
+        body = ", ".join(parts) + (f", +{extra} more" if extra > 0 else "")
+        params_line = f"l1_overrides: {body}"
+    else:
+        params_line = "l1_overrides: (none)"
+    return "\n" + _node_block(
+        "L2 REFINE CONTEXT",
+        f"L1 stalled {v.l1_stall_count} rounds  |  acc={v.current_acc:.1%}  best={v.best_acc:.1%}",
+        params_line,
+        "LLM analyzing failure patterns...",
+        label_right=f"L2 round {v.l2_round}",
+    )
+
+
+def _render_l2_refine_exit(v: L2RefineExitView) -> str:
+    tc = f", {GREEN}task_context updated{RESET}" if v.task_context_changed else ""
+    probe = f", {CYAN}action={v.action}{RESET}" if v.action != "continue" else ""
+    out = [f"  {GREEN}✓{RESET} L2 decision: {v.param_changes_count} param changes{tc}{probe}"]
+    if v.changes_description:
+        out.append(f"    {v.changes_description}")
+    if v.warned_samples:
+        out.append(
+            f"    {YELLOW}⚠ {v.warned_samples} samples with recurring "
+            f"pipeline warnings ({v.top_warning}){RESET}"
+        )
+
+    if v.l2_prompt:
+        out.append(f"\n  {CYAN}--- L2 PROMPT (sent to LLM) ---{RESET}")
+        out.extend(f"  {CYAN}│{RESET} {line}" for line in v.l2_prompt.split("\n"))
+        out.append(f"  {CYAN}--- END PROMPT ---{RESET}")
+
+    if v.l2_response_json is not None:
+        out.append(f"\n  {CYAN}--- L2 RESPONSE (raw JSON) ---{RESET}")
+        out.extend(
+            f"  {CYAN}│{RESET} {line}"
+            for line in json.dumps(v.l2_response_json, indent=2).split("\n")[:40]
+        )
+        out.append(f"  {CYAN}--- END RESPONSE ---{RESET}")
+    return "\n".join(out)
+
+
+def _render_probe_enter(v: ProbeEnterView) -> str:
+    extras = [f"  {q[:70]}" for q in v.probe_queries[:5]]
+    if len(v.probe_queries) > 5:
+        extras.append(f"  ... +{len(v.probe_queries) - 5} more")
+    return "\n" + _node_block(
+        "PROBE ROUND",
+        "Testing warned samples with new settings...",
+        *extras,
+        label_right=f"{v.n_probe_samples} samples",
+    )
+
+
+def _render_probe_exit(v: ProbeExitView) -> str:
+    if not v.n_probed:
+        return f"  {YELLOW}⚡ Probe: no matching samples found{RESET}"
+    rate = v.probe_hits / v.n_probed
+    color = GREEN if rate > 0.5 else YELLOW
+    return f"  {color}⚡ Probe: {v.probe_hits}/{v.n_probed} hits ({rate:.0%}){RESET}"
+
+
+def _render_plan_enter(v: PlanEnterView) -> str:
+    plan = v.current_plan_preview
+    plan = plan if len(plan) <= 55 else plan[:52] + "..."
+    return "\n" + _node_block(
+        "L3 MODIFY PLAN",
+        f"L2 stalled {v.l2_stall_count} rounds",
+        f"Current plan: {plan}",
+        "LLM designing new strategy...",
+        label_right=f"L3 round {v.l3_round}",
+    )
+
+
+def _render_plan_exit(v: PlanExitView) -> str:
+    plan = v.new_plan_preview
+    plan = plan if len(plan) <= 55 else plan[:52] + "..."
+    out = [f"  {GREEN}✓{RESET} New plan: {plan}"]
+    if v.changes_description:
+        out.append(f"    {v.changes_description}")
+    return "\n".join(out)
+
+
+_TEXT_RENDERERS: dict[type, Callable[..., str]] = {
+    InitEnterView: _render_init_enter,
+    InitExitView: _render_init_exit,
+    RoundStartView: _render_round_start,
+    CandidatesGeneratedView: _render_candidates_generated,
+    RoundCompleteView: _render_round_complete,
+    EscalationEnterView: _render_escalation_enter,
+    EscalationExitView: _render_escalation_exit,
+    L2RefineEnterView: _render_l2_refine_enter,
+    L2RefineExitView: _render_l2_refine_exit,
+    ProbeEnterView: _render_probe_enter,
+    ProbeExitView: _render_probe_exit,
+    PlanEnterView: _render_plan_enter,
+    PlanExitView: _render_plan_exit,
+}
+
+
+def to_text(view: AnyView) -> str:
+    """Dispatch a typed view to its ANSI text renderer."""
+    fn = _TEXT_RENDERERS.get(type(view))
+    return fn(view) if fn else ""

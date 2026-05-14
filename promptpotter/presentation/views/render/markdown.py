@@ -1,0 +1,212 @@
+"""log.md render target — typed ``LogMdView`` → markdown digest.
+
+Per-cycle digest the runner writes after each round into
+``campaigns/<cycle_id>/log.md``. Includes the per-round block, P(best)
+trajectory sparklines, hard-sample heatmap (when present), fork siblings,
+and the final-winner JSON dump.
+"""
+
+from __future__ import annotations
+
+import json
+from typing import Any
+
+from promptpotter.presentation.views.render.heatmap import render_hard_sample_heatmap
+from promptpotter.presentation.views.view_models import (
+    ForkSummaryView,
+    HardSamplesView,
+    LogMdView,
+    RoundDigestView,
+)
+from promptpotter.shared.composite import render_composite_fitness_block
+
+
+def _fmt_pct(x: float) -> str:
+    return f"{x:.1%}"
+
+
+def _json_block(label: str, value: Any) -> list[str]:
+    if not value:
+        return []
+    return [
+        f"**{label}:**",
+        "",
+        "```json",
+        json.dumps(value, indent=2, ensure_ascii=False, default=str),
+        "```",
+        "",
+    ]
+
+
+_SPARK_BLOCKS = "▁▂▃▄▅▆▇█"
+
+
+def _spark(values: list[float]) -> str:
+    """ASCII sparkline for a [0, 1] series using Unicode block elements."""
+    if not values:
+        return ""
+    out: list[str] = []
+    for v in values:
+        v_clamped = min(1.0, max(0.0, float(v)))
+        idx = min(len(_SPARK_BLOCKS) - 1, int(v_clamped * len(_SPARK_BLOCKS)))
+        out.append(_SPARK_BLOCKS[idx])
+    return "".join(out)
+
+
+def _render_p_best_trajectory(rd: RoundDigestView) -> list[str]:
+    """Render the per-round P(best) trajectory sparkline section.
+
+    Skipped silently when the JSONL stream wasn't available (resumed
+    cycles, pre-PoBB rounds).
+    """
+    if not rd.p_best_trajectory:
+        return []
+    # Sort by final P(best) desc so the round winner reads first.
+    ordered = sorted(
+        rd.p_best_trajectory.items(),
+        key=lambda kv: -(kv[1][-1] if kv[1] else 0.0),
+    )
+    lines: list[str] = ["", "P(best) trajectory:", "```"]
+    for cid, traj in ordered[:8]:
+        if not traj:
+            continue
+        spark = _spark(traj)
+        final = traj[-1] * 100
+        suffix = ""
+        if final >= 50.0:
+            suffix = " [winner]"
+        elif final < 5.0:
+            suffix = " [stopped]"
+        lines.append(f"  {cid[:10]:<10} {spark}  {final:5.1f}%{suffix}")
+    lines.append("```")
+    return lines
+
+
+def _render_round(
+    rd: RoundDigestView,
+    *,
+    formula: str | None,
+    origin_composite_fitness: float | None,
+) -> list[str]:
+    parts: list[str] = [
+        f"### Round {rd.round} — {rd.label} ({_fmt_pct(rd.accuracy)})",
+        "",
+        f"- improved: **{'yes' if rd.improved else 'no'}**",
+        f"- hits: {rd.hits}/{rd.total}",
+        f"- composite_fitness: `{rd.composite_fitness:.4f}`",
+    ]
+    if rd.changes_description:
+        parts.append(f"- changes: {rd.changes_description}")
+    if rd.l1_yield < 1.0:
+        n_total = rd.candidates_scored
+        n_valid = max(0, n_total - rd.l1_n_no_op - rd.l1_n_duplicate)
+        bits: list[str] = []
+        if rd.l1_n_no_op:
+            bits.append(f"{rd.l1_n_no_op} no-op")
+        if rd.l1_n_duplicate:
+            bits.append(f"{rd.l1_n_duplicate} dup")
+        parts.append(f"- L1 yield: {n_valid}/{n_total} ({', '.join(bits)})")
+    composite_fitness_block = render_composite_fitness_block(
+        rd.composite_fitness,
+        rd.evaluators,
+        formula,
+        origin=origin_composite_fitness,
+        use_short_names=False,
+    )
+    if composite_fitness_block:
+        parts += ["", "```", *composite_fitness_block, "```"]
+    if rd.l1_critique_text:
+        parts += ["", "> " + rd.l1_critique_text.replace("\n", "\n> ")]
+    parts += _render_p_best_trajectory(rd)
+    parts.append("")
+    return parts
+
+
+def _render_hard_samples(view: HardSamplesView | None) -> list[str]:
+    if view is None:
+        return []
+    heatmap = render_hard_sample_heatmap(
+        view.artifact,
+        sample_query_lookup=view.sample_query_lookup,
+    ).strip()
+    if not heatmap:
+        return []
+    return ["## Hard Samples", "", "```", heatmap, "```", ""]
+
+
+def _render_forks(forks: tuple[ForkSummaryView, ...]) -> list[str]:
+    if not forks:
+        return []
+    parts = ["## Forks", ""]
+    for f in forks:
+        short = f.cycle_id.split("_", 1)[-1] if "_" in f.cycle_id else f.cycle_id
+        rounds_word = "round" if f.n_rounds == 1 else "rounds"
+        line = (
+            f"- `{short}` — {f.mode or '(unknown)'} · "
+            f"best {_fmt_pct(f.best_accuracy)} "
+            f"(origin {_fmt_pct(f.origin_accuracy)}, {f.n_rounds} {rounds_word})"
+        )
+        if f.stop_reason:
+            line += f" · {f.stop_reason}"
+        parts.append(line)
+    parts.append("")
+    return parts
+
+
+def to_markdown(view: LogMdView) -> str:
+    """Render a ``LogMdView`` into the full ``log.md`` document."""
+    status = view.status
+    parts: list[str] = [
+        f"# Campaign {status.campaign_id or '(unknown cycle)'}",
+        "",
+    ]
+    if status.parent_session_id:
+        parts += [f"_session: `{status.parent_session_id}`_", ""]
+
+    parts += [
+        "## Status",
+        "",
+        f"- status: **{status.status}**",
+        f"- stop reason: `{status.stop_reason}`",
+        f"- origin: {_fmt_pct(status.origin_accuracy)}",
+        (
+            f"- best: {_fmt_pct(status.best_accuracy)}"
+            + (f" (round {status.best_round})" if status.best_round is not None else "")
+        ),
+    ]
+    if view.family_best is not None:
+        fb_acc, fb_holder = view.family_best
+        if fb_acc > status.best_accuracy and fb_holder != status.campaign_id:
+            short = fb_holder.split("_", 1)[-1] if "_" in fb_holder else fb_holder
+            parts.append(f"- family best: {_fmt_pct(fb_acc)} (in fork `{short}`)")
+    scored_rounds = status.rounds_completed - status.gen_only_rounds
+    if status.gen_only_rounds:
+        parts.append(
+            f"- rounds completed: {scored_rounds} scored (+ {status.gen_only_rounds} gen-only)"
+        )
+    else:
+        parts.append(f"- rounds completed: {status.rounds_completed}")
+    if status.started_at:
+        parts.append(f"- started: {status.started_at}")
+    if status.finished_at:
+        parts.append(f"- finished: {status.finished_at}")
+    parts += ["", *_render_forks(view.forks), "## Rounds", ""]
+
+    if not view.rounds:
+        parts += ["_No rounds yet._", ""]
+    for rd in view.rounds:
+        parts += _render_round(
+            rd,
+            formula=view.formula,
+            origin_composite_fitness=view.origin_composite_fitness,
+        )
+
+    parts += _render_hard_samples(view.hard_samples)
+
+    if view.final is not None:
+        parts.append("## Final Winner")
+        parts.append("")
+        parts += _json_block("Prompt fields", view.final.winner_prompt_fields)
+        parts += _json_block("Pipeline params", view.final.winner_pipeline_params)
+
+    return "\n".join(parts).rstrip() + "\n"
