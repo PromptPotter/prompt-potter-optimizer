@@ -65,14 +65,25 @@ def bootstrap_cycle(
     parent_session_id: str = "",
     resume_from_round_override: int | None = None,
 ) -> tuple[str | None, int]:
-    """Resume an existing cycle or create one. Returns (cycle_id, resumed_from_round).
+    """Resume an existing cycle or create one — step 3 of the bootstrap
+    chain. Returns (cycle_id, resumed_from_round).
+
+    **Preconditions:**
+    - :func:`init_services` already ran (session has ``store``,
+      ``backend_id``, ``pipeline_schema``, ``samples``).
+    - :func:`populate_session_scoring` already ran (session has ``scoring``
+      block populated — needed because the cycle may immediately re-score).
+
+    **Postconditions:**
+    - On hit: cycle exists in ``store.campaigns``; ``resumed_from_round`` =
+      ``len(rounds) + 1``.
+    - On miss: cycle freshly created at round 0; ``resumed_from_round = 1``.
+    - Hot-updateable config keys refresh from the current snapshot when
+      ``cycle_id_override`` is set.
 
     ``resumed_from_round`` is the next L1 round_num to execute. Origin is
     round 0 (always already scored by the time this returns); the first L1
-    round is round 1. Fresh cycle ⇒ ``1``. Resumed cycle ⇒ ``len(rounds) + 1``.
-
-    Hot-updateable config keys refresh from the current snapshot when
-    cycle_id_override is set.
+    round is round 1.
     """
     from promptpotter.application.runner import cycle_config_identity
 
@@ -129,7 +140,22 @@ def populate_session_scoring(
     cycle_id: str | None = None,
     source: str = "optimization_loop",
 ) -> None:
-    """Attach the scoring block onto ``session`` (mutates in place)."""
+    """Attach the scoring block onto ``session`` (mutates in place) — step 2
+    of the bootstrap chain.
+
+    **Preconditions:**
+    - :func:`init_services` already ran (session has ``store``,
+      ``backend_id``, ``pipeline_schema``).
+    - ``scoring_formula`` already resolved from
+      ``campaign.json::scoring`` by the caller.
+
+    **Postconditions:**
+    - ``session.scoring`` populated: ``scorer`` (compiled callable),
+      ``scorer_id`` (auto-derived if not given), ``scorer_formula``,
+      ``round_scorer`` (when ``scoring_round_formula`` is non-empty).
+    - ``session.state.obs`` set (may be ``None`` if obs disabled).
+    - ``session.experiment_id`` derived from cycle_id when not explicit.
+    """
     from promptpotter.application.scoring.formula import (
         auto_scorer_id,
         compile_round_scorer,

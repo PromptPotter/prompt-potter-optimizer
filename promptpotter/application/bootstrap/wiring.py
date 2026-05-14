@@ -238,7 +238,22 @@ async def init_services(
     take_over: bool = False,
     tenant_id: str = "default",
 ) -> Session:
-    """Init store, client, pipeline schema, scoring data. Refuses tenant drift unless ``take_over=True``."""
+    """Init store, client, pipeline schema, scoring data — step 1 of the
+    bootstrap chain. See :doc:`/developer/bootstrap-sequence` for the
+    end-to-end flow.
+
+    **Preconditions:**
+    - Project layout exists (``.promptpotter/`` tree under ``project_root``).
+    - ``datasets/{dataset_name}/pipeline.json`` exists and declares
+      ``backend_type``.
+
+    **Postconditions:**
+    - Returns a fully wired :class:`Session`: ``store``, ``backend_client``,
+      ``pipeline_schema``, ``tenant``, ``langfuse``, ``samples``,
+      ``index_terms`` populated. ``state`` defaults; no scoring yet.
+
+    Refuses tenant drift unless ``take_over=True``.
+    """
 
     def status(msg: str) -> None:
         if on_status:

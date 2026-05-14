@@ -1,0 +1,350 @@
+"""Layer-escalation executor — :class:`LayerStrategy` + transition harness +
+``escalate_l2`` cascade.
+
+V1 contract:
+* L2 writes ``task_context`` + ``action`` + optional ``axis_targeted`` /
+  ``l1_layout`` / ``l1_overrides``. No L1-surface scheme/text/template
+  overrides.
+* L3 writes ``plan`` (required) + optional ``note`` (sticky L3→L2 pointer;
+  survives L2 fires, replaced wholesale on each L3 fire). No
+  ``pipeline_params`` deltas.
+
+One-way arrow: this module imports from ``cycle.py``; the reverse is
+forbidden by ``tests/test_invariants.py::test_no_unexpected_runtime_layer_violations``.
+Per-layer parse/apply/enter/exit live in :mod:`.l2_driver` and
+:mod:`.l3_driver`; this module owns the layer-agnostic shape and the
+cascade orchestrator.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, Any, Literal
+
+from promptpotter.application.optimization.dispatch.hub import (
+    DispatchHub,
+    build_bundle,
+)
+from promptpotter.application.optimization.dispatch.llm_call import load_optimizer_prompt
+from promptpotter.application.optimization.escalation.state import NextAction
+from promptpotter.application.optimization.resume_and_fork import (
+    ResumeCheckpointKind,
+    record_decision,
+)
+from promptpotter.application.optimization.transitions import (
+    TransitionResult,
+    run_layer_transition,
+)
+from promptpotter.domain.l1_layout import (
+    L1_LAYOUT_SLOTS,
+    L1Layout,
+    default_l1_layout,
+    validate_l1_layout,
+)
+from promptpotter.domain.opt_search_point import OptSearchPoint
+from promptpotter.domain.phases import CampaignPhase, PhaseEvent, StopReason, emit_phase
+from promptpotter.domain.run_records import ForkPayload
+from promptpotter.infrastructure import llm as _llm_client
+from promptpotter.infrastructure.tracing import LayerApplied, observed_node
+from promptpotter.shared.errors import graceful
+
+if TYPE_CHECKING:
+    from promptpotter.application.config import CampaignConfig
+    from promptpotter.application.optimization.cycle import Cycle
+    from promptpotter.infrastructure.tracing import ObservabilityBridge
+
+logger = logging.getLogger(__name__)
+
+
+ParseFn = Callable[[Any, OptSearchPoint, str], TransitionResult]
+ApplyFn = Callable[["Cycle", TransitionResult, int], None]
+PayloadFn = Callable[["Cycle"], dict[str, Any]]
+ExitFn = Callable[["Cycle", TransitionResult], dict[str, Any]]
+
+
+@dataclass(frozen=True)
+class LayerStrategy:
+    layer_id: Literal["L2", "L3"]
+    template_name: str
+    default_temperature: float
+    phase: CampaignPhase
+    parse: ParseFn
+    apply: ApplyFn
+    enter_payload_fn: PayloadFn
+    exit_payload_fn: ExitFn
+
+    def build_prompt_vars(self, cycle: Cycle) -> dict[str, str]:
+        bundle = build_bundle(cycle)
+        template = load_optimizer_prompt(self.template_name)
+        return DispatchHub.fill_fixed(template, bundle)
+
+    def build_result(self, raw: Any, opt_sp: OptSearchPoint, prompt: str) -> TransitionResult:
+        return self.parse(raw, opt_sp, prompt)
+
+    def apply_side_effects(self, cycle: Cycle, result: TransitionResult, round_num: int) -> None:
+        self.apply(cycle, result, round_num)
+
+    def enter_payload(self, cycle: Cycle) -> dict[str, Any]:
+        return self.enter_payload_fn(cycle)
+
+    def exit_payload(self, cycle: Cycle, result: TransitionResult) -> dict[str, Any]:
+        return self.exit_payload_fn(cycle, result)
+
+
+# ---------------------------------------------------------------------------
+# Fork payload — applies operator/LLM-issued OSP deltas at fork mint time.
+# ---------------------------------------------------------------------------
+
+
+def coerce_l1_layout(raw_layout: Any) -> L1Layout | None:
+    """Best-effort coerce ``{slot: [placeholder, …]}`` → :class:`L1Layout`.
+
+    Returns ``None`` when the input is empty or shaped wrong; lets the
+    validator surface mandatory-presence/unknown-name failures uniformly
+    rather than crashing on a Pydantic validation error here.
+    """
+    if not isinstance(raw_layout, dict) or not raw_layout:
+        return None
+    sanitised: dict[str, list[str]] = {}
+    for slot in L1_LAYOUT_SLOTS:
+        vals = raw_layout.get(slot)
+        if isinstance(vals, list) and all(isinstance(v, str) for v in vals):
+            sanitised[slot] = list(vals)
+    if not sanitised:
+        return None
+    try:
+        return L1Layout(**sanitised)
+    except Exception:
+        return None
+
+
+def apply_fork_payload_to_osp(opt_sp: OptSearchPoint, payload: ForkPayload) -> None:
+    """Stamp a fork payload's L1-surface deltas on the OSP — same shape L2 writes.
+
+    Called by the runner when an operator-issued or LLM-issued fork carries
+    OSP deltas (today: ``OPERATOR_SWEEP``; M11: ``L2_REBASE`` /
+    ``L3_REBASE``). Triggers without OSP deltas (e.g. ``SCORING_DIVERGENCE``)
+    are filtered out at the call site by guarding on ``payload.l1_layout is
+    not None`` — this function assumes the layout is set.
+    """
+    if payload.l1_layout is not None:
+        layout = coerce_l1_layout(payload.l1_layout)
+        if layout is None:
+            raise ValueError(
+                f"Fork payload l1_layout is unparseable: {payload.l1_layout!r}. "
+                "Expect a dict whose keys are L1 layout slots and values are lists of "
+                "placeholder names."
+            )
+        result = validate_l1_layout(layout, prior_layout=opt_sp.l1_layout)
+        if not result.is_valid:
+            ids = sorted({o.validator_id for o in result.outcomes if not o.passed})
+            raise ValueError(f"Fork payload l1_layout failed hard validators: {ids}")
+        opt_sp.l1_layout = layout
+
+
+# Module-default L1 layout — keep the import live so apply_fork_payload_to_osp
+# callers can rely on the symbol being importable from this package.
+_ = default_l1_layout
+
+
+# ---------------------------------------------------------------------------
+# Cascade — escalate_l2 walks the L2/L3 patience ladder + wound-4 force-L3.
+# ---------------------------------------------------------------------------
+
+
+_LAYER_TEMPERATURE: dict[str, float] = {"L2": 0.3, "L3": 0.5}
+"""LLM sampling temperature per escalation layer — refinement is conservative,
+replanning explores wider."""
+
+
+async def _run_transition(
+    transition: LayerStrategy,
+    cycle: Cycle,
+    config: CampaignConfig,
+    pipeline_schema: Any,
+    round_num: int,
+    on_phase: Callable[[PhaseEvent], None] | None,
+    *,
+    obs: ObservabilityBridge | None,
+    tracing_campaign_id: str,
+) -> Any:
+    """enter → call → adopt → LayerApplied → side-effects → exit."""
+    assert cycle.tracking.current_sp is not None
+    client = _llm_client.get_llm_client(config.optimizer_llm.provider)
+    current_pp = cycle.tracking.current_sp.pipeline_params
+
+    emit_phase(
+        on_phase, transition.phase, "enter", round=round_num, **transition.enter_payload(cycle)
+    )
+    async with observed_node(
+        f"{transition.template_name}_r{round_num}",
+        "llm/meta",
+        obs=obs,
+        campaign_id=tracing_campaign_id,
+        round_num=round_num,
+    ):
+        result = await run_layer_transition(
+            transition,
+            cycle,
+            client,
+            model=config.optimizer_llm.model,
+            temperature=_LAYER_TEMPERATURE[transition.layer_id],
+            round_num=round_num,
+        )
+    new_opt = result.opt_search_point
+    cycle.opt_sp.copy_memory_to(new_opt)
+    cycle.opt_sp = new_opt
+    cycle.tracking.current_sp = new_opt.to_job_search_point(
+        base_pipeline_params=current_pp, schema=pipeline_schema
+    )
+    if obs is not None:
+        with graceful(f"LayerApplied({transition.layer_id}) emit failed"):
+            obs.emit_write_point(
+                LayerApplied,
+                layer=transition.layer_id,
+                campaign_id=tracing_campaign_id,
+                round_num=round_num,
+                changes_description=result.opt_search_point.lineage.changes_description or "",
+            )
+    transition.apply_side_effects(cycle, result, round_num)
+    emit_phase(
+        on_phase,
+        transition.phase,
+        "exit",
+        round=round_num,
+        **transition.exit_payload(cycle, result),
+    )
+    return result
+
+
+def _trigger_payload(
+    cycle: Cycle,
+    round_num: int,
+    patience: int | None,
+    *,
+    layer: str,
+    track_accuracy: bool = False,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """(inputs_ref, data) for an L2/L3 escalation-trigger decision."""
+    esc = cycle.escalation
+    counter_round = getattr(esc, f"{layer}_round")
+    inputs_ref = {
+        "round_num": round_num,
+        f"{layer}_patience": patience,
+        "entry_round": counter_round if counter_round > 0 else -1,
+    }
+    data: dict[str, Any] = {
+        f"{layer}_round": counter_round,
+        "stall_count": getattr(esc, f"{layer}_stall_count"),
+        "best_composite_fitness_at_entry": getattr(esc, f"{layer}_best_composite_fitness_at_entry"),
+        "best_composite_fitness_this_round": cycle.tracking.best_composite_fitness,
+    }
+    if track_accuracy:
+        data["best_accuracy"] = cycle.tracking.best_accuracy
+    return inputs_ref, data
+
+
+async def escalate_l2(
+    cycle: Cycle,
+    config: CampaignConfig,
+    pipeline_schema: Any,
+    round_num: int,
+    on_phase: Callable[[PhaseEvent], None] | None = None,
+    obs: ObservabilityBridge | None = None,
+    tracing_campaign_id: str = "",
+) -> StopReason | None:
+    """Drive an L2 (or cascading L3) escalation: observe state, fire layer,
+    record divergence-gated decisions, return a stop reason or None.
+
+    Called from the round-loop's ``FIRE_L2`` dispatch and from the mid-round
+    DegradationCheck path. The decision to escalate already happened
+    upstream; this driver runs the L2/L3 patience cascade (via
+    ``EscalationState.observe_l2_escalation``) and the L3 force-trigger heal
+    on L2 validator failures.
+    """
+    # Lazy imports — l2_driver / l3_driver import LayerStrategy from this
+    # module; loading them at module-import time would create a cycle.
+    from promptpotter.application.optimization.escalation.firing.l2_driver import L2
+    from promptpotter.application.optimization.escalation.firing.l3_driver import L3
+
+    opt = config.optimization
+    esc = cycle.escalation
+
+    event = esc.observe_l2_escalation(
+        current_composite_fitness=cycle.tracking.best_composite_fitness,
+        l2_patience=opt.l2_patience,
+        l3_patience=opt.l3_patience,
+    )
+
+    # L2 trigger decision is replayed for divergence — record fired-or-not.
+    l2_inputs, l2_data = _trigger_payload(
+        cycle, round_num, opt.l2_patience, layer="l2", track_accuracy=True
+    )
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.L2_ESCALATION_TRIGGER,
+        l2_inputs,
+        event.next_action == NextAction.FIRE_L2,
+        data=l2_data,
+        round=round_num,
+    )
+
+    if event.next_action == NextAction.FIRE_L2:
+        await _run_transition(
+            L2,
+            cycle,
+            config,
+            pipeline_schema,
+            round_num,
+            on_phase,
+            obs=obs,
+            tracing_campaign_id=tracing_campaign_id,
+        )
+        # Wound 4: post-L2 validator failure force-triggers L3 to heal L2's
+        # output. Trigger is deterministic from L2's output (rides on round_data
+        # JSON), so resume reproduces it without a separate decision record.
+        if cycle.opt_sp.wounds.l2_guard_breaches:
+            logger.warning(
+                "L3 force-triggered by %d L2-output validator failure(s) at round %d",
+                len(cycle.opt_sp.wounds.l2_guard_breaches),
+                round_num,
+            )
+            await _run_transition(
+                L3,
+                cycle,
+                config,
+                pipeline_schema,
+                round_num,
+                on_phase,
+                obs=obs,
+                tracing_campaign_id=tracing_campaign_id,
+            )
+        return None
+
+    # FIRE_L3 or STOP_L3_PATIENCE — record L3 trigger decision either way.
+    l3_inputs, l3_data = _trigger_payload(cycle, round_num, opt.l3_patience, layer="l3")
+    record_decision(
+        cycle.pending_decisions,
+        ResumeCheckpointKind.L3_ESCALATION_TRIGGER,
+        l3_inputs,
+        event.next_action == NextAction.FIRE_L3,
+        data=l3_data,
+        round=round_num,
+    )
+
+    if event.next_action == NextAction.FIRE_L3:
+        await _run_transition(
+            L3,
+            cycle,
+            config,
+            pipeline_schema,
+            round_num,
+            on_phase,
+            obs=obs,
+            tracing_campaign_id=tracing_campaign_id,
+        )
+        return None
+
+    return StopReason.L3_PATIENCE
