@@ -107,13 +107,6 @@ class Session:
     scoring: ScoringContext = field(default_factory=ScoringContext)
 
     # -- Runtime config --------------------------------------------------
-    stale_data_load_protocol: list[str] | None = None
-    # Stale-data protocol thresholds (defaults preserve previous behavior).
-    # Operators override via ``campaign.json::optimization.*``.
-    rerun_trigger_count: int = 3
-    samplescan_candidates: int = 3
-    samplescan_threshold: float = 0.5
-    sampleswitch_min_degradation_rate: float = 0.5
     source: str = ""
 
     # -- Lifecycle hook --------------------------------------------------

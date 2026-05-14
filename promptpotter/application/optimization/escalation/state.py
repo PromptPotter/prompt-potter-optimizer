@@ -156,8 +156,6 @@ class EscalationState:
         current_accuracy: float,
         l1_patience: int,
         axes_with_positive_yield: int | None = None,
-        escalate_on_yield_drought: bool = False,
-        fire_l2_every_round: bool = False,
     ) -> EscalationEvent:
         """L1 round outcome. Bumps the stall counter; returns CONTINUE /
         FIRE_L2 / STOP_PERFECT.
@@ -165,10 +163,8 @@ class EscalationState:
         Counter mutation stays here (state ownership). The decision
         lifts into :func:`escalation.decide.decide_escalation` — this
         method delegates with a :class:`EscalationInputs` snapshot.
-        Default rules reproduce the prior FSM exactly;
-        ``axes_with_positive_yield`` and ``escalate_on_yield_drought``
-        enable the yield-driven rule when the cycle has AxisIndex
-        evidence and the campaign opts in.
+        ``axes_with_positive_yield`` populates the yield-driven rule
+        when the cycle has AxisIndex evidence.
 
         L2/L3 stall observation lives in :meth:`observe_l2_escalation` so
         the mid-round signal path (DegradationCheck) shares the same cascade.
@@ -186,8 +182,6 @@ class EscalationState:
             l1_stall_count=self._l1_stall_count,
             l1_patience=l1_patience,
             axes_with_positive_yield=axes_with_positive_yield,
-            escalate_on_yield_drought=escalate_on_yield_drought,
-            fire_l2_every_round=fire_l2_every_round,
         )
         return decide_escalation(inputs)
 

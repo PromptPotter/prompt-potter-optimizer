@@ -78,25 +78,6 @@ class OptimizationConfig(BaseModel):
 
     l2_patience: int | None = Field(2)
     l3_patience: int | None = Field(1)
-    escalate_on_yield_drought: bool = Field(
-        False,
-        description=(
-            "Escalation rule l2_axis_yield_drought: when AxisIndex shows zero axes "
-            "with effect_size > NOISE_THRESHOLD AND L1 has stalled at least one "
-            "round, fire L2 immediately (preempts l1_patience). Closes the "
-            "calendar-driven escalation gap (Routed Dispatch flaw 3); off by "
-            "default — opt-in until validated on the M10 datasets."
-        ),
-    )
-    fire_l2_every_round: bool = Field(
-        False,
-        description=(
-            "Escalation rule l2_every_round: fire L2 unconditionally at the end of "
-            "every round (preempts l1_patience and yield-drought). Costs one extra "
-            "optimizer LLM call per round; opt-in per campaign for experiments that "
-            "want continuous task_context refinement instead of stall-driven."
-        ),
-    )
     degradation_threshold: float = Field(...)
 
     elimination_n_min: int = Field(
@@ -117,31 +98,6 @@ class OptimizationConfig(BaseModel):
         "score at least `elimination_n_min` samples AND yield p < this. Smaller = "
         "stricter. Default 1.0 disables the gate (promote on observed lift only); "
         "set lower (e.g. 0.10) to require statistical significance for ablation runs.",
-    )
-
-    stale_data_load_protocol: list[str] = Field(
-        default_factory=lambda: ["rerun", "samplescan", "sampleswitch"]
-    )
-    rerun_trigger_count: int = Field(
-        3,
-        description="Stale-data ``rerun`` step: how many independent degradation "
-        "sightings (cached + historical) before rerunning the sample.",
-    )
-    samplescan_candidates: int = Field(
-        3,
-        description="Stale-data ``samplescan`` step: number of fresh probes "
-        "with the active pipeline params; first non-degraded probe wins.",
-    )
-    samplescan_threshold: float = Field(
-        0.5,
-        description="Stale-data ``samplescan`` step: minimum fraction of probes "
-        "that must resolve cleanly to accept the result.",
-    )
-    sampleswitch_min_degradation_rate: float = Field(
-        0.5,
-        description="Stale-data ``sampleswitch`` step: historical degradation "
-        "rate at which the sample short-circuits to the cached deprecated answer "
-        "instead of re-evaluating. Set to 1.0 to disable cached-deprecation reuse.",
     )
 
     zero_signal_filter_enabled: bool = Field(False)

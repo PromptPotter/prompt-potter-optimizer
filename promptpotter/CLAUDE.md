@@ -33,7 +33,7 @@ Channel: `task_context` (L2-refined task framing) and `plan` (L3-set strategy) a
 
 ## L2-layer — l2_context
 
-Fires on L1-layer stall (default) or yield drought when opted in (escalation rule `l2_axis_yield_drought`, gated by `campaign.json::optimization.escalate_on_yield_drought` — fires when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor). Post-round transitions are decided by `decide_escalation(EscalationInputs)` over `DEFAULT_ESCALATION_RULES` (`application/optimization/escalation/decide.py`); the rule set is the policy and replaces the prior FSM.
+Fires on L1-layer stall (default) or yield drought (escalation rule `l2_axis_yield_drought` — fires when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor). Post-round transitions are decided by `decide_escalation(EscalationInputs)` over `DEFAULT_ESCALATION_RULES` (`application/optimization/escalation/decide.py`); the rule set is the policy and replaces the prior FSM.
 
 Receives the evidence panels plus the prior `l1_critique`. `l2_context` produces:
 

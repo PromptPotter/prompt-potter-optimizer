@@ -53,11 +53,10 @@ class EscalationInputs:
     # Patience config
     l1_patience: int
 
-    # Optional derived-memory inputs (None when AxisIndex not initialised
-    # or the corresponding feature flag is off — predicates must handle).
+    # Derived-memory input — None when AxisIndex not initialised (rules must
+    # handle). Populated by the runner from cycle.axes.with_positive_yield()
+    # after each round.
     axes_with_positive_yield: int | None = None
-    escalate_on_yield_drought: bool = False
-    fire_l2_every_round: bool = False
 
 
 def decide_escalation(

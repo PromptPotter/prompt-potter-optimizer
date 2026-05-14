@@ -33,8 +33,9 @@ warn-on-oversize check (`emit_token_usage`).
   bundled floor is the audited origin.
 - Write `dashboard.json::spend = {used_usd, budget_usd, by_kind, calls}`.
   No second file.
-- New `OptimizationConfig.spend_budget_usd: float | None`. Halt with a
-  new `StopReason.SPEND_BUDGET` at round boundary when exceeded.
+- Add `OptimizationConfig.spend_budget_usd: float | None` (was removed
+  in the pre-fork config cleanup since no enforcement existed). Halt
+  with a new `StopReason.SPEND_BUDGET` at round boundary when exceeded.
 - Backend tokens come from the connector's wire response. If the
   connector doesn't surface them, `unknown_calls` ticks up and the bar
   shows the asterisk.

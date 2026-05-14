@@ -18,7 +18,6 @@ from __future__ import annotations
 import copy
 import re
 import uuid
-from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Any, ClassVar, Self
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -194,7 +193,6 @@ class IndividualLineage(BaseModel):
     id: str = Field(default_factory=lambda: uuid.uuid4().hex)
     parent_id: str | None = None
     changes_description: str = ""
-    created_at: str = Field(default_factory=lambda: datetime.now(UTC).isoformat())
     source: str = Field(
         default="",
         description="Origin of this individual: 'origin' / 'l1_generate' / "

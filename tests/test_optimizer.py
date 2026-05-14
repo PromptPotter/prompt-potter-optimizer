@@ -644,87 +644,82 @@ def test_default_round_rules_reproduce_observe_round_fsm():
     assert decide_escalation(fire).next_action == NextAction.FIRE_L2
 
 
-def test_l2_axis_yield_drought_rule_fires_only_when_opted_in():
-    """Phase 2b: yield-drought rule preempts l1_continue when on; quiet when off."""
+def test_l2_axis_yield_drought_rule_fires_when_signal_supports_it():
+    """Permanent rule: yield-drought preempts l1_continue when AxisIndex
+    shows zero productive axes; quiet when the signal isn't available."""
     from promptpotter.application.optimization.escalation import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # Drought + opt-in + L1 has stalled at least one round → FIRE_L2 (priority 60)
-    drought_on = EscalationInputs(
+    # Drought signal + L1 has stalled at least one round → FIRE_L2 (priority 60)
+    drought = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
         axes_with_positive_yield=0,
-        escalate_on_yield_drought=True,
     )
-    assert decide_escalation(drought_on).next_action == NextAction.FIRE_L2
+    assert decide_escalation(drought).next_action == NextAction.FIRE_L2
 
-    # Same drought + flag off → CONTINUE (l1_continue at priority 50 wins)
-    drought_off = EscalationInputs(
+    # Signal shows productive axes → CONTINUE (l1_continue at priority 50 wins)
+    productive = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
-        axes_with_positive_yield=0,
-        escalate_on_yield_drought=False,
+        axes_with_positive_yield=2,
     )
-    assert decide_escalation(drought_off).next_action == NextAction.CONTINUE
+    assert decide_escalation(productive).next_action == NextAction.CONTINUE
 
-    # Pre-first-round (axes not initialised) → CONTINUE even with flag on
+    # Pre-first-round (AxisIndex not initialised) → CONTINUE
     no_evidence = EscalationInputs(
         improved=False,
         current_accuracy=0.5,
         l1_stall_count=1,
         l1_patience=3,
         axes_with_positive_yield=None,
-        escalate_on_yield_drought=True,
     )
     assert decide_escalation(no_evidence).next_action == NextAction.CONTINUE
 
 
-def test_l2_every_round_rule_fires_only_when_opted_in():
-    """Priority 80: l2_every_round preempts l1_continue but yields to perfect_accuracy."""
+def test_l1_patience_zero_fires_l2_every_round():
+    """l1_patience=0 unifies the 'fire L2 every round' cadence under the
+    patience primitive: l1_continue never matches, l1_to_l2 fall-through
+    fires L2 each round; perfect_accuracy still preempts."""
     from promptpotter.application.optimization.escalation import (
         EscalationInputs,
         decide_escalation,
     )
     from promptpotter.application.optimization.escalation.state import NextAction
 
-    # Opt-in + no stall → FIRE_L2 (rule l2_every_round @ priority 80)
-    on_no_stall = EscalationInputs(
+    # patience=0 + improving round → l1_continue (0<0=False) → fall through to l1_to_l2
+    improving = EscalationInputs(
         improved=True,
         current_accuracy=0.5,
         l1_stall_count=0,
-        l1_patience=3,
-        fire_l2_every_round=True,
+        l1_patience=0,
     )
-    event = decide_escalation(on_no_stall)
-    assert event.next_action == NextAction.FIRE_L2
-    assert event.rule_name == "l2_every_round"
+    assert decide_escalation(improving).next_action == NextAction.FIRE_L2
 
-    # Perfect accuracy still wins (priority 100 > 80) — terminate, don't fire L2
-    perfect_on = EscalationInputs(
+    # patience=0 + stalling round → same fall-through
+    stalling = EscalationInputs(
+        improved=False,
+        current_accuracy=0.5,
+        l1_stall_count=1,
+        l1_patience=0,
+    )
+    assert decide_escalation(stalling).next_action == NextAction.FIRE_L2
+
+    # perfect_accuracy (priority 100) still preempts the cadence
+    perfect = EscalationInputs(
         improved=True,
         current_accuracy=1.0,
         l1_stall_count=0,
-        l1_patience=3,
-        fire_l2_every_round=True,
+        l1_patience=0,
     )
-    assert decide_escalation(perfect_on).next_action == NextAction.STOP_PERFECT
-
-    # Off by default — no stall ⇒ CONTINUE (l1_continue @ priority 50)
-    off = EscalationInputs(
-        improved=False,
-        current_accuracy=0.5,
-        l1_stall_count=0,
-        l1_patience=3,
-        fire_l2_every_round=False,
-    )
-    assert decide_escalation(off).next_action == NextAction.CONTINUE
+    assert decide_escalation(perfect).next_action == NextAction.STOP_PERFECT
 
 
 # ---------------------------------------------------------------------------

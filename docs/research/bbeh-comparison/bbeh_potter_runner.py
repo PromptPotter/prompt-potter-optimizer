@@ -66,14 +66,14 @@ def build_campaign_config(
         cfg["sp_budget_ttest"] = sp_budget_ttest
 
     # Rasch-validation run scaffolding (docs/specs/rasch-validation-plan.md):
-    # L2/L3 off lets the loop run long enough for swap evidence to accumulate;
-    # 0.7 SE threshold is a temporary push above the 0.5 default to make
-    # round-1→2 firing realistic at 5 obs/sample (SE ~0.78 at p≈0.5).
+    # large l1_patience defers L2/L3 firing for the run window so swap
+    # evidence has time to accumulate; 0.7 SE threshold is a temporary push
+    # above the 0.5 default to make round-1→2 firing realistic at 5
+    # obs/sample (SE ~0.78 at p≈0.5).
     cfg["optimization"] = {
         **cfg.get("optimization", {}),
         "max_rounds": 5,
-        "enable_l2": False,
-        "enable_l3": False,
+        "l1_patience": 99,
         "scoring_set": {"swap_out_delta_se": 0.7},
     }
 

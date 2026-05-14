@@ -127,11 +127,6 @@ def populate_session_scoring(
     scorer_id: str | None = None,
     experiment_id: str = "",
     cycle_id: str | None = None,
-    stale_data_load_protocol: list[str] | None = None,
-    rerun_trigger_count: int = 3,
-    samplescan_candidates: int = 3,
-    samplescan_threshold: float = 0.5,
-    sampleswitch_min_degradation_rate: float = 0.5,
     source: str = "optimization_loop",
 ) -> None:
     """Attach the scoring block onto ``session`` (mutates in place)."""
@@ -146,11 +141,6 @@ def populate_session_scoring(
     )
     session.state.obs = obs
     session.source = source
-    session.stale_data_load_protocol = stale_data_load_protocol
-    session.rerun_trigger_count = rerun_trigger_count
-    session.samplescan_candidates = samplescan_candidates
-    session.samplescan_threshold = samplescan_threshold
-    session.sampleswitch_min_degradation_rate = sampleswitch_min_degradation_rate
     session.scoring.scorer = compile_scorer(scoring_formula)
     session.scoring.scorer_id = scorer_id or auto_scorer_id(scoring_formula)
     session.scoring.scorer_formula = scoring_formula
@@ -257,7 +247,6 @@ def _start_observability_and_scoring(
     """Start ObservabilityBridge + populate scoring; obs may be None on failure."""
     from promptpotter.infrastructure.tracing import ObservabilityBridge
 
-    opt = config.optimization
     tracing_campaign_id = resolved_cycle_id or f"campaign_{started_at[:19].replace(':', '')}"
     obs = ObservabilityBridge.start_campaign(
         session.project_root,
@@ -274,11 +263,6 @@ def _start_observability_and_scoring(
         obs=obs,
         experiment_id=experiment_id,
         cycle_id=resolved_cycle_id,
-        stale_data_load_protocol=opt.stale_data_load_protocol,
-        rerun_trigger_count=opt.rerun_trigger_count,
-        samplescan_candidates=opt.samplescan_candidates,
-        samplescan_threshold=opt.samplescan_threshold,
-        sampleswitch_min_degradation_rate=opt.sampleswitch_min_degradation_rate,
         scoring_formula=scoring_formula,
         scoring_round_formula=scoring_round_formula,
         scorer_id=scorer_id,

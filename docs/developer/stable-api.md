@@ -73,9 +73,35 @@ Connector-described pipeline (the shape `GET /pipeline` exposes, plus an operato
 
 Campaign knobs + scoring + optimizer LLM. Validated by `application/config.py::CampaignConfig` with `extra="forbid"` — unknown keys raise at boot. See `CampaignConfig` for the full field list.
 
-**Required per dataset** (no defaults): `optimization.improvement_threshold`, `optimization.max_failures`, `optimization.degradation_threshold`.
+**Top-level keys.** `dataset_name`, `scoring`, `sp_budget_ttest`, `exclude_nodes` (drop pipeline nodes by name), `pipeline_overrides` (per-node config overlay), `optimization`, `optimizer_llm`.
 
-**System invariants** (defaulted, MUST NOT appear in any `campaign.json`): `exploration.swap_out_delta_se = 0.7`. L2 and L3 are always-on architecture, not feature flags.
+**`optimization` knobs:**
+
+| Key | Default | What it does |
+|---|---|---|
+| `improvement_threshold` | — *required* | Min accuracy delta a round must beat to count as improved. |
+| `max_failures` | — *required* | Max failure examples fed to the L1 critique step. |
+| `degradation_threshold` | — *required* | Mid-eval abort threshold (0 disables). |
+| `max_rounds` | 10 | Cycle round budget (None = unlimited, up to the `HARD_CAP=100` floor). |
+| `l1_patience` | 3 | Stalled-rounds before L2 fires. Set to 0 for "fire L2 every round" cadence. |
+| `l2_patience` | 2 | L2 fires before L3 takes over. |
+| `l3_patience` | 1 | L3 fires before stop. |
+| `n_variants` | 5 | Candidates per round (L2 can override via `l1_overrides.n_variants`). |
+| `elimination_n_min` | 6 | Minimum queries before PoBB elimination fires. |
+| `pobb_epsilon` | 0.05 | Stop a candidate when P(best) < ε. |
+| `improvement_significance` | 1.0 | Significance gate (disabled by default; <1.0 requires p < this). |
+| `zero_signal_filter_enabled` | False | Round-boundary prune always-hit/always-miss samples from the dataset. |
+| `forbidden_axes_strict` | True | Reject L1 candidates that mutate operator-fixed axes (`model`, `provider`). |
+| `exploration.swap_out_delta_se` | 0.7 | Rasch SE threshold for the scoring-set swap-out. |
+| `exploration.swap_in_kg_threshold` | 0.01 | Rasch KG threshold for swap-in. |
+| `exploration.max_swaps_per_round` | 3 | Cap on scoring-set churn per round. |
+| `exploration.cold_start_prior_sigma` | 1.5 | Theta prior sigma when no observations yet. |
+
+**`optimizer_llm` knobs:** `provider` (`groq`/`openai`/`anthropic`/`openrouter`), `model` (provider-specific). Per-node temperature + max_tokens come from `datasets/_optimizer/pipeline.json`, not the campaign config.
+
+Constants moved out of `campaign.json` (they live next to their consumer): L1 candidate-generation temperature (`l1/generate.py::L1_CREATIVITY`), L2/L3 transition temperatures (`escalation/firing.py::_LAYER_TEMPERATURE`), PoBB lock-in (`l1/execute.py::POBB_LOCK_IN`), runaway-loop ceiling (`runner/loop.py::HARD_CAP`), stale-data recovery ladder (`scoring/sample_measurement.py`).
+
+The yield-drought escalation rule (`l2_axis_yield_drought`) is permanent — no opt-in flag. L2 and L3 are always-on architecture.
 
 ### Other files
 

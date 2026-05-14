@@ -212,11 +212,13 @@ async def _maybe_recover_degraded(
     sample: Sample,
     ctx: _LoopContext,
 ) -> QueryMeasurement:
-    """Run the stale-data protocol if the result is degraded and protocol is wired."""
-    if not (_is_degraded(result) and ctx.session.stale_data_load_protocol):
+    """Run the stale-data protocol if the result is degraded."""
+    from promptpotter.application.scoring.sample_measurement import STALE_DATA_LOAD_PROTOCOL
+
+    if not _is_degraded(result):
         return result
     recovered, _step = await _execute_stale_data_protocol(
-        ctx.session.stale_data_load_protocol,
+        list(STALE_DATA_LOAD_PROTOCOL),
         sample,
         cast(dict[str, Any], result),
         ctx.session,

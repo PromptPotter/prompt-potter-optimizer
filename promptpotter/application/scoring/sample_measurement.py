@@ -23,6 +23,27 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
+# Stale-data recovery ladder
+# ---------------------------------------------------------------------------
+
+STALE_DATA_LOAD_PROTOCOL: tuple[str, ...] = ("rerun", "samplescan", "sampleswitch")
+"""Step order for handling a degraded cached query. ``execute_stale_data_protocol``
+walks this in order; first step that returns a non-degraded result wins."""
+
+RERUN_TRIGGER_COUNT: int = 3
+"""Number of degradation sightings (cached + historical) before rerunning."""
+
+SAMPLESCAN_CANDIDATES: int = 3
+"""Number of fresh probes during the samplescan step."""
+
+SAMPLESCAN_THRESHOLD: float = 0.5
+"""Minimum probe-clean fraction to accept a samplescan result."""
+
+SAMPLESWITCH_MIN_DEGRADATION_RATE: float = 0.5
+"""Historical degradation rate at which sampleswitch short-circuits to the
+cached deprecated answer instead of re-evaluating."""
+
+# ---------------------------------------------------------------------------
 # Prompt template interpolation
 # ---------------------------------------------------------------------------
 
@@ -402,10 +423,9 @@ async def execute_stale_data_protocol(
 ) -> tuple[dict[str, Any], str]:
     """Walk the stale data load protocol ladder for a degraded cached query.
 
-    Hyperparameters come from ``Session`` (populated at scoring-context bootstrap
-    from ``campaign.json::optimization.*``). The four knobs:
-    ``rerun_trigger_count``, ``samplescan_candidates``, ``samplescan_threshold``,
-    ``sampleswitch_min_degradation_rate``.
+    Hyperparameters are module-level constants
+    (``RERUN_TRIGGER_COUNT``, ``SAMPLESCAN_CANDIDATES``,
+    ``SAMPLESCAN_THRESHOLD``, ``SAMPLESWITCH_MIN_DEGRADATION_RATE``).
 
     Observation counts come from ``axes.sample_index`` (degradation
     tables ingested from the measurement archive at round boundaries). Within a round
@@ -420,16 +440,15 @@ async def execute_stale_data_protocol(
         if session.stop_check and session.stop_check():
             return {**result, "cached": result.get("cached", False)}, "interrupted"
         if step == "rerun":
-            trigger_count = session.rerun_trigger_count
             historical = axes.sample_index.degradation_count(sample.id) if axes else 0
             effective_count = historical + 1
-            if effective_count < trigger_count:
+            if effective_count < RERUN_TRIGGER_COUNT:
                 return {
                     **cached_result,
                     "cached": cached_result.get("cached", False),
                     "degraded_observed": True,
                     "degraded_obs_count": effective_count,
-                    "degraded_obs_threshold": trigger_count,
+                    "degraded_obs_threshold": RERUN_TRIGGER_COUNT,
                 }, "below_threshold"
 
             result = dict(await measure_sample(sample, session, pipeline_params=pipeline_params))
@@ -439,8 +458,6 @@ async def execute_stale_data_protocol(
                 return result, "rerun"
 
         elif step == "samplescan":
-            n_candidates = session.samplescan_candidates
-            resolved_threshold = session.samplescan_threshold
             probe_params = (
                 session.pipeline_schema.to_pipeline_params()
                 if session.pipeline_schema is not None
@@ -449,15 +466,18 @@ async def execute_stale_data_protocol(
             result = dict(await measure_sample(sample, session, pipeline_params=probe_params))
             result["samplescan_resolved"] = True
             result["samplescan_config"] = {
-                "n_candidates": n_candidates,
-                "resolved_threshold": resolved_threshold,
+                "n_candidates": SAMPLESCAN_CANDIDATES,
+                "resolved_threshold": SAMPLESCAN_THRESHOLD,
             }
             if not is_degraded(result):
                 return result, "samplescan"
 
         elif step == "sampleswitch":
-            min_deg_rate = session.sampleswitch_min_degradation_rate
-            if axes and axes.sample_index.degradation_rate(sample.id) >= min_deg_rate:
+            if (
+                axes
+                and axes.sample_index.degradation_rate(sample.id)
+                >= SAMPLESWITCH_MIN_DEGRADATION_RATE
+            ):
                 result = {**cached_result, "cached": True, "switched_out": True}
                 return result, "sampleswitch"
 

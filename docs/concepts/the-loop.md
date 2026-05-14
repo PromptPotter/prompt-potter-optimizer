@@ -60,7 +60,7 @@ After scoring, before the next round's generate, the critique runs. The only pla
 
 When L3 fires, the next round still has L3, L2, and L1 all running. Higher layers don't replace lower ones; they constrain them.
 
-Post-round transitions are decided by **escalation rules over `EscalationInputs`** (`application/optimization/escalation/`), not a hard-coded patience FSM. The default rule set reproduces the prior behaviour exactly (`perfect_accuracy` → STOP_PERFECT, `l1_continue` → CONTINUE while stall < patience, `l1_to_l2` → FIRE_L2 on patience exhaustion). One opt-in rule layers on top: `l2_axis_yield_drought` (priority 60) escalates to L2 when L1 has stalled at least one round AND AxisIndex shows zero axes with effect above the noise floor — gated by `campaign.json::optimization.escalate_on_yield_drought`. Predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Each firing is recorded as a `escalation/rule_fired` PhaseRecord — see [`../operations/observability.md`](../operations/observability.md#escalation-rule-signal-stream-signalsjsonl).
+Post-round transitions are decided by **escalation rules over `EscalationInputs`** (`application/optimization/escalation/`), not a hard-coded patience FSM. The default rule set: `perfect_accuracy` → STOP_PERFECT, `l1_continue` → CONTINUE while stall < patience, `l1_to_l2` → FIRE_L2 on patience exhaustion, plus `l2_axis_yield_drought` (priority 60) which preempts the patience wait when AxisIndex shows zero productive axes with at least one stall round on the clock. Predicates are pure functions over a frozen snapshot; adding a rule is one row in `escalation/rules.py`. Each firing is recorded as a `escalation/rule_fired` PhaseRecord — see [`../operations/observability.md`](../operations/observability.md#escalation-rule-signal-stream-signalsjsonl).
 
 ---
 
@@ -70,7 +70,7 @@ The optimizer's strategist. Doesn't write prompts — shapes what the prompt-wri
 
 ### When L2 fires
 
-After every L1 round the escalation rules engine evaluates rules over a `EscalationInputs` snapshot. Default path: if best accuracy improved, the L1 stall counter resets and L2 stays out; if not, stall ticks, and once it hits `l1_patience` the `l1_to_l2` rule fires L2 next round. Opt-in path: when `escalate_on_yield_drought` is set, the `l2_axis_yield_drought` rule (priority 60) preempts the patience wait — fires L2 as soon as AxisIndex shows zero axes above the noise floor with at least one stall round on the clock. On healthy campaigns L2 stays dormant for many rounds.
+After every L1 round the escalation rules engine evaluates rules over a `EscalationInputs` snapshot. Default path: if best accuracy improved, the L1 stall counter resets and L2 stays out; if not, stall ticks, and once it hits `l1_patience` the `l1_to_l2` rule fires L2 next round. Yield-drought preempt: the `l2_axis_yield_drought` rule (priority 60) fires L2 early as soon as AxisIndex shows zero axes above the noise floor with at least one stall round on the clock. On healthy campaigns L2 stays dormant for many rounds.
 
 ### What L2 sees
 

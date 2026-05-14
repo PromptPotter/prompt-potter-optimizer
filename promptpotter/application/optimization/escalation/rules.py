@@ -6,10 +6,11 @@ reason template the evaluator formats into the returned
 :class:`EscalationEvent.reason`. Higher priority wins; ties resolved by
 list order.
 
-Default rules ship the prior FSM as four rules — no behaviour change.
-The opt-in yield-driven rule (``l2_axis_yield_drought``) layers on top
-when ``campaign.json::optimization.escalate_on_yield_drought`` is set
-and an :class:`AxisIndex` is wired to the cycle.
+The yield-driven rule (``l2_axis_yield_drought``) is a permanent rule —
+it fires whenever the cycle has AxisIndex evidence and that evidence
+shows zero productive axes. When the signal is unavailable (early
+cycles, no AxisIndex) the rule's predicate is False and other rules
+take over.
 """
 
 from __future__ import annotations
@@ -45,14 +46,11 @@ class EscalationRule:
         return self.reason or self.name
 
 
-# Default rules reproduce :meth:`EscalationState.observe_round` exactly,
-# plus the opt-in yield-drought rule and the opt-in every-round rule.
-# Branch order in the original FSM (perfect → continue → stop_no_l2 →
-# fire) maps to descending priority below — first match wins. The
-# every-round rule sits at priority 80 (above yield-drought) so an
-# operator-opted always-on L2 cadence preempts both yield-drought and
-# l1_continue. perfect_accuracy stays above it so a perfect-fit round
-# still terminates instead of firing one more L2.
+# perfect_accuracy preempts so a perfect-fit round terminates instead of
+# firing one more L2. l2_axis_yield_drought (priority 60) preempts the
+# patience wait when the AxisIndex shows no productive axes. Setting
+# l1_patience=0 unifies the "fire L2 every round" cadence under this
+# primitive: l1_continue never matches, so we fall through to l1_to_l2.
 DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
     EscalationRule(
         name="perfect_accuracy",
@@ -62,17 +60,9 @@ DEFAULT_ESCALATION_RULES: list[EscalationRule] = [
         reason="composite_fitness >= 1.0",
     ),
     EscalationRule(
-        name="l2_every_round",
-        when=lambda s: s.fire_l2_every_round,
-        fire=NextAction.FIRE_L2,
-        priority=80,
-        reason=lambda s: f"fire_l2_every_round=True (L1 stall {s.l1_stall_count}/{s.l1_patience})",
-    ),
-    EscalationRule(
         name="l2_axis_yield_drought",
         when=lambda s: (
-            s.escalate_on_yield_drought
-            and s.l1_stall_count >= 1
+            s.l1_stall_count >= 1
             and s.axes_with_positive_yield is not None
             and s.axes_with_positive_yield == 0
         ),

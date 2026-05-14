@@ -170,8 +170,6 @@ async def post_round(
         current_accuracy=cycle.tracking.current_accuracy,
         l1_patience=config.optimization.l1_patience,
         axes_with_positive_yield=axes_with_positive_yield,
-        escalate_on_yield_drought=config.optimization.escalate_on_yield_drought,
-        fire_l2_every_round=config.optimization.fire_l2_every_round,
     )
 
     await close_round(cycle, round_result, trial_dict, round_num, session, cb)

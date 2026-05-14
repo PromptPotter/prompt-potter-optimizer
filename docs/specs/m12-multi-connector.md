@@ -166,7 +166,7 @@ fitness = composite_fitness * (1.0 if duration_s_total < 60 else 0.5) # time-awa
 fitness = 0.7 * composite_fitness - 0.2 * (cost_usd_total / cost_budget) - 0.1 * (duration_s_total / time_budget)
 ```
 
-`cost_budget` + `time_budget` from `campaign.json::optimization` (`spend_budget_usd` exists; `time_budget_s` new).
+`cost_budget` + `time_budget` from `campaign.json::optimization` — both fields added with the M11 spend-tracking spec (`spend_budget_usd`) and this spec (`time_budget_s`).
 
 **Pareto-aware PoBB** *(M12+ stretch — designed not committed).* Replace scalar `score` in `posterior_best_probabilities` with vector `(accuracy, -cost, -time)`; compute Pareto rank per posterior sample (1 = non-dominated); eliminate when posterior probability of Pareto rank 1 falls below ε. Substantially harder than linear combination — linear delivers most value with no PoBB changes.
 
