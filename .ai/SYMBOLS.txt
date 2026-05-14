@@ -26,7 +26,7 @@ BackendStore	promptpotter/infrastructure/store/backend_store.py:18
 bootstrap_cycle	promptpotter/application/bootstrap/scoring_context.py:58
 build_archive_hard_samples_artifact	promptpotter/application/intelligence/hard_sample_archive.py:73
 build_archive_observations	promptpotter/application/intelligence/hard_sample_archive.py:35
-build_bundle	promptpotter/application/optimization/dispatch/hub.py:808
+build_bundle	promptpotter/application/optimization/dispatch/hub/builder.py:27
 build_campaign_emitter	promptpotter/application/origin.py:37
 build_candidate_flat	promptpotter/domain/opt_search_point.py:398
 build_dataset_run_data	promptpotter/application/datasets.py:346
@@ -108,7 +108,7 @@ CycleEventLog	promptpotter/infrastructure/ledger.py:41
 CycleListEntry	promptpotter/presentation/api/routers/active.py:53
 CycleRecordEnvelope	promptpotter/presentation/api/routers/campaigns.py:133
 CycleResult	promptpotter/domain/results.py:242
-CycleSlice	promptpotter/application/optimization/dispatch/hub.py:141
+CycleSlice	promptpotter/application/optimization/dispatch/hub/bundle.py:91
 CyclesResponse	promptpotter/presentation/api/routers/active.py:67
 CycleState	promptpotter/application/bootstrap/session.py:64
 dataset_prompt_dir	promptpotter/application/datasets.py:426
@@ -133,7 +133,7 @@ DerivedView	promptpotter/infrastructure/projections/base.py:28
 detect_invariants	promptpotter/application/optimization/validators/l1_strict.py:331
 DigestStatusView	promptpotter/presentation/views/view_models.py:244
 discover_compare_arms	promptpotter/application/optimization/pobb/elevation.py:61
-DispatchHub	promptpotter/application/optimization/dispatch/hub.py:745
+DispatchHub	promptpotter/application/optimization/dispatch/hub/dispatch.py:63
 Divergence	promptpotter/application/optimization/resume_and_fork/replayers.py:38
 elevate_to_decisive	promptpotter/application/optimization/pobb/elevation.py:204
 ElevationResult	promptpotter/application/optimization/pobb/elevation.py:128
@@ -178,6 +178,7 @@ extract_sample_diagnostics	promptpotter/application/scoring/metrics.py:95
 extract_warning_types	promptpotter/application/optimization/pobb/elimination.py:187
 FailureCluster	promptpotter/application/intelligence/indexes/sample.py:31
 fast_sleep	tests/test_llm_client.py:136
+fence_untrusted	promptpotter/application/optimization/dispatch/hub/bundle.py:58
 FewShotExample	promptpotter/domain/opt_search_point.py:37
 FileContentResponse	promptpotter/presentation/api/routers/campaigns.py:319
 FileEntry	promptpotter/presentation/api/routers/campaigns.py:306
@@ -205,7 +206,7 @@ ForkResult	promptpotter/application/optimization/resume_and_fork/fork_siblings.p
 ForksResponse	promptpotter/presentation/api/routers/campaigns.py:176
 ForkSummaryView	promptpotter/presentation/views/view_models.py:307
 ForkTrigger	promptpotter/domain/run_records.py:228
-format_l1_critique_for_prompt	promptpotter/application/optimization/dispatch/hub.py:518
+format_l1_critique_for_prompt	promptpotter/application/optimization/dispatch/hub/injections.py:345
 from_disk_log	promptpotter/presentation/writers.py:122
 from_disk_round	promptpotter/presentation/writers.py:48
 from_phase_event	promptpotter/presentation/views/view_ingress.py:386
@@ -250,8 +251,8 @@ init_services	promptpotter/application/bootstrap/wiring.py:231
 init_services_cli	promptpotter/presentation/cli/commands/_shared.py:74
 InitEnterView	promptpotter/presentation/views/view_models.py:58
 InitExitView	promptpotter/presentation/views/view_models.py:83
-InjectionBundle	promptpotter/application/optimization/dispatch/hub.py:187
-InjectionKind	promptpotter/application/optimization/dispatch/hub.py:73
+InjectionBundle	promptpotter/application/optimization/dispatch/hub/bundle.py:137
+InjectionKind	promptpotter/application/optimization/dispatch/hub/bundle.py:65
 inline_short_formula_values	promptpotter/shared/composite.py:46
 interpolate_pipeline_params	promptpotter/application/scoring/sample_measurement.py:58
 interpolate_prompt	promptpotter/application/scoring/sample_measurement.py:43
@@ -455,7 +456,7 @@ root_cycle_id	promptpotter/infrastructure/store/paths.py:27
 root_dir_for	promptpotter/infrastructure/store/paths.py:65
 RoundCompleteView	promptpotter/presentation/views/view_models.py:155
 RoundDiagnostics	promptpotter/domain/round_diagnostics.py:68
-RoundDigest	promptpotter/application/optimization/dispatch/hub.py:162
+RoundDigest	promptpotter/application/optimization/dispatch/hub/bundle.py:112
 RoundDigestView	promptpotter/presentation/views/view_models.py:265
 RoundEnd	promptpotter/infrastructure/tracing/events.py:189
 RoundMetadata	promptpotter/domain/results.py:143
@@ -713,7 +714,7 @@ validate_ast	promptpotter/application/scoring/formula/compiler.py:83
 validate_l1_layout	promptpotter/domain/l1_layout.py:135
 validate_overrides	promptpotter/application/optimization/validators/l1_strict.py:148
 validate_path_component	promptpotter/infrastructure/store/base.py:15
-validate_template	promptpotter/application/optimization/dispatch/hub.py:719
+validate_template	promptpotter/application/optimization/dispatch/hub/dispatch.py:42
 validation_error_handler	promptpotter/main.py:55
 ValidationFailure	promptpotter/domain/escalation_signals.py:73
 ValidatorOutcome	promptpotter/domain/validators.py:38
