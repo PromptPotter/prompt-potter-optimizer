@@ -1,13 +1,12 @@
 "use client";
 import { useMemo, useState } from "react";
 import { postCreateFork, postStopCycle } from "@/lib/api";
-import { useRoundHistory } from "@/lib/use-round-history";
+import { useCycleStream } from "@/lib/poll";
 import { Modal, type ModalAction } from "@/components/shell/Modal";
 import type { SelectedCandidate } from "./SelectionContext";
 
 interface Props {
   cycleId: string | null;
-  refreshKey: number;
   selected: SelectedCandidate | null;
   isLive: boolean;
   onClose: () => void;
@@ -32,12 +31,12 @@ interface RoundDoc {
 
 export function ScoringInspector({
   cycleId,
-  refreshKey,
   selected,
   isLive,
   onClose,
 }: Props) {
-  const docs = useRoundHistory(cycleId, refreshKey) as RoundDoc[];
+  const { rounds } = useCycleStream();
+  const docs = rounds as RoundDoc[];
   const [forkPending, setForkPending] = useState(false);
   const [forkResult, setForkResult] = useState<{ id: string; cli: string } | null>(null);
   const [forkErr, setForkErr] = useState<string | null>(null);

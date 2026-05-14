@@ -1,7 +1,11 @@
 "use client";
 import { useMemo } from "react";
-import { liveL1Candidates, roundOf, type DashboardSnapshot } from "@/lib/poll";
-import { useRoundHistory } from "@/lib/use-round-history";
+import {
+  liveL1Candidates,
+  roundOf,
+  useCycleStream,
+  type DashboardSnapshot,
+} from "@/lib/poll";
 import { parseSampleLine } from "@/lib/sample-line";
 import { useSelection } from "./SelectionContext";
 
@@ -19,8 +23,6 @@ interface RoundView {
 }
 
 interface Props {
-  cycleId: string | null;
-  refreshKey: number;
   dash: DashboardSnapshot | null;
 }
 
@@ -49,9 +51,9 @@ function fmtPct(v: number | undefined | null): string {
   return `${(v * 100).toFixed(0)}%`;
 }
 
-export function LineageTree({ cycleId, refreshKey, dash }: Props) {
+export function LineageTree({ dash }: Props) {
   const { selected, setSelected } = useSelection();
-  const docs = useRoundHistory(cycleId, refreshKey);
+  const { rounds: docs } = useCycleStream();
   // Same merge logic FitnessPanel uses: historical rounds from disk +
   // a partial "live" round when the dash carries L1 candidates that
   // haven't been written to round_NNNN.json yet. Without this the

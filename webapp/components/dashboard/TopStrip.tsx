@@ -5,8 +5,7 @@
 "use client";
 import { useEffect, useMemo, useRef } from "react";
 import { TERMS } from "@/lib/terms";
-import type { DashboardSnapshot } from "@/lib/poll";
-import { useRoundHistory } from "@/lib/use-round-history";
+import { useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 
 // Merged Hero + Progress card. Replaces the prior dash-hero double-card
 // (HeroSummary on the right of the breadcrumb + ProgressCard underneath).
@@ -21,10 +20,8 @@ import { useRoundHistory } from "@/lib/use-round-history";
 // scans in the first second of looking at the page.
 
 interface Props {
-  cycleId: string | null;
   dash: DashboardSnapshot | null;
   dashRound: number | null;
-  refreshKey: number;
 }
 
 interface QpsState {
@@ -69,9 +66,9 @@ function estimateQps(state: QpsState, dash: DashboardSnapshot | null): number | 
   return state.qps;
 }
 
-export function TopStrip({ cycleId, dash, dashRound, refreshKey }: Props) {
+export function TopStrip({ dash, dashRound }: Props) {
   // Sparkline: running-best composite over rounds. Lifted from HeroSummary.
-  const docs = useRoundHistory(cycleId, refreshKey);
+  const { rounds: docs } = useCycleStream();
   const spark = useMemo(() => {
     const pts: { round: number; composite: number }[] = [];
     for (const d of docs) {

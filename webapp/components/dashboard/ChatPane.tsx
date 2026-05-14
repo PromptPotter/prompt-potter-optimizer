@@ -14,7 +14,6 @@ interface Props {
   dashRound: number | null;
   cycleStartedAt: string | null;
   themeKey: string;
-  refreshKey: number;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
@@ -49,7 +48,6 @@ export function ChatPane({
   dashRound,
   cycleStartedAt,
   themeKey,
-  refreshKey,
   datasetName,
   datasetItems,
   datasetTrainCount,
@@ -110,32 +108,7 @@ export function ChatPane({
   const usedUsd = totalUsd > 0 ? totalUsd : null;
   const budgetUsd = typeof spendBlock?.budget_usd === "number" ? spendBlock.budget_usd : null;
   const rateKnown = !!(backendBucket.rate_known || loopBucket.rate_known);
-  const totalTokens =
-    (backendBucket.input_tokens ?? 0) +
-    (backendBucket.output_tokens ?? 0) +
-    (loopBucket.input_tokens ?? 0) +
-    (loopBucket.output_tokens ?? 0);
-  const fmtTokens = (n: number): string => {
-    if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M tok`;
-    if (n >= 1_000) return `${(n / 1_000).toFixed(0)}k tok`;
-    return `${n} tok`;
-  };
   const fmtUsd = (n: number): string => (n < 0.01 ? `$${n.toFixed(4)}` : `$${n.toFixed(2)}`);
-  // Lock the chip into USD mode as soon as any bucket resolves a rate —
-  // otherwise the chip flickers token→USD→token across cache-heavy windows
-  // and reads as "the spend display reverted to the old token format". Once
-  // a rate is known, sub-cent totals (including $0.00) are still the truthful
-  // display; tokens are only the right fallback for genuinely unknown-rate
-  // providers.
-  const spendChip = rateKnown
-    ? fmtUsd(usedUsd ?? 0)
-    : totalTokens > 0
-      ? fmtTokens(totalTokens)
-      : "—";
-  const spendTooltip =
-    rateKnown && (backendUsd > 0 || loopUsd > 0)
-      ? `Backend ${fmtUsd(backendUsd)} • Loop ${fmtUsd(loopUsd)}`
-      : TERMS.newjob_bar_spend;
   const budgetChip = budgetUsd != null ? `$${budgetUsd.toFixed(2)}` : "—";
   const deltaPerSpend =
     best != null && origin != null && usedUsd != null && usedUsd > 0
@@ -190,9 +163,6 @@ export function ChatPane({
               <span className="chip-lbl">Best</span> <strong>{bestPctOnly}</strong>
               {originPct && <span className="chip-origin"> / {originPct}</span>}
             </span>
-            <span className="chip" title={spendTooltip}>
-              <span className="chip-lbl">Spend</span> <strong>{spendChip}</strong>
-            </span>
             <span className="chip" title={TERMS.newjob_bar_budget}>
               <span className="chip-lbl">Budget</span> <strong>{budgetChip}</strong>
             </span>
@@ -222,7 +192,7 @@ export function ChatPane({
               <div className="row"><span className="lbl">Budget</span><span className="val">{budgetChip}</span></div>
             </div>
             <div className="job-whatif">
-              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
+              <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
             </div>
             <div className="job-footer" title={TERMS.newjob_bar_adjust}>
               Adjust spend / finishing criteria — wired in M12
@@ -289,10 +259,8 @@ export function ChatPane({
         </div>
         {samplesOpen && (
           <HardSamplesHeatmap
-            cycleId={cycleId}
             dash={dash}
             dashRound={dashRound}
-            refreshKey={refreshKey}
             datasetName={datasetName}
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}

@@ -1,10 +1,20 @@
-// Polling lifecycle — port of vanilla startPolling/stopPolling at
-// webapp/index.html:1002. Pause on tab hide so a backgrounded UI doesn't keep
-// firing fetches; resume on visible. AbortController cancels the previous
-// fetch so stalled requests can't pile up.
+"use client";
+// Single live-stream store. One provider polls dashboard.json + maintains a
+// rolling array of round_NNNN.json docs; every consumer subscribes via
+// `useCycleStream()`. Replaces the prior split of `useDashboardPoll` +
+// seven independent `useRoundHistory(cycleId, refreshKey)` calls — those
+// drifted by a render whenever they ran their own listing + Promise.all on
+// different effect cycles.
 
-import { useEffect, useRef, useState } from "react";
-import { fetchCycleFile } from "./api";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useRef,
+  useState,
+  type ReactNode,
+} from "react";
+import { fetchCycleFile, fetchFiles } from "./api";
 
 export type StatusKind = "live" | "stale" | "offline";
 
@@ -75,7 +85,23 @@ export function liveL1Candidates(dash: DashboardSnapshot | null): LiveCandidate[
   return l1?.output?.candidates ?? [];
 }
 
-export interface DashboardState {
+// Shape-agnostic round-file document. Every consumer casts to its own
+// narrowed view at the use site; the provider is the single fetch path so the
+// dashboard makes one set of round-file network calls per round change
+// instead of one per consuming component.
+export interface RoundFileDoc {
+  round?: number;
+  accuracy?: number;
+  composite_fitness?: number;
+  origin_accuracy?: number;
+  scoreboard?: unknown[];
+  results?: unknown[];
+  candidate_scores?: unknown[];
+  all_candidate_results?: Record<string, unknown>;
+  [k: string]: unknown;
+}
+
+export interface CycleStreamState {
   dash: DashboardSnapshot | null;
   status: StatusKind;
   statusText: string;
@@ -83,9 +109,11 @@ export interface DashboardState {
   ageS: number | null;
   termKey: string;
   error: string | null;
+  // Sorted ascending by `round`. Empty until the first listing fetch lands.
+  rounds: RoundFileDoc[];
 }
 
-const INITIAL_STATE: DashboardState = {
+const INITIAL_STATE: CycleStreamState = {
   dash: null,
   status: "offline",
   statusText: "Connecting…",
@@ -93,6 +121,7 @@ const INITIAL_STATE: DashboardState = {
   ageS: null,
   termKey: "status_offline",
   error: null,
+  rounds: [],
 };
 
 // Status banner age buckets — same thresholds as vanilla setStatus call sites.
@@ -146,40 +175,93 @@ export function ageBucket(ageS: number | null): BucketResult {
   };
 }
 
-export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): DashboardState {
-  const [state, setState] = useState<DashboardState>(INITIAL_STATE);
+const CycleStreamContext = createContext<CycleStreamState | null>(null);
+
+export function useCycleStream(): CycleStreamState {
+  const v = useContext(CycleStreamContext);
+  if (!v) {
+    throw new Error("useCycleStream must be called inside <CycleStreamProvider>");
+  }
+  return v;
+}
+
+// Internal hook backing the provider. Polls dashboard.json every
+// `intervalMs`; on each round change refreshes the round-files cache. Both
+// reset on cycleId change via the prev-prop pattern so the prior cycle's
+// snapshots can't linger during the new fetch.
+function useCycleStreamSource(
+  cycleId: string | null,
+  intervalMs: number,
+): CycleStreamState {
+  const [state, setState] = useState<CycleStreamState>(INITIAL_STATE);
   const abortRef = useRef<AbortController | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const cycleRef = useRef<string | null>(null);
+  // Highest round number seen on the live dashboard; bumping it triggers a
+  // single rounds-listing refresh. Distinct from the most recent round file
+  // we hold — that's encoded in `state.rounds`.
+  const lastRoundRef = useRef<number | null>(null);
+  const roundsFetchingRef = useRef(false);
 
-  // Clear the snapshot when cycleId changes. The first tick of the new
-  // cycle's polling cycle is async — without this, every percentage cell
-  // keeps rendering the prior cycle's `best` / `origin_accuracy` until the
-  // new dashboard.json fetch lands, surfacing values the active cycle has
-  // not confirmed.
   if (cycleRef.current !== cycleId) {
     cycleRef.current = cycleId;
-    if (state.dash !== null) {
-      setState((prev) => ({ ...prev, dash: null }));
+    lastRoundRef.current = null;
+    if (state.dash !== null || state.rounds.length > 0) {
+      setState((prev) => ({ ...prev, dash: null, rounds: [] }));
     }
   }
 
   useEffect(() => {
     if (!cycleId) {
       setState({
-        dash: null,
-        status: "offline",
+        ...INITIAL_STATE,
         statusText: "No active session",
         statusHint:
           "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal.",
-        ageS: null,
-        termKey: "status_offline",
-        error: null,
       });
       return;
     }
 
     let cancelled = false;
+
+    // Round-files refresh. Single-flight: if a prior fetch is still running,
+    // the next round-change tick will pick it up. The listing is the SoT for
+    // which round files exist on disk; we re-fetch the whole set rather than
+    // diffing — round files are small JSON blobs and the prior arch proved
+    // race-free with this shape.
+    const refreshRounds = async () => {
+      const id = cycleRef.current;
+      if (!id || id !== cycleId || roundsFetchingRef.current) return;
+      roundsFetchingRef.current = true;
+      try {
+        const listing = await fetchFiles(id);
+        if (cancelled || cycleRef.current !== id) return;
+        const roundFiles = listing.entries
+          .filter(
+            (e) => e.scope === "cycle" && /^rounds\/round_\d+\.json$/.test(e.path),
+          )
+          .sort((a, b) => a.path.localeCompare(b.path));
+        const fetched = await Promise.all(
+          roundFiles.map(async (f) => {
+            try {
+              const r = await fetchCycleFile(id, "cycle", f.path);
+              return JSON.parse(r.content) as RoundFileDoc;
+            } catch {
+              return null;
+            }
+          }),
+        );
+        if (cancelled || cycleRef.current !== id) return;
+        const valid = fetched
+          .filter((p): p is RoundFileDoc => p !== null)
+          .sort((a, b) => (a.round ?? 0) - (b.round ?? 0));
+        setState((prev) => ({ ...prev, rounds: valid }));
+      } catch {
+        // listing failed — retry on the next round-change tick
+      } finally {
+        roundsFetchingRef.current = false;
+      }
+    };
 
     const tick = async () => {
       if (abortRef.current) abortRef.current.abort();
@@ -194,7 +276,9 @@ export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): Das
         const wall = Date.parse(dash.wallclock_serialized_at || "");
         const ageS = Number.isFinite(wall) ? (Date.now() - wall) / 1000 : null;
         const bucket = ageBucket(ageS);
-        setState({
+        const liveRound = roundOf(dash);
+        setState((prev) => ({
+          ...prev,
           dash,
           status: bucket.status,
           statusText: bucket.statusText,
@@ -202,7 +286,11 @@ export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): Das
           ageS,
           termKey: bucket.termKey,
           error: null,
-        });
+        }));
+        if (liveRound != null && liveRound !== lastRoundRef.current) {
+          lastRoundRef.current = liveRound;
+          void refreshRounds();
+        }
       } catch (e) {
         if ((e as Error).name === "AbortError") return;
         if (cancelled) return;
@@ -250,4 +338,19 @@ export function useDashboardPoll(cycleId: string | null, intervalMs = 2000): Das
   }, [cycleId, intervalMs]);
 
   return state;
+}
+
+export function CycleStreamProvider({
+  cycleId,
+  intervalMs = 2000,
+  children,
+}: {
+  cycleId: string | null;
+  intervalMs?: number;
+  children: ReactNode;
+}) {
+  const state = useCycleStreamSource(cycleId, intervalMs);
+  return (
+    <CycleStreamContext.Provider value={state}>{children}</CycleStreamContext.Provider>
+  );
 }

@@ -6,7 +6,6 @@ import { roundOf, type DashboardSnapshot } from "@/lib/poll";
 
 interface Props {
   cycleId: string | null;
-  refreshKey: number;
   dash: DashboardSnapshot | null;
   pipeline: PipelineDoc | null;
   isLive: boolean;
@@ -17,7 +16,7 @@ interface Props {
 // writes to `node`. Each surface renders independently and they can
 // both be on at once — picking a candidate AND a node narrows from
 // "this searchpoint" to "this node within this searchpoint".
-export function SharedInspector({ cycleId, refreshKey, dash, pipeline, isLive }: Props) {
+export function SharedInspector({ cycleId, dash, pipeline, isLive }: Props) {
   const { selected, setSelected, node, setNode } = useSelection();
 
   if (!selected && !node) {
@@ -39,7 +38,6 @@ export function SharedInspector({ cycleId, refreshKey, dash, pipeline, isLive }:
       {selected && (
         <ScoringInspector
           cycleId={cycleId}
-          refreshKey={refreshKey}
           selected={selected}
           isLive={isLive}
           onClose={() => setSelected(null)}

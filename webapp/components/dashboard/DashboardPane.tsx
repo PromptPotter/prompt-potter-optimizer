@@ -8,26 +8,32 @@ import {
   fetchPipeline,
   type DatasetItem,
 } from "@/lib/api";
-import { roundOf, useDashboardPoll, type DashboardSnapshot, type StatusKind } from "@/lib/poll";
+import {
+  CycleStreamProvider,
+  roundOf,
+  useCycleStream,
+  type DashboardSnapshot,
+} from "@/lib/poll";
 import { applyChartDefaults } from "@/lib/theme";
 import { Chart as ChartJS } from "chart.js";
 import { Sidebar } from "@/components/shell/Sidebar";
 import { Topbar, type Tab } from "@/components/shell/Topbar";
+import { StatusBar } from "@/components/status/StatusBar";
+import { ConsolePane } from "@/components/console/ConsolePane";
 import { WorkflowCanvas } from "@/components/workflow/WorkflowCanvas";
 import { FitnessPanel } from "@/components/whatif/FitnessPanel";
 import { FreqChart } from "@/components/eval/FreqChart";
 import { TrendChart } from "@/components/eval/TrendChart";
 import { RawJsonCard } from "@/components/raw/RawJsonCard";
-import { TERMS } from "@/lib/terms";
 import { TopStrip } from "./TopStrip";
 import { ChatPane } from "./ChatPane";
 import { NarrowSpine, WideSpine } from "./DashboardLayout";
+import { Lane } from "./Lane";
 import { LiveStateCard } from "./LiveStateCard";
 import { LiveSamplesCard } from "./LiveSamplesCard";
 import { LineageTree } from "./LineageTree";
 import { CyclePicker } from "./CyclePicker";
 import { EditModeToggle } from "./EditModeToggle";
-import { StopButton } from "./StopButton";
 import { SelectionProvider } from "./SelectionContext";
 import { SharedInspector } from "./SharedInspector";
 import { FilesPane } from "@/components/tree/FilesPane";
@@ -38,6 +44,21 @@ interface PipelineDoc {
 }
 
 export function DashboardPane() {
+  const [cycleId, setCycleId] = useState<string | null>(null);
+  return (
+    <CycleStreamProvider cycleId={cycleId}>
+      <DashboardPaneInner cycleId={cycleId} setCycleId={setCycleId} />
+    </CycleStreamProvider>
+  );
+}
+
+function DashboardPaneInner({
+  cycleId,
+  setCycleId,
+}: {
+  cycleId: string | null;
+  setCycleId: (id: string | null) => void;
+}) {
   // Replit-style sub-tabs (Chat / Dashboard / Files) scoped to the
   // currently-selected cycle. The sidebar is persistent across all
   // three. Default = chat: that's where new cycles get conceived and
@@ -47,7 +68,6 @@ export function DashboardPane() {
   // chat dodges that path. Revisit when we untangle the dashboard
   // first-render sequence.
   const [tab, setTab] = useState<Tab>("chat");
-  const [cycleId, setCycleId] = useState<string | null>(null);
   const [sessionId, setSessionId] = useState<string | null>(null);
   const [datasetTitle, setDatasetTitle] = useState<string | null>(null);
   const [cycleStartedAt, setCycleStartedAt] = useState<string | null>(null);
@@ -63,19 +83,19 @@ export function DashboardPane() {
   // operator never finds risky affordances quietly enabled.
   const [editMode, setEditMode] = useState(false);
 
-  const dashState = useDashboardPoll(cycleId);
+  const dashState = useCycleStream();
   const dash: DashboardSnapshot | null = dashState.dash;
   // Canonical round number — derived once, threaded down to children that
-  // need it (ProgressCard, LiveSamplesCard, FitnessPanel, HardSamples*).
-  // Doubles as the refreshKey for round-file consumers: bumping it triggers
-  // `useRoundHistory` to refetch the round listing, which is the single
-  // source for every component that reads round_NNNN.json on disk.
+  // need it (LiveSamplesCard, FitnessPanel, HardSamples*). The
+  // CycleStreamProvider above owns the round-files cache: every consumer
+  // that previously called `useRoundHistory(cycleId, refreshKey)` now reads
+  // `useCycleStream().rounds`, so the dashboard makes one set of round-
+  // file network calls per round change instead of one per panel.
   const dashRound = roundOf(dash);
-  const refreshKey = dashRound ?? -1;
   // Liveness — used by mid-run guards (three-way fork modal, Live badge,
-  // Stop button visibility). `useDashboardPoll` already classifies the
-  // poll's success/age into "live"/"stale"/"offline" — reuse that signal
-  // instead of inventing a second one.
+  // Stop button visibility). The stream already classifies the poll's
+  // success/age into "live"/"stale"/"offline" — reuse that signal instead
+  // of inventing a second one.
   const isLive = dashState.status === "live";
 
   // Initial cycle selection — precedence: URL `?cycle=…` > /api/v1/active
@@ -105,7 +125,10 @@ export function DashboardPane() {
     return () => {
       cancelled = true;
     };
-  }, []);
+    // `setCycleId` is the stable useState setter forwarded from the outer
+    // DashboardPane wrapper; including it as a dep is harmless but eslint
+    // can't see through the prop boundary.
+  }, [setCycleId]);
 
   // Keep ?cycle=… in the URL so reloads stick to the currently-viewed cycle.
   // replaceState (not pushState) — switching cycles isn't a navigation event,
@@ -120,9 +143,12 @@ export function DashboardPane() {
 
   // Picker handoff. SelectionProvider auto-clears its slot on cycleId
   // change (prev-prop pattern); no need to plumb that here.
-  const handleCycleChange = useCallback((next: string) => {
-    setCycleId(next);
-  }, []);
+  const handleCycleChange = useCallback(
+    (next: string) => {
+      setCycleId(next);
+    },
+    [setCycleId],
+  );
 
   // One-shot pipeline (topology) lookup
   useEffect(() => {
@@ -191,9 +217,9 @@ export function DashboardPane() {
 
   // Cycle change ⇒ clear per-cycle derived state. Prev-prop pattern (React's
   // documented "adjusting state when a prop changes" recipe) avoids the
-  // cascading render that `setState` in `useEffect` would cost. Round-file
-  // state owns its own reset in `useRoundHistory`; this only handles the
-  // dataset preview owned by this component.
+  // cascading render that `setState` in `useEffect` would cost. The
+  // CycleStreamProvider owns the round-file + dashboard reset; this only
+  // handles the dataset preview owned by this component.
   const [prevCycleId, setPrevCycleId] = useState<string | null>(cycleId);
   if (cycleId !== prevCycleId) {
     setPrevCycleId(cycleId);
@@ -228,6 +254,20 @@ export function DashboardPane() {
       />
       <main className="main">
         <Topbar tab={tab} onTabChange={setTab} onThemeChange={onThemeChange} />
+        <StatusBar
+          status={dashState.status}
+          statusText={activeError && !cycleId ? "No active session" : dashState.statusText}
+          statusHint={
+            activeError && !cycleId
+              ? "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
+              : dashState.statusHint
+          }
+          termKey={dashState.termKey}
+          cycleId={cycleId}
+          dash={dash}
+          isLive={isLive}
+          onOpenFiles={() => setTab("files")}
+        />
         {tab === "chat" ? (
           <ChatPane
             cycleId={cycleId}
@@ -237,7 +277,6 @@ export function DashboardPane() {
             dashRound={dashRound}
             cycleStartedAt={cycleStartedAt}
             themeKey={themeKey}
-            refreshKey={refreshKey}
             datasetName={datasetName}
             datasetItems={datasetItems}
             datasetTrainCount={datasetTrainCount}
@@ -245,17 +284,6 @@ export function DashboardPane() {
           />
         ) : tab === "dashboard" ? (
           <div className="content" id="content-dashboard">
-            <DashStatusStrip
-              status={dashState.status}
-              statusText={activeError && !cycleId ? "No active session" : dashState.statusText}
-              statusHint={activeError && !cycleId
-                ? "Start a cycle: `python -m promptpotter optimize --backend-url http://127.0.0.1:8000 --config datasets/<name>/campaign.json` in another terminal."
-                : dashState.statusHint}
-              termKey={dashState.termKey}
-              cycleId={cycleId}
-              dash={dash}
-              onOpenFiles={() => setTab("files")}
-            />
             <NarrowSpine>
               <header className="dash-hero">
                 <div className="page-header">
@@ -269,126 +297,57 @@ export function DashboardPane() {
                     )}
                     <span className="cycle-toolbar">
                       <EditModeToggle on={editMode} onToggle={setEditMode} />
-                      {editMode && cycleId && <StopButton cycleId={cycleId} isLive={isLive} />}
                     </span>
                   </div>
                 </div>
-                <TopStrip cycleId={cycleId} dash={dash} dashRound={dashRound} refreshKey={refreshKey} />
               </header>
             </NarrowSpine>
-            <WideSpine>
-              <div className="dash-row-three">
-                <LineageTree
-                  cycleId={cycleId}
-                  refreshKey={refreshKey}
-                  dash={dash}
-                />
-                <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-                <WorkflowCanvas pipeline={pipeline} dash={dash} />
-              </div>
-            </WideSpine>
-            <WideSpine>
-              <SharedInspector cycleId={cycleId} refreshKey={refreshKey} dash={dash} pipeline={pipeline} isLive={isLive} />
-            </WideSpine>
-            <WideSpine>
-              <section className="dash-samples-wide" aria-label="Live samples">
-                <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
-              </section>
-            </WideSpine>
-            <WideSpine>
-              <div className="dash-charts">
-                <FreqChart cycleId={cycleId} refreshKey={refreshKey} dash={dash} themeKey={themeKey} />
-                <TrendChart cycleId={cycleId} refreshKey={refreshKey} themeKey={themeKey} />
-              </div>
-            </WideSpine>
-            <NarrowSpine>
-              <details className="dash-diag">
-                <summary>Diagnostics — live state & raw payload</summary>
-                <div className="dash-diag-body">
+            <Lane id="now" title="Now" subtitle="What's running right now" defaultOpen>
+              <NarrowSpine>
+                <TopStrip dash={dash} dashRound={dashRound} />
+              </NarrowSpine>
+              <WideSpine>
+                <div className="dash-row-now">
+                  <WorkflowCanvas pipeline={pipeline} dash={dash} />
                   <LiveStateCard dash={dash} />
-                  <RawJsonCard dash={dash} />
                 </div>
-              </details>
-            </NarrowSpine>
+              </WideSpine>
+              <WideSpine>
+                <section className="dash-samples-wide" aria-label="Live samples">
+                  <LiveSamplesCard dash={dash} dashRound={dashRound} status={dashState.status} />
+                </section>
+              </WideSpine>
+            </Lane>
+            <Lane id="verdict" title="Verdict" subtitle="Has it improved? By how much?" defaultOpen>
+              <WideSpine>
+                <div className="dash-row-verdict">
+                  <LineageTree dash={dash} />
+                  <FitnessPanel dash={dash} dashRound={dashRound} cycleId={cycleId} themeKey={themeKey} />
+                </div>
+              </WideSpine>
+              <WideSpine>
+                <div className="dash-charts">
+                  <FreqChart dash={dash} themeKey={themeKey} />
+                  <TrendChart themeKey={themeKey} />
+                </div>
+              </WideSpine>
+            </Lane>
+            <Lane id="why" title="Why" subtitle="Drill into a candidate or node" defaultOpen={false}>
+              <WideSpine>
+                <SharedInspector cycleId={cycleId} dash={dash} pipeline={pipeline} isLive={isLive} />
+              </WideSpine>
+              <NarrowSpine>
+                <RawJsonCard dash={dash} />
+              </NarrowSpine>
+            </Lane>
           </div>
         ) : (
           <FilesPane cycleId={cycleId} />
         )}
+        <ConsolePane cycleId={cycleId} />
       </main>
     </div>
     </SelectionProvider>
   );
 }
 
-interface DashStatusStripProps {
-  status: StatusKind;
-  statusText: string;
-  statusHint?: string;
-  termKey?: string;
-  cycleId: string | null;
-  dash: DashboardSnapshot | null;
-  onOpenFiles: () => void;
-}
-
-function fmtPct(v: number | null | undefined): string {
-  return typeof v === "number" && Number.isFinite(v) ? `${(v * 100).toFixed(1)}%` : "—";
-}
-
-function shortCycleId(id: string | null): string {
-  if (!id) return "—";
-  return id.length > 22 ? `${id.slice(0, 14)}…${id.slice(-4)}` : id;
-}
-
-function ageText(iso: string | undefined | null): string {
-  if (!iso) return "—";
-  const t = Date.parse(iso);
-  if (!Number.isFinite(t)) return "—";
-  const s = Math.max(0, Math.round((Date.now() - t) / 1000));
-  if (s < 60) return `${s}s ago`;
-  if (s < 3600) return `${Math.round(s / 60)}m ago`;
-  return `${Math.round(s / 3600)}h ago`;
-}
-
-function DashStatusStrip({ status, statusText, statusHint, termKey, cycleId, dash, onOpenFiles }: DashStatusStripProps) {
-  const tip = termKey ? TERMS[termKey] : "";
-  const round = roundOf(dash);
-  const patience = (dash as { patience?: string } | null)?.patience;
-  const best = typeof dash?.best === "number" ? dash.best : null;
-  const origin = typeof dash?.origin_accuracy === "number" ? dash.origin_accuracy : null;
-  const delta = best != null && origin != null ? best - origin : null;
-  const deltaSign = delta == null ? "" : delta > 0 ? "+" : "";
-  const deltaCls = delta == null ? "" : delta > 0 ? "up" : delta < 0 ? "down" : "flat";
-  return (
-    <div className={`dash-strip status-bar ${status}`} role="status" aria-live="polite" aria-atomic="true" title={tip || undefined}>
-      <span className="status-dot" aria-hidden="true" />
-      <span className="dash-strip-text">
-        <strong>{statusText}</strong>
-        {statusHint ? <span className="dash-strip-hint">{statusHint}</span> : null}
-      </span>
-      <span className="dash-strip-sep" aria-hidden="true">·</span>
-      <span className="dash-strip-cell" title={cycleId ?? ""}>
-        <span className="dash-strip-label">cycle</span>
-        <code>{shortCycleId(cycleId)}</code>
-      </span>
-      <span className="dash-strip-cell">
-        <span className="dash-strip-label">round</span>
-        <strong>{round != null ? `R${round}` : "—"}</strong>
-        {patience ? <span className="dash-strip-sub">· patience {patience}</span> : null}
-      </span>
-      <span className="dash-strip-cell">
-        <span className="dash-strip-label">best</span>
-        <strong>{fmtPct(best)}</strong>
-        {delta != null && origin != null ? (
-          <span className={`dash-strip-delta ${deltaCls}`}>{deltaSign}{(delta * 100).toFixed(1)}% vs origin</span>
-        ) : null}
-      </span>
-      <span className="dash-strip-cell">
-        <span className="dash-strip-label">updated</span>
-        <strong>{ageText(dash?.wallclock_serialized_at)}</strong>
-      </span>
-      <button type="button" className="dash-strip-jump" onClick={onOpenFiles} aria-label="Open files pane">
-        Files →
-      </button>
-    </div>
-  );
-}

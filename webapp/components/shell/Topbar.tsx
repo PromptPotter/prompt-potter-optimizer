@@ -1,5 +1,4 @@
 "use client";
-import { TERMS } from "@/lib/terms";
 import { ThemeToggle } from "./ThemeToggle";
 import type { Theme } from "@/lib/theme";
 
@@ -37,10 +36,7 @@ export function Topbar({ tab, onTabChange, onThemeChange }: Props) {
             onClick={() => onTabChange(t.id)}
           >{t.label}</button>
         ))}
-        <button type="button" className="tab" role="tab" tabIndex={-1} aria-disabled="true" aria-selected="false" title={TERMS.placeholder}>Model Audit</button>
-        <button type="button" className="tab" role="tab" tabIndex={-1} aria-disabled="true" aria-selected="false" title={TERMS.placeholder}>Prompts</button>
       </div>
-      <button className="btn-export" disabled title={TERMS.placeholder}>Export Data</button>
       <ThemeToggle onThemeChange={onThemeChange} />
     </header>
   );

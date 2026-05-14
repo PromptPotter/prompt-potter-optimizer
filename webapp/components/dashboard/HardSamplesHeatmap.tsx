@@ -2,15 +2,12 @@
 import { useMemo, useState } from "react";
 import { type DatasetItem } from "@/lib/api";
 import { parseSampleLine } from "@/lib/sample-line";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
-import { useRoundHistory } from "@/lib/use-round-history";
+import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import { HardSamplesTable } from "./HardSamplesTable";
 
 interface Props {
-  cycleId: string | null;
   dash: DashboardSnapshot | null;
   dashRound: number | null;
-  refreshKey: number;
   datasetName: string | null;
   datasetItems: DatasetItem[];
   datasetTrainCount: number;
@@ -65,17 +62,15 @@ function liveMeasurements(
 }
 
 export function HardSamplesHeatmap({
-  cycleId,
   dash,
   dashRound,
-  refreshKey,
   datasetName,
   datasetItems,
   datasetTrainCount,
   datasetTestCount,
 }: Props) {
   const [expanded, setExpanded] = useState(false);
-  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  const { rounds: historyDocs } = useCycleStream();
   const rounds: RoundDoc[] = useMemo(() => {
     const out: RoundDoc[] = [];
     for (const d of historyDocs) {

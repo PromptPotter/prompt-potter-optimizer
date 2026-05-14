@@ -7,8 +7,12 @@ import { FitnessChart, type BarSlot } from "./FitnessChart";
 import { setFitnessState, useFitnessState } from "./fitness-store";
 import { parseSampleLine } from "@/lib/sample-line";
 import { candidateLabel } from "@/lib/candidate-label";
-import { liveL1Candidates, type DashboardSnapshot, type LiveCandidate } from "@/lib/poll";
-import { useRoundHistory } from "@/lib/use-round-history";
+import {
+  liveL1Candidates,
+  useCycleStream,
+  type DashboardSnapshot,
+  type LiveCandidate,
+} from "@/lib/poll";
 import { useSelection } from "@/components/dashboard/SelectionContext";
 
 interface HistoricalCandidate {
@@ -31,8 +35,7 @@ interface HistoricalRound {
 interface Props {
   dash: DashboardSnapshot | null;
   dashRound: number | null;
-  cycleId: string | null;
-  refreshKey: number;              // bumped each completed round (drives refetch)
+  cycleId: string | null;          // still used for one-shot evaluator-seed scoping
   themeKey: string;
 }
 
@@ -90,7 +93,7 @@ function pickWinner(lines: { key: string; v: number | null }[]): string | null {
   return best;
 }
 
-export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }: Props) {
+export function FitnessPanel({ dash, dashRound, cycleId, themeKey }: Props) {
   // Shared candidate selection — driving any of {fitness bar, lineage stub}
   // sets this context slot; the other surface(s) re-render highlighted.
   // FitnessChart resolves selectedKey → bar index by matching `bar.key`
@@ -121,11 +124,12 @@ export function FitnessPanel({ dash, dashRound, cycleId, refreshKey, themeKey }:
   const inflightCandidates: LiveCandidate[] = liveL1Candidates(dash);
   const currentRound = dashRound ?? 0;
 
-  // ── 2. Historical rounds — round_NNNN.json files on disk, fetched once
-  // per refreshKey bump via the shared hook (also feeds HeroSummary /
-  // TrendChart / LineageTree so the dashboard makes one set of network
-  // calls per round instead of four).
-  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  // ── 2. Historical rounds — round_NNNN.json files on disk. The
+  // CycleStreamProvider owns the cache; the dashboard makes one set of
+  // network calls per round change and every consumer (TopStrip,
+  // TrendChart, LineageTree, FreqChart, HardSamples*, here) reads the
+  // same array.
+  const { rounds: historyDocs } = useCycleStream();
   const history: HistoricalRound[] = useMemo(() => {
     const out: HistoricalRound[] = [];
     for (const d of historyDocs) {

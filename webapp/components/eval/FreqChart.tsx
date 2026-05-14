@@ -5,8 +5,7 @@ import { ensureChartRegistered } from "@/lib/chart-init";
 import { getCss } from "@/lib/theme";
 import { TERMS } from "@/lib/terms";
 import { parseSampleLine } from "@/lib/sample-line";
-import { liveL1Candidates, type DashboardSnapshot } from "@/lib/poll";
-import { useRoundHistory } from "@/lib/use-round-history";
+import { liveL1Candidates, useCycleStream, type DashboardSnapshot } from "@/lib/poll";
 import type { ChartOptions } from "chart.js";
 
 ensureChartRegistered();
@@ -19,8 +18,6 @@ interface ResultRow {
 }
 
 interface Props {
-  cycleId: string | null;
-  refreshKey: number;
   dash: DashboardSnapshot | null;
   themeKey: string;
 }
@@ -57,14 +54,14 @@ function liveResultsFrom(dash: DashboardSnapshot | null): ResultRow[] {
   return out;
 }
 
-export function FreqChart({ cycleId, refreshKey, dash, themeKey }: Props) {
+export function FreqChart({ dash, themeKey }: Props) {
   const chartRef = useRef(null);
 
-  // Reuse the shared round-history hook — the latest entry is the freshest
+  // Reuse the shared round-history stream — the latest entry is the freshest
   // round_NNNN.json on disk. No second round-file fetch path: every consumer
-  // (HeroSummary, TrendChart, LineageTree, FitnessPanel, HardSamples*, here)
-  // reads from the same hook.
-  const historyDocs = useRoundHistory(cycleId, refreshKey);
+  // (TopStrip, TrendChart, LineageTree, FitnessPanel, HardSamples*, here)
+  // reads from the same `useCycleStream().rounds` array.
+  const { rounds: historyDocs } = useCycleStream();
   const latestResults = useMemo<ResultRow[]>(() => {
     const latest = historyDocs[historyDocs.length - 1];
     return (latest?.results as ResultRow[] | undefined) ?? [];

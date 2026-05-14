@@ -3,7 +3,7 @@ import { useMemo } from "react";
 import { Line } from "react-chartjs-2";
 import { ensureChartRegistered } from "@/lib/chart-init";
 import { cssRgba, getCss } from "@/lib/theme";
-import { useRoundHistory } from "@/lib/use-round-history";
+import { useCycleStream } from "@/lib/poll";
 import type { ChartOptions } from "chart.js";
 
 ensureChartRegistered();
@@ -14,13 +14,11 @@ interface Point {
 }
 
 interface Props {
-  cycleId: string | null;
-  refreshKey: number; // bumped each new round
   themeKey: string;
 }
 
-export function TrendChart({ cycleId, refreshKey, themeKey }: Props) {
-  const docs = useRoundHistory(cycleId, refreshKey);
+export function TrendChart({ themeKey }: Props) {
+  const { rounds: docs } = useCycleStream();
   const points: Point[] = useMemo(() => {
     const out: Point[] = [];
     for (const d of docs) {
